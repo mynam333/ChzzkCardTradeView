@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Flame
 } from 'lucide-react';
+import { API_BASE_URL } from '@/lib/api';
 
 interface Streamer {
   channel_id: string;
@@ -48,7 +49,7 @@ export const RankingTab: React.FC = () => {
     setLoading(true);
     try {
       if (subTab === 'streamer') {
-        const res = await fetch('http://localhost:5000/api/streamers');
+        const res = await fetch(`${API_BASE_URL}/streamers`);
         if (res.ok) {
           const data = await res.json();
           setStreamers(data);

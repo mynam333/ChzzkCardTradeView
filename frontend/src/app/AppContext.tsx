@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_BASE_URL } from '@/lib/api';
 
 // 다크모드/라이트모드 및 현재 선택 탭, 사용자 인증 상태, 보유 재화 전역 관리
 interface AppContextType {
@@ -30,7 +31,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<'main' | 'gacha' | 'ranking' | 'my-info'>('main');
   const [user, setUser] = useState<AppContextType['user']>(null);
 
-  // 로컬 스토리지 또는 시스템 설정 동기화
+  // 로컬 스토리지에서 저장된 세션 복원 (치지직 로그인 완료 후 저장된 경우만)
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
     if (savedTheme) {
@@ -40,24 +41,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       document.documentElement.classList.add('dark');
     }
 
-    // 자동 모크 로그인 처리 (첫 진입 시 일반 유저로 세팅 - 0포인트)
+    // 치지직 OAuth 로그인 후 저장된 세션이 있는 경우에만 복원
     const savedUser = localStorage.getItem('user_session');
     if (savedUser) {
       setUser(JSON.parse(savedUser));
-    } else {
-      // 첫 방문 유저 자동 Mocking 로그인
-      const mockUid = 'user_' + Math.random().toString(36).substring(2, 9);
-      const defaultUser = {
-        id: mockUid,
-        username: `치지직유저_${mockUid.substring(0, 4)}`,
-        avatarUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${mockUid}`,
-        role: 'USER' as const,
-        point: 0,
-        lastFreeDraw: null
-      };
-      localStorage.setItem('user_session', JSON.stringify(defaultUser));
-      setUser(defaultUser);
     }
+    // 미로그인 상태 = null 유지 (자동 모크 로그인 없음)
   }, []);
 
   const toggleTheme = () => {
@@ -92,14 +81,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshUserData = async () => {
     if (!user) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/health`); // 백엔드 활성화 여부
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${apiUrl}/health`.replace('/api/health', '/health'));
       if (response.ok) {
-        // 백엔드 연동 시 리프레시 로직 (여기서는 로컬 세션 기준으로 상태 동기화)
         const saved = localStorage.getItem('user_session');
         if (saved) setUser(JSON.parse(saved));
       }
     } catch (e) {
-      // offline fallback
+      // 오프라인 폴백: 로컬 세션으로 동기화
       const saved = localStorage.getItem('user_session');
       if (saved) setUser(JSON.parse(saved));
     }

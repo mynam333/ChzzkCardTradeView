@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Upload
 } from 'lucide-react';
+import { API_BASE_URL, apiFetch } from '@/lib/api';
 
 export const MyInfoTab: React.FC = () => {
   const { user, loginMock, logout, updatePoints } = useApp();
@@ -60,7 +61,7 @@ export const MyInfoTab: React.FC = () => {
 
   const fetchAdminReports = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/admin/reports', {
+      const res = await apiFetch('/admin/reports', {
         headers: { Authorization: `Mock admin_test_uid` }
       });
       if (res.ok) {
@@ -83,7 +84,7 @@ export const MyInfoTab: React.FC = () => {
     }
 
     try {
-      const res = await fetch('http://localhost:5000/api/coupons/claim', {
+      const res = await apiFetch('/coupons/claim', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -134,7 +135,7 @@ export const MyInfoTab: React.FC = () => {
     formData.append('image', imageFile);
 
     try {
-      const res = await fetch('http://localhost:5000/api/streamers/me/image', {
+      const res = await fetch(`${API_BASE_URL}/streamers/me/image`, {
         method: 'POST',
         headers: {
           'Authorization': `Mock ${user?.id}`
@@ -160,7 +161,7 @@ export const MyInfoTab: React.FC = () => {
   // 쿠폰 발급 (ADMIN)
   const handleCreateCoupon = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/admin/coupons', {
+      const res = await apiFetch('/admin/coupons', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,7 +183,7 @@ export const MyInfoTab: React.FC = () => {
   // 공지사항 작성 (ADMIN)
   const handleCreateAnnouncement = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/admin/announcements', {
+      const res = await apiFetch('/admin/announcements', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -202,7 +203,7 @@ export const MyInfoTab: React.FC = () => {
   // 푸시 알림 발송 (ADMIN)
   const handleSchedulePush = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/admin/push/schedule', {
+      const res = await apiFetch('/admin/push/schedule', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -222,7 +223,7 @@ export const MyInfoTab: React.FC = () => {
   // 신고 해결/기각 (ADMIN)
   const handleResolveReport = async (reportId: number, status: 'resolved' | 'rejected') => {
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/reports/${reportId}/resolve`, {
+      const res = await apiFetch(`/admin/reports/${reportId}/resolve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -242,7 +243,7 @@ export const MyInfoTab: React.FC = () => {
   // 악성 유저 밴 차단 (ADMIN)
   const handleBanUser = async (userId: string, duration: string) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}/ban`, {
+      const res = await apiFetch(`/admin/users/${userId}/ban`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

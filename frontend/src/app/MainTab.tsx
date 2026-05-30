@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert } from 'lucide-react';
+import { API_BASE_URL } from '@/lib/api';
 
 interface Notice {
   id: number;
@@ -28,7 +29,7 @@ export const MainTab: React.FC = () => {
 
   const fetchNotices = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/announcements');
+      const res = await fetch(`${API_BASE_URL}/announcements`);
       if (res.ok) {
         const data = await res.json();
         setNotices(data);
@@ -59,7 +60,7 @@ export const MainTab: React.FC = () => {
 
   const fetchHotStreamers = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/streamers');
+      const res = await fetch(`${API_BASE_URL}/streamers`);
       if (res.ok) {
         const data = await res.json();
         setHotStreamers(data.slice(0, 3));
