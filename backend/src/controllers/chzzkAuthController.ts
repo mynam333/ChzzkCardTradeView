@@ -60,14 +60,20 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     console.log('[ChzzkDebug] A. 토큰 요청 성공 raw 응답 바디:', rawTokenBody);
 
     const tokenData = JSON.parse(rawTokenBody) as {
-      accessToken: string;
-      refreshToken: string;
-      expiresIn: number;
-      tokenType?: string;
+      code: number;
+      message: string;
+      content?: {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn: number;
+        tokenType?: string;
+      };
     };
 
-    const finalAccessToken = tokenData.accessToken || (tokenData as any).access_token || null;
-    const finalRefreshToken = tokenData.refreshToken || (tokenData as any).refresh_token || null;
+    // content 내부의 데이터를 추출하되, 스네이크 케이스 대응용 폴백도 마련합니다.
+    const tokenContent = tokenData.content || (tokenData as any);
+    const finalAccessToken = tokenContent.accessToken || (tokenContent as any).access_token || null;
+    const finalRefreshToken = tokenContent.refreshToken || (tokenContent as any).refresh_token || null;
     console.log('[ChzzkDebug] 추출된 accessToken:', finalAccessToken);
     console.log('[ChzzkDebug] 추출된 refreshToken:', finalRefreshToken);
 
