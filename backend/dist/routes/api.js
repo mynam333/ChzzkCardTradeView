@@ -10,6 +10,7 @@ const admin_1 = require("../middlewares/admin");
 const banCheck_1 = require("../middlewares/banCheck");
 const streamerController_1 = require("../controllers/streamerController");
 const reportController_1 = require("../controllers/reportController");
+const chzzkAuthController_1 = require("../controllers/chzzkAuthController");
 const adminController_1 = require("../controllers/adminController");
 const couponController_1 = require("../controllers/couponController");
 const announcementController_1 = require("../controllers/announcementController");
@@ -20,6 +21,11 @@ const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }
 });
+// ==========================================
+// 0. 치지직 OpenAPI OAuth 로그인 기능
+// ==========================================
+router.get('/auth/chzzk/url', chzzkAuthController_1.getChzzkAuthUrl);
+router.post('/auth/chzzk/callback', chzzkAuthController_1.handleChzzkCallback);
 // ==========================================
 // 1. 스트리머 전용 기능
 // ==========================================

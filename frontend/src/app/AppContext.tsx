@@ -16,6 +16,7 @@ interface AppContextType {
     point: number;
     lastFreeDraw: string | null;
   } | null;
+  setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
   loginMock: (role: 'USER' | 'ADMIN') => void;
   logout: () => void;
   refreshUserData: () => Promise<void>;
@@ -83,6 +84,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     localStorage.removeItem('user_session');
+    localStorage.removeItem('cctv_jwt_token');
     setUser(null);
     alert('로그아웃되었습니다.');
   };
@@ -120,6 +122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activeTab,
       setActiveTab,
       user,
+      setUser,
       loginMock,
       logout,
       refreshUserData,
@@ -129,6 +132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     </AppContext.Provider>
   );
 };
+
 
 export const useApp = () => {
   const context = useContext(AppContext);

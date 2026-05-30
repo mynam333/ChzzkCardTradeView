@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AppProvider } from "./AppContext";
 
 export const metadata: Metadata = {
   title: "CCTV - 치지직 카드 트레이드 뷰",
@@ -27,8 +28,11 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full antialiased dark" style={{ fontSize: "16px" }}>
       <body className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
-        {children}
+        <AppProvider>
+          {children}
+        </AppProvider>
       </body>
     </html>
   );
 }
+

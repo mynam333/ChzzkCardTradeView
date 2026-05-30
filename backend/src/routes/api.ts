@@ -5,6 +5,7 @@ import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
 import { uploadCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
+import { getChzzkAuthUrl, handleChzzkCallback } from '../controllers/chzzkAuthController';
 import {
   resetStreamerImage,
   banStreamerImage,
@@ -34,6 +35,13 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }
 });
+
+// ==========================================
+// 0. 치지직 OpenAPI OAuth 로그인 기능
+// ==========================================
+router.get('/auth/chzzk/url', getChzzkAuthUrl);
+router.post('/auth/chzzk/callback', handleChzzkCallback);
+
 
 // ==========================================
 // 1. 스트리머 전용 기능

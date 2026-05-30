@@ -35,8 +35,7 @@ const CCTVAppContent: React.FC = () => {
 
 export default function Home() {
   return (
-    <AppProvider>
-      <CCTVAppContent />
-    </AppProvider>
+    <CCTVAppContent />
   );
 }
+
