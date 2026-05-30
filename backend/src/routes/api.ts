@@ -44,6 +44,17 @@ const upload = multer({
 });
 
 // ==========================================
+// 헬스체크 엔드포인트 (/api/health)
+// ==========================================
+router.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: '치지직 카드 트레이드 뷰 백엔드 API가 정상 작동 중입니다.',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ==========================================
 // 0. 치지직 OpenAPI OAuth 로그인 및 기본 유저 정보
 // ==========================================
 router.get('/auth/chzzk/url', getChzzkAuthUrl);

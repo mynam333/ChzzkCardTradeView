@@ -2,56 +2,56 @@
 
 @layer base {
   :root {
-    --background: #f8fafc;
+    --background: #f8fafc; /* 한층 더 차분하고 투명한 Slate 백그라운드 */
     --foreground: #0f172a;
     --card: #ffffff;
     --card-foreground: #0f172a;
     --popover: #ffffff;
     --popover-foreground: #0f172a;
-    --primary: #0082f6; /* 청량하고 시원한 라이브 블루 */
+    --primary: #3b82f6; /* 심플하고 정제된 미드나잇 블루 */
     --primary-foreground: #ffffff;
     --secondary: #f1f5f9;
     --secondary-foreground: #0f172a;
-    --muted: #f1f5f9;
+    --muted: #f8fafc;
     --muted-foreground: #64748b;
     --accent: #f1f5f9;
     --accent-foreground: #0f172a;
-    --destructive: #ff4d4f;
+    --destructive: #ef4444;
     --destructive-foreground: #ffffff;
-    --border: #e2e8f0;
-    --input: #e2e8f0;
-    --ring: #0082f6;
-    --radius: 0.75rem;
+    --border: #f1f5f9; /* 테두리선을 연하게 조절하여 깔끔함 강조 */
+    --input: #f1f5f9;
+    --ring: #3b82f6;
+    --radius: 1rem; /* 조금 더 둥글고 트렌디한 라운딩 처리 */
 
     /* 카드 등급 없이 가치 등급을 표현하기 위한 테두리 그라디언트 효과 */
-    --card-border-common: #cbd5e1;
-    --card-border-rare: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    --card-border-epic: linear-gradient(135deg, #ec4899, #8b5cf6);
-    --card-border-legendary: linear-gradient(135deg, #f59e0b, #ef4444, #ec4899);
+    --card-border-common: #f1f5f9;
+    --card-border-rare: linear-gradient(135deg, #60a5fa, #a78bfa);
+    --card-border-epic: linear-gradient(135deg, #f472b6, #c084fc);
+    --card-border-legendary: linear-gradient(135deg, #fbbf24, #f87171, #f472b6);
   }
 
   .dark {
-    --background: #09090b;
-    --foreground: #f4f4f5;
-    --card: #18181b;
-    --card-foreground: #f4f4f5;
-    --popover: #18181b;
-    --popover-foreground: #f4f4f5;
-    --primary: #00d2ff; /* 다크모드에서 청량하게 빛나는 네온 스카이 블루 */
-    --primary-foreground: #09090b;
-    --secondary: #27272a;
-    --secondary-foreground: #f4f4f5;
-    --muted: #27272a;
-    --muted-foreground: #a1a1aa;
-    --accent: #27272a;
-    --accent-foreground: #f4f4f5;
-    --destructive: #ff4d4f;
-    --destructive-foreground: #f4f4f5;
-    --border: #27272a;
-    --input: #27272a;
-    --ring: #00d2ff;
+    --background: #0b0f19; /* 단순 블랙이 아닌 트렌디한 딥 미드나잇 블루(Deep Midnight) */
+    --foreground: #f1f5f9;
+    --card: #131b2e; /* 카드 배경을 은은한 네이비 톤으로 구성하여 조화 극대화 */
+    --card-foreground: #f1f5f9;
+    --popover: #131b2e;
+    --popover-foreground: #f1f5f9;
+    --primary: #60a5fa; /* 다크모드에서 눈에 가장 편하고 세련된 스카이 블루 */
+    --primary-foreground: #0b0f19;
+    --secondary: #1e293b;
+    --secondary-foreground: #f1f5f9;
+    --muted: #1e293b;
+    --muted-foreground: #94a3b8;
+    --accent: #1e293b;
+    --accent-foreground: #f1f5f9;
+    --destructive: #ef4444;
+    --destructive-foreground: #f1f5f9;
+    --border: #1e293b;
+    --input: #1e293b;
+    --ring: #60a5fa;
 
-    --card-border-common: #3f3f46;
+    --card-border-common: #1e293b;
     --card-border-rare: linear-gradient(135deg, #3b82f6, #8b5cf6);
     --card-border-epic: linear-gradient(135deg, #ec4899, #8b5cf6);
     --card-border-legendary: linear-gradient(135deg, #f59e0b, #ef4444, #ec4899);
