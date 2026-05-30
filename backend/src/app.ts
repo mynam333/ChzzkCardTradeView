@@ -2,13 +2,17 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+
+// ⚠️ 반드시 다른 모듈(특히 환경변수 참조 모듈) import 전에 dotenv.config() 호출
+dotenv.config();
+
 import { initDatabaseConnection } from './services/db';
 import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
-import { startPushNotificationScheduler } from './controllers/pushController';
+import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 
-// 환경 변수 설정 로드
-dotenv.config();
+// VAPID 초기화 (dotenv.config() 이후 실행 보장)
+initVapid();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
