@@ -1,0 +1,134 @@
+-- ============================================================
+-- ChzzkCardTradeView - Supabase(PostgreSQL) 초기 스키마 구성
+-- SQLite 문법과 다른 부분: SERIAL, TIMESTAMP, BOOLEAN 타입 등
+-- ============================================================
+
+-- 1. 유저 테이블
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,                         -- 치지직 로그인 UID
+    username TEXT NOT NULL,                      -- 치지직 닉네임
+    avatar_url TEXT,                             -- 프로필 이미지 URL
+    role TEXT DEFAULT 'USER',                    -- 권한 구분 ('USER' 또는 'ADMIN')
+    point INTEGER DEFAULT 0,                     -- 보유 재화
+    last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 일시
+    banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. 스트리머 테이블
+CREATE TABLE IF NOT EXISTS streamers (
+    channel_id TEXT PRIMARY KEY,                 -- 치지직 채널 고유 ID
+    name TEXT NOT NULL,                          -- 스트리머 활동명
+    logo_url TEXT,                               -- 치지직 기본 프로필 로고 URL
+    custom_image_url TEXT,                       -- 커스텀 이미지 URL (NULL 가능)
+    is_image_banned BOOLEAN DEFAULT FALSE,       -- 커스텀 이미지 업로드 권한 차단 여부
+    follower_count INTEGER DEFAULT 0,            -- 실시간 팔로워 수
+    activity_score INTEGER DEFAULT 0,            -- 활동 지표 환산 점수
+    base_value INTEGER DEFAULT 1000,             -- 현재 환산 시세 (재화 기준)
+    is_active BOOLEAN DEFAULT FALSE,             -- 현재 방송 중 여부
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. 유저 보유 카드 매핑 테이블
+CREATE TABLE IF NOT EXISTS user_cards (
+    id SERIAL PRIMARY KEY,                       -- 자동 증가 고유 ID
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
+    serial_number INTEGER NOT NULL,              -- 발행 일련번호
+    acquired_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. 1:1 교환 제안 테이블
+CREATE TABLE IF NOT EXISTS trades (
+    id SERIAL PRIMARY KEY,
+    sender_id TEXT NOT NULL REFERENCES users(id),
+    receiver_id TEXT NOT NULL REFERENCES users(id),
+    sender_offer JSONB NOT NULL,                 -- { cards: [], point: 0 }
+    receiver_offer JSONB NOT NULL,               -- { cards: [], point: 0 }
+    status TEXT DEFAULT 'PENDING',               -- 'PENDING', 'ACCEPTED', 'REJECTED', 'CANCELLED'
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
+-- 5. 스트리머 시세 히스토리 테이블
+CREATE TABLE IF NOT EXISTS value_history (
+    id SERIAL PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
+    value INTEGER NOT NULL,
+    recorded_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. 쿠폰 테이블
+CREATE TABLE IF NOT EXISTS coupons (
+    id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    coupon_type TEXT NOT NULL,                   -- 'single' 또는 'multi'
+    points INTEGER NOT NULL DEFAULT 0,
+    max_uses INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. 쿠폰 사용 로그 테이블
+CREATE TABLE IF NOT EXISTS coupon_logs (
+    id SERIAL PRIMARY KEY,
+    coupon_id INTEGER NOT NULL REFERENCES coupons(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    redeemed_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(coupon_id, user_id)                   -- 1인 1회 제한
+);
+
+-- 8. 공지사항 및 팝업 테이블
+CREATE TABLE IF NOT EXISTS announcements (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_popup BOOLEAN DEFAULT FALSE,
+    popup_expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. PWA 푸시 구독 정보 테이블
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    auth_key TEXT NOT NULL,
+    p256dh_key TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, endpoint)
+);
+
+-- 10. 예약 푸시 알림 테이블
+CREATE TABLE IF NOT EXISTS push_notifications (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',               -- 'pending', 'sent'
+    scheduled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. 카드 신고 내역 테이블
+CREATE TABLE IF NOT EXISTS card_reports (
+    id SERIAL PRIMARY KEY,
+    reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
+    reported_image_url TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',               -- 'pending', 'resolved', 'rejected'
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- 인덱스 설정 (자주 조회되는 컬럼 최적화)
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id);
+CREATE INDEX IF NOT EXISTS idx_trades_sender_id ON trades(sender_id);
+CREATE INDEX IF NOT EXISTS idx_trades_receiver_id ON trades(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);
