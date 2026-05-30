@@ -53,6 +53,19 @@ export const GachaTab: React.FC = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnCard, setDrawnCard] = useState<Streamer | null>(null);
 
+  // 커스텀 알림 피드백 모달 상태
+  const [alertModal, setAlertModal] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+  }>({
+    open: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
   useEffect(() => {
     if (user) {
       fetchStreamers();
@@ -275,11 +288,33 @@ export const GachaTab: React.FC = () => {
   // 신규 스트리머 카드 등록 API 호출
   const handleRegisterStreamer = async () => {
     if (!selectedStreamer) {
-      alert('등록할 스트리머를 리스트에서 선택해 주세요.');
+      setAlertModal({
+        open: true,
+        title: '등록 오류',
+        message: '등록할 스트리머를 리스트에서 선택해 주세요.',
+        type: 'error'
+      });
       return;
     }
+
+    // README 명세 기준 팔로워 150명 미만 프론트 단 1차 차단 필터
+    if (selectedStreamer.followerCount !== undefined && Number(selectedStreamer.followerCount) < 150) {
+      setAlertModal({
+        open: true,
+        title: '등록 불가',
+        message: `팔로워 수 150명 이상인 스트리머만 등록할 수 있습니다. (현재: ${Number(selectedStreamer.followerCount).toLocaleString()}명)`,
+        type: 'warning'
+      });
+      return;
+    }
+
     if (!disclaimerChecked) {
-      alert('등록 책임 조항 및 약관 동의를 완료해 주세요.');
+      setAlertModal({
+        open: true,
+        title: '동의 필요',
+        message: '등록 책임 조항 및 약관 동의를 완료해 주세요.',
+        type: 'warning'
+      });
       return;
     }
 
@@ -302,7 +337,12 @@ export const GachaTab: React.FC = () => {
 
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || '성공적으로 스트리머 카드가 등록되었습니다!');
+        setAlertModal({
+          open: true,
+          title: '등록 완료',
+          message: data.message || '성공적으로 스트리머 카드가 등록되었습니다!',
+          type: 'success'
+        });
         setRegisterModalOpen(false);
         // 상태 초기화 및 스트리머 데이터 갱신
         setSelectedStreamer(null);
@@ -311,11 +351,21 @@ export const GachaTab: React.FC = () => {
         setDisclaimerChecked(false);
         fetchStreamers();
       } else {
-        alert(data.message || '스트리머 등록에 실패했습니다.');
+        setAlertModal({
+          open: true,
+          title: '등록 실패',
+          message: data.message || '스트리머 등록에 실패했습니다.',
+          type: 'error'
+        });
       }
     } catch (e) {
       console.error(e);
-      alert('서버 전송 중 에러가 발생했습니다.');
+      setAlertModal({
+        open: true,
+        title: '통신 오류',
+        message: '서버 전송 중 에러가 발생했습니다.',
+        type: 'error'
+      });
     } finally {
       setRegistering(false);
     }
@@ -698,6 +748,29 @@ export const GachaTab: React.FC = () => {
         )}
       </section>
 
+      {/* 커스텀 피드백 알림 모달 */}
+      {alertModal.open && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+            <h4 className={`text-base font-extrabold mb-2 ${
+              alertModal.type === 'success' ? 'text-emerald-500' :
+              alertModal.type === 'error' ? 'text-red-500' :
+              alertModal.type === 'warning' ? 'text-amber-500' : 'text-primary'
+            }`}>
+              {alertModal.title}
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed py-2">
+              {alertModal.message}
+            </p>
+            <button 
+              onClick={() => setAlertModal({ ...alertModal, open: false })}
+              className="mt-4 w-full rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

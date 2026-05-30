@@ -216,6 +216,14 @@ export const registerStreamer = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'BadRequest', message: '스트리머 채널 ID와 이름이 필요합니다.' });
   }
 
+  // README 명세 기준 팔로워 150명 이상의 스트리머만 등록 가능하도록 차단 필터 적용
+  if (followerCount !== undefined && Number(followerCount) < 150) {
+    return res.status(400).json({ 
+      error: 'InsufficientFollowers', 
+      message: '치지직 카드 등록 정책에 따라 팔로워 수가 150명 이상인 스트리머만 카드로 등록할 수 있습니다.' 
+    });
+  }
+
   try {
     // 중복 체크
     const exists = await streamerRepository.findById(channelId);

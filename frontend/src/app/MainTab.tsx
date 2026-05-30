@@ -117,7 +117,7 @@ export const MainTab: React.FC = () => {
             치지직 스트리머 카드 수집 게임
           </span>
           <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
-            최애 스트리머 카드를 뽑고<br />컬렉션 최강자가 되어보세요!
+            최애 스트리머 카드를 뽑고<br />최고의 수집가가 되어보세요!
           </h2>
           <p className="mt-3 text-sm text-sky-100/90 leading-relaxed">
             치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
