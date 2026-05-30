@@ -138,9 +138,6 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     }
 
     // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
-    const finalAccessToken = tokenData.accessToken || (tokenData as any).access_token || null;
-    const finalRefreshToken = tokenData.refreshToken || (tokenData as any).refresh_token || null;
-
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
       user = {
