@@ -1,26 +1,117 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@layer base {
+  :root {
+    --background: #f8fafc;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --primary: #00c73c; /* 치지직 시그니처 그린 */
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #0f172a;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #f1f5f9;
+    --accent-foreground: #0f172a;
+    --destructive: #ff4d4f;
+    --destructive-foreground: #ffffff;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #00c73c;
+    --radius: 0.75rem;
+
+    /* 카드 등급 없이 가치 등급을 표현하기 위한 테두리 그라디언트 효과 */
+    --card-border-common: #cbd5e1;
+    --card-border-rare: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    --card-border-epic: linear-gradient(135deg, #ec4899, #8b5cf6);
+    --card-border-legendary: linear-gradient(135deg, #f59e0b, #ef4444, #ec4899);
+  }
+
+  .dark {
+    --background: #09090b;
+    --foreground: #f4f4f5;
+    --card: #18181b;
+    --card-foreground: #f4f4f5;
+    --popover: #18181b;
+    --popover-foreground: #f4f4f5;
+    --primary: #00e650; /* 다크모드에서 더욱 선명한 치지직 그린 */
+    --primary-foreground: #09090b;
+    --secondary: #27272a;
+    --secondary-foreground: #f4f4f5;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --accent: #27272a;
+    --accent-foreground: #f4f4f5;
+    --destructive: #ff4d4f;
+    --destructive-foreground: #f4f4f5;
+    --border: #27272a;
+    --input: #27272a;
+    --ring: #00e650;
+
+    --card-border-common: #3f3f46;
+    --card-border-rare: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    --card-border-epic: linear-gradient(135deg, #ec4899, #8b5cf6);
+    --card-border-legendary: linear-gradient(135deg, #f59e0b, #ef4444, #ec4899);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  overflow-x: hidden;
+}
+
+/* 프리미엄 카드 홀로그램 & 펄 효과 애니메이션 */
+.hologram-effect {
+  position: relative;
+  overflow: hidden;
+}
+.hologram-effect::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    125deg,
+    rgba(255,255,255,0) 30%,
+    rgba(255,255,255,0.12) 40%,
+    rgba(255,255,255,0.25) 50%,
+    rgba(255,255,255,0.12) 60%,
+    rgba(255,255,255,0) 70%
+  );
+  background-size: 200% 200%;
+  background-position: 0% 0%;
+  transition: background-position 0.6s ease;
+  pointer-events: none;
+}
+.hologram-effect:hover::after {
+  background-position: 100% 100%;
 }

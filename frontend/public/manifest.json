@@ -1,0 +1,18 @@
+{
+  "name": "CCTV - 치지직 카드 트레이드 뷰",
+  "short_name": "CCTV",
+  "theme_color": "#00c73c",
+  "background_color": "#09090b",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

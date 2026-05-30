@@ -1,0 +1,186 @@
+'use client';
+
+import React from 'react';
+import { useApp } from './AppContext';
+import { 
+  Home, 
+  Layers, 
+  TrendingUp, 
+  User, 
+  Sun, 
+  Moon, 
+  Bell, 
+  Coins 
+} from 'lucide-react';
+import Image from 'next/image';
+
+interface NavigationProps {
+  onNotifyClick?: () => void;
+}
+
+export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
+  const { activeTab, setActiveTab, theme, toggleTheme, user, loginMock } = useApp();
+
+  const navItems = [
+    { id: 'main' as const, label: '메인', icon: Home },
+    { id: 'gacha' as const, label: '뽑기/보관함', icon: Layers },
+    { id: 'ranking' as const, label: '실시간 랭킹', icon: TrendingUp },
+    { id: 'my-info' as const, label: '내 정보', icon: User },
+  ];
+
+  return (
+    <div className="flex min-h-screen w-full flex-col bg-background text-foreground md:flex-row">
+      
+      {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
+      <aside className="hidden w-64 flex-col border-r border-border bg-card px-4 py-6 md:flex">
+        <div className="mb-8 flex items-center gap-3 px-2">
+          <Image 
+            src="/icon.png" 
+            alt="CCTV Logo" 
+            width={36} 
+            height={36} 
+            className="rounded-lg shadow-md object-contain"
+          />
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-foreground">CCTV</h1>
+            <p className="text-xs text-muted-foreground">치지직 카드 트레이드 뷰</p>
+          </div>
+        </div>
+
+        {/* 유저 상태 카드 */}
+        {user && (
+          <div className="mb-6 rounded-xl bg-secondary/50 p-4 border border-border">
+            <div className="flex items-center gap-3">
+              <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card" />
+              <div className="overflow-hidden">
+                <p className="truncate text-sm font-semibold">{user.username}</p>
+                <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  {user.role}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Coins className="h-3 w-3 text-yellow-500" /> 보유 자산
+              </span>
+              <span className="text-sm font-bold text-foreground">{user.point.toLocaleString()} P</span>
+            </div>
+          </div>
+        )}
+
+        <nav className="flex-1 space-y-1">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                  isActive
+                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-4.5 w-4.5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* 테마 스위치 & 모크 로그인 */}
+        <div className="mt-auto space-y-3 pt-4 border-t border-border">
+          <div className="flex gap-2">
+            <button 
+              onClick={() => loginMock('USER')}
+              className="flex-1 rounded-md bg-secondary py-1 text-center text-xs font-semibold hover:bg-secondary/80"
+            >
+              유저
+            </button>
+            <button 
+              onClick={() => loginMock('ADMIN')}
+              className="flex-1 rounded-md bg-secondary py-1 text-center text-xs font-semibold hover:bg-secondary/80"
+            >
+              관리자
+            </button>
+          </div>
+          
+          <div className="flex items-center justify-between px-2">
+            <span className="text-xs text-muted-foreground">화면 테마</span>
+            <button
+              onClick={toggleTheme}
+              className="rounded-lg p-2 hover:bg-secondary text-muted-foreground hover:text-foreground transition"
+              title="테마 전환"
+            >
+              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* 모바일 상단 바 (Mobile Top Bar) */}
+      <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3 md:hidden">
+        <div className="flex items-center gap-2">
+          <Image 
+            src="/icon.png" 
+            alt="CCTV Logo" 
+            width={28} 
+            height={28} 
+            className="rounded"
+          />
+          <span className="font-bold text-foreground">CCTV</span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {user && (
+            <div className="flex items-center gap-1 rounded-full bg-secondary/80 px-3 py-1 text-xs font-bold">
+              <Coins className="h-3.5 w-3.5 text-yellow-500" />
+              <span>{user.point.toLocaleString()}</span>
+            </div>
+          )}
+          
+          <button 
+            onClick={onNotifyClick}
+            className="rounded-full p-1.5 hover:bg-secondary text-muted-foreground"
+          >
+            <Bell className="h-4 w-4" />
+          </button>
+
+          <button
+            onClick={toggleTheme}
+            className="rounded-full p-1.5 hover:bg-secondary text-muted-foreground"
+          >
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8 pb-24 md:pb-8 max-w-7xl mx-auto w-full">
+        {children}
+      </main>
+
+      {/* 모바일 하단 탭 내비게이션 바 (Mobile Bottom Navigation) */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card/90 backdrop-blur-md py-2 md:hidden">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex flex-col items-center justify-center gap-1 px-3 py-1 transition-all ${
+                isActive ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              <Icon className="h-5 w-5" />
+              <span className="text-[10px] font-medium">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+    </div>
+  );
+};

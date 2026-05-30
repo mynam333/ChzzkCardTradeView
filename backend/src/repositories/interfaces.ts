@@ -1,0 +1,97 @@
+// ChzzkCardTradeView 데이터 액세스 레이어 추상화 인터페이스 정의
+
+export interface User {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  role: 'USER' | 'ADMIN';
+  point: number;
+  last_free_draw: string | null;
+  banned_until: string | null;
+  created_at?: string;
+}
+
+export interface Streamer {
+  channel_id: string;
+  name: string;
+  logo_url: string | null;
+  custom_image_url: string | null;
+  is_image_banned: boolean;
+  follower_count: number;
+  activity_score: number;
+  base_value: number;
+  is_active: boolean;
+  updated_at?: string;
+}
+
+export interface Coupon {
+  id?: number;
+  code: string;
+  coupon_type: 'single' | 'multi';
+  points: number;
+  max_uses: number;
+  used_count: number;
+  expires_at: string | null;
+  created_at?: string;
+}
+
+export interface CardReport {
+  id?: number;
+  reporter_id: string;
+  channel_id: string;
+  reported_image_url: string;
+  reason: string;
+  status: 'pending' | 'resolved' | 'rejected';
+  created_at?: string;
+}
+
+export interface Announcement {
+  id?: number;
+  title: string;
+  content: string;
+  is_popup: boolean;
+  popup_expires_at: string | null;
+  created_at?: string;
+}
+
+// 1. 유저 리포지토리 인터페이스
+export interface IUserRepository {
+  findById(id: string): Promise<User | null>;
+  create(user: User): Promise<User>;
+  updatePoint(id: string, point: number): Promise<void>;
+  updateBanStatus(id: string, bannedUntil: string | null): Promise<void>;
+  updateLastFreeDraw(id: string, time: string): Promise<void>;
+}
+
+// 2. 스트리머 리포지토리 인터페이스
+export interface IStreamerRepository {
+  findAll(): Promise<Streamer[]>;
+  findById(channelId: string): Promise<Streamer | null>;
+  save(streamer: Streamer): Promise<void>;
+  updateCustomImage(channelId: string, imageUrl: string | null): Promise<void>;
+  updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void>;
+}
+
+// 3. 쿠폰 리포지토리 인터페이스
+export interface ICouponRepository {
+  findByCode(code: string): Promise<Coupon | null>;
+  create(coupon: Coupon): Promise<Coupon>;
+  incrementUsedCount(couponId: number): Promise<void>;
+  checkCouponRedeemed(couponId: number, userId: string): Promise<boolean>;
+  logCouponRedeem(couponId: number, userId: string): Promise<void>;
+}
+
+// 4. 신고 리포지토리 인터페이스
+export interface IReportRepository {
+  findAll(): Promise<CardReport[]>;
+  create(report: CardReport): Promise<CardReport>;
+  updateStatus(reportId: number, status: 'resolved' | 'rejected'): Promise<void>;
+}
+
+// 5. 공지사항 리포지토리 인터페이스
+export interface IAnnouncementRepository {
+  findAll(): Promise<Announcement[]>;
+  findActivePopups(): Promise<Announcement[]>;
+  create(announcement: Announcement): Promise<Announcement>;
+  delete(id: number): Promise<void>;
+}

@@ -128,7 +128,7 @@
 * **엄격한 다크 모드 및 라이트 모드 (Strict Mode Theming):**
   * shadcn/ui의 CSS Variables 테마 엔진을 내장하여 라이트 및 다크 테마의 색상을 1:1로 엄격하게 대칭 정의.
   * **라이트 모드:** 눈의 피로를 최소화하기 위해 순수 백색이 아닌 부드러운 오프화이트(Off-white, HSL 0 0% 98%)와 Slate 톤의 고대비 텍스트 매칭.
-  * **다크 모드:** 진한 회색이나 제트 블랙 계열(HSL 240 10% 3.9%)을 바탕으로, 카드 등급 및 브랜드 포인트 컬러의 명도를 조정하여 시독성 보장. (강제 색 반전이 아닌 디자인 의도에 맞춘 완벽 분리 테마)
+  * **다크 모드:** 진한 회색이나 제트 블랙 계열(HSL 240 10% 3.9%)을 바탕으로, 카드 가치 표시 및 브랜드 포인트 컬러의 명도를 조정하여 시독성 보장. (강제 색 반전이 아닌 디자인 의도에 맞춘 완벽 분리 테마)
 
 ---
 
@@ -239,7 +239,6 @@ erDiagram
         boolean is_image_banned "커스텀 이미지 업로드 권한 차단 여부 (기본: false)"
         integer follower_count "실시간 팔로워 수"
         integer activity_score "활동 지표 환산 점수"
-        string card_grade "카드 등급 (COMMON ~ LEGENDARY)"
         integer base_value "현재 환산 시세 (재화 기준)"
         boolean is_active "현재 방송 중 여부"
         timestamp updated_at

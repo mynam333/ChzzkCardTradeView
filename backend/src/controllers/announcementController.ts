@@ -1,0 +1,67 @@
+import { Request, Response } from 'express';
+import { announcementRepository } from '../repositories';
+
+/**
+ * 1. 공지사항 및 팝업 작성 (ADMIN 전용)
+ */
+export const createAnnouncement = async (req: Request, res: Response) => {
+  const { title, content, is_popup, popup_expires_at } = req.body;
+
+  if (!title || !content) {
+    return res.status(400).json({ error: 'BadRequest', message: '공지사항 제목과 내용이 필요합니다.' });
+  }
+
+  try {
+    const announcement = await announcementRepository.create({
+      title,
+      content,
+      is_popup: !!is_popup,
+      popup_expires_at: popup_expires_at || null
+    });
+    return res.status(201).json(announcement);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 생성 실패', details: err.message });
+  }
+};
+
+/**
+ * 2. 공지사항 전체 목록 조회
+ */
+export const getAnnouncements = async (req: Request, res: Response) => {
+  try {
+    const list = await announcementRepository.findAll();
+    return res.status(200).json(list);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 목록 조회 실패', details: err.message });
+  }
+};
+
+/**
+ * 3. 활성화된 팝업 공지 목록 조회
+ */
+export const getActivePopups = async (req: Request, res: Response) => {
+  try {
+    const popups = await announcementRepository.findActivePopups();
+    return res.status(200).json(popups);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '활성 팝업 조회 실패', details: err.message });
+  }
+};
+
+/**
+ * 4. 공지사항 삭제 (ADMIN 전용)
+ */
+export const deleteAnnouncement = async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: 'BadRequest', message: '공지사항 ID가 필요합니다.' });
+  }
+
+  try {
+    await announcementRepository.delete(Number(id));
+    return res.status(200).json({ message: '공지사항이 성공적으로 삭제되었습니다.', id: Number(id) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 삭제 실패', details: err.message });
+  }
+};

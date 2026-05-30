@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { AuthenticatedRequest } from './auth';
+import { AuthenticatedRequest } from './admin';
 
 export const banCheckMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const user = req.user;
@@ -27,7 +27,7 @@ export const banCheckMiddleware = (req: AuthenticatedRequest, res: Response, nex
 
       return res.status(403).json({
         error: 'BannedUser',
-        message: isPermanent 
+        message: isPermanent
           ? '해당 계정은 규정 위반으로 인해 서비스 영구 이용 정지 상태입니다.'
           : `해당 계정은 서비스 이용이 일시 제한되었습니다. (제한 만료: ${formattedDate})`,
         banned_until: user.banned_until
