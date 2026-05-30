@@ -95,7 +95,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       };
     }
 
-    // C. DB 조회 또는 생성 (계정 자동 연동)
+    // C. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
       user = {
@@ -108,6 +108,13 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         banned_until: null
       };
       await userRepository.create(user);
+    } else {
+      // 이미 가입된 유저의 경우, 로그인할 때마다 최신 치지직 닉네임과 프로필 사진으로 업데이트합니다.
+      user.username = chzzkUser.nickname;
+      if (chzzkUser.profileImageUrl) {
+        user.avatar_url = chzzkUser.profileImageUrl;
+      }
+      await userRepository.update(user);
     }
 
     // D. JWT 토큰 발행
