@@ -123,6 +123,37 @@ class SupabaseStreamerRepository {
         if (error)
             throw error;
     }
+    async findStreamerIndex(channelId) {
+        const { data, error } = await this.getClient()
+            .from('streamers')
+            .select('channel_id')
+            .order('channel_id', { ascending: true });
+        if (error || !data)
+            return 1;
+        const index = data.findIndex(r => r.channel_id === channelId);
+        return index !== -1 ? index + 1 : 1;
+    }
+    async findMaxSerialNumber() {
+        const { data, error } = await this.getClient()
+            .from('streamers')
+            .select('serial_number')
+            .order('serial_number', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (error || !data)
+            return 0;
+        return data.serial_number || 0;
+    }
+    async findAllocatedStreamerSerialNumbers() {
+        const { data, error } = await this.getClient()
+            .from('streamers')
+            .select('serial_number')
+            .not('serial_number', 'is', null)
+            .order('serial_number', { ascending: true });
+        if (error || !data)
+            return [];
+        return data.map(r => r.serial_number);
+    }
 }
 exports.SupabaseStreamerRepository = SupabaseStreamerRepository;
 // 3. Supabase 쿠폰 레포지토리
@@ -315,6 +346,18 @@ class SupabaseUserCardRepository {
             return 0;
         }
         return data ? data.serial_number : 0;
+    }
+    async findAllocatedSerialNumbers(channelId) {
+        const { data, error } = await this.getClient()
+            .from('user_cards')
+            .select('serial_number')
+            .eq('channel_id', channelId)
+            .order('serial_number', { ascending: true });
+        if (error) {
+            console.error('[SupabaseUserCardRepository] findAllocatedSerialNumbers 에러:', error);
+            return [];
+        }
+        return (data || []).map(r => r.serial_number);
     }
 }
 exports.SupabaseUserCardRepository = SupabaseUserCardRepository;

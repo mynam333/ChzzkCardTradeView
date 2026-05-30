@@ -80,6 +80,7 @@ class SqliteStreamerRepository {
             activity_score: row.activity_score,
             base_value: row.base_value,
             is_active: row.is_active === 1,
+            serial_number: row.serial_number || undefined,
             updated_at: row.updated_at
         }));
     }
@@ -97,13 +98,14 @@ class SqliteStreamerRepository {
             activity_score: row.activity_score,
             base_value: row.base_value,
             is_active: row.is_active === 1,
+            serial_number: row.serial_number || undefined,
             updated_at: row.updated_at
         };
     }
     async save(streamer) {
         this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(channel_id) DO UPDATE SET
         name = excluded.name,
         logo_url = excluded.logo_url,
@@ -111,8 +113,9 @@ class SqliteStreamerRepository {
         activity_score = excluded.activity_score,
         base_value = excluded.base_value,
         is_active = excluded.is_active,
+        serial_number = COALESCE(excluded.serial_number, streamers.serial_number),
         updated_at = datetime('now')
-    `).run(streamer.channel_id, streamer.name, streamer.logo_url, streamer.follower_count, streamer.activity_score, streamer.base_value, streamer.is_active ? 1 : 0);
+    `).run(streamer.channel_id, streamer.name, streamer.logo_url, streamer.follower_count, streamer.activity_score, streamer.base_value, streamer.is_active ? 1 : 0, streamer.serial_number || null);
     }
     async updateCustomImage(channelId, imageUrl) {
         this.getDb().prepare('UPDATE streamers SET custom_image_url = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
@@ -121,6 +124,19 @@ class SqliteStreamerRepository {
     async updateImageBanStatus(channelId, isBanned) {
         this.getDb().prepare('UPDATE streamers SET is_image_banned = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
             .run(isBanned ? 1 : 0, channelId);
+    }
+    async findStreamerIndex(channelId) {
+        const rows = this.getDb().prepare('SELECT channel_id FROM streamers ORDER BY channel_id').all();
+        const index = rows.findIndex(r => r.channel_id === channelId);
+        return index !== -1 ? index + 1 : 1;
+    }
+    async findMaxSerialNumber() {
+        const row = this.getDb().prepare('SELECT MAX(serial_number) as max_sn FROM streamers').get();
+        return row && row.max_sn ? row.max_sn : 0;
+    }
+    async findAllocatedStreamerSerialNumbers() {
+        const rows = this.getDb().prepare('SELECT serial_number FROM streamers WHERE serial_number IS NOT NULL ORDER BY serial_number ASC').all();
+        return rows.map(r => r.serial_number);
     }
 }
 exports.SqliteStreamerRepository = SqliteStreamerRepository;
@@ -271,6 +287,10 @@ class SqliteUserCardRepository {
     async findLatestSerialNumber(channelId) {
         const row = this.getDb().prepare('SELECT MAX(serial_number) as max_sn FROM user_cards WHERE channel_id = ?').get(channelId);
         return row && row.max_sn ? row.max_sn : 0;
+    }
+    async findAllocatedSerialNumbers(channelId) {
+        const rows = this.getDb().prepare('SELECT serial_number FROM user_cards WHERE channel_id = ? ORDER BY serial_number ASC').all(channelId);
+        return rows.map(r => r.serial_number);
     }
 }
 exports.SqliteUserCardRepository = SqliteUserCardRepository;

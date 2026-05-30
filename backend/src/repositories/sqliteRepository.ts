@@ -98,10 +98,10 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       activity_score: row.activity_score,
       base_value: row.base_value,
       is_active: row.is_active === 1,
+      serial_number: row.serial_number || undefined,
       updated_at: row.updated_at
     }));
   }
-
   async findById(channelId: string): Promise<Streamer | null> {
     const row = this.getDb().prepare('SELECT * FROM streamers WHERE channel_id = ?').get(channelId) as any;
     if (!row) return null;
@@ -115,14 +115,15 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       activity_score: row.activity_score,
       base_value: row.base_value,
       is_active: row.is_active === 1,
+      serial_number: row.serial_number || undefined,
       updated_at: row.updated_at
     };
   }
 
   async save(streamer: Streamer): Promise<void> {
     this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(channel_id) DO UPDATE SET
         name = excluded.name,
         logo_url = excluded.logo_url,
@@ -130,6 +131,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
         activity_score = excluded.activity_score,
         base_value = excluded.base_value,
         is_active = excluded.is_active,
+        serial_number = COALESCE(excluded.serial_number, streamers.serial_number),
         updated_at = datetime('now')
     `).run(
       streamer.channel_id,
@@ -138,7 +140,8 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       streamer.follower_count,
       streamer.activity_score,
       streamer.base_value,
-      streamer.is_active ? 1 : 0
+      streamer.is_active ? 1 : 0,
+      streamer.serial_number || null
     );
   }
 
@@ -146,13 +149,27 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     this.getDb().prepare('UPDATE streamers SET custom_image_url = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
       .run(imageUrl, channelId);
   }
-
   async updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void> {
     this.getDb().prepare('UPDATE streamers SET is_image_banned = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
       .run(isBanned ? 1 : 0, channelId);
   }
-}
 
+  async findStreamerIndex(channelId: string): Promise<number> {
+    const rows = this.getDb().prepare('SELECT channel_id FROM streamers ORDER BY channel_id').all() as { channel_id: string }[];
+    const index = rows.findIndex(r => r.channel_id === channelId);
+    return index !== -1 ? index + 1 : 1;
+  }
+
+  async findMaxSerialNumber(): Promise<number> {
+    const row = this.getDb().prepare('SELECT MAX(serial_number) as max_sn FROM streamers').get() as any;
+    return row && row.max_sn ? row.max_sn : 0;
+  }
+
+  async findAllocatedStreamerSerialNumbers(): Promise<number[]> {
+    const rows = this.getDb().prepare('SELECT serial_number FROM streamers WHERE serial_number IS NOT NULL ORDER BY serial_number ASC').all() as any[];
+    return rows.map(r => r.serial_number);
+  }
+}
 // 3. SQLite 쿠폰 레포지토리
 export class SqliteCouponRepository implements ICouponRepository {
   private getDb() {
@@ -335,6 +352,11 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     ).get(channelId) as any;
     return row && row.max_sn ? row.max_sn : 0;
   }
+
+  async findAllocatedSerialNumbers(channelId: string): Promise<number[]> {
+    const rows = this.getDb().prepare(
+      'SELECT serial_number FROM user_cards WHERE channel_id = ? ORDER BY serial_number ASC'
+    ).all(channelId) as any[];
+    return rows.map(r => r.serial_number);
+  }
 }
-
-

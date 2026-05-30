@@ -111,13 +111,8 @@ const drawCard = async (req, res) => {
         }
         // D. 무작위 스트리머 추첨
         const luckyStreamer = streamers[Math.floor(Math.random() * streamers.length)];
-        // E. 순차 시리얼 넘버 발급 (0001부터 9999까지 등록순)
-        const lastSn = await repositories_1.userCardRepository.findLatestSerialNumber(luckyStreamer.channel_id);
-        let serialNumber = lastSn + 1;
-        if (serialNumber > 9999) {
-            // 9999를 초과하면 순환하거나 에러를 내야하지만, 0001부터 다시 시작하도록 롤오버 처리
-            serialNumber = 1;
-        }
+        // E. 스트리머 고유 테이블에 등록된 고정 시리얼 넘버 적용
+        const serialNumber = luckyStreamer.serial_number || 1;
         // F. 재화 차감 또는 무료 기회 소진 업데이트
         let nextPoint = user.point;
         if (isFreeDraw) {
@@ -213,6 +208,16 @@ const registerStreamer = async (req, res) => {
         }
         // 기본 시세 계산 (기본 1000P + 팔로워 수의 1/100, 최대 10,000P 캡핑)
         const baseValue = Math.min(10000, 1000 + Math.floor((followerCount || 0) / 100));
+        // 스트리머용 시리얼 넘버 할당 (1 ~ 9999 중 비어있는 가장 작은 번호 자동 매칭)
+        const allocatedStreamerSns = await repositories_1.streamerRepository.findAllocatedStreamerSerialNumbers();
+        const allocatedSet = new Set(allocatedStreamerSns);
+        let serialNumber = 1;
+        for (let i = 1; i <= 9999; i++) {
+            if (!allocatedSet.has(i)) {
+                serialNumber = i;
+                break;
+            }
+        }
         const newStreamer = {
             channel_id: channelId,
             name: channelName,
@@ -222,7 +227,8 @@ const registerStreamer = async (req, res) => {
             follower_count: followerCount || 0,
             activity_score: 50, // 기본 활동점수
             base_value: baseValue,
-            is_active: true
+            is_active: true,
+            serial_number: serialNumber
         };
         await repositories_1.streamerRepository.save(newStreamer);
         return res.status(200).json({

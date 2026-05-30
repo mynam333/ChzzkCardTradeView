@@ -136,7 +136,6 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
   }
-
   async updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void> {
     const { error } = await this.getClient()
       .from('streamers')
@@ -145,8 +144,40 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
   }
-}
+  async findStreamerIndex(channelId: string): Promise<number> {
+    const { data, error } = await this.getClient()
+      .from('streamers')
+      .select('channel_id')
+      .order('channel_id', { ascending: true });
 
+    if (error || !data) return 1;
+    const index = data.findIndex(r => r.channel_id === channelId);
+    return index !== -1 ? index + 1 : 1;
+  }
+
+  async findMaxSerialNumber(): Promise<number> {
+    const { data, error } = await this.getClient()
+      .from('streamers')
+      .select('serial_number')
+      .order('serial_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return 0;
+    return (data.serial_number as number) || 0;
+  }
+
+  async findAllocatedStreamerSerialNumbers(): Promise<number[]> {
+    const { data, error } = await this.getClient()
+      .from('streamers')
+      .select('serial_number')
+      .not('serial_number', 'is', null)
+      .order('serial_number', { ascending: true });
+
+    if (error || !data) return [];
+    return data.map(r => r.serial_number as number);
+  }
+}
 // 3. Supabase 쿠폰 레포지토리
 export class SupabaseCouponRepository implements ICouponRepository {
   private getClient() {
@@ -357,5 +388,18 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     }
     return data ? (data.serial_number as number) : 0;
   }
-}
 
+  async findAllocatedSerialNumbers(channelId: string): Promise<number[]> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .select('serial_number')
+      .eq('channel_id', channelId)
+      .order('serial_number', { ascending: true });
+
+    if (error) {
+      console.error('[SupabaseUserCardRepository] findAllocatedSerialNumbers 에러:', error);
+      return [];
+    }
+    return (data || []).map(r => r.serial_number);
+  }
+}

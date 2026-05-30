@@ -23,6 +23,7 @@ export interface Streamer {
   activity_score: number;
   base_value: number;
   is_active: boolean;
+  serial_number?: number;
   updated_at?: string;
 }
 
@@ -82,6 +83,9 @@ export interface IStreamerRepository {
   save(streamer: Streamer): Promise<void>;
   updateCustomImage(channelId: string, imageUrl: string | null): Promise<void>;
   updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void>;
+  findStreamerIndex(channelId: string): Promise<number>;
+  findMaxSerialNumber(): Promise<number>;
+  findAllocatedStreamerSerialNumbers(): Promise<number[]>;
 }
 
 // 3. 쿠폰 리포지토리 인터페이스
@@ -113,5 +117,5 @@ export interface IUserCardRepository {
   create(card: UserCard): Promise<UserCard>;
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
   findLatestSerialNumber(channelId: string): Promise<number>;
+  findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
 }
-
