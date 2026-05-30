@@ -61,8 +61,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       expiresIn: number;
     };
 
-    // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회
-    // 1차 시도: 치지직 공식 OpenAPI 연동
+    // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회 (공식 가이드 준수)
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
 
     try {
@@ -76,19 +75,16 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       if (profileResponse.ok) {
         const profileData = (await profileResponse.json()) as any;
         if (profileData.code === 200 && profileData.content) {
-          chzzkUser = {
-            id: profileData.content.userId || '',
-            nickname: profileData.content.nickname || '',
-            profileImageUrl: profileData.content.profileImageUrl || ''
-          };
+          chzzkUser.id = profileData.content.channelId || ''; // 공식 문서 명세: channelId 가 사용자 식별자입니다.
+          chzzkUser.nickname = profileData.content.nickname || '';
         }
       }
     } catch (e) {
-      console.warn('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 실패, 비공식 API로 대체 시도:', e);
+      console.warn('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 실패:', e);
     }
 
-    // 2차 시도: 치지직 비공식/네이버 게임 공용 계정 정보 API Fallback
-    if (!chzzkUser.id || !chzzkUser.nickname) {
+    // 2차 백업: 공식 API 호출 실패 시 비공식 service/v1/users/me API로 유저 식별자 추출 시도
+    if (!chzzkUser.id) {
       try {
         const fallbackResponse = await fetch('https://api.chzzk.naver.com/service/v1/users/me', {
           headers: {
@@ -100,21 +96,37 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         if (fallbackResponse.ok) {
           const fallbackData = (await fallbackResponse.json()) as any;
           if (fallbackData.code === 200 && fallbackData.content) {
-            chzzkUser = {
-              id: fallbackData.content.userId || fallbackData.content.hashNumber || '',
-              nickname: fallbackData.content.nickname || '',
-              profileImageUrl: fallbackData.content.profileImageUrl || ''
-            };
+            chzzkUser.id = fallbackData.content.userId || fallbackData.content.hashNumber || '';
+            chzzkUser.nickname = fallbackData.content.nickname || '';
+            chzzkUser.profileImageUrl = fallbackData.content.profileImageUrl || '';
           }
         }
       } catch (e) {
-        console.error('[ChzzkAuthController] 비공식 API 프로필 획득도 실패함:', e);
+        console.error('[ChzzkAuthController] 비공식 service/v1/users/me API 프로필 획득 실패:', e);
       }
     }
 
-    // fallback / mock (테스트 및 연동 편의용 폴백)
+    // C. 프로필 이미지가 비어있는 경우, channelId를 기반으로 비공식 채널 프로필 API를 추가 호출하여 프로필 이미지 수급
+    if (chzzkUser.id && !chzzkUser.profileImageUrl) {
+      try {
+        const channelProfileResponse = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${chzzkUser.id}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+        if (channelProfileResponse.ok) {
+          const channelData = (await channelProfileResponse.json()) as any;
+          if (channelData.code === 200 && channelData.content) {
+            chzzkUser.profileImageUrl = channelData.content.channelImageUrl || '';
+          }
+        }
+      } catch (e) {
+        console.warn(`[ChzzkAuthController] channelId(${chzzkUser.id}) 기반 비공식 프로필 이미지 조회 실패:`, e);
+      }
+    }
+
+    // 최종 Fallback: 네트워크 단절 또는 임시 응답 부재 시 의사 생성 (로그인 연동 보장)
     if (!chzzkUser.id) {
-      // 치지직 API 통신 실패 또는 클라이언트 키 미비 시, code의 해시를 활용한 의사 프로필 생성
       const tempHash = cryptoHash(code);
       chzzkUser = {
         id: `chzzk_${tempHash.substring(0, 12)}`,
