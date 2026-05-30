@@ -69,6 +69,7 @@ export interface IUserRepository {
   updatePoint(id: string, point: number): Promise<void>;
   updateBanStatus(id: string, bannedUntil: string | null): Promise<void>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
+  updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void>;
   findRankings(limit: number): Promise<User[]>;
 }
 

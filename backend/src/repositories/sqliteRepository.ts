@@ -53,6 +53,10 @@ export class SqliteUserRepository implements IUserRepository {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
   }
 
+  async updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void> {
+    this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ? WHERE id = ?').run(username, avatarUrl, id);
+  }
+
   async findRankings(limit: number): Promise<User[]> {
     const rows = this.getDb().prepare('SELECT * FROM users ORDER BY point DESC LIMIT ?').all(limit);
     return rows.map((row: any) => ({

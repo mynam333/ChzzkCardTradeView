@@ -68,6 +68,15 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
+  async updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('users')
+      .update({ username, avatar_url: avatarUrl })
+      .eq('id', id);
+
+    if (error) throw error;
+  }
+
   async findRankings(limit: number): Promise<User[]> {
     const { data, error } = await this.getClient()
       .from('users')
