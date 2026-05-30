@@ -33,7 +33,7 @@ export const MainTab: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setNotices(data);
-        
+
         // 팝업 공지 추출 (최신 활성 팝업 1개 노출)
         const popups = data.filter((n: Notice) => n.is_popup);
         if (popups.length > 0) {
@@ -76,7 +76,7 @@ export const MainTab: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      
+
       {/* 팝업 오버레이 모달 */}
       {activePopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -90,13 +90,13 @@ export const MainTab: React.FC = () => {
               {activePopup.content}
             </p>
             <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
-              <button 
-                onClick={() => dismissPopup(true)} 
+              <button
+                onClick={() => dismissPopup(true)}
                 className="text-xs text-muted-foreground hover:underline"
               >
                 다시 보지 않기
               </button>
-              <button 
+              <button
                 onClick={() => dismissPopup(false)}
                 className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/10"
               >
@@ -111,7 +111,7 @@ export const MainTab: React.FC = () => {
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-700 to-blue-800 p-6 text-white shadow-xl md:p-10">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
         <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-emerald-500/20 blur-2xl"></div>
-        
+
         <div className="relative z-10 max-w-xl">
           <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
             치지직 스트리머 카드 수집 게임
@@ -120,14 +120,14 @@ export const MainTab: React.FC = () => {
             최애 스트리머 카드를 뽑고<br />컬렉션 최강자가 되어보세요!
           </h2>
           <p className="mt-3 text-sm text-emerald-100/90 leading-relaxed">
-            치지직 로그인 하나로 바로 시작! 매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요. 스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
+            치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
               <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 매일 무료 가챠 제공
             </div>
             <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <Award className="h-3.5 w-3.5 text-yellow-300" /> 전국 컬렉터 랭킹 경쟁
+              <Award className="h-3.5 w-3.5 text-yellow-300" /> 컬렉터 랭킹 경쟁
             </div>
             <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
               <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 스트리머 인기 반영 시세
@@ -138,7 +138,7 @@ export const MainTab: React.FC = () => {
 
       {/* Grid Layout: 실시간 핫 스트리머 & 공지사항 게시판 */}
       <div className="grid gap-6 md:grid-cols-3">
-        
+
         {/* 공지사항 롤링 보드 */}
         <div className="md:col-span-2 rounded-2xl border border-border bg-card p-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
@@ -149,7 +149,7 @@ export const MainTab: React.FC = () => {
               <RefreshCw className="h-3.5 w-3.5" />
             </button>
           </div>
-          
+
           <div className="mt-4 space-y-4 max-h-[280px] overflow-y-auto pr-1">
             {loading ? (
               <p className="text-center py-8 text-xs text-muted-foreground">소식을 가져오는 중입니다...</p>
@@ -176,7 +176,7 @@ export const MainTab: React.FC = () => {
           <h3 className="text-base font-bold flex items-center gap-2 border-b border-border/60 pb-3">
             <Flame className="h-4.5 w-4.5 text-orange-500 fill-orange-500" /> 실시간 최고 가치 Top 3
           </h3>
-          
+
           <div className="mt-4 space-y-3.5 flex-1">
             {hotStreamers.map((st, index) => (
               <div key={st.channel_id} className="flex items-center justify-between rounded-xl bg-secondary/20 p-3 border border-border/40 hover:border-border/80 transition">
@@ -228,7 +228,7 @@ export const MainTab: React.FC = () => {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">3</span>
               <h4 className="font-bold text-foreground">시세로 랭킹 정상 노려보기</h4>
             </div>
-            <p>보유 카드 총 가치로 전국 컬렉터들과 실력을 겨뤄보세요. 최애 스트리머가 인기를 얻을수록 내 카드 가치도 함께 올라가 랭킹이 수직 상승!</p>
+            <p>보유 카드 총 가치로 치지직의 컬렉터들과 실력을 겨뤄보세요. 최애 스트리머가 인기를 얻을수록 내 카드 가치도 함께 올라가 랭킹이 수직 상승!</p>
           </div>
         </div>
       </section>
