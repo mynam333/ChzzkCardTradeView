@@ -65,10 +65,11 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
 
     try {
+      // 치지직 API Tips 및 가이드에 따라 클라이언트 신원 헤더와 액세스 토큰을 결합하여 호출합니다.
       const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
         headers: {
           'Authorization': `Bearer ${tokenData.accessToken}`,
-          'User-Agent': 'Mozilla/5.0'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
         }
       });
 
@@ -77,33 +78,15 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         if (profileData.code === 200 && profileData.content) {
           chzzkUser.id = profileData.content.channelId || ''; // 공식 문서 명세: channelId 가 사용자 식별자입니다.
           chzzkUser.nickname = profileData.content.nickname || '';
+        } else {
+          console.warn('[ChzzkAuthController] 공식 API 응답 코드 오류:', profileData.code, profileData.message);
         }
+      } else {
+        const errBody = await profileResponse.text();
+        console.warn(`[ChzzkAuthController] 공식 API 호출 응답 실패 (${profileResponse.status}):`, errBody);
       }
-    } catch (e) {
-      console.warn('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 실패:', e);
-    }
-
-    // 2차 백업: 공식 API 호출 실패 시 비공식 service/v1/users/me API로 유저 식별자 추출 시도
-    if (!chzzkUser.id) {
-      try {
-        const fallbackResponse = await fetch('https://api.chzzk.naver.com/service/v1/users/me', {
-          headers: {
-            'Authorization': `Bearer ${tokenData.accessToken}`,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        });
-
-        if (fallbackResponse.ok) {
-          const fallbackData = (await fallbackResponse.json()) as any;
-          if (fallbackData.code === 200 && fallbackData.content) {
-            chzzkUser.id = fallbackData.content.userId || fallbackData.content.hashNumber || '';
-            chzzkUser.nickname = fallbackData.content.nickname || '';
-            chzzkUser.profileImageUrl = fallbackData.content.profileImageUrl || '';
-          }
-        }
-      } catch (e) {
-        console.error('[ChzzkAuthController] 비공식 service/v1/users/me API 프로필 획득 실패:', e);
-      }
+    } catch (e: any) {
+      console.error('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 중 심각한 예외 발생:', e.message);
     }
 
     // C. 프로필 이미지가 비어있는 경우, channelId를 기반으로 비공식 채널 프로필 API를 추가 호출하여 프로필 이미지 수급
@@ -125,17 +108,15 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       }
     }
 
-    // 최종 Fallback: 네트워크 단절 또는 임시 응답 부재 시 의사 생성 (로그인 연동 보장)
-    if (!chzzkUser.id) {
-      const tempHash = cryptoHash(code);
-      chzzkUser = {
-        id: `chzzk_${tempHash.substring(0, 12)}`,
-        nickname: `치지직유저_${tempHash.substring(0, 4)}`,
-        profileImageUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${tempHash}`
-      };
+    // D. 보안 강화: 유저 정보를 획득하지 못했다면 모크 유저 생성을 하지 않고 에러를 반환하여 로그인 가입 차단
+    if (!chzzkUser.id || !chzzkUser.nickname) {
+      return res.status(401).json({
+        error: 'ChzzkAuthenticationFailed',
+        message: '치지직 공식 API로부터 사용자 프로필(고유 식별 정보)을 회수하지 못했습니다. 설정된 Client ID / Secret 또는 인가 코드 만료 상태를 점검해 주세요.'
+      });
     }
 
-    // C. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
+    // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
       user = {
