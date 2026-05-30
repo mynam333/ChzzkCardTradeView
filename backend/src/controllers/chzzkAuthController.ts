@@ -59,18 +59,18 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       accessToken: string;
       refreshToken: string;
       expiresIn: number;
+      tokenType?: string;
     };
 
     // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회 (공식 가이드 준수)
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
 
     try {
-      // 치지직 API Tips 및 가이드에 따라 클라이언트 신원 헤더와 액세스 토큰을 결합하여 호출합니다.
+      // 공식 명세에 따라, 개인 유저 정보 조회 시에는 클라이언트 자격증명(Client-Id/Secret) 없이 
+      // 오직 유저의 accessToken만을 Bearer 헤더에 담아서 안전하게 요청합니다.
       const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
         headers: {
           'Authorization': `Bearer ${tokenData.accessToken}`,
-          'Client-Id': CHZZK_CLIENT_ID,
-          'Client-Secret': CHZZK_CLIENT_SECRET,
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
         }
       });
