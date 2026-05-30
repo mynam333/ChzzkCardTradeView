@@ -21,7 +21,7 @@ import {
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 
 export const MyInfoTab: React.FC = () => {
-  const { user, logout, updatePoints } = useApp();
+  const { user, logout, updatePoints, refreshUserData } = useApp();
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
