@@ -119,6 +119,9 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     }
 
     // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
+    const finalAccessToken = tokenData.accessToken || (tokenData as any).access_token || null;
+    const finalRefreshToken = tokenData.refreshToken || (tokenData as any).refresh_token || null;
+
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
       user = {
@@ -128,17 +131,21 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         role: 'USER',
         point: 0, // 첫 가입 유저 0 포인트
         last_free_draw: null,
-        banned_until: null
+        banned_until: null,
+        access_token: finalAccessToken,
+        refresh_token: finalRefreshToken
       };
       await userRepository.create(user);
     } else {
-      // 이미 가입된 유저의 경우, 로그인할 때마다 최신 치지직 닉네임과 프로필 사진으로 업데이트합니다.
-      await userRepository.updateProfile(chzzkUser.id, chzzkUser.nickname, chzzkUser.profileImageUrl || null);
+      // 이미 가입된 유저의 경우, 로그인할 때마다 최신 치지직 닉네임, 프로필 사진 및 액세스 토큰으로 업데이트합니다.
+      await userRepository.updateProfile(chzzkUser.id, chzzkUser.nickname, chzzkUser.profileImageUrl || null, finalAccessToken, finalRefreshToken);
       // 로컬 JWT 토큰 발행을 위해 user 객체 정보도 갱신해줍니다.
       user.username = chzzkUser.nickname;
       if (chzzkUser.profileImageUrl) {
         user.avatar_url = chzzkUser.profileImageUrl;
       }
+      user.access_token = finalAccessToken;
+      user.refresh_token = finalRefreshToken;
     }
 
     // D. JWT 토큰 발행

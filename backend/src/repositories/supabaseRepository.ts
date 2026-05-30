@@ -68,10 +68,14 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
-  async updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void> {
+  async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {
+    const updatePayload: any = { username, avatar_url: avatarUrl };
+    if (accessToken !== undefined) updatePayload.access_token = accessToken;
+    if (refreshToken !== undefined) updatePayload.refresh_token = refreshToken;
+
     const { error } = await this.getClient()
       .from('users')
-      .update({ username, avatar_url: avatarUrl })
+      .update(updatePayload)
       .eq('id', id);
 
     if (error) throw error;

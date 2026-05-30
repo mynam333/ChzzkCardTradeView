@@ -30,14 +30,16 @@ export class SqliteUserRepository implements IUserRepository {
       point: row.point,
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
+      access_token: row.access_token,
+      refresh_token: row.refresh_token,
       created_at: row.created_at
     };
   }
 
   async create(user: User): Promise<User> {
     this.getDb().prepare(
-      'INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, ?, ?)'
-    ).run(user.id, user.username, user.avatar_url, user.role, user.point);
+      'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null);
     return user;
   }
 
@@ -53,8 +55,14 @@ export class SqliteUserRepository implements IUserRepository {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
   }
 
-  async updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void> {
-    this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ? WHERE id = ?').run(username, avatarUrl, id);
+  async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {
+    if (accessToken !== undefined && refreshToken !== undefined) {
+      this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ?, access_token = ?, refresh_token = ? WHERE id = ?').run(username, avatarUrl, accessToken, refreshToken, id);
+    } else if (accessToken !== undefined) {
+      this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ?, access_token = ? WHERE id = ?').run(username, avatarUrl, accessToken, id);
+    } else {
+      this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ? WHERE id = ?').run(username, avatarUrl, id);
+    }
   }
 
   async findRankings(limit: number): Promise<User[]> {

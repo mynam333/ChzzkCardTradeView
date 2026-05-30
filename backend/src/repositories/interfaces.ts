@@ -8,6 +8,8 @@ export interface User {
   point: number;
   last_free_draw: string | null;
   banned_until: string | null;
+  access_token?: string | null;
+  refresh_token?: string | null;
   created_at?: string;
 }
 
@@ -69,7 +71,7 @@ export interface IUserRepository {
   updatePoint(id: string, point: number): Promise<void>;
   updateBanStatus(id: string, bannedUntil: string | null): Promise<void>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
-  updateProfile(id: string, username: string, avatarUrl: string | null): Promise<void>;
+  updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   findRankings(limit: number): Promise<User[]>;
 }
 
