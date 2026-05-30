@@ -69,6 +69,8 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
         headers: {
           'Authorization': `Bearer ${tokenData.accessToken}`,
+          'Client-Id': CHZZK_CLIENT_ID,
+          'Client-Secret': CHZZK_CLIENT_SECRET,
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
         }
       });
