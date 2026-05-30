@@ -67,8 +67,19 @@ router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawCard);
 
 
 // ==========================================
-// 1. 스트리머 전용 기능
 // ==========================================
+// 1. 스트리머 관련 기능
+// ==========================================
+// 전체 스트리머 정보 목록 조회 (시세 탑3 리딩 등 활용)
+router.get('/streamers', async (req, res) => {
+  try {
+    const streamers = await streamerRepository.findAll();
+    return res.status(200).json(streamers);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });
+  }
+});
+
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, upload.single('image'), uploadCustomImage);
 

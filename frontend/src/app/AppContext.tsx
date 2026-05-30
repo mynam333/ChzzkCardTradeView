@@ -30,7 +30,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<'main' | 'gacha' | 'ranking' | 'my-info'>('main');
   const [user, setUser] = useState<AppContextType['user']>(null);
 
-  // 로컬 스토리지에서 저장된 세션 복원 (치지직 로그인 완료 후 저장된 경우만)
+  // 로컬 스토리지에서 저장된 테마만 복원 및 초기 인증 처리
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
     if (savedTheme) {
@@ -40,11 +40,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       document.documentElement.classList.add('dark');
     }
 
-    // 치지직 OAuth 로그인 후 저장된 세션이 있는 경우에만 복원
-    const savedUser = localStorage.getItem('user_session');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    // JWT 토큰이 있으면 매 마운트 시 서버에 검증된 정보(/users/me)를 호출하여 로드
+    refreshUserData();
   }, []);
 
   const toggleTheme = () => {
@@ -55,7 +52,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
-    localStorage.removeItem('user_session');
     localStorage.removeItem('cctv_jwt_token');
     setUser(null);
     setActiveTab('main');
@@ -64,7 +60,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshUserData = async () => {
     const token = localStorage.getItem('cctv_jwt_token');
-    if (!token) return;
+    if (!token) {
+      setUser(null);
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/users/me`, {
         headers: {
@@ -73,19 +72,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       if (response.ok) {
         const data = await response.json();
-        const updated = {
+        setUser({
           id: data.id,
           username: data.username,
           avatarUrl: data.avatarUrl,
           role: data.role,
           point: data.point,
           lastFreeDraw: data.lastFreeDraw
-        };
-        localStorage.setItem('user_session', JSON.stringify(updated));
-        setUser(updated);
+        });
       } else if (response.status === 401) {
         // 만료되었거나 비정상적인 토큰인 경우 로그아웃 처리
-        localStorage.removeItem('user_session');
         localStorage.removeItem('cctv_jwt_token');
         setUser(null);
       }
@@ -96,12 +92,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updatePoints = async (diff: number) => {
     if (!user) return;
-    const updated = {
+    // UI에만 즉시 피드백을 주기 위해 React State만 업데이트합니다 (외부 변조 및 불법 갱신 방지)
+    setUser({
       ...user,
       point: Math.max(0, user.point + diff)
-    };
-    localStorage.setItem('user_session', JSON.stringify(updated));
-    setUser(updated);
+    });
   };
 
   return (

@@ -62,25 +62,53 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     };
 
     // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회
-    // (OpenAPI 명세에 맞는 엔드포인트 호출 - 통상적으로 user profile 조회 API 활용)
-    // 실제 치지직 API가 사용자의 unique ID와 프로필을 주는 규격에 대응합니다.
-    const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
-      headers: {
-        'Authorization': `Bearer ${tokenData.accessToken}`,
-        'User-Agent': 'Mozilla/5.0'
-      }
-    });
-
+    // 1차 시도: 치지직 공식 OpenAPI 연동
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
 
-    if (profileResponse.ok) {
-      const profileData = (await profileResponse.json()) as any;
-      if (profileData.code === 200 && profileData.content) {
-        chzzkUser = {
-          id: profileData.content.userId || '',
-          nickname: profileData.content.nickname || '치지직유저',
-          profileImageUrl: profileData.content.profileImageUrl || ''
-        };
+    try {
+      const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
+        headers: {
+          'Authorization': `Bearer ${tokenData.accessToken}`,
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
+
+      if (profileResponse.ok) {
+        const profileData = (await profileResponse.json()) as any;
+        if (profileData.code === 200 && profileData.content) {
+          chzzkUser = {
+            id: profileData.content.userId || '',
+            nickname: profileData.content.nickname || '',
+            profileImageUrl: profileData.content.profileImageUrl || ''
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 실패, 비공식 API로 대체 시도:', e);
+    }
+
+    // 2차 시도: 치지직 비공식/네이버 게임 공용 계정 정보 API Fallback
+    if (!chzzkUser.id || !chzzkUser.nickname) {
+      try {
+        const fallbackResponse = await fetch('https://api.chzzk.naver.com/service/v1/users/me', {
+          headers: {
+            'Authorization': `Bearer ${tokenData.accessToken}`,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        if (fallbackResponse.ok) {
+          const fallbackData = (await fallbackResponse.json()) as any;
+          if (fallbackData.code === 200 && fallbackData.content) {
+            chzzkUser = {
+              id: fallbackData.content.userId || fallbackData.content.hashNumber || '',
+              nickname: fallbackData.content.nickname || '',
+              profileImageUrl: fallbackData.content.profileImageUrl || ''
+            };
+          }
+        }
+      } catch (e) {
+        console.error('[ChzzkAuthController] 비공식 API 프로필 획득도 실패함:', e);
       }
     }
 

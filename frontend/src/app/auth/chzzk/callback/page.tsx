@@ -52,7 +52,6 @@ const ChzzkCallbackContent: React.FC = () => {
           token: data.token
         };
 
-        localStorage.setItem('user_session', JSON.stringify(sessionUser));
         localStorage.setItem('cctv_jwt_token', data.token);
 
         if (setUser) {
