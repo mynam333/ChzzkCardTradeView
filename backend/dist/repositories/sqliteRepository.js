@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SqliteAnnouncementRepository = exports.SqliteReportRepository = exports.SqliteCouponRepository = exports.SqliteStreamerRepository = exports.SqliteUserRepository = void 0;
+exports.SqliteUserCardRepository = exports.SqliteAnnouncementRepository = exports.SqliteReportRepository = exports.SqliteCouponRepository = exports.SqliteStreamerRepository = exports.SqliteUserRepository = void 0;
 const db_1 = require("../services/db");
 // 1. SQLite 유저 레포지토리
 class SqliteUserRepository {
@@ -19,11 +19,13 @@ class SqliteUserRepository {
             point: row.point,
             last_free_draw: row.last_free_draw,
             banned_until: row.banned_until,
+            access_token: row.access_token,
+            refresh_token: row.refresh_token,
             created_at: row.created_at
         };
     }
     async create(user) {
-        this.getDb().prepare('INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, ?, ?)').run(user.id, user.username, user.avatar_url, user.role, user.point);
+        this.getDb().prepare('INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token) VALUES (?, ?, ?, ?, ?, ?, ?)').run(user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null);
         return user;
     }
     async updatePoint(id, point) {
@@ -34,6 +36,30 @@ class SqliteUserRepository {
     }
     async updateLastFreeDraw(id, time) {
         this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
+    }
+    async updateProfile(id, username, avatarUrl, accessToken, refreshToken) {
+        if (accessToken !== undefined && refreshToken !== undefined) {
+            this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ?, access_token = ?, refresh_token = ? WHERE id = ?').run(username, avatarUrl, accessToken, refreshToken, id);
+        }
+        else if (accessToken !== undefined) {
+            this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ?, access_token = ? WHERE id = ?').run(username, avatarUrl, accessToken, id);
+        }
+        else {
+            this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ? WHERE id = ?').run(username, avatarUrl, id);
+        }
+    }
+    async findRankings(limit) {
+        const rows = this.getDb().prepare('SELECT * FROM users ORDER BY point DESC LIMIT ?').all(limit);
+        return rows.map((row) => ({
+            id: row.id,
+            username: row.username,
+            avatar_url: row.avatar_url,
+            role: row.role,
+            point: row.point,
+            last_free_draw: row.last_free_draw,
+            banned_until: row.banned_until,
+            created_at: row.created_at
+        }));
     }
 }
 exports.SqliteUserRepository = SqliteUserRepository;
@@ -205,3 +231,46 @@ class SqliteAnnouncementRepository {
     }
 }
 exports.SqliteAnnouncementRepository = SqliteAnnouncementRepository;
+// 6. SQLite 유저 보유 카드 레포지토리
+class SqliteUserCardRepository {
+    getDb() {
+        return (0, db_1.getSqliteDb)();
+    }
+    async create(card) {
+        const result = this.getDb().prepare('INSERT INTO user_cards (user_id, channel_id, serial_number) VALUES (?, ?, ?)').run(card.user_id, card.channel_id, card.serial_number);
+        card.id = Number(result.lastInsertRowid);
+        return card;
+    }
+    async findByUserId(userId) {
+        const rows = this.getDb().prepare(`
+      SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image, s.base_value as streamer_base_value, s.follower_count as streamer_follower
+      FROM user_cards uc
+      JOIN streamers s ON uc.channel_id = s.channel_id
+      WHERE uc.user_id = ?
+      ORDER BY uc.id DESC
+    `).all(userId);
+        return rows.map((row) => ({
+            id: row.id,
+            user_id: row.user_id,
+            channel_id: row.channel_id,
+            serial_number: row.serial_number,
+            acquired_at: row.acquired_at,
+            streamer: {
+                channel_id: row.channel_id,
+                name: row.streamer_name,
+                logo_url: row.streamer_logo,
+                custom_image_url: row.streamer_custom_image,
+                base_value: row.streamer_base_value,
+                follower_count: row.streamer_follower,
+                is_image_banned: false,
+                activity_score: 0,
+                is_active: false
+            }
+        }));
+    }
+    async findLatestSerialNumber(channelId) {
+        const row = this.getDb().prepare('SELECT MAX(serial_number) as max_sn FROM user_cards WHERE channel_id = ?').get(channelId);
+        return row && row.max_sn ? row.max_sn : 0;
+    }
+}
+exports.SqliteUserCardRepository = SqliteUserCardRepository;

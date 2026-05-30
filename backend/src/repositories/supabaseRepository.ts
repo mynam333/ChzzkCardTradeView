@@ -341,5 +341,21 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     if (error) throw error;
     return (data || []) as any[];
   }
+
+  async findLatestSerialNumber(channelId: string): Promise<number> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .select('serial_number')
+      .eq('channel_id', channelId)
+      .order('serial_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[SupabaseUserCardRepository] findLatestSerialNumber 에러:', error);
+      return 0;
+    }
+    return data ? (data.serial_number as number) : 0;
+  }
 }
 

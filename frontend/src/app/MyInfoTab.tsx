@@ -136,13 +136,19 @@ export const MyInfoTab: React.FC = () => {
     }
   };
 
-  // 이미지 선택 시 blob 생성하여 지연 렌더링 (Lazy Preview)
+  // 스트리머 이미지 업로드 모달 및 책임 동의 여부 상태
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
+
+  // 이미지 선택 시 blob 생성하여 지연 렌더링 (Lazy Preview) 및 모달 오픈
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setImageFile(file);
       const blobUrl = URL.createObjectURL(file);
       setPreviewBlob(blobUrl);
+      setUploadModalOpen(true); // 이미지 파일 선택 시 즉시 팝업 노출
+      setImageDisclaimerChecked(false); // 동의 상태 초기화
     }
   };
 
@@ -153,9 +159,15 @@ export const MyInfoTab: React.FC = () => {
       return;
     }
 
+    if (!imageDisclaimerChecked) {
+      alert('이미지 등록 책임 동의 체크박스를 확인해 주세요.');
+      return;
+    }
+
     setUploading(true);
     const formData = new FormData();
     formData.append('image', imageFile);
+    formData.append('channel_id', user.id); // 채널 ID 전달
 
     const token = localStorage.getItem('cctv_jwt_token');
     try {
@@ -171,6 +183,9 @@ export const MyInfoTab: React.FC = () => {
       if (res.ok) {
         alert('이미지가 성공적으로 저장 완료되었습니다.');
         setImageFile(null);
+        setUploadModalOpen(false);
+        // 프로필 정보 최신 상태 동기화
+        refreshUserData();
       } else {
         alert(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
       }
@@ -320,7 +335,7 @@ export const MyInfoTab: React.FC = () => {
 
             <div className="relative z-20 space-y-0.5 text-white">
               <h4 className="text-xs font-bold truncate drop-shadow">{user?.username}</h4>
-              <p className="text-[8px] text-zinc-300">No.777</p>
+              <p className="text-[8px] text-zinc-300">No.0001</p>
             </div>
           </div>
 
@@ -334,26 +349,95 @@ export const MyInfoTab: React.FC = () => {
                 <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
               </label>
             </div>
+          </div>
+        </div>
 
-            {previewBlob && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setPreviewBlob(null); setImageFile(null); }}
-                  className="flex-1 rounded-lg bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+        {/* 스트리머 이미지 등록 및 동의 팝업 모달 */}
+        {uploadModalOpen && previewBlob && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 카드 이미지 업로드
+                </h3>
+                <button 
+                  onClick={() => {
+                    setUploadModalOpen(false);
+                    setPreviewBlob(null);
+                    setImageFile(null);
+                    setImageDisclaimerChecked(false);
+                  }} 
+                  className="text-muted-foreground hover:text-foreground"
                 >
-                  초기화
+                  <X className="h-5 w-5" />
                 </button>
-                <button
+              </div>
+
+              <div className="mt-4 space-y-4 flex flex-col items-center">
+                {/* 팝업 내 미리보기 영역 */}
+                <div className="relative flex h-60 w-36 flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary p-3 shadow-md">
+                  <div className="absolute inset-0 z-0">
+                    <img 
+                      src={previewBlob} 
+                      alt="Card Preview Modal"
+                      className="h-full w-full object-cover opacity-80"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/35 z-10"></div>
+                  </div>
+                  
+                  <div className="relative z-20 flex justify-between">
+                    <span className="rounded bg-primary px-1.5 py-0.5 text-[8px] font-bold text-primary-foreground">LIVE</span>
+                  </div>
+
+                  <div className="relative z-20 space-y-0.5 text-white">
+                    <h4 className="text-xs font-bold truncate drop-shadow">{user?.username}</h4>
+                    <p className="text-[8px] text-zinc-300">No.0001</p>
+                  </div>
+                </div>
+
+                {/* 법적 동의 체크박스 */}
+                <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 space-y-2.5 w-full">
+                  <div className="text-[0.62rem] text-muted-foreground leading-relaxed">
+                    <p className="font-bold text-foreground/80 mb-1">⚠️ 이미지 등록 법적 책임 조항</p>
+                    해당 스트리머 커스텀 카드 이미지 등록으로 인해 발생하는 모든 초상권, 저작권, 퍼블리시티권 분쟁 등 법적 책임은 등록자 본인에게 전적으로 귀속됨을 확인합니다.
+                  </div>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={imageDisclaimerChecked}
+                      onChange={(e) => setImageDisclaimerChecked(e.target.checked)}
+                      className="mt-0.5 rounded border-border"
+                    />
+                    <span className="text-[0.65rem] font-semibold text-foreground/90">
+                      내용을 확인했으며, 모든 법적 책임 귀속에 동의합니다.
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
+                <button 
+                  onClick={() => {
+                    setUploadModalOpen(false);
+                    setPreviewBlob(null);
+                    setImageFile(null);
+                    setImageDisclaimerChecked(false);
+                  }}
+                  className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
+                >
+                  취소
+                </button>
+                <button 
                   onClick={handleUploadImage}
-                  disabled={uploading}
-                  className="flex-1 rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+                  disabled={uploading || !imageDisclaimerChecked}
+                  className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   {uploading ? '저장 중...' : '카드 이미지 최종 저장'}
                 </button>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* 쿠폰 입력 영역 */}

@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initRepositories = exports.announcementRepository = exports.reportRepository = exports.couponRepository = exports.streamerRepository = exports.userRepository = void 0;
+exports.initRepositories = exports.userCardRepository = exports.announcementRepository = exports.reportRepository = exports.couponRepository = exports.streamerRepository = exports.userRepository = void 0;
 const db_1 = require("../services/db");
 const sqliteRepository_1 = require("./sqliteRepository");
 const supabaseRepository_1 = require("./supabaseRepository");
@@ -29,6 +29,7 @@ const initRepositories = () => {
         exports.couponRepository = new supabaseRepository_1.SupabaseCouponRepository();
         exports.reportRepository = new supabaseRepository_1.SupabaseReportRepository();
         exports.announcementRepository = new supabaseRepository_1.SupabaseAnnouncementRepository();
+        exports.userCardRepository = new supabaseRepository_1.SupabaseUserCardRepository();
         console.log('[Repository] Supabase 리포지토리 레이어가 활성화되었습니다.');
     }
     else {
@@ -37,6 +38,7 @@ const initRepositories = () => {
         exports.couponRepository = new sqliteRepository_1.SqliteCouponRepository();
         exports.reportRepository = new sqliteRepository_1.SqliteReportRepository();
         exports.announcementRepository = new sqliteRepository_1.SqliteAnnouncementRepository();
+        exports.userCardRepository = new sqliteRepository_1.SqliteUserCardRepository();
         console.log('[Repository] 로컬 SQLite 리포지토리 레이어가 활성화되었습니다.');
     }
 };

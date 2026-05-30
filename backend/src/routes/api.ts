@@ -32,7 +32,9 @@ import {
   getUserMe,
   getUserRankings,
   getUserCards,
-  drawCard
+  drawCard,
+  searchChzzkStreamer,
+  registerStreamer
 } from '../controllers/playController';
 import { streamerRepository } from '../repositories';
 
@@ -64,6 +66,10 @@ router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/ranking', getUserRankings);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawCard);
+
+// 신규 스트리머 검색 및 카드 등록 API
+router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchChzzkStreamer);
+router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerStreamer);
 
 
 

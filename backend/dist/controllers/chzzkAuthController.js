@@ -51,38 +51,67 @@ const handleChzzkCallback = async (req, res) => {
             const errorText = await response.text();
             throw new Error(`치지직 토큰 교환 실패: ${response.status} - ${errorText}`);
         }
-        const tokenData = (await response.json());
-        // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회
-        // (OpenAPI 명세에 맞는 엔드포인트 호출 - 통상적으로 user profile 조회 API 활용)
-        // 실제 치지직 API가 사용자의 unique ID와 프로필을 주는 규격에 대응합니다.
-        const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
-            headers: {
-                'Authorization': `Bearer ${tokenData.accessToken}`,
-                'User-Agent': 'Mozilla/5.0'
-            }
-        });
+        const rawTokenBody = await response.text();
+        const tokenData = JSON.parse(rawTokenBody);
+        const tokenContent = tokenData.content || tokenData;
+        const finalAccessToken = tokenContent.accessToken || tokenContent.access_token || null;
+        const finalRefreshToken = tokenContent.refreshToken || tokenContent.refresh_token || null;
+        // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회 (공식 가이드 준수)
         let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
-        if (profileResponse.ok) {
-            const profileData = (await profileResponse.json());
-            if (profileData.code === 200 && profileData.content) {
-                chzzkUser = {
-                    id: profileData.content.userId || '',
-                    nickname: profileData.content.nickname || '치지직유저',
-                    profileImageUrl: profileData.content.profileImageUrl || ''
-                };
+        try {
+            const profileHeaders = {
+                'Authorization': `Bearer ${finalAccessToken}`,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
+            };
+            const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
+                headers: profileHeaders
+            });
+            if (profileResponse.ok) {
+                const rawProfileBody = await profileResponse.text();
+                const profileData = JSON.parse(rawProfileBody);
+                if (profileData.code === 200 && profileData.content) {
+                    chzzkUser.id = profileData.content.channelId || '';
+                    chzzkUser.nickname = profileData.content.nickname || '';
+                }
+                else {
+                    console.warn('[ChzzkAuthController] 공식 API 응답 코드 오류:', profileData.code, profileData.message);
+                }
+            }
+            else {
+                const errBody = await profileResponse.text();
+                console.warn(`[ChzzkAuthController] 공식 API 호출 응답 실패 (${profileResponse.status}):`, errBody);
             }
         }
-        // fallback / mock (테스트 및 연동 편의용 폴백)
-        if (!chzzkUser.id) {
-            // 치지직 API 통신 실패 또는 클라이언트 키 미비 시, code의 해시를 활용한 의사 프로필 생성
-            const tempHash = cryptoHash(code);
-            chzzkUser = {
-                id: `chzzk_${tempHash.substring(0, 12)}`,
-                nickname: `치지직유저_${tempHash.substring(0, 4)}`,
-                profileImageUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${tempHash}`
-            };
+        catch (e) {
+            console.error('[ChzzkAuthController] 공식 OpenAPI 사용자 프로필 획득 중 심각한 예외 발생:', e.message);
         }
-        // C. DB 조회 또는 생성 (계정 자동 연동)
+        // C. 프로필 이미지가 비어있는 경우, channelId를 기반으로 비공식 채널 프로필 API를 추가 호출하여 프로필 이미지 수급
+        if (chzzkUser.id && !chzzkUser.profileImageUrl) {
+            try {
+                const channelProfileResponse = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${chzzkUser.id}`, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                if (channelProfileResponse.ok) {
+                    const channelData = (await channelProfileResponse.json());
+                    if (channelData.code === 200 && channelData.content) {
+                        chzzkUser.profileImageUrl = channelData.content.channelImageUrl || '';
+                    }
+                }
+            }
+            catch (e) {
+                console.warn(`[ChzzkAuthController] channelId(${chzzkUser.id}) 기반 비공식 프로필 이미지 조회 실패:`, e);
+            }
+        }
+        // D. 보안 강화: 유저 정보를 획득하지 못했다면 모크 유저 생성을 하지 않고 에러를 반환하여 로그인 가입 차단
+        if (!chzzkUser.id || !chzzkUser.nickname) {
+            return res.status(401).json({
+                error: 'ChzzkAuthenticationFailed',
+                message: '치지직 공식 API로부터 사용자 프로필(고유 식별 정보)을 회수하지 못했습니다. 설정된 Client ID / Secret 또는 인가 코드 만료 상태를 점검해 주세요.'
+            });
+        }
+        // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
         let user = await repositories_1.userRepository.findById(chzzkUser.id);
         if (!user) {
             user = {
@@ -92,9 +121,22 @@ const handleChzzkCallback = async (req, res) => {
                 role: 'USER',
                 point: 0, // 첫 가입 유저 0 포인트
                 last_free_draw: null,
-                banned_until: null
+                banned_until: null,
+                access_token: finalAccessToken,
+                refresh_token: finalRefreshToken
             };
             await repositories_1.userRepository.create(user);
+        }
+        else {
+            // 이미 가입된 유저의 경우, 로그인할 때마다 최신 치지직 닉네임, 프로필 사진 및 액세스 토큰으로 업데이트합니다.
+            await repositories_1.userRepository.updateProfile(chzzkUser.id, chzzkUser.nickname, chzzkUser.profileImageUrl || null, finalAccessToken, finalRefreshToken);
+            // 로컬 JWT 토큰 발행을 위해 user 객체 정보도 갱신해줍니다.
+            user.username = chzzkUser.nickname;
+            if (chzzkUser.profileImageUrl) {
+                user.avatar_url = chzzkUser.profileImageUrl;
+            }
+            user.access_token = finalAccessToken;
+            user.refresh_token = finalRefreshToken;
         }
         // D. JWT 토큰 발행
         const sessionToken = jsonwebtoken_1.default.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });

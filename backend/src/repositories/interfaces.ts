@@ -112,5 +112,6 @@ export interface IAnnouncementRepository {
 export interface IUserCardRepository {
   create(card: UserCard): Promise<UserCard>;
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
+  findLatestSerialNumber(channelId: string): Promise<number>;
 }
 

@@ -15,6 +15,8 @@ const adminController_1 = require("../controllers/adminController");
 const couponController_1 = require("../controllers/couponController");
 const announcementController_1 = require("../controllers/announcementController");
 const pushController_1 = require("../controllers/pushController");
+const playController_1 = require("../controllers/playController");
+const repositories_1 = require("../repositories");
 const router = (0, express_1.Router)();
 // Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한)
 const upload = (0, multer_1.default)({
@@ -22,13 +24,41 @@ const upload = (0, multer_1.default)({
     limits: { fileSize: 5 * 1024 * 1024 }
 });
 // ==========================================
-// 0. 치지직 OpenAPI OAuth 로그인 기능
+// 헬스체크 엔드포인트 (/api/health)
+// ==========================================
+router.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        message: '치지직 카드 트레이드 뷰 백엔드 API가 정상 작동 중입니다.',
+        timestamp: new Date().toISOString()
+    });
+});
+// ==========================================
+// 0. 치지직 OpenAPI OAuth 로그인 및 기본 유저 정보
 // ==========================================
 router.get('/auth/chzzk/url', chzzkAuthController_1.getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', chzzkAuthController_1.handleChzzkCallback);
+router.get('/users/me', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.getUserMe);
+router.get('/users/ranking', playController_1.getUserRankings);
+router.get('/users/me/cards', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.getUserCards);
+router.post('/cards/draw', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.drawCard);
+// 신규 스트리머 검색 및 카드 등록 API
+router.get('/streamers/search', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.searchChzzkStreamer);
+router.post('/streamers/register', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.registerStreamer);
 // ==========================================
-// 1. 스트리머 전용 기능
 // ==========================================
+// 1. 스트리머 관련 기능
+// ==========================================
+// 전체 스트리머 정보 목록 조회 (시세 탑3 리딩 등 활용)
+router.get('/streamers', async (req, res) => {
+    try {
+        const streamers = await repositories_1.streamerRepository.findAll();
+        return res.status(200).json(streamers);
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });
+    }
+});
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
 router.post('/streamers/me/image', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, upload.single('image'), streamerController_1.uploadCustomImage);
 // ==========================================

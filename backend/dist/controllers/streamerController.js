@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadCustomImage = void 0;
 const repositories_1 = require("../repositories");
-const db_1 = require("../services/db");
 const imageService_1 = require("../services/imageService");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -46,41 +45,20 @@ const uploadCustomImage = async (req, res) => {
     try {
         // 1. sharp 가공 파이프라인 (webp 포맷 및 최대 1280px 리사이즈)
         const webpBuffer = await (0, imageService_1.resizeAndConvertToWebp)(req.file.buffer);
-        let imageUrl = '';
-        const dbMode = (0, db_1.getDbMode)();
-        if (dbMode === 'SUPABASE') {
-            // 2-A. Supabase Storage 업로드
-            const { getSupabaseClient } = require('../services/db');
-            const supabase = getSupabaseClient();
-            const fileName = `custom_${channel_id}_${Date.now()}.webp`;
-            const { error } = await supabase.storage
-                .from('streamer-cards')
-                .upload(fileName, webpBuffer, {
-                contentType: 'image/webp',
-                upsert: true
-            });
-            if (error) {
-                throw new Error(`Supabase Storage 업로드 실패: ${error.message}`);
-            }
-            // public URL 획득
-            const { data: publicUrlData } = supabase.storage
-                .from('streamer-cards')
-                .getPublicUrl(fileName);
-            imageUrl = publicUrlData.publicUrl;
+        // 스트리머의 이름을 폴더명으로 지정하기 위해 안전한 폴더명 형태로 가공합니다.
+        // 특수문자나 공백을 안전한 형태로 치환하거나 정리
+        const safeStreamerName = streamer.name.replace(/[\/\\?%*:|"<>\s]/g, '_');
+        // 스트리머명_channelId 형태의 폴더 생성
+        const folderName = `${safeStreamerName}_${channel_id}`;
+        const uploadDir = path_1.default.join(__dirname, '../../../public/uploads', folderName);
+        if (!fs_1.default.existsSync(uploadDir)) {
+            fs_1.default.mkdirSync(uploadDir, { recursive: true });
         }
-        else {
-            // 2-B. 로컬 파일 시스템 저장 (LOCAL_SQL Mode)
-            // public/uploads 폴더 생성 보장
-            const uploadDir = path_1.default.join(__dirname, '../../../public/uploads');
-            if (!fs_1.default.existsSync(uploadDir)) {
-                fs_1.default.mkdirSync(uploadDir, { recursive: true });
-            }
-            const fileName = `custom_${channel_id}_${Date.now()}.webp`;
-            const filePath = path_1.default.join(uploadDir, fileName);
-            fs_1.default.writeFileSync(filePath, webpBuffer);
-            // 웹 접근 가능한 로컬 URL 매핑
-            imageUrl = `/uploads/${fileName}`;
-        }
+        const fileName = `custom_${Date.now()}.webp`;
+        const filePath = path_1.default.join(uploadDir, fileName);
+        fs_1.default.writeFileSync(filePath, webpBuffer);
+        // 호스팅 경로 매핑
+        const imageUrl = `/uploads/${folderName}/${fileName}`;
         // 3. 데이터베이스 정보 갱신
         await repositories_1.streamerRepository.updateCustomImage(channel_id, imageUrl);
         return res.status(200).json({

@@ -121,11 +121,28 @@ export const GachaTab: React.FC = () => {
     return <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">COMMON</span>;
   };
 
+  // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
+  const getIsFreeDrawAvailable = () => {
+    if (!user) return false;
+    if (!user.lastFreeDraw) return true;
+    
+    const nowKst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+    const todayStrKst = nowKst.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    const lastFreeKst = new Date(new Date(user.lastFreeDraw).getTime() + 9 * 60 * 60 * 1000);
+    const lastFreeStrKst = lastFreeKst.toISOString().split('T')[0];
+    
+    return lastFreeStrKst !== todayStrKst;
+  };
+
+  const isFreeDraw = getIsFreeDrawAvailable();
+
   const handleDraw = async () => {
     if (!user) return;
-    const drawCost = 1000;
-    if (user.point < drawCost) {
-      alert('포인트가 부족합니다. (1회 뽑기: 1,000 P)');
+    const drawCost = 10000; // 1회 뽑기 비용 10,000 P로 수정
+    
+    if (!isFreeDraw && user.point < drawCost) {
+      alert(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`);
       return;
     }
 
@@ -150,10 +167,16 @@ export const GachaTab: React.FC = () => {
       
       setTimeout(() => {
         setDrawnCard(data.card.streamer);
+        // 그려진 카드에 서버에서 생성된 시리얼넘버 주입
+        if (data.card.serial_number) {
+          (data.card.streamer as any).serial_number = data.card.serial_number;
+        }
         setIsDrawing(false);
         
-        // 유저 포인트 로컬 동기화 및 전체 인벤토리 즉시 재조회
-        updatePoints(-drawCost);
+        // 무료 뽑기가 아닌 경우에만 로컬 포인트 차감
+        if (!data.is_free) {
+          updatePoints(-drawCost);
+        }
         fetchInventory();
         refreshUserData();
 
@@ -171,6 +194,15 @@ export const GachaTab: React.FC = () => {
       alert(e.message || '서버와의 통신 오류가 발생했습니다.');
     }
   };
+
+  // 스트리머 등록 모달 상태
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [streamerSearchKeyword, setStreamerSearchKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedStreamer, setSelectedStreamer] = useState<any | null>(null);
+  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+  const [registering, setRegistering] = useState(false);
 
   const handleOpenTrade = () => {
     if (inventory.length === 0) {
@@ -211,6 +243,84 @@ export const GachaTab: React.FC = () => {
     }
   };
 
+  // 신규 스트리머 검색 API 호출
+  const handleSearchStreamer = async () => {
+    if (!streamerSearchKeyword.trim()) {
+      alert('검색할 스트리머 명칭을 입력해 주세요.');
+      return;
+    }
+    setSearching(true);
+    setSelectedStreamer(null);
+    const token = localStorage.getItem('cctv_jwt_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/streamers/search?keyword=${encodeURIComponent(streamerSearchKeyword)}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data);
+      } else {
+        alert('스트리머 검색에 실패했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('통신 중 오류가 발생했습니다.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // 신규 스트리머 카드 등록 API 호출
+  const handleRegisterStreamer = async () => {
+    if (!selectedStreamer) {
+      alert('등록할 스트리머를 리스트에서 선택해 주세요.');
+      return;
+    }
+    if (!disclaimerChecked) {
+      alert('등록 책임 조항 및 약관 동의를 완료해 주세요.');
+      return;
+    }
+
+    setRegistering(true);
+    const token = localStorage.getItem('cctv_jwt_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/streamers/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          channelId: selectedStreamer.channelId,
+          channelName: selectedStreamer.channelName,
+          channelImageUrl: selectedStreamer.channelImageUrl,
+          followerCount: selectedStreamer.followerCount
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || '성공적으로 스트리머 카드가 등록되었습니다!');
+        setRegisterModalOpen(false);
+        // 상태 초기화 및 스트리머 데이터 갱신
+        setSelectedStreamer(null);
+        setSearchResults([]);
+        setStreamerSearchKeyword('');
+        setDisclaimerChecked(false);
+        fetchStreamers();
+      } else {
+        alert(data.message || '스트리머 등록에 실패했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('서버 전송 중 에러가 발생했습니다.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
   // 검색 필터링
   const filteredInventory = inventory.filter(card => 
     card.streamer?.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -219,6 +329,119 @@ export const GachaTab: React.FC = () => {
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
       
+      {/* 신규 스트리머 카드 등록 팝업 모달 */}
+      {registerModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-base font-bold flex items-center gap-2">
+                <Plus className="h-4.5 w-4.5 text-primary" /> 신규 스트리머 카드 등록
+              </h3>
+              <button 
+                onClick={() => {
+                  setRegisterModalOpen(false);
+                  setSelectedStreamer(null);
+                  setSearchResults([]);
+                  setStreamerSearchKeyword('');
+                  setDisclaimerChecked(false);
+                }} 
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={streamerSearchKeyword}
+                  onChange={(e) => setStreamerSearchKeyword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearchStreamer(); }}
+                  placeholder="치지직 스트리머 이름을 입력하세요"
+                  className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                />
+                <button 
+                  onClick={handleSearchStreamer}
+                  disabled={searching}
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+                >
+                  {searching ? '검색 중...' : '검색'}
+                </button>
+              </div>
+
+              {/* 검색 결과 리스트 */}
+              {searchResults.length > 0 && (
+                <div className="border border-border/80 rounded-xl max-h-48 overflow-y-auto p-1.5 space-y-1">
+                  {searchResults.map((ch) => {
+                    const isSelected = selectedStreamer?.channelId === ch.channelId;
+                    return (
+                      <div 
+                        key={ch.channelId}
+                        onClick={() => setSelectedStreamer(ch)}
+                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
+                          isSelected ? 'bg-primary/10 border border-primary/40' : 'hover:bg-secondary/60 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <img src={ch.channelImageUrl} alt={ch.channelName} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
+                          <div>
+                            <p className="text-xs font-bold text-foreground">{ch.channelName}</p>
+                            <p className="text-[9.5px] text-muted-foreground">{(ch.followerCount || 0).toLocaleString()} 팔로워</p>
+                          </div>
+                        </div>
+                        {isSelected && <Check className="h-4 w-4 text-primary" />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 하단 약관 및 동의 체크 */}
+              <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 space-y-2.5">
+                <div className="text-[0.62rem] text-muted-foreground leading-relaxed">
+                  <p className="font-bold text-foreground/80 mb-1">⚠️ 신규 스트리머 카드 등록 책임 조항</p>
+                  본 서비스를 통해 신규 스트리머의 정보를 등록하여 카드를 활성화하는 모든 행위의 주체는 사용자 본인이며, 이로 인해 발생할 수 있는 초상권, 저작권, 퍼블리시티권 분쟁을 포함한 민형사상의 모든 법적 책임은 카드 등록자 본인에게 전적으로 귀속됩니다.
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={disclaimerChecked}
+                    onChange={(e) => setDisclaimerChecked(e.target.checked)}
+                    className="mt-0.5 rounded border-border"
+                  />
+                  <span className="text-[0.65rem] font-semibold text-foreground/90">
+                    위 조항의 내용을 충분히 숙지하였으며 책임을 확인했습니다.
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
+              <button 
+                onClick={() => {
+                  setRegisterModalOpen(false);
+                  setSelectedStreamer(null);
+                  setSearchResults([]);
+                  setStreamerSearchKeyword('');
+                  setDisclaimerChecked(false);
+                }}
+                className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
+              >
+                취소
+              </button>
+              <button 
+                onClick={handleRegisterStreamer}
+                disabled={registering || !selectedStreamer || !disclaimerChecked}
+                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {registering ? '등록 중...' : '스트리머 등록 완료'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1:1 교환 거래 팝업 */}
       {tradeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -261,7 +484,7 @@ export const GachaTab: React.FC = () => {
                       >
                         <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
                         <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
-                        <span className="text-[8.5px] text-muted-foreground">No.{card.serial_number}</span>
+                        <span className="text-[8.5px] text-muted-foreground">No.{String(card.serial_number).padStart(4, '0')}</span>
                         {isSelected && (
                           <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
                             <Check className="h-2.5 w-2.5" />
@@ -301,7 +524,7 @@ export const GachaTab: React.FC = () => {
             </span>
             <h2 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">치지직 카드 즉시 소환</h2>
             <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
-              1,000 포인트를 사용하여 무작위 치지직 스트리머 카드를 획득합니다. 실시간 시세를 가진 카드가 생성되며 인벤토리에 자동 영구 소장됩니다.
+              매일 한국 표준시(KST) 자정에 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다. 무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">10,000 포인트</strong>입니다.
             </p>
           </div>
 
@@ -315,7 +538,11 @@ export const GachaTab: React.FC = () => {
               <Sparkles className="h-8 w-8 animate-pulse text-white" />
               <div className="text-center">
                 <span className="text-sm tracking-wide text-white/90">스트리머 소환</span>
-                <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> 1,000 P</p>
+                {isFreeDraw ? (
+                  <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 뽑기 가능</p>
+                ) : (
+                  <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> 10,000 P</p>
+                )}
               </div>
             </button>
           </div>
@@ -349,7 +576,9 @@ export const GachaTab: React.FC = () => {
                   {/* 카드 상단 정보 */}
                   <div className="relative z-20 flex items-center justify-between">
                     {getCardBadge(drawnCard.base_value)}
-                    <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">No.999</span>
+                    <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">
+                      No.{String((drawnCard as any).serial_number || 1).padStart(4, '0')}
+                    </span>
                   </div>
 
                   {/* 카드 하단 정보 */}
@@ -404,6 +633,13 @@ export const GachaTab: React.FC = () => {
             </div>
             
             <button 
+              onClick={() => setRegisterModalOpen(true)}
+              className="rounded-lg bg-secondary border border-border/80 px-3.5 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1.5 shadow-sm flex"
+            >
+              <Plus className="h-3.5 w-3.5" /> 스트리머 등록
+            </button>
+
+            <button 
               onClick={handleOpenTrade}
               className="hidden sm:flex rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1.5 shadow-sm"
             >
@@ -440,7 +676,9 @@ export const GachaTab: React.FC = () => {
                   {/* 카드 상단 정보 */}
                   <div className="relative z-20 flex items-center justify-between">
                     {getCardBadge(streamer.base_value)}
-                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">No.{card.serial_number}</span>
+                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                      No.{String(card.serial_number).padStart(4, '0')}
+                    </span>
                   </div>
 
                   {/* 카드 하단 정보 */}

@@ -328,6 +328,13 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       }
     }));
   }
+
+  async findLatestSerialNumber(channelId: string): Promise<number> {
+    const row = this.getDb().prepare(
+      'SELECT MAX(serial_number) as max_sn FROM user_cards WHERE channel_id = ?'
+    ).get(channelId) as any;
+    return row && row.max_sn ? row.max_sn : 0;
+  }
 }
 
 

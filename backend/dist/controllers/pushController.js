@@ -3,27 +3,34 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startPushNotificationSchedulerHandler = exports.startPushNotificationScheduler = exports.scheduleNotification = exports.subscribePush = exports.getVapidPublicKey = void 0;
+exports.startPushNotificationSchedulerHandler = exports.startPushNotificationScheduler = exports.scheduleNotification = exports.subscribePush = exports.getVapidPublicKey = exports.initVapid = void 0;
 const web_push_1 = __importDefault(require("web-push"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = require("../services/db");
-// VAPID 키 설정 (일반적으로 .env에서 가져오나 없으면 임시 생성하여 활용 가능)
-const vapidKeys = {
+// VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
+const getVapidKeys = () => ({
     publicKey: process.env.VAPID_PUBLIC_KEY || '',
     privateKey: process.env.VAPID_PRIVATE_KEY || '',
+});
+/**
+ * VAPID 초기화 함수 - app.ts에서 dotenv.config() 직후 호출해야 합니다.
+ */
+const initVapid = () => {
+    const { publicKey, privateKey } = getVapidKeys();
+    if (publicKey && privateKey) {
+        web_push_1.default.setVapidDetails('mailto:admin@chzzkcardtrade.com', publicKey, privateKey);
+        console.log('[Push] 웹 푸시 VAPID 설정이 성공적으로 로드되었습니다.');
+    }
+    else {
+        console.warn('[Push] VAPID 키가 누락되었습니다. 푸시 알림 기능이 작동하지 않을 수 있습니다.');
+    }
 };
-if (vapidKeys.publicKey && vapidKeys.privateKey) {
-    web_push_1.default.setVapidDetails('mailto:admin@chzzkcardtrade.com', vapidKeys.publicKey, vapidKeys.privateKey);
-    console.log('[Push] 웹 푸시 VAPID 설정이 성공적으로 로드되었습니다.');
-}
-else {
-    console.warn('[Push] VAPID 키가 누락되었습니다. 푸시 알림 기능이 작동하지 않을 수 있습니다.');
-}
+exports.initVapid = initVapid;
 /**
  * 1. 푸시 알림 VAPID Public Key 조회 API
  */
 const getVapidPublicKey = (req, res) => {
-    return res.status(200).json({ publicKey: vapidKeys.publicKey });
+    return res.status(200).json({ publicKey: getVapidKeys().publicKey });
 };
 exports.getVapidPublicKey = getVapidPublicKey;
 /**

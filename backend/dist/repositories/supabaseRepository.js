@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SupabaseAnnouncementRepository = exports.SupabaseReportRepository = exports.SupabaseCouponRepository = exports.SupabaseStreamerRepository = exports.SupabaseUserRepository = void 0;
+exports.SupabaseUserCardRepository = exports.SupabaseAnnouncementRepository = exports.SupabaseReportRepository = exports.SupabaseCouponRepository = exports.SupabaseStreamerRepository = exports.SupabaseUserRepository = void 0;
 const db_1 = require("../services/db");
 // 1. Supabase 유저 레포지토리
 class SupabaseUserRepository {
@@ -50,6 +50,29 @@ class SupabaseUserRepository {
             .eq('id', id);
         if (error)
             throw error;
+    }
+    async updateProfile(id, username, avatarUrl, accessToken, refreshToken) {
+        const updatePayload = { username, avatar_url: avatarUrl };
+        if (accessToken !== undefined)
+            updatePayload.access_token = accessToken;
+        if (refreshToken !== undefined)
+            updatePayload.refresh_token = refreshToken;
+        const { error } = await this.getClient()
+            .from('users')
+            .update(updatePayload)
+            .eq('id', id);
+        if (error)
+            throw error;
+    }
+    async findRankings(limit) {
+        const { data, error } = await this.getClient()
+            .from('users')
+            .select('*')
+            .order('point', { ascending: false })
+            .limit(limit);
+        if (error)
+            throw error;
+        return (data || []);
     }
 }
 exports.SupabaseUserRepository = SupabaseUserRepository;
@@ -239,3 +262,59 @@ class SupabaseAnnouncementRepository {
     }
 }
 exports.SupabaseAnnouncementRepository = SupabaseAnnouncementRepository;
+// 6. Supabase 유저 보유 카드 레포지토리
+class SupabaseUserCardRepository {
+    getClient() {
+        return (0, db_1.getSupabaseClient)();
+    }
+    async create(card) {
+        const { data, error } = await this.getClient()
+            .from('user_cards')
+            .insert([card])
+            .select()
+            .single();
+        if (error)
+            throw error;
+        return data;
+    }
+    async findByUserId(userId) {
+        // Supabase 상에서 user_cards와 streamers를 Inner Join
+        const { data, error } = await this.getClient()
+            .from('user_cards')
+            .select(`
+        id,
+        user_id,
+        channel_id,
+        serial_number,
+        acquired_at,
+        streamer:streamers (
+          channel_id,
+          name,
+          logo_url,
+          custom_image_url,
+          base_value,
+          follower_count
+        )
+      `)
+            .eq('user_id', userId)
+            .order('id', { ascending: false });
+        if (error)
+            throw error;
+        return (data || []);
+    }
+    async findLatestSerialNumber(channelId) {
+        const { data, error } = await this.getClient()
+            .from('user_cards')
+            .select('serial_number')
+            .eq('channel_id', channelId)
+            .order('serial_number', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (error) {
+            console.error('[SupabaseUserCardRepository] findLatestSerialNumber 에러:', error);
+            return 0;
+        }
+        return data ? data.serial_number : 0;
+    }
+}
+exports.SupabaseUserCardRepository = SupabaseUserCardRepository;
