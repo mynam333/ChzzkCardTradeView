@@ -27,6 +27,7 @@ interface Streamer {
   custom_image_url: string | null;
   base_value: number;
   follower_count: number;
+  is_active?: boolean;
 }
 
 interface UserCard {
@@ -65,6 +66,10 @@ export const GachaTab: React.FC = () => {
     message: '',
     type: 'info'
   });
+
+  // 카드 정렬 및 필터링 상태 추가
+  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc'>('acquired-desc');
+  const [liveFilter, setLiveFilter] = useState<'all' | 'live' | 'offline'>('all');
 
   useEffect(() => {
     if (user) {
@@ -125,13 +130,6 @@ export const GachaTab: React.FC = () => {
     if (val >= 5000) return 'border-2 border-fuchsia-500 shadow-[0_0_10px_rgba(217,70,239,0.35)]';
     if (val >= 3000) return 'border-2 border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
     return 'border border-border/80';
-  };
-
-  const getCardBadge = (val: number) => {
-    if (val >= 8000) return <span className="rounded bg-gradient-to-r from-amber-500 to-orange-500 px-1.5 py-0.5 text-[9px] font-black text-white">LEGENDRY</span>;
-    if (val >= 5000) return <span className="rounded bg-gradient-to-r from-fuchsia-500 to-purple-500 px-1.5 py-0.5 text-[9px] font-black text-white">EPIC</span>;
-    if (val >= 3000) return <span className="rounded bg-blue-500 px-1.5 py-0.5 text-[9px] font-black text-white">RARE</span>;
-    return <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">COMMON</span>;
   };
 
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
@@ -371,10 +369,59 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 검색 필터링
-  const filteredInventory = inventory.filter(card => 
-    card.streamer?.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
+  const getProcessedInventory = () => {
+    // 1. 검색어 및 라이브 상태 필터링
+    let result = inventory.filter(card => {
+      const streamer = card.streamer;
+      if (!streamer) return false;
+
+      // 이름 검색 필터
+      const matchesSearch = streamer.name.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      // 라이브 상태 필터 (DB 필드 또는 객체의 is_active 속성 매칭)
+      const isActive = streamer.is_active || (streamer as any).isLive;
+      const matchesLive = 
+        liveFilter === 'all' ? true :
+        liveFilter === 'live' ? isActive === true :
+        isActive !== true;
+
+      return matchesSearch && matchesLive;
+    });
+
+    // 2. 정렬 정렬
+    return [...result].sort((a, b) => {
+      const nameA = a.streamer?.name || '';
+      const nameB = b.streamer?.name || '';
+      const valA = a.streamer?.base_value || 0;
+      const valB = b.streamer?.base_value || 0;
+      const timeA = new Date(a.acquired_at || 0).getTime();
+      const timeB = new Date(b.acquired_at || 0).getTime();
+      const idA = a.id || 0;
+      const idB = b.id || 0;
+
+      switch (sortBy) {
+        case 'name-asc':
+          return nameA.localeCompare(nameB);
+        case 'name-desc':
+          return nameB.localeCompare(nameA);
+        case 'acquired-desc':
+          // 획득순 내림차순 (최신순 - ID 또는 시간 기준)
+          return timeB - timeA || idB - idA;
+        case 'acquired-asc':
+          // 획득순 오름차순 (과거순)
+          return timeA - timeB || idA - idB;
+        case 'value-desc':
+          return valB - valA;
+        case 'value-asc':
+          return valA - valB;
+        default:
+          return timeB - timeA;
+      }
+    });
+  };
+
+  const filteredInventory = getProcessedInventory();
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -624,15 +671,31 @@ export const GachaTab: React.FC = () => {
                   </div>
 
                   {/* 카드 상단 정보 */}
-                  <div className="relative z-20 flex items-center justify-between">
-                    {getCardBadge(drawnCard.base_value)}
+                  <div className="relative z-20 flex items-center justify-between w-full">
+                    {drawnCard.is_active || (drawnCard as any).isLive ? (
+                      <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                        <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                      </span>
+                    ) : (
+                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
+                        OFFLINE
+                      </span>
+                    )}
                     <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">
                       No.{String((drawnCard as any).serial_number || 1).padStart(4, '0')}
                     </span>
                   </div>
 
                   {/* 카드 하단 정보 */}
-                  <div className="relative z-20 space-y-1.5 text-white">
+                  <a 
+                    href={drawnCard.is_active || (drawnCard as any).isLive
+                      ? `https://chzzk.naver.com/live/${drawnCard.channel_id}`
+                      : `https://chzzk.naver.com/${drawnCard.channel_id}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative z-20 space-y-1.5 text-white hover:opacity-90 block mt-auto"
+                  >
                     <h3 className="text-base font-black tracking-tight text-white drop-shadow-md">{drawnCard.name}</h3>
                     <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
                     
@@ -640,7 +703,7 @@ export const GachaTab: React.FC = () => {
                       <span className="text-[9px] text-zinc-400">시세 가치</span>
                       <span className="text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
                     </div>
-                  </div>
+                  </a>
                 </div>
 
                 <button 
@@ -670,7 +733,32 @@ export const GachaTab: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto mt-2 sm:mt-0">
+            {/* 라이브 상태 필터링 */}
+            <select
+              value={liveFilter}
+              onChange={(e: any) => setLiveFilter(e.target.value)}
+              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none"
+            >
+              <option value="all">전체 방송 상태</option>
+              <option value="live">🟢 방송 중</option>
+              <option value="offline">⚫ 방송 아님</option>
+            </select>
+
+            {/* 정렬 방식 필터링 */}
+            <select
+              value={sortBy}
+              onChange={(e: any) => setSortBy(e.target.value)}
+              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none"
+            >
+              <option value="acquired-desc">최신 획득순</option>
+              <option value="acquired-asc">과거 획득순</option>
+              <option value="name-asc">이름 가나다순</option>
+              <option value="name-desc">이름 역순</option>
+              <option value="value-desc">가치 높은순</option>
+              <option value="value-asc">가치 낮은순</option>
+            </select>
+
             <div className="relative flex-1 sm:flex-initial">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <input
@@ -678,22 +766,22 @@ export const GachaTab: React.FC = () => {
                 placeholder="스트리머 검색"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full sm:w-56 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs focus:border-primary focus:outline-none"
+                className="w-full sm:w-44 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs focus:border-primary focus:outline-none"
               />
             </div>
             
             <button 
               onClick={() => setRegisterModalOpen(true)}
-              className="rounded-lg bg-secondary border border-border/80 px-3.5 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1.5 shadow-sm flex"
+              className="rounded-lg bg-secondary border border-border/80 px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1 shadow-sm flex"
             >
               <Plus className="h-3.5 w-3.5" /> 스트리머 등록
             </button>
 
             <button 
               onClick={handleOpenTrade}
-              className="hidden sm:flex rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1.5 shadow-sm"
+              className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
             >
-              <ArrowRightLeft className="h-3.5 w-3.5" /> 1:1 교환 제안
+              <ArrowRightLeft className="h-3.5 w-3.5" /> 교환 제안
             </button>
           </div>
         </div>
@@ -703,49 +791,107 @@ export const GachaTab: React.FC = () => {
           <div className="rounded-2xl border border-border/80 border-dashed py-12 text-center text-xs text-muted-foreground">
             {searchQuery ? '검색된 카드가 없습니다.' : '보유 중인 스트리머 카드가 없습니다. 상단에서 소환을 완료해 주세요!'}
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {filteredInventory.map((card) => {
-              const streamer = card.streamer;
-              if (!streamer) return null;
-              return (
-                <div 
-                  key={card.id}
-                  className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg ${getCardBorderClass(streamer.base_value)}`}
-                >
-                  {/* 카드 이미지 배경 */}
-                  <div className="absolute inset-0 z-0">
-                    <img 
-                      src={streamer.custom_image_url || streamer.logo_url} 
-                      alt={streamer.name}
-                      className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/25 z-10"></div>
-                  </div>
+        ) : (() => {
+          // 중복 카드 그룹화 (채널 ID 기준으로 그룹화)
+          // 최신 획득순/정렬 상태에 따라 최초 대표 카드 1장을 정하고, 개수 카운트
+          interface GroupedCard {
+            card: UserCard;
+            count: number;
+          }
+          const groupedMap: { [key: string]: GroupedCard } = {};
+          
+          // 이미 정렬된 filteredInventory 순서대로 순회하며, 최초 등장한 것을 대표로 두고 개수를 누적시킴
+          filteredInventory.forEach(card => {
+            const cid = card.channel_id;
+            if (!groupedMap[cid]) {
+              groupedMap[cid] = {
+                card: card,
+                count: 1
+              };
+            } else {
+              groupedMap[cid].count += 1;
+            }
+          });
 
-                  {/* 카드 상단 정보 */}
-                  <div className="relative z-20 flex items-center justify-between">
-                    {getCardBadge(streamer.base_value)}
-                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                      No.{String(card.serial_number).padStart(4, '0')}
-                    </span>
-                  </div>
+          // 원래 정렬 순서를 보존하여 렌더링하기 위해, 정렬 결과 중 처음 나타난 순서대로 배열 변환
+          const groupedList: GroupedCard[] = [];
+          const seen = new Set<string>();
+          filteredInventory.forEach(card => {
+            const cid = card.channel_id;
+            if (!seen.has(cid)) {
+              seen.add(cid);
+              groupedList.push(groupedMap[cid]);
+            }
+          });
 
-                  {/* 카드 하단 정보 */}
-                  <div className="relative z-20 space-y-1 text-white">
-                    <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
-                    <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
-                    
-                    <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                      <span className="text-[8.5px] text-zinc-400">시세 가치</span>
-                      <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
+          return (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {groupedList.map(({ card, count }) => {
+                const streamer = card.streamer;
+                if (!streamer) return null;
+                return (
+                  <div 
+                    key={card.id}
+                    className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg ${getCardBorderClass(streamer.base_value)}`}
+                  >
+                    {/* 카드 이미지 배경 */}
+                    <div className="absolute inset-0 z-0">
+                      <img 
+                        src={streamer.custom_image_url || streamer.logo_url} 
+                        alt={streamer.name}
+                        className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/25 z-10"></div>
                     </div>
+
+                    {/* 카드 상단 정보 */}
+                    <div className="relative z-20 flex items-center justify-between w-full">
+                      {streamer.is_active || (streamer as any).isLive ? (
+                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                          <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                        </span>
+                      ) : (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
+                          OFFLINE
+                        </span>
+                      )}
+                      
+                      <div className="flex items-center gap-1">
+                        {count > 1 && (
+                          <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
+                            ×{count}
+                          </span>
+                        )}
+                        <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                          No.{String(card.serial_number).padStart(4, '0')}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 카드 하단 정보 */}
+                    <a 
+                      href={streamer.is_active || (streamer as any).isLive
+                        ? `https://chzzk.naver.com/live/${streamer.channel_id}`
+                        : `https://chzzk.naver.com/${streamer.channel_id}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="relative z-20 space-y-1 text-white hover:opacity-90 block mt-auto"
+                    >
+                      <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
+                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
+                      
+                      <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                        <span className="text-[8.5px] text-zinc-400">시세 가치</span>
+                        <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
+                      </div>
+                    </a>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          );
+        })()}
       </section>
 
       {/* 커스텀 피드백 알림 모달 */}
