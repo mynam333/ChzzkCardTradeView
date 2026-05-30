@@ -152,12 +152,19 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
           <span className="font-bold text-foreground">CCTV</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {user && (
+        <div className="flex items-center gap-2">
+          {user ? (
             <div className="flex items-center gap-1 rounded-full bg-secondary/80 px-3 py-1 text-xs font-bold">
               <Coins className="h-3.5 w-3.5 text-yellow-500" />
               <span>{user.point.toLocaleString()}</span>
             </div>
+          ) : (
+            <button
+              onClick={handleLogin}
+              className="rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-primary-foreground hover:bg-primary/95 transition shadow-sm"
+            >
+              로그인
+            </button>
           )}
           
           <button 

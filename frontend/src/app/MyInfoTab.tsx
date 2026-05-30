@@ -59,6 +59,21 @@ export const MyInfoTab: React.FC = () => {
     }
   }, [user]);
 
+  const handleLogin = async () => {
+    try {
+      const redirectUri = `${window.location.origin}/auth/chzzk/callback`;
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/auth/chzzk/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
+      if (!response.ok) throw new Error('로그인 URL 획득 실패');
+      const data = await response.json();
+      if (data.auth_url) {
+        window.location.href = data.auth_url;
+      }
+    } catch (e) {
+      console.error(e);
+      alert('치지직 로그인 주소 요청 중 에러가 발생했습니다.');
+    }
+  };
+
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
@@ -68,6 +83,12 @@ export const MyInfoTab: React.FC = () => {
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
             나의 프로필 정보 조회, 스트리머 카드 이미지 커스텀 관리, 쿠폰 리딤을 이용하시려면 치지직 간편 로그인을 진행해 주세요.
           </p>
+          <button
+            onClick={handleLogin}
+            className="mt-6 w-full rounded-xl bg-primary py-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition shadow-md shadow-primary/25"
+          >
+            치지직 연동 로그인 시작하기
+          </button>
         </div>
       </div>
     );
