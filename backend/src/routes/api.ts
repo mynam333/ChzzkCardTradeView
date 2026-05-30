@@ -28,6 +28,13 @@ import {
   scheduleNotification
 } from '../controllers/pushController';
 
+import {
+  getUserMe,
+  getUserRankings,
+  getUserCards,
+  drawCard
+} from '../controllers/playController';
+
 const router = Router();
 
 // Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한)
@@ -37,10 +44,15 @@ const upload = multer({
 });
 
 // ==========================================
-// 0. 치지직 OpenAPI OAuth 로그인 기능
+// 0. 치지직 OpenAPI OAuth 로그인 및 기본 유저 정보
 // ==========================================
 router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', handleChzzkCallback);
+router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
+router.get('/users/ranking', getUserRankings);
+router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
+router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawCard);
+
 
 
 // ==========================================

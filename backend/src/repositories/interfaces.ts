@@ -54,6 +54,14 @@ export interface Announcement {
   created_at?: string;
 }
 
+export interface UserCard {
+  id?: number;
+  user_id: string;
+  channel_id: string;
+  serial_number: number;
+  acquired_at?: string;
+}
+
 // 1. 유저 리포지토리 인터페이스
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
@@ -61,6 +69,7 @@ export interface IUserRepository {
   updatePoint(id: string, point: number): Promise<void>;
   updateBanStatus(id: string, bannedUntil: string | null): Promise<void>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
+  findRankings(limit: number): Promise<User[]>;
 }
 
 // 2. 스트리머 리포지토리 인터페이스
@@ -95,3 +104,10 @@ export interface IAnnouncementRepository {
   create(announcement: Announcement): Promise<Announcement>;
   delete(id: number): Promise<void>;
 }
+
+// 6. 유저 보유 카드 리포지토리 인터페이스
+export interface IUserCardRepository {
+  create(card: UserCard): Promise<UserCard>;
+  findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
+}
+

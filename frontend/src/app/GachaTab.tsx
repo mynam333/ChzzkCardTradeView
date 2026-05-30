@@ -38,7 +38,7 @@ interface UserCard {
 }
 
 export const GachaTab: React.FC = () => {
-  const { user, updatePoints } = useApp();
+  const { user, updatePoints, refreshUserData } = useApp();
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,9 +54,25 @@ export const GachaTab: React.FC = () => {
   const [drawnCard, setDrawnCard] = useState<Streamer | null>(null);
 
   useEffect(() => {
-    fetchStreamers();
-    fetchInventory();
-  }, []);
+    if (user) {
+      fetchStreamers();
+      fetchInventory();
+    }
+  }, [user]);
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
+        <div className="max-w-md rounded-3xl border border-border bg-card p-8 shadow-lg">
+          <Layers className="mx-auto h-12 w-12 text-primary animate-pulse mb-4" />
+          <h2 className="text-xl font-black text-foreground">로그인이 필요한 기능입니다</h2>
+          <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+            스트리머 카드 소환(GACHA) 및 보관함 인벤토리, 1:1 교환을 이용하시려면 치지직 간편 로그인을 진행해 주세요.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const fetchStreamers = async () => {
     try {
@@ -66,26 +82,28 @@ export const GachaTab: React.FC = () => {
         setStreamers(data);
       }
     } catch (e) {
-      // offline fallback
-      setStreamers([
-        { channel_id: 'ch1', name: '풍월량', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p1', custom_image_url: null, base_value: 8000, follower_count: 580000 },
-        { channel_id: 'ch2', name: '우왁굳', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p2', custom_image_url: null, base_value: 9500, follower_count: 650000 },
-        { channel_id: 'ch3', name: '한동숙', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p3', custom_image_url: null, base_value: 7500, follower_count: 420000 },
-        { channel_id: 'ch4', name: '녹두로', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p4', custom_image_url: null, base_value: 4500, follower_count: 230000 },
-        { channel_id: 'ch5', name: '서새봄', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p5', custom_image_url: null, base_value: 5100, follower_count: 310000 }
-      ]);
+      console.error('스트리머 목록 로드 실패:', e);
     }
   };
 
-  const fetchInventory = () => {
-    // 로컬 세션 또는 Mock 인벤토리 로드
-    const savedInv = localStorage.getItem(`inventory_${user?.id}`);
-    if (savedInv) {
-      setInventory(JSON.parse(savedInv));
-    } else {
-      setInventory([]);
+  const fetchInventory = async () => {
+    const token = localStorage.getItem('cctv_jwt_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/users/me/cards`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInventory(data);
+      }
+    } catch (e) {
+      console.error('인벤토리 조회 실패:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // 등급 없이 오직 가치(base_value) 기준으로 비주얼 오라 레벨 구분
@@ -114,38 +132,44 @@ export const GachaTab: React.FC = () => {
     setIsDrawing(true);
     setDrawnCard(null);
 
-    // 1.5초 룰렛 연출 효과 부여
-    setTimeout(() => {
-      if (streamers.length === 0) return;
-      const targetIndex = Math.floor(Math.random() * streamers.length);
-      const chosen = streamers[targetIndex];
-
-      setDrawnCard(chosen);
-      setIsDrawing(false);
-      updatePoints(-drawCost);
-
-      // 신규 카드 인벤토리 보관 처리
-      const newCard: UserCard = {
-        id: Date.now(),
-        channel_id: chosen.channel_id,
-        serial_number: Math.floor(Math.random() * 900) + 100,
-        acquired_at: new Date().toISOString(),
-        streamer: chosen
-      };
-
-      const updatedInv = [newCard, ...inventory];
-      setInventory(updatedInv);
-      localStorage.setItem(`inventory_${user.id}`, JSON.stringify(updatedInv));
-
-      // 팡파레 효과 (가치가 높은 카드를 뽑은 경우 더 크게 연출)
-      canvasConfetti({
-        particleCount: chosen.base_value >= 8000 ? 120 : 60,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: chosen.base_value >= 8000 ? ['#f59e0b', '#10b981', '#3b82f6'] : ['#10b981', '#3b82f6']
+    const token = localStorage.getItem('cctv_jwt_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/cards/draw`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
 
-    }, 1200);
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || '카드 뽑기 요청에 실패했습니다.');
+      }
+
+      const data = await res.json();
+      
+      setTimeout(() => {
+        setDrawnCard(data.card.streamer);
+        setIsDrawing(false);
+        
+        // 유저 포인트 로컬 동기화 및 전체 인벤토리 즉시 재조회
+        updatePoints(-drawCost);
+        fetchInventory();
+        refreshUserData();
+
+        // 팡파레 효과
+        canvasConfetti({
+          particleCount: data.card.streamer.base_value >= 8000 ? 120 : 60,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: data.card.streamer.base_value >= 8000 ? ['#f59e0b', '#10b981', '#3b82f6'] : ['#10b981', '#3b82f6']
+        });
+      }, 1200);
+
+    } catch (e: any) {
+      setIsDrawing(false);
+      alert(e.message || '서버와의 통신 오류가 발생했습니다.');
+    }
   };
 
   const handleOpenTrade = () => {
@@ -172,7 +196,6 @@ export const GachaTab: React.FC = () => {
     // 인벤토리에서 거래 보낸 카드 차감
     const remaining = inventory.filter(card => !selectedOfferCards.includes(card.id));
     setInventory(remaining);
-    localStorage.setItem(`inventory_${user?.id}`, JSON.stringify(remaining));
 
     // 정리
     setSelectedOfferCards([]);

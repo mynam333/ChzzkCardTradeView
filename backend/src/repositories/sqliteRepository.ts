@@ -5,6 +5,7 @@ import {
   ICouponRepository, 
   IReportRepository,
   IAnnouncementRepository,
+  IUserCardRepository,
   User,
   Streamer,
   Coupon,
@@ -50,6 +51,20 @@ export class SqliteUserRepository implements IUserRepository {
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
+  }
+
+  async findRankings(limit: number): Promise<User[]> {
+    const rows = this.getDb().prepare('SELECT * FROM users ORDER BY point DESC LIMIT ?').all(limit);
+    return rows.map((row: any) => ({
+      id: row.id,
+      username: row.username,
+      avatar_url: row.avatar_url,
+      role: row.role as 'USER' | 'ADMIN',
+      point: row.point,
+      last_free_draw: row.last_free_draw,
+      banned_until: row.banned_until,
+      created_at: row.created_at
+    }));
   }
 }
 
@@ -258,4 +273,49 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
     this.getDb().prepare('DELETE FROM announcements WHERE id = ?').run(id);
   }
 }
+
+// 6. SQLite 유저 보유 카드 레포지토리
+export class SqliteUserCardRepository implements IUserCardRepository {
+  private getDb() {
+    return getSqliteDb();
+  }
+
+  async create(card: any): Promise<any> {
+    const result = this.getDb().prepare(
+      'INSERT INTO user_cards (user_id, channel_id, serial_number) VALUES (?, ?, ?)'
+    ).run(card.user_id, card.channel_id, card.serial_number);
+    card.id = Number(result.lastInsertRowid);
+    return card;
+  }
+
+  async findByUserId(userId: string): Promise<any[]> {
+    const rows = this.getDb().prepare(`
+      SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image, s.base_value as streamer_base_value, s.follower_count as streamer_follower
+      FROM user_cards uc
+      JOIN streamers s ON uc.channel_id = s.channel_id
+      WHERE uc.user_id = ?
+      ORDER BY uc.id DESC
+    `).all(userId);
+
+    return rows.map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      channel_id: row.channel_id,
+      serial_number: row.serial_number,
+      acquired_at: row.acquired_at,
+      streamer: {
+        channel_id: row.channel_id,
+        name: row.streamer_name,
+        logo_url: row.streamer_logo,
+        custom_image_url: row.streamer_custom_image,
+        base_value: row.streamer_base_value,
+        follower_count: row.streamer_follower,
+        is_image_banned: false,
+        activity_score: 0,
+        is_active: false
+      }
+    }));
+  }
+}
+
 

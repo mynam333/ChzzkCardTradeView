@@ -19,7 +19,22 @@ interface NavigationProps {
 }
 
 export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme, user, loginMock } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, user } = useApp();
+
+  const handleLogin = async () => {
+    try {
+      const redirectUri = `${window.location.origin}/auth/chzzk/callback`;
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/auth/chzzk/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
+      if (!response.ok) throw new Error('로그인 URL 획득 실패');
+      const data = await response.json();
+      if (data.auth_url) {
+        window.location.href = data.auth_url;
+      }
+    } catch (e) {
+      console.error(e);
+      alert('치지직 로그인 주소 요청 중 에러가 발생했습니다.');
+    }
+  };
 
   const navItems = [
     { id: 'main' as const, label: '메인', icon: Home },
@@ -47,8 +62,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
           </div>
         </div>
 
-        {/* 유저 상태 카드 */}
-        {user && (
+        {/* 유저 상태 카드 또는 로그인 버튼 */}
+        {user ? (
           <div className="mb-6 rounded-xl bg-secondary/50 p-4 border border-border">
             <div className="flex items-center gap-3">
               <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card" />
@@ -65,6 +80,16 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
               </span>
               <span className="text-sm font-bold text-foreground">{user.point.toLocaleString()} P</span>
             </div>
+          </div>
+        ) : (
+          <div className="mb-6 rounded-xl bg-secondary/30 p-4 border border-dashed border-border text-center">
+            <p className="text-xs text-muted-foreground mb-3">간편하게 로그인하고<br />나만의 카드를 소집하세요!</p>
+            <button
+              onClick={handleLogin}
+              className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition shadow-sm"
+            >
+              치지직 연동 로그인
+            </button>
           </div>
         )}
 
@@ -89,23 +114,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
           })}
         </nav>
 
-        {/* 테마 스위치 & 모크 로그인 */}
-        <div className="mt-auto space-y-3 pt-4 border-t border-border">
-          <div className="flex gap-2">
-            <button 
-              onClick={() => loginMock('USER')}
-              className="flex-1 rounded-md bg-secondary py-1 text-center text-xs font-semibold hover:bg-secondary/80"
-            >
-              유저
-            </button>
-            <button 
-              onClick={() => loginMock('ADMIN')}
-              className="flex-1 rounded-md bg-secondary py-1 text-center text-xs font-semibold hover:bg-secondary/80"
-            >
-              관리자
-            </button>
-          </div>
-          
+        {/* 테마 스위치 */}
+        <div className="mt-auto pt-4 border-t border-border">
           <div className="flex items-center justify-between px-2">
             <span className="text-xs text-muted-foreground">화면 테마</span>
             <button

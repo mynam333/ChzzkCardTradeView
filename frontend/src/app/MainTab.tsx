@@ -45,14 +45,8 @@ export const MainTab: React.FC = () => {
         }
       }
     } catch (e) {
-      console.warn('백엔드 공지사항 로드 불가 (오프라인 모드 fallback)');
-      // offline mock notices
-      const mockNotices = [
-        { id: 1, title: 'CCTV 서비스 오픈 안내!', content: '치지직 카드 트레이드 뷰(CCTV) 플랫폼 서비스가 정상 가동을 시작했습니다. 100% 실시간 팔로워와 가치 환산 기능을 통해 컬렉션을 수집해 보세요.', is_popup: true, created_at: new Date().toISOString() },
-        { id: 2, title: '쿠폰 시스템 가이드', content: '내 정보 탭 또는 어드민 패널에서 쿠폰 코드를 입력해 다양한 포인트를 지급받으실 수 있습니다.', is_popup: false, created_at: new Date().toISOString() }
-      ];
-      setNotices(mockNotices);
-      setActivePopup(mockNotices[0]);
+      console.error('백엔드 공지사항 로드 에러:', e);
+      setNotices([]);
     } finally {
       setLoading(false);
     }
@@ -66,12 +60,8 @@ export const MainTab: React.FC = () => {
         setHotStreamers(data.slice(0, 3));
       }
     } catch (e) {
-      // offline fallback
-      setHotStreamers([
-        { channel_id: 'ch1', name: '스트리머A', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=A', base_value: 5400, follower_count: 145000 },
-        { channel_id: 'ch2', name: '스트리머B', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=B', base_value: 3900, follower_count: 85200 },
-        { channel_id: 'ch3', name: '스트리머C', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=C', base_value: 2100, follower_count: 42100 }
-      ]);
+      console.error('핫 스트리머 목록 로드 에러:', e);
+      setHotStreamers([]);
     }
   };
 
@@ -124,20 +114,23 @@ export const MainTab: React.FC = () => {
         
         <div className="relative z-10 max-w-xl">
           <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
-            Live Streamer Collection
+            치지직 스트리머 카드 수집 게임
           </span>
           <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
-            치지직 최애 스트리머를<br />소장하고 가치로 경쟁하세요!
+            최애 스트리머 카드를 뽑고<br />컬렉션 최강자가 되어보세요!
           </h2>
           <p className="mt-3 text-sm text-emerald-100/90 leading-relaxed">
-            등급이 필요 없는 순수한 시세 중심의 신개념 트레이딩 뷰. 실시간 라이브 활동 데이터와 팔로워 수의 증가 추이에 맞춰 보유 카드의 시세가 동적으로 움직입니다.
+            치지직 로그인 하나로 바로 시작! 매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요. 스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 가치 중심의 무등급 카드
+              <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 매일 무료 가챠 제공
             </div>
             <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 치지직 API 실시간 연동
+              <Award className="h-3.5 w-3.5 text-yellow-300" /> 전국 컬렉터 랭킹 경쟁
+            </div>
+            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
+              <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 스트리머 인기 반영 시세
             </div>
           </div>
         </div>
@@ -210,23 +203,32 @@ export const MainTab: React.FC = () => {
 
       </div>
 
-      {/* 가이드 & 정보 제공 */}
+      {/* 이용 방법 안내 */}
       <section className="rounded-2xl border border-border bg-secondary/40 p-6">
-        <h3 className="text-sm font-bold flex items-center gap-2 text-foreground mb-3">
-          <HelpCircle className="h-4 w-4 text-muted-foreground" /> 플랫폼 가이드라인
+        <h3 className="text-sm font-bold flex items-center gap-2 text-foreground mb-4">
+          <HelpCircle className="h-4 w-4 text-muted-foreground" /> 이렇게 즐기세요!
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 text-xs text-muted-foreground leading-relaxed">
-          <div className="p-3 bg-card rounded-xl border border-border/50">
-            <h4 className="font-bold text-foreground mb-1">1. 카드에는 등급이 존재하지 않습니다</h4>
-            <p>모든 스트리머 카드는 등급 없이 오직 시세 가치(`base_value`)로만 가치가 매겨집니다. 가치가 높을수록 더욱 희소한 오라가 카드 테두리에 부여됩니다.</p>
+          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">1</span>
+              <h4 className="font-bold text-foreground">치지직 계정으로 바로 로그인</h4>
+            </div>
+            <p>별도 회원가입 없이 치지직 계정 하나로 즉시 시작할 수 있어요. 로그인하면 매일 무료 뽑기 포인트가 지급됩니다.</p>
           </div>
-          <div className="p-3 bg-card rounded-xl border border-border/50">
-            <h4 className="font-bold text-foreground mb-1">2. 실시간 데이터 갱신 및 가치 조정</h4>
-            <p>스트리머의 치지직 API 데이터를 실시간으로 가져와 활동 점수와 시세를 재계산합니다. 팔로워 수의 증가량과 방송 활성화 지표가 핵심 시세 변동 요소입니다.</p>
+          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">2</span>
+              <h4 className="font-bold text-foreground">가챠로 스트리머 카드 수집</h4>
+            </div>
+            <p>포인트를 사용해 가챠를 돌리고 다양한 스트리머 카드를 뽑아보세요. 어떤 카드가 나올지 두근두근한 순간을 매일 즐길 수 있어요!</p>
           </div>
-          <div className="p-3 bg-card rounded-xl border border-border/50">
-            <h4 className="font-bold text-foreground mb-1">3. 스트리머 고유 업로드 지연 업로드</h4>
-            <p>스트리머 권한을 획득하면 자기 카드의 고유 이미지를 리사이징된 고품질 WebP 파일로 업로드할 수 있습니다. 저장 전까지 blob 미리보기로 실시간 피드백을 제공합니다.</p>
+          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">3</span>
+              <h4 className="font-bold text-foreground">시세로 랭킹 정상 노려보기</h4>
+            </div>
+            <p>보유 카드 총 가치로 전국 컬렉터들과 실력을 겨뤄보세요. 최애 스트리머가 인기를 얻을수록 내 카드 가치도 함께 올라가 랭킹이 수직 상승!</p>
           </div>
         </div>
       </section>

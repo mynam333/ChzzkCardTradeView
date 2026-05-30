@@ -55,27 +55,18 @@ export const RankingTab: React.FC = () => {
           setStreamers(data);
         }
       } else {
-        // 유저 자산 랭킹 모킹 및 로딩
-        // 실제 운영 시 백엔드 유저 랭킹 API 연동
-        setUserRankings([
-          { id: 'u1', username: '치지직마스터', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=u1', point: 184000, card_count: 32 },
-          { id: 'u2', username: '카드수집가', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=u2', point: 125000, card_count: 24 },
-          { id: 'u3', username: '거래왕김치직', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=u3', point: 92000, card_count: 18 },
-          { id: 'u4', username: '풍월량팬클럽', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=u4', point: 64000, card_count: 11 },
-          { id: 'u5', username: '초보수집꾼', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=u5', point: 32000, card_count: 6 }
-        ]);
+        const res = await fetch(`${API_BASE_URL}/users/ranking`);
+        if (res.ok) {
+          const data = await res.json();
+          setUserRankings(data);
+        }
       }
     } catch (e) {
-      console.warn('랭킹 데이터 획득 실패 (오프라인 모드 작동)');
-      // 오프라인 fallback
+      console.error('랭킹 데이터 획득 실패:', e);
       if (subTab === 'streamer') {
-        setStreamers([
-          { channel_id: 'ch1', name: '우왁굳', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p2', custom_image_url: null, base_value: 9500, follower_count: 650000 },
-          { channel_id: 'ch2', name: '풍월량', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p1', custom_image_url: null, base_value: 8000, follower_count: 580000 },
-          { channel_id: 'ch3', name: '한동숙', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p3', custom_image_url: null, base_value: 7500, follower_count: 420000 },
-          { channel_id: 'ch4', name: '서새봄', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p5', custom_image_url: null, base_value: 5100, follower_count: 310000 },
-          { channel_id: 'ch5', name: '녹두로', logo_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=p4', custom_image_url: null, base_value: 4500, follower_count: 230000 }
-        ]);
+        setStreamers([]);
+      } else {
+        setUserRankings([]);
       }
     } finally {
       setLoading(false);

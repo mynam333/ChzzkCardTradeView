@@ -18,7 +18,6 @@ interface AppContextType {
     lastFreeDraw: string | null;
   } | null;
   setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
-  loginMock: (role: 'USER' | 'ADMIN') => void;
   logout: () => void;
   refreshUserData: () => Promise<void>;
   updatePoints: (diff: number) => Promise<void>;
@@ -46,7 +45,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (savedUser) {
       setUser(JSON.parse(savedUser));
     }
-    // 미로그인 상태 = null 유지 (자동 모크 로그인 없음)
   }, []);
 
   const toggleTheme = () => {
@@ -56,41 +54,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.documentElement.classList.toggle('dark', nextTheme === 'dark');
   };
 
-  const loginMock = (role: 'USER' | 'ADMIN') => {
-    const mockUid = role === 'ADMIN' ? 'admin_test_uid' : 'user_test_uid';
-    const mockUser = {
-      id: mockUid,
-      username: role === 'ADMIN' ? '치지직관리자' : '치지직유저_테스트',
-      avatarUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${mockUid}`,
-      role: role,
-      point: role === 'ADMIN' ? 999999 : 0, // 관리자는 풍족하게, 유저는 0포인트로 시작
-      lastFreeDraw: null
-    };
-    localStorage.setItem('user_session', JSON.stringify(mockUser));
-    setUser(mockUser);
-    alert(`${role === 'ADMIN' ? '관리자' : '일반 유저'} 모드로 전환 로그인되었습니다.`);
-  };
-
   const logout = () => {
     localStorage.removeItem('user_session');
     localStorage.removeItem('cctv_jwt_token');
     setUser(null);
+    setActiveTab('main');
     alert('로그아웃되었습니다.');
   };
 
   const refreshUserData = async () => {
-    if (!user) return;
+    const token = localStorage.getItem('cctv_jwt_token');
+    if (!token) return;
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-      const response = await fetch(`${apiUrl}/health`.replace('/api/health', '/health'));
+      const response = await fetch(`${API_BASE_URL}/users/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (response.ok) {
-        const saved = localStorage.getItem('user_session');
-        if (saved) setUser(JSON.parse(saved));
+        const data = await response.json();
+        const updated = {
+          id: data.id,
+          username: data.username,
+          avatarUrl: data.avatarUrl,
+          role: data.role,
+          point: data.point,
+          lastFreeDraw: data.lastFreeDraw
+        };
+        localStorage.setItem('user_session', JSON.stringify(updated));
+        setUser(updated);
+      } else if (response.status === 401) {
+        // 만료되었거나 비정상적인 토큰인 경우 로그아웃 처리
+        localStorage.removeItem('user_session');
+        localStorage.removeItem('cctv_jwt_token');
+        setUser(null);
       }
     } catch (e) {
-      // 오프라인 폴백: 로컬 세션으로 동기화
-      const saved = localStorage.getItem('user_session');
-      if (saved) setUser(JSON.parse(saved));
+      console.error('[AppContext] 유저 세션 갱신 실패:', e);
     }
   };
 
@@ -112,7 +112,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveTab,
       user,
       setUser,
-      loginMock,
       logout,
       refreshUserData,
       updatePoints

@@ -21,7 +21,7 @@ import {
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 
 export const MyInfoTab: React.FC = () => {
-  const { user, loginMock, logout, updatePoints } = useApp();
+  const { user, logout, updatePoints } = useApp();
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
@@ -59,20 +59,30 @@ export const MyInfoTab: React.FC = () => {
     }
   }, [user]);
 
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
+        <div className="max-w-md rounded-3xl border border-border bg-card p-8 shadow-lg">
+          <User className="mx-auto h-12 w-12 text-primary animate-pulse mb-4" />
+          <h2 className="text-xl font-black text-foreground">로그인이 필요한 기능입니다</h2>
+          <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+            나의 프로필 정보 조회, 스트리머 카드 이미지 커스텀 관리, 쿠폰 리딤을 이용하시려면 치지직 간편 로그인을 진행해 주세요.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const fetchAdminReports = async () => {
     try {
-      const res = await apiFetch('/admin/reports', {
-        headers: { Authorization: `Mock admin_test_uid` }
-      });
+      const res = await apiFetch('/admin/reports');
       if (res.ok) {
         const data = await res.json();
         setReports(data);
       }
     } catch (e) {
-      console.warn('관리자 신고 목록 조회 불가 (오프라인 모드)');
-      setReports([
-        { id: 1, reporter_id: 'user1', channel_id: 'ch1', reported_image_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=mock_snap', reason: '부적절한 밈 포함', status: 'pending' }
-      ]);
+      console.error('관리자 신고 목록 조회 실패:', e);
+      setReports([]);
     }
   };
 
@@ -87,8 +97,7 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch('/coupons/claim', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock ${user?.id}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ code: couponCode })
       });
@@ -102,14 +111,7 @@ export const MyInfoTab: React.FC = () => {
         alert(data.message || '쿠폰 등록 실패');
       }
     } catch (e) {
-      // offline mock fallback
-      if (couponCode === 'MOCK-1000') {
-        alert('쿠폰 등록 완료! 1,000 포인트를 획득했습니다.');
-        updatePoints(1000);
-        setCouponCode('');
-      } else {
-        alert('존재하지 않거나 오프라인 모드에서는 임시 코드 [MOCK-1000] 만 사용 가능합니다.');
-      }
+      alert('서버와의 통신 오류가 발생했습니다.');
     }
   };
 
@@ -134,11 +136,12 @@ export const MyInfoTab: React.FC = () => {
     const formData = new FormData();
     formData.append('image', imageFile);
 
+    const token = localStorage.getItem('cctv_jwt_token');
     try {
       const res = await fetch(`${API_BASE_URL}/streamers/me/image`, {
         method: 'POST',
         headers: {
-          'Authorization': `Mock ${user?.id}`
+          'Authorization': `Bearer ${token}`
         },
         body: formData
       });
@@ -151,7 +154,7 @@ export const MyInfoTab: React.FC = () => {
         alert(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
       }
     } catch (e) {
-      alert('저장 완료! (서버 오프라인 상태이므로 임시 미리보기 이미지만 반영됩니다.)');
+      alert('서버 전송 중 에러가 발생했습니다.');
       setImageFile(null);
     } finally {
       setUploading(false);
@@ -164,8 +167,7 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch('/admin/coupons', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock admin_test_uid`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(couponForm)
       });
@@ -176,7 +178,7 @@ export const MyInfoTab: React.FC = () => {
         alert('쿠폰 발급 오류');
       }
     } catch (e) {
-      alert(`쿠폰 발급 완료!\n코드: MOCK-GEN-${Math.floor(Math.random()*9000)}`);
+      alert('서버와 통신 에러가 발생했습니다.');
     }
   };
 
@@ -186,8 +188,7 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch('/admin/announcements', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock admin_test_uid`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(noticeForm)
       });
@@ -196,7 +197,7 @@ export const MyInfoTab: React.FC = () => {
         setNoticeForm({ title: '', content: '', is_popup: false });
       }
     } catch (e) {
-      alert('오프라인: 등록 불가');
+      alert('등록 실패');
     }
   };
 
@@ -206,8 +207,7 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch('/admin/push/schedule', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock admin_test_uid`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(pushForm)
       });
@@ -216,7 +216,7 @@ export const MyInfoTab: React.FC = () => {
         setPushForm({ title: '', body: '', scheduled_at: '' });
       }
     } catch (e) {
-      alert('오프라인: 푸시 등록 완료');
+      alert('푸시 등록 에러');
     }
   };
 
@@ -226,8 +226,7 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch(`/admin/reports/${reportId}/resolve`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock admin_test_uid`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ status })
       });
@@ -236,7 +235,7 @@ export const MyInfoTab: React.FC = () => {
         fetchAdminReports();
       }
     } catch (e) {
-      alert('처리 완료');
+      alert('처리 중 에러 발생');
     }
   };
 
@@ -246,15 +245,14 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch(`/admin/users/${userId}/ban`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Mock admin_test_uid`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ duration })
       });
       const data = await res.json();
       alert(data.message);
     } catch (e) {
-      alert(`해당 유저를 ${duration} 동안 차단 완료했습니다.`);
+      alert(`차단 요청 중 에러가 발생했습니다.`);
     }
   };
 

@@ -5,6 +5,7 @@ import {
   ICouponRepository, 
   IReportRepository,
   IAnnouncementRepository,
+  IUserCardRepository,
   User,
   Streamer,
   Coupon,
@@ -65,6 +66,17 @@ export class SupabaseUserRepository implements IUserRepository {
       .eq('id', id);
 
     if (error) throw error;
+  }
+
+  async findRankings(limit: number): Promise<User[]> {
+    const { data, error } = await this.getClient()
+      .from('users')
+      .select('*')
+      .order('point', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return (data || []) as User[];
   }
 }
 
@@ -273,3 +285,48 @@ export class SupabaseAnnouncementRepository implements IAnnouncementRepository {
     if (error) throw error;
   }
 }
+
+// 6. Supabase 유저 보유 카드 레포지토리
+export class SupabaseUserCardRepository implements IUserCardRepository {
+  private getClient() {
+    return getSupabaseClient();
+  }
+
+  async create(card: any): Promise<any> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .insert([card])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async findByUserId(userId: string): Promise<any[]> {
+    // Supabase 상에서 user_cards와 streamers를 Inner Join
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .select(`
+        id,
+        user_id,
+        channel_id,
+        serial_number,
+        acquired_at,
+        streamer:streamers (
+          channel_id,
+          name,
+          logo_url,
+          custom_image_url,
+          base_value,
+          follower_count
+        )
+      `)
+      .eq('user_id', userId)
+      .order('id', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as any[];
+  }
+}
+
