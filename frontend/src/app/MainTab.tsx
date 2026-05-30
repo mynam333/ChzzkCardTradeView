@@ -108,9 +108,9 @@ export const MainTab: React.FC = () => {
       )}
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-700 to-blue-800 p-6 text-white shadow-xl md:p-10">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-sky-700 to-indigo-900 p-6 text-white shadow-xl md:p-10">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
-        <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-emerald-500/20 blur-2xl"></div>
+        <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-sky-400/20 blur-2xl"></div>
 
         <div className="relative z-10 max-w-xl">
           <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
@@ -119,7 +119,7 @@ export const MainTab: React.FC = () => {
           <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
             최애 스트리머 카드를 뽑고<br />컬렉션 최강자가 되어보세요!
           </h2>
-          <p className="mt-3 text-sm text-emerald-100/90 leading-relaxed">
+          <p className="mt-3 text-sm text-sky-100/90 leading-relaxed">
             치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
