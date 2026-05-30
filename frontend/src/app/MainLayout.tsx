@@ -150,6 +150,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
             className="rounded"
           />
           <span className="font-bold text-foreground">CCTV</span>
+          <span className="text-[0.65rem] text-muted-foreground self-end mb-[0.1rem]">치지직 카드 트레이드 뷰</span>
         </div>
 
         <div className="flex items-center gap-2">
