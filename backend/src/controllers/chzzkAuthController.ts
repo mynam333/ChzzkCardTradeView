@@ -52,12 +52,10 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[ChzzkDebug] A. 토큰 요청 실패:', response.status, errorText);
       throw new Error(`치지직 토큰 교환 실패: ${response.status} - ${errorText}`);
     }
 
     const rawTokenBody = await response.text();
-    console.log('[ChzzkDebug] A. 토큰 요청 성공 raw 응답 바디:', rawTokenBody);
 
     const tokenData = JSON.parse(rawTokenBody) as {
       code: number;
@@ -70,28 +68,18 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       };
     };
 
-    // content 내부의 데이터를 추출하되, 스네이크 케이스 대응용 폴백도 마련합니다.
     const tokenContent = tokenData.content || (tokenData as any);
     const finalAccessToken = tokenContent.accessToken || (tokenContent as any).access_token || null;
     const finalRefreshToken = tokenContent.refreshToken || (tokenContent as any).refresh_token || null;
-    console.log('[ChzzkDebug] 추출된 accessToken:', finalAccessToken);
-    console.log('[ChzzkDebug] 추출된 refreshToken:', finalRefreshToken);
 
     // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회 (공식 가이드 준수)
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
 
     try {
-      // 공식 명세에 따라, 개인 유저 정보 조회 시에는 클라이언트 자격증명(Client-Id/Secret) 없이 
-      // 오직 유저의 accessToken만을 Bearer 헤더에 담아서 안전하게 요청합니다.
       const profileHeaders = {
         'Authorization': `Bearer ${finalAccessToken}`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
       };
-      
-      console.log('[ChzzkDebug] B. 프로필 요청 정보:', {
-        url: 'https://openapi.chzzk.naver.com/open/v1/users/me',
-        headers: profileHeaders
-      });
 
       const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
         headers: profileHeaders
@@ -99,12 +87,10 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
 
       if (profileResponse.ok) {
         const rawProfileBody = await profileResponse.text();
-        console.log('[ChzzkDebug] B. 프로필 요청 성공 raw 응답 바디:', rawProfileBody);
         const profileData = JSON.parse(rawProfileBody) as any;
         if (profileData.code === 200 && profileData.content) {
-          chzzkUser.id = profileData.content.channelId || ''; // 공식 문서 명세: channelId 가 사용자 식별자입니다.
+          chzzkUser.id = profileData.content.channelId || '';
           chzzkUser.nickname = profileData.content.nickname || '';
-          console.log('[ChzzkDebug] 추출된 유저 정보:', chzzkUser);
         } else {
           console.warn('[ChzzkAuthController] 공식 API 응답 코드 오류:', profileData.code, profileData.message);
         }
