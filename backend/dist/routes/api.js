@@ -42,6 +42,7 @@ router.get('/users/me', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, pl
 router.get('/users/ranking', playController_1.getUserRankings);
 router.get('/users/me/cards', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.getUserCards);
 router.post('/cards/draw', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.drawCard);
+router.post('/cards/sell', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.sellCards);
 // 신규 스트리머 검색 및 카드 등록 API
 router.get('/streamers/search', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.searchChzzkStreamer);
 router.post('/streamers/register', auth_1.authMiddleware, banCheck_1.banCheckMiddleware, playController_1.registerStreamer);

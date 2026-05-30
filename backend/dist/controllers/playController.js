@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerStreamer = exports.searchChzzkStreamer = exports.drawCard = exports.getUserCards = exports.getUserRankings = exports.getUserMe = void 0;
+exports.sellCards = exports.registerStreamer = exports.searchChzzkStreamer = exports.drawCard = exports.getUserCards = exports.getUserRankings = exports.getUserMe = void 0;
 const repositories_1 = require("../repositories");
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
@@ -242,3 +242,76 @@ const registerStreamer = async (req, res) => {
     }
 };
 exports.registerStreamer = registerStreamer;
+/**
+ * 7. 카드 판매 및 일괄 판매 처리 API
+ * POST /api/cards/sell
+ * Body: { items: Array<{ channelId: string, count: number }> }
+ */
+const sellCards = async (req, res) => {
+    const userId = req.user?.id;
+    if (!userId) {
+        return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+    }
+    const { items } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'BadRequest', message: '판매할 카드 목록(items)이 필요합니다.' });
+    }
+    try {
+        // A. 유저 정보 조회
+        const user = await repositories_1.userRepository.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+        }
+        // B. 유저 보유 카드 데이터 조회
+        const userCards = await repositories_1.userCardRepository.findByUserId(userId);
+        // channelId별 유저 보유 카드 매핑
+        const userCardsByChannel = {};
+        userCards.forEach(uc => {
+            const cid = uc.channel_id;
+            if (!userCardsByChannel[cid]) {
+                userCardsByChannel[cid] = [];
+            }
+            userCardsByChannel[cid].push(uc);
+        });
+        let totalGainedPoints = 0;
+        const sellActions = [];
+        // C. 판매 항목 수량 및 시세 검증
+        for (const item of items) {
+            const { channelId, count } = item;
+            if (!channelId || !count || count <= 0) {
+                return res.status(400).json({ error: 'BadRequest', message: '올바른 channelId와 0보다 큰 수량이 필요합니다.' });
+            }
+            const owned = userCardsByChannel[channelId] || [];
+            if (owned.length < count) {
+                return res.status(400).json({
+                    error: 'InsufficientCards',
+                    message: `보유한 카드 수량이 부족합니다. (채널 ID: ${channelId}, 보유: ${owned.length}장, 판매 요청: ${count}장)`
+                });
+            }
+            // 시세 가치 조회
+            const streamer = owned[0]?.streamer;
+            if (!streamer) {
+                return res.status(404).json({ error: 'NotFound', message: `스트리머 정보를 찾을 수 없습니다. (채널 ID: ${channelId})` });
+            }
+            const baseValue = streamer.base_value || 0;
+            totalGainedPoints += baseValue * count;
+            sellActions.push({ channelId, count, baseValue });
+        }
+        // D. 판매 처리 (카드 삭제 및 포인트 지급)
+        for (const action of sellActions) {
+            await repositories_1.userCardRepository.deleteCards(userId, action.channelId, action.count);
+        }
+        const nextPoint = user.point + totalGainedPoints;
+        await repositories_1.userRepository.updatePoint(userId, nextPoint);
+        return res.status(200).json({
+            message: `성공적으로 카드 판매가 완료되었습니다. 총 ${totalGainedPoints.toLocaleString()} 포인트를 획득하였습니다!`,
+            points_gained: totalGainedPoints,
+            new_points: nextPoint
+        });
+    }
+    catch (err) {
+        console.error('[PlayController] sellCards 에러:', err);
+        return res.status(500).json({ error: 'InternalServerError', message: err.message });
+    }
+};
+exports.sellCards = sellCards;

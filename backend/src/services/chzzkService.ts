@@ -6,13 +6,14 @@ export interface ChzzkProfile {
   name: string;
   logoUrl: string;
   followerCount: number;
+  openLive: boolean;
 }
 
 /**
  * 치지직 공개 API를 통해 스트리머 채널 프로필 데이터를 실시간 획득합니다.
  *
  * @param channelId 치지직 채널 고유 ID
- * @returns 스트리머 이름, 프로필 이미지 URL, 팔로워 수
+ * @returns 스트리머 이름, 프로필 이미지 URL, 팔로워 수, 방송 여부
  */
 export const fetchChzzkChannelProfile = async (channelId: string): Promise<ChzzkProfile> => {
   const apiUrl = `https://api.chzzk.naver.com/service/v1/channels/${channelId}`;
@@ -31,11 +32,12 @@ export const fetchChzzkChannelProfile = async (channelId: string): Promise<Chzzk
     const body = (await response.json()) as any;
 
     if (body.code === 200 && body.content) {
-      const { channelName, channelImageUrl, followerCount } = body.content;
+      const { channelName, channelImageUrl, followerCount, openLive } = body.content;
       return {
         name: channelName || '알 수 없는 스트리머',
         logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
-        followerCount: followerCount || 0
+        followerCount: followerCount || 0,
+        openLive: !!openLive
       };
     } else {
       throw new Error(body.message || 'API 응답 형식이 올바르지 않습니다.');
@@ -46,7 +48,8 @@ export const fetchChzzkChannelProfile = async (channelId: string): Promise<Chzzk
     return {
       name: `스트리머_${channelId.substring(0, 5)}`,
       logoUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${channelId}`,
-      followerCount: 150 // 기본 충족 팔로워 수
+      followerCount: 150, // 기본 충족 팔로워 수
+      openLive: false
     };
   }
 };

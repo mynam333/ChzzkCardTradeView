@@ -12,6 +12,7 @@ const db_1 = require("./services/db");
 const repositories_1 = require("./repositories");
 const api_1 = __importDefault(require("./routes/api"));
 const pushController_1 = require("./controllers/pushController");
+const streamerScheduler_1 = require("./cron/streamerScheduler");
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 (0, pushController_1.initVapid)();
 const app = (0, express_1.default)();
@@ -37,6 +38,7 @@ const startServer = async () => {
         await (0, db_1.initDatabaseConnection)();
         (0, repositories_1.initRepositories)(); // 레포지토리 초기화 추가
         (0, pushController_1.startPushNotificationScheduler)(); // PWA 푸시 알림 예약 크론 가동
+        (0, streamerScheduler_1.startStreamerLiveStatusScheduler)(); // 치지직 실시간 방송 상태 폴링 크론 가동
         const useHttps = process.env.USE_HTTPS === 'true';
         // nginx 표준과 동일한 인증서 파일명(fullchain.pem / privkey.pem)을 사용합니다.
         const privkeyPath = process.env.SSL_PRIVKEY_PATH;

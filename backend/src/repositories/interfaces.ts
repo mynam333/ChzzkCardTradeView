@@ -86,6 +86,7 @@ export interface IStreamerRepository {
   findStreamerIndex(channelId: string): Promise<number>;
   findMaxSerialNumber(): Promise<number>;
   findAllocatedStreamerSerialNumbers(): Promise<number[]>;
+  updateLiveStatus(channelId: string, isActive: boolean, followerCount: number): Promise<void>;
 }
 
 // 3. 쿠폰 리포지토리 인터페이스
@@ -118,4 +119,5 @@ export interface IUserCardRepository {
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
   findLatestSerialNumber(channelId: string): Promise<number>;
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
+  deleteCards(userId: string, channelId: string, count: number): Promise<number>;
 }

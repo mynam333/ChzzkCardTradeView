@@ -138,6 +138,10 @@ class SqliteStreamerRepository {
         const rows = this.getDb().prepare('SELECT serial_number FROM streamers WHERE serial_number IS NOT NULL ORDER BY serial_number ASC').all();
         return rows.map(r => r.serial_number);
     }
+    async updateLiveStatus(channelId, isActive, followerCount) {
+        this.getDb().prepare('UPDATE streamers SET is_active = ?, follower_count = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
+            .run(isActive ? 1 : 0, followerCount, channelId);
+    }
 }
 exports.SqliteStreamerRepository = SqliteStreamerRepository;
 // 3. SQLite 쿠폰 레포지토리
@@ -291,6 +295,16 @@ class SqliteUserCardRepository {
     async findAllocatedSerialNumbers(channelId) {
         const rows = this.getDb().prepare('SELECT serial_number FROM user_cards WHERE channel_id = ? ORDER BY serial_number ASC').all(channelId);
         return rows.map(r => r.serial_number);
+    }
+    async deleteCards(userId, channelId, count) {
+        // 특정 개수만큼만 삭제하기 위해 rowid 또는 id를 조회해서 IN 절로 삭제합니다.
+        const rows = this.getDb().prepare('SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?').all(userId, channelId, count);
+        if (rows.length === 0)
+            return 0;
+        const ids = rows.map(r => r.id);
+        const placeholders = ids.map(() => '?').join(',');
+        const result = this.getDb().prepare(`DELETE FROM user_cards WHERE id IN (${placeholders})`).run(...ids);
+        return result.changes;
     }
 }
 exports.SqliteUserCardRepository = SqliteUserCardRepository;

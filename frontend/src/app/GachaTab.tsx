@@ -71,6 +71,42 @@ export const GachaTab: React.FC = () => {
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc'>('acquired-desc');
   const [liveFilter, setLiveFilter] = useState<'all' | 'live' | 'offline'>('all');
 
+  // 우클릭 컨텍스트 메뉴 상태
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    open: boolean;
+    card: UserCard | null;
+  }>({ x: 0, y: 0, open: false, card: null });
+
+  // 카드 선택 모드 및 선택된 채널 ID 목록 (수집 갯수 단위로 묶여있으므로 channel_id 기반 일괄 선택 지원)
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+
+  // 단일 판매 모달 및 확인 모달 상태
+  const [sellModalOpen, setSellModalOpen] = useState(false);
+  const [sellConfirmOpen, setSellConfirmOpen] = useState(false);
+  const [sellQuantity, setSellQuantity] = useState(1);
+  const [sellingStreamer, setSellingStreamer] = useState<Streamer | null>(null);
+
+  // 일괄 판매 모달 및 확인 모달 상태
+  const [bulkSellModalOpen, setBulkSellModalOpen] = useState(false);
+  const [bulkSellConfirmOpen, setBulkSellConfirmOpen] = useState(false);
+  // 일괄 판매 항목 설정: { [channelId]: count }
+  const [bulkSellQuantities, setBulkSellQuantities] = useState<{ [key: string]: number }>({});
+  
+  // 모바일 롱프레스 타이머 레프
+  const longPressTimer = React.useRef<any>(null);
+
+  // 전역 클릭 시 컨텍스트 메뉴 닫기
+  useEffect(() => {
+    const handleGlobalClick = () => {
+      setContextMenu(prev => prev.open ? { ...prev, open: false } : prev);
+    };
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
+
   useEffect(() => {
     if (user) {
       fetchStreamers();
@@ -369,6 +405,109 @@ export const GachaTab: React.FC = () => {
     }
   };
 
+  // 단일 카드 판매 실행
+  const executeSell = async () => {
+    if (!sellingStreamer) return;
+    const token = localStorage.getItem('cctv_jwt_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/cards/sell`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          items: [{ channelId: sellingStreamer.channel_id, count: sellQuantity }]
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAlertModal({
+          open: true,
+          title: '판매 완료',
+          message: data.message || '카드가 정상적으로 판매되었습니다.',
+          type: 'success'
+        });
+        setSellConfirmOpen(false);
+        setSellModalOpen(false);
+        setSellingStreamer(null);
+        fetchInventory();
+        refreshUserData();
+      } else {
+        setAlertModal({
+          open: true,
+          title: '판매 실패',
+          message: data.message || '카드 판매 도중 오류가 발생했습니다.',
+          type: 'error'
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      alert('서버 전송 중 에러가 발생했습니다.');
+    }
+  };
+
+  // 일괄 카드 판매 실행
+  const executeBulkSell = async () => {
+    const token = localStorage.getItem('cctv_jwt_token');
+    const items = Object.entries(bulkSellQuantities)
+      .map(([channelId, count]) => ({ channelId, count }))
+      .filter(item => item.count > 0);
+
+    if (items.length === 0) {
+      alert('판매할 카드가 선택되지 않았습니다.');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/cards/sell`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ items })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAlertModal({
+          open: true,
+          title: '일괄 판매 완료',
+          message: data.message || '선택한 모든 카드가 일괄 판매되었습니다.',
+          type: 'success'
+        });
+        setBulkSellConfirmOpen(false);
+        setBulkSellModalOpen(false);
+        setSelectedChannelIds([]);
+        setSelectionMode(false);
+        fetchInventory();
+        refreshUserData();
+      } else {
+        setAlertModal({
+          open: true,
+          title: '일괄 판매 실패',
+          message: data.message || '일괄 판매 실패',
+          type: 'error'
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      alert('서버 전송 중 에러가 발생했습니다.');
+    }
+  };
+
+  // 카드 수량 계산 헬퍼
+  const getCardCountInInventory = (channelId: string) => {
+    return inventory.filter(c => c.channel_id === channelId).length;
+  };
+
+  // 카드 객체 찾기 헬퍼
+  const getStreamerByChannelId = (channelId: string) => {
+    return inventory.find(c => c.channel_id === channelId)?.streamer || null;
+  };
+
   // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
   const getProcessedInventory = () => {
     // 1. 검색어 및 라이브 상태 필터링
@@ -658,7 +797,15 @@ export const GachaTab: React.FC = () => {
                 <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공</span>
                 
                 {/* 실시간 포토카드 프레임 */}
-                <div className={`relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl ${getCardBorderClass(drawnCard.base_value)}`}>
+                <a 
+                  href={drawnCard.is_active || (drawnCard as any).isLive
+                    ? `https://chzzk.naver.com/live/${drawnCard.channel_id}`
+                    : `https://chzzk.naver.com/${drawnCard.channel_id}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl hover:-translate-y-1 hover:shadow-2xl transition duration-300 select-none block ${getCardBorderClass(drawnCard.base_value)}`}
+                >
                   
                   {/* 카드 배경 이미지 (커스텀 또는 기본 로고) */}
                   <div className="absolute inset-0 z-0">
@@ -687,15 +834,7 @@ export const GachaTab: React.FC = () => {
                   </div>
 
                   {/* 카드 하단 정보 */}
-                  <a 
-                    href={drawnCard.is_active || (drawnCard as any).isLive
-                      ? `https://chzzk.naver.com/live/${drawnCard.channel_id}`
-                      : `https://chzzk.naver.com/${drawnCard.channel_id}`
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative z-20 space-y-1.5 text-white hover:opacity-90 block mt-auto"
-                  >
+                  <div className="relative z-20 space-y-1.5 text-white mt-auto">
                     <h3 className="text-base font-black tracking-tight text-white drop-shadow-md">{drawnCard.name}</h3>
                     <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
                     
@@ -703,8 +842,8 @@ export const GachaTab: React.FC = () => {
                       <span className="text-[9px] text-zinc-400">시세 가치</span>
                       <span className="text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
                     </div>
-                  </a>
-                </div>
+                  </div>
+                </a>
 
                 <button 
                   onClick={() => setDrawnCard(null)}
@@ -825,74 +964,486 @@ export const GachaTab: React.FC = () => {
           });
 
           return (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {groupedList.map(({ card, count }) => {
-                const streamer = card.streamer;
-                if (!streamer) return null;
-                return (
-                  <div 
-                    key={card.id}
-                    className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg ${getCardBorderClass(streamer.base_value)}`}
-                  >
-                    {/* 카드 이미지 배경 */}
-                    <div className="absolute inset-0 z-0">
-                      <img 
-                        src={streamer.custom_image_url || streamer.logo_url} 
-                        alt={streamer.name}
-                        className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/25 z-10"></div>
-                    </div>
+            <div className="relative">
+              {/* 선택 모드 안내 바 */}
+              {selectionMode && (
+                <div className="mb-4 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 p-3.5 animate-in slide-in-from-top-3 duration-200">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-primary animate-ping"></span>
+                    <span className="text-[0.75rem] font-bold text-foreground">
+                      카드를 다중 선택 중입니다 ({selectedChannelIds.length}개 선택됨)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (selectedChannelIds.length === 0) {
+                          alert('선택된 카드가 없습니다.');
+                          return;
+                        }
+                        // 선택된 카드 정보 기반으로 일괄 판매 초기화
+                        const quantities: { [key: string]: number } = {};
+                        selectedChannelIds.forEach(cid => {
+                          quantities[cid] = getCardCountInInventory(cid);
+                        });
+                        setBulkSellQuantities(quantities);
+                        setBulkSellModalOpen(true);
+                      }}
+                      className="rounded-lg bg-primary px-3 py-1.5 text-[0.7rem] font-extrabold text-primary-foreground hover:bg-primary/95 transition shadow-sm"
+                    >
+                      선택 카드 일괄판매
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedChannelIds([]);
+                        setSelectionMode(false);
+                      }}
+                      className="rounded-lg bg-secondary px-3 py-1.5 text-[0.7rem] font-bold text-muted-foreground hover:bg-secondary/80 transition"
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                    {/* 카드 상단 정보 */}
-                    <div className="relative z-20 flex items-center justify-between w-full">
-                      {streamer.is_active || (streamer as any).isLive ? (
-                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                          <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
-                        </span>
-                      ) : (
-                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
-                          OFFLINE
-                        </span>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {groupedList.map(({ card, count }) => {
+                  const streamer = card.streamer;
+                  if (!streamer) return null;
+
+                  const isSelected = selectedChannelIds.includes(streamer.channel_id);
+
+                  // 우클릭 이벤트 핸들러
+                  const handleContextMenu = (e: React.MouseEvent) => {
+                    e.preventDefault();
+                    if (selectionMode) {
+                      // 다중 선택 상태일 때의 우클릭 액션: 일괄 판매 모달 바로 트리거
+                      const quantities: { [key: string]: number } = {};
+                      selectedChannelIds.forEach(cid => {
+                        quantities[cid] = getCardCountInInventory(cid);
+                      });
+                      setBulkSellQuantities(quantities);
+                      setBulkSellModalOpen(true);
+                      return;
+                    }
+                    setContextMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      open: true,
+                      card: card
+                    });
+                  };
+
+                  // 카드 클릭 이벤트 핸들러
+                  const handleCardClick = (e: React.MouseEvent) => {
+                    if (selectionMode) {
+                      e.preventDefault();
+                      if (isSelected) {
+                        setSelectedChannelIds(selectedChannelIds.filter(cid => cid !== streamer.channel_id));
+                      } else {
+                        setSelectedChannelIds([...selectedChannelIds, streamer.channel_id]);
+                      }
+                    } else {
+                      // 다중 선택 모드가 아닐 때 카드 전체 클릭 시 치지직 채널로 새 창 이동
+                      const targetUrl = streamer.is_active || (streamer as any).isLive
+                        ? `https://chzzk.naver.com/live/${streamer.channel_id}`
+                        : `https://chzzk.naver.com/${streamer.channel_id}`;
+                      window.open(targetUrl, '_blank');
+                    }
+                  };
+
+                  // 마우스 및 터치 터치 롱프레스 핸들링 (모바일 지원용)
+                  const startPress = () => {
+                    longPressTimer.current = setTimeout(() => {
+                      if (!selectionMode) {
+                        setSelectionMode(true);
+                        setSelectedChannelIds([streamer.channel_id]);
+                        if (navigator.vibrate) {
+                          navigator.vibrate(50);
+                        }
+                      }
+                    }, 800);
+                  };
+
+                  const endPress = () => {
+                    if (longPressTimer.current) {
+                      clearTimeout(longPressTimer.current);
+                    }
+                  };
+
+                  return (
+                    <div 
+                      key={card.id}
+                      onContextMenu={handleContextMenu}
+                      onClick={handleCardClick}
+                      onMouseDown={startPress}
+                      onMouseUp={endPress}
+                      onTouchStart={startPress}
+                      onTouchEnd={endPress}
+                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer ${
+                        isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''
+                      } ${getCardBorderClass(streamer.base_value)}`}
+                    >
+                      {/* 다중 선택 모드 체크박스 오버레이 */}
+                      {selectionMode && (
+                        <div className="absolute top-2.5 left-2.5 z-30 flex h-5 w-5 items-center justify-center rounded-md border border-primary bg-background shadow transition">
+                          {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
+                        </div>
                       )}
-                      
-                      <div className="flex items-center gap-1">
-                        {count > 1 && (
-                          <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
-                            ×{count}
+
+                      {/* 카드 이미지 배경 */}
+                      <div className="absolute inset-0 z-0">
+                        <img 
+                          src={streamer.custom_image_url || streamer.logo_url} 
+                          alt={streamer.name}
+                          className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/25 z-10"></div>
+                      </div>
+
+                      {/* 카드 상단 정보 */}
+                      <div className="relative z-20 flex items-center justify-between w-full">
+                        {streamer.is_active || (streamer as any).isLive ? (
+                          <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                            <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                          </span>
+                        ) : (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
+                            OFFLINE
                           </span>
                         )}
-                        <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                          No.{String(card.serial_number).padStart(4, '0')}
-                        </span>
+                        
+                        <div className="flex items-center gap-1">
+                          {count > 1 && (
+                            <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
+                              ×{count}
+                            </span>
+                          )}
+                          <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                            No.{String(card.serial_number).padStart(4, '0')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 카드 하단 정보 */}
+                      <div className="relative z-20 space-y-1 text-white block mt-auto">
+                        <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
+                        <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
+                        
+                        <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                          <span className="text-[8.5px] text-zinc-400">시세 가치</span>
+                          <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
+                        </div>
                       </div>
                     </div>
-
-                    {/* 카드 하단 정보 */}
-                    <a 
-                      href={streamer.is_active || (streamer as any).isLive
-                        ? `https://chzzk.naver.com/live/${streamer.channel_id}`
-                        : `https://chzzk.naver.com/${streamer.channel_id}`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="relative z-20 space-y-1 text-white hover:opacity-90 block mt-auto"
-                    >
-                      <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
-                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
-                      
-                      <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                        <span className="text-[8.5px] text-zinc-400">시세 가치</span>
-                        <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
-                      </div>
-                    </a>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           );
         })()}
       </section>
+
+      {/* 우클릭 컨텍스트 메뉴 오버레이 */}
+      {contextMenu.open && contextMenu.card && (
+        <div 
+          className="fixed z-50 rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 min-w-36"
+          style={{ 
+            left: `${contextMenu.x}px`, 
+            top: `${contextMenu.y}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              if (contextMenu.card) {
+                setSellingStreamer(contextMenu.card.streamer || null);
+                setSellQuantity(1);
+                setSellModalOpen(true);
+              }
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+          >
+            💰 카드 판매하기
+          </button>
+          <button
+            onClick={() => {
+              if (contextMenu.card?.streamer) {
+                setSelectionMode(true);
+                setSelectedChannelIds([contextMenu.card.streamer.channel_id]);
+              }
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+          >
+            ✔️ 다중 선택 모드
+          </button>
+          <button
+            onClick={() => {
+              if (contextMenu.card?.streamer) {
+                const targetUrl = contextMenu.card.streamer.is_active
+                  ? `https://chzzk.naver.com/live/${contextMenu.card.streamer.channel_id}`
+                  : `https://chzzk.naver.com/${contextMenu.card.streamer.channel_id}`;
+                window.open(targetUrl, '_blank');
+              }
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2 border-t border-border/50"
+          >
+            📺 스트리머 채널 이동
+          </button>
+        </div>
+      )}
+
+      {/* 단일 판매 설정 모달 */}
+      {sellModalOpen && sellingStreamer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
+              💰 카드 시스템 판매
+            </h3>
+            
+            <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
+              <img 
+                src={sellingStreamer.custom_image_url || sellingStreamer.logo_url} 
+                alt={sellingStreamer.name} 
+                className="h-12 w-12 rounded-full border border-border/80 object-cover"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-black text-foreground truncate">{sellingStreamer.name}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  보유량: <span className="font-bold text-foreground">{getCardCountInInventory(sellingStreamer.channel_id)}</span>장
+                </p>
+                <p className="text-[10px] text-emerald-500 font-bold mt-0.5">
+                  개당 시세: {sellingStreamer.base_value.toLocaleString()} P
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-1.5">
+              <label className="text-[10px] font-bold text-muted-foreground">판매 수량 설정</label>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={sellQuantity <= 1}
+                  onClick={() => setSellQuantity(prev => prev - 1)}
+                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-foreground disabled:opacity-40"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  max={getCardCountInInventory(sellingStreamer.channel_id)}
+                  value={sellQuantity}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.min(getCardCountInInventory(sellingStreamer.channel_id), Number(e.target.value) || 1));
+                    setSellQuantity(val);
+                  }}
+                  className="w-16 text-center rounded-lg border border-border bg-secondary/50 px-2 py-1 text-xs font-bold focus:outline-none"
+                />
+                <button
+                  disabled={sellQuantity >= getCardCountInInventory(sellingStreamer.channel_id)}
+                  onClick={() => setSellQuantity(prev => prev + 1)}
+                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-foreground disabled:opacity-40"
+                >
+                  +
+                </button>
+                <button
+                  onClick={() => setSellQuantity(getCardCountInInventory(sellingStreamer.channel_id))}
+                  className="ml-auto rounded-lg bg-secondary border border-border px-2.5 py-1.5 text-[9.5px] font-bold text-foreground hover:bg-secondary/80"
+                >
+                  최대
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-border/50 pt-3 flex items-center justify-between text-xs">
+              <span className="font-bold text-muted-foreground">예상 획득 포인트</span>
+              <span className="font-black text-emerald-500 text-sm">
+                {(sellingStreamer.base_value * sellQuantity).toLocaleString()} P
+              </span>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setSellModalOpen(false);
+                  setSellingStreamer(null);
+                }}
+                className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => setSellConfirmOpen(true)}
+                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm"
+              >
+                판매하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 단일 판매 확인 모달 */}
+      {sellConfirmOpen && sellingStreamer && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+            <h4 className="text-sm font-black text-foreground mb-3">⚠️ 판매 최종 확인</h4>
+            <div className="text-xs text-muted-foreground leading-relaxed py-2">
+              정말로 <strong className="text-foreground">{sellingStreamer.name}</strong> 카드{' '}
+              <strong className="text-primary font-bold">{sellQuantity}장</strong>을 판매하시겠습니까?
+              <p className="mt-2 text-foreground font-semibold">
+                획득 예정 포인트: <span className="text-emerald-500 font-extrabold">{(sellingStreamer.base_value * sellQuantity).toLocaleString()} P</span>
+              </p>
+              <p className="text-[10px] text-red-500/80 mt-1">※ 판매 완료된 카드는 되돌릴 수 없습니다.</p>
+            </div>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setSellConfirmOpen(false)}
+                className="w-1/2 rounded-lg bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/85"
+              >
+                돌아가기
+              </button>
+              <button
+                onClick={executeSell}
+                className="w-1/2 rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95"
+              >
+                수락 및 판매 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 판매 설정 모달 */}
+      {bulkSellModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
+              💰 선택 카드 일괄 판매 설정
+            </h3>
+
+            <div className="mt-4 space-y-3.5 max-h-60 overflow-y-auto pr-1">
+              {Object.entries(bulkSellQuantities).map(([channelId, count]) => {
+                const streamer = getStreamerByChannelId(channelId);
+                const maxCount = getCardCountInInventory(channelId);
+                if (!streamer) return null;
+
+                return (
+                  <div key={channelId} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <img 
+                        src={streamer.custom_image_url || streamer.logo_url} 
+                        alt={streamer.name} 
+                        className="h-8 w-8 rounded-full border border-border/60 object-cover"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-foreground truncate">{streamer.name}</p>
+                        <p className="text-[9px] text-muted-foreground">보유: {maxCount}장</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        disabled={count <= 0}
+                        onClick={() => {
+                          setBulkSellQuantities(prev => ({ ...prev, [channelId]: Math.max(0, count - 1) }));
+                        }}
+                        className="h-6 w-6 rounded bg-secondary flex items-center justify-center text-xs font-bold disabled:opacity-40"
+                      >
+                        -
+                      </button>
+                      <span className="w-8 text-center text-xs font-bold text-foreground">
+                        {count}
+                      </span>
+                      <button
+                        disabled={count >= maxCount}
+                        onClick={() => {
+                          setBulkSellQuantities(prev => ({ ...prev, [channelId]: Math.min(maxCount, count + 1) }));
+                        }}
+                        className="h-6 w-6 rounded bg-secondary flex items-center justify-center text-xs font-bold disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 border-t border-border/50 pt-3 flex items-center justify-between text-xs">
+              <span className="font-bold text-muted-foreground">총 예상 획득 포인트</span>
+              <span className="font-black text-emerald-500 text-sm">
+                {Object.entries(bulkSellQuantities).reduce((acc, [channelId, count]) => {
+                  const streamer = getStreamerByChannelId(channelId);
+                  return acc + (streamer ? streamer.base_value * count : 0);
+                }, 0).toLocaleString()} P
+              </span>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setBulkSellModalOpen(false)}
+                className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => {
+                  const totalCount = Object.values(bulkSellQuantities).reduce((a, b) => a + b, 0);
+                  if (totalCount === 0) {
+                    alert('판매할 카드가 1개 이상 존재해야 합니다.');
+                    return;
+                  }
+                  setBulkSellConfirmOpen(true);
+                }}
+                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm"
+              >
+                판매 진행
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 판매 확인 모달 */}
+      {bulkSellConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+            <h4 className="text-sm font-black text-foreground mb-3">⚠️ 일괄 판매 최종 확인</h4>
+            <div className="text-xs text-muted-foreground leading-relaxed py-2">
+              선택한 스트리머 카드 총 <strong className="text-primary font-bold">
+                {Object.values(bulkSellQuantities).reduce((a, b) => a + b, 0)}장
+              </strong>을 일괄 판매하시겠습니까?
+              <p className="mt-2 text-foreground font-semibold">
+                총 획득 예정 포인트: <span className="text-emerald-500 font-extrabold">
+                  {Object.entries(bulkSellQuantities).reduce((acc, [channelId, count]) => {
+                    const streamer = getStreamerByChannelId(channelId);
+                    return acc + (streamer ? streamer.base_value * count : 0);
+                  }, 0).toLocaleString()} P
+                </span>
+              </p>
+              <p className="text-[10px] text-red-500/80 mt-1">※ 판매 완료된 카드는 되돌릴 수 없습니다.</p>
+            </div>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setBulkSellConfirmOpen(false)}
+                className="w-1/2 rounded-lg bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/85"
+              >
+                돌아가기
+              </button>
+              <button
+                onClick={executeBulkSell}
+                className="w-1/2 rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95"
+              >
+                수락 및 일괄 판매 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 커스텀 피드백 알림 모달 */}
       {alertModal.open && (

@@ -10,7 +10,7 @@ dotenv_1.default.config();
  * 치지직 공개 API를 통해 스트리머 채널 프로필 데이터를 실시간 획득합니다.
  *
  * @param channelId 치지직 채널 고유 ID
- * @returns 스트리머 이름, 프로필 이미지 URL, 팔로워 수
+ * @returns 스트리머 이름, 프로필 이미지 URL, 팔로워 수, 방송 여부
  */
 const fetchChzzkChannelProfile = async (channelId) => {
     const apiUrl = `https://api.chzzk.naver.com/service/v1/channels/${channelId}`;
@@ -25,11 +25,12 @@ const fetchChzzkChannelProfile = async (channelId) => {
         }
         const body = (await response.json());
         if (body.code === 200 && body.content) {
-            const { channelName, channelImageUrl, followerCount } = body.content;
+            const { channelName, channelImageUrl, followerCount, openLive } = body.content;
             return {
                 name: channelName || '알 수 없는 스트리머',
                 logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
-                followerCount: followerCount || 0
+                followerCount: followerCount || 0,
+                openLive: !!openLive
             };
         }
         else {
@@ -42,7 +43,8 @@ const fetchChzzkChannelProfile = async (channelId) => {
         return {
             name: `스트리머_${channelId.substring(0, 5)}`,
             logoUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${channelId}`,
-            followerCount: 150 // 기본 충족 팔로워 수
+            followerCount: 150, // 기본 충족 팔로워 수
+            openLive: false
         };
     }
 };

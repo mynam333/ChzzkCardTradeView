@@ -154,6 +154,18 @@ class SupabaseStreamerRepository {
             return [];
         return data.map(r => r.serial_number);
     }
+    async updateLiveStatus(channelId, isActive, followerCount) {
+        const { error } = await this.getClient()
+            .from('streamers')
+            .update({
+            is_active: isActive,
+            follower_count: followerCount,
+            updated_at: new Date().toISOString()
+        })
+            .eq('channel_id', channelId);
+        if (error)
+            throw error;
+    }
 }
 exports.SupabaseStreamerRepository = SupabaseStreamerRepository;
 // 3. Supabase 쿠폰 레포지토리
@@ -358,6 +370,26 @@ class SupabaseUserCardRepository {
             return [];
         }
         return (data || []).map(r => r.serial_number);
+    }
+    async deleteCards(userId, channelId, count) {
+        // 특정 개수만큼만 삭제하기 위해 row를 먼저 조회 후 id로 매칭하여 삭제합니다.
+        const { data: rows, error: selectError } = await this.getClient()
+            .from('user_cards')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('channel_id', channelId)
+            .order('id', { ascending: true })
+            .limit(count);
+        if (selectError || !rows || rows.length === 0)
+            return 0;
+        const ids = rows.map(r => r.id);
+        const { error: deleteError, count: deletedCount } = await this.getClient()
+            .from('user_cards')
+            .delete({ count: 'exact' })
+            .in('id', ids);
+        if (deleteError)
+            throw deleteError;
+        return deletedCount || ids.length;
     }
 }
 exports.SupabaseUserCardRepository = SupabaseUserCardRepository;
