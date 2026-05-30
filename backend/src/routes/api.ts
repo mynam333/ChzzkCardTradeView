@@ -34,6 +34,7 @@ import {
   getUserCards,
   drawCard
 } from '../controllers/playController';
+import { streamerRepository } from '../repositories';
 
 const router = Router();
 
