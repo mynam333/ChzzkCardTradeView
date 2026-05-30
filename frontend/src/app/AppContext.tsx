@@ -17,6 +17,7 @@ interface AppContextType {
     point: number;
     lastFreeDraw: string | null;
   } | null;
+  authLoading: boolean;
   setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
   logout: () => void;
   refreshUserData: () => Promise<void>;
@@ -29,6 +30,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [theme, setTheme] = useState<'light' | 'dark'>('dark'); // 기본 다크모드 선호
   const [activeTab, setActiveTab] = useState<'main' | 'gacha' | 'ranking' | 'my-info'>('main');
   const [user, setUser] = useState<AppContextType['user']>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
 
   // 로컬 스토리지에서 저장된 테마만 복원 및 초기 인증 처리
   useEffect(() => {
@@ -62,8 +64,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const token = localStorage.getItem('cctv_jwt_token');
     if (!token) {
       setUser(null);
+      setAuthLoading(false);
       return;
     }
+    setAuthLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/users/me`, {
         headers: {
@@ -87,6 +91,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (e) {
       console.error('[AppContext] 유저 세션 갱신 실패:', e);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -106,6 +112,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       activeTab,
       setActiveTab,
       user,
+      authLoading,
       setUser,
       logout,
       refreshUserData,

@@ -19,7 +19,7 @@ interface NavigationProps {
 }
 
 export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme, user } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading } = useApp();
 
   const handleLogin = async () => {
     try {
@@ -63,7 +63,17 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
         </div>
 
         {/* 유저 상태 카드 또는 로그인 버튼 */}
-        {user ? (
+        {authLoading ? (
+          <div className="mb-6 rounded-xl bg-secondary/20 p-4 border border-border animate-pulse flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-secondary" />
+              <div className="flex-1 space-y-2 py-1">
+                <div className="h-2 bg-secondary rounded" />
+                <div className="h-2 bg-secondary rounded w-5/6" />
+              </div>
+            </div>
+          </div>
+        ) : user ? (
           <div className="mb-6 rounded-xl bg-secondary/50 p-4 border border-border">
             <div className="flex items-center gap-3">
               <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card" />
