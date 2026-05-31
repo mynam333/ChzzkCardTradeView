@@ -65,6 +65,15 @@ class ChzzkChatManager {
     try {
       const accessToken = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
       
+      // 가상 UUID 생성 헬퍼 함수
+      const generateUuid = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      };
+
       // 치지직 기본 웹소켓 서버 주소
       const wsUrl = 'wss://kr-ss1.chat.naver.com/chat';
       const ws = new WebSocket(wsUrl);
@@ -73,18 +82,25 @@ class ChzzkChatManager {
       let currentSid = ''; // 서버로부터 획득할 세션 ID 저장 공간
 
       ws.on('open', () => {
-        // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송
-        const connectFrame: ChzzkSocketFrame = {
+        // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송 (전달받은 실기기 패킷 구조 적용)
+        const connectFrame = {
           ver: '3',
           cmd: 100, // CMD_CONNECT
           svcid: 'game',
           cid: chatChannelId,
-          sid: '',
+          sid: null,
           bdy: {
-            uid: null,
+            uid: streamerAccessToken ? channelId : null,
             devType: 2001,
             accTkn: accessToken,
-            authTypes: []
+            auth: 'SEND',
+            libVer: '4.11.0',
+            osVer: 'Linux/',
+            devName: 'Mozilla Firefox/135.0',
+            locale: 'ko',
+            timezone: 'Asia/Seoul',
+            uuid: generateUuid(),
+            windowId: generateUuid()
           },
           tid: 1
         };
@@ -93,12 +109,13 @@ class ChzzkChatManager {
 
       ws.on('message', async (data: string) => {
         try {
-          const frame = JSON.parse(data) as ChzzkSocketFrame;
+          const frame = JSON.parse(data) as any;
 
           // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
           if (frame.cmd === 10100) {
             isJoined = true;
-            currentSid = frame.bdy?.sid || ''; // 발급받은 세션 ID 보관
+            // 최상위 frame.sid를 우선 참조하고 백업으로 frame.bdy.sid 참조
+            currentSid = frame.sid || frame.bdy?.sid || '';
             console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
           } else if (frame.cmd === 93006) { // CMD_SEND_CHAT
             // 채팅 수신 시 DB 카운트 증가
