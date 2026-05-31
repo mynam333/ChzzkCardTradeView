@@ -82,17 +82,17 @@ class ChzzkChatManager {
 
       ws.on('open', () => {
         // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송 (공식 라이브러리 검증 규격 적용)
+        // sid를 아예 생략하고, 비로그인 시 uid를 undefined로 세팅해 JSON.stringify에서 완전히 누락시킴으로써 105 에러를 최종 방어합니다.
         const connectFrame = {
-          ver: '2', // 버전은 "2"를 사용해야 Incorrect parameter 에러가 나지 않습니다.
+          ver: '2',
           cmd: 100, // CMD_CONNECT
           svcid: 'game',
           cid: chatChannelId,
-          sid: null,
           bdy: {
             accTkn: accessToken,
-            auth: streamerAccessToken ? 'SEND' : 'READ', // 비로그인 시에는 반드시 READ로 설정해야 105 에러가 나지 않습니다.
+            auth: streamerAccessToken ? 'SEND' : 'READ',
             devType: 2001,
-            uid: streamerAccessToken ? channelId : null
+            uid: streamerAccessToken ? channelId : undefined
           },
           tid: 1
         };
