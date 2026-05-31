@@ -82,7 +82,9 @@ class ChzzkChatManager {
             });
             ws.on('message', async (data) => {
                 try {
-                    const frame = JSON.parse(data);
+                    const rawMsg = data.toString();
+                    console.log(`[ChatManager Debug] 수신 패킷: ${rawMsg}`);
+                    const frame = JSON.parse(rawMsg);
                     // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
                     if (frame.cmd === 10100) {
                         isJoined = true;
