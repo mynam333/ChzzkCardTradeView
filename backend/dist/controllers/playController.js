@@ -216,8 +216,8 @@ const registerStreamer = async (req, res) => {
         if (exists) {
             return res.status(400).json({ error: 'Conflict', message: '이미 카드로 등록되어 있는 스트리머입니다.' });
         }
-        // 기본 시세 계산 (기본 1000P + 팔로워 수의 1/100, 최대 10,000P 캡핑)
-        const baseValue = Math.min(10000, 1000 + Math.floor((followerCount || 0) / 100));
+        // 기본 시세 계산 (기본 가치는 팔로워 수와 1:1 매칭하되 하한 100, 상한 500,000 적용)
+        const baseValue = Math.min(500000, Math.max(Number(followerCount || 0), 100));
         // 스트리머용 시리얼 넘버 할당 (1 ~ 9999 중 비어있는 가장 작은 번호 자동 매칭)
         const allocatedStreamerSns = await repositories_1.streamerRepository.findAllocatedStreamerSerialNumbers();
         const allocatedSet = new Set(allocatedStreamerSns);
