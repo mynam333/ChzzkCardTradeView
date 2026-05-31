@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
-import { 
-  Sparkles, 
-  Search, 
-  Coins, 
-  HelpCircle, 
-  Upload, 
-  UserMinus, 
-  Check, 
+import {
+  Sparkles,
+  Search,
+  Coins,
+  HelpCircle,
+  Upload,
+  UserMinus,
+  Check,
   RefreshCw,
   Clock,
   ArrowRightLeft,
@@ -44,12 +44,12 @@ export const GachaTab: React.FC = () => {
   const [inventory, setInventory] = useState<UserCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // 1:1 교환 모달 상태
   const [tradeTargetUser, setTradeTargetUser] = useState('');
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [selectedOfferCards, setSelectedOfferCards] = useState<number[]>([]); // 유저 보유 카드 일련 ID 목록
-  
+
   // 뽑기 연출 애니메이션 상태
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnCard, setDrawnCard] = useState<Streamer | null>(null);
@@ -94,7 +94,7 @@ export const GachaTab: React.FC = () => {
   const [bulkSellConfirmOpen, setBulkSellConfirmOpen] = useState(false);
   // 일괄 판매 항목 설정: { [channelId]: count }
   const [bulkSellQuantities, setBulkSellQuantities] = useState<{ [key: string]: number }>({});
-  
+
   // 모바일 롱프레스 타이머 레프
   const longPressTimer = React.useRef<any>(null);
 
@@ -172,13 +172,13 @@ export const GachaTab: React.FC = () => {
   const getIsFreeDrawAvailable = () => {
     if (!user) return false;
     if (!user.lastFreeDraw) return true;
-    
+
     const nowKst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
     const todayStrKst = nowKst.toISOString().split('T')[0]; // YYYY-MM-DD
-    
+
     const lastFreeKst = new Date(new Date(user.lastFreeDraw).getTime() + 9 * 60 * 60 * 1000);
     const lastFreeStrKst = lastFreeKst.toISOString().split('T')[0];
-    
+
     return lastFreeStrKst !== todayStrKst;
   };
 
@@ -187,7 +187,7 @@ export const GachaTab: React.FC = () => {
   const handleDraw = async () => {
     if (!user) return;
     const drawCost = 10000; // 1회 뽑기 비용 10,000 P로 수정
-    
+
     if (!isFreeDraw && user.point < drawCost) {
       alert(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`);
       return;
@@ -211,7 +211,7 @@ export const GachaTab: React.FC = () => {
       }
 
       const data = await res.json();
-      
+
       setTimeout(() => {
         setDrawnCard(data.card.streamer);
         // 그려진 카드에 서버에서 생성된 시리얼넘버 주입
@@ -219,7 +219,7 @@ export const GachaTab: React.FC = () => {
           (data.card.streamer as any).serial_number = data.card.serial_number;
         }
         setIsDrawing(false);
-        
+
         // 무료 뽑기가 아닌 경우에만 로컬 포인트 차감
         if (!data.is_free) {
           updatePoints(-drawCost);
@@ -271,7 +271,7 @@ export const GachaTab: React.FC = () => {
 
     // 1:1 거래 시나리오 성공 시뮬레이션
     alert(`[${tradeTargetUser}] 님에게 카드 ${selectedOfferCards.length}개에 대한 1:1 교환 요청을 발송했습니다!`);
-    
+
     // 인벤토리에서 거래 보낸 카드 차감
     const remaining = inventory.filter(card => !selectedOfferCards.includes(card.id));
     setInventory(remaining);
@@ -517,13 +517,13 @@ export const GachaTab: React.FC = () => {
 
       // 이름 검색 필터
       const matchesSearch = streamer.name.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       // 라이브 상태 필터 (DB 필드 또는 객체의 is_active 속성 매칭)
       const isActive = streamer.is_active || (streamer as any).isLive;
-      const matchesLive = 
+      const matchesLive =
         liveFilter === 'all' ? true :
-        liveFilter === 'live' ? isActive === true :
-        isActive !== true;
+          liveFilter === 'live' ? isActive === true :
+            isActive !== true;
 
       return matchesSearch && matchesLive;
     });
@@ -564,7 +564,7 @@ export const GachaTab: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-      
+
       {/* 신규 스트리머 카드 등록 팝업 모달 */}
       {registerModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -573,14 +573,14 @@ export const GachaTab: React.FC = () => {
               <h3 className="text-base font-bold flex items-center gap-2">
                 <Plus className="h-4.5 w-4.5 text-primary" /> 신규 스트리머 카드 등록
               </h3>
-              <button 
+              <button
                 onClick={() => {
                   setRegisterModalOpen(false);
                   setSelectedStreamer(null);
                   setSearchResults([]);
                   setStreamerSearchKeyword('');
                   setDisclaimerChecked(false);
-                }} 
+                }}
                 className="text-muted-foreground hover:text-foreground"
               >
                 <X className="h-5 w-5" />
@@ -589,15 +589,15 @@ export const GachaTab: React.FC = () => {
 
             <div className="mt-4 space-y-4">
               <div className="flex gap-2">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={streamerSearchKeyword}
                   onChange={(e) => setStreamerSearchKeyword(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSearchStreamer(); }}
                   placeholder="치지직 스트리머 이름을 입력하세요"
                   className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
                 />
-                <button 
+                <button
                   onClick={handleSearchStreamer}
                   disabled={searching}
                   className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
@@ -612,12 +612,11 @@ export const GachaTab: React.FC = () => {
                   {searchResults.map((ch) => {
                     const isSelected = selectedStreamer?.channelId === ch.channelId;
                     return (
-                      <div 
+                      <div
                         key={ch.channelId}
                         onClick={() => setSelectedStreamer(ch)}
-                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${
-                          isSelected ? 'bg-primary/10 border border-primary/40' : 'hover:bg-secondary/60 border border-transparent'
-                        }`}
+                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${isSelected ? 'bg-primary/10 border border-primary/40' : 'hover:bg-secondary/60 border border-transparent'
+                          }`}
                       >
                         <div className="flex items-center gap-2.5">
                           <img src={ch.channelImageUrl} alt={ch.channelName} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
@@ -640,8 +639,8 @@ export const GachaTab: React.FC = () => {
                   본 서비스를 통해 신규 스트리머의 정보를 등록하여 카드를 활성화하는 모든 행위의 주체는 사용자 본인이며, 이로 인해 발생할 수 있는 초상권, 저작권, 퍼블리시티권 분쟁을 포함한 민형사상의 모든 법적 책임은 카드 등록자 본인에게 전적으로 귀속됩니다.
                 </div>
                 <label className="flex items-start gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={disclaimerChecked}
                     onChange={(e) => setDisclaimerChecked(e.target.checked)}
                     className="mt-0.5 rounded border-border"
@@ -654,7 +653,7 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
-              <button 
+              <button
                 onClick={() => {
                   setRegisterModalOpen(false);
                   setSelectedStreamer(null);
@@ -666,7 +665,7 @@ export const GachaTab: React.FC = () => {
               >
                 취소
               </button>
-              <button 
+              <button
                 onClick={handleRegisterStreamer}
                 disabled={registering || !selectedStreamer || !disclaimerChecked}
                 className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
@@ -694,8 +693,8 @@ export const GachaTab: React.FC = () => {
             <div className="mt-4 space-y-4">
               <div>
                 <label className="text-xs font-bold text-muted-foreground block mb-1.5">상대방 치지직 닉네임 입력</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={tradeTargetUser}
                   onChange={(e) => setTradeTargetUser(e.target.value)}
                   placeholder="상대의 닉네임을 입력해 주세요"
@@ -711,12 +710,11 @@ export const GachaTab: React.FC = () => {
                     const isSelected = selectedOfferCards.includes(card.id);
                     if (!streamer) return null;
                     return (
-                      <div 
+                      <div
                         key={card.id}
                         onClick={() => toggleSelectCard(card.id)}
-                        className={`cursor-pointer relative flex flex-col items-center justify-center p-2.5 rounded-xl border transition ${
-                          isSelected ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border/60 bg-secondary/30 hover:bg-secondary/60'
-                        }`}
+                        className={`cursor-pointer relative flex flex-col items-center justify-center p-2.5 rounded-xl border transition ${isSelected ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border/60 bg-secondary/30 hover:bg-secondary/60'
+                          }`}
                       >
                         <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
                         <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
@@ -734,13 +732,13 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
-              <button 
+              <button
                 onClick={() => setTradeModalOpen(false)}
                 className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
               >
                 취소
               </button>
-              <button 
+              <button
                 onClick={executeTrade}
                 className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
               >
@@ -760,7 +758,7 @@ export const GachaTab: React.FC = () => {
             </span>
             <h2 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">치지직 카드 즉시 소환</h2>
             <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
-              매일 한국 표준시(KST) 자정에 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다. 무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">10,000 포인트</strong>입니다.
+              매일 한국 표준시(KST) 자정에 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다.<br />무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">10,000 포인트</strong>입니다.
             </p>
           </div>
 
@@ -795,9 +793,9 @@ export const GachaTab: React.FC = () => {
             ) : drawnCard ? (
               <div className="flex flex-col items-center">
                 <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공</span>
-                
+
                 {/* 실시간 포토카드 프레임 */}
-                <a 
+                <a
                   href={drawnCard.is_active || (drawnCard as any).isLive
                     ? `https://chzzk.naver.com/live/${drawnCard.channel_id}`
                     : `https://chzzk.naver.com/${drawnCard.channel_id}`
@@ -806,11 +804,11 @@ export const GachaTab: React.FC = () => {
                   rel="noopener noreferrer"
                   className={`relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl hover:-translate-y-1 hover:shadow-2xl transition duration-300 select-none block ${getCardBorderClass(drawnCard.base_value)}`}
                 >
-                  
+
                   {/* 카드 배경 이미지 (커스텀 또는 기본 로고) */}
                   <div className="absolute inset-0 z-0">
-                    <img 
-                      src={drawnCard.custom_image_url || drawnCard.logo_url} 
+                    <img
+                      src={drawnCard.custom_image_url || drawnCard.logo_url}
                       alt={drawnCard.name}
                       className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-110"
                     />
@@ -837,7 +835,7 @@ export const GachaTab: React.FC = () => {
                   <div className="relative z-20 space-y-1.5 text-white mt-auto">
                     <h3 className="text-base font-black tracking-tight text-white drop-shadow-md">{drawnCard.name}</h3>
                     <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
-                    
+
                     <div className="flex items-center justify-between border-t border-white/20 pt-2">
                       <span className="text-[9px] text-zinc-400">시세 가치</span>
                       <span className="text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
@@ -845,7 +843,7 @@ export const GachaTab: React.FC = () => {
                   </div>
                 </a>
 
-                <button 
+                <button
                   onClick={() => setDrawnCard(null)}
                   className="mt-4 rounded-lg bg-secondary px-4 py-1.5 text-xs font-bold hover:bg-secondary/80 text-muted-foreground"
                 >
@@ -864,7 +862,7 @@ export const GachaTab: React.FC = () => {
             <h3 className="text-base font-bold flex items-center gap-2">
               <Layers className="h-4.5 w-4.5 text-primary" /> 나의 카드 보관함 ({inventory.length}장)
             </h3>
-            <button 
+            <button
               onClick={handleOpenTrade}
               className="sm:hidden rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 flex items-center gap-1"
             >
@@ -908,15 +906,15 @@ export const GachaTab: React.FC = () => {
                 className="w-full sm:w-44 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs focus:border-primary focus:outline-none"
               />
             </div>
-            
-            <button 
+
+            <button
               onClick={() => setRegisterModalOpen(true)}
               className="rounded-lg bg-secondary border border-border/80 px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1 shadow-sm flex"
             >
               <Plus className="h-3.5 w-3.5" /> 스트리머 등록
             </button>
 
-            <button 
+            <button
               onClick={handleOpenTrade}
               className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
             >
@@ -938,7 +936,7 @@ export const GachaTab: React.FC = () => {
             count: number;
           }
           const groupedMap: { [key: string]: GroupedCard } = {};
-          
+
           // 이미 정렬된 filteredInventory 순서대로 순회하며, 최초 등장한 것을 대표로 두고 개수를 누적시킴
           filteredInventory.forEach(card => {
             const cid = card.channel_id;
@@ -1072,7 +1070,7 @@ export const GachaTab: React.FC = () => {
                   };
 
                   return (
-                    <div 
+                    <div
                       key={card.id}
                       onContextMenu={handleContextMenu}
                       onClick={handleCardClick}
@@ -1080,9 +1078,8 @@ export const GachaTab: React.FC = () => {
                       onMouseUp={endPress}
                       onTouchStart={startPress}
                       onTouchEnd={endPress}
-                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer ${
-                        isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''
-                      } ${getCardBorderClass(streamer.base_value)}`}
+                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''
+                        } ${getCardBorderClass(streamer.base_value)}`}
                     >
                       {/* 다중 선택 모드 체크박스 오버레이 */}
                       {selectionMode && (
@@ -1093,8 +1090,8 @@ export const GachaTab: React.FC = () => {
 
                       {/* 카드 이미지 배경 */}
                       <div className="absolute inset-0 z-0">
-                        <img 
-                          src={streamer.custom_image_url || streamer.logo_url} 
+                        <img
+                          src={streamer.custom_image_url || streamer.logo_url}
                           alt={streamer.name}
                           className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
                         />
@@ -1112,7 +1109,7 @@ export const GachaTab: React.FC = () => {
                             OFFLINE
                           </span>
                         )}
-                        
+
                         <div className="flex items-center gap-1">
                           {count > 1 && (
                             <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
@@ -1129,7 +1126,7 @@ export const GachaTab: React.FC = () => {
                       <div className="relative z-20 space-y-1 text-white block mt-auto">
                         <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
                         <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
-                        
+
                         <div className="flex items-center justify-between border-t border-white/10 pt-1">
                           <span className="text-[8.5px] text-zinc-400">시세 가치</span>
                           <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
@@ -1146,10 +1143,10 @@ export const GachaTab: React.FC = () => {
 
       {/* 우클릭 컨텍스트 메뉴 오버레이 */}
       {contextMenu.open && contextMenu.card && (
-        <div 
+        <div
           className="fixed z-50 rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 min-w-36"
-          style={{ 
-            left: `${contextMenu.x}px`, 
+          style={{
+            left: `${contextMenu.x}px`,
             top: `${contextMenu.y}px`,
           }}
           onClick={(e) => e.stopPropagation()}
@@ -1203,11 +1200,11 @@ export const GachaTab: React.FC = () => {
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
               💰 카드 시스템 판매
             </h3>
-            
+
             <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
-              <img 
-                src={sellingStreamer.custom_image_url || sellingStreamer.logo_url} 
-                alt={sellingStreamer.name} 
+              <img
+                src={sellingStreamer.custom_image_url || sellingStreamer.logo_url}
+                alt={sellingStreamer.name}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
               />
               <div className="flex-1 min-w-0">
@@ -1334,9 +1331,9 @@ export const GachaTab: React.FC = () => {
                 return (
                   <div key={channelId} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <img 
-                        src={streamer.custom_image_url || streamer.logo_url} 
-                        alt={streamer.name} 
+                      <img
+                        src={streamer.custom_image_url || streamer.logo_url}
+                        alt={streamer.name}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
                       />
                       <div className="min-w-0">
@@ -1449,17 +1446,16 @@ export const GachaTab: React.FC = () => {
       {alertModal.open && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
-            <h4 className={`text-base font-extrabold mb-2 ${
-              alertModal.type === 'success' ? 'text-emerald-500' :
-              alertModal.type === 'error' ? 'text-red-500' :
-              alertModal.type === 'warning' ? 'text-amber-500' : 'text-primary'
-            }`}>
+            <h4 className={`text-base font-extrabold mb-2 ${alertModal.type === 'success' ? 'text-emerald-500' :
+                alertModal.type === 'error' ? 'text-red-500' :
+                  alertModal.type === 'warning' ? 'text-amber-500' : 'text-primary'
+              }`}>
               {alertModal.title}
             </h4>
             <p className="text-xs text-muted-foreground leading-relaxed py-2">
               {alertModal.message}
             </p>
-            <button 
+            <button
               onClick={() => setAlertModal({ ...alertModal, open: false })}
               className="mt-4 w-full rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition"
             >
