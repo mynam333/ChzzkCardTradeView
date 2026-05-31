@@ -148,7 +148,8 @@ const handleChzzkCallback = async (req, res) => {
                 username: user.username,
                 avatar_url: user.avatar_url,
                 role: user.role,
-                point: user.point
+                point: user.point,
+                last_free_draw: user.last_free_draw
             }
         });
     }

@@ -171,7 +171,8 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         username: user.username,
         avatar_url: user.avatar_url,
         role: user.role,
-        point: user.point
+        point: user.point,
+        last_free_draw: user.last_free_draw
       }
     });
   } catch (err: any) {
