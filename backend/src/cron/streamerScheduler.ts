@@ -8,36 +8,36 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * 정교하게 개편된 카드 가치 계산 공식을 실행합니다.
- * @param followers 팔로워 수
- * @param broadcastMultiplier 실시간 방송 감가 배율 (0.2 ~ 1.0)
+ * @param prevValue 이전 가치 (시세 연속성 유지)
+ * @param followers 팔로워 수 (요구 채팅량 계산용)
+ * @param deltaMultiplier 1회 스케줄러 주기당 방송 상태에 따른 변동 배율 델타값
  * @param chats 실제 채팅량 (방송 중 집계됨)
  * @param concurrentUserCount 실시간 동시 시청자 수
  * @returns 100 ~ 500,000 범위 내로 보정된 최종 가치
  */
 export const calculateCardValue = (
+  prevValue: number,
   followers: number, 
-  broadcastMultiplier: number, 
+  deltaMultiplier: number, 
   chats: number,
   concurrentUserCount: number
 ): number => {
-  // 1. 기본 팔로우 기반 가치 (팔로워 수와 동일하게 1:1 매칭)
-  const baseFollowerValue = followers;
+  // 1. 이전 가치 안전장치 (0 이하 또는 누락 방지)
+  const currentVal = prevValue > 0 ? prevValue : followers;
 
   // 2. 필요 기준 채팅량 (시청자 수 + 팔로워 수 연동 모델)
-  // 대형 스트리머일수록 전체 시청자 대비 채팅 전송 비율(눈팅 비율)이 작아지는 경향을 보정합니다.
   const viewerScale = concurrentUserCount > 1000 ? 0.15 : 0.25;
   const requiredChats = Math.round(concurrentUserCount * viewerScale + Math.sqrt(followers) * 0.05 + 2);
 
-  // 3. 채팅량 영향 요인 보너스/감가 (로그 변동 적용하여 극으로 갈수록 변화 폭 완만화)
-  // 기본 가치(팔로워) 규모에 맞춰 변동폭이 건강하게 유지되도록 스케일러를 Math.sqrt(baseFollowerValue) * 150 으로 동적 설정
-  // 이를 통해 팔로워 수에 비례하여 합리적인 범위 내에서 채팅만으로도 큰 변동폭(수천 ~ 수십만)이 가능하도록 보정합니다.
+  // 3. 채팅량 영향 요인 보너스/감가 (이전 가치 규모에 맞게 유동적으로 스케일링)
   const chatDiff = chats - requiredChats;
   const chatSign = Math.sign(chatDiff);
-  const scaleFactor = Math.sqrt(baseFollowerValue) * 150;
+  const scaleFactor = Math.sqrt(currentVal) * 15; // 누적식이므로 변동폭이 과하지 않게 스케일 조정 (150 -> 15)
   const chatBonus = chatSign * Math.log(1 + Math.abs(chatDiff) / 10) * scaleFactor;
 
-  // 4. 최종 가치 계산 (기본가치 * 방송감가배율 + 채팅보너스)
-  const finalValue = Math.round(baseFollowerValue * broadcastMultiplier + chatBonus);
+  // 4. 최종 가치 계산 (이전 가치 + 방송 상태 델타 변동 + 채팅 보너스)
+  const valueChangeFromBroadcast = currentVal * deltaMultiplier;
+  const finalValue = Math.round(currentVal + valueChangeFromBroadcast + chatBonus);
 
   // 5. 상하한 한계 제한 (100 ~ 500,000)
   return Math.min(Math.max(finalValue, 100), 500000);
@@ -111,13 +111,16 @@ export const syncAllStreamersLiveStatus = async () => {
           // 감가 한계 범위 제한 (0.2 ~ 1.2)
           const newMultiplier = Math.min(Math.max(m, 0.2), 1.2);
 
-          // 최종 가치 연산 (실시간 시청자 수 반영)
+          // 최종 가치 연산 (이전 base_value 기준 누적식 변동 적용)
           const finalVal = calculateCardValue(
+            updatedStreamer.base_value || updatedStreamer.follower_count,
             updatedStreamer.follower_count,
-            newMultiplier,
+            clampedDelta,
             updatedStreamer.chat_count || 0,
             profile.concurrentUserCount || 0
           );
+
+          console.log(`[LiveStatusScheduler] 가치 계산 상세 (스트리머: ${updatedStreamer.name}) - 이전가치: ${updatedStreamer.base_value}, 팔로워: ${updatedStreamer.follower_count}, 시청자: ${profile.concurrentUserCount || 0}, 채팅: ${updatedStreamer.chat_count || 0}, 배율델타: ${clampedDelta.toFixed(5)} -> 최종가치: ${finalVal}`);
 
           // 활동 지표는 방송 횟수, 채팅량에 감가 배율 가중치를 합성하여 점수화
           const activityScore = Math.round(

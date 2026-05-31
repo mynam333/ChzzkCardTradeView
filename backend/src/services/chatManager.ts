@@ -20,10 +20,11 @@ class ChzzkChatManager {
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
    */
   private async getChatAccessToken(channelId: string): Promise<string> {
-    const url = `https://control-api.chzzk.naver.com/v1/chats/access-token?channelId=${channelId}&chatType=STREAMING`;
+    const url = `https://comm-api.chzzk.naver.com/section/v1/chats/access-token?channelId=${channelId}&chatType=STREAMING`;
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
       }
     });
 
