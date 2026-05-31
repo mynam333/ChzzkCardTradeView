@@ -114,7 +114,7 @@ class ChzzkChatManager {
             isJoined = true;
             currentSid = frame.bdy?.sid || frame.sid || ''; // 발급받은 세션 ID 보관
             console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
-          } else if (frame.cmd === 93006) { // CMD_SEND_CHAT
+          } else if (frame.cmd === 93001 || frame.cmd === 93002) { // 93001: CMD_CHAT, 93002: CMD_DONATION
             // 채팅 수신 시 DB 카운트 증가
             const chatCount = Array.isArray(frame.bdy) ? frame.bdy.length : 1;
             await streamerRepository.incrementChatCount(channelId, chatCount);

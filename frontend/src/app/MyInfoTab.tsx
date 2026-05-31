@@ -314,7 +314,7 @@ export const MyInfoTab: React.FC = () => {
           <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 고유 카드 이미지 관리
         </h3>
         <p className="text-xs text-muted-foreground">
-          자기 스트리머 카드 이미지를 커스텀으로 변경할 수 있습니다. 저장 완료 버튼을 누르기 전까지는 임시 Blob 미리보기 상태로 렌더링되어 지연 업로드됩니다. (WebP 최대 1280px 자동 변환)
+          자기 스트리머 카드 이미지를 커스텀으로 변경할 수 있습니다. (WebP 최대 1280px 자동 변환)
         </p>
 
         <div className="flex flex-col sm:flex-row items-center gap-6 pt-2">
