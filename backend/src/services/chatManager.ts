@@ -70,6 +70,7 @@ class ChzzkChatManager {
       const ws = new WebSocket(wsUrl);
 
       let isJoined = false;
+      let currentSid = ''; // 서버로부터 획득할 세션 ID 저장 공간
 
       ws.on('open', () => {
         // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송
@@ -97,7 +98,8 @@ class ChzzkChatManager {
           // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
           if (frame.cmd === 10100) {
             isJoined = true;
-            console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId})`);
+            currentSid = frame.bdy?.sid || ''; // 발급받은 세션 ID 보관
+            console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
           } else if (frame.cmd === 93006) { // CMD_SEND_CHAT
             // 채팅 수신 시 DB 카운트 증가
             // frame.bdy가 배열일 수 있으므로 수신된 실시간 대화 수만큼 증가시킵니다.
@@ -106,7 +108,8 @@ class ChzzkChatManager {
           } else if (frame.cmd === 0) { // 서버의 PING 요청에 대한 PONG 처리
             const pongFrame: ChzzkSocketFrame = {
               ver: '3',
-              cmd: 10000 // CMD_PONG
+              cmd: 10000, // CMD_PONG
+              sid: currentSid
             };
             ws.send(JSON.stringify(pongFrame));
           }
@@ -118,7 +121,11 @@ class ChzzkChatManager {
       // 주기적으로 생존 여부 체크를 위해 클라이언트가 주기적으로 PING 프레임(cmd: 0)을 전송 (15초 주기로 최적화)
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ ver: '3', cmd: 0 })); // CMD_PING
+          ws.send(JSON.stringify({ 
+            ver: '3', 
+            cmd: 0,
+            sid: currentSid 
+          })); // CMD_PING
         }
       }, 15000);
 
