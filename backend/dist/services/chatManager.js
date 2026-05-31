@@ -105,7 +105,10 @@ class ChzzkChatManager {
             this.connections.set(channelId, { socket: ws, pingInterval });
         }
         catch (err) {
-            console.error(`[ChatManager] 소켓 연결 중 예외 발생 (채널: ${channelId}):`, err.message);
+            console.error(`[ChatManager] 소켓 연결 중 예외 발생 (채널: ${channelId}):`, err);
+            if (err.cause) {
+                console.error(`[ChatManager] 상세 원인 (Cause):`, err.cause);
+            }
         }
     }
     /**
