@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     broadcast_count INTEGER DEFAULT 0,          -- 방송 켠 횟수
     chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
     broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
+    prev_value INTEGER DEFAULT 1000,            -- 이전 환산 시세 (등락률 계산용)
     updated_at TEXT DEFAULT (datetime('now'))
 );
 

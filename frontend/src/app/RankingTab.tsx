@@ -22,6 +22,7 @@ interface Streamer {
   custom_image_url: string | null;
   base_value: number;
   follower_count: number;
+  prev_value?: number;
 }
 
 interface UserRank {
@@ -174,8 +175,35 @@ export const RankingTab: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-xs font-black text-primary">{(st.base_value || 0).toLocaleString()} P</span>
+                <div className="text-right flex flex-col items-end justify-center">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="text-xs font-black text-primary">{(st.base_value || 0).toLocaleString()} P</span>
+                    {(() => {
+                      const prevVal = st.prev_value ?? st.base_value ?? 1000;
+                      const diff = st.base_value - prevVal;
+                      const rate = prevVal > 0 ? (diff / prevVal) * 100 : 0;
+
+                      if (diff > 0) {
+                        return (
+                          <span className="text-[10px] font-black text-rose-500 flex items-center gap-0.5" title={`이전 시세: ${prevVal.toLocaleString()} P`}>
+                            ▲ +{rate.toFixed(1)}%
+                          </span>
+                        );
+                      } else if (diff < 0) {
+                        return (
+                          <span className="text-[10px] font-black text-blue-500 flex items-center gap-0.5" title={`이전 시세: ${prevVal.toLocaleString()} P`}>
+                            ▼ {rate.toFixed(1)}%
+                          </span>
+                        );
+                      } else {
+                        return (
+                          <span className="text-[9px] font-bold text-muted-foreground" title={`이전 시세: ${prevVal.toLocaleString()} P`}>
+                            - 0.0%
+                          </span>
+                        );
+                      }
+                    })()}
+                  </div>
                   <p className="text-[9px] text-muted-foreground">실시간 환산 시세</p>
                 </div>
               </div>

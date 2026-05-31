@@ -27,6 +27,7 @@ export interface Streamer {
   broadcast_count?: number;
   chat_count?: number;
   broadcast_multiplier?: number;
+  prev_value?: number;
   updated_at?: string;
 }
 
