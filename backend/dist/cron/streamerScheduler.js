@@ -17,19 +17,24 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param deltaMultiplier 1회 스케줄러 주기당 방송 상태에 따른 변동 배율 델타값
  * @param chats 실제 채팅량 (방송 중 집계됨)
  * @param concurrentUserCount 실시간 동시 시청자 수
+ * @param isLive 실시간 채팅 집계 및 보너스 적용 대상이 되는 생방송 활성화 여부
  * @returns 100 ~ 500,000 범위 내로 보정된 최종 가치
  */
-const calculateCardValue = (prevValue, followers, deltaMultiplier, chats, concurrentUserCount) => {
+const calculateCardValue = (prevValue, followers, deltaMultiplier, chats, concurrentUserCount, isLive) => {
     // 1. 이전 가치 안전장치 (0 이하 또는 누락 방지)
     const currentVal = prevValue > 0 ? prevValue : followers;
     // 2. 필요 기준 채팅량 (시청자 수 + 팔로워 수 연동 모델)
     const viewerScale = concurrentUserCount > 1000 ? 0.15 : 0.25;
     const requiredChats = Math.round(concurrentUserCount * viewerScale + Math.sqrt(followers) * 0.05 + 2);
     // 3. 채팅량 영향 요인 보너스/감가 (이전 가치 규모에 맞게 유동적으로 스케일링)
-    const chatDiff = chats - requiredChats;
-    const chatSign = Math.sign(chatDiff);
-    const scaleFactor = Math.sqrt(currentVal) * 15; // 누적식이므로 변동폭이 과하지 않게 스케일 조정 (150 -> 15)
-    const chatBonus = chatSign * Math.log(1 + Math.abs(chatDiff) / 10) * scaleFactor;
+    // 방송 중(isLive = true) 일 때만 채팅 보너스가 작용합니다.
+    let chatBonus = 0;
+    if (isLive) {
+        const chatDiff = chats - requiredChats;
+        const chatSign = Math.sign(chatDiff);
+        const scaleFactor = Math.sqrt(currentVal) * 15; // 누적식이므로 변동폭이 과하지 않게 스케일 조정 (150 -> 15)
+        chatBonus = chatSign * Math.log(1 + Math.abs(chatDiff) / 10) * scaleFactor;
+    }
     // 4. 최종 가치 계산 (이전 가치 + 방송 상태 델타 변동 + 채팅 보너스)
     const valueChangeFromBroadcast = currentVal * deltaMultiplier;
     const finalValue = Math.round(currentVal + valueChangeFromBroadcast + chatBonus);
@@ -105,8 +110,8 @@ const syncAllStreamersLiveStatus = async () => {
                     m = m + clampedDelta;
                     // 감가 한계 범위 제한 (0.2 ~ 1.2)
                     const newMultiplier = Math.min(Math.max(m, 0.2), 1.2);
-                    // 최종 가치 연산 (이전 base_value 기준 누적식 변동 적용)
-                    const finalVal = (0, exports.calculateCardValue)(updatedStreamer.base_value || updatedStreamer.follower_count, updatedStreamer.follower_count, clampedDelta, updatedStreamer.chat_count || 0, profile.concurrentUserCount || 0);
+                    // 최종 가치 연산 (이전 base_value 기준 누적식 변동 적용 및 방송중 여부 전달)
+                    const finalVal = (0, exports.calculateCardValue)(updatedStreamer.base_value || updatedStreamer.follower_count, updatedStreamer.follower_count, clampedDelta, updatedStreamer.chat_count || 0, profile.concurrentUserCount || 0, isEffectiveLive);
                     console.log(`[LiveStatusScheduler] 가치 계산 상세 (스트리머: ${updatedStreamer.name}) - 이전가치: ${updatedStreamer.base_value}, 팔로워: ${updatedStreamer.follower_count}, 시청자: ${profile.concurrentUserCount || 0}, 채팅: ${updatedStreamer.chat_count || 0}, 배율델타: ${clampedDelta.toFixed(5)} -> 최종가치: ${finalVal}`);
                     // 활동 지표는 방송 횟수, 채팅량에 감가 배율 가중치를 합성하여 점수화
                     const activityScore = Math.round(((updatedStreamer.broadcast_count || 0) * 10 + (updatedStreamer.chat_count || 0)) * newMultiplier);

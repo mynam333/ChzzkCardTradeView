@@ -13,8 +13,17 @@ interface ChzzkSocketFrame {
 }
 
 class ChzzkChatManager {
-  // 채널 ID별 WebSocket 연결 관리 맵
-  private connections: Map<string, { socket: WebSocket; pingInterval?: NodeJS.Timeout }> = new Map();
+  // 채널 ID별 WebSocket 연결 관리 맵 (재연결용 메타데이터 보관)
+  private connections: Map<
+    string, 
+    { 
+      socket: WebSocket; 
+      pingInterval?: NodeJS.Timeout; 
+      chatChannelId: string;
+      streamerAccessToken?: string;
+      isExplicitlyClosed?: boolean;
+    }
+  > = new Map();
 
   /**
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
@@ -65,7 +74,7 @@ class ChzzkChatManager {
       ws.on('open', () => {
         // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송
         const connectFrame: ChzzkSocketFrame = {
-          ver: '2',
+          ver: '3',
           cmd: 100, // CMD_CONNECT
           svcid: 'game',
           cid: chatChannelId,
@@ -96,7 +105,7 @@ class ChzzkChatManager {
             await streamerRepository.incrementChatCount(channelId, chatCount);
           } else if (frame.cmd === 0) { // 서버의 PING 요청에 대한 PONG 처리
             const pongFrame: ChzzkSocketFrame = {
-              ver: '2',
+              ver: '3',
               cmd: 10000 // CMD_PONG
             };
             ws.send(JSON.stringify(pongFrame));
@@ -106,16 +115,26 @@ class ChzzkChatManager {
         }
       });
 
-      // 주기적으로 생존 여부 체크를 위해 클라이언트가 주기적으로 PING 프레임(cmd: 0)을 전송
+      // 주기적으로 생존 여부 체크를 위해 클라이언트가 주기적으로 PING 프레임(cmd: 0)을 전송 (15초 주기로 최적화)
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ ver: '2', cmd: 0 })); // CMD_PING
+          ws.send(JSON.stringify({ ver: '3', cmd: 0 })); // CMD_PING
         }
-      }, 20000);
+      }, 15000);
 
       ws.on('close', () => {
         console.log(`[ChatManager] 웹소켓 연결 닫힘 (채널: ${channelId})`);
+        const conn = this.connections.get(channelId);
+        const wasExplicitlyClosed = conn?.isExplicitlyClosed;
         this.cleanupConnection(channelId);
+
+        // 명시적으로 끊은 경우가 아닌 예기치 못한 끊김인 경우 5초 후 자동 재연결 시도
+        if (!wasExplicitlyClosed) {
+          console.log(`[ChatManager] 예기치 못한 종료 감지 -> 5초 후 자동 재연결 시도 (채널: ${channelId})`);
+          setTimeout(() => {
+            this.connect(channelId, chatChannelId, streamerAccessToken);
+          }, 5000);
+        }
       });
 
       ws.on('error', (err) => {
@@ -123,7 +142,13 @@ class ChzzkChatManager {
         ws.close();
       });
 
-      this.connections.set(channelId, { socket: ws, pingInterval });
+      this.connections.set(channelId, { 
+        socket: ws, 
+        pingInterval,
+        chatChannelId,
+        streamerAccessToken,
+        isExplicitlyClosed: false
+      });
     } catch (err: any) {
       console.error(`[ChatManager] 소켓 연결 중 예외 발생 (채널: ${channelId}):`, err);
       if (err.cause) {
@@ -148,6 +173,7 @@ class ChzzkChatManager {
     const conn = this.connections.get(channelId);
     if (conn) {
       console.log(`[ChatManager] 채팅 수집 중단 (채널: ${channelId})`);
+      conn.isExplicitlyClosed = true;
       conn.socket.close();
       this.cleanupConnection(channelId);
     }
