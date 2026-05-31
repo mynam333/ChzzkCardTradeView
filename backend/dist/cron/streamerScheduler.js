@@ -26,8 +26,10 @@ const syncAllStreamersLiveStatus = async () => {
                 // API 요청 간 시간 간격을 두어 네이버 API Rate Limit 방지 (200ms)
                 await delay(200);
                 const profile = await (0, chzzkService_1.fetchChzzkChannelProfile)(streamer.channel_id);
+                console.log(`[LiveStatusSchedulerDebug] DB 업데이트 시도 (ID: ${streamer.channel_id},이름: ${streamer.name}) - 신규 isActive: ${profile.openLive}, 신규 followerCount: ${profile.followerCount}`);
                 // 데이터베이스에 라이브 상태 및 팔로워 수 업데이트
                 await repositories_1.streamerRepository.updateLiveStatus(streamer.channel_id, profile.openLive, profile.followerCount);
+                console.log(`[LiveStatusSchedulerDebug] DB 업데이트 성공 (ID: ${streamer.channel_id})`);
                 successCount++;
             }
             catch (err) {
