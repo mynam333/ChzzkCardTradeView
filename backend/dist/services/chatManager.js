@@ -10,7 +10,7 @@ class ChzzkChatManager {
     // 채널 ID별 WebSocket 연결 관리 맵 (재연결용 메타데이터 보관)
     connections = new Map();
     /**
-     * 치지직 채팅 서버 연결용 토큰 획득 API 호출
+     * 치지직 채팅 서버 연결용 토큰 및 식별 해시(userIdHash) 획득 API 호출
      */
     async getChatAccessToken(channelId, streamerAccessToken) {
         const url = `https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId=${channelId}&chatType=STREAMING`;
@@ -27,7 +27,10 @@ class ChzzkChatManager {
         }
         const body = (await res.json());
         if (body.code === 200 && body.content) {
-            return body.content.accessToken;
+            return {
+                accessToken: body.content.accessToken,
+                userIdHash: body.content.userIdHash || ''
+            };
         }
         throw new Error(body.message || '채팅 토큰 파싱 에러');
     }
@@ -41,7 +44,7 @@ class ChzzkChatManager {
         }
         console.log(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
         try {
-            const accessToken = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
+            const { accessToken, userIdHash } = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
             // 가상 UUID 생성 헬퍼 함수
             const generateUuid = () => {
                 return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -64,7 +67,7 @@ class ChzzkChatManager {
                     cid: chatChannelId,
                     sid: null,
                     bdy: {
-                        uid: streamerAccessToken ? channelId : null,
+                        uid: userIdHash || null, // 토큰 발급에 연동된 고유 유저 ID 해시를 대입하여 불일치 방지
                         devType: 2001,
                         accTkn: accessToken,
                         auth: 'SEND',
@@ -87,8 +90,14 @@ class ChzzkChatManager {
                     const frame = JSON.parse(rawMsg);
                     // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
                     if (frame.cmd === 10100) {
+                        // retCode가 존재하고 0이 아니라면 연결 에러로 판단해 접속 종료
+                        if (frame.retCode !== undefined && frame.retCode !== 0) {
+                            console.error(`[ChatManager] 조인 인증 실패 (에러코드: ${frame.retCode}, 사유: ${frame.retMsg})`);
+                            ws.close();
+                            return;
+                        }
                         isJoined = true;
-                        // 최상위 frame.sid를 우선 참조하고 백업으로 frame.bdy.sid 참조
+                        // 최상위 frame.sid를 우선 참조하고 백업으로 frame.bdy?.sid 참조
                         currentSid = frame.sid || frame.bdy?.sid || '';
                         console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
                     }
