@@ -37,7 +37,7 @@ export const calculateCardValue = (
   if (isLive) {
     const chatDiff = chats - requiredChats;
     const chatSign = Math.sign(chatDiff);
-    const scaleFactor = Math.sqrt(currentVal) * 15; // 누적식이므로 변동폭이 과하지 않게 스케일 조정 (150 -> 15)
+    const scaleFactor = Math.sqrt(currentVal) * 0.5; // 채팅량 편차에 의한 가치 변동폭을 대폭 축소하여 안정성 확보 (15 -> 0.5)
     chatBonus = chatSign * Math.log(1 + Math.abs(chatDiff) / 10) * scaleFactor;
   }
 
