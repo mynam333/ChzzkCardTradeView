@@ -26,9 +26,9 @@ class ChzzkChatManager {
   > = new Map();
 
   /**
-   * 치지직 채팅 서버 연결용 토큰 및 식별 해시(userIdHash) 획득 API 호출
+   * 치지직 채팅 서버 연결용 토큰 획득 API 호출
    */
-  private async getChatAccessToken(channelId: string, streamerAccessToken?: string): Promise<{ accessToken: string; userIdHash: string }> {
+  private async getChatAccessToken(channelId: string, streamerAccessToken?: string): Promise<{ accessToken: string }> {
     const url = `https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId=${channelId}&chatType=STREAMING`;
     const headers: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -48,8 +48,7 @@ class ChzzkChatManager {
     const body = (await res.json()) as any;
     if (body.code === 200 && body.content) {
       return {
-        accessToken: body.content.accessToken,
-        userIdHash: body.content.userIdHash || ''
+        accessToken: body.content.accessToken
       };
     }
     throw new Error(body.message || '채팅 토큰 파싱 에러');
@@ -66,45 +65,34 @@ class ChzzkChatManager {
 
     console.log(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
     try {
-      const { accessToken, userIdHash } = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
+      const { accessToken } = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
       
-      // 가상 UUID 생성 헬퍼 함수
-      const generateUuid = () => {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = Math.random() * 16 | 0;
-          const v = c === 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
-      };
+      // 치지직 기본 웹소켓 서버 주소 분산 매핑 (라이브러리 로직)
+      const serverId = Math.abs(
+        chatChannelId.split("")
+          .map(c => c.charCodeAt(0))
+          .reduce((a, b) => a + b)
+      ) % 9 + 1;
 
-      // 치지직 기본 웹소켓 서버 주소
-      const wsUrl = 'wss://kr-ss1.chat.naver.com/chat';
+      const wsUrl = `wss://kr-ss${serverId}.chat.naver.com/chat`;
       const ws = new WebSocket(wsUrl);
 
       let isJoined = false;
       let currentSid = ''; // 서버로부터 획득할 세션 ID 저장 공간
 
       ws.on('open', () => {
-        // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송 (전달받은 실기기 패킷 구조 적용)
-        // 로그인 인증 수집 시에는 채널 ID를 uid로 전달하고, 비로그인 수집 시에는 null로 설정하여 인증 불일치(105, 106)를 완벽 차단합니다.
+        // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송 (공식 라이브러리 검증 규격 적용)
         const connectFrame = {
-          ver: '3',
+          ver: '2', // 버전은 "2"를 사용해야 Incorrect parameter 에러가 나지 않습니다.
           cmd: 100, // CMD_CONNECT
           svcid: 'game',
           cid: chatChannelId,
           sid: null,
           bdy: {
-            uid: streamerAccessToken ? channelId : null,
-            devType: 2001,
             accTkn: accessToken,
-            auth: 'SEND',
-            libVer: '4.11.0',
-            osVer: 'Linux/',
-            devName: 'Mozilla Firefox/135.0',
-            locale: 'ko',
-            timezone: 'Asia/Seoul',
-            uuid: generateUuid(),
-            windowId: generateUuid()
+            auth: streamerAccessToken ? 'SEND' : 'READ', // 비로그인 시에는 반드시 READ로 설정해야 105 에러가 나지 않습니다.
+            devType: 2001,
+            uid: streamerAccessToken ? channelId : null
           },
           tid: 1
         };
@@ -113,30 +101,27 @@ class ChzzkChatManager {
 
       ws.on('message', async (data: string) => {
         try {
-          const frame = JSON.parse(data) as any;
+          const rawMsg = data.toString();
+          const frame = JSON.parse(rawMsg) as any;
 
-          // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
+          // CMD_CONNECT_SUCCESS (10100)
           if (frame.cmd === 10100) {
-            // retCode가 존재하고 0이 아니라면 연결 에러로 판단해 접속 종료
             if (frame.retCode !== undefined && frame.retCode !== 0) {
               console.error(`[ChatManager] 조인 인증 실패 (에러코드: ${frame.retCode}, 사유: ${frame.retMsg})`);
               ws.close();
               return;
             }
             isJoined = true;
-            // 최상위 frame.sid를 우선 참조하고 백업으로 frame.bdy?.sid 참조
-            currentSid = frame.sid || frame.bdy?.sid || '';
+            currentSid = frame.bdy?.sid || frame.sid || ''; // 발급받은 세션 ID 보관
             console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
           } else if (frame.cmd === 93006) { // CMD_SEND_CHAT
             // 채팅 수신 시 DB 카운트 증가
-            // frame.bdy가 배열일 수 있으므로 수신된 실시간 대화 수만큼 증가시킵니다.
             const chatCount = Array.isArray(frame.bdy) ? frame.bdy.length : 1;
             await streamerRepository.incrementChatCount(channelId, chatCount);
-          } else if (frame.cmd === 0) { // 서버의 PING 요청에 대한 PONG 처리
-            const pongFrame: ChzzkSocketFrame = {
-              ver: '3',
-              cmd: 10000, // CMD_PONG
-              sid: currentSid
+          } else if (frame.cmd === 0) { // 서버의 PING 요청에 대한 PONG 처리 (라이브러리 스펙 매핑)
+            const pongFrame = {
+              ver: '2',
+              cmd: 10000 // CMD_PONG
             };
             ws.send(JSON.stringify(pongFrame));
           }
@@ -145,16 +130,15 @@ class ChzzkChatManager {
         }
       });
 
-      // 주기적으로 생존 여부 체크를 위해 클라이언트가 주기적으로 PING 프레임(cmd: 0)을 전송 (15초 주기로 최적화)
+      // 주기적으로 생존 여부 체크를 위해 클라이언트가 주기적으로 PING 프레임(cmd: 0)을 전송 (20초 라이브러리 주기 적용)
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ 
-            ver: '3', 
-            cmd: 0,
-            sid: currentSid 
-          })); // CMD_PING
+            ver: '2', 
+            cmd: 0 
+          })); // CMD_PING (세션 ID 불필요)
         }
-      }, 15000);
+      }, 20000);
 
       ws.on('close', () => {
         console.log(`[ChatManager] 웹소켓 연결 닫힘 (채널: ${channelId})`);
