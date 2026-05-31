@@ -25,16 +25,12 @@ export const syncAllStreamersLiveStatus = async () => {
 
         const profile = await fetchChzzkChannelProfile(streamer.channel_id);
         
-        console.log(`[LiveStatusSchedulerDebug] DB 업데이트 시도 (ID: ${streamer.channel_id},이름: ${streamer.name}) - 신규 isActive: ${profile.openLive}, 신규 followerCount: ${profile.followerCount}`);
-        
         // 데이터베이스에 라이브 상태 및 팔로워 수 업데이트
         await streamerRepository.updateLiveStatus(
           streamer.channel_id,
           profile.openLive,
           profile.followerCount
         );
-        
-        console.log(`[LiveStatusSchedulerDebug] DB 업데이트 성공 (ID: ${streamer.channel_id})`);
         successCount++;
       } catch (err: any) {
         console.error(`[LiveStatusScheduler] 스트리머 정보 업데이트 실패 (ID: ${streamer.channel_id}):`, err.message);

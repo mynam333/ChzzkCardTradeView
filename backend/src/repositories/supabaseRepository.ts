@@ -376,7 +376,9 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
           logo_url,
           custom_image_url,
           base_value,
-          follower_count
+          follower_count,
+          is_active,
+          is_image_banned
         )
       `)
       .eq('user_id', userId)

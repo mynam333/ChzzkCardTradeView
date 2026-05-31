@@ -324,7 +324,9 @@ export class SqliteUserCardRepository implements IUserCardRepository {
 
   async findByUserId(userId: string): Promise<any[]> {
     const rows = this.getDb().prepare(`
-      SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image, s.base_value as streamer_base_value, s.follower_count as streamer_follower
+      SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image, 
+             s.base_value as streamer_base_value, s.follower_count as streamer_follower, 
+             s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned
       FROM user_cards uc
       JOIN streamers s ON uc.channel_id = s.channel_id
       WHERE uc.user_id = ?
@@ -344,9 +346,9 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         custom_image_url: row.streamer_custom_image,
         base_value: row.streamer_base_value,
         follower_count: row.streamer_follower,
-        is_image_banned: false,
+        is_image_banned: row.streamer_is_image_banned === 1,
         activity_score: 0,
-        is_active: false
+        is_active: row.streamer_is_active === 1
       }
     }));
   }
