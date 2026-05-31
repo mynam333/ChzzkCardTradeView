@@ -19,14 +19,18 @@ class ChzzkChatManager {
   /**
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
    */
-  private async getChatAccessToken(channelId: string): Promise<string> {
+  private async getChatAccessToken(channelId: string, streamerAccessToken?: string): Promise<string> {
     const url = `https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId=${channelId}&chatType=STREAMING`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      }
-    });
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    };
+
+    if (streamerAccessToken) {
+      headers['Authorization'] = `Bearer ${streamerAccessToken}`;
+    }
+
+    const res = await fetch(url, { headers });
 
     if (!res.ok) {
       throw new Error(`채팅 토큰 요청 실패 (HTTP 상태코드: ${res.status})`);
@@ -42,7 +46,7 @@ class ChzzkChatManager {
   /**
    * 특정 채널의 방송 중 채팅방 웹소켓 연결 시작
    */
-  public async connect(channelId: string, chatChannelId: string) {
+  public async connect(channelId: string, chatChannelId: string, streamerAccessToken?: string) {
     if (this.connections.has(channelId)) {
       // 이미 연결되어 있으면 추가 연결을 건너뜁니다.
       return;
@@ -50,7 +54,7 @@ class ChzzkChatManager {
 
     console.log(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
     try {
-      const accessToken = await this.getChatAccessToken(channelId);
+      const accessToken = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
       
       // 치지직 기본 웹소켓 서버 주소
       const wsUrl = 'wss://kr-ss1.chat.naver.com/chat';
@@ -126,6 +130,15 @@ class ChzzkChatManager {
         console.error(`[ChatManager] 상세 원인 (Cause):`, err.cause);
       }
     }
+  }
+
+  /**
+   * 특정 스트리머의 채팅 수집 웹소켓이 정상 연결(OPEN)되어 있는지 여부 반환
+   */
+  public isConnected(channelId: string): boolean {
+    const conn = this.connections.get(channelId);
+    if (!conn) return false;
+    return conn.socket.readyState === WebSocket.OPEN || conn.socket.readyState === WebSocket.CONNECTING;
   }
 
   /**

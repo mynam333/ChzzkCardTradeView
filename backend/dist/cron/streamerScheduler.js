@@ -64,8 +64,18 @@ const syncAllStreamersLiveStatus = async () => {
                 await repositories_1.streamerRepository.updateLiveStatus(streamer.channel_id, profile.openLive, profile.followerCount);
                 // 3. 실시간 채팅 수집을 위한 Websocket 연결/종료 관리
                 if (profile.openLive && profile.chatChannelId) {
+                    let streamerAccessToken = undefined;
+                    try {
+                        const streamerUser = await repositories_1.userRepository.findById(streamer.channel_id);
+                        if (streamerUser?.access_token) {
+                            streamerAccessToken = streamerUser.access_token;
+                        }
+                    }
+                    catch (err) {
+                        // 사용자 정보가 없거나 에러가 나면 무시하고 비로그인 수집 시도
+                    }
                     // 방송 중이면 웹소켓 연결 수립
-                    chatManager_1.chatManager.connect(streamer.channel_id, profile.chatChannelId);
+                    chatManager_1.chatManager.connect(streamer.channel_id, profile.chatChannelId, streamerAccessToken);
                 }
                 else {
                     // 방송 중이 아니면 웹소켓 연결 해제
@@ -77,7 +87,10 @@ const syncAllStreamersLiveStatus = async () => {
                     let m = updatedStreamer.broadcast_multiplier !== undefined ? updatedStreamer.broadcast_multiplier : 1.0;
                     const MAX_DELTA = 0.05; // 1회 스케줄러 당 변경 가능한 배율의 최대 절댓값 한계
                     let delta = 0;
-                    if (profile.openLive) {
+                    // 19금/연령제한/해외차단 등으로 생방송 중(profile.openLive = true)이지만 채팅 수집 소켓이 비활성화된 경우 가치 계산 시 오프라인(감가) 처리
+                    const isChatConnected = chatManager_1.chatManager.isConnected(streamer.channel_id);
+                    const isEffectiveLive = profile.openLive && isChatConnected;
+                    if (isEffectiveLive) {
                         // 방송 중일 때 복구 (Recovery): 초반(0.2 부근)에 급격히 복구되다가 1.0에 갈수록 완만히 안착
                         // 2분 주기 기준, 약 4~6시간(120~180 루프) 정도 방송을 유지하면 거의 1.0 수준으로 완벽하게 복구되도록 설계
                         delta = Math.log(1 + (1.0 - m) * 10) * 0.0055;
