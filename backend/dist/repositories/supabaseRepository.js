@@ -166,6 +166,30 @@ class SupabaseStreamerRepository {
         if (error)
             throw error;
     }
+    async incrementBroadcastCount(channelId) {
+        const streamer = await this.findById(channelId);
+        if (!streamer)
+            return;
+        const current = streamer.broadcast_count || 0;
+        const { error } = await this.getClient()
+            .from('streamers')
+            .update({ broadcast_count: current + 1, updated_at: new Date().toISOString() })
+            .eq('channel_id', channelId);
+        if (error)
+            throw error;
+    }
+    async incrementChatCount(channelId, count = 1) {
+        const streamer = await this.findById(channelId);
+        if (!streamer)
+            return;
+        const current = streamer.chat_count || 0;
+        const { error } = await this.getClient()
+            .from('streamers')
+            .update({ chat_count: current + count, updated_at: new Date().toISOString() })
+            .eq('channel_id', channelId);
+        if (error)
+            throw error;
+    }
 }
 exports.SupabaseStreamerRepository = SupabaseStreamerRepository;
 // 3. Supabase 쿠폰 레포지토리

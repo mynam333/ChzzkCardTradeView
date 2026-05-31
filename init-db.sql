@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS streamers (
     activity_score INTEGER DEFAULT 0,          -- 활동 지표 환산 점수
     base_value INTEGER DEFAULT 1000,           -- 현재 환산 시세 (재화 기준)
     is_active INTEGER DEFAULT 0,               -- 현재 방송 중 여부 (0: false, 1: true)
+    broadcast_count INTEGER DEFAULT 0,          -- 방송 켠 횟수
+    chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
+    broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
     updated_at TEXT DEFAULT (datetime('now'))
 );
 

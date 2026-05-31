@@ -99,6 +99,9 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       base_value: row.base_value,
       is_active: row.is_active === 1,
       serial_number: row.serial_number || undefined,
+      broadcast_count: row.broadcast_count || 0,
+      chat_count: row.chat_count || 0,
+      broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       updated_at: row.updated_at
     }));
   }
@@ -116,14 +119,17 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       base_value: row.base_value,
       is_active: row.is_active === 1,
       serial_number: row.serial_number || undefined,
+      broadcast_count: row.broadcast_count || 0,
+      chat_count: row.chat_count || 0,
+      broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       updated_at: row.updated_at
     };
   }
 
   async save(streamer: Streamer): Promise<void> {
     this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(channel_id) DO UPDATE SET
         name = excluded.name,
         logo_url = excluded.logo_url,
@@ -132,6 +138,9 @@ export class SqliteStreamerRepository implements IStreamerRepository {
         base_value = excluded.base_value,
         is_active = excluded.is_active,
         serial_number = COALESCE(excluded.serial_number, streamers.serial_number),
+        broadcast_count = COALESCE(excluded.broadcast_count, streamers.broadcast_count),
+        chat_count = COALESCE(excluded.chat_count, streamers.chat_count),
+        broadcast_multiplier = COALESCE(excluded.broadcast_multiplier, streamers.broadcast_multiplier),
         updated_at = datetime('now')
     `).run(
       streamer.channel_id,
@@ -141,7 +150,10 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       streamer.activity_score,
       streamer.base_value,
       streamer.is_active ? 1 : 0,
-      streamer.serial_number || null
+      streamer.serial_number || null,
+      streamer.broadcast_count || 0,
+      streamer.chat_count || 0,
+      streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0
     );
   }
 
@@ -173,6 +185,16 @@ export class SqliteStreamerRepository implements IStreamerRepository {
   async updateLiveStatus(channelId: string, isActive: boolean, followerCount: number): Promise<void> {
     this.getDb().prepare('UPDATE streamers SET is_active = ?, follower_count = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
       .run(isActive ? 1 : 0, followerCount, channelId);
+  }
+
+  async incrementBroadcastCount(channelId: string): Promise<void> {
+    this.getDb().prepare('UPDATE streamers SET broadcast_count = broadcast_count + 1, updated_at = datetime(\'now\') WHERE channel_id = ?')
+      .run(channelId);
+  }
+
+  async incrementChatCount(channelId: string, count: number = 1): Promise<void> {
+    this.getDb().prepare('UPDATE streamers SET chat_count = chat_count + ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
+      .run(count, channelId);
   }
 }
 // 3. SQLite 쿠폰 레포지토리

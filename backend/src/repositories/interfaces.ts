@@ -24,6 +24,9 @@ export interface Streamer {
   base_value: number;
   is_active: boolean;
   serial_number?: number;
+  broadcast_count?: number;
+  chat_count?: number;
+  broadcast_multiplier?: number;
   updated_at?: string;
 }
 
@@ -87,6 +90,8 @@ export interface IStreamerRepository {
   findMaxSerialNumber(): Promise<number>;
   findAllocatedStreamerSerialNumbers(): Promise<number[]>;
   updateLiveStatus(channelId: string, isActive: boolean, followerCount: number): Promise<void>;
+  incrementBroadcastCount(channelId: string): Promise<void>;
+  incrementChatCount(channelId: string, count?: number): Promise<void>;
 }
 
 // 3. 쿠폰 리포지토리 인터페이스

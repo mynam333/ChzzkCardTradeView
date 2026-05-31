@@ -190,6 +190,28 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
   }
+
+  async incrementBroadcastCount(channelId: string): Promise<void> {
+    const streamer = await this.findById(channelId);
+    if (!streamer) return;
+    const current = streamer.broadcast_count || 0;
+    const { error } = await this.getClient()
+      .from('streamers')
+      .update({ broadcast_count: current + 1, updated_at: new Date().toISOString() })
+      .eq('channel_id', channelId);
+    if (error) throw error;
+  }
+
+  async incrementChatCount(channelId: string, count: number = 1): Promise<void> {
+    const streamer = await this.findById(channelId);
+    if (!streamer) return;
+    const current = streamer.chat_count || 0;
+    const { error } = await this.getClient()
+      .from('streamers')
+      .update({ chat_count: current + count, updated_at: new Date().toISOString() })
+      .eq('channel_id', channelId);
+    if (error) throw error;
+  }
 }
 // 3. Supabase 쿠폰 레포지토리
 export class SupabaseCouponRepository implements ICouponRepository {

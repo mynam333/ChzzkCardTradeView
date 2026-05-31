@@ -52,6 +52,28 @@ const initDatabaseConnection = async () => {
             const sqlSchema = fs_1.default.readFileSync(sqlPath, 'utf8');
             sqliteDb.exec(sqlSchema);
             console.log('[DB] 로컬 SQLite3 데이터베이스 연결 및 초기 스키마 적재가 완료되었습니다. (LOCAL MODE)');
+            // 테이블 컬럼 자동 마이그레이션 방어 장치
+            try {
+                sqliteDb.prepare("SELECT broadcast_count FROM streamers LIMIT 1").get();
+            }
+            catch (e) {
+                console.log('[DB Migration] streamers 테이블에 broadcast_count 컬럼이 없어 추가합니다.');
+                sqliteDb.exec("ALTER TABLE streamers ADD COLUMN broadcast_count INTEGER DEFAULT 0;");
+            }
+            try {
+                sqliteDb.prepare("SELECT chat_count FROM streamers LIMIT 1").get();
+            }
+            catch (e) {
+                console.log('[DB Migration] streamers 테이블에 chat_count 컬럼이 없어 추가합니다.');
+                sqliteDb.exec("ALTER TABLE streamers ADD COLUMN chat_count INTEGER DEFAULT 0;");
+            }
+            try {
+                sqliteDb.prepare("SELECT broadcast_multiplier FROM streamers LIMIT 1").get();
+            }
+            catch (e) {
+                console.log('[DB Migration] streamers 테이블에 broadcast_multiplier 컬럼이 없어 추가합니다.');
+                sqliteDb.exec("ALTER TABLE streamers ADD COLUMN broadcast_multiplier REAL DEFAULT 1.0;");
+            }
         }
         else {
             console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);

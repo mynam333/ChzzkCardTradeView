@@ -109,8 +109,18 @@ const drawCard = async (req, res) => {
         if (streamers.length === 0) {
             return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
         }
-        // D. 무작위 스트리머 추첨
-        const luckyStreamer = streamers[Math.floor(Math.random() * streamers.length)];
+        // D. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 높을수록 확률 하락, 낮을수록 확률 상승)
+        const weights = streamers.map(s => 1 / (s.base_value || 100));
+        const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+        let randomNum = Math.random() * totalWeight;
+        let luckyStreamer = streamers[0];
+        for (let i = 0; i < streamers.length; i++) {
+            randomNum -= weights[i];
+            if (randomNum <= 0) {
+                luckyStreamer = streamers[i];
+                break;
+            }
+        }
         // E. 스트리머 고유 테이블에 등록된 고정 시리얼 넘버 적용
         const serialNumber = luckyStreamer.serial_number || 1;
         // F. 재화 차감 또는 무료 기회 소진 업데이트

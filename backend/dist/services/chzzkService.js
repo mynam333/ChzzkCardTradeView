@@ -22,11 +22,15 @@ const fetchChzzkChannelProfile = async (channelId) => {
         }
         const profileBody = (await profileRes.json());
         let openLive = false;
+        let chatChannelId = null;
+        let concurrentUserCount = 0;
         if (liveRes && liveRes.ok) {
             try {
                 const liveBody = (await liveRes.json());
                 if (liveBody.code === 200 && liveBody.content) {
                     openLive = liveBody.content.status === 'OPEN';
+                    chatChannelId = liveBody.content.chatChannelId || null;
+                    concurrentUserCount = liveBody.content.concurrentUserCount || 0;
                 }
             }
             catch (e) {
@@ -39,7 +43,9 @@ const fetchChzzkChannelProfile = async (channelId) => {
                 name: channelName || '알 수 없는 스트리머',
                 logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
                 followerCount: followerCount || 0,
-                openLive
+                openLive,
+                chatChannelId,
+                concurrentUserCount
             };
         }
         else {

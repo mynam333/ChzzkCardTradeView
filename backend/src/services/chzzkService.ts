@@ -7,6 +7,8 @@ export interface ChzzkProfile {
   logoUrl: string;
   followerCount: number;
   openLive: boolean;
+  chatChannelId?: string | null;
+  concurrentUserCount?: number;
 }
 
 export const fetchChzzkChannelProfile = async (channelId: string): Promise<ChzzkProfile> => {
@@ -29,12 +31,16 @@ export const fetchChzzkChannelProfile = async (channelId: string): Promise<Chzzk
 
     const profileBody = (await profileRes.json()) as any;
     let openLive = false;
+    let chatChannelId: string | null = null;
+    let concurrentUserCount = 0;
 
     if (liveRes && liveRes.ok) {
       try {
         const liveBody = (await liveRes.json()) as any;
         if (liveBody.code === 200 && liveBody.content) {
           openLive = liveBody.content.status === 'OPEN';
+          chatChannelId = liveBody.content.chatChannelId || null;
+          concurrentUserCount = liveBody.content.concurrentUserCount || 0;
         }
       } catch (e) {
         console.warn(`[ChzzkService] 방송 상태 파싱 실패 (대상: ${channelId})`);
@@ -47,7 +53,9 @@ export const fetchChzzkChannelProfile = async (channelId: string): Promise<Chzzk
         name: channelName || '알 수 없는 스트리머',
         logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
         followerCount: followerCount || 0,
-        openLive
+        openLive,
+        chatChannelId,
+        concurrentUserCount
       };
     } else {
       throw new Error(profileBody.message || 'API 응답 형식이 올바르지 않습니다.');
