@@ -60,6 +60,7 @@ class ChzzkChatManager {
             let currentSid = ''; // 서버로부터 획득할 세션 ID 저장 공간
             ws.on('open', () => {
                 // 1. 소켓 연결 후 조인(Connect) 요청 프레임 전송 (전달받은 실기기 패킷 구조 적용)
+                // 로그인 인증 수집 시에는 채널 ID를 uid로 전달하고, 비로그인 수집 시에는 null로 설정하여 인증 불일치(105, 106)를 완벽 차단합니다.
                 const connectFrame = {
                     ver: '3',
                     cmd: 100, // CMD_CONNECT
@@ -67,7 +68,7 @@ class ChzzkChatManager {
                     cid: chatChannelId,
                     sid: null,
                     bdy: {
-                        uid: userIdHash || null, // 토큰 발급에 연동된 고유 유저 ID 해시를 대입하여 불일치 방지
+                        uid: streamerAccessToken ? channelId : null,
                         devType: 2001,
                         accTkn: accessToken,
                         auth: 'SEND',
@@ -85,9 +86,7 @@ class ChzzkChatManager {
             });
             ws.on('message', async (data) => {
                 try {
-                    const rawMsg = data.toString();
-                    console.log(`[ChatManager Debug] 수신 패킷: ${rawMsg}`);
-                    const frame = JSON.parse(rawMsg);
+                    const frame = JSON.parse(data);
                     // CMD_CONNECT_SUCCESS (10100) or CMD_SEND_CHAT (93006)
                     if (frame.cmd === 10100) {
                         // retCode가 존재하고 0이 아니라면 연결 에러로 판단해 접속 종료
