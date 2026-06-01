@@ -11,6 +11,24 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const SCHEDULE_INTERVAL_MINUTES = 2;
 
 /**
+ * 모든 카드에 적용되는 랜덤 시세 변동(재미 요소)을 계산합니다.
+ * 매 주기 대부분은 작은 폭(±0.8%)으로 등락하고, 약 15% 확률로 조금 더 큰 변동(±2.5%)이 발생합니다.
+ * 현재 가치에 비례하므로 저가/고가 카드 모두 체감 가능한 수준으로 흔들립니다.
+ * @param value 현재(이전) 가치
+ * @returns 가치에 더해질 랜덤 변동량 (양수=상승, 음수=하락)
+ */
+const computeRandomDrift = (value: number): number => {
+  const BASE_PCT = 0.008;   // 평상시 최대 변동폭 0.8%
+  const SPIKE_PCT = 0.025;  // 가끔 발생하는 큰 변동 2.5%
+  const SPIKE_CHANCE = 0.15;
+
+  const maxPct = Math.random() < SPIKE_CHANCE ? SPIKE_PCT : BASE_PCT;
+  // -maxPct ~ +maxPct 사이 균등 분포 (상승/하락 동일 확률)
+  const pct = (Math.random() * 2 - 1) * maxPct;
+  return value * pct;
+};
+
+/**
  * 정교하게 개편된 카드 가치 계산 공식을 실행합니다.
  * @param prevValue 이전 가치 (시세 연속성 유지)
  * @param followers 팔로워 수 (요구 채팅량 계산용)
@@ -52,9 +70,11 @@ export const calculateCardValue = (
   const valueChangeFromBroadcast = currentVal * deltaMultiplier;
   // 팔로워 1명 증감당 가치 1 변동 (필요에 따라 가중치 조정 가능)
   const followerBonus = followerDelta;
-  const finalValue = Math.round(currentVal + valueChangeFromBroadcast + chatBonus + followerBonus);
+  // 5. 랜덤 시세 변동: 방송 여부와 무관하게 모든 카드에 소폭 등락을 부여 (재미 요소)
+  const randomDrift = computeRandomDrift(currentVal);
+  const finalValue = Math.round(currentVal + valueChangeFromBroadcast + chatBonus + followerBonus + randomDrift);
 
-  // 5. 상하한 한계 제한 (100 ~ 500,000)
+  // 6. 상하한 한계 제한 (100 ~ 500,000)
   return Math.min(Math.max(finalValue, 100), 500000);
 };
 
