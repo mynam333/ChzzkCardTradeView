@@ -6,11 +6,14 @@ import {
   IReportRepository,
   IAnnouncementRepository,
   IUserCardRepository,
+  ITradeRepository,
   User,
+  UserRanking,
   Streamer,
   Coupon,
   CardReport,
-  Announcement
+  Announcement,
+  Trade
 } from './interfaces';
 
 // 1. Supabase 유저 레포지토리
@@ -25,6 +28,19 @@ export class SupabaseUserRepository implements IUserRepository {
       .select('*')
       .eq('id', id)
       .single();
+
+    if (error || !data) return null;
+    return data as User;
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    const { data, error } = await this.getClient()
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
     if (error || !data) return null;
     return data as User;
@@ -50,6 +66,32 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
+  async incrementPoint(id: string, delta: number): Promise<void> {
+    // 원자적 증감 RPC 우선, 미배포 시 read-modify-write로 폴백
+    const { error } = await this.getClient().rpc('increment_user_point', { p_id: id, p_delta: delta });
+    if (error) {
+      console.warn('[Supabase] increment_user_point RPC 실패, 폴백 사용:', error.message);
+      const current = await this.findById(id);
+      if (!current) throw new Error('포인트를 증감할 사용자를 찾을 수 없습니다.');
+      const { error: updErr } = await this.getClient().from('users').update({ point: current.point + delta }).eq('id', id);
+      if (updErr) throw updErr;
+    }
+  }
+
+  async tryDeductPoint(id: string, amount: number): Promise<boolean> {
+    // 잔액 충분 시에만 차감하는 원자적 RPC. boolean 반환.
+    const { data, error } = await this.getClient().rpc('deduct_user_point', { p_id: id, p_amount: amount });
+    if (error) {
+      console.warn('[Supabase] deduct_user_point RPC 실패, 폴백 사용:', error.message);
+      const current = await this.findById(id);
+      if (!current || current.point < amount) return false;
+      const { error: updErr } = await this.getClient().from('users').update({ point: current.point - amount }).eq('id', id).gte('point', amount);
+      if (updErr) throw updErr;
+      return true;
+    }
+    return data === true;
+  }
+
   async updateBanStatus(id: string, bannedUntil: string | null): Promise<void> {
     const { error } = await this.getClient()
       .from('users')
@@ -57,6 +99,26 @@ export class SupabaseUserRepository implements IUserRepository {
       .eq('id', id);
 
     if (error) throw error;
+  }
+
+  async claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean> {
+    const { data, error } = await this.getClient().rpc('claim_free_draw', { p_id: id, p_today: todayKst, p_now: nowIso });
+    if (error) {
+      console.warn('[Supabase] claim_free_draw RPC 실패, 폴백 사용:', error.message);
+      const current = await this.findById(id);
+      if (!current) return false;
+      let eligible = true;
+      if (current.last_free_draw) {
+        const lastKst = new Date(new Date(current.last_free_draw).getTime() + 9 * 60 * 60 * 1000)
+          .toISOString().split('T')[0];
+        eligible = lastKst !== todayKst;
+      }
+      if (!eligible) return false;
+      const { error: updErr } = await this.getClient().from('users').update({ last_free_draw: nowIso }).eq('id', id);
+      if (updErr) throw updErr;
+      return true;
+    }
+    return data === true;
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
@@ -81,15 +143,67 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
-  async findRankings(limit: number): Promise<User[]> {
-    const { data, error } = await this.getClient()
+  async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('users')
+      .update({ representative_card_channel_id: channelId })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  async count(): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    if (error) return 0;
+    return count || 0;
+  }
+
+  async findRankings(limit: number): Promise<UserRanking[]> {
+    // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용
+    const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit });
+    if (!error && Array.isArray(data)) {
+      return data.map((row: any) => ({
+        id: row.id,
+        username: row.username,
+        avatar_url: row.avatar_url,
+        role: row.role as 'USER' | 'ADMIN',
+        point: row.point,
+        last_free_draw: row.last_free_draw,
+        banned_until: row.banned_until,
+        created_at: row.created_at,
+        card_count: Number(row.card_count) || 0,
+        total_asset: Number(row.total_asset) || row.point
+      }));
+    }
+
+    // 폴백: 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 총자산 기준 재정렬
+    console.warn('[Supabase] get_user_rankings RPC 실패, 폴백 사용:', error?.message);
+    const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
+    const { data: users, error: uErr } = await this.getClient()
       .from('users')
       .select('*')
       .order('point', { ascending: false })
-      .limit(limit);
+      .limit(candidateLimit);
+    if (uErr) throw uErr;
 
-    if (error) throw error;
-    return (data || []) as User[];
+    const enriched: UserRanking[] = [];
+    for (const u of users || []) {
+      const { data: cards } = await this.getClient()
+        .from('user_cards')
+        .select('streamer:streamers(base_value)')
+        .eq('user_id', u.id);
+      const cardsValue = (cards || []).reduce(
+        (sum: number, c: any) => sum + (c.streamer?.base_value || 0), 0
+      );
+      enriched.push({
+        ...(u as User),
+        card_count: (cards || []).length,
+        total_asset: u.point + cardsValue
+      });
+    }
+    enriched.sort((a, b) => b.total_asset - a.total_asset);
+    return enriched.slice(0, limit);
   }
 }
 
@@ -192,25 +306,116 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   }
 
   async incrementBroadcastCount(channelId: string): Promise<void> {
-    const streamer = await this.findById(channelId);
-    if (!streamer) return;
-    const current = streamer.broadcast_count || 0;
+    const { error } = await this.getClient().rpc('increment_streamer_broadcast', { p_channel_id: channelId });
+    if (error) {
+      console.warn('[Supabase] increment_streamer_broadcast RPC 실패, 폴백 사용:', error.message);
+      const streamer = await this.findById(channelId);
+      if (!streamer) return;
+      await this.getClient().from('streamers')
+        .update({ broadcast_count: (streamer.broadcast_count || 0) + 1, updated_at: new Date().toISOString() })
+        .eq('channel_id', channelId);
+    }
+  }
+
+  async incrementChatCount(channelId: string, count: number = 1): Promise<void> {
+    const { error } = await this.getClient().rpc('increment_streamer_chat', { p_channel_id: channelId, p_count: count });
+    if (error) {
+      console.warn('[Supabase] increment_streamer_chat RPC 실패, 폴백 사용:', error.message);
+      const streamer = await this.findById(channelId);
+      if (!streamer) return;
+      await this.getClient().from('streamers')
+        .update({ chat_count: (streamer.chat_count || 0) + count, updated_at: new Date().toISOString() })
+        .eq('channel_id', channelId);
+    }
+  }
+
+  async incrementBroadcastMinutes(channelId: string, minutes: number): Promise<void> {
+    if (minutes <= 0) return;
+    const { error } = await this.getClient().rpc('increment_streamer_minutes', { p_channel_id: channelId, p_minutes: minutes });
+    if (error) {
+      const streamer = await this.findById(channelId);
+      if (!streamer) return;
+      await this.getClient().from('streamers')
+        .update({ broadcast_minutes: (streamer.broadcast_minutes || 0) + minutes })
+        .eq('channel_id', channelId);
+    }
+  }
+
+  async getValueHistory(channelId: string, sinceIso: string): Promise<{ value: number; recorded_at: string }[]> {
+    const { data, error } = await this.getClient()
+      .from('value_history')
+      .select('value, recorded_at')
+      .eq('channel_id', channelId)
+      .gte('recorded_at', sinceIso)
+      .order('recorded_at', { ascending: true });
+    if (error || !data) return [];
+    return data.map((r: any) => ({ value: r.value, recorded_at: r.recorded_at }));
+  }
+
+  async count(): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('streamers')
+      .select('*', { count: 'exact', head: true });
+    if (error) return 0;
+    return count || 0;
+  }
+
+  async updateValueMetrics(channelId: string, prevValue: number, baseValue: number, activityScore: number, multiplier: number): Promise<void> {
     const { error } = await this.getClient()
       .from('streamers')
-      .update({ broadcast_count: current + 1, updated_at: new Date().toISOString() })
+      .update({
+        prev_value: prevValue,
+        base_value: baseValue,
+        activity_score: activityScore,
+        broadcast_multiplier: multiplier,
+        updated_at: new Date().toISOString()
+      })
       .eq('channel_id', channelId);
     if (error) throw error;
   }
 
-  async incrementChatCount(channelId: string, count: number = 1): Promise<void> {
-    const streamer = await this.findById(channelId);
-    if (!streamer) return;
-    const current = streamer.chat_count || 0;
+  async decrementChatCount(channelId: string, amount: number): Promise<void> {
+    if (amount <= 0) return;
+    const { error } = await this.getClient().rpc('decrement_streamer_chat', { p_channel_id: channelId, p_amount: amount });
+    if (error) {
+      console.warn('[Supabase] decrement_streamer_chat RPC 실패, 폴백 사용:', error.message);
+      const streamer = await this.findById(channelId);
+      if (!streamer) return;
+      const next = Math.max((streamer.chat_count || 0) - amount, 0);
+      await this.getClient().from('streamers')
+        .update({ chat_count: next, updated_at: new Date().toISOString() })
+        .eq('channel_id', channelId);
+    }
+  }
+
+  async recordValueHistory(channelId: string, value: number): Promise<void> {
     const { error } = await this.getClient()
-      .from('streamers')
-      .update({ chat_count: current + count, updated_at: new Date().toISOString() })
-      .eq('channel_id', channelId);
+      .from('value_history')
+      .insert([{ channel_id: channelId, value }]);
     if (error) throw error;
+    // 오래된 이력 정리 (8일 초과)
+    const cutoff = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    await this.getClient().from('value_history').delete().eq('channel_id', channelId).lt('recorded_at', cutoff);
+  }
+
+  async getValue24hAgoMap(): Promise<Record<string, number>> {
+    // 24시간 이전에 기록된 이력 중 채널별 가장 최근 값을 선택
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await this.getClient()
+      .from('value_history')
+      .select('channel_id, value, recorded_at')
+      .lte('recorded_at', cutoff)
+      .order('recorded_at', { ascending: false });
+    if (error || !data) return {};
+
+    const map: Record<string, number> = {};
+    for (const row of data as any[]) {
+      // 내림차순 정렬이므로 채널별 최초 등장이 24h 경계에 가장 근접한 값
+      if (map[row.channel_id] === undefined) {
+        map[row.channel_id] = row.value;
+      }
+    }
+    return map;
   }
 }
 // 3. Supabase 쿠폰 레포지토리
@@ -258,6 +463,15 @@ export class SupabaseCouponRepository implements ICouponRepository {
     if (error) throw error;
   }
 
+  async findAll(): Promise<Coupon[]> {
+    const { data, error } = await this.getClient()
+      .from('coupons')
+      .select('*')
+      .order('id', { ascending: false });
+    if (error) throw error;
+    return (data || []) as Coupon[];
+  }
+
   async checkCouponRedeemed(couponId: number, userId: string): Promise<boolean> {
     const { data, error } = await this.getClient()
       .from('coupon_logs')
@@ -269,12 +483,17 @@ export class SupabaseCouponRepository implements ICouponRepository {
     return !error && data !== null;
   }
 
-  async logCouponRedeem(couponId: number, userId: string): Promise<void> {
+  async logCouponRedeem(couponId: number, userId: string): Promise<boolean> {
     const { error } = await this.getClient()
       .from('coupon_logs')
       .insert([{ coupon_id: couponId, user_id: userId }]);
 
-    if (error) throw error;
+    if (error) {
+      // 23505 = unique_violation (이미 사용한 쿠폰, 동시 요청 포함)
+      if ((error as any).code === '23505') return false;
+      throw error;
+    }
+    return true;
   }
 }
 
@@ -312,6 +531,15 @@ export class SupabaseReportRepository implements IReportRepository {
       .eq('id', reportId);
 
     if (error) throw error;
+  }
+
+  async countPending(): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('card_reports')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    if (error) return 0;
+    return count || 0;
   }
 }
 
@@ -460,5 +688,123 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
 
     if (deleteError) throw deleteError;
     return deletedCount || ids.length;
+  }
+
+  async count(): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('user_cards')
+      .select('*', { count: 'exact', head: true });
+    if (error) return 0;
+    return count || 0;
+  }
+}
+
+// 7. Supabase 거래(1:1 교환) 레포지토리
+export class SupabaseTradeRepository implements ITradeRepository {
+  private getClient() {
+    return getSupabaseClient();
+  }
+
+  async create(trade: Pick<Trade, 'sender_id' | 'receiver_id' | 'sender_offer' | 'receiver_offer'>): Promise<Trade> {
+    const { data, error } = await this.getClient()
+      .from('trades')
+      .insert([{
+        sender_id: trade.sender_id,
+        receiver_id: trade.receiver_id,
+        sender_offer: trade.sender_offer,
+        receiver_offer: trade.receiver_offer,
+        status: 'PENDING'
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as Trade;
+  }
+
+  async findById(id: number): Promise<Trade | null> {
+    const { data, error } = await this.getClient()
+      .from('trades')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as Trade;
+  }
+
+  private async queryTrades(userId: string, statuses: string[]): Promise<Trade[]> {
+    const inList = `(${statuses.join(',')})`;
+    const { data, error } = await this.getClient()
+      .from('trades')
+      .select('*, sender:users!trades_sender_id_fkey(username), receiver:users!trades_receiver_id_fkey(username)')
+      .filter('status', 'in', inList)
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('id', { ascending: false });
+
+    if (error) {
+      // 외래키 임베드 조인이 실패하는 환경을 위한 폴백 (사용자명 없이 반환)
+      const { data: plain, error: plainErr } = await this.getClient()
+        .from('trades')
+        .select('*')
+        .filter('status', 'in', inList)
+        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+        .order('id', { ascending: false });
+      if (plainErr) throw plainErr;
+      return (plain || []) as Trade[];
+    }
+
+    return (data || []).map((row: any) => ({
+      ...row,
+      sender_username: row.sender?.username,
+      receiver_username: row.receiver?.username
+    })) as Trade[];
+  }
+
+  async findActiveByUser(userId: string): Promise<Trade[]> {
+    return this.queryTrades(userId, ['PENDING', 'CONFIRMED']);
+  }
+
+  async findHistoryByUser(userId: string, limit: number): Promise<Trade[]> {
+    const trades = await this.queryTrades(userId, ['ACCEPTED', 'REJECTED', 'CANCELLED']);
+    return trades.slice(0, limit);
+  }
+
+  async updateStatus(id: number, status: Trade['status']): Promise<void> {
+    const { error } = await this.getClient()
+      .from('trades')
+      .update({ status })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  async countCompleted(): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('trades')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'ACCEPTED');
+    if (error) return 0;
+    return count || 0;
+  }
+
+  // 1단계: 수신자 동의 (PENDING → CONFIRMED)
+  async confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+    const trade = await this.findById(id);
+    if (!trade) return { ok: false, reason: 'NOT_FOUND' };
+    if (trade.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
+    if (trade.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
+    await this.updateStatus(id, 'CONFIRMED');
+    return { ok: true, reason: 'OK' };
+  }
+
+  // 2단계: 제안자 최종 승인 및 원자적 체결 (CONFIRMED → ACCEPTED)은 PostgreSQL 함수(finalize_trade)에 위임
+  async finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+    const { data, error } = await this.getClient().rpc('finalize_trade', { p_trade_id: id, p_actor: actorId });
+    if (error) {
+      console.error('[SupabaseTradeRepository] finalize_trade RPC 에러:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+    const result = String(data);
+    return { ok: result === 'OK', reason: result };
   }
 }

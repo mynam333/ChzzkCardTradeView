@@ -1,30 +1,34 @@
 'use client';
 
 import React from 'react';
-import { useApp } from './AppContext';
-import { 
-  Home, 
-  Layers, 
-  TrendingUp, 
-  User, 
-  Sun, 
-  Moon, 
-  Bell, 
-  Coins 
+import { useApp, TabId } from './AppContext';
+import {
+  Home,
+  Layers,
+  TrendingUp,
+  User,
+  Sun,
+  Moon,
+  Bell,
+  Coins,
+  Shield,
+  Download
 } from 'lucide-react';
 import Image from 'next/image';
+import { apiFetch } from '@/lib/api';
 
 interface NavigationProps {
   onNotifyClick?: () => void;
 }
 
 export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, canInstall, promptInstall } = useApp();
+  const touchStartX = React.useRef<number | null>(null);
 
   const handleLogin = async () => {
     try {
       const redirectUri = `${window.location.origin}/auth/chzzk/callback`;
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/auth/chzzk/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
+      const response = await apiFetch(`/auth/chzzk/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
       if (!response.ok) throw new Error('로그인 URL 획득 실패');
       const data = await response.json();
       if (data.auth_url) {
@@ -36,12 +40,30 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
     }
   };
 
-  const navItems = [
-    { id: 'main' as const, label: '메인', icon: Home },
-    { id: 'gacha' as const, label: '뽑기/보관함', icon: Layers },
-    { id: 'ranking' as const, label: '실시간 랭킹', icon: TrendingUp },
-    { id: 'my-info' as const, label: '내 정보', icon: User },
+  const navItems: { id: TabId; label: string; icon: typeof Home }[] = [
+    { id: 'main', label: '메인', icon: Home },
+    { id: 'gacha', label: '뽑기/보관함', icon: Layers },
+    { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
+    { id: 'my-info', label: '내 정보', icon: User },
+    ...(user?.role === 'ADMIN'
+      ? [{ id: 'admin' as TabId, label: '관리자', icon: Shield }]
+      : []),
   ];
+
+  // 모바일 좌우 스와이프로 탭 전환
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(dx) < 60) return;
+    const ids = navItems.map((i) => i.id);
+    const idx = ids.indexOf(activeTab);
+    if (dx < 0 && idx < ids.length - 1) setActiveTab(ids[idx + 1]);
+    else if (dx > 0 && idx > 0) setActiveTab(ids[idx - 1]);
+  };
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-background text-foreground md:flex-row">
@@ -124,8 +146,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
           })}
         </nav>
 
+        {/* PWA 설치 버튼 (설치 가능할 때만 노출) */}
+        {canInstall && (
+          <button
+            onClick={promptInstall}
+            className="mt-auto mb-3 flex items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 py-2 text-xs font-bold text-primary hover:bg-primary/20 transition"
+          >
+            <Download className="h-4 w-4" /> 앱 설치하기
+          </button>
+        )}
+
         {/* 테마 스위치 */}
-        <div className="mt-auto pt-4 border-t border-border">
+        <div className={`${canInstall ? '' : 'mt-auto'} pt-4 border-t border-border`}>
           <div className="flex items-center justify-between px-2">
             <span className="text-xs text-muted-foreground">화면 테마</span>
             <button
@@ -185,7 +217,11 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8 pb-24 md:pb-8 max-w-7xl mx-auto w-full">
+      <main
+        className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8 pb-24 md:pb-8 max-w-7xl mx-auto w-full"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {children}
       </main>
 

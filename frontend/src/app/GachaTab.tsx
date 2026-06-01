@@ -15,10 +15,11 @@ import {
   ArrowRightLeft,
   X,
   Plus,
-  Layers
+  Layers,
+  BarChart3
 } from 'lucide-react';
 import canvasConfetti from 'canvas-confetti';
-import { API_BASE_URL } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface Streamer {
   channel_id: string;
@@ -49,6 +50,20 @@ export const GachaTab: React.FC = () => {
   const [tradeTargetUser, setTradeTargetUser] = useState('');
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
   const [selectedOfferCards, setSelectedOfferCards] = useState<number[]>([]); // 유저 보유 카드 일련 ID 목록
+  const [offerPoint, setOfferPoint] = useState(0); // 내가 함께 제시할 포인트
+  const [requestPoint, setRequestPoint] = useState(0); // 상대에게 요청할 포인트
+  const [requestCards, setRequestCards] = useState<{ [channelId: string]: number }>({}); // 상대에게 요청할 카드 { channel_id: count }
+  const [tradeBusy, setTradeBusy] = useState(false);
+
+  // 받은/보낸 교환 목록 (인박스)
+  const [activeTrades, setActiveTrades] = useState<any[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<any[]>([]);
+  const [tradeRequestSearch, setTradeRequestSearch] = useState('');
+
+  // 스트리머 상세 + 시세 그래프 모달
+  const [detailStreamer, setDetailStreamer] = useState<any | null>(null);
+  const [detailHistory, setDetailHistory] = useState<{ value: number; recorded_at: string }[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // 뽑기 연출 애니메이션 상태
   const [isDrawing, setIsDrawing] = useState(false);
@@ -66,6 +81,11 @@ export const GachaTab: React.FC = () => {
     message: '',
     type: 'info'
   });
+
+  // 커스텀 알림 모달 헬퍼
+  const showAlert = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setAlertModal({ open: true, title, message, type });
+  };
 
   // 카드 정렬 및 필터링 상태 추가
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc'>('acquired-desc');
@@ -111,6 +131,8 @@ export const GachaTab: React.FC = () => {
     if (user) {
       fetchStreamers();
       fetchInventory();
+      fetchActiveTrades();
+      fetchTradeHistory();
     }
   }, [user]);
 
@@ -130,7 +152,7 @@ export const GachaTab: React.FC = () => {
 
   const fetchStreamers = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/streamers`);
+      const res = await apiFetch('/streamers');
       if (res.ok) {
         const data = await res.json();
         setStreamers(data);
@@ -141,14 +163,9 @@ export const GachaTab: React.FC = () => {
   };
 
   const fetchInventory = async () => {
-    const token = localStorage.getItem('cctv_jwt_token');
-    if (!token) return;
+    if (!localStorage.getItem('cctv_jwt_token')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/users/me/cards`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await apiFetch('/users/me/cards');
       if (res.ok) {
         const data = await res.json();
         setInventory(data);
@@ -196,14 +213,8 @@ export const GachaTab: React.FC = () => {
     setIsDrawing(true);
     setDrawnCard(null);
 
-    const token = localStorage.getItem('cctv_jwt_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/cards/draw`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await apiFetch('/cards/draw', { method: 'POST' });
 
       if (!res.ok) {
         const errData = await res.json();
@@ -252,34 +263,175 @@ export const GachaTab: React.FC = () => {
   const [registering, setRegistering] = useState(false);
 
   const handleOpenTrade = () => {
-    if (inventory.length === 0) {
-      alert('교환할 카드가 인벤토리에 없습니다.');
-      return;
-    }
+    // 카드/포인트 어느 쪽이든 제안 가능하므로 빈 인벤토리여도 열 수 있게 허용
     setTradeModalOpen(true);
   };
 
-  const executeTrade = () => {
-    if (!tradeTargetUser.trim()) {
-      alert('상대방 치지직 닉네임을 입력해 주세요.');
-      return;
+  // 진행 중(보낸/받은) 교환 목록 조회
+  const fetchActiveTrades = async () => {
+    try {
+      const res = await apiFetch('/trades/active');
+      if (res.ok) {
+        setActiveTrades(await res.json());
+      }
+    } catch (e) {
+      console.error('교환 목록 조회 실패:', e);
     }
-    if (selectedOfferCards.length === 0) {
-      alert('제안할 카드를 최소 1장 선택해 주세요.');
-      return;
+  };
+
+  // 종료된 교환 이력 조회
+  const fetchTradeHistory = async () => {
+    try {
+      const res = await apiFetch('/trades/history');
+      if (res.ok) setTradeHistory(await res.json());
+    } catch (e) {
+      console.error('교환 이력 조회 실패:', e);
     }
+  };
 
-    // 1:1 거래 시나리오 성공 시뮬레이션
-    alert(`[${tradeTargetUser}] 님에게 카드 ${selectedOfferCards.length}개에 대한 1:1 교환 요청을 발송했습니다!`);
+  // 스트리머 상세 + 시세 그래프 열기
+  const openStreamerDetail = async (channelId: string) => {
+    setDetailLoading(true);
+    setDetailStreamer({ channel_id: channelId, loading: true });
+    setDetailHistory([]);
+    try {
+      const res = await apiFetch(`/streamers/${channelId}?range=7d`);
+      if (res.ok) {
+        const data = await res.json();
+        setDetailStreamer(data.streamer);
+        setDetailHistory(data.history || []);
+      } else {
+        showAlert('조회 실패', '스트리머 상세 정보를 불러오지 못했습니다.', 'error');
+        setDetailStreamer(null);
+      }
+    } catch (e) {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+      setDetailStreamer(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
-    // 인벤토리에서 거래 보낸 카드 차감
-    const remaining = inventory.filter(card => !selectedOfferCards.includes(card.id));
-    setInventory(remaining);
+  // 선택한 보유 카드 id 목록을 channel_id별 수량으로 묶음
+  const buildOfferCards = (): { channel_id: string; count: number }[] => {
+    const counts: { [cid: string]: number } = {};
+    for (const cardId of selectedOfferCards) {
+      const card = inventory.find(c => c.id === cardId);
+      if (card) counts[card.channel_id] = (counts[card.channel_id] || 0) + 1;
+    }
+    return Object.entries(counts).map(([channel_id, count]) => ({ channel_id, count }));
+  };
 
-    // 정리
+  const resetTradeForm = () => {
     setSelectedOfferCards([]);
+    setOfferPoint(0);
+    setRequestPoint(0);
+    setRequestCards({});
     setTradeTargetUser('');
+    setTradeRequestSearch('');
     setTradeModalOpen(false);
+  };
+
+  const executeTrade = async () => {
+    if (!tradeTargetUser.trim()) {
+      showAlert('상대 지정 필요', '상대방 치지직 닉네임을 입력해 주세요.', 'warning');
+      return;
+    }
+
+    const offerCards = buildOfferCards();
+    const reqCards = Object.entries(requestCards)
+      .filter(([, count]) => count > 0)
+      .map(([channel_id, count]) => ({ channel_id, count }));
+
+    const senderOfferEmpty = offerCards.length === 0 && offerPoint <= 0;
+    const receiverOfferEmpty = reqCards.length === 0 && requestPoint <= 0;
+    if (senderOfferEmpty && receiverOfferEmpty) {
+      showAlert('내용 부족', '제시하거나 요청할 카드/포인트를 최소 한 가지 이상 지정해 주세요.', 'warning');
+      return;
+    }
+
+    setTradeBusy(true);
+    try {
+      const res = await apiFetch('/trades', {
+        method: 'POST',
+        body: JSON.stringify({
+          receiver_username: tradeTargetUser.trim(),
+          sender_offer: { cards: offerCards, point: offerPoint },
+          receiver_offer: { cards: reqCards, point: requestPoint }
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('교환 제안 완료', data.message || '교환을 제안했습니다.', 'success');
+        resetTradeForm();
+        fetchActiveTrades();
+      } else {
+        showAlert('교환 제안 실패', data.message || '교환 제안에 실패했습니다.', 'error');
+      }
+    } catch (e) {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setTradeBusy(false);
+    }
+  };
+
+  // 교환 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED)
+  const handleConfirmTrade = async (tradeId: number) => {
+    try {
+      const res = await apiFetch(`/trades/${tradeId}/confirm`, { method: 'POST' });
+      const data = await res.json();
+      showAlert(res.ok ? '동의 완료' : '처리 실패', data.message || '', res.ok ? 'success' : 'error');
+      fetchActiveTrades();
+    } catch (e) {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 교환 2단계: 제안자가 최종 승인하여 체결 (CONFIRMED → ACCEPTED)
+  const handleFinalizeTrade = async (tradeId: number) => {
+    try {
+      const res = await apiFetch(`/trades/${tradeId}/finalize`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('교환 체결', data.message || '교환이 체결되었습니다.', 'success');
+        fetchActiveTrades();
+        fetchTradeHistory();
+        fetchInventory();
+        refreshUserData();
+      } else {
+        showAlert('교환 실패', data.message || '교환 체결에 실패했습니다.', 'error');
+        fetchActiveTrades();
+      }
+    } catch (e) {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 교환 거절(받은) / 취소(보낸)
+  const handleRejectTrade = async (tradeId: number) => {
+    try {
+      const res = await apiFetch(`/trades/${tradeId}/reject`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('처리 완료', data.message || '처리되었습니다.', 'info');
+        fetchActiveTrades();
+      } else {
+        showAlert('처리 실패', data.message || '처리에 실패했습니다.', 'error');
+      }
+    } catch (e) {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 요청 카드 수량 증감
+  const adjustRequestCard = (channelId: string, delta: number) => {
+    setRequestCards(prev => {
+      const next = { ...prev };
+      const v = (next[channelId] || 0) + delta;
+      if (v <= 0) delete next[channelId];
+      else next[channelId] = v;
+      return next;
+    });
   };
 
   const toggleSelectCard = (id: number) => {
@@ -298,13 +450,8 @@ export const GachaTab: React.FC = () => {
     }
     setSearching(true);
     setSelectedStreamer(null);
-    const token = localStorage.getItem('cctv_jwt_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/streamers/search?keyword=${encodeURIComponent(streamerSearchKeyword)}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const res = await apiFetch(`/streamers/search?keyword=${encodeURIComponent(streamerSearchKeyword)}`);
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data);
@@ -353,14 +500,9 @@ export const GachaTab: React.FC = () => {
     }
 
     setRegistering(true);
-    const token = localStorage.getItem('cctv_jwt_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/streamers/register`, {
+      const res = await apiFetch('/streamers/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({
           channelId: selectedStreamer.channelId,
           channelName: selectedStreamer.channelName,
@@ -408,14 +550,9 @@ export const GachaTab: React.FC = () => {
   // 단일 카드 판매 실행
   const executeSell = async () => {
     if (!sellingStreamer) return;
-    const token = localStorage.getItem('cctv_jwt_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/cards/sell`, {
+      const res = await apiFetch('/cards/sell', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({
           items: [{ channelId: sellingStreamer.channel_id, count: sellQuantity }]
         })
@@ -450,7 +587,6 @@ export const GachaTab: React.FC = () => {
 
   // 일괄 카드 판매 실행
   const executeBulkSell = async () => {
-    const token = localStorage.getItem('cctv_jwt_token');
     const items = Object.entries(bulkSellQuantities)
       .map(([channelId, count]) => ({ channelId, count }))
       .filter(item => item.count > 0);
@@ -461,12 +597,8 @@ export const GachaTab: React.FC = () => {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/cards/sell`, {
+      const res = await apiFetch('/cards/sell', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ items })
       });
 
@@ -690,7 +822,7 @@ export const GachaTab: React.FC = () => {
               </button>
             </div>
 
-            <div className="mt-4 space-y-4">
+            <div className="mt-4 space-y-4 max-h-[65vh] overflow-y-auto pr-1">
               <div>
                 <label className="text-xs font-bold text-muted-foreground block mb-1.5">상대방 치지직 닉네임 입력</label>
                 <input
@@ -702,52 +834,285 @@ export const GachaTab: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-muted-foreground block mb-2">교환 제안할 보유 카드 선택</label>
-                <div className="grid grid-cols-3 gap-2.5 max-h-48 overflow-y-auto pr-1">
-                  {inventory.map((card) => {
-                    const streamer = card.streamer;
-                    const isSelected = selectedOfferCards.includes(card.id);
-                    if (!streamer) return null;
-                    return (
-                      <div
-                        key={card.id}
-                        onClick={() => toggleSelectCard(card.id)}
-                        className={`cursor-pointer relative flex flex-col items-center justify-center p-2.5 rounded-xl border transition ${isSelected ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border/60 bg-secondary/30 hover:bg-secondary/60'
-                          }`}
-                      >
-                        <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
-                        <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
-                        <span className="text-[8.5px] text-muted-foreground">No.{String(card.serial_number).padStart(4, '0')}</span>
-                        {isSelected && (
-                          <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
-                            <Check className="h-2.5 w-2.5" />
+              {/* 내가 제시: 카드 + 포인트 */}
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2.5">
+                <p className="text-xs font-black text-emerald-500">내가 제시</p>
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-2">제시할 보유 카드 선택</label>
+                  {inventory.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground py-2">보유한 카드가 없습니다.</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2.5 max-h-40 overflow-y-auto pr-1">
+                      {inventory.map((card) => {
+                        const streamer = card.streamer;
+                        const isSelected = selectedOfferCards.includes(card.id);
+                        if (!streamer) return null;
+                        return (
+                          <div
+                            key={card.id}
+                            onClick={() => toggleSelectCard(card.id)}
+                            className={`cursor-pointer relative flex flex-col items-center justify-center p-2.5 rounded-xl border transition ${isSelected ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border/60 bg-secondary/30 hover:bg-secondary/60'
+                              }`}
+                          >
+                            <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
+                            <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
+                            <span className="text-[8.5px] text-muted-foreground">No.{String(card.serial_number).padStart(4, '0')}</span>
+                            {isSelected && (
+                              <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
+                                <Check className="h-2.5 w-2.5" />
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">제시할 포인트</label>
+                  <input
+                    type="number" min={0}
+                    value={offerPoint}
+                    onChange={(e) => setOfferPoint(Math.max(0, Number(e.target.value)))}
+                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* 내가 요청: 카드 + 포인트 */}
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 space-y-2.5">
+                <p className="text-xs font-black text-sky-500">상대에게 요청</p>
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">요청할 카드 (스트리머 검색 후 수량 지정)</label>
+                  <input
+                    type="text"
+                    value={tradeRequestSearch}
+                    onChange={(e) => setTradeRequestSearch(e.target.value)}
+                    placeholder="스트리머 이름 검색"
+                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none mb-2"
+                  />
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {streamers
+                      .filter(s => tradeRequestSearch.trim() === ''
+                        ? (requestCards[s.channel_id] || 0) > 0
+                        : s.name.toLowerCase().includes(tradeRequestSearch.toLowerCase()))
+                      .slice(0, 30)
+                      .map((s) => (
+                        <div key={s.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                            <span className="text-[11px] font-bold truncate">{s.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={() => adjustRequestCard(s.channel_id, -1)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
+                            <span className="w-5 text-center text-xs font-bold">{requestCards[s.channel_id] || 0}</span>
+                            <button onClick={() => adjustRequestCard(s.channel_id, 1)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                          </div>
+                        </div>
+                      ))}
+                    {tradeRequestSearch.trim() === '' && Object.keys(requestCards).length === 0 && (
+                      <p className="text-[10px] text-muted-foreground py-1">검색해서 요청할 카드를 추가하세요.</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">요청할 포인트</label>
+                  <input
+                    type="number" min={0}
+                    value={requestPoint}
+                    onChange={(e) => setRequestPoint(Math.max(0, Number(e.target.value)))}
+                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
+                  />
                 </div>
               </div>
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
               <button
-                onClick={() => setTradeModalOpen(false)}
+                onClick={resetTradeForm}
                 className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
               >
                 취소
               </button>
               <button
                 onClick={executeTrade}
-                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+                disabled={tradeBusy}
+                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                교환 요청 보내기
+                {tradeBusy ? '전송 중...' : '교환 요청 보내기'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* 스트리머 상세 + 시세 그래프 모달 */}
+      {detailStreamer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setDetailStreamer(null)}>
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-base font-bold flex items-center gap-2"><BarChart3 className="h-4.5 w-4.5 text-primary" /> 스트리머 시세 상세</h3>
+              <button onClick={() => setDetailStreamer(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center gap-3">
+                  <img src={detailStreamer.custom_image_url || detailStreamer.logo_url} alt={detailStreamer.name} className="h-14 w-14 rounded-full object-cover border border-border" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-black truncate">{detailStreamer.name}</h4>
+                    <p className="text-[11px] text-muted-foreground">{(detailStreamer.follower_count || 0).toLocaleString()} 팔로워 · {detailStreamer.is_active ? '🟢 방송 중' : '⚫ 오프라인'}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-black text-primary">{(detailStreamer.base_value || 0).toLocaleString()} P</p>
+                    {(() => {
+                      const prev = detailStreamer.prev_value ?? detailStreamer.base_value ?? 1000;
+                      const diff = (detailStreamer.base_value || 0) - prev;
+                      const rate = prev > 0 ? (diff / prev) * 100 : 0;
+                      const cls = diff > 0 ? 'text-rose-500' : diff < 0 ? 'text-blue-500' : 'text-muted-foreground';
+                      const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '-';
+                      return <p className={`text-[11px] font-bold ${cls}`}>{arrow} {rate.toFixed(1)}% (24h)</p>;
+                    })()}
+                  </div>
+                </div>
+
+                {/* SVG 라인 차트 (최근 7일) */}
+                {detailHistory.length >= 2 ? (() => {
+                  const W = 460, H = 140, P = 8;
+                  const values = detailHistory.map(h => h.value);
+                  const min = Math.min(...values), max = Math.max(...values);
+                  const range = max - min || 1;
+                  const pts = detailHistory.map((h, i) => {
+                    const x = P + (i / (detailHistory.length - 1)) * (W - 2 * P);
+                    const y = H - P - ((h.value - min) / range) * (H - 2 * P);
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                  }).join(' ');
+                  const up = values[values.length - 1] >= values[0];
+                  const stroke = up ? '#f43f5e' : '#3b82f6';
+                  return (
+                    <div className="rounded-xl border border-border bg-secondary/20 p-3">
+                      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
+                        <polyline points={pts} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                      </svg>
+                      <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
+                        <span>{new Date(detailHistory[0].recorded_at).toLocaleDateString('ko-KR')}</span>
+                        <span>최저 {min.toLocaleString()}P · 최고 {max.toLocaleString()}P</span>
+                        <span>{new Date(detailHistory[detailHistory.length - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div className="rounded-xl border border-border bg-secondary/20 p-6 text-center text-[11px] text-muted-foreground">
+                    아직 시세 그래프를 그릴 만큼의 데이터가 쌓이지 않았습니다.<br />(시세는 2분마다 기록됩니다)
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="rounded-lg bg-secondary/30 p-2.5"><p className="text-muted-foreground">활동 점수</p><p className="font-bold">{(detailStreamer.activity_score || 0).toLocaleString()}</p></div>
+                  <div className="rounded-lg bg-secondary/30 p-2.5"><p className="text-muted-foreground">누적 방송 시간</p><p className="font-bold">{Math.floor((detailStreamer.broadcast_minutes || 0) / 60)}시간 {(detailStreamer.broadcast_minutes || 0) % 60}분</p></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 교환 인박스 (받은/보낸 진행 중 교환) */}
+      {activeTrades.length > 0 && (
+        <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-3">
+          <h3 className="text-base font-black flex items-center gap-2">
+            <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 진행 중인 교환 ({activeTrades.length})
+          </h3>
+          <div className="space-y-2.5">
+            {activeTrades.map((t) => {
+              const incoming = t.direction === 'incoming';
+              const summarize = (offer: any) => {
+                const parts: string[] = [];
+                const cardCount = (offer?.cards || []).reduce((a: number, c: any) => a + c.count, 0);
+                if (cardCount > 0) parts.push(`카드 ${cardCount}장`);
+                if (offer?.point > 0) parts.push(`${offer.point.toLocaleString()} P`);
+                return parts.length ? parts.join(' + ') : '없음';
+              };
+              const counterpartName = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
+              const confirmed = t.status === 'CONFIRMED';
+              // 단계 안내 라벨
+              const stageLabel = confirmed
+                ? (incoming ? '내가 동의함 · 제안자 최종 승인 대기' : '상대가 동의함 · 내 최종 승인 필요')
+                : (incoming ? '검토 요청됨' : '상대 동의 대기 중');
+              return (
+                <div key={t.id} className="rounded-xl border border-border/60 bg-secondary/20 p-3.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`text-[10px] font-black rounded px-2 py-0.5 ${incoming ? 'bg-sky-500/15 text-sky-500' : 'bg-amber-500/15 text-amber-500'}`}>
+                      {incoming ? '받은 교환' : '보낸 교환'}
+                    </span>
+                    <span className="text-[11px] font-bold text-muted-foreground truncate">상대: {counterpartName}</span>
+                  </div>
+                  <p className={`text-[10px] font-bold mb-2 ${confirmed ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                    [{confirmed ? '2단계' : '1단계'}] {stageLabel}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2">
+                      <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
+                      <p className="text-muted-foreground">{summarize(t.sender_offer)}</p>
+                    </div>
+                    <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 p-2">
+                      <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
+                      <p className="text-muted-foreground">{summarize(t.receiver_offer)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2.5 flex justify-end gap-2">
+                    {/* 수신자: PENDING이면 '동의' 가능. 제안자: CONFIRMED면 '최종 승인' 가능. 양측 항상 취소/거절 가능 */}
+                    <button onClick={() => handleRejectTrade(t.id)} className="rounded-lg bg-secondary px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-secondary/80">
+                      {incoming ? '거절' : '취소'}
+                    </button>
+                    {incoming && !confirmed && (
+                      <button onClick={() => handleConfirmTrade(t.id)} className="rounded-lg bg-primary px-4 py-1.5 text-[11px] font-bold text-primary-foreground hover:bg-primary/90">동의 (1단계)</button>
+                    )}
+                    {!incoming && confirmed && (
+                      <button onClick={() => handleFinalizeTrade(t.id)} className="rounded-lg bg-emerald-600 px-4 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700">최종 승인 (2단계)</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 교환 이력 + 통계 */}
+      {tradeHistory.length > 0 && (() => {
+        const accepted = tradeHistory.filter((t) => t.status === 'ACCEPTED').length;
+        const rejected = tradeHistory.filter((t) => t.status === 'REJECTED').length;
+        const cancelled = tradeHistory.filter((t) => t.status === 'CANCELLED').length;
+        const statusLabel: Record<string, string> = { ACCEPTED: '체결', REJECTED: '거절', CANCELLED: '취소' };
+        const statusColor: Record<string, string> = { ACCEPTED: 'text-emerald-500', REJECTED: 'text-rose-500', CANCELLED: 'text-muted-foreground' };
+        return (
+          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-3">
+            <h3 className="text-base font-black flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력</h3>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-emerald-500/10 p-2.5 text-center"><p className="text-lg font-black text-emerald-500">{accepted}</p><p className="text-[10px] text-muted-foreground">체결</p></div>
+              <div className="rounded-lg bg-rose-500/10 p-2.5 text-center"><p className="text-lg font-black text-rose-500">{rejected}</p><p className="text-[10px] text-muted-foreground">거절</p></div>
+              <div className="rounded-lg bg-secondary p-2.5 text-center"><p className="text-lg font-black text-muted-foreground">{cancelled}</p><p className="text-[10px] text-muted-foreground">취소</p></div>
+            </div>
+            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+              {tradeHistory.map((t) => {
+                const incoming = t.direction === 'incoming';
+                const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
+                return (
+                  <div key={t.id} className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2 text-[11px]">
+                    <span className="truncate">{incoming ? '받음' : '보냄'} · {counterpart}</span>
+                    <span className={`font-bold ${statusColor[t.status]}`}>{statusLabel[t.status] || t.status}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* 가챠 보드 영역 */}
       <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
@@ -1116,6 +1481,13 @@ export const GachaTab: React.FC = () => {
                               ×{count}
                             </span>
                           )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openStreamerDetail(streamer.channel_id); }}
+                            title="시세 그래프 보기"
+                            className="rounded bg-black/40 p-1 text-white/90 hover:bg-primary hover:text-primary-foreground transition"
+                          >
+                            <BarChart3 className="h-3 w-3" />
+                          </button>
                           <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
                             No.{String(card.serial_number).padStart(4, '0')}
                           </span>

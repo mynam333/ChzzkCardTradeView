@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { couponRepository, userRepository } from '../repositories';
 import crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { IS_PRODUCTION } from '../config';
 
 /**
  * 1. 쿠폰 생성 (ADMIN 전용)
@@ -45,7 +46,7 @@ export const createCoupon = async (req: Request, res: Response) => {
 
     return res.status(201).json(coupon);
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 생성 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 생성 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -84,33 +85,29 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(410).json({ error: 'Gone', message: '이미 모두 사용된 쿠폰입니다.' });
     }
 
-    // 중복 사용 확인 (동일인이 이미 사용했는지 로그 체크)
     if (coupon.id === undefined) {
       return res.status(500).json({ error: 'InternalServerError', message: '올바르지 않은 쿠폰 상태입니다.' });
     }
 
-    const alreadyRedeemed = await couponRepository.checkCouponRedeemed(coupon.id, userId);
-    if (alreadyRedeemed) {
+    // 중복 사용 차단을 원자적으로 처리: 로그 INSERT가 UNIQUE 제약에 의해 실패하면
+    // 이미 사용한 것으로 간주 (동시 요청에 의한 이중 수령 방지)
+    const inserted = await couponRepository.logCouponRedeem(coupon.id, userId);
+    if (!inserted) {
       return res.status(409).json({ error: 'Conflict', message: '이미 사용하신 쿠폰입니다.' });
     }
 
-    // 쿠폰 사용 트랜잭션 수동 모방 (SQLite/Supabase 호환)
-    // 1. 로그 기록
-    await couponRepository.logCouponRedeem(coupon.id, userId);
-    // 2. 사용 횟수 증가
+    // 사용 횟수 증가 및 포인트 원자적 가산
     await couponRepository.incrementUsedCount(coupon.id);
-    // 3. 유저 포인트 가산
-    const user = await userRepository.findById(userId);
-    if (user) {
-      await userRepository.updatePoint(userId, user.point + coupon.points);
-    }
+    await userRepository.incrementPoint(userId, coupon.points);
+
+    const updated = await userRepository.findById(userId);
 
     return res.status(200).json({
       message: `쿠폰이 정상적으로 등록되어 ${coupon.points}포인트가 지급되었습니다.`,
       points_added: coupon.points,
-      new_points: user ? user.point + coupon.points : coupon.points
+      new_points: updated ? updated.point : coupon.points
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 사용 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 사용 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

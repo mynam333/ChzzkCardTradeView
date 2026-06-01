@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     point INTEGER DEFAULT 0,                   -- 보유 재화 (기본값: 0)
     last_free_draw TEXT,                       -- 마지막 무료 뽑기 일시 (ISO String)
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
+    representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     base_value INTEGER DEFAULT 1000,           -- 현재 환산 시세 (재화 기준)
     is_active INTEGER DEFAULT 0,               -- 현재 방송 중 여부 (0: false, 1: true)
     broadcast_count INTEGER DEFAULT 0,          -- 방송 켠 횟수
+    broadcast_minutes INTEGER DEFAULT 0,        -- 누적 방송 시간(분)
     chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
     broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
     prev_value INTEGER DEFAULT 1000,            -- 이전 환산 시세 (등락률 계산용)

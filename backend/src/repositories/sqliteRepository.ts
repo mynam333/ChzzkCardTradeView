@@ -6,11 +6,14 @@ import {
   IReportRepository,
   IAnnouncementRepository,
   IUserCardRepository,
+  ITradeRepository,
   User,
+  UserRanking,
   Streamer,
   Coupon,
   CardReport,
-  Announcement
+  Announcement,
+  Trade
 } from './interfaces';
 
 // 1. SQLite 유저 레포지토리
@@ -19,9 +22,7 @@ export class SqliteUserRepository implements IUserRepository {
     return getSqliteDb();
   }
 
-  async findById(id: string): Promise<User | null> {
-    const row = this.getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
-    if (!row) return null;
+  private mapUser(row: any): User {
     return {
       id: row.id,
       username: row.username,
@@ -30,10 +31,21 @@ export class SqliteUserRepository implements IUserRepository {
       point: row.point,
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
+      representative_card_channel_id: row.representative_card_channel_id ?? null,
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       created_at: row.created_at
     };
+  }
+
+  async findById(id: string): Promise<User | null> {
+    const row = this.getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
+    return row ? this.mapUser(row) : null;
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    const row = this.getDb().prepare('SELECT * FROM users WHERE username = ? ORDER BY created_at ASC LIMIT 1').get(username) as any;
+    return row ? this.mapUser(row) : null;
   }
 
   async create(user: User): Promise<User> {
@@ -47,12 +59,44 @@ export class SqliteUserRepository implements IUserRepository {
     this.getDb().prepare('UPDATE users SET point = ? WHERE id = ?').run(point, id);
   }
 
+  async incrementPoint(id: string, delta: number): Promise<void> {
+    this.getDb().prepare('UPDATE users SET point = point + ? WHERE id = ?').run(delta, id);
+  }
+
+  async tryDeductPoint(id: string, amount: number): Promise<boolean> {
+    const result = this.getDb()
+      .prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
+      .run(amount, id, amount);
+    return result.changes > 0;
+  }
+
   async updateBanStatus(id: string, bannedUntil: string | null): Promise<void> {
     this.getDb().prepare('UPDATE users SET banned_until = ? WHERE id = ?').run(bannedUntil, id);
   }
 
+  async claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean> {
+    // last_free_draw(UTC ISO)를 KST 날짜로 환산하여 오늘과 다를 때만 갱신 → 단일 UPDATE로 원자적 처리
+    const result = this.getDb()
+      .prepare(
+        `UPDATE users SET last_free_draw = ?
+         WHERE id = ?
+           AND (last_free_draw IS NULL OR date(datetime(last_free_draw, '+9 hours')) <> ?)`
+      )
+      .run(nowIso, id, todayKst);
+    return result.changes > 0;
+  }
+
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
+  }
+
+  async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {
+    this.getDb().prepare('UPDATE users SET representative_card_channel_id = ? WHERE id = ?').run(channelId, id);
+  }
+
+  async count(): Promise<number> {
+    const row = this.getDb().prepare('SELECT COUNT(*) AS c FROM users').get() as any;
+    return row?.c || 0;
   }
 
   async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {
@@ -65,8 +109,20 @@ export class SqliteUserRepository implements IUserRepository {
     }
   }
 
-  async findRankings(limit: number): Promise<User[]> {
-    const rows = this.getDb().prepare('SELECT * FROM users ORDER BY point DESC LIMIT ?').all(limit);
+  async findRankings(limit: number): Promise<UserRanking[]> {
+    // 보유 카드 수와 카드 시세 합산을 조인 집계하여 (포인트 + 카드가치) 총자산 기준 정렬
+    const rows = this.getDb().prepare(`
+      SELECT u.*,
+             COUNT(uc.id) AS card_count,
+             COALESCE(SUM(s.base_value), 0) AS cards_value
+      FROM users u
+      LEFT JOIN user_cards uc ON uc.user_id = u.id
+      LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+      GROUP BY u.id
+      ORDER BY (u.point + COALESCE(SUM(s.base_value), 0)) DESC
+      LIMIT ?
+    `).all(limit);
+
     return rows.map((row: any) => ({
       id: row.id,
       username: row.username,
@@ -75,7 +131,9 @@ export class SqliteUserRepository implements IUserRepository {
       point: row.point,
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
-      created_at: row.created_at
+      created_at: row.created_at,
+      card_count: row.card_count,
+      total_asset: row.point + row.cards_value
     }));
   }
 }
@@ -100,6 +158,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       is_active: row.is_active === 1,
       serial_number: row.serial_number || undefined,
       broadcast_count: row.broadcast_count || 0,
+      broadcast_minutes: row.broadcast_minutes || 0,
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
@@ -121,6 +180,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       is_active: row.is_active === 1,
       serial_number: row.serial_number || undefined,
       broadcast_count: row.broadcast_count || 0,
+      broadcast_minutes: row.broadcast_minutes || 0,
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
@@ -196,9 +256,74 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       .run(channelId);
   }
 
+  async incrementBroadcastMinutes(channelId: string, minutes: number): Promise<void> {
+    if (minutes <= 0) return;
+    this.getDb().prepare('UPDATE streamers SET broadcast_minutes = broadcast_minutes + ? WHERE channel_id = ?')
+      .run(minutes, channelId);
+  }
+
+  async getValueHistory(channelId: string, sinceIso: string): Promise<{ value: number; recorded_at: string }[]> {
+    const rows = this.getDb().prepare(
+      `SELECT value, recorded_at FROM value_history
+        WHERE channel_id = ? AND datetime(recorded_at) >= datetime(?)
+        ORDER BY recorded_at ASC`
+    ).all(channelId, sinceIso) as any[];
+    return rows.map(r => ({ value: r.value, recorded_at: r.recorded_at }));
+  }
+
+  async count(): Promise<number> {
+    const row = this.getDb().prepare('SELECT COUNT(*) AS c FROM streamers').get() as any;
+    return row?.c || 0;
+  }
+
   async incrementChatCount(channelId: string, count: number = 1): Promise<void> {
     this.getDb().prepare('UPDATE streamers SET chat_count = chat_count + ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
       .run(count, channelId);
+  }
+
+  async updateValueMetrics(channelId: string, prevValue: number, baseValue: number, activityScore: number, multiplier: number): Promise<void> {
+    this.getDb().prepare(
+      `UPDATE streamers
+         SET prev_value = ?, base_value = ?, activity_score = ?, broadcast_multiplier = ?, updated_at = datetime('now')
+       WHERE channel_id = ?`
+    ).run(prevValue, baseValue, activityScore, multiplier, channelId);
+  }
+
+  async decrementChatCount(channelId: string, amount: number): Promise<void> {
+    if (amount <= 0) return;
+    // 집계 도중 새로 들어온 채팅이 음수가 되지 않도록 0 하한 적용
+    this.getDb().prepare(
+      `UPDATE streamers SET chat_count = MAX(chat_count - ?, 0) WHERE channel_id = ?`
+    ).run(amount, channelId);
+  }
+
+  async recordValueHistory(channelId: string, value: number): Promise<void> {
+    this.getDb().prepare('INSERT INTO value_history (channel_id, value) VALUES (?, ?)').run(channelId, value);
+    // 8일(192시간)보다 오래된 이력은 정리하여 테이블 비대화 방지
+    this.getDb().prepare(
+      `DELETE FROM value_history WHERE channel_id = ? AND datetime(recorded_at) < datetime('now', '-8 days')`
+    ).run(channelId);
+  }
+
+  async getValue24hAgoMap(): Promise<Record<string, number>> {
+    // 채널별로 24시간 경계에 가장 근접한(24h 이전 중 가장 최근) 시세를 선택
+    const rows = this.getDb().prepare(
+      `SELECT vh.channel_id AS channel_id, vh.value AS value
+         FROM value_history vh
+         JOIN (
+           SELECT channel_id, MAX(recorded_at) AS latest
+             FROM value_history
+            WHERE datetime(recorded_at) <= datetime('now', '-24 hours')
+            GROUP BY channel_id
+         ) latest_old
+           ON vh.channel_id = latest_old.channel_id AND vh.recorded_at = latest_old.latest`
+    ).all() as any[];
+
+    const map: Record<string, number> = {};
+    for (const r of rows) {
+      map[r.channel_id] = r.value;
+    }
+    return map;
   }
 }
 // 3. SQLite 쿠폰 레포지토리
@@ -235,13 +360,36 @@ export class SqliteCouponRepository implements ICouponRepository {
     this.getDb().prepare('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?').run(couponId);
   }
 
+  async findAll(): Promise<Coupon[]> {
+    const rows = this.getDb().prepare('SELECT * FROM coupons ORDER BY id DESC').all() as any[];
+    return rows.map(row => ({
+      id: row.id,
+      code: row.code,
+      coupon_type: row.coupon_type as 'single' | 'multi',
+      points: row.points,
+      max_uses: row.max_uses,
+      used_count: row.used_count,
+      expires_at: row.expires_at,
+      created_at: row.created_at
+    }));
+  }
+
   async checkCouponRedeemed(couponId: number, userId: string): Promise<boolean> {
     const row = this.getDb().prepare('SELECT 1 FROM coupon_logs WHERE coupon_id = ? AND user_id = ?').get(couponId, userId);
     return !!row;
   }
 
-  async logCouponRedeem(couponId: number, userId: string): Promise<void> {
-    this.getDb().prepare('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)').run(couponId, userId);
+  async logCouponRedeem(couponId: number, userId: string): Promise<boolean> {
+    try {
+      this.getDb().prepare('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)').run(couponId, userId);
+      return true;
+    } catch (err: any) {
+      // UNIQUE(coupon_id, user_id) 제약 위반 = 이미 사용한 쿠폰 (동시 요청 포함)
+      if (err && typeof err.code === 'string' && err.code.startsWith('SQLITE_CONSTRAINT')) {
+        return false;
+      }
+      throw err;
+    }
   }
 }
 
@@ -275,6 +423,11 @@ export class SqliteReportRepository implements IReportRepository {
 
   async updateStatus(reportId: number, status: 'resolved' | 'rejected'): Promise<void> {
     this.getDb().prepare('UPDATE card_reports SET status = ? WHERE id = ?').run(status, reportId);
+  }
+
+  async countPending(): Promise<number> {
+    const row = this.getDb().prepare("SELECT COUNT(*) AS c FROM card_reports WHERE status = 'pending'").get() as any;
+    return row?.c || 0;
   }
 }
 
@@ -406,7 +559,158 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     const result = this.getDb().prepare(
       `DELETE FROM user_cards WHERE id IN (${placeholders})`
     ).run(...ids);
-    
+
     return result.changes;
+  }
+
+  async count(): Promise<number> {
+    const row = this.getDb().prepare('SELECT COUNT(*) AS c FROM user_cards').get() as any;
+    return row?.c || 0;
+  }
+}
+
+// 7. SQLite 거래(1:1 교환) 레포지토리
+export class SqliteTradeRepository implements ITradeRepository {
+  private getDb() {
+    return getSqliteDb();
+  }
+
+  private mapRow(row: any): Trade {
+    return {
+      id: row.id,
+      sender_id: row.sender_id,
+      receiver_id: row.receiver_id,
+      sender_offer: JSON.parse(row.sender_offer),
+      receiver_offer: JSON.parse(row.receiver_offer),
+      status: row.status,
+      created_at: row.created_at,
+      completed_at: row.completed_at,
+      sender_username: row.sender_username,
+      receiver_username: row.receiver_username
+    };
+  }
+
+  async create(trade: Pick<Trade, 'sender_id' | 'receiver_id' | 'sender_offer' | 'receiver_offer'>): Promise<Trade> {
+    const result = this.getDb().prepare(
+      `INSERT INTO trades (sender_id, receiver_id, sender_offer, receiver_offer, status)
+       VALUES (?, ?, ?, ?, 'PENDING')`
+    ).run(
+      trade.sender_id,
+      trade.receiver_id,
+      JSON.stringify(trade.sender_offer),
+      JSON.stringify(trade.receiver_offer)
+    );
+    return {
+      id: Number(result.lastInsertRowid),
+      ...trade,
+      status: 'PENDING'
+    };
+  }
+
+  async findById(id: number): Promise<Trade | null> {
+    const row = this.getDb().prepare('SELECT * FROM trades WHERE id = ?').get(id) as any;
+    return row ? this.mapRow(row) : null;
+  }
+
+  async findActiveByUser(userId: string): Promise<Trade[]> {
+    const rows = this.getDb().prepare(`
+      SELECT t.*, su.username AS sender_username, ru.username AS receiver_username
+        FROM trades t
+        LEFT JOIN users su ON su.id = t.sender_id
+        LEFT JOIN users ru ON ru.id = t.receiver_id
+       WHERE t.status IN ('PENDING','CONFIRMED') AND (t.sender_id = ? OR t.receiver_id = ?)
+       ORDER BY t.id DESC
+    `).all(userId, userId) as any[];
+    return rows.map(r => this.mapRow(r));
+  }
+
+  async findHistoryByUser(userId: string, limit: number): Promise<Trade[]> {
+    const rows = this.getDb().prepare(`
+      SELECT t.*, su.username AS sender_username, ru.username AS receiver_username
+        FROM trades t
+        LEFT JOIN users su ON su.id = t.sender_id
+        LEFT JOIN users ru ON ru.id = t.receiver_id
+       WHERE t.status IN ('ACCEPTED','REJECTED','CANCELLED') AND (t.sender_id = ? OR t.receiver_id = ?)
+       ORDER BY t.id DESC
+       LIMIT ?
+    `).all(userId, userId, limit) as any[];
+    return rows.map(r => this.mapRow(r));
+  }
+
+  async updateStatus(id: number, status: Trade['status']): Promise<void> {
+    this.getDb().prepare('UPDATE trades SET status = ? WHERE id = ?').run(status, id);
+  }
+
+  async countCompleted(): Promise<number> {
+    const row = this.getDb().prepare("SELECT COUNT(*) AS c FROM trades WHERE status = 'ACCEPTED'").get() as any;
+    return row?.c || 0;
+  }
+
+  // 1단계: 수신자 동의 (PENDING → CONFIRMED)
+  async confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+    const row = this.getDb().prepare('SELECT * FROM trades WHERE id = ?').get(id) as any;
+    if (!row) return { ok: false, reason: 'NOT_FOUND' };
+    if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
+    if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
+    this.getDb().prepare("UPDATE trades SET status = 'CONFIRMED' WHERE id = ?").run(id);
+    return { ok: true, reason: 'OK' };
+  }
+
+  // 2단계: 제안자 최종 승인 및 원자적 체결 (CONFIRMED → ACCEPTED)
+  async finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+    const db = this.getDb();
+
+    // 카드 channel_id+count 만큼 소유자를 from→to로 이전하는 헬퍼 (부족 시 throw)
+    const moveCards = (fromId: string, toId: string, cards: { channel_id: string; count: number }[]) => {
+      for (const c of cards) {
+        if (!c.channel_id || !c.count || c.count <= 0) continue;
+        const owned = db.prepare(
+          'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
+        ).all(fromId, c.channel_id, c.count) as { id: number }[];
+        if (owned.length < c.count) {
+          throw new Error('CARD_SHORTAGE');
+        }
+        const ids = owned.map(o => o.id);
+        const placeholders = ids.map(() => '?').join(',');
+        db.prepare(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`).run(toId, ...ids);
+      }
+    };
+
+    const txn = db.transaction(() => {
+      const row = db.prepare('SELECT * FROM trades WHERE id = ?').get(id) as any;
+      if (!row) throw new Error('NOT_FOUND');
+      if (row.status !== 'CONFIRMED') throw new Error('NOT_CONFIRMED');
+      if (row.sender_id !== actorId) throw new Error('FORBIDDEN');
+
+      const senderOffer = JSON.parse(row.sender_offer);
+      const receiverOffer = JSON.parse(row.receiver_offer);
+      const senderOut = Number(senderOffer.point || 0);
+      const receiverOut = Number(receiverOffer.point || 0);
+
+      // 포인트 잔액 검증
+      const sender = db.prepare('SELECT point FROM users WHERE id = ?').get(row.sender_id) as any;
+      const receiver = db.prepare('SELECT point FROM users WHERE id = ?').get(row.receiver_id) as any;
+      if (!sender || !receiver) throw new Error('USER_NOT_FOUND');
+      if (sender.point < senderOut) throw new Error('SENDER_POINT_SHORT');
+      if (receiver.point < receiverOut) throw new Error('RECEIVER_POINT_SHORT');
+
+      // 카드 이전 (양방향)
+      moveCards(row.sender_id, row.receiver_id, senderOffer.cards || []);
+      moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || []);
+
+      // 포인트 정산 (양방향 동시 반영)
+      db.prepare('UPDATE users SET point = point - ? + ? WHERE id = ?').run(senderOut, receiverOut, row.sender_id);
+      db.prepare('UPDATE users SET point = point - ? + ? WHERE id = ?').run(receiverOut, senderOut, row.receiver_id);
+
+      // 거래 체결 처리
+      db.prepare("UPDATE trades SET status = 'ACCEPTED', completed_at = datetime('now') WHERE id = ?").run(id);
+    });
+
+    try {
+      txn();
+      return { ok: true, reason: 'OK' };
+    } catch (err: any) {
+      return { ok: false, reason: err.message || 'FAILED' };
+    }
   }
 }

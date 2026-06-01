@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { streamerRepository, reportRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { IS_PRODUCTION } from '../config';
 
 /**
  * 특정 스트리머 카드를 신고하는 핸들러 (신고 시점 이미지 스냅샷 포함)
@@ -54,8 +55,7 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
     return res.status(500).json({
       error: 'InternalServerError',
       message: '신고 접수 중 서버 에러가 발생했습니다.',
-      details: err.message
+      details: IS_PRODUCTION ? undefined : err.message
     });
   }
 };
-export { reportStreamerCard as reportStreamerCardHandler };

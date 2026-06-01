@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert } from 'lucide-react';
-import { API_BASE_URL } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface Notice {
   id: number;
@@ -29,17 +29,19 @@ export const MainTab: React.FC = () => {
 
   const fetchNotices = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/announcements`);
-      if (res.ok) {
-        const data = await res.json();
-        setNotices(data);
+      // 게시판 목록 (전체 공지)
+      const res = await apiFetch('/announcements');
+      if (res.ok) setNotices(await res.json());
 
-        // 팝업 공지 추출 (최신 활성 팝업 1개 노출)
-        const popups = data.filter((n: Notice) => n.is_popup);
+      // 팝업은 만료(popup_expires_at)가 반영된 전용 엔드포인트에서 활성 팝업만 가져옴
+      const popupRes = await apiFetch('/announcements/popups');
+      if (popupRes.ok) {
+        const popups = await popupRes.json();
         if (popups.length > 0) {
           const latestPopupId = popups[0].id;
-          const isDismissed = localStorage.getItem(`popup_dismissed_${latestPopupId}`);
-          if (!isDismissed) {
+          const dismissedDate = localStorage.getItem(`popup_dismissed_${latestPopupId}`);
+          // '오늘 하루 보지 않기'는 당일에만 유효 (저장된 날짜가 오늘과 다르면 다시 노출)
+          if (dismissedDate !== getTodayKey()) {
             setActivePopup(popups[0]);
           }
         }
@@ -54,7 +56,7 @@ export const MainTab: React.FC = () => {
 
   const fetchHotStreamers = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/streamers`);
+      const res = await apiFetch('/streamers');
       if (res.ok) {
         const data = await res.json();
         setHotStreamers(data.slice(0, 3));
@@ -65,10 +67,15 @@ export const MainTab: React.FC = () => {
     }
   };
 
-  const dismissPopup = (forever = false) => {
+  // 오늘 날짜 키 (KST 기준 YYYY-MM-DD)
+  const getTodayKey = () =>
+    new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const dismissPopup = (today = false) => {
     if (activePopup) {
-      if (forever) {
-        localStorage.setItem(`popup_dismissed_${activePopup.id}`, 'true');
+      if (today) {
+        // 오늘 하루 보지 않기: 오늘 날짜를 저장 (다음 날에는 다시 노출)
+        localStorage.setItem(`popup_dismissed_${activePopup.id}`, getTodayKey());
       }
       setActivePopup(null);
     }
@@ -94,7 +101,7 @@ export const MainTab: React.FC = () => {
                 onClick={() => dismissPopup(true)}
                 className="text-xs text-muted-foreground hover:underline"
               >
-                다시 보지 않기
+                오늘 하루 보지 않기
               </button>
               <button
                 onClick={() => dismissPopup(false)}

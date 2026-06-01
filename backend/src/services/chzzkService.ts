@@ -11,7 +11,10 @@ export interface ChzzkProfile {
   concurrentUserCount?: number;
 }
 
-export const fetchChzzkChannelProfile = async (channelId: string): Promise<ChzzkProfile> => {
+export const fetchChzzkChannelProfile = async (
+  channelId: string,
+  throwOnError = false
+): Promise<ChzzkProfile> => {
   const profileUrl = `https://api.chzzk.naver.com/service/v1/channels/${channelId}`;
   const liveStatusUrl = `https://api.chzzk.naver.com/polling/v2/channels/${channelId}/live-status`;
 
@@ -62,6 +65,10 @@ export const fetchChzzkChannelProfile = async (channelId: string): Promise<Chzzk
     }
   } catch (error: any) {
     console.warn(`[ChzzkService] 치지직 API 조회 실패 (대상: ${channelId}):`, error.message);
+    // 신규 카드 등록처럼 정확한 검증이 필요한 경우에는 폴백 더미 데이터 대신 에러를 전파합니다.
+    if (throwOnError) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
     return {
       name: `스트리머_${channelId.substring(0, 5)}`,
       logoUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${channelId}`,

@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
+import { JWT_SECRET, IS_PRODUCTION } from '../config';
+import { encryptToken } from '../services/cryptoService';
 
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
 const CHZZK_API_URL = process.env.CHZZK_API_URL || 'https://api.chzzk.naver.com';
-const JWT_SECRET = process.env.JWT_SECRET || 'chzzk_secret_key_2026';
 
 /**
  * 1. 치지직 로그인 인터록 URL 반환 API
@@ -129,6 +130,10 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       });
     }
 
+    // 치지직 OAuth 토큰은 DB에 평문으로 저장하지 않고 AES-256-GCM으로 암호화하여 보관
+    const encAccessToken = encryptToken(finalAccessToken);
+    const encRefreshToken = encryptToken(finalRefreshToken);
+
     // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
@@ -140,13 +145,13 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         point: 0, // 첫 가입 유저 0 포인트
         last_free_draw: null,
         banned_until: null,
-        access_token: finalAccessToken,
-        refresh_token: finalRefreshToken
+        access_token: encAccessToken,
+        refresh_token: encRefreshToken
       };
       await userRepository.create(user);
     } else {
       // 이미 가입된 유저의 경우, 로그인할 때마다 최신 치지직 닉네임, 프로필 사진 및 액세스 토큰으로 업데이트합니다.
-      await userRepository.updateProfile(chzzkUser.id, chzzkUser.nickname, chzzkUser.profileImageUrl || null, finalAccessToken, finalRefreshToken);
+      await userRepository.updateProfile(chzzkUser.id, chzzkUser.nickname, chzzkUser.profileImageUrl || null, encAccessToken, encRefreshToken);
       // 로컬 JWT 토큰 발행을 위해 user 객체 정보도 갱신해줍니다.
       user.username = chzzkUser.nickname;
       if (chzzkUser.profileImageUrl) {
@@ -180,7 +185,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     return res.status(500).json({
       error: 'InternalServerError',
       message: '치지직 로그인 처리 중 서버 내부 오류가 발생했습니다.',
-      details: err.message
+      details: IS_PRODUCTION ? undefined : err.message
     });
   }
 };
@@ -191,13 +196,4 @@ const queryParser = (req: Request) => {
     redirect_uri: req.query.redirect_uri as string,
     state: req.query.state as string
   };
-};
-
-const cryptoHash = (str: string): string => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
 };

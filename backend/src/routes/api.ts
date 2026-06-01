@@ -37,6 +37,22 @@ import {
   registerStreamer,
   sellCards
 } from '../controllers/playController';
+import {
+  createTrade,
+  getActiveTrades,
+  confirmTrade,
+  finalizeTrade,
+  rejectTrade,
+  getTradeHistory
+} from '../controllers/tradeController';
+import {
+  getStreamerDetail,
+  setRepresentativeCard
+} from '../controllers/playController';
+import {
+  getAdminStats,
+  getCoupons
+} from '../controllers/adminController';
 import { streamerRepository } from '../repositories';
 
 const router = Router();
@@ -73,6 +89,17 @@ router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
 router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchChzzkStreamer);
 router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerStreamer);
 
+// 대표 카드 설정
+router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setRepresentativeCard);
+
+// 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
+router.post('/trades', authMiddleware, banCheckMiddleware, createTrade);
+router.get('/trades/active', authMiddleware, banCheckMiddleware, getActiveTrades);
+router.get('/trades/history', authMiddleware, banCheckMiddleware, getTradeHistory);
+router.post('/trades/:trade_id/confirm', authMiddleware, banCheckMiddleware, confirmTrade);
+router.post('/trades/:trade_id/finalize', authMiddleware, banCheckMiddleware, finalizeTrade);
+router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, rejectTrade);
+
 
 
 // ==========================================
@@ -83,7 +110,14 @@ router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerS
 router.get('/streamers', async (req, res) => {
   try {
     const streamers = await streamerRepository.findAll();
-    return res.status(200).json(streamers);
+    // 24시간 전 시세를 조회하여 prev_value로 덮어써, 프론트의 등락률이 실제 24h 변동을 반영하도록 함
+    const value24hMap = await streamerRepository.getValue24hAgoMap();
+    const enriched = streamers.map((s) => ({
+      ...s,
+      // 24h 이력이 있으면 그 값을, 없으면(신규 등록 등) 기존 prev_value 유지
+      prev_value: value24hMap[s.channel_id] ?? s.prev_value
+    }));
+    return res.status(200).json(enriched);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });
   }
@@ -91,6 +125,9 @@ router.get('/streamers', async (req, res) => {
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, upload.single('image'), uploadCustomImage);
+
+// 특정 스트리머 상세 + 시세 변화 그래프 데이터 (공개) — /streamers/search, /streamers/register 보다 뒤에 위치
+router.get('/streamers/:channel_id', getStreamerDetail);
 
 // ==========================================
 // 2. 일반 유저 및 공용 기능
@@ -137,8 +174,12 @@ router.get('/admin/reports', authMiddleware, adminMiddleware, getReports);
 // 특정 신고 건에 대한 종결 처리 상태 갱신
 router.post('/admin/reports/:report_id/resolve', authMiddleware, adminMiddleware, resolveReport);
 
-// 쿠폰 발급 API
+// 관리자 대시보드 통계
+router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
+
+// 쿠폰 발급 및 목록/사용현황 조회
 router.post('/admin/coupons', authMiddleware, adminMiddleware, createCoupon);
+router.get('/admin/coupons', authMiddleware, adminMiddleware, getCoupons);
 
 // 공지사항 작성
 router.post('/admin/announcements', authMiddleware, adminMiddleware, createAnnouncement);

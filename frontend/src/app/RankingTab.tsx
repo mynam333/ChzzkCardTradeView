@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Flame
 } from 'lucide-react';
-import { API_BASE_URL } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 interface Streamer {
   channel_id: string;
@@ -31,6 +31,7 @@ interface UserRank {
   avatar_url: string;
   point: number;
   card_count: number;
+  total_asset?: number;
 }
 
 export const RankingTab: React.FC = () => {
@@ -50,13 +51,13 @@ export const RankingTab: React.FC = () => {
     setLoading(true);
     try {
       if (subTab === 'streamer') {
-        const res = await fetch(`${API_BASE_URL}/streamers`);
+        const res = await apiFetch('/streamers');
         if (res.ok) {
           const data = await res.json();
           setStreamers(data);
         }
       } else {
-        const res = await fetch(`${API_BASE_URL}/users/ranking`);
+        const res = await apiFetch('/users/ranking');
         if (res.ok) {
           const data = await res.json();
           setUserRankings(data);
@@ -231,8 +232,8 @@ export const RankingTab: React.FC = () => {
                 </div>
 
                 <div className="text-right">
-                  <span className="text-xs font-black text-primary">{(ur.point || 0).toLocaleString()} P</span>
-                  <p className="text-[9px] text-muted-foreground">보유 자산</p>
+                  <span className="text-xs font-black text-primary">{((ur.total_asset ?? ur.point) || 0).toLocaleString()} P</span>
+                  <p className="text-[9px] text-muted-foreground">총 자산 (포인트+카드가치)</p>
                 </div>
               </div>
             ))

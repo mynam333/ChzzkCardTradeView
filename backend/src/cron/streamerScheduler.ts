@@ -2,9 +2,13 @@ import cron from 'node-cron';
 import { streamerRepository, userRepository } from '../repositories';
 import { fetchChzzkChannelProfile } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
+import { decryptToken } from '../services/cryptoService';
 
 // 지연 처리를 위한 헬퍼 함수
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
+const SCHEDULE_INTERVAL_MINUTES = 2;
 
 /**
  * 정교하게 개편된 카드 가치 계산 공식을 실행합니다.
@@ -94,7 +98,8 @@ export const syncAllStreamersLiveStatus = async () => {
           try {
             const streamerUser = await userRepository.findById(streamer.channel_id);
             if (streamerUser?.access_token) {
-              streamerAccessToken = streamerUser.access_token;
+              // DB에는 암호화되어 저장되므로 사용 직전에 복호화
+              streamerAccessToken = decryptToken(streamerUser.access_token) || undefined;
             }
           } catch (err) {
             // 사용자 정보가 없거나 에러가 나면 무시하고 비로그인 수집 시도
@@ -138,32 +143,50 @@ export const syncAllStreamersLiveStatus = async () => {
           // 팔로워 증감량 계산
           const followerDelta = profile.followerCount - (streamer.follower_count || 0);
 
+          // 이번 주기에 집계에 사용한 채팅 수(소비량). 집계 도중 새로 들어온 채팅은 보존하기 위해 별도 보관.
+          const consumedChats = updatedStreamer.chat_count || 0;
+
           // 최종 가치 연산 (이전 base_value 기준 누적식 변동 적용, 방송중 여부 및 팔로워 증감 전달)
           const finalVal = calculateCardValue(
             updatedStreamer.base_value || updatedStreamer.follower_count,
             updatedStreamer.follower_count,
             clampedDelta,
-            updatedStreamer.chat_count || 0,
+            consumedChats,
             profile.concurrentUserCount || 0,
             isEffectiveLive,
             followerDelta
           );
 
-          console.log(`[LiveStatusScheduler] 가치 계산 상세 (스트리머: ${updatedStreamer.name}) - 이전가치: ${updatedStreamer.base_value}, 팔로워: ${updatedStreamer.follower_count}, 팔로워변동: ${followerDelta}, 시청자: ${profile.concurrentUserCount || 0}, 채팅: ${updatedStreamer.chat_count || 0}, 배율델타: ${clampedDelta.toFixed(5)} -> 최종가치: ${finalVal}`);
+          console.log(`[LiveStatusScheduler] 가치 계산 상세 (스트리머: ${updatedStreamer.name}) - 이전가치: ${updatedStreamer.base_value}, 팔로워: ${updatedStreamer.follower_count}, 팔로워변동: ${followerDelta}, 시청자: ${profile.concurrentUserCount || 0}, 채팅: ${consumedChats}, 배율델타: ${clampedDelta.toFixed(5)} -> 최종가치: ${finalVal}`);
 
-          // 활동 지표는 방송 횟수, 채팅량에 감가 배율 가중치를 합성하여 점수화
+          // 방송 시간 누적: effective live면 이번 스케줄 주기(2분)만큼 방송 시간(분) 가산
+          if (isEffectiveLive) {
+            await streamerRepository.incrementBroadcastMinutes(streamer.channel_id, SCHEDULE_INTERVAL_MINUTES);
+          }
+
+          // 활동 지표는 누적 방송 시간(시간 단위) + 채팅량에 감가 배율 가중치를 합성하여 점수화
+          const broadcastMinutes = (updatedStreamer.broadcast_minutes || 0) + (isEffectiveLive ? SCHEDULE_INTERVAL_MINUTES : 0);
+          const broadcastHours = broadcastMinutes / 60;
           const activityScore = Math.round(
-            ((updatedStreamer.broadcast_count || 0) * 10 + (updatedStreamer.chat_count || 0)) * newMultiplier
+            (broadcastHours * 50 + consumedChats) * newMultiplier
           );
 
-          // 변경된 최종 가치, 감가 배율 및 활동 점수 업데이트
-          updatedStreamer.prev_value = updatedStreamer.base_value || updatedStreamer.follower_count;
-          updatedStreamer.broadcast_multiplier = newMultiplier;
-          updatedStreamer.base_value = finalVal;
-          updatedStreamer.activity_score = activityScore;
-          // 다음 2분 동안의 채팅 수집을 위해 chat_count를 0으로 초기화
-          updatedStreamer.chat_count = 0;
-          await streamerRepository.save(updatedStreamer);
+          const prevValue = updatedStreamer.base_value || updatedStreamer.follower_count;
+
+          // 시세/배율/점수만 원자적으로 반영 (chat_count는 건드리지 않아 집계 중 유입 채팅 보존)
+          await streamerRepository.updateValueMetrics(
+            streamer.channel_id,
+            prevValue,
+            finalVal,
+            activityScore,
+            newMultiplier
+          );
+
+          // 집계에 소비한 만큼만 chat_count 차감 (집계 도중 들어온 채팅은 다음 주기로 이월)
+          await streamerRepository.decrementChatCount(streamer.channel_id, consumedChats);
+
+          // 시세 히스토리 기록 (24시간 등락률/차트용)
+          await streamerRepository.recordValueHistory(streamer.channel_id, finalVal);
         }
 
         successCount++;

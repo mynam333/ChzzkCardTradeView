@@ -3,6 +3,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '../../../AppContext';
+import { apiFetch } from '@/lib/api';
 
 import { Loader2 } from 'lucide-react';
 
@@ -25,12 +26,8 @@ const ChzzkCallbackContent: React.FC = () => {
 
     const exchangeCodeForToken = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-        const response = await fetch(`${apiUrl}/auth/chzzk/callback`, {
+        const response = await apiFetch('/auth/chzzk/callback', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
           body: JSON.stringify({ code, state }),
         });
 
@@ -49,6 +46,7 @@ const ChzzkCallbackContent: React.FC = () => {
           role: data.user.role,
           point: data.user.point,
           lastFreeDraw: null,
+          representativeCardChannelId: null,
           token: data.token
         };
 

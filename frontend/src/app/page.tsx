@@ -7,9 +7,29 @@ import { MainTab } from './MainTab';
 import { GachaTab } from './GachaTab';
 import { RankingTab } from './RankingTab';
 import { MyInfoTab } from './MyInfoTab';
+import { AdminTab } from './AdminTab';
+import { subscribeToPush, isPushSupported } from '@/lib/push';
 
 const CCTVAppContent: React.FC = () => {
-  const { activeTab } = useApp();
+  const { activeTab, user } = useApp();
+
+  // 🔔 버튼: 실제 웹 푸시 알림 권한 요청 및 구독 등록
+  const handleNotifyClick = async () => {
+    if (!isPushSupported()) {
+      alert('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.');
+      return;
+    }
+    if (!user) {
+      alert('알림을 받으려면 먼저 치지직 로그인이 필요합니다.');
+      return;
+    }
+    const result = await subscribeToPush();
+    if (result.ok) {
+      alert('실시간 푸시 알림 구독이 완료되었습니다!');
+    } else {
+      alert(result.message);
+    }
+  };
 
   const renderActiveTab = () => {
     switch (activeTab) {
@@ -21,13 +41,16 @@ const CCTVAppContent: React.FC = () => {
         return <RankingTab />;
       case 'my-info':
         return <MyInfoTab />;
+      case 'admin':
+        // 관리자 전용 가드: ADMIN이 아니면 메인으로 폴백
+        return user?.role === 'ADMIN' ? <AdminTab /> : <MainTab />;
       default:
         return <MainTab />;
     }
   };
 
   return (
-    <MainLayout onNotifyClick={() => alert('실시간 PWA 알림 권한 허용이 완료되었습니다.')}>
+    <MainLayout onNotifyClick={handleNotifyClick}>
       {renderActiveTab()}
     </MainLayout>
   );

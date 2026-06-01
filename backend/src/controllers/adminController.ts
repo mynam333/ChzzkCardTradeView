@@ -1,6 +1,14 @@
 import { Request, Response } from 'express';
-import { streamerRepository, userRepository, reportRepository } from '../repositories';
+import {
+  streamerRepository,
+  userRepository,
+  reportRepository,
+  couponRepository,
+  userCardRepository,
+  tradeRepository
+} from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { IS_PRODUCTION } from '../config';
 
 /**
  * 1. 스트리머 카드 커스텀 이미지를 기본 프로필로 강제 초기화
@@ -26,7 +34,7 @@ export const resetStreamerImage = async (req: Request, res: Response) => {
       channel_id
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 이미지 초기화 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 이미지 초기화 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -56,7 +64,7 @@ export const banStreamerImage = async (req: Request, res: Response) => {
       channel_id
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 이미지 차단 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 이미지 차단 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -83,7 +91,7 @@ export const unbanStreamerImage = async (req: Request, res: Response) => {
       channel_id
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 차단 해제 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 차단 해제 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -137,7 +145,7 @@ export const banUser = async (req: Request, res: Response) => {
       banned_until: bannedUntilIso
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '유저 차단 처리 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '유저 차단 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -164,7 +172,7 @@ export const unbanUser = async (req: Request, res: Response) => {
       user_id
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '유저 제재 해제 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '유저 제재 해제 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -176,7 +184,7 @@ export const getReports = async (req: Request, res: Response) => {
     const reports = await reportRepository.findAll();
     return res.status(200).json(reports);
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '신고 목록 조회 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '신고 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -199,7 +207,43 @@ export const resolveReport = async (req: Request, res: Response) => {
       status
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '신고 처리 상태 변경 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '신고 처리 상태 변경 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
-export { resolveReport as resolveReportHandler };
+
+/**
+ * 8. 관리자 대시보드 통계 요약
+ */
+export const getAdminStats = async (req: Request, res: Response) => {
+  try {
+    const [userCount, streamerCount, cardCount, completedTrades, pendingReports] = await Promise.all([
+      userRepository.count(),
+      streamerRepository.count(),
+      userCardRepository.count(),
+      tradeRepository.countCompleted(),
+      reportRepository.countPending()
+    ]);
+
+    return res.status(200).json({
+      user_count: userCount,
+      streamer_count: streamerCount,
+      card_distributed: cardCount,
+      completed_trades: completedTrades,
+      pending_reports: pendingReports
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '통계 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 9. 발급된 쿠폰 목록 및 사용 현황 조회
+ */
+export const getCoupons = async (req: Request, res: Response) => {
+  try {
+    const coupons = await couponRepository.findAll();
+    return res.status(200).json(coupons);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};

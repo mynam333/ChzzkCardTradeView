@@ -1,27 +1,30 @@
 import { getDbMode } from '../services/db';
-import { 
-  IUserRepository, 
-  IStreamerRepository, 
-  ICouponRepository, 
+import {
+  IUserRepository,
+  IStreamerRepository,
+  ICouponRepository,
   IReportRepository,
   IAnnouncementRepository,
-  IUserCardRepository
+  IUserCardRepository,
+  ITradeRepository
 } from './interfaces';
-import { 
-  SqliteUserRepository, 
-  SqliteStreamerRepository, 
-  SqliteCouponRepository, 
+import {
+  SqliteUserRepository,
+  SqliteStreamerRepository,
+  SqliteCouponRepository,
   SqliteReportRepository,
   SqliteAnnouncementRepository,
-  SqliteUserCardRepository
+  SqliteUserCardRepository,
+  SqliteTradeRepository
 } from './sqliteRepository';
-import { 
-  SupabaseUserRepository, 
-  SupabaseStreamerRepository, 
-  SupabaseCouponRepository, 
+import {
+  SupabaseUserRepository,
+  SupabaseStreamerRepository,
+  SupabaseCouponRepository,
   SupabaseReportRepository,
   SupabaseAnnouncementRepository,
-  SupabaseUserCardRepository
+  SupabaseUserCardRepository,
+  SupabaseTradeRepository
 } from './supabaseRepository';
 
 // 전역 싱글톤 리포지토리 변수 선언
@@ -31,6 +34,7 @@ export let couponRepository: ICouponRepository;
 export let reportRepository: IReportRepository;
 export let announcementRepository: IAnnouncementRepository;
 export let userCardRepository: IUserCardRepository;
+export let tradeRepository: ITradeRepository;
 
 /**
  * 데이터베이스 커넥션이 확립된 후, 모드에 적합한 레포지토리 인스턴스를 초기화합니다.
@@ -45,6 +49,7 @@ export const initRepositories = (): void => {
     reportRepository = new SupabaseReportRepository();
     announcementRepository = new SupabaseAnnouncementRepository();
     userCardRepository = new SupabaseUserCardRepository();
+    tradeRepository = new SupabaseTradeRepository();
     console.log('[Repository] Supabase 리포지토리 레이어가 활성화되었습니다.');
   } else {
     userRepository = new SqliteUserRepository();
@@ -53,6 +58,7 @@ export const initRepositories = (): void => {
     reportRepository = new SqliteReportRepository();
     announcementRepository = new SqliteAnnouncementRepository();
     userCardRepository = new SqliteUserCardRepository();
+    tradeRepository = new SqliteTradeRepository();
     console.log('[Repository] 로컬 SQLite 리포지토리 레이어가 활성화되었습니다.');
   }
 };

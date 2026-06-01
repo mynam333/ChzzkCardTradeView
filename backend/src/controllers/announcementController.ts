@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { announcementRepository } from '../repositories';
+import { IS_PRODUCTION } from '../config';
 
 /**
  * 1. 공지사항 및 팝업 작성 (ADMIN 전용)
@@ -20,7 +21,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
     });
     return res.status(201).json(announcement);
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 생성 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 생성 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -32,7 +33,7 @@ export const getAnnouncements = async (req: Request, res: Response) => {
     const list = await announcementRepository.findAll();
     return res.status(200).json(list);
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 목록 조회 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -44,7 +45,7 @@ export const getActivePopups = async (req: Request, res: Response) => {
     const popups = await announcementRepository.findActivePopups();
     return res.status(200).json(popups);
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '활성 팝업 조회 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '활성 팝업 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -62,6 +63,6 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
     await announcementRepository.delete(Number(id));
     return res.status(200).json({ message: '공지사항이 성공적으로 삭제되었습니다.', id: Number(id) });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 삭제 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 삭제 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

@@ -9,6 +9,7 @@ import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 import { startStreamerLiveStatusScheduler } from './cron/streamerScheduler';
+import { CORS_ALLOWED_ORIGINS } from './config';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -17,7 +18,16 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // 미들웨어 설정
-app.use(cors());
+// CORS: 환경변수로 지정된 오리진 화이트리스트만 허용 (origin 없는 동일출처/서버간 요청은 통과)
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || CORS_ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS 정책에 의해 차단된 오리진입니다: ${origin}`));
+    }
+  }
+}));
 app.use(express.json());
 
 // 로컬 SQLite 업로드 이미지 정적 서빙 경로 마운트

@@ -3,6 +3,7 @@ import { streamerRepository } from '../repositories';
 import { getDbMode } from '../services/db';
 import { resizeAndConvertToWebp } from '../services/imageService';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { IS_PRODUCTION } from '../config';
 import fs from 'fs';
 import path from 'path';
 
@@ -83,7 +84,7 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     return res.status(500).json({
       error: 'InternalServerError',
       message: '서버 내부 문제로 인해 이미지 처리를 실패했습니다.',
-      details: err.message
+      details: IS_PRODUCTION ? undefined : err.message
     });
   }
 };

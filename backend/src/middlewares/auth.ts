@@ -2,8 +2,7 @@ import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
 import { AuthenticatedRequest } from './admin';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'chzzk_secret_key_2026';
+import { JWT_SECRET, IS_PRODUCTION } from '../config';
 
 /**
  * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어
@@ -45,7 +44,7 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
     return res.status(401).json({
       error: 'Unauthorized',
       message: '만료되었거나 손상된 토큰입니다.',
-      details: err.message
+      details: IS_PRODUCTION ? undefined : err.message
     });
   }
 };

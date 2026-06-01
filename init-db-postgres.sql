@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     point INTEGER DEFAULT 0,                     -- 보유 재화
     last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 일시
     banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
+    representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     base_value INTEGER DEFAULT 1000,             -- 현재 환산 시세 (재화 기준)
     is_active BOOLEAN DEFAULT FALSE,             -- 현재 방송 중 여부
     broadcast_count INTEGER DEFAULT 0,            -- 방송 켠 횟수
+    broadcast_minutes INTEGER DEFAULT 0,          -- 누적 방송 시간(분)
     chat_count INTEGER DEFAULT 0,                 -- 실시간 채팅 누적 갯수
     broadcast_multiplier DOUBLE PRECISION DEFAULT 1.0, -- 실시간 방송 감가 배율 (0.2 ~ 1.2)
     prev_value INTEGER DEFAULT 1000,              -- 이전 환산 시세 (등락률 계산용)
@@ -126,6 +128,12 @@ CREATE TABLE IF NOT EXISTS card_reports (
 );
 
 -- ============================================================
+-- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
+
+-- ============================================================
 -- 인덱스 설정 (자주 조회되는 컬럼 최적화)
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);
@@ -134,5 +142,164 @@ CREATE INDEX IF NOT EXISTS idx_trades_sender_id ON trades(sender_id);
 CREATE INDEX IF NOT EXISTS idx_trades_receiver_id ON trades(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id);
+CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);
+
+-- ============================================================
+-- 원자적 연산을 위한 RPC 함수 (동시성 안전성 보장)
+-- 백엔드 SupabaseRepository에서 .rpc()로 호출합니다.
+-- ============================================================
+
+-- 포인트 원자적 증감 (delta 음수 가능)
+CREATE OR REPLACE FUNCTION increment_user_point(p_id TEXT, p_delta INTEGER)
+RETURNS VOID AS $$
+  UPDATE users SET point = point + p_delta WHERE id = p_id;
+$$ LANGUAGE sql;
+
+-- 잔액이 충분할 때만 차감 (성공 시 TRUE, 부족 시 FALSE)
+CREATE OR REPLACE FUNCTION deduct_user_point(p_id TEXT, p_amount INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+  updated INTEGER;
+BEGIN
+  UPDATE users SET point = point - p_amount
+   WHERE id = p_id AND point >= p_amount;
+  GET DIAGNOSTICS updated = ROW_COUNT;
+  RETURN updated > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 무료 뽑기: 마지막 무료뽑기의 KST 날짜가 오늘과 다를 때만 갱신 (성공 시 TRUE)
+CREATE OR REPLACE FUNCTION claim_free_draw(p_id TEXT, p_today TEXT, p_now TIMESTAMPTZ)
+RETURNS BOOLEAN AS $$
+DECLARE
+  updated INTEGER;
+BEGIN
+  UPDATE users SET last_free_draw = p_now
+   WHERE id = p_id
+     AND (last_free_draw IS NULL
+          OR to_char(last_free_draw AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') <> p_today);
+  GET DIAGNOSTICS updated = ROW_COUNT;
+  RETURN updated > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 스트리머 방송 횟수 원자적 증가
+CREATE OR REPLACE FUNCTION increment_streamer_broadcast(p_channel_id TEXT)
+RETURNS VOID AS $$
+  UPDATE streamers SET broadcast_count = broadcast_count + 1, updated_at = NOW()
+   WHERE channel_id = p_channel_id;
+$$ LANGUAGE sql;
+
+-- 스트리머 채팅 카운트 원자적 증가
+CREATE OR REPLACE FUNCTION increment_streamer_chat(p_channel_id TEXT, p_count INTEGER)
+RETURNS VOID AS $$
+  UPDATE streamers SET chat_count = chat_count + p_count, updated_at = NOW()
+   WHERE channel_id = p_channel_id;
+$$ LANGUAGE sql;
+
+-- 스트리머 채팅 카운트 원자적 차감 (0 하한)
+CREATE OR REPLACE FUNCTION decrement_streamer_chat(p_channel_id TEXT, p_amount INTEGER)
+RETURNS VOID AS $$
+  UPDATE streamers SET chat_count = GREATEST(chat_count - p_amount, 0), updated_at = NOW()
+   WHERE channel_id = p_channel_id;
+$$ LANGUAGE sql;
+
+-- 스트리머 누적 방송 시간(분) 원자적 증가
+CREATE OR REPLACE FUNCTION increment_streamer_minutes(p_channel_id TEXT, p_minutes INTEGER)
+RETURNS VOID AS $$
+  UPDATE streamers SET broadcast_minutes = broadcast_minutes + p_minutes, updated_at = NOW()
+   WHERE channel_id = p_channel_id;
+$$ LANGUAGE sql;
+
+-- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트 양방향 이전을 단일 트랜잭션으로 수행
+-- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE'
+--       | 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT' | 'FAILED:<msg>'
+CREATE OR REPLACE FUNCTION finalize_trade(p_trade_id INTEGER, p_actor TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  t            trades%ROWTYPE;
+  item         JSONB;
+  cid          TEXT;
+  cnt          INTEGER;
+  moved        INTEGER;
+  sender_out   INTEGER;
+  receiver_out INTEGER;
+  s_point      INTEGER;
+  r_point      INTEGER;
+BEGIN
+  SELECT * INTO t FROM trades WHERE id = p_trade_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN 'NOT_FOUND'; END IF;
+  IF t.status <> 'CONFIRMED' THEN RETURN 'NOT_CONFIRMED'; END IF;
+  IF t.sender_id <> p_actor THEN RETURN 'FORBIDDEN'; END IF;
+
+  sender_out   := COALESCE((t.sender_offer->>'point')::INTEGER, 0);
+  receiver_out := COALESCE((t.receiver_offer->>'point')::INTEGER, 0);
+
+  -- 포인트 잔액 검증
+  SELECT point INTO s_point FROM users WHERE id = t.sender_id FOR UPDATE;
+  SELECT point INTO r_point FROM users WHERE id = t.receiver_id FOR UPDATE;
+  IF s_point < sender_out THEN RETURN 'SENDER_POINT_SHORT'; END IF;
+  IF r_point < receiver_out THEN RETURN 'RECEIVER_POINT_SHORT'; END IF;
+
+  -- 보낸 사람 카드 → 받는 사람
+  FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.sender_offer->'cards', '[]'::jsonb)) LOOP
+    cid := item->>'channel_id';
+    cnt := (item->>'count')::INTEGER;
+    IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
+    UPDATE user_cards SET user_id = t.receiver_id
+     WHERE id IN (
+       SELECT id FROM user_cards
+        WHERE user_id = t.sender_id AND channel_id = cid
+        ORDER BY id ASC LIMIT cnt FOR UPDATE
+     );
+    GET DIAGNOSTICS moved = ROW_COUNT;
+    IF moved < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+  END LOOP;
+
+  -- 받는 사람 카드 → 보낸 사람
+  FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.receiver_offer->'cards', '[]'::jsonb)) LOOP
+    cid := item->>'channel_id';
+    cnt := (item->>'count')::INTEGER;
+    IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
+    UPDATE user_cards SET user_id = t.sender_id
+     WHERE id IN (
+       SELECT id FROM user_cards
+        WHERE user_id = t.receiver_id AND channel_id = cid
+        ORDER BY id ASC LIMIT cnt FOR UPDATE
+     );
+    GET DIAGNOSTICS moved = ROW_COUNT;
+    IF moved < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+  END LOOP;
+
+  -- 포인트 정산 (양방향)
+  UPDATE users SET point = point - sender_out + receiver_out WHERE id = t.sender_id;
+  UPDATE users SET point = point - receiver_out + sender_out WHERE id = t.receiver_id;
+
+  UPDATE trades SET status = 'ACCEPTED', completed_at = NOW() WHERE id = p_trade_id;
+  RETURN 'OK';
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN 'FAILED:' || SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 유저 랭킹: (포인트 + 보유 카드 시세 합산) 총자산 기준 정렬
+CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER)
+RETURNS TABLE (
+  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
+  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  card_count BIGINT, total_asset BIGINT
+) AS $$
+  SELECT u.id, u.username, u.avatar_url, u.role, u.point,
+         u.last_free_draw, u.banned_until, u.created_at,
+         COUNT(uc.id) AS card_count,
+         (u.point + COALESCE(SUM(s.base_value), 0))::BIGINT AS total_asset
+    FROM users u
+    LEFT JOIN user_cards uc ON uc.user_id = u.id
+    LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+   GROUP BY u.id
+   ORDER BY total_asset DESC
+   LIMIT p_limit;
+$$ LANGUAGE sql;

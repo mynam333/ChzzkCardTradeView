@@ -79,6 +79,18 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] streamers 테이블에 prev_value 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN prev_value INTEGER DEFAULT 1000;");
       }
+      try {
+        sqliteDb.prepare("SELECT broadcast_minutes FROM streamers LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] streamers 테이블에 broadcast_minutes 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE streamers ADD COLUMN broadcast_minutes INTEGER DEFAULT 0;");
+      }
+      try {
+        sqliteDb.prepare("SELECT representative_card_channel_id FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 representative_card_channel_id 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_channel_id TEXT;");
+      }
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

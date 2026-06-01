@@ -3,6 +3,7 @@ import webpush from 'web-push';
 import cron from 'node-cron';
 import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
 import { AuthenticatedRequest } from '../middlewares/admin';
+import { IS_PRODUCTION } from '../config';
 
 // VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
 const getVapidKeys = () => ({
@@ -80,7 +81,7 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
 
     return res.status(201).json({ message: '푸시 알림 구독 등록이 완료되었습니다.' });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '구독 등록 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '구독 등록 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -127,7 +128,7 @@ export const scheduleNotification = async (req: Request, res: Response) => {
         : '푸시 알림이 즉시 발송 대기 상태로 등록되었습니다.'
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'InternalServerError', message: '푸시 예약 생성 실패', details: err.message });
+    return res.status(500).json({ error: 'InternalServerError', message: '푸시 예약 생성 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -237,4 +238,3 @@ export const startPushNotificationScheduler = () => {
 
   console.log('[Scheduler] PWA 예약 푸시 스케줄러 감시 워커가 가동되었습니다. (1분 간격)');
 };
-export { startPushNotificationScheduler as startPushNotificationSchedulerHandler };
