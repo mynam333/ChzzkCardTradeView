@@ -69,8 +69,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id SERIAL PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
     coupon_type TEXT NOT NULL,                   -- 'single' 또는 'multi'
-    points INTEGER NOT NULL DEFAULT 0,
-    max_uses INTEGER DEFAULT 1,
+    reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화) 또는 'card'(스트리머 카드)
+    points INTEGER NOT NULL DEFAULT 0,           -- reward_type='point' 지급 재화
+    reward_channel_id TEXT,                      -- reward_type='card' 지급 스트리머 채널 ID
+    reward_quantity INTEGER DEFAULT 0,           -- reward_type='card' 지급 카드 수량
+    max_uses INTEGER DEFAULT 1,                  -- 발급 갯수(single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -132,6 +135,9 @@ CREATE TABLE IF NOT EXISTS card_reports (
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
 
 -- ============================================================
 -- 인덱스 설정 (자주 조회되는 컬럼 최적화)

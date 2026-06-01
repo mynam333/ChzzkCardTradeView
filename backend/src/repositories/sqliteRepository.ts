@@ -340,14 +340,15 @@ export class SqliteCouponRepository implements ICouponRepository {
     return getSqliteDb();
   }
 
-  async findByCode(code: string): Promise<Coupon | null> {
-    const row = this.getDb().prepare('SELECT * FROM coupons WHERE code = ?').get(code) as any;
-    if (!row) return null;
+  private mapCoupon(row: any): Coupon {
     return {
       id: row.id,
       code: row.code,
       coupon_type: row.coupon_type as 'single' | 'multi',
+      reward_type: (row.reward_type || 'point') as 'point' | 'card',
       points: row.points,
+      reward_channel_id: row.reward_channel_id ?? null,
+      reward_quantity: row.reward_quantity ?? 0,
       max_uses: row.max_uses,
       used_count: row.used_count,
       expires_at: row.expires_at,
@@ -355,11 +356,27 @@ export class SqliteCouponRepository implements ICouponRepository {
     };
   }
 
+  async findByCode(code: string): Promise<Coupon | null> {
+    const row = this.getDb().prepare('SELECT * FROM coupons WHERE code = ?').get(code) as any;
+    return row ? this.mapCoupon(row) : null;
+  }
+
   async create(coupon: Coupon): Promise<Coupon> {
     const result = this.getDb().prepare(
-      'INSERT INTO coupons (code, coupon_type, points, max_uses, used_count, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(coupon.code, coupon.coupon_type, coupon.points, coupon.max_uses, coupon.used_count, coupon.expires_at);
-    
+      `INSERT INTO coupons (code, coupon_type, reward_type, points, reward_channel_id, reward_quantity, max_uses, used_count, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      coupon.code,
+      coupon.coupon_type,
+      coupon.reward_type,
+      coupon.points,
+      coupon.reward_channel_id,
+      coupon.reward_quantity,
+      coupon.max_uses,
+      coupon.used_count,
+      coupon.expires_at
+    );
+
     coupon.id = Number(result.lastInsertRowid);
     return coupon;
   }
@@ -370,16 +387,7 @@ export class SqliteCouponRepository implements ICouponRepository {
 
   async findAll(): Promise<Coupon[]> {
     const rows = this.getDb().prepare('SELECT * FROM coupons ORDER BY id DESC').all() as any[];
-    return rows.map(row => ({
-      id: row.id,
-      code: row.code,
-      coupon_type: row.coupon_type as 'single' | 'multi',
-      points: row.points,
-      max_uses: row.max_uses,
-      used_count: row.used_count,
-      expires_at: row.expires_at,
-      created_at: row.created_at
-    }));
+    return rows.map(row => this.mapCoupon(row));
   }
 
   async checkCouponRedeemed(couponId: number, userId: string): Promise<boolean> {

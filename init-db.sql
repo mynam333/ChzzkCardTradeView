@@ -71,8 +71,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,                 -- 쿠폰 코드 (수동 입력 또는 랜덤)
     coupon_type TEXT NOT NULL,                 -- 쿠폰 유형 ('single' 또는 'multi')
-    points INTEGER NOT NULL DEFAULT 0,         -- 지급 재화 크기
-    max_uses INTEGER DEFAULT 1,                -- 최대 사용 가능 횟수 (multi인 경우)
+    reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point' 재화 또는 'card' 스트리머 카드)
+    points INTEGER NOT NULL DEFAULT 0,         -- 지급 재화 크기 (reward_type='point')
+    reward_channel_id TEXT,                    -- 지급 스트리머 채널 ID (reward_type='card')
+    reward_quantity INTEGER DEFAULT 0,         -- 지급 카드 수량 (reward_type='card')
+    max_uses INTEGER DEFAULT 1,                -- 발급 갯수 (single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,              -- 현재 사용 횟수
     expires_at TEXT,                           -- 유효 만료 기한 (ISO String)
     created_at TEXT DEFAULT (datetime('now'))

@@ -42,9 +42,14 @@ export interface ValueHistoryPoint {
 export interface Coupon {
   id?: number;
   code: string;
+  // single: 선착순 발급 갯수(max_uses) 제한, multi: 기간 내 1인 1회 · 총량 무제한
   coupon_type: 'single' | 'multi';
-  points: number;
-  max_uses: number;
+  // 보상 종류: point(재화) | card(스트리머 카드)
+  reward_type: 'point' | 'card';
+  points: number;                     // reward_type === 'point' 일 때 지급 재화량
+  reward_channel_id: string | null;   // reward_type === 'card' 일 때 지급 스트리머 채널 ID
+  reward_quantity: number;            // reward_type === 'card' 일 때 지급 카드 수량
+  max_uses: number;                   // single: 발급 갯수, multi: 0(무제한)
   used_count: number;
   expires_at: string | null;
   created_at?: string;

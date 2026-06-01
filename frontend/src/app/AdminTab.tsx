@@ -29,7 +29,18 @@ export const AdminTab: React.FC = () => {
 
   // 쿠폰
   const [coupons, setCoupons] = useState<any[]>([]);
-  const [couponForm, setCouponForm] = useState({ code: '', coupon_type: 'single' as 'single' | 'multi', points: 1000, max_uses: 1 });
+  const [couponStreamers, setCouponStreamers] = useState<any[]>([]);
+  const [couponStreamerSearch, setCouponStreamerSearch] = useState('');
+  const [couponForm, setCouponForm] = useState({
+    code: '',
+    coupon_type: 'single' as 'single' | 'multi',
+    reward_type: 'point' as 'point' | 'card',
+    points: 1000,
+    reward_channel_id: '',
+    reward_quantity: 1,
+    max_uses: 1,
+    expires_at: ''
+  });
 
   // 공지
   const [announcements, setAnnouncements] = useState<any[]>([]);
@@ -50,7 +61,7 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
     if (subTab === 'dashboard') fetchStats();
-    if (subTab === 'coupons') fetchCoupons();
+    if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); }
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') fetchReports();
   }, [subTab, isAdmin]);
@@ -78,6 +89,16 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setCoupons(await res.json());
     } catch { /* noop */ }
   };
+  const fetchCouponStreamers = async () => {
+    if (couponStreamers.length > 0) return;
+    try {
+      const res = await apiFetch('/streamers');
+      if (res.ok) setCouponStreamers(await res.json());
+    } catch { /* noop */ }
+  };
+  // 카드 보상 쿠폰 목록 표시용 채널ID→이름 매핑
+  const streamerName = (channelId: string) =>
+    couponStreamers.find((s) => s.channel_id === channelId)?.name || channelId;
   const fetchAnnouncements = async () => {
     try {
       const res = await apiFetch('/announcements');
@@ -92,12 +113,22 @@ export const AdminTab: React.FC = () => {
   };
 
   const handleCreateCoupon = async () => {
+    if (couponForm.reward_type === 'card' && !couponForm.reward_channel_id) {
+      alert('지급할 스트리머 카드를 선택해 주세요.');
+      return;
+    }
+    // 만료 일시는 datetime-local → ISO 변환
+    const payload = {
+      ...couponForm,
+      expires_at: couponForm.expires_at ? new Date(couponForm.expires_at).toISOString() : null
+    };
     try {
-      const res = await apiFetch('/admin/coupons', { method: 'POST', body: JSON.stringify(couponForm) });
+      const res = await apiFetch('/admin/coupons', { method: 'POST', body: JSON.stringify(payload) });
       const data = await res.json();
       if (res.ok) {
         alert(`쿠폰이 발급되었습니다.\n코드: ${data.code}`);
-        setCouponForm({ code: '', coupon_type: 'single', points: 1000, max_uses: 1 });
+        setCouponForm({ code: '', coupon_type: 'single', reward_type: 'point', points: 1000, reward_channel_id: '', reward_quantity: 1, max_uses: 1, expires_at: '' });
+        setCouponStreamerSearch('');
         fetchCoupons();
       } else {
         alert(data.message || '쿠폰 발급 오류');
@@ -254,23 +285,79 @@ export const AdminTab: React.FC = () => {
         <section className="space-y-5">
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-bold flex items-center gap-1.5"><Tag className="h-4 w-4" /> 리딤 쿠폰 발행</h3>
+
             <input type="text" placeholder="쿠폰 코드 (미입력 시 랜덤 생성)" value={couponForm.code}
               onChange={(e) => setCouponForm({ ...couponForm, code: e.target.value })}
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            <div className="flex gap-2">
-              <select value={couponForm.coupon_type}
-                onChange={(e) => setCouponForm({ ...couponForm, coupon_type: e.target.value as any })}
-                className="flex-1 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
-                <option value="single">일회성 (1회 소멸)</option>
-                <option value="multi">다회성 (횟수 지정)</option>
-              </select>
-              <input type="number" placeholder="최대 사용" value={couponForm.max_uses}
-                onChange={(e) => setCouponForm({ ...couponForm, max_uses: Number(e.target.value) })}
-                className="w-24 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+
+            {/* 사용 방식 */}
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground block mb-1">사용 방식</label>
+              <div className="flex gap-2">
+                <select value={couponForm.coupon_type}
+                  onChange={(e) => setCouponForm({ ...couponForm, coupon_type: e.target.value as any })}
+                  className="flex-1 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+                  <option value="single">일회성 (선착순 발급 갯수 제한)</option>
+                  <option value="multi">다회성 (기간 내 1인 1회·무제한)</option>
+                </select>
+                {couponForm.coupon_type === 'single' && (
+                  <input type="number" min={1} placeholder="발급 갯수" value={couponForm.max_uses}
+                    onChange={(e) => setCouponForm({ ...couponForm, max_uses: Number(e.target.value) })}
+                    className="w-24 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" title="발급 갯수" />
+                )}
+              </div>
             </div>
-            <input type="number" placeholder="지급 포인트" value={couponForm.points}
-              onChange={(e) => setCouponForm({ ...couponForm, points: Number(e.target.value) })}
-              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+
+            {/* 보상 종류 */}
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground block mb-1">보상 종류</label>
+              <select value={couponForm.reward_type}
+                onChange={(e) => setCouponForm({ ...couponForm, reward_type: e.target.value as any })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+                <option value="point">재화 (포인트)</option>
+                <option value="card">스트리머 카드</option>
+              </select>
+            </div>
+
+            {couponForm.reward_type === 'point' ? (
+              <input type="number" min={1} placeholder="지급 포인트" value={couponForm.points}
+                onChange={(e) => setCouponForm({ ...couponForm, points: Number(e.target.value) })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+            ) : (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-secondary/20 p-2.5">
+                <input type="text" placeholder="스트리머 검색" value={couponStreamerSearch}
+                  onChange={(e) => setCouponStreamerSearch(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs" />
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {couponStreamers
+                    .filter((s) => couponStreamerSearch.trim() === '' ? true : s.name.toLowerCase().includes(couponStreamerSearch.toLowerCase()))
+                    .slice(0, 20)
+                    .map((s) => (
+                      <button key={s.channel_id}
+                        onClick={() => setCouponForm({ ...couponForm, reward_channel_id: s.channel_id })}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_channel_id === s.channel_id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
+                        <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-6 w-6 rounded-full object-cover" />
+                        <span className="text-[11px] font-bold truncate">{s.name}</span>
+                      </button>
+                    ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">지급 수량</span>
+                  <input type="number" min={1} value={couponForm.reward_quantity}
+                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                    className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-xs" />
+                </div>
+              </div>
+            )}
+
+            {/* 사용 가능 기간 (만료 일시) */}
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground block mb-1">사용 가능 만료 일시 (비우면 무기한)</label>
+              <input type="datetime-local" value={couponForm.expires_at}
+                onChange={(e) => setCouponForm({ ...couponForm, expires_at: e.target.value })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+            </div>
+
             <button onClick={handleCreateCoupon} className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">쿠폰 발행</button>
           </div>
 
@@ -282,18 +369,25 @@ export const AdminTab: React.FC = () => {
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {coupons.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">발급된 쿠폰이 없습니다.</p>
-              ) : coupons.map((c) => (
-                <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
-                  <div>
-                    <p className="text-xs font-bold font-mono">{c.code}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {c.coupon_type === 'single' ? '일회성' : '다회성'} · {c.points.toLocaleString()}P
-                      {c.expires_at ? ` · 만료 ${new Date(c.expires_at).toLocaleDateString('ko-KR')}` : ''}
-                    </p>
+              ) : coupons.map((c) => {
+                const reward = c.reward_type === 'card'
+                  ? `🃏 ${streamerName(c.reward_channel_id)} 카드 ×${c.reward_quantity}`
+                  : `💰 ${(c.points || 0).toLocaleString()}P`;
+                return (
+                  <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold font-mono truncate">{c.code}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {c.coupon_type === 'single' ? '일회성' : '다회성'} · {reward}
+                        {c.expires_at ? ` · ~${new Date(c.expires_at).toLocaleDateString('ko-KR')}` : ' · 무기한'}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-bold text-primary ml-2">
+                      {c.coupon_type === 'single' ? `${c.used_count}/${c.max_uses}` : `${c.used_count} 사용`}
+                    </span>
                   </div>
-                  <span className="text-[11px] font-bold text-primary">{c.used_count}/{c.max_uses} 사용</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>

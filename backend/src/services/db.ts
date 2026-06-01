@@ -91,6 +91,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] users 테이블에 representative_card_channel_id 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_channel_id TEXT;");
       }
+      try {
+        sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] coupons 테이블에 보상(reward) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_type TEXT NOT NULL DEFAULT 'point';");
+        sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_channel_id TEXT;");
+        sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_quantity INTEGER DEFAULT 0;");
+      }
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

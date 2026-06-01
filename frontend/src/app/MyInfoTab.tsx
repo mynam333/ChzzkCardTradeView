@@ -110,7 +110,9 @@ export const MyInfoTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         alert(data.message);
-        updatePoints(data.points_added);
+        if (data.points_added) updatePoints(data.points_added);
+        // 카드 보상이면 보관함 갱신
+        if (data.reward_type === 'card') fetchInventory();
         setCouponCode('');
       } else {
         alert(data.message || '쿠폰 등록 실패');
