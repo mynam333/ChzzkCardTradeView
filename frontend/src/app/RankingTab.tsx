@@ -70,15 +70,23 @@ export const RankingTab: React.FC = () => {
   // 1시간 등락량 (현재 시세 - 1시간 전 시세)
   const change1h = (s: Streamer) => (s.base_value || 0) - (s.value_1h_ago ?? s.base_value ?? 0);
 
-  // 서브탭 기준 전체 정렬 → 실제 순위(rank) 부여 → 검색 필터(순위는 유지)
-  const rankedStreamers = (() => {
-    const sorted = [...streamers].sort((a, b) =>
-      subTab === 'change' ? change1h(b) - change1h(a) : (b.base_value || 0) - (a.base_value || 0)
-    );
-    const withRank = sorted.map((s, i) => ({ ...s, rank: i + 1 }));
+  // 공통: 정렬된 목록에 실제 순위(rank)를 부여한 뒤 검색어로 필터(순위는 유지)
+  const rankAndFilter = <T,>(sorted: T[], getName: (item: T) => string): (T & { rank: number })[] => {
+    const withRank = sorted.map((item, i) => ({ ...item, rank: i + 1 }));
     const q = searchQuery.trim().toLowerCase();
-    return q ? withRank.filter((s) => s.name.toLowerCase().includes(q)) : withRank;
-  })();
+    return q ? withRank.filter((item) => getName(item).toLowerCase().includes(q)) : withRank;
+  };
+
+  // 시세/등락률 탭: 서브탭 기준 정렬 후 순위·검색 적용
+  const rankedStreamers = rankAndFilter(
+    [...streamers].sort((a, b) =>
+      subTab === 'change' ? change1h(b) - change1h(a) : (b.base_value || 0) - (a.base_value || 0)
+    ),
+    (s) => s.name
+  );
+
+  // 컬렉터 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
+  const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
 
   const rankColor = (rank: number) =>
     rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
@@ -112,9 +120,8 @@ export const RankingTab: React.FC = () => {
               <button
                 key={t.id}
                 onClick={() => setSubTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
-                  subTab === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${subTab === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
               >
                 {t.label}
               </button>
@@ -134,19 +141,17 @@ export const RankingTab: React.FC = () => {
       {/* 랭킹 메인 */}
       <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
 
-        {/* 스트리머 랭킹 검색바 */}
-        {subTab !== 'user' && (
-          <div className="relative mb-5">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="스트리머 검색 (검색해도 실제 순위가 표시됩니다)"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-border bg-secondary/30 pl-10 pr-4 py-2.5 text-xs focus:border-primary focus:outline-none"
-            />
-          </div>
-        )}
+        {/* 검색바 (모든 탭 공통, 검색해도 실제 순위 유지) */}
+        <div className="relative mb-5">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder={subTab === 'user' ? '컬렉터(유저) 검색' : '스트리머 검색'}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-xl border border-border bg-secondary/30 pl-10 pr-4 py-2.5 text-xs focus:border-primary focus:outline-none"
+          />
+        </div>
 
         {/* 랭킹 테이블 리스트 */}
         <div className="space-y-3.5">
@@ -155,14 +160,16 @@ export const RankingTab: React.FC = () => {
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
             </div>
           ) : subTab === 'user' ? (
-            // 컬렉터(유저) 자산 랭킹
-            userRankings.map((ur, index) => (
+            // 컬렉터(유저) 자산 랭킹 (검색해도 실제 순위 유지)
+            rankedUsers.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-12">표시할 컬렉터가 없습니다.</p>
+            ) : rankedUsers.map((ur) => (
               <div
                 key={ur.id}
                 className="flex items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-border transition"
               >
                 <div className="flex items-center gap-4">
-                  <span className={`w-6 text-center text-xs font-black ${rankColor(index + 1)}`}>{index + 1}</span>
+                  <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
                   <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
                   <div>
                     <h4 className="text-xs font-bold text-foreground">{ur.username}</h4>
