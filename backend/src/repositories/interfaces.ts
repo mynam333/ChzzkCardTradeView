@@ -130,6 +130,8 @@ export interface IStreamerRepository {
   recordValueHistory(channelId: string, value: number): Promise<void>;
   /** 채널별 약 24시간 전 시세 맵을 반환합니다(등락률 계산용). */
   getValue24hAgoMap(): Promise<Record<string, number>>;
+  /** 채널별 약 1시간 전 시세 맵을 반환합니다(1시간 등락 랭킹용). */
+  getValue1hAgoMap(): Promise<Record<string, number>>;
 }
 
 // 3. 쿠폰 리포지토리 인터페이스

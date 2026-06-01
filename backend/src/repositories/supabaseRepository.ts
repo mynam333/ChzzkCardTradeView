@@ -398,9 +398,9 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     await this.getClient().from('value_history').delete().eq('channel_id', channelId).lt('recorded_at', cutoff);
   }
 
-  async getValue24hAgoMap(): Promise<Record<string, number>> {
-    // 24시간 이전에 기록된 이력 중 채널별 가장 최근 값을 선택
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  private async valueAgoMap(hours: number): Promise<Record<string, number>> {
+    // 경계 시각 이전에 기록된 이력 중 채널별 가장 최근 값을 선택
+    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
     const { data, error } = await this.getClient()
       .from('value_history')
       .select('channel_id, value, recorded_at')
@@ -410,12 +410,20 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     const map: Record<string, number> = {};
     for (const row of data as any[]) {
-      // 내림차순 정렬이므로 채널별 최초 등장이 24h 경계에 가장 근접한 값
+      // 내림차순 정렬이므로 채널별 최초 등장이 경계에 가장 근접한 값
       if (map[row.channel_id] === undefined) {
         map[row.channel_id] = row.value;
       }
     }
     return map;
+  }
+
+  async getValue24hAgoMap(): Promise<Record<string, number>> {
+    return this.valueAgoMap(24);
+  }
+
+  async getValue1hAgoMap(): Promise<Record<string, number>> {
+    return this.valueAgoMap(1);
   }
 }
 // 3. Supabase 쿠폰 레포지토리

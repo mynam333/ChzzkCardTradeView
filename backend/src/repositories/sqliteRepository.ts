@@ -305,25 +305,33 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     ).run(channelId);
   }
 
-  async getValue24hAgoMap(): Promise<Record<string, number>> {
-    // 채널별로 24시간 경계에 가장 근접한(24h 이전 중 가장 최근) 시세를 선택
+  // 채널별로 지정한 시간 경계에 가장 근접한(경계 이전 중 가장 최근) 시세를 선택
+  private valueAgoMap(modifier: string): Record<string, number> {
     const rows = this.getDb().prepare(
       `SELECT vh.channel_id AS channel_id, vh.value AS value
          FROM value_history vh
          JOIN (
            SELECT channel_id, MAX(recorded_at) AS latest
              FROM value_history
-            WHERE datetime(recorded_at) <= datetime('now', '-24 hours')
+            WHERE datetime(recorded_at) <= datetime('now', ?)
             GROUP BY channel_id
          ) latest_old
            ON vh.channel_id = latest_old.channel_id AND vh.recorded_at = latest_old.latest`
-    ).all() as any[];
+    ).all(modifier) as any[];
 
     const map: Record<string, number> = {};
     for (const r of rows) {
       map[r.channel_id] = r.value;
     }
     return map;
+  }
+
+  async getValue24hAgoMap(): Promise<Record<string, number>> {
+    return this.valueAgoMap('-24 hours');
+  }
+
+  async getValue1hAgoMap(): Promise<Record<string, number>> {
+    return this.valueAgoMap('-1 hours');
   }
 }
 // 3. SQLite 쿠폰 레포지토리

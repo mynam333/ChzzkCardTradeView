@@ -110,12 +110,17 @@ router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, reje
 router.get('/streamers', async (req, res) => {
   try {
     const streamers = await streamerRepository.findAll();
-    // 24시간 전 시세를 조회하여 prev_value로 덮어써, 프론트의 등락률이 실제 24h 변동을 반영하도록 함
-    const value24hMap = await streamerRepository.getValue24hAgoMap();
+    // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
+    const [value24hMap, value1hMap] = await Promise.all([
+      streamerRepository.getValue24hAgoMap(),
+      streamerRepository.getValue1hAgoMap()
+    ]);
     const enriched = streamers.map((s) => ({
       ...s,
       // 24h 이력이 있으면 그 값을, 없으면(신규 등록 등) 기존 prev_value 유지
-      prev_value: value24hMap[s.channel_id] ?? s.prev_value
+      prev_value: value24hMap[s.channel_id] ?? s.prev_value,
+      // 1시간 전 시세 (1시간 등락 랭킹용). 이력이 없으면 현재 시세로 폴백(변동 0)
+      value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
     }));
     return res.status(200).json(enriched);
   } catch (err: any) {
