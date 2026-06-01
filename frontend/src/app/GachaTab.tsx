@@ -29,6 +29,7 @@ interface Streamer {
   base_value: number;
   follower_count: number;
   is_active?: boolean;
+  serial_number?: number; // 스트리머 카드 고유 시리얼(전 카피 공통, 1~9999)
 }
 
 interface UserCard {
@@ -224,11 +225,8 @@ export const GachaTab: React.FC = () => {
       const data = await res.json();
 
       setTimeout(() => {
+        // data.card.streamer에는 스트리머 고유 시리얼(serial_number)이 포함되어 있으므로 그대로 사용
         setDrawnCard(data.card.streamer);
-        // 그려진 카드에 서버에서 생성된 시리얼넘버 주입
-        if (data.card.serial_number) {
-          (data.card.streamer as any).serial_number = data.card.serial_number;
-        }
         setIsDrawing(false);
 
         // 무료 뽑기가 아닌 경우에만 로컬 포인트 차감
@@ -856,7 +854,7 @@ export const GachaTab: React.FC = () => {
                           >
                             <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
                             <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
-                            <span className="text-[8.5px] text-muted-foreground">No.{String(card.serial_number).padStart(4, '0')}</span>
+                            <span className="text-[8.5px] text-muted-foreground">No.{String(streamer.serial_number ?? 0).padStart(4, '0')}</span>
                             {isSelected && (
                               <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
                                 <Check className="h-2.5 w-2.5" />
@@ -1489,7 +1487,7 @@ export const GachaTab: React.FC = () => {
                             <BarChart3 className="h-3 w-3" />
                           </button>
                           <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                            No.{String(card.serial_number).padStart(4, '0')}
+                            No.{String(streamer.serial_number ?? 0).padStart(4, '0')}
                           </span>
                         </div>
                       </div>

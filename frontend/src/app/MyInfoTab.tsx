@@ -40,6 +40,9 @@ export const MyInfoTab: React.FC = () => {
   const [inventory, setInventory] = useState<UserCard[]>([]);
   const [repModalOpen, setRepModalOpen] = useState(false);
 
+  // 본인 계정이 카드로 등록된 스트리머인지 여부 (이미지 관리 노출 조건)
+  const [isStreamer, setIsStreamer] = useState(false);
+
   // 스트리머 프로필 커스텀 이미지 업로드 상태 (지연 업로드)
   const [previewBlob, setPreviewBlob] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -48,7 +51,10 @@ export const MyInfoTab: React.FC = () => {
   const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
 
   useEffect(() => {
-    if (user) fetchInventory();
+    if (user) {
+      fetchInventory();
+      checkStreamerRegistration();
+    }
   }, [user]);
 
   const fetchInventory = async () => {
@@ -57,6 +63,17 @@ export const MyInfoTab: React.FC = () => {
       if (res.ok) setInventory(await res.json());
     } catch (e) {
       console.error('인벤토리 조회 실패:', e);
+    }
+  };
+
+  // 내 채널 ID가 스트리머로 등록되어 있는지 확인 (등록된 경우에만 카드 이미지 관리 노출)
+  const checkStreamerRegistration = async () => {
+    if (!user) return;
+    try {
+      const res = await apiFetch(`/streamers/${user.id}`);
+      setIsStreamer(res.ok);
+    } catch {
+      setIsStreamer(false);
     }
   };
 
@@ -282,7 +299,8 @@ export const MyInfoTab: React.FC = () => {
         </div>
       )}
 
-      {/* 스트리머 본인 전용 카드 이미지 편집 */}
+      {/* 스트리머 본인 전용 카드 이미지 편집 (카드로 등록된 스트리머 계정에서만 노출) */}
+      {isStreamer && (
       <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2">
           <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 고유 카드 이미지 관리
@@ -358,6 +376,7 @@ export const MyInfoTab: React.FC = () => {
           </div>
         )}
       </section>
+      )}
 
       {/* 쿠폰 입력 */}
       <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
