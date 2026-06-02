@@ -68,6 +68,11 @@ export const RankingTab: React.FC = () => {
 
   // 1시간 등락량 (현재 시세 - 1시간 전 시세)
   const change1h = (s: Streamer) => (s.base_value || 0) - (s.value_1h_ago ?? s.base_value ?? 0);
+  // 1시간 등락률(%) — 등락률 랭킹 정렬 기준
+  const changeRate1h = (s: Streamer) => {
+    const prev = s.value_1h_ago ?? s.base_value ?? 0;
+    return prev > 0 ? (change1h(s) / prev) * 100 : 0;
+  };
 
   // 공통: 정렬된 목록에 실제 순위(rank)를 부여한 뒤 검색어로 필터(순위는 유지)
   const rankAndFilter = <T,>(sorted: T[], getName: (item: T) => string): (T & { rank: number })[] => {
@@ -77,9 +82,10 @@ export const RankingTab: React.FC = () => {
   };
 
   // 시세/등락률 탭: 서브탭 기준 정렬 후 순위·검색 적용
+  // (등락률 탭은 1시간 등락 '퍼센트' 기준, 시세 탭은 카드 가치 기준)
   const rankedStreamers = rankAndFilter(
     [...streamers].sort((a, b) =>
-      subTab === 'change' ? change1h(b) - change1h(a) : (b.base_value || 0) - (a.base_value || 0)
+      subTab === 'change' ? changeRate1h(b) - changeRate1h(a) : (b.base_value || 0) - (a.base_value || 0)
     ),
     (s) => s.name
   );
@@ -211,13 +217,13 @@ export const RankingTab: React.FC = () => {
                   </div>
 
                   {subTab === 'change' ? (
-                    // 등락률 탭: 1시간 등락량 강조
+                    // 등락률 탭: 1시간 등락 '퍼센트' 강조 (정렬 기준)
                     <div className="text-right flex flex-col items-end justify-center">
-                      <span className={`text-sm font-black flex items-center gap-0.5 ${diff1h > 0 ? 'text-rose-500' : diff1h < 0 ? 'text-blue-500' : 'text-muted-foreground'}`}>
-                        {diff1h > 0 ? '▲' : diff1h < 0 ? '▼' : '-'} {diff1h > 0 ? '+' : ''}{diff1h.toLocaleString()} P
+                      <span className={`text-sm font-black flex items-center gap-0.5 ${rate1h > 0 ? 'text-rose-500' : rate1h < 0 ? 'text-blue-500' : 'text-muted-foreground'}`}>
+                        {rate1h > 0 ? '▲' : rate1h < 0 ? '▼' : '-'} {rate1h > 0 ? '+' : ''}{rate1h.toFixed(2)}%
                       </span>
                       <p className="text-[10px] text-muted-foreground">
-                        1시간 {rate1h >= 0 ? '+' : ''}{rate1h.toFixed(1)}% · 현재 {(st.base_value || 0).toLocaleString()}P
+                        1시간 {diff1h > 0 ? '+' : ''}{diff1h.toLocaleString()}P · 현재 {(st.base_value || 0).toLocaleString()}P
                       </p>
                     </div>
                   ) : (
