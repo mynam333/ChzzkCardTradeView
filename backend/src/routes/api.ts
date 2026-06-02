@@ -5,6 +5,7 @@ import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
 import { uploadCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
+import { proxyImage } from '../controllers/imageProxyController';
 import { getChzzkAuthUrl, handleChzzkCallback } from '../controllers/chzzkAuthController';
 import {
   resetStreamerImage,
@@ -108,6 +109,7 @@ router.get('/health', (req, res) => {
 // ==========================================
 router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
+router.get('/image-proxy', proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/ranking', getUserRankings);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);

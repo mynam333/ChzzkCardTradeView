@@ -1098,7 +1098,7 @@ export const GachaTab: React.FC = () => {
                   rel="noopener noreferrer"
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00ffa3] py-2.5 text-xs font-black text-black hover:brightness-95 transition"
                 >
-                  치지직 방송국 바로가기
+                  치지직 바로가기
                 </a>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px]">

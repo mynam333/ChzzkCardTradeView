@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { borderStyle, nameEffectStyle } from '@/lib/cosmetics';
+import { borderStyle, nameEffectStyle, proxiedImage } from '@/lib/cosmetics';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 
@@ -161,7 +161,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
               {/* 헤더: 닉네임 + ID */}
               <div className="flex items-center gap-3">
                 <img
-                  src={profile.avatar_url}
+                  src={proxiedImage(profile.avatar_url)}
                   alt={profile.username}
                   crossOrigin="anonymous"
                   className="h-14 w-14 rounded-full border-2 border-primary/50 bg-zinc-800 object-cover"
@@ -184,7 +184,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                     className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 p-3 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
                     <img
-                      src={repStreamer.custom_image_url || repStreamer.logo_url || ''}
+                      src={proxiedImage(repStreamer.custom_image_url || repStreamer.logo_url)}
                       alt={repStreamer.name}
                       crossOrigin="anonymous"
                       className="absolute inset-0 h-full w-full object-cover opacity-85"
@@ -246,7 +246,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                     {profile.collection.slice(0, 24).map((c) => (
                       <div key={c.channel_id} className="relative">
                         <img
-                          src={c.streamer.custom_image_url || c.streamer.logo_url || ''}
+                          src={proxiedImage(c.streamer.custom_image_url || c.streamer.logo_url)}
                           alt={c.streamer.name}
                           crossOrigin="anonymous"
                           className="h-9 w-9 rounded-lg border border-white/10 object-cover"

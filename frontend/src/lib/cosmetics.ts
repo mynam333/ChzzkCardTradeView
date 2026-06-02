@@ -1,4 +1,16 @@
 import React from 'react';
+import { API_BASE_URL } from './api';
+
+/**
+ * 외부/교차 출처 이미지를 백엔드 프록시(동일 출처 + CORS 허용)로 우회시킵니다.
+ * 프로필 카드 캡처(html-to-image) 시 캔버스 오염 및 표시 깨짐을 방지합니다.
+ * data:/blob: URL이나 빈 값은 그대로 둡니다.
+ */
+export const proxiedImage = (url?: string | null): string => {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  return `${API_BASE_URL}/image-proxy?url=${encodeURIComponent(url)}`;
+};
 
 /** shop_items.style_json(JSON 문자열)을 React 인라인 스타일 객체로 파싱 */
 export const parseStyle = (json?: string | null): React.CSSProperties => {
