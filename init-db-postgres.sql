@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 일시
     banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
     representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
+    access_token TEXT,                           -- 치지직 OAuth access_token (암호화 저장)
+    refresh_token TEXT,                          -- 치지직 OAuth refresh_token (암호화 저장)
+    token_expires_at TIMESTAMPTZ,                -- 치지직 access_token 만료 시각
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -134,6 +137,9 @@ CREATE TABLE IF NOT EXISTS card_reports (
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;

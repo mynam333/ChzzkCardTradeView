@@ -143,6 +143,14 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
+  async updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('users')
+      .update({ access_token: accessToken, refresh_token: refreshToken, token_expires_at: tokenExpiresAt })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
   async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {
     const { error } = await this.getClient()
       .from('users')

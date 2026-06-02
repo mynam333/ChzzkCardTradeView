@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 const ChzzkCallbackContent: React.FC = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { setUser } = useApp() as any; // 타입 캐스팅 편의용
+  const { setUser, toast } = useApp() as any; // 타입 캐스팅 편의용
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,7 +57,7 @@ const ChzzkCallbackContent: React.FC = () => {
         }
 
         // 로그인 성공 알림 및 메인 페이지 이동
-        alert(`${sessionUser.username}님, 치지직 인증 로그인이 완료되었습니다.`);
+        if (toast) toast(`${sessionUser.username}님, 치지직 인증 로그인이 완료되었습니다.`, 'success');
         router.push('/');
       } catch (err: any) {
         console.error('[ChzzkCallback] 토큰 획득 에러:', err);

@@ -40,10 +40,13 @@ export const RankingTab: React.FC = () => {
 
   useEffect(() => {
     fetchRankings();
+    // 시세를 준실시간으로 반영하기 위해 25초마다 조용히 갱신 (로딩 스피너 없이)
+    const timer = setInterval(() => fetchRankings(true), 25_000);
+    return () => clearInterval(timer);
   }, [subTab]);
 
-  const fetchRankings = async () => {
-    setLoading(true);
+  const fetchRankings = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       if (subTab === 'user') {
         const res = await apiFetch('/users/ranking');
@@ -54,17 +57,13 @@ export const RankingTab: React.FC = () => {
       }
     } catch (e) {
       console.error('랭킹 데이터 획득 실패:', e);
-      if (subTab === 'user') setUserRankings([]);
-      else setStreamers([]);
+      if (!silent) {
+        if (subTab === 'user') setUserRankings([]);
+        else setStreamers([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
-
-  const getCardBadge = (val: number) => {
-    if (val >= 8000) return <span className="rounded bg-gradient-to-r from-amber-500 to-orange-500 px-1.5 py-0.5 text-[8.5px] font-black text-white">LEGEND</span>;
-    if (val >= 5000) return <span className="rounded bg-gradient-to-r from-fuchsia-500 to-purple-500 px-1.5 py-0.5 text-[8.5px] font-black text-white">EPIC</span>;
-    return <span className="rounded bg-blue-500 px-1.5 py-0.5 text-[8.5px] font-black text-white">RARE</span>;
   };
 
   // 1시간 등락량 (현재 시세 - 1시간 전 시세)
@@ -129,7 +128,7 @@ export const RankingTab: React.FC = () => {
           </div>
 
           <button
-            onClick={fetchRankings}
+            onClick={() => fetchRankings()}
             className="rounded-lg p-2 bg-secondary text-muted-foreground hover:text-foreground transition"
             title="새로고침"
           >
@@ -205,7 +204,7 @@ export const RankingTab: React.FC = () => {
                     <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
                     <div>
                       <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        {st.name} {st.base_value >= 5000 && getCardBadge(st.base_value)}
+                        {st.name}
                       </h4>
                       <p className="text-[10px] text-muted-foreground">{(st.follower_count || 0).toLocaleString()} 팔로워</p>
                     </div>

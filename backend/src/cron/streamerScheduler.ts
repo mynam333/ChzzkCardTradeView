@@ -1,11 +1,46 @@
 import cron from 'node-cron';
 import { streamerRepository, userRepository } from '../repositories';
-import { fetchChzzkChannelProfile } from '../services/chzzkService';
+import { fetchChzzkChannelProfile, refreshChzzkToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
-import { decryptToken } from '../services/cryptoService';
+import { decryptToken, encryptToken } from '../services/cryptoService';
 
-// 지연 처리를 위한 헬퍼 함수
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * 스트리머(유저)의 유효한 치지직 access_token을 반환합니다.
+ * 만료 임박(5분 이내) 시 refresh_token으로 갱신 후 DB에 저장합니다.
+ */
+const getValidStreamerAccessToken = async (channelId: string): Promise<string | undefined> => {
+  try {
+    const streamerUser = await userRepository.findById(channelId);
+    if (!streamerUser?.access_token) return undefined;
+
+    const accessToken = decryptToken(streamerUser.access_token) || undefined;
+    const expiresAt = streamerUser.token_expires_at ? new Date(streamerUser.token_expires_at).getTime() : 0;
+    const needsRefresh = expiresAt > 0 && Date.now() >= expiresAt - 5 * 60 * 1000;
+
+    if (needsRefresh && streamerUser.refresh_token) {
+      const refresh = decryptToken(streamerUser.refresh_token);
+      if (refresh) {
+        const refreshed = await refreshChzzkToken(refresh);
+        if (refreshed) {
+          const newExpiry = refreshed.expiresIn
+            ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString()
+            : null;
+          await userRepository.updateTokens(
+            channelId,
+            encryptToken(refreshed.accessToken),
+            encryptToken(refreshed.refreshToken),
+            newExpiry
+          );
+          console.log(`[LiveStatusScheduler] 치지직 토큰 갱신 완료 (대상: ${channelId})`);
+          return refreshed.accessToken;
+        }
+      }
+    }
+    return accessToken;
+  } catch {
+    return undefined;
+  }
+};
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
 const SCHEDULE_INTERVAL_MINUTES = 2;
@@ -17,7 +52,7 @@ const SCHEDULE_INTERVAL_MINUTES = 2;
  * @param value 현재(이전) 가치
  * @returns 가치에 더해질 랜덤 변동량 (양수=상승, 음수=하락)
  */
-const computeRandomDrift = (value: number): number => {
+export const computeRandomDrift = (value: number): number => {
   const BASE_PCT = 0.008;   // 평상시 최대 변동폭 0.8%
   const SPIKE_PCT = 0.025;  // 가끔 발생하는 큰 변동 2.5%
   const SPIKE_CHANCE = 0.15;
@@ -91,11 +126,10 @@ export const syncAllStreamersLiveStatus = async () => {
     }
 
     let successCount = 0;
-    for (const streamer of streamers) {
-      try {
-        // API 요청 간 시간 간격을 두어 네이버 API Rate Limit 방지 (200ms)
-        await delay(200);
+    const CONCURRENCY = 4; // 동시 처리 스트리머 수 상한 (2분 주기 초과 방지 + 과도한 동시 요청 억제)
 
+    const processStreamer = async (streamer: typeof streamers[number]) => {
+      try {
         const profile = await fetchChzzkChannelProfile(streamer.channel_id);
         
         // 1. 방송 켬 트랜지션 감지 (기존 오프라인이었는데 생방송이 켜진 경우)
@@ -114,16 +148,8 @@ export const syncAllStreamersLiveStatus = async () => {
 
         // 3. 실시간 채팅 수집을 위한 Websocket 연결/종료 관리
         if (profile.openLive && profile.chatChannelId) {
-          let streamerAccessToken: string | undefined = undefined;
-          try {
-            const streamerUser = await userRepository.findById(streamer.channel_id);
-            if (streamerUser?.access_token) {
-              // DB에는 암호화되어 저장되므로 사용 직전에 복호화
-              streamerAccessToken = decryptToken(streamerUser.access_token) || undefined;
-            }
-          } catch (err) {
-            // 사용자 정보가 없거나 에러가 나면 무시하고 비로그인 수집 시도
-          }
+          // 만료 임박 시 자동 갱신된 유효 토큰 사용 (없으면 비로그인 수집)
+          const streamerAccessToken = await getValidStreamerAccessToken(streamer.channel_id);
           // 방송 중이면 웹소켓 연결 수립
           chatManager.connect(streamer.channel_id, profile.chatChannelId, streamerAccessToken);
         } else {
@@ -213,7 +239,20 @@ export const syncAllStreamersLiveStatus = async () => {
       } catch (err: any) {
         console.error(`[LiveStatusScheduler] 스트리머 정보 업데이트 실패 (ID: ${streamer.channel_id}):`, err.message);
       }
-    }
+    };
+
+    // 동시성 제한 워커 풀: 커서를 공유하며 최대 CONCURRENCY개씩 병렬 처리
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < streamers.length) {
+        const idx = cursor++;
+        await processStreamer(streamers[idx]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, streamers.length) }, () => worker())
+    );
+
     console.log(`[LiveStatusScheduler] 동기화 완료: 총 ${streamers.length}명 중 ${successCount}명 성공`);
   } catch (error: any) {
     console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error.message);

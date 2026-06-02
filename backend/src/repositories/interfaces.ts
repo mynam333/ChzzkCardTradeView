@@ -11,6 +11,7 @@ export interface User {
   representative_card_channel_id?: string | null;
   access_token?: string | null;
   refresh_token?: string | null;
+  token_expires_at?: string | null; // 치지직 access_token 만료 시각(ISO)
   created_at?: string;
 }
 
@@ -98,6 +99,8 @@ export interface IUserRepository {
   claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
+  /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
+  updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void>;
   updateRepresentativeCard(id: string, channelId: string | null): Promise<void>;
   findRankings(limit: number): Promise<UserRanking[]>;
   count(): Promise<number>;

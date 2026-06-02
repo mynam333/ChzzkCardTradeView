@@ -25,6 +25,9 @@ export const MainTab: React.FC = () => {
   useEffect(() => {
     fetchNotices();
     fetchHotStreamers();
+    // 급상승/시세 요약을 준실시간으로 반영 (25초 주기)
+    const timer = setInterval(() => fetchHotStreamers(), 25_000);
+    return () => clearInterval(timer);
   }, []);
 
   const fetchNotices = async () => {

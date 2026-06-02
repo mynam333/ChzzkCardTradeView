@@ -34,6 +34,7 @@ export class SqliteUserRepository implements IUserRepository {
       representative_card_channel_id: row.representative_card_channel_id ?? null,
       access_token: row.access_token,
       refresh_token: row.refresh_token,
+      token_expires_at: row.token_expires_at ?? null,
       created_at: row.created_at
     };
   }
@@ -88,6 +89,11 @@ export class SqliteUserRepository implements IUserRepository {
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
+  }
+
+  async updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void> {
+    this.getDb().prepare('UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?')
+      .run(accessToken, refreshToken, tokenExpiresAt, id);
   }
 
   async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {

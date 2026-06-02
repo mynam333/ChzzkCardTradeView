@@ -92,6 +92,24 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_channel_id TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT access_token FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 access_token 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN access_token TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT refresh_token FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 refresh_token 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN refresh_token TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT token_expires_at FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 token_expires_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN token_expires_at TEXT;");
+      }
+      try {
         sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] coupons 테이블에 보상(reward) 컬럼이 없어 추가합니다.');

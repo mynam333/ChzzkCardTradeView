@@ -21,7 +21,7 @@ import { apiFetch } from '@/lib/api';
 type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers';
 
 export const AdminTab: React.FC = () => {
-  const { user } = useApp();
+  const { user, toast } = useApp();
   const [subTab, setSubTab] = useState<AdminSubTab>('dashboard');
 
   // 대시보드
@@ -64,6 +64,7 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); }
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') fetchReports();
+    if (subTab === 'streamers') fetchCouponStreamers(true);
   }, [subTab, isAdmin]);
 
   if (!isAdmin) {
@@ -89,8 +90,8 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setCoupons(await res.json());
     } catch { /* noop */ }
   };
-  const fetchCouponStreamers = async () => {
-    if (couponStreamers.length > 0) return;
+  const fetchCouponStreamers = async (force = false) => {
+    if (!force && couponStreamers.length > 0) return;
     try {
       const res = await apiFetch('/streamers');
       if (res.ok) setCouponStreamers(await res.json());
@@ -114,7 +115,7 @@ export const AdminTab: React.FC = () => {
 
   const handleCreateCoupon = async () => {
     if (couponForm.reward_type === 'card' && !couponForm.reward_channel_id) {
-      alert('지급할 스트리머 카드를 선택해 주세요.');
+      toast('지급할 스트리머 카드를 선택해 주세요.');
       return;
     }
     // 만료 일시는 datetime-local → ISO 변환
@@ -126,29 +127,29 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/coupons', { method: 'POST', body: JSON.stringify(payload) });
       const data = await res.json();
       if (res.ok) {
-        alert(`쿠폰이 발급되었습니다.\n코드: ${data.code}`);
+        toast(`쿠폰이 발급되었습니다.\n코드: ${data.code}`);
         setCouponForm({ code: '', coupon_type: 'single', reward_type: 'point', points: 1000, reward_channel_id: '', reward_quantity: 1, max_uses: 1, expires_at: '' });
         setCouponStreamerSearch('');
         fetchCoupons();
       } else {
-        alert(data.message || '쿠폰 발급 오류');
+        toast(data.message || '쿠폰 발급 오류');
       }
-    } catch { alert('서버 통신 에러'); }
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleCreateAnnouncement = async () => {
     if (!noticeForm.title.trim() || !noticeForm.content.trim()) {
-      alert('제목과 내용을 입력해 주세요.');
+      toast('제목과 내용을 입력해 주세요.');
       return;
     }
     try {
       const res = await apiFetch('/admin/announcements', { method: 'POST', body: JSON.stringify(noticeForm) });
       if (res.ok) {
-        alert('공지사항이 등록되었습니다.');
+        toast('공지사항이 등록되었습니다.');
         setNoticeForm({ title: '', content: '', is_popup: false });
         fetchAnnouncements();
-      } else alert('등록 실패');
-    } catch { alert('서버 통신 에러'); }
+      } else toast('등록 실패');
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleDeleteAnnouncement = async (id: number) => {
@@ -156,62 +157,64 @@ export const AdminTab: React.FC = () => {
     try {
       const res = await apiFetch(`/admin/announcements/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        alert('삭제되었습니다.');
+        toast('삭제되었습니다.');
         fetchAnnouncements();
-      } else alert('삭제 실패');
-    } catch { alert('서버 통신 에러'); }
+      } else toast('삭제 실패');
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleSchedulePush = async () => {
     if (!pushForm.title.trim() || !pushForm.body.trim()) {
-      alert('알림 제목과 본문을 입력해 주세요.');
+      toast('알림 제목과 본문을 입력해 주세요.');
       return;
     }
     try {
       const res = await apiFetch('/admin/push/schedule', { method: 'POST', body: JSON.stringify(pushForm) });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || '푸시가 등록되었습니다.');
+        toast(data.message || '푸시가 등록되었습니다.');
         setPushForm({ title: '', body: '', scheduled_at: '' });
-      } else alert('푸시 등록 실패');
-    } catch { alert('서버 통신 에러'); }
+      } else toast('푸시 등록 실패');
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleResolveReport = async (reportId: number, status: 'resolved' | 'rejected') => {
     try {
       const res = await apiFetch(`/admin/reports/${reportId}/resolve`, { method: 'POST', body: JSON.stringify({ status }) });
       if (res.ok) {
-        alert(`신고가 ${status === 'resolved' ? '처리' : '기각'}되었습니다.`);
+        toast(`신고가 ${status === 'resolved' ? '처리' : '기각'}되었습니다.`);
         fetchReports();
-      } else alert('처리 실패');
-    } catch { alert('서버 통신 에러'); }
+      } else toast('처리 실패');
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleBanUser = async (userId: string, duration: string) => {
-    if (!userId.trim()) { alert('대상 유저 ID가 필요합니다.'); return; }
+    if (!userId.trim()) { toast('대상 유저 ID가 필요합니다.'); return; }
     try {
       const res = await apiFetch(`/admin/users/${userId}/ban`, { method: 'POST', body: JSON.stringify({ duration }) });
       const data = await res.json();
-      alert(data.message || '처리되었습니다.');
-    } catch { alert('서버 통신 에러'); }
+      toast(data.message || '처리되었습니다.');
+    } catch { toast('서버 통신 에러'); }
   };
 
   const handleUnbanUser = async (userId: string) => {
-    if (!userId.trim()) { alert('대상 유저 ID가 필요합니다.'); return; }
+    if (!userId.trim()) { toast('대상 유저 ID가 필요합니다.'); return; }
     try {
       const res = await apiFetch(`/admin/users/${userId}/unban`, { method: 'POST' });
       const data = await res.json();
-      alert(data.message || '해제되었습니다.');
-    } catch { alert('서버 통신 에러'); }
+      toast(data.message || '해제되었습니다.');
+    } catch { toast('서버 통신 에러'); }
   };
 
-  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban') => {
-    if (!streamerChannelId.trim()) { alert('스트리머 채널 ID를 입력해 주세요.'); return; }
+  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string) => {
+    const target = (channelId || streamerChannelId).trim();
+    if (!target) { toast('스트리머 채널 ID를 입력해 주세요.'); return; }
     try {
-      const res = await apiFetch(`/admin/streamers/${streamerChannelId}/image/${action}`, { method: 'POST' });
+      const res = await apiFetch(`/admin/streamers/${target}/image/${action}`, { method: 'POST' });
       const data = await res.json();
-      alert(data.message || '처리되었습니다.');
-    } catch { alert('서버 통신 에러'); }
+      toast(data.message || '처리되었습니다.');
+      fetchCouponStreamers(true); // 목록 갱신
+    } catch { toast('서버 통신 에러'); }
   };
 
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
@@ -500,20 +503,59 @@ export const AdminTab: React.FC = () => {
       )}
 
       {/* 스트리머 이미지 */}
-      {subTab === 'streamers' && (
-        <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-          <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 스트리머 커스텀 이미지 제어</h3>
-          <p className="text-xs text-muted-foreground">채널 ID를 입력하고 작업을 선택하세요.</p>
-          <input type="text" placeholder="스트리머 채널 ID" value={streamerChannelId}
-            onChange={(e) => setStreamerChannelId(e.target.value)}
-            className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-          <div className="flex flex-wrap gap-1.5">
-            <button onClick={() => handleStreamerImageAction('reset')} className="rounded bg-secondary px-3 py-1.5 text-[11px] font-bold hover:bg-secondary/80">기본 이미지로 초기화</button>
-            <button onClick={() => handleStreamerImageAction('ban')} className="rounded bg-red-500/10 px-3 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-500/20">이미지 차단</button>
-            <button onClick={() => handleStreamerImageAction('unban')} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">차단 해제</button>
-          </div>
-        </section>
-      )}
+      {subTab === 'streamers' && (() => {
+        const customStreamers = couponStreamers.filter((s) => s.custom_image_url || s.is_image_banned);
+        return (
+          <section className="space-y-5">
+            {/* 커스텀 이미지 보유/차단 스트리머 원클릭 제어 */}
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 커스텀 이미지 스트리머 ({customStreamers.length})</h3>
+                <button onClick={() => fetchCouponStreamers(true)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {customStreamers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-6">커스텀 이미지를 등록했거나 차단된 스트리머가 없습니다.</p>
+                ) : customStreamers.map((s) => (
+                  <div key={s.channel_id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-10 w-10 rounded object-cover border border-border" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                          {s.name}
+                          {s.is_image_banned && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">차단됨</span>}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">{s.channel_id}</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button onClick={() => handleStreamerImageAction('reset', s.channel_id)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">초기화</button>
+                      {s.is_image_banned ? (
+                        <button onClick={() => handleStreamerImageAction('unban', s.channel_id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500 hover:bg-emerald-500/20">해제</button>
+                      ) : (
+                        <button onClick={() => handleStreamerImageAction('ban', s.channel_id)} className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500/20">차단</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 수동 채널 ID 직접 제어 (보조) */}
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 채널 ID 직접 제어</h3>
+              <input type="text" placeholder="스트리머 채널 ID" value={streamerChannelId}
+                onChange={(e) => setStreamerChannelId(e.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => handleStreamerImageAction('reset')} className="rounded bg-secondary px-3 py-1.5 text-[11px] font-bold hover:bg-secondary/80">기본 이미지로 초기화</button>
+                <button onClick={() => handleStreamerImageAction('ban')} className="rounded bg-red-500/10 px-3 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-500/20">이미지 차단</button>
+                <button onClick={() => handleStreamerImageAction('unban')} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">차단 해제</button>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 };

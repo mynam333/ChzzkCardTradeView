@@ -182,6 +182,42 @@ const sendPushToAll = async (title: string, body: string) => {
 };
 
 /**
+ * 특정 유저에게만 푸시 알림을 전송합니다 (교환 알림 등). 실패해도 호출부에 영향을 주지 않습니다.
+ */
+export const sendPushToUser = async (userId: string, title: string, body: string, url?: string) => {
+  try {
+    const dbMode = getDbMode();
+    let subscriptions: any[] = [];
+
+    if (dbMode === 'SUPABASE') {
+      const { data, error } = await getSupabaseClient()
+        .from('push_subscriptions').select('*').eq('user_id', userId);
+      if (!error && data) subscriptions = data;
+    } else {
+      subscriptions = getSqliteDb().prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId);
+    }
+
+    if (subscriptions.length === 0) return;
+
+    const payload = JSON.stringify({ title, body, url: url || '/' });
+    await Promise.all(subscriptions.map((sub) => {
+      const pushSubscription = { endpoint: sub.endpoint, keys: { auth: sub.auth_key, p256dh: sub.p256dh_key } };
+      return webpush.sendNotification(pushSubscription, payload).catch((err: any) => {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          if (dbMode === 'SUPABASE') {
+            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then();
+          } else {
+            getSqliteDb().prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
+          }
+        }
+      });
+    }));
+  } catch (err) {
+    console.error('[Push] 개별 푸시 전송 중 에러:', err);
+  }
+};
+
+/**
  * node-cron 푸시 스케줄러 등록
  * 1분마다 주기적으로 감시하여 전송할 시간이 경과한 'pending' 푸시를 자동 일괄 발송합니다.
  */

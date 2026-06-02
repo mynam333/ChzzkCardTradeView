@@ -11,23 +11,23 @@ import { AdminTab } from './AdminTab';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 
 const CCTVAppContent: React.FC = () => {
-  const { activeTab, user } = useApp();
+  const { activeTab, user, toast } = useApp();
 
   // 🔔 버튼: 실제 웹 푸시 알림 권한 요청 및 구독 등록
   const handleNotifyClick = async () => {
     if (!isPushSupported()) {
-      alert('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.');
+      toast('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.', 'warning');
       return;
     }
     if (!user) {
-      alert('알림을 받으려면 먼저 치지직 로그인이 필요합니다.');
+      toast('알림을 받으려면 먼저 치지직 로그인이 필요합니다.', 'warning');
       return;
     }
     const result = await subscribeToPush();
     if (result.ok) {
-      alert('실시간 푸시 알림 구독이 완료되었습니다!');
+      toast('실시간 푸시 알림 구독이 완료되었습니다!', 'success');
     } else {
-      alert(result.message);
+      toast(result.message, 'error');
     }
   };
 

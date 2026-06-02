@@ -1,8 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { apiFetch } from '@/lib/api';
-import { registerServiceWorker } from '@/lib/push';
+import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
 export type TabId = 'main' | 'gacha' | 'ranking' | 'my-info' | 'admin';
 
@@ -26,10 +26,12 @@ interface AppContextType {
   logout: () => void;
   refreshUserData: () => Promise<void>;
   updatePoints: (diff: number) => Promise<void>;
-  // PWA 설치 프롬프트
-  canInstall: boolean;
-  promptInstall: () => Promise<void>;
+  // 전역 토스트 알림 (alert 대체)
+  toast: (message: string, type?: ToastType) => void;
 }
+
+type ToastType = 'success' | 'error' | 'warning' | 'info';
+interface ToastItem { id: number; message: string; type: ToastType; }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -38,7 +40,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<TabId>('main');
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  // 설치 프롬프트 이벤트는 제스처 핸들러(클로저)에서 직접 접근하므로 ref로만 보관
+  const deferredPromptRef = useRef<any>(null);
+
+  const toast = (message: string, type: ToastType = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3200);
+  };
+  const askedPushRef = useRef(false);       // 알림 권한 자동 요청 1회만
+  const promptedInstallRef = useRef(false); // 설치 프롬프트 자동 노출 1회만
 
   // 로컬 스토리지에서 저장된 테마만 복원 및 초기 인증 처리
   useEffect(() => {
@@ -59,15 +73,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // PWA 설치 프롬프트 이벤트 캡처 (브라우저가 기본 배너 대신 우리가 제어)
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      deferredPromptRef.current = e;
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    const handleInstalled = () => setDeferredPrompt(null);
+    const handleInstalled = () => { deferredPromptRef.current = null; };
     window.addEventListener('appinstalled', handleInstalled);
+
+    // 브라우저 정책상 제스처 없이 시스템 프롬프트를 띄울 수 없으므로,
+    // 사용자의 "첫 상호작용" 시점에 네이티브 알림 권한 → 앱 설치 다이얼로그를 순차 노출한다.
+    const handleFirstGesture = async () => {
+      // 1순위: 알림 권한 (아직 묻지 않은 경우에만 네이티브 프롬프트)
+      if (!askedPushRef.current && isPushSupported() && Notification.permission === 'default') {
+        askedPushRef.current = true;
+        try { await subscribeToPush(); } catch { /* 권한 거부/실패 무시 */ }
+        return; // 이번 제스처는 알림에 사용, 설치는 다음 제스처에서 (제스처 활성화 만료 방지)
+      }
+      // 2순위: 앱 설치 (설치 가능 & 아직 노출 안 함) — 제스처 동기 호출이어야 함
+      if (deferredPromptRef.current && !promptedInstallRef.current) {
+        promptedInstallRef.current = true;
+        const dp = deferredPromptRef.current;
+        deferredPromptRef.current = null;
+        try { dp.prompt(); await dp.userChoice; } catch { /* 무시 */ }
+      }
+      // 둘 다 끝났으면 리스너 제거
+      if (askedPushRef.current && promptedInstallRef.current) {
+        window.removeEventListener('pointerdown', handleFirstGesture);
+      }
+    };
+    window.addEventListener('pointerdown', handleFirstGesture);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleInstalled);
+      window.removeEventListener('pointerdown', handleFirstGesture);
     };
   }, []);
 
@@ -82,7 +120,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('cctv_jwt_token');
     setUser(null);
     setActiveTab('main');
-    alert('로그아웃되었습니다.');
+    toast('로그아웃되었습니다.', 'info');
   };
 
   const refreshUserData = async () => {
@@ -127,17 +165,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const promptInstall = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    try {
-      await deferredPrompt.userChoice;
-    } catch {
-      // 사용자가 닫은 경우 무시
-    }
-    setDeferredPrompt(null);
-  };
-
   return (
     <AppContext.Provider value={{
       theme,
@@ -150,10 +177,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logout,
       refreshUserData,
       updatePoints,
-      canInstall: !!deferredPrompt,
-      promptInstall
+      toast
     }}>
       {children}
+
+      {/* 전역 토스트 컨테이너 */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => {
+          const tone =
+            t.type === 'success' ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+            : t.type === 'error' ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
+            : t.type === 'warning' ? 'border-amber-500/40 bg-amber-500/15 text-amber-100'
+            : 'border-sky-500/40 bg-sky-500/15 text-sky-100';
+          return (
+            <div
+              key={t.id}
+              className={`pointer-events-auto rounded-xl border px-4 py-3 text-xs font-bold shadow-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200 ${tone}`}
+            >
+              {t.message}
+            </div>
+          );
+        })}
+      </div>
     </AppContext.Provider>
   );
 };

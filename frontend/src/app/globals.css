@@ -22,12 +22,6 @@
     --input: #f1f5f9;
     --ring: #3b82f6;
     --radius: 1rem; /* 조금 더 둥글고 트렌디한 라운딩 처리 */
-
-    /* 카드 등급 없이 가치 등급을 표현하기 위한 테두리 그라디언트 효과 */
-    --card-border-common: #f1f5f9;
-    --card-border-rare: linear-gradient(135deg, #60a5fa, #a78bfa);
-    --card-border-epic: linear-gradient(135deg, #f472b6, #c084fc);
-    --card-border-legendary: linear-gradient(135deg, #fbbf24, #f87171, #f472b6);
   }
 
   .dark {
@@ -50,11 +44,6 @@
     --border: #1e293b;
     --input: #1e293b;
     --ring: #60a5fa;
-
-    --card-border-common: #1e293b;
-    --card-border-rare: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    --card-border-epic: linear-gradient(135deg, #ec4899, #8b5cf6);
-    --card-border-legendary: linear-gradient(135deg, #f59e0b, #ef4444, #ec4899);
   }
 }
 
@@ -88,30 +77,4 @@ body {
   color: var(--foreground);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   overflow-x: hidden;
-}
-
-/* 프리미엄 카드 홀로그램 & 펄 효과 애니메이션 */
-.hologram-effect {
-  position: relative;
-  overflow: hidden;
-}
-.hologram-effect::after {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: linear-gradient(
-    125deg,
-    rgba(255,255,255,0) 30%,
-    rgba(255,255,255,0.12) 40%,
-    rgba(255,255,255,0.25) 50%,
-    rgba(255,255,255,0.12) 60%,
-    rgba(255,255,255,0) 70%
-  );
-  background-size: 200% 200%;
-  background-position: 0% 0%;
-  transition: background-position 0.6s ease;
-  pointer-events: none;
-}
-.hologram-effect:hover::after {
-  background-position: 100% 100%;
 }

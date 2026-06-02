@@ -54,8 +54,17 @@ import {
   getCoupons
 } from '../controllers/adminController';
 import { streamerRepository } from '../repositories';
+import { rateLimit } from '../middlewares/rateLimit';
 
 const router = Router();
+
+// 라우트별 레이트 리미터 (IP 기준 고정 윈도우)
+const drawLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'draw' });
+const searchLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'search' });
+const tradeLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'trade' });
+const couponLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'coupon' });
+const authLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'auth' });
+const registerLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'register' });
 
 // Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한)
 const upload = multer({
@@ -78,22 +87,22 @@ router.get('/health', (req, res) => {
 // 0. 치지직 OpenAPI OAuth 로그인 및 기본 유저 정보
 // ==========================================
 router.get('/auth/chzzk/url', getChzzkAuthUrl);
-router.post('/auth/chzzk/callback', handleChzzkCallback);
+router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/ranking', getUserRankings);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
-router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawCard);
+router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
 
 // 신규 스트리머 검색 및 카드 등록 API
-router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchChzzkStreamer);
-router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerStreamer);
+router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchLimiter, searchChzzkStreamer);
+router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerLimiter, registerStreamer);
 
 // 대표 카드 설정
 router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setRepresentativeCard);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
-router.post('/trades', authMiddleware, banCheckMiddleware, createTrade);
+router.post('/trades', authMiddleware, banCheckMiddleware, tradeLimiter, createTrade);
 router.get('/trades/active', authMiddleware, banCheckMiddleware, getActiveTrades);
 router.get('/trades/history', authMiddleware, banCheckMiddleware, getTradeHistory);
 router.post('/trades/:trade_id/confirm', authMiddleware, banCheckMiddleware, confirmTrade);
@@ -107,8 +116,17 @@ router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, reje
 // 1. 스트리머 관련 기능
 // ==========================================
 // 전체 스트리머 정보 목록 조회 (시세 탑3 리딩 등 활용)
+// 여러 화면(메인·랭킹·가챠·관리자)에서 빈번히 호출되므로 짧은 TTL 메모리 캐시 적용
+let streamersCache: { data: any[]; expiresAt: number } | null = null;
+const STREAMERS_CACHE_TTL = 15_000; // 15초
+
 router.get('/streamers', async (req, res) => {
   try {
+    const now = Date.now();
+    if (streamersCache && streamersCache.expiresAt > now) {
+      return res.status(200).json(streamersCache.data);
+    }
+
     const streamers = await streamerRepository.findAll();
     // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
     const [value24hMap, value1hMap] = await Promise.all([
@@ -122,6 +140,8 @@ router.get('/streamers', async (req, res) => {
       // 1시간 전 시세 (1시간 등락 랭킹용). 이력이 없으면 현재 시세로 폴백(변동 0)
       value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
     }));
+
+    streamersCache = { data: enriched, expiresAt: now + STREAMERS_CACHE_TTL };
     return res.status(200).json(enriched);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });
@@ -141,7 +161,7 @@ router.get('/streamers/:channel_id', getStreamerDetail);
 router.post('/cards/:channel_id/report', authMiddleware, banCheckMiddleware, reportStreamerCard);
 
 // 쿠폰 등록(사용) API
-router.post('/coupons/claim', authMiddleware, banCheckMiddleware, claimCoupon);
+router.post('/coupons/claim', authMiddleware, banCheckMiddleware, couponLimiter, claimCoupon);
 
 // 공지사항 전체 조회
 router.get('/announcements', getAnnouncements);

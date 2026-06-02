@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_free_draw TEXT,                       -- 마지막 무료 뽑기 일시 (ISO String)
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
     representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
+    access_token TEXT,                         -- 치지직 OAuth access_token (암호화 저장)
+    refresh_token TEXT,                        -- 치지직 OAuth refresh_token (암호화 저장)
+    token_expires_at TEXT,                     -- 치지직 access_token 만료 시각 (ISO String)
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 

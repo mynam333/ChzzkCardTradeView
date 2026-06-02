@@ -41,7 +41,7 @@ interface UserCard {
 }
 
 export const GachaTab: React.FC = () => {
-  const { user, updatePoints, refreshUserData } = useApp();
+  const { user, updatePoints, refreshUserData, toast } = useApp();
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,27 +65,20 @@ export const GachaTab: React.FC = () => {
   const [detailStreamer, setDetailStreamer] = useState<any | null>(null);
   const [detailHistory, setDetailHistory] = useState<{ value: number; recorded_at: string }[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
+  const [detailRange, setDetailRange] = useState<'24h' | '7d'>('7d');
 
   // 뽑기 연출 애니메이션 상태
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnCard, setDrawnCard] = useState<Streamer | null>(null);
 
-  // 커스텀 알림 피드백 모달 상태
-  const [alertModal, setAlertModal] = useState<{
-    open: boolean;
-    title: string;
-    message: string;
-    type: 'success' | 'error' | 'warning' | 'info';
-  }>({
-    open: false,
-    title: '',
-    message: '',
-    type: 'info'
-  });
-
-  // 커스텀 알림 모달 헬퍼
+  // 알림 피드백: 전역 토스트로 통일 (title은 메시지 앞에 간단히 덧붙임)
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
-    setAlertModal({ open: true, title, message, type });
+    toast(title ? `${title} · ${message}` : message, type);
+  };
+  // 기존 setAlertModal({open,title,message,type}) 호출을 토스트로 라우팅하는 호환 shim
+  const setAlertModal = (a: { open?: boolean; title?: string; message?: string; type?: 'success' | 'error' | 'warning' | 'info' }) => {
+    if (a?.message) showAlert(a.title || '', a.message, a.type || 'info');
   };
 
   // 카드 정렬 및 필터링 상태 추가
@@ -178,14 +171,6 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 등급 없이 오직 가치(base_value) 기준으로 비주얼 오라 레벨 구분
-  const getCardBorderClass = (val: number) => {
-    if (val >= 8000) return 'border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)] hologram-effect';
-    if (val >= 5000) return 'border-2 border-fuchsia-500 shadow-[0_0_10px_rgba(217,70,239,0.35)]';
-    if (val >= 3000) return 'border-2 border-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
-    return 'border border-border/80';
-  };
-
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
   const getIsFreeDrawAvailable = () => {
     if (!user) return false;
@@ -207,7 +192,7 @@ export const GachaTab: React.FC = () => {
     const drawCost = 10000; // 1회 뽑기 비용 10,000 P로 수정
 
     if (!isFreeDraw && user.point < drawCost) {
-      alert(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`);
+      toast(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`);
       return;
     }
 
@@ -238,16 +223,16 @@ export const GachaTab: React.FC = () => {
 
         // 팡파레 효과
         canvasConfetti({
-          particleCount: data.card.streamer.base_value >= 8000 ? 120 : 60,
+          particleCount: 90,
           spread: 70,
           origin: { y: 0.6 },
-          colors: data.card.streamer.base_value >= 8000 ? ['#f59e0b', '#10b981', '#3b82f6'] : ['#10b981', '#3b82f6']
+          colors: ['#10b981', '#3b82f6']
         });
       }, 1200);
 
     } catch (e: any) {
       setIsDrawing(false);
-      alert(e.message || '서버와의 통신 오류가 발생했습니다.');
+      toast(e.message || '서버와의 통신 오류가 발생했습니다.');
     }
   };
 
@@ -288,12 +273,12 @@ export const GachaTab: React.FC = () => {
   };
 
   // 스트리머 상세 + 시세 그래프 열기
-  const openStreamerDetail = async (channelId: string) => {
+  // 지정 범위(24h/7d)로 스트리머 상세+그래프 로드
+  const loadStreamerDetail = async (channelId: string, range: '24h' | '7d') => {
     setDetailLoading(true);
-    setDetailStreamer({ channel_id: channelId, loading: true });
     setDetailHistory([]);
     try {
-      const res = await apiFetch(`/streamers/${channelId}?range=7d`);
+      const res = await apiFetch(`/streamers/${channelId}?range=${range}`);
       if (res.ok) {
         const data = await res.json();
         setDetailStreamer(data.streamer);
@@ -308,6 +293,19 @@ export const GachaTab: React.FC = () => {
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  const openStreamerDetail = (channelId: string) => {
+    setDetailChannelId(channelId);
+    setDetailRange('7d');
+    setDetailStreamer({ channel_id: channelId, loading: true });
+    loadStreamerDetail(channelId, '7d');
+  };
+
+  const changeDetailRange = (range: '24h' | '7d') => {
+    if (!detailChannelId || range === detailRange) return;
+    setDetailRange(range);
+    loadStreamerDetail(detailChannelId, range);
   };
 
   // 선택한 보유 카드 id 목록을 channel_id별 수량으로 묶음
@@ -443,7 +441,7 @@ export const GachaTab: React.FC = () => {
   // 신규 스트리머 검색 API 호출
   const handleSearchStreamer = async () => {
     if (!streamerSearchKeyword.trim()) {
-      alert('검색할 스트리머 명칭을 입력해 주세요.');
+      toast('검색할 스트리머 명칭을 입력해 주세요.');
       return;
     }
     setSearching(true);
@@ -454,11 +452,11 @@ export const GachaTab: React.FC = () => {
         const data = await res.json();
         setSearchResults(data);
       } else {
-        alert('스트리머 검색에 실패했습니다.');
+        toast('스트리머 검색에 실패했습니다.');
       }
     } catch (e) {
       console.error(e);
-      alert('통신 중 오류가 발생했습니다.');
+      toast('통신 중 오류가 발생했습니다.');
     } finally {
       setSearching(false);
     }
@@ -579,7 +577,7 @@ export const GachaTab: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      alert('서버 전송 중 에러가 발생했습니다.');
+      toast('서버 전송 중 에러가 발생했습니다.');
     }
   };
 
@@ -590,7 +588,7 @@ export const GachaTab: React.FC = () => {
       .filter(item => item.count > 0);
 
     if (items.length === 0) {
-      alert('판매할 카드가 선택되지 않았습니다.');
+      toast('판매할 카드가 선택되지 않았습니다.');
       return;
     }
 
@@ -624,7 +622,7 @@ export const GachaTab: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      alert('서버 전송 중 에러가 발생했습니다.');
+      toast('서버 전송 중 에러가 발생했습니다.');
     }
   };
 
@@ -978,7 +976,20 @@ export const GachaTab: React.FC = () => {
                   </div>
                 </div>
 
-                {/* SVG 라인 차트 (최근 7일) */}
+                {/* 그래프 기간 토글 */}
+                <div className="flex items-center justify-end gap-1">
+                  {(['24h', '7d'] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => changeDetailRange(r)}
+                      className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition ${detailRange === r ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {r === '24h' ? '24시간' : '7일'}
+                    </button>
+                  ))}
+                </div>
+
+                {/* SVG 라인 차트 */}
                 {detailHistory.length >= 2 ? (() => {
                   const W = 460, H = 140, P = 8;
                   const values = detailHistory.map(h => h.value);
@@ -1165,7 +1176,7 @@ export const GachaTab: React.FC = () => {
                   }
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl hover:-translate-y-1 hover:shadow-2xl transition duration-300 select-none block ${getCardBorderClass(drawnCard.base_value)}`}
+                  className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl hover:-translate-y-1 hover:shadow-2xl transition duration-300 select-none block border border-border/80"
                 >
 
                   {/* 카드 배경 이미지 (커스텀 또는 기본 로고) */}
@@ -1339,7 +1350,7 @@ export const GachaTab: React.FC = () => {
                     <button
                       onClick={() => {
                         if (selectedChannelIds.length === 0) {
-                          alert('선택된 카드가 없습니다.');
+                          toast('선택된 카드가 없습니다.');
                           return;
                         }
                         // 선택된 카드 정보 기반으로 일괄 판매 초기화
@@ -1441,8 +1452,7 @@ export const GachaTab: React.FC = () => {
                       onMouseUp={endPress}
                       onTouchStart={startPress}
                       onTouchEnd={endPress}
-                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''
-                        } ${getCardBorderClass(streamer.base_value)}`}
+                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
                     >
                       {/* 다중 선택 모드 체크박스 오버레이 */}
                       {selectionMode && (
@@ -1761,7 +1771,7 @@ export const GachaTab: React.FC = () => {
                 onClick={() => {
                   const totalCount = Object.values(bulkSellQuantities).reduce((a, b) => a + b, 0);
                   if (totalCount === 0) {
-                    alert('판매할 카드가 1개 이상 존재해야 합니다.');
+                    toast('판매할 카드가 1개 이상 존재해야 합니다.');
                     return;
                   }
                   setBulkSellConfirmOpen(true);
@@ -1812,28 +1822,6 @@ export const GachaTab: React.FC = () => {
         </div>
       )}
 
-      {/* 커스텀 피드백 알림 모달 */}
-      {alertModal.open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
-            <h4 className={`text-base font-extrabold mb-2 ${alertModal.type === 'success' ? 'text-emerald-500' :
-                alertModal.type === 'error' ? 'text-red-500' :
-                  alertModal.type === 'warning' ? 'text-amber-500' : 'text-primary'
-              }`}>
-              {alertModal.title}
-            </h4>
-            <p className="text-xs text-muted-foreground leading-relaxed py-2">
-              {alertModal.message}
-            </p>
-            <button
-              onClick={() => setAlertModal({ ...alertModal, open: false })}
-              className="mt-4 w-full rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition"
-            >
-              확인
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

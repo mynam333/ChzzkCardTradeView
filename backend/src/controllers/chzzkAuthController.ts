@@ -72,6 +72,8 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     const tokenContent = tokenData.content || (tokenData as any);
     const finalAccessToken = tokenContent.accessToken || (tokenContent as any).access_token || null;
     const finalRefreshToken = tokenContent.refreshToken || (tokenContent as any).refresh_token || null;
+    const expiresIn = Number(tokenContent.expiresIn || (tokenContent as any).expires_in || 0);
+    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // B. 발급받은 accessToken으로 치지직 사용자 프로필 조회 (공식 가이드 준수)
     let chzzkUser = { id: '', nickname: '', profileImageUrl: '' };
@@ -159,6 +161,25 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       }
       user.access_token = finalAccessToken;
       user.refresh_token = finalRefreshToken;
+    }
+
+    // 토큰 만료 시각 저장 (리프레시 기준점)
+    await userRepository.updateTokens(user.id, encAccessToken, encRefreshToken, tokenExpiresAt);
+
+    // E-2. 차단(밴) 계정은 로그인 시점에 안내하고 토큰을 발급하지 않음
+    if (user.banned_until) {
+      const banExpiration = new Date(user.banned_until);
+      if (banExpiration > new Date()) {
+        const isPermanent = banExpiration.getFullYear() > 2099;
+        const formatted = banExpiration.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+        return res.status(403).json({
+          error: 'BannedUser',
+          message: isPermanent
+            ? '해당 계정은 규정 위반으로 영구 이용 정지 상태입니다.'
+            : `해당 계정은 이용이 제한되어 로그인할 수 없습니다. (제한 만료: ${formatted})`,
+          banned_until: user.banned_until
+        });
+      }
     }
 
     // D. JWT 토큰 발행

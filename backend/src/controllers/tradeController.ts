@@ -3,6 +3,7 @@ import { tradeRepository, userRepository, userCardRepository } from '../reposito
 import { TradeOffer } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import { sendPushToUser } from './pushController';
 
 /**
  * 거래 오퍼 형식을 검증하고 정규화합니다.
@@ -29,6 +30,30 @@ const getOwnedCountMap = async (userId: string): Promise<Record<string, number>>
     map[c.channel_id] = (map[c.channel_id] || 0) + 1;
   }
   return map;
+};
+
+/**
+ * 진행 중인 거래에 묶여(에스크로) 있는 유저의 카드/포인트 예약량을 계산합니다.
+ * - 제안자 측: PENDING/CONFIRMED 모두 제시품(sender_offer)이 예약됨
+ * - 수신자 측: CONFIRMED(동의 완료)일 때 요청받은 품목(receiver_offer)이 예약됨
+ * 다른 곳(판매/신규 제안)에서 available = 보유 - 예약 으로 검증해 이중 지출을 막습니다.
+ */
+export const getUserReservations = async (userId: string): Promise<{ cards: Record<string, number>; points: number }> => {
+  const active = await tradeRepository.findActiveByUser(userId);
+  const cards: Record<string, number> = {};
+  let points = 0;
+
+  const reserve = (offer: TradeOffer | undefined) => {
+    if (!offer) return;
+    for (const c of offer.cards || []) cards[c.channel_id] = (cards[c.channel_id] || 0) + c.count;
+    points += offer.point || 0;
+  };
+
+  for (const t of active) {
+    if (t.sender_id === userId) reserve(t.sender_offer);
+    if (t.receiver_id === userId && t.status === 'CONFIRMED') reserve(t.receiver_offer);
+  }
+  return { cards, points };
 };
 
 /**
@@ -62,16 +87,20 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'BadRequest', message: '자기 자신과는 교환할 수 없습니다.' });
     }
 
-    // 제안자가 실제로 제시한 카드/포인트를 보유 중인지 사전 검증 (체결 시 원자적으로 재검증됨)
+    // 제안자가 제시한 카드/포인트가 "사용 가능"한지 검증
+    // (보유량에서 이미 다른 진행 중 거래에 묶인 예약량을 뺀 값 기준 → 이중 지출 방지)
     const ownedMap = await getOwnedCountMap(sender.id);
+    const reservations = await getUserReservations(sender.id);
     for (const c of senderOffer.cards) {
-      if ((ownedMap[c.channel_id] || 0) < c.count) {
-        return res.status(400).json({ error: 'InsufficientCards', message: '제안하려는 카드를 충분히 보유하고 있지 않습니다.' });
+      const available = (ownedMap[c.channel_id] || 0) - (reservations.cards[c.channel_id] || 0);
+      if (available < c.count) {
+        return res.status(400).json({ error: 'InsufficientCards', message: '제안하려는 카드가 부족합니다. (이미 다른 거래에 묶여 있을 수 있어요)' });
       }
     }
     const freshSender = await userRepository.findById(sender.id);
-    if (!freshSender || freshSender.point < senderOffer.point) {
-      return res.status(400).json({ error: 'InsufficientPoint', message: '제안하려는 포인트가 보유 포인트를 초과합니다.' });
+    const availablePoint = (freshSender?.point ?? 0) - reservations.points;
+    if (!freshSender || availablePoint < senderOffer.point) {
+      return res.status(400).json({ error: 'InsufficientPoint', message: '제안하려는 포인트가 부족합니다. (다른 거래에 묶인 포인트 제외)' });
     }
 
     const trade = await tradeRepository.create({
@@ -80,6 +109,9 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
       sender_offer: senderOffer,
       receiver_offer: receiverOffer
     });
+
+    // 수신자에게 새 교환 제안 푸시 알림 (실패 무시)
+    sendPushToUser(receiver.id, '새 교환 제안 📩', `${sender.username}님이 카드 교환을 제안했어요.`);
 
     return res.status(201).json({
       message: `${receiver.username}님에게 교환을 제안했습니다.`,
@@ -139,12 +171,15 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
   if (!tradeId) return res.status(400).json({ error: 'BadRequest', message: '유효한 거래 ID가 필요합니다.' });
 
   try {
+    const trade = await tradeRepository.findById(tradeId);
     const result = await tradeRepository.confirm(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 동의 처리에 실패했습니다.'
       });
     }
+    // 제안자에게 최종 승인 요청 푸시
+    if (trade) sendPushToUser(trade.sender_id, '교환 동의됨 ✅', `${user.username}님이 교환에 동의했어요. 최종 승인이 필요합니다.`);
     return res.status(200).json({ message: '교환 조건에 동의했습니다. 제안자의 최종 승인을 기다립니다.' });
   } catch (err: any) {
     console.error('[TradeController] confirmTrade 에러:', err);
@@ -163,12 +198,15 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
   if (!tradeId) return res.status(400).json({ error: 'BadRequest', message: '유효한 거래 ID가 필요합니다.' });
 
   try {
+    const trade = await tradeRepository.findById(tradeId);
     const result = await tradeRepository.finalize(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 체결에 실패했습니다.'
       });
     }
+    // 수신자에게 체결 완료 푸시
+    if (trade) sendPushToUser(trade.receiver_id, '교환 체결 🤝', `${user.username}님과의 카드 교환이 완료되었어요!`);
     return res.status(200).json({ message: '교환이 성공적으로 체결되었습니다.' });
   } catch (err: any) {
     console.error('[TradeController] finalizeTrade 에러:', err);
@@ -205,6 +243,14 @@ export const rejectTrade = async (req: AuthenticatedRequest, res: Response) => {
     // 제안자가 취소하면 CANCELLED, 수신자가 거절하면 REJECTED
     const nextStatus = trade.sender_id === user.id ? 'CANCELLED' : 'REJECTED';
     await tradeRepository.updateStatus(tradeId, nextStatus);
+
+    // 상대방에게 결과 푸시
+    const counterpartId = trade.sender_id === user.id ? trade.receiver_id : trade.sender_id;
+    sendPushToUser(
+      counterpartId,
+      nextStatus === 'CANCELLED' ? '교환 취소됨' : '교환 거절됨',
+      nextStatus === 'CANCELLED' ? `${user.username}님이 교환 제안을 취소했어요.` : `${user.username}님이 교환 제안을 거절했어요.`
+    );
 
     return res.status(200).json({
       message: nextStatus === 'CANCELLED' ? '교환 제안을 취소했습니다.' : '교환 제안을 거절했습니다.'

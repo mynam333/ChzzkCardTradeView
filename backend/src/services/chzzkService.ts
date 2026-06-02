@@ -11,6 +11,49 @@ export interface ChzzkProfile {
   concurrentUserCount?: number;
 }
 
+export interface ChzzkTokenResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number; // 초 단위 만료 시간
+}
+
+/**
+ * refresh_token으로 치지직 OAuth access_token을 갱신합니다.
+ * 성공 시 새 토큰 세트를, 실패 시 null을 반환합니다.
+ */
+export const refreshChzzkToken = async (refreshToken: string): Promise<ChzzkTokenResult | null> => {
+  const clientId = process.env.CHZZK_CLIENT_ID || '';
+  const clientSecret = process.env.CHZZK_CLIENT_SECRET || '';
+  if (!refreshToken || !clientId || !clientSecret) return null;
+
+  try {
+    const res = await fetch('https://openapi.chzzk.naver.com/auth/v1/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      body: JSON.stringify({
+        grantType: 'refresh_token',
+        refreshToken,
+        clientId,
+        clientSecret
+      })
+    });
+    if (!res.ok) {
+      console.warn(`[ChzzkService] 토큰 갱신 실패 (HTTP ${res.status})`);
+      return null;
+    }
+    const body = (await res.json()) as any;
+    const content = body.content || body;
+    const accessToken = content.accessToken || content.access_token;
+    const newRefresh = content.refreshToken || content.refresh_token || refreshToken;
+    const expiresIn = Number(content.expiresIn || content.expires_in || 0);
+    if (!accessToken) return null;
+    return { accessToken, refreshToken: newRefresh, expiresIn };
+  } catch (e: any) {
+    console.warn('[ChzzkService] 토큰 갱신 중 예외:', e.message);
+    return null;
+  }
+};
+
 export const fetchChzzkChannelProfile = async (
   channelId: string,
   throwOnError = false

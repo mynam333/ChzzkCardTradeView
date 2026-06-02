@@ -11,8 +11,7 @@ import {
   Moon,
   Bell,
   Coins,
-  Shield,
-  Download
+  Shield
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
@@ -22,8 +21,10 @@ interface NavigationProps {
 }
 
 export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
-  const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, canInstall, promptInstall } = useApp();
+  const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
   const touchStartX = React.useRef<number | null>(null);
+  const touchStartY = React.useRef<number | null>(null);
+  const touchStartTime = React.useRef<number>(0);
 
   const handleLogin = async () => {
     try {
@@ -36,7 +37,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
       }
     } catch (e) {
       console.error(e);
-      alert('치지직 로그인 주소 요청 중 에러가 발생했습니다.');
+      toast('치지직 로그인 주소 요청 중 에러가 발생했습니다.', 'error');
     }
   };
 
@@ -50,15 +51,29 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
       : []),
   ];
 
-  // 모바일 좌우 스와이프로 탭 전환
+  // 모바일 좌우 스와이프로 탭 전환 (오작동 방지를 위해 둔감하게 조정)
+  const SWIPE_MIN_DISTANCE = 110;   // 최소 가로 이동 거리(px)
+  const SWIPE_MAX_DURATION = 700;   // 너무 느린(스크롤성) 제스처 제외(ms)
+  const SWIPE_HORIZONTAL_RATIO = 2; // 가로 이동이 세로보다 충분히 커야 함
+
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    touchStartTime.current = Date.now();
   };
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
+    if (touchStartX.current === null || touchStartY.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    const dt = Date.now() - touchStartTime.current;
     touchStartX.current = null;
-    if (Math.abs(dx) < 60) return;
+    touchStartY.current = null;
+
+    // 1) 충분히 길고 빠른 가로 스와이프만 인정, 2) 세로 이동(스크롤) 대비 가로가 우세할 때만
+    if (Math.abs(dx) < SWIPE_MIN_DISTANCE) return;
+    if (dt > SWIPE_MAX_DURATION) return;
+    if (Math.abs(dx) < Math.abs(dy) * SWIPE_HORIZONTAL_RATIO) return;
+
     const ids = navItems.map((i) => i.id);
     const idx = ids.indexOf(activeTab);
     if (dx < 0 && idx < ids.length - 1) setActiveTab(ids[idx + 1]);
@@ -146,18 +161,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
           })}
         </nav>
 
-        {/* PWA 설치 버튼 (설치 가능할 때만 노출) */}
-        {canInstall && (
-          <button
-            onClick={promptInstall}
-            className="mt-auto mb-3 flex items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 py-2 text-xs font-bold text-primary hover:bg-primary/20 transition"
-          >
-            <Download className="h-4 w-4" /> 앱 설치하기
-          </button>
-        )}
-
         {/* 테마 스위치 */}
-        <div className={`${canInstall ? '' : 'mt-auto'} pt-4 border-t border-border`}>
+        <div className="mt-auto pt-4 border-t border-border">
           <div className="flex items-center justify-between px-2">
             <span className="text-xs text-muted-foreground">화면 테마</span>
             <button

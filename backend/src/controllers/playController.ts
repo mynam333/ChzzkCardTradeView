@@ -6,6 +6,7 @@ import {
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile } from '../services/chzzkService';
+import { getUserReservations } from './tradeController';
 
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
@@ -309,7 +310,7 @@ export const sellCards = async (req: Request, res: Response) => {
 
     // B. 유저 보유 카드 데이터 조회
     const userCards = await userCardRepository.findByUserId(userId);
-    
+
     // channelId별 유저 보유 카드 매핑
     const userCardsByChannel: { [key: string]: any[] } = {};
     userCards.forEach(uc => {
@@ -319,6 +320,9 @@ export const sellCards = async (req: Request, res: Response) => {
       }
       userCardsByChannel[cid].push(uc);
     });
+
+    // 진행 중인 거래에 묶인(에스크로) 카드는 판매 불가하도록 예약량 차감
+    const reservations = await getUserReservations(userId);
 
     let totalGainedPoints = 0;
     const sellActions: { channelId: string, count: number, baseValue: number }[] = [];
@@ -331,10 +335,12 @@ export const sellCards = async (req: Request, res: Response) => {
       }
 
       const owned = userCardsByChannel[channelId] || [];
-      if (owned.length < count) {
-        return res.status(400).json({ 
-          error: 'InsufficientCards', 
-          message: `보유한 카드 수량이 부족합니다. (채널 ID: ${channelId}, 보유: ${owned.length}장, 판매 요청: ${count}장)` 
+      const reserved = reservations.cards[channelId] || 0;
+      const sellable = owned.length - reserved;
+      if (sellable < count) {
+        return res.status(400).json({
+          error: 'InsufficientCards',
+          message: `판매 가능한 카드 수량이 부족합니다. (보유 ${owned.length}장 중 거래 중 ${reserved}장, 판매 요청 ${count}장)`
         });
       }
 

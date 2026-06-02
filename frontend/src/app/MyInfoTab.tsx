@@ -10,7 +10,6 @@ import {
   X,
   Upload,
   Star,
-  Download,
   Check
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
@@ -31,7 +30,7 @@ interface UserCard {
 }
 
 export const MyInfoTab: React.FC = () => {
-  const { user, logout, updatePoints, refreshUserData, canInstall, promptInstall } = useApp();
+  const { user, logout, updatePoints, refreshUserData, toast } = useApp();
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
@@ -86,7 +85,7 @@ export const MyInfoTab: React.FC = () => {
       if (data.auth_url) window.location.href = data.auth_url;
     } catch (e) {
       console.error(e);
-      alert('치지직 로그인 주소 요청 중 에러가 발생했습니다.');
+      toast('치지직 로그인 주소 요청 중 에러가 발생했습니다.');
     }
   };
 
@@ -119,33 +118,33 @@ export const MyInfoTab: React.FC = () => {
 
   const handleClaimCoupon = async () => {
     if (!couponCode.trim()) {
-      alert('쿠폰 코드를 입력해 주세요.');
+      toast('쿠폰 코드를 입력해 주세요.');
       return;
     }
     try {
       const res = await apiFetch('/coupons/claim', { method: 'POST', body: JSON.stringify({ code: couponCode }) });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message);
+        toast(data.message);
         if (data.points_added) updatePoints(data.points_added);
         // 카드 보상이면 보관함 갱신
         if (data.reward_type === 'card') fetchInventory();
         setCouponCode('');
       } else {
-        alert(data.message || '쿠폰 등록 실패');
+        toast(data.message || '쿠폰 등록 실패');
       }
     } catch (e) {
-      alert('서버와의 통신 오류가 발생했습니다.');
+      toast('서버와의 통신 오류가 발생했습니다.');
     }
   };
 
   const handleEnablePush = async () => {
     if (!isPushSupported()) {
-      alert('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.');
+      toast('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.');
       return;
     }
     const result = await subscribeToPush();
-    alert(result.ok ? '실시간 푸시 알림 구독이 완료되었습니다!' : result.message);
+    toast(result.ok ? '실시간 푸시 알림 구독이 완료되었습니다!' : result.message);
   };
 
   const handleSetRepresentative = async (channelId: string | null) => {
@@ -156,10 +155,10 @@ export const MyInfoTab: React.FC = () => {
         await refreshUserData();
         setRepModalOpen(false);
       } else {
-        alert(data.message || '대표 카드 설정 실패');
+        toast(data.message || '대표 카드 설정 실패');
       }
     } catch (e) {
-      alert('서버와의 통신 오류가 발생했습니다.');
+      toast('서버와의 통신 오류가 발생했습니다.');
     }
   };
 
@@ -175,8 +174,8 @@ export const MyInfoTab: React.FC = () => {
   };
 
   const handleUploadImage = async () => {
-    if (!imageFile) { alert('변경할 카드의 이미지를 선택해 주세요.'); return; }
-    if (!imageDisclaimerChecked) { alert('이미지 등록 책임 동의 체크박스를 확인해 주세요.'); return; }
+    if (!imageFile) { toast('변경할 카드의 이미지를 선택해 주세요.'); return; }
+    if (!imageDisclaimerChecked) { toast('이미지 등록 책임 동의 체크박스를 확인해 주세요.'); return; }
 
     setUploading(true);
     const formData = new FormData();
@@ -193,16 +192,16 @@ export const MyInfoTab: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        alert('이미지가 성공적으로 저장 완료되었습니다.');
+        toast('이미지가 성공적으로 저장 완료되었습니다.');
         setImageFile(null);
         setUploadModalOpen(false);
         refreshUserData();
         fetchInventory();
       } else {
-        alert(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
+        toast(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
       }
     } catch (e) {
-      alert('서버 전송 중 에러가 발생했습니다.');
+      toast('서버 전송 중 에러가 발생했습니다.');
       setImageFile(null);
     } finally {
       setUploading(false);
@@ -392,18 +391,11 @@ export const MyInfoTab: React.FC = () => {
 
       {/* 알림 & 앱 설치 */}
       <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <h3 className="text-base font-bold flex items-center gap-2"><BellRing className="h-4.5 w-4.5 text-primary" /> 실시간 푸시 알림 & 앱 설치</h3>
-        <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트 소식을 푸시로 받아볼 수 있습니다. PWA로 설치하면 백그라운드 알림 수신이 가능합니다.</p>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={handleEnablePush} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition shadow-sm">
-            알림 받기 (구독하기)
-          </button>
-          {canInstall && (
-            <button onClick={promptInstall} className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-5 py-2.5 text-xs font-bold text-primary hover:bg-primary/20 transition">
-              <Download className="h-4 w-4" /> 앱 설치하기
-            </button>
-          )}
-        </div>
+        <h3 className="text-base font-bold flex items-center gap-2"><BellRing className="h-4.5 w-4.5 text-primary" /> 실시간 푸시 알림</h3>
+        <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트 소식을 푸시로 받아볼 수 있습니다. (PWA 설치 시 백그라운드 수신)</p>
+        <button onClick={handleEnablePush} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition shadow-sm">
+          알림 받기 (구독하기)
+        </button>
       </section>
 
       {/* 로그아웃 */}
