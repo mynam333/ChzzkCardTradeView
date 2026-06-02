@@ -526,12 +526,17 @@ export const fuseCards = async (req: Request, res: Response) => {
   try {
     const result = await userCardRepository.fuse(userId, channel_id, starNum);
     if (!result.ok) {
-      const msg = result.reason === 'NOT_ENOUGH'
-        ? `${starNum}성 카드가 2장 이상 있어야 합성할 수 있습니다.`
-        : result.reason === 'MAX_STAR' ? '이미 최고 등급(5성)입니다.' : '합성에 실패했습니다.';
+      let msg = '한계돌파에 실패했습니다.';
+      if (result.reason === 'MAX_STAR') msg = '이미 최고 등급(5성)입니다.';
+      else if (result.reason === 'NO_TARGET') msg = `${starNum}성 카드를 보유하고 있지 않습니다.`;
+      else if (result.reason === 'NO_FODDER') {
+        msg = starNum === 0
+          ? '한계돌파에는 같은 스트리머의 0성 카드가 2장(대상 1장 + 재료 1장) 필요합니다.'
+          : '한계돌파에는 재료로 쓸 같은 스트리머의 0성 카드가 1장 더 필요합니다.';
+      }
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
     }
-    return res.status(200).json({ message: `합성 성공! ${result.newStar}성 카드가 되었습니다. ⭐`, new_star: result.newStar });
+    return res.status(200).json({ message: `한계돌파 성공! ${result.newStar}성 카드가 되었습니다. ⭐`, new_star: result.newStar });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '합성 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
   }

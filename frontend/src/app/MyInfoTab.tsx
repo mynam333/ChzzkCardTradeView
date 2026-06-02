@@ -43,6 +43,8 @@ export const MyInfoTab: React.FC = () => {
 
   // 본인 계정이 카드로 등록된 스트리머인지 여부 (이미지 관리 노출 조건)
   const [isStreamer, setIsStreamer] = useState(false);
+  // 본인 스트리머 카드에 현재 설정된 이미지(커스텀 또는 기본 로고)
+  const [myCardImage, setMyCardImage] = useState<string | null>(null);
 
   // 프로필 카드(공유용) 모달
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -76,8 +78,16 @@ export const MyInfoTab: React.FC = () => {
     try {
       const res = await apiFetch(`/streamers/${user.id}`);
       setIsStreamer(res.ok);
+      if (res.ok) {
+        const data = await res.json();
+        const s = data.streamer || data;
+        setMyCardImage(s.custom_image_url || s.logo_url || null);
+      } else {
+        setMyCardImage(null);
+      }
     } catch {
       setIsStreamer(false);
+      setMyCardImage(null);
     }
   };
 
@@ -198,10 +208,16 @@ export const MyInfoTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast('이미지가 성공적으로 저장 완료되었습니다.');
+        // 업로드 응답의 새 이미지 URL을 즉시 미리보기에 반영 (없으면 재조회로 동기화)
+        if (data.image_url || data.custom_image_url) {
+          setMyCardImage(data.image_url || data.custom_image_url);
+        }
+        setPreviewBlob(null);
         setImageFile(null);
         setUploadModalOpen(false);
         refreshUserData();
         fetchInventory();
+        checkStreamerRegistration();
       } else {
         toast(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
       }
@@ -326,8 +342,8 @@ export const MyInfoTab: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-center gap-6 pt-2">
           <div className="relative flex h-60 w-36 flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary p-3 shadow-md">
             <div className="absolute inset-0 z-0">
-              <img src={previewBlob || user.avatarUrl} alt="Card Preview" className="h-full w-full object-cover opacity-80" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/35 z-10"></div>
+              <img src={previewBlob || myCardImage || user.avatarUrl} alt="Card Preview" className="h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent z-10"></div>
             </div>
             <div className="relative z-20 flex justify-between">
               <span className="rounded bg-primary px-1.5 py-0.5 text-[8px] font-bold text-primary-foreground">LIVE</span>

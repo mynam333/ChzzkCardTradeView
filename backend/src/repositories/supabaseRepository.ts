@@ -702,23 +702,37 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
   async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const client = this.getClient();
-    const { data: rows, error } = await client
+
+    // 1) 업그레이드 대상: 현재 star인 카드 1장
+    const { data: targetRows, error: tErr } = await client
       .from('user_cards')
-      .select('id, serial_number')
+      .select('id')
       .eq('user_id', userId)
       .eq('channel_id', channelId)
       .eq('star', star)
       .order('id', { ascending: true })
-      .limit(2);
-    if (error || !rows || rows.length < 2) return { ok: false, reason: 'NOT_ENOUGH' };
+      .limit(1);
+    if (tErr || !targetRows || targetRows.length === 0) return { ok: false, reason: 'NO_TARGET' };
+    const targetId = targetRows[0].id;
 
-    const ids = rows.map((r) => r.id);
-    const { error: delErr } = await client.from('user_cards').delete().in('id', ids);
+    // 2) 한계돌파 재료: 같은 스트리머의 0성 카드 1장 (대상과 다른 카드)
+    const { data: fodderRows, error: fErr } = await client
+      .from('user_cards')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('channel_id', channelId)
+      .eq('star', 0)
+      .neq('id', targetId)
+      .order('id', { ascending: true })
+      .limit(1);
+    if (fErr || !fodderRows || fodderRows.length === 0) return { ok: false, reason: 'NO_FODDER' };
+    const fodderId = fodderRows[0].id;
+
+    // 대상 카드의 별을 1 올리고, 재료 0성 카드는 소모(삭제)
+    const { error: updErr } = await client.from('user_cards').update({ star: star + 1 }).eq('id', targetId);
+    if (updErr) return { ok: false, reason: 'FAILED' };
+    const { error: delErr } = await client.from('user_cards').delete().eq('id', fodderId);
     if (delErr) return { ok: false, reason: 'FAILED' };
-    const { error: insErr } = await client.from('user_cards').insert([{
-      user_id: userId, channel_id: channelId, serial_number: rows[0].serial_number, star: star + 1
-    }]);
-    if (insErr) return { ok: false, reason: 'FAILED' };
     return { ok: true, reason: 'OK', newStar: star + 1 };
   }
 

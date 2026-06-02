@@ -433,16 +433,16 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 카드 합성 (같은 스트리머·같은 별 2장 → 별+1)
+  // 카드 한계돌파 (대상 카드의 별 +1, 같은 스트리머의 0성 카드 1장을 재료로 소모)
   const handleFuse = async (channelId: string, star: number) => {
     try {
       const res = await apiFetch('/cards/fuse', { method: 'POST', body: JSON.stringify({ channel_id: channelId, star }) });
       const data = await res.json();
       if (res.ok) {
-        showAlert('합성 성공', data.message || '합성되었습니다.', 'success');
+        showAlert('한계돌파 성공', data.message || '한계돌파에 성공했습니다.', 'success');
         fetchInventory();
       } else {
-        showAlert('합성 실패', data.message || '합성에 실패했습니다.', 'error');
+        showAlert('한계돌파 실패', data.message || '한계돌파에 실패했습니다.', 'error');
       }
     } catch {
       showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
@@ -1309,6 +1309,14 @@ export const GachaTab: React.FC = () => {
             }
           });
 
+          // 채널별 0성 카드 보유량 (한계돌파 재료 가용성 판단용) — 검색 필터와 무관하게 전체 보관함 기준
+          const zeroStarByChannel: Record<string, number> = {};
+          inventory.forEach(c => {
+            if ((c.star || 0) === 0) {
+              zeroStarByChannel[c.channel_id] = (zeroStarByChannel[c.channel_id] || 0) + 1;
+            }
+          });
+
           return (
             <div className="relative">
               {/* 선택 모드 안내 바 */}
@@ -1439,9 +1447,11 @@ export const GachaTab: React.FC = () => {
                         <img
                           src={streamer.custom_image_url || streamer.logo_url}
                           alt={streamer.name}
-                          className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-105"
+                          loading="lazy"
+                          className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/25 z-10"></div>
+                        {/* 하단만 어둡게 처리해 텍스트 가독성은 유지하면서 이미지는 선명하게 노출 */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
                       </div>
 
                       {/* 카드 상단 정보 */}
@@ -1486,15 +1496,22 @@ export const GachaTab: React.FC = () => {
                           <span className="text-xs font-black text-emerald-400">{cardValue.toLocaleString()} P</span>
                         </div>
 
-                        {/* 합성 버튼 (같은 별 2장 이상 & 5성 미만) */}
-                        {!selectionMode && count >= 2 && star < 5 && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
-                            className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
-                          >
-                            ⭐ 합성 ({star}★→{star + 1}★)
-                          </button>
-                        )}
+                        {/* 한계돌파 버튼 (같은 스트리머 0성 카드를 재료로 소모해 별 +1) */}
+                        {(() => {
+                          if (selectionMode || star >= 5) return null;
+                          const zeroCount = zeroStarByChannel[streamer.channel_id] || 0;
+                          // 0성 카드를 올릴 땐 대상+재료로 2장 필요, 1성 이상은 재료 0성 1장 필요
+                          const canFuse = star === 0 ? zeroCount >= 2 : zeroCount >= 1;
+                          if (!canFuse) return null;
+                          return (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
+                              className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
+                            >
+                              ⭐ 한계돌파 ({star}★→{star + 1}★)
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   );

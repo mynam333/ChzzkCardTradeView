@@ -542,14 +542,19 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const db = this.getDb();
     const txn = db.transaction(() => {
-      const rows = db.prepare(
-        'SELECT id, serial_number FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = ? ORDER BY id ASC LIMIT 2'
-      ).all(userId, channelId, star) as any[];
-      if (rows.length < 2) throw new Error('NOT_ENOUGH');
-      // 2장 삭제 후 1장을 별+1로 생성 (시리얼은 두 장 중 작은 값 유지)
-      db.prepare('DELETE FROM user_cards WHERE id IN (?, ?)').run(rows[0].id, rows[1].id);
-      db.prepare('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, ?)')
-        .run(userId, channelId, rows[0].serial_number, star + 1);
+      // 1) 업그레이드 대상: 현재 star인 카드 1장
+      const target = db.prepare(
+        'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = ? ORDER BY id ASC LIMIT 1'
+      ).get(userId, channelId, star) as any;
+      if (!target) throw new Error('NO_TARGET');
+      // 2) 한계돌파 재료: 같은 스트리머의 0성 카드 1장 (대상과 다른 카드)
+      const fodder = db.prepare(
+        'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = 0 AND id <> ? ORDER BY id ASC LIMIT 1'
+      ).get(userId, channelId, target.id) as any;
+      if (!fodder) throw new Error('NO_FODDER');
+      // 대상 카드의 별을 1 올리고, 재료 0성 카드는 소모(삭제)
+      db.prepare('UPDATE user_cards SET star = ? WHERE id = ?').run(star + 1, target.id);
+      db.prepare('DELETE FROM user_cards WHERE id = ?').run(fodder.id);
     });
     try {
       txn();
