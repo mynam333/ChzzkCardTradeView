@@ -68,8 +68,10 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     const filePath = path.join(uploadDir, fileName);
     fs.writeFileSync(filePath, webpBuffer);
 
-    // 호스팅 경로 매핑
-    const imageUrl = `/uploads/${folderName}/${fileName}`;
+    // 호스팅 경로 매핑 — 정적 파일은 백엔드가 서빙하므로 백엔드 절대 URL로 반환
+    // (상대경로면 프론트엔드 오리진 기준이 되어 파일을 찾지 못함)
+    const backendBase = process.env.BACKEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${backendBase.replace(/\/$/, '')}/uploads/${folderName}/${encodeURIComponent(fileName)}`;
 
     // 3. 데이터베이스 정보 갱신
     await streamerRepository.updateCustomImage(channel_id, imageUrl);

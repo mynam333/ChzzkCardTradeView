@@ -10,10 +10,12 @@ import {
   X,
   Upload,
   Star,
-  Check
+  Check,
+  Share2
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
+import { ProfileModal } from './ProfileModal';
 
 interface UserCard {
   id: number;
@@ -41,6 +43,9 @@ export const MyInfoTab: React.FC = () => {
 
   // 본인 계정이 카드로 등록된 스트리머인지 여부 (이미지 관리 노출 조건)
   const [isStreamer, setIsStreamer] = useState(false);
+
+  // 프로필 카드(공유용) 모달
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   // 스트리머 프로필 커스텀 이미지 업로드 상태 (지연 업로드)
   const [previewBlob, setPreviewBlob] = useState<string | null>(null);
@@ -244,19 +249,30 @@ export const MyInfoTab: React.FC = () => {
                 대표 카드<br />미설정
               </div>
             )}
-            <button
-              onClick={() => setRepModalOpen(true)}
-              className="rounded-lg bg-secondary px-3 py-2 text-[11px] font-bold text-foreground hover:bg-secondary/80"
-            >
-              대표 카드<br />설정
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setRepModalOpen(true)}
+                className="rounded-lg bg-secondary px-3 py-2 text-[11px] font-bold text-foreground hover:bg-secondary/80"
+              >
+                대표 카드 설정
+              </button>
+              <button
+                onClick={() => setProfileModalOpen(true)}
+                className="flex items-center justify-center gap-1 rounded-lg bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground hover:bg-primary/90"
+              >
+                <Share2 className="h-3 w-3" /> 프로필 공유
+              </button>
+            </div>
           </div>
         </div>
       </section>
 
+      {/* 프로필 카드(공유용) 모달 */}
+      {profileModalOpen && <ProfileModal userId={user.id} onClose={() => setProfileModalOpen(false)} />}
+
       {/* 대표 카드 선택 모달 */}
       {repModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2"><Star className="h-4.5 w-4.5 text-amber-500" /> 대표 카드 선택</h3>
@@ -334,7 +350,7 @@ export const MyInfoTab: React.FC = () => {
 
         {/* 업로드 동의 모달 */}
         {uploadModalOpen && previewBlob && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-base font-bold flex items-center gap-2"><Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 카드 이미지 업로드</h3>

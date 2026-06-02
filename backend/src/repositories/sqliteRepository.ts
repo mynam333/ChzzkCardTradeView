@@ -7,13 +7,15 @@ import {
   IAnnouncementRepository,
   IUserCardRepository,
   ITradeRepository,
+  INotificationRepository,
   User,
   UserRanking,
   Streamer,
   Coupon,
   CardReport,
   Announcement,
-  Trade
+  Trade,
+  AppNotification
 } from './interfaces';
 
 // 1. SQLite 유저 레포지토리
@@ -47,6 +49,13 @@ export class SqliteUserRepository implements IUserRepository {
   async findByUsername(username: string): Promise<User | null> {
     const row = this.getDb().prepare('SELECT * FROM users WHERE username = ? ORDER BY created_at ASC LIMIT 1').get(username) as any;
     return row ? this.mapUser(row) : null;
+  }
+
+  async searchByUsername(keyword: string, limit: number): Promise<User[]> {
+    const rows = this.getDb().prepare(
+      'SELECT * FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT ?'
+    ).all(`%${keyword}%`, limit) as any[];
+    return rows.map((r) => this.mapUser(r));
   }
 
   async create(user: User): Promise<User> {
@@ -504,6 +513,11 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
     return announcement;
   }
 
+  async updatePopup(id: number, isPopup: boolean, popupExpiresAt: string | null): Promise<void> {
+    this.getDb().prepare('UPDATE announcements SET is_popup = ?, popup_expires_at = ? WHERE id = ?')
+      .run(isPopup ? 1 : 0, popupExpiresAt, id);
+  }
+
   async delete(id: number): Promise<void> {
     this.getDb().prepare('DELETE FROM announcements WHERE id = ?').run(id);
   }
@@ -517,10 +531,32 @@ export class SqliteUserCardRepository implements IUserCardRepository {
 
   async create(card: any): Promise<any> {
     const result = this.getDb().prepare(
-      'INSERT INTO user_cards (user_id, channel_id, serial_number) VALUES (?, ?, ?)'
-    ).run(card.user_id, card.channel_id, card.serial_number);
+      'INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, ?)'
+    ).run(card.user_id, card.channel_id, card.serial_number, card.star ?? 0);
     card.id = Number(result.lastInsertRowid);
     return card;
+  }
+
+  // 같은 스트리머·같은 별 카드 2장 → 1장(별+1). better-sqlite3 트랜잭션으로 원자 처리
+  async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+    if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
+    const db = this.getDb();
+    const txn = db.transaction(() => {
+      const rows = db.prepare(
+        'SELECT id, serial_number FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = ? ORDER BY id ASC LIMIT 2'
+      ).all(userId, channelId, star) as any[];
+      if (rows.length < 2) throw new Error('NOT_ENOUGH');
+      // 2장 삭제 후 1장을 별+1로 생성 (시리얼은 두 장 중 작은 값 유지)
+      db.prepare('DELETE FROM user_cards WHERE id IN (?, ?)').run(rows[0].id, rows[1].id);
+      db.prepare('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, ?)')
+        .run(userId, channelId, rows[0].serial_number, star + 1);
+    });
+    try {
+      txn();
+      return { ok: true, reason: 'OK', newStar: star + 1 };
+    } catch (e: any) {
+      return { ok: false, reason: e.message || 'FAILED' };
+    }
   }
 
   async findByUserId(userId: string): Promise<any[]> {
@@ -528,9 +564,13 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image,
              s.base_value as streamer_base_value, s.follower_count as streamer_follower,
              s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned,
-             s.serial_number as streamer_serial
+             s.serial_number as streamer_serial,
+             bi.id as border_id, bi.style_json as border_style,
+             ni.id as name_id, ni.style_json as name_style, ni.font_url as name_font_url, ni.font_family as name_font_family
       FROM user_cards uc
       JOIN streamers s ON uc.channel_id = s.channel_id
+      LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
+      LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
       WHERE uc.user_id = ?
       ORDER BY uc.id DESC
     `).all(userId);
@@ -540,6 +580,11 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       user_id: row.user_id,
       channel_id: row.channel_id,
       serial_number: row.serial_number,
+      star: row.star ?? 0,
+      border_item_id: row.border_item_id ?? null,
+      name_effect_item_id: row.name_effect_item_id ?? null,
+      border: row.border_id ? { id: row.border_id, style_json: row.border_style } : null,
+      name_effect: row.name_id ? { id: row.name_id, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
       acquired_at: row.acquired_at,
       streamer: {
         channel_id: row.channel_id,
@@ -736,5 +781,48 @@ export class SqliteTradeRepository implements ITradeRepository {
     } catch (err: any) {
       return { ok: false, reason: err.message || 'FAILED' };
     }
+  }
+}
+
+// 8. SQLite 인앱 알림 레포지토리
+export class SqliteNotificationRepository implements INotificationRepository {
+  private getDb() {
+    return getSqliteDb();
+  }
+
+  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void> {
+    this.getDb().prepare(
+      'INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?)'
+    ).run(n.user_id, n.title, n.body ?? null, n.link ?? null);
+  }
+
+  async findByUser(userId: string, limit: number): Promise<AppNotification[]> {
+    const rows = this.getDb().prepare(
+      'SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?'
+    ).all(userId, limit) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      title: r.title,
+      body: r.body,
+      link: r.link,
+      is_read: r.is_read === 1,
+      created_at: r.created_at
+    }));
+  }
+
+  async countUnread(userId: string): Promise<number> {
+    const row = this.getDb().prepare(
+      'SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0'
+    ).get(userId) as any;
+    return row?.c || 0;
+  }
+
+  async markRead(id: number, userId: string): Promise<void> {
+    this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  async markAllRead(userId: string): Promise<void> {
+    this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').run(userId);
   }
 }

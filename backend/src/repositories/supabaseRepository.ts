@@ -7,13 +7,15 @@ import {
   IAnnouncementRepository,
   IUserCardRepository,
   ITradeRepository,
+  INotificationRepository,
   User,
   UserRanking,
   Streamer,
   Coupon,
   CardReport,
   Announcement,
-  Trade
+  Trade,
+  AppNotification
 } from './interfaces';
 
 // 1. Supabase 유저 레포지토리
@@ -44,6 +46,17 @@ export class SupabaseUserRepository implements IUserRepository {
 
     if (error || !data) return null;
     return data as User;
+  }
+
+  async searchByUsername(keyword: string, limit: number): Promise<User[]> {
+    const { data, error } = await this.getClient()
+      .from('users')
+      .select('*')
+      .ilike('username', `%${keyword}%`)
+      .order('username', { ascending: true })
+      .limit(limit);
+    if (error || !data) return [];
+    return data as User[];
   }
 
   async create(user: User): Promise<User> {
@@ -599,6 +612,14 @@ export class SupabaseAnnouncementRepository implements IAnnouncementRepository {
     return data as Announcement;
   }
 
+  async updatePopup(id: number, isPopup: boolean, popupExpiresAt: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('announcements')
+      .update({ is_popup: isPopup, popup_expires_at: popupExpiresAt })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
   async delete(id: number): Promise<void> {
     const { error } = await this.getClient()
       .from('announcements')
@@ -635,6 +656,9 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
         user_id,
         channel_id,
         serial_number,
+        star,
+        border_item_id,
+        name_effect_item_id,
         acquired_at,
         streamer:streamers (
           channel_id,
@@ -652,7 +676,50 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       .order('id', { ascending: false });
 
     if (error) throw error;
-    return (data || []) as any[];
+    const cards = (data || []) as any[];
+
+    // 장착된 코스메틱(테두리/이름이펙트) 상세를 한 번에 조회해 매핑
+    const itemIds = Array.from(new Set(
+      cards.flatMap((c) => [c.border_item_id, c.name_effect_item_id]).filter((v): v is number => !!v)
+    ));
+    let itemMap: Record<number, any> = {};
+    if (itemIds.length > 0) {
+      const { data: items } = await this.getClient()
+        .from('shop_items')
+        .select('id, style_json, font_url, font_family')
+        .in('id', itemIds);
+      for (const it of items || []) itemMap[it.id] = it;
+    }
+    for (const c of cards) {
+      const b = c.border_item_id ? itemMap[c.border_item_id] : null;
+      const n = c.name_effect_item_id ? itemMap[c.name_effect_item_id] : null;
+      c.border = b ? { id: b.id, style_json: b.style_json } : null;
+      c.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
+    }
+    return cards;
+  }
+
+  async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+    if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
+    const client = this.getClient();
+    const { data: rows, error } = await client
+      .from('user_cards')
+      .select('id, serial_number')
+      .eq('user_id', userId)
+      .eq('channel_id', channelId)
+      .eq('star', star)
+      .order('id', { ascending: true })
+      .limit(2);
+    if (error || !rows || rows.length < 2) return { ok: false, reason: 'NOT_ENOUGH' };
+
+    const ids = rows.map((r) => r.id);
+    const { error: delErr } = await client.from('user_cards').delete().in('id', ids);
+    if (delErr) return { ok: false, reason: 'FAILED' };
+    const { error: insErr } = await client.from('user_cards').insert([{
+      user_id: userId, channel_id: channelId, serial_number: rows[0].serial_number, star: star + 1
+    }]);
+    if (insErr) return { ok: false, reason: 'FAILED' };
+    return { ok: true, reason: 'OK', newStar: star + 1 };
   }
 
   async findLatestSerialNumber(channelId: string): Promise<number> {
@@ -823,5 +890,58 @@ export class SupabaseTradeRepository implements ITradeRepository {
     }
     const result = String(data);
     return { ok: result === 'OK', reason: result };
+  }
+}
+
+// 8. Supabase 인앱 알림 레포지토리
+export class SupabaseNotificationRepository implements INotificationRepository {
+  private getClient() {
+    return getSupabaseClient();
+  }
+
+  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void> {
+    const { error } = await this.getClient()
+      .from('notifications')
+      .insert([{ user_id: n.user_id, title: n.title, body: n.body ?? null, link: n.link ?? null }]);
+    if (error) throw error;
+  }
+
+  async findByUser(userId: string, limit: number): Promise<AppNotification[]> {
+    const { data, error } = await this.getClient()
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data || []) as AppNotification[];
+  }
+
+  async countUnread(userId: string): Promise<number> {
+    const { count, error } = await this.getClient()
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+    if (error) return 0;
+    return count || 0;
+  }
+
+  async markRead(id: number, userId: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+  }
+
+  async markAllRead(userId: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+    if (error) throw error;
   }
 }

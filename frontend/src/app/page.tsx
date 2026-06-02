@@ -4,37 +4,21 @@ import React from 'react';
 import { AppProvider, useApp } from './AppContext';
 import { MainLayout } from './MainLayout';
 import { MainTab } from './MainTab';
+import { ShopTab } from './ShopTab';
 import { GachaTab } from './GachaTab';
 import { RankingTab } from './RankingTab';
 import { MyInfoTab } from './MyInfoTab';
 import { AdminTab } from './AdminTab';
-import { subscribeToPush, isPushSupported } from '@/lib/push';
 
 const CCTVAppContent: React.FC = () => {
-  const { activeTab, user, toast } = useApp();
-
-  // 🔔 버튼: 실제 웹 푸시 알림 권한 요청 및 구독 등록
-  const handleNotifyClick = async () => {
-    if (!isPushSupported()) {
-      toast('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.', 'warning');
-      return;
-    }
-    if (!user) {
-      toast('알림을 받으려면 먼저 치지직 로그인이 필요합니다.', 'warning');
-      return;
-    }
-    const result = await subscribeToPush();
-    if (result.ok) {
-      toast('실시간 푸시 알림 구독이 완료되었습니다!', 'success');
-    } else {
-      toast(result.message, 'error');
-    }
-  };
+  const { activeTab, user } = useApp();
 
   const renderActiveTab = () => {
     switch (activeTab) {
       case 'main':
         return <MainTab />;
+      case 'shop':
+        return <ShopTab />;
       case 'gacha':
         return <GachaTab />;
       case 'ranking':
@@ -50,7 +34,7 @@ const CCTVAppContent: React.FC = () => {
   };
 
   return (
-    <MainLayout onNotifyClick={handleNotifyClick}>
+    <MainLayout>
       {renderActiveTab()}
     </MainLayout>
   );

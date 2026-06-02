@@ -14,11 +14,13 @@ import {
   ArrowRightLeft,
   Layers,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Store
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { parseStyle, nameEffectStyle } from '@/lib/cosmetics';
 
-type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers';
+type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop';
 
 export const AdminTab: React.FC = () => {
   const { user, toast } = useApp();
@@ -26,6 +28,11 @@ export const AdminTab: React.FC = () => {
 
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
+
+  // 상점 관리
+  const [shopItems, setShopItems] = useState<any[]>([]);
+  const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true };
+  const [shopForm, setShopForm] = useState({ ...emptyShopForm });
 
   // 쿠폰
   const [coupons, setCoupons] = useState<any[]>([]);
@@ -65,6 +72,7 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') fetchReports();
     if (subTab === 'streamers') fetchCouponStreamers(true);
+    if (subTab === 'shop') fetchShopItems();
   }, [subTab, isAdmin]);
 
   if (!isAdmin) {
@@ -152,6 +160,20 @@ export const AdminTab: React.FC = () => {
     } catch { toast('서버 통신 에러'); }
   };
 
+  const handleTogglePopup = async (a: any) => {
+    try {
+      const res = await apiFetch(`/admin/announcements/${a.id}/popup`, {
+        method: 'POST',
+        body: JSON.stringify({ is_popup: !a.is_popup, popup_expires_at: a.popup_expires_at || null })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '변경되었습니다.', 'success');
+        fetchAnnouncements();
+      } else toast(data.message || '변경 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); }
+  };
+
   const handleDeleteAnnouncement = async (id: number) => {
     if (!confirm('이 공지사항을 삭제하시겠습니까?')) return;
     try {
@@ -206,6 +228,52 @@ export const AdminTab: React.FC = () => {
     } catch { toast('서버 통신 에러'); }
   };
 
+  // ---- 상점 관리 ----
+  const fetchShopItems = async () => {
+    try {
+      const res = await apiFetch('/admin/shop/items');
+      if (res.ok) setShopItems(await res.json());
+    } catch { /* noop */ }
+  };
+
+  const submitShopItem = async () => {
+    if (!shopForm.name.trim()) { toast('이름을 입력해 주세요.'); return; }
+    if (shopForm.style_json.trim()) {
+      try { JSON.parse(shopForm.style_json); } catch { toast('스타일(JSON) 형식이 올바르지 않습니다.', 'error'); return; }
+    }
+    const payload = {
+      type: shopForm.type, name: shopForm.name, description: shopForm.description || null,
+      price: Math.max(0, Number(shopForm.price) || 0), style_json: shopForm.style_json || null,
+      font_url: shopForm.font_url || null, font_family: shopForm.font_family || null, active: shopForm.active
+    };
+    try {
+      const url = shopForm.id ? `/admin/shop/items/${shopForm.id}` : '/admin/shop/items';
+      const res = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (res.ok) {
+        toast(shopForm.id ? '아이템이 수정되었습니다.' : '아이템이 추가되었습니다.', 'success');
+        setShopForm({ ...emptyShopForm });
+        fetchShopItems();
+      } else toast(data.message || '저장 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); }
+  };
+
+  const toggleShopActive = async (item: any) => {
+    try {
+      const res = await apiFetch(`/admin/shop/items/${item.id}`, { method: 'POST', body: JSON.stringify({ active: !item.active }) });
+      if (res.ok) { toast(item.active ? '비활성화했습니다.' : '활성화했습니다.', 'info'); fetchShopItems(); }
+      else toast('변경 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); }
+  };
+
+  const editShopItem = (item: any) => {
+    setShopForm({
+      id: item.id, type: item.type, name: item.name, description: item.description || '',
+      price: item.price, style_json: item.style_json || '', font_url: item.font_url || '',
+      font_family: item.font_family || '', active: item.active
+    });
+  };
+
   const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string) => {
     const target = (channelId || streamerChannelId).trim();
     if (!target) { toast('스트리머 채널 ID를 입력해 주세요.'); return; }
@@ -223,7 +291,8 @@ export const AdminTab: React.FC = () => {
     { id: 'announcements', label: '공지', icon: Megaphone },
     { id: 'push', label: '푸시', icon: BellRing },
     { id: 'reports', label: '신고·밴', icon: AlertTriangle },
-    { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon }
+    { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
+    { id: 'shop', label: '상점 관리', icon: Store }
   ];
 
   return (
@@ -428,9 +497,18 @@ export const AdminTab: React.FC = () => {
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">{a.content}</p>
                   </div>
-                  <button onClick={() => handleDeleteAnnouncement(a.id)} className="shrink-0 rounded bg-red-500/10 p-1.5 text-red-500 hover:bg-red-500/20">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => handleTogglePopup(a)}
+                      className={`rounded px-2 py-1.5 text-[10px] font-bold transition ${a.is_popup ? 'bg-amber-500/15 text-amber-500 hover:bg-amber-500/25' : 'bg-secondary text-muted-foreground hover:bg-secondary/80'}`}
+                      title="팝업 노출 토글"
+                    >
+                      {a.is_popup ? '팝업 해제' : '팝업 등록'}
+                    </button>
+                    <button onClick={() => handleDeleteAnnouncement(a.id)} className="rounded bg-red-500/10 p-1.5 text-red-500 hover:bg-red-500/20">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -556,6 +634,126 @@ export const AdminTab: React.FC = () => {
           </section>
         );
       })()}
+
+      {/* 상점 관리 */}
+      {subTab === 'shop' && (
+        <section className="space-y-5">
+          {/* 아이템 추가/수정 폼 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Store className="h-4 w-4" /> {shopForm.id ? `아이템 수정 (#${shopForm.id})` : '코스메틱 아이템 추가'}
+            </h3>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground block mb-1">종류</label>
+                <select value={shopForm.type} onChange={(e) => setShopForm({ ...shopForm, type: e.target.value as any })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+                  <option value="border">테두리</option>
+                  <option value="name_effect">이름 이펙트</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground block mb-1">가격 (P)</label>
+                <input type="number" min={0} value={shopForm.price}
+                  onChange={(e) => setShopForm({ ...shopForm, price: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              </div>
+            </div>
+
+            <input type="text" placeholder="아이템 이름" value={shopForm.name}
+              onChange={(e) => setShopForm({ ...shopForm, name: e.target.value })}
+              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+            <input type="text" placeholder="설명 (선택)" value={shopForm.description}
+              onChange={(e) => setShopForm({ ...shopForm, description: e.target.value })}
+              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground block mb-1">
+                스타일 (CSS JSON) <span className="font-normal">예: {`{"borderColor":"#f00","borderWidth":"3px","boxShadow":"0 0 12px #f00"}`} / 이름 이펙트는 {`{"color":"#f0f","textShadow":"0 0 8px #f0f"}`}</span>
+              </label>
+              <textarea rows={3} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
+                onChange={(e) => setShopForm({ ...shopForm, style_json: e.target.value })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono" />
+            </div>
+
+            {shopForm.type === 'name_effect' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="웹폰트 URL (선택)" value={shopForm.font_url}
+                  onChange={(e) => setShopForm({ ...shopForm, font_url: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                <input type="text" placeholder="font-family (선택)" value={shopForm.font_family}
+                  onChange={(e) => setShopForm({ ...shopForm, font_family: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              </div>
+            )}
+
+            {/* 미리보기 */}
+            <div className="flex items-center gap-4 rounded-lg bg-secondary/30 p-4">
+              <span className="text-[11px] font-bold text-muted-foreground">미리보기</span>
+              {shopForm.type === 'border' ? (
+                <div className="h-16 w-12 rounded-xl bg-card border border-border/80" style={parseStyle(shopForm.style_json)} />
+              ) : (
+                <span className="text-lg font-black" style={nameEffectStyle({ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family })}>
+                  {shopForm.name || '미리보기'}
+                </span>
+              )}
+            </div>
+
+            <label className="flex items-center gap-2 text-xs font-bold">
+              <input type="checkbox" checked={shopForm.active} onChange={(e) => setShopForm({ ...shopForm, active: e.target.checked })} />
+              판매 활성화
+            </label>
+
+            <div className="flex gap-2">
+              <button onClick={submitShopItem} className="flex-1 rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">
+                {shopForm.id ? '수정 저장' : '아이템 추가'}
+              </button>
+              {shopForm.id ? (
+                <button onClick={() => setShopForm({ ...emptyShopForm })} className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold hover:bg-secondary/80">취소</button>
+              ) : null}
+            </div>
+          </div>
+
+          {/* 아이템 목록 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold flex items-center gap-1.5"><Store className="h-4 w-4" /> 등록된 아이템 ({shopItems.length})</h3>
+              <button onClick={fetchShopItems} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+            </div>
+            <div className="space-y-2 max-h-[28rem] overflow-y-auto">
+              {shopItems.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6">등록된 아이템이 없습니다.</p>
+              ) : shopItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {item.type === 'border' ? (
+                      <div className="h-12 w-9 shrink-0 rounded-lg bg-card border border-border/80" style={parseStyle(item.style_json)} />
+                    ) : (
+                      <span className="shrink-0 text-base font-black px-1" style={nameEffectStyle(item)}>{item.name}</span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                        {item.name}
+                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">{item.type === 'border' ? '테두리' : '이름 이펙트'}</span>
+                        {!item.active && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">비활성</span>}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">{item.price.toLocaleString()} P · {item.description || '설명 없음'}</p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button onClick={() => editShopItem(item)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">수정</button>
+                    <button onClick={() => toggleShopActive(item)}
+                      className={`rounded px-2 py-1 text-[10px] font-bold ${item.active ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}>
+                      {item.active ? '비활성화' : '활성화'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 };

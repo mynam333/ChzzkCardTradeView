@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS user_cards (
     user_id TEXT NOT NULL,                     -- 보유자 고유 ID (users.id FK)
     channel_id TEXT NOT NULL,                  -- 스트리머 카드 ID (streamers.channel_id FK)
     serial_number INTEGER NOT NULL,            -- 발행 일련번호
+    star INTEGER DEFAULT 0,                     -- 합성 별 등급 (0~5)
+    border_item_id INTEGER,                    -- 장착된 테두리 코스메틱 ID
+    name_effect_item_id INTEGER,               -- 장착된 이름 이펙트 코스메틱 ID
     acquired_at TEXT DEFAULT (datetime('now')),-- 획득 일시
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
@@ -137,6 +140,44 @@ CREATE TABLE IF NOT EXISTS card_reports (
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+);
+
+-- 12. 인앱 알림함 테이블
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,                     -- 수신 유저 ID
+    title TEXT NOT NULL,                       -- 알림 제목
+    body TEXT,                                 -- 알림 본문
+    link TEXT,                                 -- 클릭 시 이동할 탭/경로 (예: 'gacha')
+    is_read INTEGER DEFAULT 0,                 -- 읽음 여부 (0/1)
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+
+-- 13. 상점 아이템 (테두리 / 이름 이펙트)
+CREATE TABLE IF NOT EXISTS shop_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,                        -- 'border' 또는 'name_effect'
+    name TEXT NOT NULL,
+    description TEXT,
+    price INTEGER NOT NULL DEFAULT 0,
+    style_json TEXT,                           -- React 인라인 스타일 객체(JSON 문자열)
+    font_url TEXT,                             -- 이름 이펙트용 웹폰트 URL (선택)
+    font_family TEXT,                          -- 폰트 패밀리명 (선택)
+    active INTEGER DEFAULT 1,                  -- 판매 활성 여부 (0/1)
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 14. 유저 보유 코스메틱 (미장착 수량)
+CREATE TABLE IF NOT EXISTS user_cosmetics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 0,
+    UNIQUE(user_id, item_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(item_id) REFERENCES shop_items(id) ON DELETE CASCADE
 );
 
 

@@ -15,15 +15,20 @@ interface ChzzkSocketFrame {
 class ChzzkChatManager {
   // 채널 ID별 WebSocket 연결 관리 맵 (재연결용 메타데이터 보관)
   private connections: Map<
-    string, 
-    { 
-      socket: WebSocket; 
-      pingInterval?: NodeJS.Timeout; 
+    string,
+    {
+      socket: WebSocket;
+      pingInterval?: NodeJS.Timeout;
       chatChannelId: string;
       streamerAccessToken?: string;
       isExplicitlyClosed?: boolean;
     }
   > = new Map();
+
+  // 현재 "연결되어 있어야 하는" 채널 집합 (방송 중). 재연결 가드로 사용.
+  private desired: Set<string> = new Set();
+  // 채널별 대기 중인 재연결 타이머 (disconnect 시 취소용)
+  private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
 
   /**
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
@@ -58,6 +63,9 @@ class ChzzkChatManager {
    * 특정 채널의 방송 중 채팅방 웹소켓 연결 시작
    */
   public async connect(channelId: string, chatChannelId: string, streamerAccessToken?: string) {
+    // 이 채널은 "연결 유지 대상"으로 표시 (재연결 가드)
+    this.desired.add(channelId);
+
     if (this.connections.has(channelId)) {
       // 이미 연결되어 있으면 추가 연결을 건너뜁니다.
       return;
@@ -146,12 +154,18 @@ class ChzzkChatManager {
         const wasExplicitlyClosed = conn?.isExplicitlyClosed;
         this.cleanupConnection(channelId);
 
-        // 명시적으로 끊은 경우가 아닌 예기치 못한 끊김인 경우 5초 후 자동 재연결 시도
-        if (!wasExplicitlyClosed) {
+        // 명시적 종료가 아니고, 여전히 연결 유지 대상(방송 중)일 때만 5초 후 재연결
+        // 방송이 종료되면 scheduler가 disconnect()로 desired에서 제거하므로 재연결하지 않음
+        if (!wasExplicitlyClosed && this.desired.has(channelId)) {
           console.log(`[ChatManager] 예기치 못한 종료 감지 -> 5초 후 자동 재연결 시도 (채널: ${channelId})`);
-          setTimeout(() => {
-            this.connect(channelId, chatChannelId, streamerAccessToken);
+          const timer = setTimeout(() => {
+            this.reconnectTimers.delete(channelId);
+            // 타이머 발화 시점에도 여전히 연결 대상인지 재확인
+            if (this.desired.has(channelId)) {
+              this.connect(channelId, chatChannelId, streamerAccessToken);
+            }
           }, 5000);
+          this.reconnectTimers.set(channelId, timer);
         }
       });
 
@@ -188,6 +202,14 @@ class ChzzkChatManager {
    * 특정 채널 웹소켓 접속 해제 및 정리
    */
   public disconnect(channelId: string) {
+    // 더 이상 연결 유지 대상이 아님 → 재연결 가드 해제 및 대기 중 재연결 타이머 취소
+    this.desired.delete(channelId);
+    const pending = this.reconnectTimers.get(channelId);
+    if (pending) {
+      clearTimeout(pending);
+      this.reconnectTimers.delete(channelId);
+    }
+
     const conn = this.connections.get(channelId);
     if (conn) {
       console.log(`[ChatManager] 채팅 수집 중단 (채널: ${channelId})`);

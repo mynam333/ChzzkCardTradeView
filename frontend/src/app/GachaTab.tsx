@@ -3,9 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
 import {
-  Sparkles,
   Search,
-  Coins,
   HelpCircle,
   Upload,
   UserMinus,
@@ -18,8 +16,8 @@ import {
   Layers,
   BarChart3
 } from 'lucide-react';
-import canvasConfetti from 'canvas-confetti';
 import { apiFetch } from '@/lib/api';
+import { borderStyle, nameEffectStyle } from '@/lib/cosmetics';
 
 interface Streamer {
   channel_id: string;
@@ -32,29 +30,45 @@ interface Streamer {
   serial_number?: number; // 스트리머 카드 고유 시리얼(전 카피 공통, 1~9999)
 }
 
+interface CosmeticRef { id: number; style_json?: string | null; font_url?: string | null; font_family?: string | null; }
 interface UserCard {
   id: number;
   channel_id: string;
   serial_number: number;
+  star?: number;
+  border?: CosmeticRef | null;
+  name_effect?: CosmeticRef | null;
   acquired_at: string;
   streamer?: Streamer;
 }
 
+// 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
+const starMult = (star: number) => 1 + (star || 0) * 0.6;
+
 export const GachaTab: React.FC = () => {
-  const { user, updatePoints, refreshUserData, toast } = useApp();
+  const { user, refreshUserData, toast } = useApp();
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
+  // 코스메틱 장착
+  const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
+  const [equipCard, setEquipCard] = useState<UserCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   // 1:1 교환 모달 상태
-  const [tradeTargetUser, setTradeTargetUser] = useState('');
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
-  const [selectedOfferCards, setSelectedOfferCards] = useState<number[]>([]); // 유저 보유 카드 일련 ID 목록
   const [offerPoint, setOfferPoint] = useState(0); // 내가 함께 제시할 포인트
   const [requestPoint, setRequestPoint] = useState(0); // 상대에게 요청할 포인트
+  const [offerCards, setOfferCards] = useState<{ [channelId: string]: number }>({}); // 내가 제시할 카드 { channel_id: count }
   const [requestCards, setRequestCards] = useState<{ [channelId: string]: number }>({}); // 상대에게 요청할 카드 { channel_id: count }
   const [tradeBusy, setTradeBusy] = useState(false);
+  // 상대 검색/선택 및 상대 보유 카드
+  const [receiverSearch, setReceiverSearch] = useState('');
+  const [receiverResults, setReceiverResults] = useState<any[]>([]);
+  const [selectedReceiver, setSelectedReceiver] = useState<{ id: string; username: string; avatar_url?: string } | null>(null);
+  const [partnerCollection, setPartnerCollection] = useState<any[]>([]);
+  const [offerSearch, setOfferSearch] = useState('');
+  const [requestSearch, setRequestSearch] = useState('');
 
   // 받은/보낸 교환 목록 (인박스)
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
@@ -67,10 +81,8 @@ export const GachaTab: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
   const [detailRange, setDetailRange] = useState<'24h' | '7d'>('7d');
+  const [detailHover, setDetailHover] = useState<number | null>(null);
 
-  // 뽑기 연출 애니메이션 상태
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawnCard, setDrawnCard] = useState<Streamer | null>(null);
 
   // 알림 피드백: 전역 토스트로 통일 (title은 메시지 앞에 간단히 덧붙임)
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
@@ -127,8 +139,40 @@ export const GachaTab: React.FC = () => {
       fetchInventory();
       fetchActiveTrades();
       fetchTradeHistory();
+      fetchMyCosmetics();
     }
   }, [user]);
+
+  const fetchMyCosmetics = async () => {
+    try {
+      const res = await apiFetch('/shop/inventory');
+      if (res.ok) setMyCosmetics(await res.json());
+    } catch { /* noop */ }
+  };
+
+  // 카드에 코스메틱 장착
+  const handleEquip = async (cardId: number, itemId: number) => {
+    try {
+      const res = await apiFetch(`/cards/${cardId}/equip`, { method: 'POST', body: JSON.stringify({ item_id: itemId }) });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('장착 완료', data.message || '장착되었습니다.', 'success');
+        fetchInventory(); fetchMyCosmetics();
+      } else showAlert('장착 실패', data.message || '실패했습니다.', 'error');
+    } catch { showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error'); }
+  };
+
+  // 카드에서 코스메틱 해제(반환)
+  const handleUnequip = async (cardId: number, type: 'border' | 'name_effect') => {
+    try {
+      const res = await apiFetch(`/cards/${cardId}/unequip`, { method: 'POST', body: JSON.stringify({ type }) });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('해제 완료', data.message || '해제되었습니다.', 'info');
+        fetchInventory(); fetchMyCosmetics();
+      } else showAlert('해제 실패', data.message || '실패했습니다.', 'error');
+    } catch { showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error'); }
+  };
 
   if (!user) {
     return (
@@ -172,70 +216,6 @@ export const GachaTab: React.FC = () => {
   };
 
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
-  const getIsFreeDrawAvailable = () => {
-    if (!user) return false;
-    if (!user.lastFreeDraw) return true;
-
-    const nowKst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
-    const todayStrKst = nowKst.toISOString().split('T')[0]; // YYYY-MM-DD
-
-    const lastFreeKst = new Date(new Date(user.lastFreeDraw).getTime() + 9 * 60 * 60 * 1000);
-    const lastFreeStrKst = lastFreeKst.toISOString().split('T')[0];
-
-    return lastFreeStrKst !== todayStrKst;
-  };
-
-  const isFreeDraw = getIsFreeDrawAvailable();
-
-  const handleDraw = async () => {
-    if (!user) return;
-    const drawCost = 10000; // 1회 뽑기 비용 10,000 P로 수정
-
-    if (!isFreeDraw && user.point < drawCost) {
-      toast(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`);
-      return;
-    }
-
-    setIsDrawing(true);
-    setDrawnCard(null);
-
-    try {
-      const res = await apiFetch('/cards/draw', { method: 'POST' });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || '카드 뽑기 요청에 실패했습니다.');
-      }
-
-      const data = await res.json();
-
-      setTimeout(() => {
-        // data.card.streamer에는 스트리머 고유 시리얼(serial_number)이 포함되어 있으므로 그대로 사용
-        setDrawnCard(data.card.streamer);
-        setIsDrawing(false);
-
-        // 무료 뽑기가 아닌 경우에만 로컬 포인트 차감
-        if (!data.is_free) {
-          updatePoints(-drawCost);
-        }
-        fetchInventory();
-        refreshUserData();
-
-        // 팡파레 효과
-        canvasConfetti({
-          particleCount: 90,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#10b981', '#3b82f6']
-        });
-      }, 1200);
-
-    } catch (e: any) {
-      setIsDrawing(false);
-      toast(e.message || '서버와의 통신 오류가 발생했습니다.');
-    }
-  };
-
   // 스트리머 등록 모달 상태
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [streamerSearchKeyword, setStreamerSearchKeyword] = useState('');
@@ -246,8 +226,52 @@ export const GachaTab: React.FC = () => {
   const [registering, setRegistering] = useState(false);
 
   const handleOpenTrade = () => {
-    // 카드/포인트 어느 쪽이든 제안 가능하므로 빈 인벤토리여도 열 수 있게 허용
+    resetTradeForm();
     setTradeModalOpen(true);
+  };
+
+  // 상대 검색 (디바운스 없이 버튼/엔터/입력 변경 시 호출)
+  const searchReceivers = async (kw: string) => {
+    setReceiverSearch(kw);
+    if (kw.trim().length < 1) { setReceiverResults([]); return; }
+    try {
+      const res = await apiFetch(`/users/search?keyword=${encodeURIComponent(kw.trim())}`);
+      if (res.ok) setReceiverResults(await res.json());
+    } catch { /* 무시 */ }
+  };
+
+  // 상대 선택 → 상대 보유 카드 컬렉션 로드
+  const selectReceiver = async (u: { id: string; username: string; avatar_url?: string }) => {
+    setSelectedReceiver(u);
+    setReceiverResults([]);
+    setReceiverSearch(u.username);
+    setRequestCards({});
+    setPartnerCollection([]);
+    try {
+      const res = await apiFetch(`/users/${u.id}/collection`);
+      if (res.ok) setPartnerCollection(await res.json());
+    } catch { /* 무시 */ }
+  };
+
+  // 내 보유 카드 channel_id별 묶음
+  const myCollection = (() => {
+    const map: { [cid: string]: { channel_id: string; count: number; streamer: any } } = {};
+    for (const c of inventory) {
+      if (!c.streamer) continue;
+      if (!map[c.channel_id]) map[c.channel_id] = { channel_id: c.channel_id, count: 0, streamer: c.streamer };
+      map[c.channel_id].count += 1;
+    }
+    return Object.values(map);
+  })();
+
+  const adjustOfferCard = (channelId: string, delta: number, max: number) => {
+    setOfferCards(prev => {
+      const next = { ...prev };
+      const v = Math.max(0, Math.min(max, (next[channelId] || 0) + delta));
+      if (v <= 0) delete next[channelId];
+      else next[channelId] = v;
+      return next;
+    });
   };
 
   // 진행 중(보낸/받은) 교환 목록 조회
@@ -308,40 +332,29 @@ export const GachaTab: React.FC = () => {
     loadStreamerDetail(detailChannelId, range);
   };
 
-  // 선택한 보유 카드 id 목록을 channel_id별 수량으로 묶음
-  const buildOfferCards = (): { channel_id: string; count: number }[] => {
-    const counts: { [cid: string]: number } = {};
-    for (const cardId of selectedOfferCards) {
-      const card = inventory.find(c => c.id === cardId);
-      if (card) counts[card.channel_id] = (counts[card.channel_id] || 0) + 1;
-    }
-    return Object.entries(counts).map(([channel_id, count]) => ({ channel_id, count }));
-  };
-
   const resetTradeForm = () => {
-    setSelectedOfferCards([]);
+    setOfferCards({});
     setOfferPoint(0);
     setRequestPoint(0);
     setRequestCards({});
-    setTradeTargetUser('');
-    setTradeRequestSearch('');
-    setTradeModalOpen(false);
+    setReceiverSearch('');
+    setReceiverResults([]);
+    setSelectedReceiver(null);
+    setPartnerCollection([]);
+    setOfferSearch('');
+    setRequestSearch('');
   };
 
   const executeTrade = async () => {
-    if (!tradeTargetUser.trim()) {
-      showAlert('상대 지정 필요', '상대방 치지직 닉네임을 입력해 주세요.', 'warning');
+    if (!selectedReceiver) {
+      showAlert('상대 지정 필요', '교환할 상대를 검색해서 선택해 주세요.', 'warning');
       return;
     }
 
-    const offerCards = buildOfferCards();
-    const reqCards = Object.entries(requestCards)
-      .filter(([, count]) => count > 0)
-      .map(([channel_id, count]) => ({ channel_id, count }));
+    const offerList = Object.entries(offerCards).filter(([, c]) => c > 0).map(([channel_id, count]) => ({ channel_id, count }));
+    const reqList = Object.entries(requestCards).filter(([, c]) => c > 0).map(([channel_id, count]) => ({ channel_id, count }));
 
-    const senderOfferEmpty = offerCards.length === 0 && offerPoint <= 0;
-    const receiverOfferEmpty = reqCards.length === 0 && requestPoint <= 0;
-    if (senderOfferEmpty && receiverOfferEmpty) {
+    if (offerList.length === 0 && offerPoint <= 0 && reqList.length === 0 && requestPoint <= 0) {
       showAlert('내용 부족', '제시하거나 요청할 카드/포인트를 최소 한 가지 이상 지정해 주세요.', 'warning');
       return;
     }
@@ -351,15 +364,16 @@ export const GachaTab: React.FC = () => {
       const res = await apiFetch('/trades', {
         method: 'POST',
         body: JSON.stringify({
-          receiver_username: tradeTargetUser.trim(),
-          sender_offer: { cards: offerCards, point: offerPoint },
-          receiver_offer: { cards: reqCards, point: requestPoint }
+          receiver_id: selectedReceiver.id,
+          sender_offer: { cards: offerList, point: offerPoint },
+          receiver_offer: { cards: reqList, point: requestPoint }
         })
       });
       const data = await res.json();
       if (res.ok) {
         showAlert('교환 제안 완료', data.message || '교환을 제안했습니다.', 'success');
         resetTradeForm();
+        setTradeModalOpen(false);
         fetchActiveTrades();
       } else {
         showAlert('교환 제안 실패', data.message || '교환 제안에 실패했습니다.', 'error');
@@ -419,23 +433,31 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 요청 카드 수량 증감
-  const adjustRequestCard = (channelId: string, delta: number) => {
+  // 카드 합성 (같은 스트리머·같은 별 2장 → 별+1)
+  const handleFuse = async (channelId: string, star: number) => {
+    try {
+      const res = await apiFetch('/cards/fuse', { method: 'POST', body: JSON.stringify({ channel_id: channelId, star }) });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('합성 성공', data.message || '합성되었습니다.', 'success');
+        fetchInventory();
+      } else {
+        showAlert('합성 실패', data.message || '합성에 실패했습니다.', 'error');
+      }
+    } catch {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 요청 카드 수량 증감 (상대 보유량 상한)
+  const adjustRequestCard = (channelId: string, delta: number, max: number) => {
     setRequestCards(prev => {
       const next = { ...prev };
-      const v = (next[channelId] || 0) + delta;
+      const v = Math.max(0, Math.min(max, (next[channelId] || 0) + delta));
       if (v <= 0) delete next[channelId];
       else next[channelId] = v;
       return next;
     });
-  };
-
-  const toggleSelectCard = (id: number) => {
-    if (selectedOfferCards.includes(id)) {
-      setSelectedOfferCards(selectedOfferCards.filter(cid => cid !== id));
-    } else {
-      setSelectedOfferCards([...selectedOfferCards, id]);
-    }
   };
 
   // 신규 스트리머 검색 API 호출
@@ -695,7 +717,7 @@ export const GachaTab: React.FC = () => {
 
       {/* 신규 스트리머 카드 등록 팝업 모달 */}
       {registerModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2">
@@ -807,7 +829,7 @@ export const GachaTab: React.FC = () => {
 
       {/* 1:1 교환 거래 팝업 */}
       {tradeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2">
@@ -819,113 +841,126 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <div className="mt-4 space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+              {/* 상대 검색/선택 */}
               <div>
-                <label className="text-xs font-bold text-muted-foreground block mb-1.5">상대방 치지직 닉네임 입력</label>
-                <input
-                  type="text"
-                  value={tradeTargetUser}
-                  onChange={(e) => setTradeTargetUser(e.target.value)}
-                  placeholder="상대의 닉네임을 입력해 주세요"
-                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm focus:border-primary focus:outline-none"
-                />
+                <label className="text-xs font-bold text-muted-foreground block mb-1.5">교환 상대 검색</label>
+                {selectedReceiver ? (
+                  <div className="flex items-center justify-between rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <img src={selectedReceiver.avatar_url} alt={selectedReceiver.username} className="h-8 w-8 rounded-full object-cover border border-border/60" />
+                      <span className="text-sm font-bold truncate">{selectedReceiver.username}</span>
+                    </div>
+                    <button onClick={() => { setSelectedReceiver(null); setReceiverSearch(''); setPartnerCollection([]); setRequestCards({}); }} className="text-xs text-muted-foreground hover:text-foreground">변경</button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={receiverSearch}
+                      onChange={(e) => searchReceivers(e.target.value)}
+                      placeholder="상대 닉네임 검색"
+                      className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm focus:border-primary focus:outline-none"
+                    />
+                    {receiverResults.length > 0 && (
+                      <div className="mt-1.5 space-y-1 max-h-40 overflow-y-auto rounded-lg border border-border bg-card p-1">
+                        {receiverResults.map((u) => (
+                          <button key={u.id} onClick={() => selectReceiver(u)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary/60 transition">
+                            <img src={u.avatar_url} alt={u.username} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                            <span className="text-xs font-bold truncate">{u.username}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
-              {/* 내가 제시: 카드 + 포인트 */}
+              {/* 내가 제시: 보유 카드(검색) + 포인트 */}
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2.5">
                 <p className="text-xs font-black text-emerald-500">내가 제시</p>
-                <div>
-                  <label className="text-[11px] font-bold text-muted-foreground block mb-2">제시할 보유 카드 선택</label>
-                  {inventory.length === 0 ? (
-                    <p className="text-[10px] text-muted-foreground py-2">보유한 카드가 없습니다.</p>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-2.5 max-h-40 overflow-y-auto pr-1">
-                      {inventory.map((card) => {
-                        const streamer = card.streamer;
-                        const isSelected = selectedOfferCards.includes(card.id);
-                        if (!streamer) return null;
-                        return (
-                          <div
-                            key={card.id}
-                            onClick={() => toggleSelectCard(card.id)}
-                            className={`cursor-pointer relative flex flex-col items-center justify-center p-2.5 rounded-xl border transition ${isSelected ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border/60 bg-secondary/30 hover:bg-secondary/60'
-                              }`}
-                          >
-                            <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-10 w-10 rounded-full border border-border/80 object-cover" />
-                            <span className="text-[10px] font-bold text-foreground mt-1.5 truncate max-w-full">{streamer.name}</span>
-                            <span className="text-[8.5px] text-muted-foreground">No.{String(streamer.serial_number ?? 0).padStart(4, '0')}</span>
-                            {isSelected && (
-                              <div className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
-                                <Check className="h-2.5 w-2.5" />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                <input
+                  type="text"
+                  value={offerSearch}
+                  onChange={(e) => setOfferSearch(e.target.value)}
+                  placeholder="내 보유 카드 검색"
+                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
+                />
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {myCollection.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground py-1">보유한 카드가 없습니다.</p>
+                  ) : myCollection
+                    .filter((c) => offerSearch.trim() === '' ? true : c.streamer.name.toLowerCase().includes(offerSearch.toLowerCase()))
+                    .map((c) => (
+                      <div key={c.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <img src={c.streamer.custom_image_url || c.streamer.logo_url} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                          <span className="text-[11px] font-bold truncate">{c.streamer.name}</span>
+                          <span className="text-[9px] text-muted-foreground">보유 {c.count}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => adjustOfferCard(c.channel_id, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
+                          <span className="w-5 text-center text-xs font-bold">{offerCards[c.channel_id] || 0}</span>
+                          <button onClick={() => adjustOfferCard(c.channel_id, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                        </div>
+                      </div>
+                    ))}
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">제시할 포인트</label>
-                  <input
-                    type="number" min={0}
-                    value={offerPoint}
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">제시할 포인트 (보유 {user.point.toLocaleString()})</label>
+                  <input type="number" min={0} value={offerPoint}
                     onChange={(e) => setOfferPoint(Math.max(0, Number(e.target.value)))}
-                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
-                  />
+                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none" />
                 </div>
               </div>
 
-              {/* 내가 요청: 카드 + 포인트 */}
+              {/* 내가 요청: 상대 보유 카드(검색) + 포인트 */}
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 space-y-2.5">
                 <p className="text-xs font-black text-sky-500">상대에게 요청</p>
-                <div>
-                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">요청할 카드 (스트리머 검색 후 수량 지정)</label>
-                  <input
-                    type="text"
-                    value={tradeRequestSearch}
-                    onChange={(e) => setTradeRequestSearch(e.target.value)}
-                    placeholder="스트리머 이름 검색"
-                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none mb-2"
-                  />
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                    {streamers
-                      .filter(s => tradeRequestSearch.trim() === ''
-                        ? (requestCards[s.channel_id] || 0) > 0
-                        : s.name.toLowerCase().includes(tradeRequestSearch.toLowerCase()))
-                      .slice(0, 30)
-                      .map((s) => (
-                        <div key={s.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
-                            <span className="text-[11px] font-bold truncate">{s.name}</span>
+                {!selectedReceiver ? (
+                  <p className="text-[10px] text-muted-foreground py-1">먼저 교환 상대를 선택하면 상대의 보유 카드를 요청할 수 있어요.</p>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={requestSearch}
+                      onChange={(e) => setRequestSearch(e.target.value)}
+                      placeholder="상대 보유 카드 검색"
+                      className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
+                    />
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {partnerCollection.length === 0 ? (
+                        <p className="text-[10px] text-muted-foreground py-1">상대가 보유한 카드가 없습니다.</p>
+                      ) : partnerCollection
+                        .filter((c) => requestSearch.trim() === '' ? true : c.streamer?.name?.toLowerCase().includes(requestSearch.toLowerCase()))
+                        .map((c) => (
+                          <div key={c.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <img src={c.streamer?.custom_image_url || c.streamer?.logo_url} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                              <span className="text-[11px] font-bold truncate">{c.streamer?.name}</span>
+                              <span className="text-[9px] text-muted-foreground">보유 {c.count}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button onClick={() => adjustRequestCard(c.channel_id, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
+                              <span className="w-5 text-center text-xs font-bold">{requestCards[c.channel_id] || 0}</span>
+                              <button onClick={() => adjustRequestCard(c.channel_id, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={() => adjustRequestCard(s.channel_id, -1)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
-                            <span className="w-5 text-center text-xs font-bold">{requestCards[s.channel_id] || 0}</span>
-                            <button onClick={() => adjustRequestCard(s.channel_id, 1)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
-                          </div>
-                        </div>
-                      ))}
-                    {tradeRequestSearch.trim() === '' && Object.keys(requestCards).length === 0 && (
-                      <p className="text-[10px] text-muted-foreground py-1">검색해서 요청할 카드를 추가하세요.</p>
-                    )}
-                  </div>
-                </div>
+                        ))}
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="text-[11px] font-bold text-muted-foreground block mb-1">요청할 포인트</label>
-                  <input
-                    type="number" min={0}
-                    value={requestPoint}
+                  <input type="number" min={0} value={requestPoint}
                     onChange={(e) => setRequestPoint(Math.max(0, Number(e.target.value)))}
-                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
-                  />
+                    className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none" />
                 </div>
               </div>
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
               <button
-                onClick={resetTradeForm}
+                onClick={() => { resetTradeForm(); setTradeModalOpen(false); }}
                 className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
               >
                 취소
@@ -944,7 +979,7 @@ export const GachaTab: React.FC = () => {
 
       {/* 스트리머 상세 + 시세 그래프 모달 */}
       {detailStreamer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setDetailStreamer(null)}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setDetailStreamer(null)}>
           <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2"><BarChart3 className="h-4.5 w-4.5 text-primary" /> 스트리머 시세 상세</h3>
@@ -989,28 +1024,64 @@ export const GachaTab: React.FC = () => {
                   ))}
                 </div>
 
-                {/* SVG 라인 차트 */}
+                {/* SVG 라인 차트 (hover 시 해당 시점 강조 + 툴팁) */}
                 {detailHistory.length >= 2 ? (() => {
                   const W = 460, H = 140, P = 8;
+                  const n = detailHistory.length;
                   const values = detailHistory.map(h => h.value);
                   const min = Math.min(...values), max = Math.max(...values);
                   const range = max - min || 1;
-                  const pts = detailHistory.map((h, i) => {
-                    const x = P + (i / (detailHistory.length - 1)) * (W - 2 * P);
-                    const y = H - P - ((h.value - min) / range) * (H - 2 * P);
-                    return `${x.toFixed(1)},${y.toFixed(1)}`;
-                  }).join(' ');
-                  const up = values[values.length - 1] >= values[0];
+                  const coords = detailHistory.map((h, i) => ({
+                    x: P + (i / (n - 1)) * (W - 2 * P),
+                    y: H - P - ((h.value - min) / range) * (H - 2 * P)
+                  }));
+                  const pts = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+                  const up = values[n - 1] >= values[0];
                   const stroke = up ? '#f43f5e' : '#3b82f6';
+
+                  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const ratio = (e.clientX - rect.left) / rect.width;
+                    const idx = Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1))));
+                    setDetailHover(idx);
+                  };
+                  const hovered = detailHover !== null && detailHover < n ? detailHover : null;
+                  const fmtTime = (iso: string) => {
+                    const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
+                    return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                  };
+
                   return (
                     <div className="rounded-xl border border-border bg-secondary/20 p-3">
-                      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
-                        <polyline points={pts} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-                      </svg>
+                      <div className="relative">
+                        <svg
+                          viewBox={`0 0 ${W} ${H}`}
+                          className="w-full h-auto"
+                          preserveAspectRatio="none"
+                          onMouseMove={onMove}
+                          onMouseLeave={() => setDetailHover(null)}
+                        >
+                          <polyline points={pts} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                          {hovered !== null && (
+                            <>
+                              <line x1={coords[hovered].x} y1={P} x2={coords[hovered].x} y2={H - P} stroke="currentColor" strokeWidth="1" className="text-muted-foreground/40" strokeDasharray="3 3" />
+                              <circle cx={coords[hovered].x} cy={coords[hovered].y} r="4" fill={stroke} stroke="#fff" strokeWidth="1.5" />
+                            </>
+                          )}
+                        </svg>
+                        {hovered !== null && (
+                          <div
+                            className="pointer-events-none absolute -top-1 z-10 -translate-x-1/2 -translate-y-full rounded-lg bg-foreground px-2 py-1 text-[10px] font-bold text-background shadow-lg whitespace-nowrap"
+                            style={{ left: `${(coords[hovered].x / W) * 100}%` }}
+                          >
+                            {fmtTime(detailHistory[hovered].recorded_at)} · {values[hovered].toLocaleString()}P
+                          </div>
+                        )}
+                      </div>
                       <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
                         <span>{new Date(detailHistory[0].recorded_at).toLocaleDateString('ko-KR')}</span>
                         <span>최저 {min.toLocaleString()}P · 최고 {max.toLocaleString()}P</span>
-                        <span>{new Date(detailHistory[detailHistory.length - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
+                        <span>{new Date(detailHistory[n - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
                       </div>
                     </div>
                   );
@@ -1019,6 +1090,16 @@ export const GachaTab: React.FC = () => {
                     아직 시세 그래프를 그릴 만큼의 데이터가 쌓이지 않았습니다.<br />(시세는 2분마다 기록됩니다)
                   </div>
                 )}
+
+                {/* 치지직 방송국 바로가기 */}
+                <a
+                  href={detailStreamer.is_active ? `https://chzzk.naver.com/live/${detailStreamer.channel_id}` : `https://chzzk.naver.com/${detailStreamer.channel_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00ffa3] py-2.5 text-xs font-black text-black hover:brightness-95 transition"
+                >
+                  치지직 방송국 바로가기
+                </a>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div className="rounded-lg bg-secondary/30 p-2.5"><p className="text-muted-foreground">활동 점수</p><p className="font-bold">{(detailStreamer.activity_score || 0).toLocaleString()}</p></div>
@@ -1123,112 +1204,6 @@ export const GachaTab: React.FC = () => {
         );
       })()}
 
-      {/* 가챠 보드 영역 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-2 text-center md:text-left">
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-              <Sparkles className="h-3 w-3" /> CHZZK CARD GACHA
-            </span>
-            <h2 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">치지직 카드 즉시 소환</h2>
-            <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
-              매일 한국 표준시(KST) 자정에 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다.<br />무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">10,000 포인트</strong>입니다.
-            </p>
-          </div>
-
-          {/* 소환 버튼 */}
-          <div className="flex flex-col items-center gap-2">
-            <button
-              onClick={handleDraw}
-              disabled={isDrawing}
-              className="group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-emerald-500 to-teal-600 font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none"
-            >
-              <Sparkles className="h-8 w-8 animate-pulse text-white" />
-              <div className="text-center">
-                <span className="text-sm tracking-wide text-white/90">스트리머 소환</span>
-                {isFreeDraw ? (
-                  <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 뽑기 가능</p>
-                ) : (
-                  <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> 10,000 P</p>
-                )}
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* 뽑기 카드 렌더링 영역 */}
-        {(isDrawing || drawnCard) && (
-          <div className="mt-8 flex flex-col items-center justify-center border-t border-border/50 pt-8 animate-in fade-in duration-200">
-            {isDrawing ? (
-              <div className="flex flex-col items-center gap-3 py-12">
-                <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-                <p className="text-xs font-semibold text-muted-foreground">치지직 스트리머 카드 팩 개봉 중...</p>
-              </div>
-            ) : drawnCard ? (
-              <div className="flex flex-col items-center">
-                <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공</span>
-
-                {/* 실시간 포토카드 프레임 */}
-                <a
-                  href={drawnCard.is_active || (drawnCard as any).isLive
-                    ? `https://chzzk.naver.com/live/${drawnCard.channel_id}`
-                    : `https://chzzk.naver.com/${drawnCard.channel_id}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl hover:-translate-y-1 hover:shadow-2xl transition duration-300 select-none block border border-border/80"
-                >
-
-                  {/* 카드 배경 이미지 (커스텀 또는 기본 로고) */}
-                  <div className="absolute inset-0 z-0">
-                    <img
-                      src={drawnCard.custom_image_url || drawnCard.logo_url}
-                      alt={drawnCard.name}
-                      className="h-full w-full object-cover opacity-80 transition duration-300 group-hover:scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>
-                  </div>
-
-                  {/* 카드 상단 정보 */}
-                  <div className="relative z-20 flex items-center justify-between w-full">
-                    {drawnCard.is_active || (drawnCard as any).isLive ? (
-                      <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                        <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
-                      </span>
-                    ) : (
-                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
-                        OFFLINE
-                      </span>
-                    )}
-                    <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">
-                      No.{String((drawnCard as any).serial_number || 1).padStart(4, '0')}
-                    </span>
-                  </div>
-
-                  {/* 카드 하단 정보 */}
-                  <div className="relative z-20 space-y-1.5 text-white mt-auto">
-                    <h3 className="text-base font-black tracking-tight text-white drop-shadow-md">{drawnCard.name}</h3>
-                    <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
-
-                    <div className="flex items-center justify-between border-t border-white/20 pt-2">
-                      <span className="text-[9px] text-zinc-400">시세 가치</span>
-                      <span className="text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
-                    </div>
-                  </div>
-                </a>
-
-                <button
-                  onClick={() => setDrawnCard(null)}
-                  className="mt-4 rounded-lg bg-secondary px-4 py-1.5 text-xs font-bold hover:bg-secondary/80 text-muted-foreground"
-                >
-                  닫기
-                </button>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </section>
-
       {/* 인벤토리 (보관함) 영역 */}
       <section className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1305,22 +1280,21 @@ export const GachaTab: React.FC = () => {
         ) : (() => {
           // 중복 카드 그룹화 (채널 ID 기준으로 그룹화)
           // 최신 획득순/정렬 상태에 따라 최초 대표 카드 1장을 정하고, 개수 카운트
+          // 채널 + 별 등급 단위로 그룹화 (서로 다른 별은 별도 스택으로 표시·합성)
           interface GroupedCard {
             card: UserCard;
             count: number;
+            star: number;
           }
+          const groupKey = (card: UserCard) => `${card.channel_id}__${card.star || 0}`;
           const groupedMap: { [key: string]: GroupedCard } = {};
 
-          // 이미 정렬된 filteredInventory 순서대로 순회하며, 최초 등장한 것을 대표로 두고 개수를 누적시킴
           filteredInventory.forEach(card => {
-            const cid = card.channel_id;
-            if (!groupedMap[cid]) {
-              groupedMap[cid] = {
-                card: card,
-                count: 1
-              };
+            const key = groupKey(card);
+            if (!groupedMap[key]) {
+              groupedMap[key] = { card, count: 1, star: card.star || 0 };
             } else {
-              groupedMap[cid].count += 1;
+              groupedMap[key].count += 1;
             }
           });
 
@@ -1328,10 +1302,10 @@ export const GachaTab: React.FC = () => {
           const groupedList: GroupedCard[] = [];
           const seen = new Set<string>();
           filteredInventory.forEach(card => {
-            const cid = card.channel_id;
-            if (!seen.has(cid)) {
-              seen.add(cid);
-              groupedList.push(groupedMap[cid]);
+            const key = groupKey(card);
+            if (!seen.has(key)) {
+              seen.add(key);
+              groupedList.push(groupedMap[key]);
             }
           });
 
@@ -1379,11 +1353,12 @@ export const GachaTab: React.FC = () => {
               )}
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {groupedList.map(({ card, count }) => {
+                {groupedList.map(({ card, count, star }) => {
                   const streamer = card.streamer;
                   if (!streamer) return null;
 
                   const isSelected = selectedChannelIds.includes(streamer.channel_id);
+                  const cardValue = Math.round((streamer.base_value || 0) * starMult(star));
 
                   // 우클릭 이벤트 핸들러
                   const handleContextMenu = (e: React.MouseEvent) => {
@@ -1416,11 +1391,8 @@ export const GachaTab: React.FC = () => {
                         setSelectedChannelIds([...selectedChannelIds, streamer.channel_id]);
                       }
                     } else {
-                      // 다중 선택 모드가 아닐 때 카드 전체 클릭 시 치지직 채널로 새 창 이동
-                      const targetUrl = streamer.is_active || (streamer as any).isLive
-                        ? `https://chzzk.naver.com/live/${streamer.channel_id}`
-                        : `https://chzzk.naver.com/${streamer.channel_id}`;
-                      window.open(targetUrl, '_blank');
+                      // 다중 선택 모드가 아닐 때 카드 클릭 시 시세 상세 모달 오픈 (방송국 이동은 모달 내 버튼으로)
+                      openStreamerDetail(streamer.channel_id);
                     }
                   };
 
@@ -1452,7 +1424,8 @@ export const GachaTab: React.FC = () => {
                       onMouseUp={endPress}
                       onTouchStart={startPress}
                       onTouchEnd={endPress}
-                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
+                      style={borderStyle(card.border)}
+                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''} ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
                     >
                       {/* 다중 선택 모드 체크박스 오버레이 */}
                       {selectionMode && (
@@ -1489,13 +1462,6 @@ export const GachaTab: React.FC = () => {
                               ×{count}
                             </span>
                           )}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openStreamerDetail(streamer.channel_id); }}
-                            title="시세 그래프 보기"
-                            className="rounded bg-black/40 p-1 text-white/90 hover:bg-primary hover:text-primary-foreground transition"
-                          >
-                            <BarChart3 className="h-3 w-3" />
-                          </button>
                           <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
                             No.{String(streamer.serial_number ?? 0).padStart(4, '0')}
                           </span>
@@ -1504,13 +1470,31 @@ export const GachaTab: React.FC = () => {
 
                       {/* 카드 하단 정보 */}
                       <div className="relative z-20 space-y-1 text-white block mt-auto">
-                        <h4 className="text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</h4>
+                        {/* 별 등급 표시 */}
+                        {star > 0 && (
+                          <div className="flex items-center gap-0.5 drop-shadow">
+                            {Array.from({ length: star }, (_, i) => (
+                              <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                            ))}
+                          </div>
+                        )}
+                        <h4 className="text-sm font-bold tracking-tight truncate drop-shadow" style={nameEffectStyle(card.name_effect)}>{streamer.name}</h4>
                         <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
 
                         <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                          <span className="text-[8.5px] text-zinc-400">시세 가치</span>
-                          <span className="text-xs font-black text-emerald-400">{(streamer.base_value || 0).toLocaleString()} P</span>
+                          <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                          <span className="text-xs font-black text-emerald-400">{cardValue.toLocaleString()} P</span>
                         </div>
+
+                        {/* 합성 버튼 (같은 별 2장 이상 & 5성 미만) */}
+                        {!selectionMode && count >= 2 && star < 5 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
+                            className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
+                          >
+                            ⭐ 합성 ({star}★→{star + 1}★)
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1546,6 +1530,15 @@ export const GachaTab: React.FC = () => {
           </button>
           <button
             onClick={() => {
+              if (contextMenu.card) setEquipCard(contextMenu.card);
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+          >
+            🎨 코스메틱 장착
+          </button>
+          <button
+            onClick={() => {
               if (contextMenu.card?.streamer) {
                 setSelectionMode(true);
                 setSelectedChannelIds([contextMenu.card.streamer.channel_id]);
@@ -1573,9 +1566,66 @@ export const GachaTab: React.FC = () => {
         </div>
       )}
 
+      {/* 코스메틱 장착 모달 */}
+      {equipCard && (() => {
+        const live = inventory.find((c) => c.id === equipCard.id) || equipCard;
+        const borders = myCosmetics.filter((m) => m.type === 'border');
+        const effects = myCosmetics.filter((m) => m.type === 'name_effect');
+        const renderSlot = (type: 'border' | 'name_effect', label: string, equipped: any, items: any[]) => (
+          <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold">{label}</p>
+              {equipped && (
+                <button onClick={() => handleUnequip(live.id, type)} className="text-[10px] font-bold text-rose-500 hover:underline">해제(반환)</button>
+              )}
+            </div>
+            {items.length === 0 ? (
+              <p className="text-[10px] text-muted-foreground">보유한 {label}이(가) 없습니다. 상점에서 구매하세요.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-1">
+                {items.map((it) => {
+                  const isOn = equipped?.id === it.id;
+                  return (
+                    <button key={it.id} onClick={() => handleEquip(live.id, it.id)}
+                      className={`rounded-lg border p-2 flex flex-col items-center gap-1 transition ${isOn ? 'border-primary ring-2 ring-primary/30' : 'border-border/60 hover:bg-secondary/50'}`}>
+                      {type === 'border'
+                        ? <div className="h-10 w-8 rounded bg-card border border-border/80" style={borderStyle(it)} />
+                        : <span className="text-sm font-black truncate max-w-full" style={nameEffectStyle(it)}>{it.name}</span>}
+                      <span className="text-[9px] text-muted-foreground truncate max-w-full">{it.name} ×{it.quantity}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setEquipCard(null)}>
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <h3 className="text-base font-bold">코스메틱 장착</h3>
+                <button onClick={() => setEquipCard(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+              </div>
+              {/* 카드 미리보기 */}
+              <div className="mt-4 flex justify-center">
+                <div className="relative flex h-44 w-28 flex-col justify-end overflow-hidden rounded-xl bg-card p-2 border border-border/80" style={borderStyle(live.border)}>
+                  <img src={live.streamer?.custom_image_url || live.streamer?.logo_url} alt={live.streamer?.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                  <h4 className="relative z-10 text-xs font-black text-white truncate drop-shadow" style={nameEffectStyle(live.name_effect)}>{live.streamer?.name}</h4>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                {renderSlot('border', '테두리', live.border, borders)}
+                {renderSlot('name_effect', '이름 이펙트', live.name_effect, effects)}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 단일 판매 설정 모달 */}
       {sellModalOpen && sellingStreamer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
               💰 카드 시스템 판매
@@ -1696,7 +1746,7 @@ export const GachaTab: React.FC = () => {
 
       {/* 일괄 판매 설정 모달 */}
       {bulkSellModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
               💰 선택 카드 일괄 판매 설정

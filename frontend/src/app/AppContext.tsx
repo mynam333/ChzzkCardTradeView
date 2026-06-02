@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { apiFetch } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
-export type TabId = 'main' | 'gacha' | 'ranking' | 'my-info' | 'admin';
+export type TabId = 'main' | 'shop' | 'gacha' | 'ranking' | 'my-info' | 'admin';
 
 // 다크모드/라이트모드 및 현재 선택 탭, 사용자 인증 상태, 보유 재화 전역 관리
 interface AppContextType {
@@ -28,10 +28,24 @@ interface AppContextType {
   updatePoints: (diff: number) => Promise<void>;
   // 전역 토스트 알림 (alert 대체)
   toast: (message: string, type?: ToastType) => void;
+  // 인앱 알림함
+  notifications: AppNotificationItem[];
+  unreadCount: number;
+  fetchNotifications: () => Promise<void>;
+  openNotification: (n: AppNotificationItem) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
 }
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 interface ToastItem { id: number; message: string; type: ToastType; }
+export interface AppNotificationItem {
+  id: number;
+  title: string;
+  body: string | null;
+  link: string | null;
+  is_read: boolean;
+  created_at?: string;
+}
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -42,17 +56,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  // 설치 프롬프트 이벤트는 제스처 핸들러(클로저)에서 직접 접근하므로 ref로만 보관
-  const deferredPromptRef = useRef<any>(null);
+  const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const toast = (message: string, type: ToastType = 'info') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3200);
   };
-  const askedPushRef = useRef(false);       // 알림 권한 자동 요청 1회만
-  const promptedInstallRef = useRef(false); // 설치 프롬프트 자동 노출 1회만
+  const askedPushRef = useRef(false); // 알림 권한 자동 요청 1회만
 
   // 로컬 스토리지에서 저장된 테마만 복원 및 초기 인증 처리
   useEffect(() => {
@@ -70,41 +82,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // PWA 서비스 워커 등록 (푸시 알림 수신 기반 마련)
     registerServiceWorker();
 
-    // PWA 설치 프롬프트 이벤트 캡처 (브라우저가 기본 배너 대신 우리가 제어)
-    const handleBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      deferredPromptRef.current = e;
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    const handleInstalled = () => { deferredPromptRef.current = null; };
-    window.addEventListener('appinstalled', handleInstalled);
-
-    // 브라우저 정책상 제스처 없이 시스템 프롬프트를 띄울 수 없으므로,
-    // 사용자의 "첫 상호작용" 시점에 네이티브 알림 권한 → 앱 설치 다이얼로그를 순차 노출한다.
+    // 첫 사용자 상호작용 시 알림 권한 네이티브 프롬프트만 노출 (앱 자동 설치는 제거됨)
     const handleFirstGesture = async () => {
-      // 1순위: 알림 권한 (아직 묻지 않은 경우에만 네이티브 프롬프트)
       if (!askedPushRef.current && isPushSupported() && Notification.permission === 'default') {
         askedPushRef.current = true;
         try { await subscribeToPush(); } catch { /* 권한 거부/실패 무시 */ }
-        return; // 이번 제스처는 알림에 사용, 설치는 다음 제스처에서 (제스처 활성화 만료 방지)
       }
-      // 2순위: 앱 설치 (설치 가능 & 아직 노출 안 함) — 제스처 동기 호출이어야 함
-      if (deferredPromptRef.current && !promptedInstallRef.current) {
-        promptedInstallRef.current = true;
-        const dp = deferredPromptRef.current;
-        deferredPromptRef.current = null;
-        try { dp.prompt(); await dp.userChoice; } catch { /* 무시 */ }
-      }
-      // 둘 다 끝났으면 리스너 제거
-      if (askedPushRef.current && promptedInstallRef.current) {
-        window.removeEventListener('pointerdown', handleFirstGesture);
-      }
+      window.removeEventListener('pointerdown', handleFirstGesture);
     };
     window.addEventListener('pointerdown', handleFirstGesture);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      window.removeEventListener('appinstalled', handleInstalled);
       window.removeEventListener('pointerdown', handleFirstGesture);
     };
   }, []);
@@ -165,6 +153,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // ---- 인앱 알림함 ----
+  const fetchNotifications = async () => {
+    if (!localStorage.getItem('cctv_jwt_token')) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+    try {
+      const res = await apiFetch('/notifications');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.items || []);
+        setUnreadCount(data.unread || 0);
+      }
+    } catch (e) {
+      console.error('[AppContext] 알림 조회 실패:', e);
+    }
+  };
+
+  const openNotification = async (n: AppNotificationItem) => {
+    // 읽음 처리 (낙관적 갱신)
+    if (!n.is_read) {
+      setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
+      setUnreadCount((c) => Math.max(0, c - 1));
+      try { await apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }); } catch { /* 무시 */ }
+    }
+    // 연관 위치로 이동
+    if (n.link && ['main', 'shop', 'gacha', 'ranking', 'my-info', 'admin'].includes(n.link)) {
+      setActiveTab(n.link as TabId);
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    setNotifications((prev) => prev.map((x) => ({ ...x, is_read: true })));
+    setUnreadCount(0);
+    try { await apiFetch('/notifications/read-all', { method: 'POST' }); } catch { /* 무시 */ }
+  };
+
+  // 로그인 상태에서 알림 주기적 폴링 (30초)
+  useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+    fetchNotifications();
+    const timer = setInterval(fetchNotifications, 30_000);
+    return () => clearInterval(timer);
+  }, [user?.id]);
+
   return (
     <AppContext.Provider value={{
       theme,
@@ -177,22 +215,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logout,
       refreshUserData,
       updatePoints,
-      toast
+      toast,
+      notifications,
+      unreadCount,
+      fetchNotifications,
+      openNotification,
+      markAllNotificationsRead
     }}>
       {children}
 
       {/* 전역 토스트 컨테이너 */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 pointer-events-none">
         {toasts.map((t) => {
+          // 라이트/다크 양쪽에서 가독성을 위해 솔리드 배경 + 흰 글자 사용
           const tone =
-            t.type === 'success' ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
-            : t.type === 'error' ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
-            : t.type === 'warning' ? 'border-amber-500/40 bg-amber-500/15 text-amber-100'
-            : 'border-sky-500/40 bg-sky-500/15 text-sky-100';
+            t.type === 'success' ? 'bg-emerald-600'
+            : t.type === 'error' ? 'bg-rose-600'
+            : t.type === 'warning' ? 'bg-amber-500'
+            : 'bg-sky-600';
           return (
             <div
               key={t.id}
-              className={`pointer-events-auto rounded-xl border px-4 py-3 text-xs font-bold shadow-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200 ${tone}`}
+              className={`pointer-events-auto rounded-xl px-4 py-3 text-xs font-bold text-white shadow-lg ring-1 ring-black/10 animate-in fade-in slide-in-from-top-2 duration-200 whitespace-pre-line ${tone}`}
             >
               {t.message}
             </div>

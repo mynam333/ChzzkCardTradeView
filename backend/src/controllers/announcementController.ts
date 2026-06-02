@@ -50,6 +50,29 @@ export const getActivePopups = async (req: Request, res: Response) => {
 };
 
 /**
+ * 4-1. 공지사항 팝업 노출 여부 토글 (ADMIN 전용)
+ */
+export const setAnnouncementPopup = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { is_popup, popup_expires_at } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ error: 'BadRequest', message: '공지사항 ID가 필요합니다.' });
+  }
+
+  try {
+    await announcementRepository.updatePopup(Number(id), !!is_popup, popup_expires_at || null);
+    return res.status(200).json({
+      message: is_popup ? '팝업으로 등록되었습니다.' : '팝업이 해제되었습니다.',
+      id: Number(id),
+      is_popup: !!is_popup
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '팝업 설정 변경 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 4. 공지사항 삭제 (ADMIN 전용)
  */
 export const deleteAnnouncement = async (req: Request, res: Response) => {

@@ -9,18 +9,19 @@ import {
   User,
   Sun,
   Moon,
-  Bell,
   Coins,
-  Shield
+  Shield,
+  Store
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
+import { NotificationBell } from './NotificationBell';
 
 interface NavigationProps {
   onNotifyClick?: () => void;
 }
 
-export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: () => void }> = ({ children, onNotifyClick }) => {
+export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
   const touchStartX = React.useRef<number | null>(null);
   const touchStartY = React.useRef<number | null>(null);
@@ -43,7 +44,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
 
   const navItems: { id: TabId; label: string; icon: typeof Home }[] = [
     { id: 'main', label: '메인', icon: Home },
-    { id: 'gacha', label: '뽑기/보관함', icon: Layers },
+    { id: 'shop', label: '상점', icon: Store },
+    { id: 'gacha', label: '보관함', icon: Layers },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
     { id: 'my-info', label: '내 정보', icon: User },
     ...(user?.role === 'ADMIN'
@@ -86,17 +88,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
       <aside className="hidden w-64 flex-col border-r border-border bg-card px-4 py-6 md:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
-          <Image 
-            src="/icon.png" 
-            alt="CCTV Logo" 
-            width={36} 
-            height={36} 
+          <Image
+            src="/icon.png"
+            alt="CCTV Logo"
+            width={36}
+            height={36}
             className="rounded-lg shadow-md object-contain"
           />
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-bold tracking-tight text-foreground">CCTV</h1>
             <p className="text-xs text-muted-foreground">치지직 카드 트레이드 뷰</p>
           </div>
+          {user && <NotificationBell />}
         </div>
 
         {/* 유저 상태 카드 또는 로그인 버튼 */}
@@ -205,12 +208,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode; onNotifyClick?: (
             </button>
           )}
           
-          <button 
-            onClick={onNotifyClick}
-            className="rounded-full p-1.5 hover:bg-secondary text-muted-foreground"
-          >
-            <Bell className="h-4 w-4" />
-          </button>
+          {user && <NotificationBell />}
 
           <button
             onClick={toggleTheme}

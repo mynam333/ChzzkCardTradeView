@@ -89,11 +89,11 @@ export const MainTab: React.FC = () => {
 
       {/* 팝업 오버레이 모달 */}
       {activePopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-2 text-primary">
               <Megaphone className="h-5 w-5" />
-              <h3 className="font-bold text-foreground">긴급 공지사항</h3>
+              <h3 className="font-bold text-foreground">공지사항</h3>
             </div>
             <h4 className="mt-3 text-lg font-bold text-foreground">{activePopup.title}</h4>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
@@ -192,10 +192,13 @@ export const MainTab: React.FC = () => {
               <div key={st.channel_id} className="flex items-center justify-between rounded-xl bg-secondary/20 p-3 border border-border/40 hover:border-border/80 transition">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src={st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card" />
+                    <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
                     <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-black text-primary-foreground shadow-sm">
                       {index + 1}
                     </span>
+                    {st.is_active && (
+                      <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
+                    )}
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-foreground">{st.name}</h4>
@@ -224,7 +227,7 @@ export const MainTab: React.FC = () => {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">1</span>
               <h4 className="font-bold text-foreground">치지직 계정으로 바로 로그인</h4>
             </div>
-            <p>별도 회원가입 없이 치지직 계정 하나로 즉시 시작할 수 있어요. 로그인하면 매일 무료 뽑기 포인트가 지급됩니다.</p>
+            <p>별도 회원가입 없이 치지직 계정 하나로 즉시 시작할 수 있어요. 로그인하면 매일 무료 뽑기가 지급됩니다.</p>
           </div>
           <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
             <div className="flex items-center gap-2 mb-2">

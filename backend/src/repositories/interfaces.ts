@@ -75,12 +75,25 @@ export interface Announcement {
   created_at?: string;
 }
 
+export interface CosmeticRef {
+  id: number;
+  style_json?: string | null;
+  font_url?: string | null;
+  font_family?: string | null;
+}
+
 export interface UserCard {
   id?: number;
   user_id: string;
   channel_id: string;
   serial_number: number;
+  star?: number;
   acquired_at?: string;
+  // 장착된 코스메틱(조회 시 임베드)
+  border_item_id?: number | null;
+  name_effect_item_id?: number | null;
+  border?: CosmeticRef | null;
+  name_effect?: CosmeticRef | null;
 }
 
 // 1. 유저 리포지토리 인터페이스
@@ -88,6 +101,8 @@ export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   /** 닉네임으로 사용자를 조회합니다(거래 상대 지정용). 동명이인 시 가장 먼저 가입한 1명. */
   findByUsername(username: string): Promise<User | null>;
+  /** 닉네임 부분일치로 사용자 목록을 검색합니다(거래 상대 검색용). */
+  searchByUsername(keyword: string, limit: number): Promise<User[]>;
   create(user: User): Promise<User>;
   updatePoint(id: string, point: number): Promise<void>;
   /** 포인트를 원자적으로 delta만큼 증감합니다(delta 음수 가능, 하한 검증 없음). */
@@ -169,6 +184,8 @@ export interface IAnnouncementRepository {
   findAll(): Promise<Announcement[]>;
   findActivePopups(): Promise<Announcement[]>;
   create(announcement: Announcement): Promise<Announcement>;
+  /** 공지의 팝업 노출 여부 및 만료 시각을 갱신합니다. */
+  updatePopup(id: number, isPopup: boolean, popupExpiresAt: string | null): Promise<void>;
   delete(id: number): Promise<void>;
 }
 
@@ -209,6 +226,25 @@ export interface ITradeRepository {
   countCompleted(): Promise<number>;
 }
 
+// 인앱 알림
+export interface AppNotification {
+  id?: number;
+  user_id: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  is_read: boolean;
+  created_at?: string;
+}
+
+export interface INotificationRepository {
+  create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void>;
+  findByUser(userId: string, limit: number): Promise<AppNotification[]>;
+  countUnread(userId: string): Promise<number>;
+  markRead(id: number, userId: string): Promise<void>;
+  markAllRead(userId: string): Promise<void>;
+}
+
 // 6. 유저 보유 카드 리포지토리 인터페이스
 export interface IUserCardRepository {
   create(card: UserCard): Promise<UserCard>;
@@ -217,4 +253,6 @@ export interface IUserCardRepository {
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
   deleteCards(userId: string, channelId: string, count: number): Promise<number>;
   count(): Promise<number>;
+  /** 같은 스트리머·같은 별 카드 2장을 합성하여 1장(별+1)으로 만듭니다. */
+  fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }>;
 }

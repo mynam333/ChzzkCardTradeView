@@ -6,7 +6,8 @@ import {
   IReportRepository,
   IAnnouncementRepository,
   IUserCardRepository,
-  ITradeRepository
+  ITradeRepository,
+  INotificationRepository
 } from './interfaces';
 import {
   SqliteUserRepository,
@@ -15,7 +16,8 @@ import {
   SqliteReportRepository,
   SqliteAnnouncementRepository,
   SqliteUserCardRepository,
-  SqliteTradeRepository
+  SqliteTradeRepository,
+  SqliteNotificationRepository
 } from './sqliteRepository';
 import {
   SupabaseUserRepository,
@@ -24,7 +26,8 @@ import {
   SupabaseReportRepository,
   SupabaseAnnouncementRepository,
   SupabaseUserCardRepository,
-  SupabaseTradeRepository
+  SupabaseTradeRepository,
+  SupabaseNotificationRepository
 } from './supabaseRepository';
 
 // 전역 싱글톤 리포지토리 변수 선언
@@ -35,6 +38,7 @@ export let reportRepository: IReportRepository;
 export let announcementRepository: IAnnouncementRepository;
 export let userCardRepository: IUserCardRepository;
 export let tradeRepository: ITradeRepository;
+export let notificationRepository: INotificationRepository;
 
 /**
  * 데이터베이스 커넥션이 확립된 후, 모드에 적합한 레포지토리 인스턴스를 초기화합니다.
@@ -50,6 +54,7 @@ export const initRepositories = (): void => {
     announcementRepository = new SupabaseAnnouncementRepository();
     userCardRepository = new SupabaseUserCardRepository();
     tradeRepository = new SupabaseTradeRepository();
+    notificationRepository = new SupabaseNotificationRepository();
     console.log('[Repository] Supabase 리포지토리 레이어가 활성화되었습니다.');
   } else {
     userRepository = new SqliteUserRepository();
@@ -59,6 +64,7 @@ export const initRepositories = (): void => {
     announcementRepository = new SqliteAnnouncementRepository();
     userCardRepository = new SqliteUserCardRepository();
     tradeRepository = new SqliteTradeRepository();
+    notificationRepository = new SqliteNotificationRepository();
     console.log('[Repository] 로컬 SQLite 리포지토리 레이어가 활성화되었습니다.');
   }
 };

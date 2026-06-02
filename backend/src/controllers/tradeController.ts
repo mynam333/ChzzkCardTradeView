@@ -1,9 +1,15 @@
 import { Response } from 'express';
-import { tradeRepository, userRepository, userCardRepository } from '../repositories';
+import { tradeRepository, userRepository, userCardRepository, notificationRepository } from '../repositories';
 import { TradeOffer } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
+
+/** 푸시 + 인앱 알림함 동시 기록 (실패해도 무시) */
+const notify = (userId: string, title: string, body: string) => {
+  sendPushToUser(userId, title, body, '/');
+  notificationRepository.create({ user_id: userId, title, body, link: 'gacha' }).catch(() => { /* 무시 */ });
+};
 
 /**
  * 거래 오퍼 형식을 검증하고 정규화합니다.
@@ -66,9 +72,9 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   }
 
-  const { receiver_username } = req.body;
-  if (!receiver_username || !String(receiver_username).trim()) {
-    return res.status(400).json({ error: 'BadRequest', message: '교환 상대방의 닉네임을 입력해 주세요.' });
+  const { receiver_id, receiver_username } = req.body;
+  if (!receiver_id && !(receiver_username && String(receiver_username).trim())) {
+    return res.status(400).json({ error: 'BadRequest', message: '교환 상대방을 지정해 주세요.' });
   }
 
   const senderOffer = normalizeOffer(req.body.sender_offer);
@@ -79,9 +85,12 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const receiver = await userRepository.findByUsername(String(receiver_username).trim());
+    // 검색 선택 시 receiver_id 우선, 없으면 닉네임으로 조회
+    const receiver = receiver_id
+      ? await userRepository.findById(String(receiver_id))
+      : await userRepository.findByUsername(String(receiver_username).trim());
     if (!receiver) {
-      return res.status(404).json({ error: 'NotFound', message: '해당 닉네임의 사용자를 찾을 수 없습니다.' });
+      return res.status(404).json({ error: 'NotFound', message: '해당 사용자를 찾을 수 없습니다.' });
     }
     if (receiver.id === sender.id) {
       return res.status(400).json({ error: 'BadRequest', message: '자기 자신과는 교환할 수 없습니다.' });
@@ -110,8 +119,8 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
       receiver_offer: receiverOffer
     });
 
-    // 수신자에게 새 교환 제안 푸시 알림 (실패 무시)
-    sendPushToUser(receiver.id, '새 교환 제안 📩', `${sender.username}님이 카드 교환을 제안했어요.`);
+    // 수신자에게 새 교환 제안 알림
+    notify(receiver.id, '새 교환 제안 📩', `${sender.username}님이 카드 교환을 제안했어요.`);
 
     return res.status(201).json({
       message: `${receiver.username}님에게 교환을 제안했습니다.`,
@@ -178,8 +187,8 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 동의 처리에 실패했습니다.'
       });
     }
-    // 제안자에게 최종 승인 요청 푸시
-    if (trade) sendPushToUser(trade.sender_id, '교환 동의됨 ✅', `${user.username}님이 교환에 동의했어요. 최종 승인이 필요합니다.`);
+    // 제안자에게 최종 승인 요청 알림
+    if (trade) notify(trade.sender_id, '교환 동의됨 ✅', `${user.username}님이 교환에 동의했어요. 최종 승인이 필요합니다.`);
     return res.status(200).json({ message: '교환 조건에 동의했습니다. 제안자의 최종 승인을 기다립니다.' });
   } catch (err: any) {
     console.error('[TradeController] confirmTrade 에러:', err);
@@ -205,8 +214,8 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 체결에 실패했습니다.'
       });
     }
-    // 수신자에게 체결 완료 푸시
-    if (trade) sendPushToUser(trade.receiver_id, '교환 체결 🤝', `${user.username}님과의 카드 교환이 완료되었어요!`);
+    // 수신자에게 체결 완료 알림
+    if (trade) notify(trade.receiver_id, '교환 체결 🤝', `${user.username}님과의 카드 교환이 완료되었어요!`);
     return res.status(200).json({ message: '교환이 성공적으로 체결되었습니다.' });
   } catch (err: any) {
     console.error('[TradeController] finalizeTrade 에러:', err);
@@ -246,7 +255,7 @@ export const rejectTrade = async (req: AuthenticatedRequest, res: Response) => {
 
     // 상대방에게 결과 푸시
     const counterpartId = trade.sender_id === user.id ? trade.receiver_id : trade.sender_id;
-    sendPushToUser(
+    notify(
       counterpartId,
       nextStatus === 'CANCELLED' ? '교환 취소됨' : '교환 거절됨',
       nextStatus === 'CANCELLED' ? `${user.username}님이 교환 제안을 취소했어요.` : `${user.username}님이 교환 제안을 거절했어요.`

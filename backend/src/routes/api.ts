@@ -20,7 +20,8 @@ import {
   createAnnouncement,
   getAnnouncements,
   getActivePopups,
-  deleteAnnouncement
+  deleteAnnouncement,
+  setAnnouncementPopup
 } from '../controllers/announcementController';
 import {
   getVapidPublicKey,
@@ -47,12 +48,31 @@ import {
 } from '../controllers/tradeController';
 import {
   getStreamerDetail,
-  setRepresentativeCard
+  setRepresentativeCard,
+  searchUsers,
+  getUserCollection,
+  getUserProfile,
+  fuseCards
 } from '../controllers/playController';
 import {
   getAdminStats,
   getCoupons
 } from '../controllers/adminController';
+import {
+  getNotifications,
+  markNotificationRead,
+  markAllNotificationsRead
+} from '../controllers/notificationController';
+import {
+  getShopItems,
+  getMyCosmetics,
+  buyShopItem,
+  equipToCard,
+  unequipFromCard,
+  adminGetShopItems,
+  adminCreateShopItem,
+  adminUpdateShopItem
+} from '../controllers/shopController';
 import { streamerRepository } from '../repositories';
 import { rateLimit } from '../middlewares/rateLimit';
 
@@ -90,9 +110,24 @@ router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/ranking', getUserRankings);
+router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
+router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);
+router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
+router.post('/cards/fuse', authMiddleware, banCheckMiddleware, fuseCards);
+
+// 상점 (코스메틱: 테두리 / 이름 이펙트)
+router.get('/shop/items', authMiddleware, getShopItems);
+router.get('/shop/inventory', authMiddleware, getMyCosmetics);
+router.post('/shop/buy', authMiddleware, banCheckMiddleware, buyShopItem);
+router.post('/cards/:card_id/equip', authMiddleware, banCheckMiddleware, equipToCard);
+router.post('/cards/:card_id/unequip', authMiddleware, banCheckMiddleware, unequipFromCard);
+// 관리자 상점 관리
+router.get('/admin/shop/items', authMiddleware, adminMiddleware, adminGetShopItems);
+router.post('/admin/shop/items', authMiddleware, adminMiddleware, adminCreateShopItem);
+router.post('/admin/shop/items/:id', authMiddleware, adminMiddleware, adminUpdateShopItem);
 
 // 신규 스트리머 검색 및 카드 등록 API
 router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchLimiter, searchChzzkStreamer);
@@ -100,6 +135,11 @@ router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerL
 
 // 대표 카드 설정
 router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setRepresentativeCard);
+
+// 인앱 알림함
+router.get('/notifications', authMiddleware, getNotifications);
+router.post('/notifications/read-all', authMiddleware, markAllNotificationsRead);
+router.post('/notifications/:id/read', authMiddleware, markNotificationRead);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
 router.post('/trades', authMiddleware, banCheckMiddleware, tradeLimiter, createTrade);
@@ -211,6 +251,9 @@ router.post('/admin/announcements', authMiddleware, adminMiddleware, createAnnou
 
 // 공지사항 삭제
 router.delete('/admin/announcements/:id', authMiddleware, adminMiddleware, deleteAnnouncement);
+
+// 공지사항 팝업 노출 여부 토글
+router.post('/admin/announcements/:id/popup', authMiddleware, adminMiddleware, setAnnouncementPopup);
 
 // 푸시 알림 즉시 또는 예약 생성
 router.post('/admin/push/schedule', authMiddleware, adminMiddleware, scheduleNotification);

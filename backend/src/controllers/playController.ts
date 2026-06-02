@@ -39,6 +39,128 @@ export const getUserMe = async (req: Request, res: Response) => {
 };
 
 /**
+ * 닉네임으로 유저 검색 (거래 상대 선택용)
+ */
+export const searchUsers = async (req: Request, res: Response) => {
+  const keyword = String(req.query.keyword || '').trim();
+  const selfId = (req as any).user?.id;
+  if (keyword.length < 1) {
+    return res.status(400).json({ error: 'BadRequest', message: '검색어가 필요합니다.' });
+  }
+  try {
+    const users = await userRepository.searchByUsername(keyword, 12);
+    const mapped = users
+      .filter((u) => u.id !== selfId) // 자기 자신 제외
+      .map((u) => ({
+        id: u.id,
+        username: u.username,
+        avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`
+      }));
+    return res.status(200).json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '유저 검색 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 특정 유저의 보유 카드 컬렉션(channel_id별 묶음) 조회 — 거래 시 상대 보유 카드 선택용
+ */
+export const getUserCollection = async (req: Request, res: Response) => {
+  const { user_id } = req.params;
+  if (!user_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '유저 ID가 필요합니다.' });
+  }
+  try {
+    const cards = await userCardRepository.findByUserId(user_id);
+    const map: { [cid: string]: any } = {};
+    for (const c of cards) {
+      if (!map[c.channel_id]) {
+        map[c.channel_id] = { channel_id: c.channel_id, count: 0, streamer: c.streamer };
+      }
+      map[c.channel_id].count += 1;
+    }
+    return res.status(200).json(Object.values(map));
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '컬렉션 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 유저 공개 프로필 조회 — 프로필 모달(닉네임/포인트/대표 카드/보유 카드 요약/총자산)
+ */
+export const getUserProfile = async (req: Request, res: Response) => {
+  const { user_id } = req.params;
+  if (!user_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '유저 ID가 필요합니다.' });
+  }
+  try {
+    const user = await userRepository.findById(user_id);
+    if (!user) {
+      return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+    }
+    const cards = await userCardRepository.findByUserId(user_id);
+
+    // 채널별 묶음 + 총 자산(별 배수 반영) 계산
+    const map: { [cid: string]: any } = {};
+    let cardAsset = 0;
+    for (const c of cards) {
+      const baseValue = c.streamer?.base_value || 0;
+      cardAsset += Math.round(baseValue * starValueMultiplier(c.star || 0));
+      if (!map[c.channel_id]) {
+        map[c.channel_id] = {
+          channel_id: c.channel_id,
+          count: 0,
+          maxStar: c.star || 0,
+          streamer: c.streamer
+        };
+      }
+      map[c.channel_id].count += 1;
+      if ((c.star || 0) > map[c.channel_id].maxStar) map[c.channel_id].maxStar = c.star || 0;
+    }
+    const collection = Object.values(map).sort(
+      (a: any, b: any) => (b.streamer?.base_value || 0) - (a.streamer?.base_value || 0)
+    );
+
+    // 대표 카드: 지정된 채널의 카드 중 별이 가장 높은 카드, 없으면 가장 가치 높은 카드
+    let repCard: any = null;
+    const repChannel = user.representative_card_channel_id;
+    const pool = repChannel ? cards.filter((c) => c.channel_id === repChannel) : cards;
+    const candidates = (pool.length ? pool : cards).slice();
+    candidates.sort((a, b) => {
+      const sa = a.star || 0, sb = b.star || 0;
+      if (sb !== sa) return sb - sa;
+      return (b.streamer?.base_value || 0) - (a.streamer?.base_value || 0);
+    });
+    if (candidates.length) {
+      const c = candidates[0];
+      repCard = {
+        channel_id: c.channel_id,
+        star: c.star || 0,
+        serial_number: c.streamer?.serial_number ?? null,
+        streamer: c.streamer,
+        border: c.border || null,
+        name_effect: c.name_effect || null
+      };
+    }
+
+    return res.status(200).json({
+      id: user.id,
+      username: user.username,
+      avatar_url: user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`,
+      point: user.point,
+      card_count: cards.length,
+      unique_count: collection.length,
+      total_asset: user.point + cardAsset,
+      representative_card: repCard,
+      collection
+    });
+  } catch (err: any) {
+    console.error('[PlayController] getUserProfile 에러:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '프로필 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 2. 자산 랭킹 상위 유저 목록 조회
  */
 export const getUserRankings = async (req: Request, res: Response) => {
@@ -355,11 +477,16 @@ export const sellCards = async (req: Request, res: Response) => {
       sellActions.push({ channelId, count, baseValue });
     }
 
-    // D. 판매 처리: 실제로 삭제된 카드 수량만큼만 정산하여 동시 판매로 인한 초과 지급 방지
+    // D. 판매 처리: 실제로 삭제된 카드 수량만큼만 정산 (별 등급 배율 반영)
     let actualGainedPoints = 0;
     for (const action of sellActions) {
+      // 삭제 대상은 오래된(id 오름차순) count장 → 그 카드들의 별 배율을 합산해 정산
+      const ownedAsc = [...(userCardsByChannel[action.channelId] || [])].sort((a, b) => (a.id || 0) - (b.id || 0));
       const deletedCount = await userCardRepository.deleteCards(userId, action.channelId, action.count);
-      actualGainedPoints += action.baseValue * deletedCount;
+      const targets = ownedAsc.slice(0, deletedCount);
+      for (const t of targets) {
+        actualGainedPoints += Math.round(action.baseValue * starValueMultiplier(t.star || 0));
+      }
     }
 
     // 원자적으로 포인트 가산
@@ -377,6 +504,36 @@ export const sellCards = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[PlayController] sellCards 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/** 별 등급에 따른 가치 배율 (0성=1배 ~ 5성=4배) */
+export const starValueMultiplier = (star: number): number => 1 + (star || 0) * 0.6;
+
+/**
+ * 카드 합성: 같은 스트리머·같은 별 카드 2장 → 1장(별+1)
+ * POST /api/cards/fuse  Body: { channel_id, star }
+ */
+export const fuseCards = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+
+  const { channel_id, star } = req.body;
+  const starNum = Number(star) || 0;
+  if (!channel_id) return res.status(400).json({ error: 'BadRequest', message: '합성할 카드(channel_id)가 필요합니다.' });
+  if (starNum < 0 || starNum >= 5) return res.status(400).json({ error: 'BadRequest', message: '0~4성 카드만 합성할 수 있습니다.' });
+
+  try {
+    const result = await userCardRepository.fuse(userId, channel_id, starNum);
+    if (!result.ok) {
+      const msg = result.reason === 'NOT_ENOUGH'
+        ? `${starNum}성 카드가 2장 이상 있어야 합성할 수 있습니다.`
+        : result.reason === 'MAX_STAR' ? '이미 최고 등급(5성)입니다.' : '합성에 실패했습니다.';
+      return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
+    }
+    return res.status(200).json({ message: `합성 성공! ${result.newStar}성 카드가 되었습니다. ⭐`, new_star: result.newStar });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '합성 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

@@ -110,6 +110,19 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE users ADD COLUMN token_expires_at TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT star FROM user_cards LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_cards 테이블에 star 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN star INTEGER DEFAULT 0;");
+      }
+      try {
+        sqliteDb.prepare("SELECT border_item_id FROM user_cards LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_cards 테이블에 코스메틱 장착 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN border_item_id INTEGER;");
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN name_effect_item_id INTEGER;");
+      }
+      try {
         sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] coupons 테이블에 보상(reward) 컬럼이 없어 추가합니다.');

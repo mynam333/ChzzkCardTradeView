@@ -7,6 +7,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { ProfileModal } from './ProfileModal';
 
 interface Streamer {
   channel_id: string;
@@ -17,6 +18,7 @@ interface Streamer {
   follower_count: number;
   prev_value?: number;
   value_1h_ago?: number;
+  is_active?: boolean;
 }
 
 interface UserRank {
@@ -37,6 +39,9 @@ export const RankingTab: React.FC = () => {
   const [userRankings, setUserRankings] = useState<UserRank[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 10;
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchRankings();
@@ -44,6 +49,9 @@ export const RankingTab: React.FC = () => {
     const timer = setInterval(() => fetchRankings(true), 25_000);
     return () => clearInterval(timer);
   }, [subTab]);
+
+  // 탭 전환·검색 시 1페이지로 초기화
+  useEffect(() => { setPage(1); }, [subTab, searchQuery]);
 
   const fetchRankings = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -92,6 +100,14 @@ export const RankingTab: React.FC = () => {
 
   // 컬렉터 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
+
+  // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
+  const activeLength = subTab === 'user' ? rankedUsers.length : rankedStreamers.length;
+  const totalPages = Math.max(1, Math.ceil(activeLength / PER_PAGE));
+  const pageClamped = Math.min(page, totalPages);
+  const sliceStart = (pageClamped - 1) * PER_PAGE;
+  const pagedStreamers = rankedStreamers.slice(sliceStart, sliceStart + PER_PAGE);
+  const pagedUsers = rankedUsers.slice(sliceStart, sliceStart + PER_PAGE);
 
   const rankColor = (rank: number) =>
     rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
@@ -168,10 +184,11 @@ export const RankingTab: React.FC = () => {
             // 컬렉터(유저) 자산 랭킹 (검색해도 실제 순위 유지)
             rankedUsers.length === 0 ? (
               <p className="text-center text-xs text-muted-foreground py-12">표시할 컬렉터가 없습니다.</p>
-            ) : rankedUsers.map((ur) => (
+            ) : pagedUsers.map((ur) => (
               <div
                 key={ur.id}
-                className="flex items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-border transition"
+                onClick={() => setProfileUserId(ur.id)}
+                className="flex cursor-pointer items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-primary/60 hover:bg-secondary/30 transition"
               >
                 <div className="flex items-center gap-4">
                   <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
@@ -190,7 +207,7 @@ export const RankingTab: React.FC = () => {
           ) : rankedStreamers.length === 0 ? (
             <p className="text-center text-xs text-muted-foreground py-12">표시할 스트리머가 없습니다.</p>
           ) : (
-            rankedStreamers.map((st) => {
+            pagedStreamers.map((st) => {
               const diff1h = change1h(st);
               const prev1h = st.value_1h_ago ?? st.base_value ?? 0;
               const rate1h = prev1h > 0 ? (diff1h / prev1h) * 100 : 0;
@@ -207,7 +224,12 @@ export const RankingTab: React.FC = () => {
                 >
                   <div className="flex items-center gap-4">
                     <span className={`w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
-                    <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                    <div className="relative shrink-0">
+                      <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                      {st.is_active && (
+                        <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
+                      )}
+                    </div>
                     <div>
                       <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
                         {st.name}
@@ -248,7 +270,50 @@ export const RankingTab: React.FC = () => {
           )}
         </div>
 
+        {/* 페이지네이션 (10위 단위) */}
+        {!loading && totalPages > 1 && (
+          <div className="mt-5 flex items-center justify-center gap-1.5">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={pageClamped <= 1}
+              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+            >
+              이전
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter((p) => Math.abs(p - pageClamped) <= 2 || p === 1 || p === totalPages)
+              .reduce((acc: (number | string)[], p, idx, arr) => {
+                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('…');
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                typeof p === 'number' ? (
+                  <button
+                    key={i}
+                    onClick={() => setPage(p)}
+                    className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${p === pageClamped ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {p}
+                  </button>
+                ) : (
+                  <span key={i} className="px-1 text-xs text-muted-foreground">{p}</span>
+                )
+              )}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={pageClamped >= totalPages}
+              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+            >
+              다음
+            </button>
+          </div>
+        )}
+
       </div>
+
+      {/* 컬렉터 프로필 모달 */}
+      {profileUserId && <ProfileModal userId={profileUserId} onClose={() => setProfileUserId(null)} />}
 
     </div>
   );

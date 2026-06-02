@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS user_cards (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
     serial_number INTEGER NOT NULL,              -- 발행 일련번호
+    star INTEGER DEFAULT 0,                       -- 합성 별 등급 (0~5)
     acquired_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -133,6 +134,41 @@ CREATE TABLE IF NOT EXISTS card_reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 12. 인앱 알림함 테이블
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT,
+    link TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+
+-- 13. 상점 아이템 (테두리 / 이름 이펙트)
+CREATE TABLE IF NOT EXISTS shop_items (
+    id SERIAL PRIMARY KEY,
+    type TEXT NOT NULL,                          -- 'border' 또는 'name_effect'
+    name TEXT NOT NULL,
+    description TEXT,
+    price INTEGER NOT NULL DEFAULT 0,
+    style_json TEXT,                             -- React 인라인 스타일 객체(JSON 문자열)
+    font_url TEXT,                               -- 이름 이펙트용 웹폰트 URL (선택)
+    font_family TEXT,                            -- 폰트 패밀리명 (선택)
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. 유저 보유 코스메틱 (미장착 수량)
+CREATE TABLE IF NOT EXISTS user_cosmetics (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
+    quantity INTEGER DEFAULT 0,
+    UNIQUE(user_id, item_id)
+);
+
 -- ============================================================
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
 -- ============================================================
@@ -144,6 +180,9 @@ ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
 
 -- ============================================================
 -- 인덱스 설정 (자주 조회되는 컬럼 최적화)

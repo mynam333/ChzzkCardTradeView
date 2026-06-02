@@ -29,7 +29,7 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(payload.title || 'CCTV 알림', {
       body: payload.body || '',
       icon: '/icon.png',
-      badge: '/icon.png',
+      badge: '/badge.png',
       data: { url: payload.url || '/' }
     })
   );
