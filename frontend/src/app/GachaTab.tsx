@@ -83,6 +83,9 @@ export const GachaTab: React.FC = () => {
   const [detailRange, setDetailRange] = useState<'24h' | '7d'>('7d');
   const [detailHover, setDetailHover] = useState<number | null>(null);
 
+  // 카드 확대(상세) 모달 — 테두리/이름 효과가 적용된 카드를 크게 표시
+  const [zoomCard, setZoomCard] = useState<UserCard | null>(null);
+
 
   // 알림 피드백: 전역 토스트로 통일 (title은 메시지 앞에 간단히 덧붙임)
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
@@ -123,10 +126,17 @@ export const GachaTab: React.FC = () => {
 
   // 모바일 롱프레스 타이머 레프
   const longPressTimer = React.useRef<any>(null);
+  // 롱프레스로 메뉴가 떠서 직후의 클릭(확대 모달)을 무시해야 하는지 여부
+  const longPressFired = React.useRef<boolean>(false);
 
   // 전역 클릭 시 컨텍스트 메뉴 닫기
   useEffect(() => {
     const handleGlobalClick = () => {
+      // 롱프레스 직후 발생하는 클릭은 메뉴를 닫지 않고 1회 소비 (모바일에서 메뉴가 즉시 닫히는 것 방지)
+      if (longPressFired.current) {
+        longPressFired.current = false;
+        return;
+      }
       setContextMenu(prev => prev.open ? { ...prev, open: false } : prev);
     };
     window.addEventListener('click', handleGlobalClick);
@@ -1399,22 +1409,31 @@ export const GachaTab: React.FC = () => {
                         setSelectedChannelIds([...selectedChannelIds, streamer.channel_id]);
                       }
                     } else {
-                      // 다중 선택 모드가 아닐 때 카드 클릭 시 시세 상세 모달 오픈 (방송국 이동은 모달 내 버튼으로)
-                      openStreamerDetail(streamer.channel_id);
+                      // 롱프레스로 메뉴가 떴다면 직후의 클릭은 무시 (확대 모달이 뜨지 않도록)
+                      // 플래그 리셋은 전역 클릭 핸들러에서 처리하여 메뉴가 닫히지 않게 함
+                      if (longPressFired.current) return;
+                      // 다중 선택 모드가 아닐 때 카드 클릭 시 확대(상세) 카드 모달 오픈 (시세 상세는 우클릭 메뉴)
+                      setZoomCard(card);
                     }
                   };
 
-                  // 마우스 및 터치 터치 롱프레스 핸들링 (모바일 지원용)
-                  const startPress = () => {
+                  // 마우스 및 터치 롱프레스 핸들링 (모바일에서 길게 누르면 우클릭 메뉴 표시)
+                  const startPress = (e: React.MouseEvent | React.TouchEvent) => {
+                    longPressFired.current = false;
+                    // 터치/마우스 좌표 추출 (메뉴 위치용)
+                    const point = 'touches' in e ? e.touches[0] : (e as React.MouseEvent);
+                    const x = point?.clientX ?? 0;
+                    const y = point?.clientY ?? 0;
                     longPressTimer.current = setTimeout(() => {
-                      if (!selectionMode) {
-                        setSelectionMode(true);
-                        setSelectedChannelIds([streamer.channel_id]);
-                        if (navigator.vibrate) {
-                          navigator.vibrate(50);
-                        }
-                      }
-                    }, 800);
+                      if (selectionMode) return;
+                      longPressFired.current = true;
+                      // 화면 밖으로 넘치지 않도록 메뉴 좌표 보정
+                      const menuW = 180, menuH = 200;
+                      const cx = Math.min(x, window.innerWidth - menuW);
+                      const cy = Math.min(y, window.innerHeight - menuH);
+                      setContextMenu({ x: Math.max(8, cx), y: Math.max(8, cy), open: true, card });
+                      if (navigator.vibrate) navigator.vibrate(40);
+                    }, 500);
                   };
 
                   const endPress = () => {
@@ -1522,6 +1541,64 @@ export const GachaTab: React.FC = () => {
         })()}
       </section>
 
+      {/* 카드 확대(상세) 모달 — 카드 외 영역 클릭 시 닫힘 */}
+      {zoomCard && (() => {
+        const live = inventory.find((c) => c.id === zoomCard.id) || zoomCard;
+        const s = live.streamer;
+        if (!s) return null;
+        const star = live.star || 0;
+        const value = Math.round((s.base_value || 0) * starMult(star));
+        return (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
+            onClick={() => setZoomCard(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={borderStyle(live.border)}
+              className={`relative flex aspect-[5/8] h-[82vh] max-h-[82vh] max-w-[92vw] flex-col justify-between overflow-hidden rounded-3xl bg-card p-6 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+            >
+              {/* 카드 이미지 배경 */}
+              <div className="absolute inset-0 z-0">
+                <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
+              </div>
+
+              {/* 상단 정보 */}
+              <div className="relative z-20 flex items-center justify-between">
+                {s.is_active || (s as any).isLive ? (
+                  <span className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1 animate-pulse">
+                    <span className="h-1.5 w-1.5 rounded-full bg-white"></span> LIVE
+                  </span>
+                ) : (
+                  <span className="rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-bold text-zinc-400">OFFLINE</span>
+                )}
+                <span className="rounded-md bg-black/40 px-2.5 py-1 text-xs font-black text-white/90">
+                  No.{String(s.serial_number ?? 0).padStart(4, '0')}
+                </span>
+              </div>
+
+              {/* 하단 정보 */}
+              <div className="relative z-20 space-y-2 text-white">
+                {star > 0 && (
+                  <div className="flex items-center gap-1 drop-shadow">
+                    {Array.from({ length: star }, (_, i) => (
+                      <span key={i} className="text-amber-300 text-2xl leading-none">★</span>
+                    ))}
+                  </div>
+                )}
+                <h3 className="text-3xl font-black tracking-tight drop-shadow-lg" style={nameEffectStyle(live.name_effect)}>{s.name}</h3>
+                <p className="text-sm text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
+                <div className="flex items-center justify-between border-t border-white/20 pt-3">
+                  <span className="text-sm text-zinc-300">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                  <span className="text-2xl font-black text-emerald-400 drop-shadow">{value.toLocaleString()} P</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 우클릭 컨텍스트 메뉴 오버레이 */}
       {contextMenu.open && contextMenu.card && (
         <div
@@ -1544,6 +1621,15 @@ export const GachaTab: React.FC = () => {
             className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
           >
             💰 카드 판매하기
+          </button>
+          <button
+            onClick={() => {
+              if (contextMenu.card?.streamer) openStreamerDetail(contextMenu.card.streamer.channel_id);
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+          >
+            📈 스트리머 시세 상세
           </button>
           <button
             onClick={() => {
