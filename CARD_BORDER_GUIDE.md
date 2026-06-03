@@ -3,8 +3,6 @@
 CCTV(치지직 카드 트레이드 뷰)의 **프리미엄 카드 테두리**를 CSS만으로 만드는 방법을 처음부터 끝까지 설명합니다.
 프리셋을 쓰지 않고, **여기서 작성한 CSS를 관리자 페이지에 그대로 붙여넣으면 즉시 적용**됩니다.
 
-> 카드 **이름 글자**에 입히는 효과는 [`NAME_EFFECT_GUIDE.md`](./NAME_EFFECT_GUIDE.md)를 참고하세요.
-
 > ## ⭐ 지향점 — "이미지 수준의 완성도"
 > 이 테두리는 단순 장식이 아니라 **유료로 판매하는 카드 스킨**입니다.
 > 실제 일러스트 카드 프레임처럼 **정교한 디테일, 풍부한 질감, 살아 있는 애니메이션, 완성도 높은 마감**을 목표로 하세요.
@@ -128,28 +126,6 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 > 모서리가 둥근 곡선 장식은 `preserveAspectRatio='none'` 로 약간 늘어납니다.
 > 너무 동그란 모티프보다 **사선·결정·기하학** 모티프가 늘어짐을 잘 견딥니다.
 
-### 4.4 고급 SVG — 그라데이션 · 재사용 · 입체감 (완성도의 핵심)
-플랫한 단색 선만 쓰면 "대충 그린 테두리"가 됩니다. 아래 기법으로 **금속/유리/보석 질감**을 만드세요.
-
-- **`<defs>` + 그라데이션**: 프레임 선을 단색 대신 그라데이션으로 칠하면 입체감이 확 살아납니다.
-  ```svg
-  <defs>
-    <linearGradient id='au' x1='0' y1='0' x2='1' y2='1'>
-      <stop offset='0' stop-color='#fff1bd'/><stop offset='.5' stop-color='#e8c66a'/><stop offset='1' stop-color='#a8842a'/>
-    </linearGradient>
-    <radialGradient id='gem' cx='38%' cy='34%' r='70%'>
-      <stop offset='0' stop-color='#ff9a9a'/><stop offset='1' stop-color='#c01726'/>
-    </radialGradient>
-  </defs>
-  <rect ... stroke='url(#au)'/>      <!-- 금속 광택 프레임 -->
-  <path ... fill='url(#gem)'/>       <!-- 면이 살아있는 보석 -->
-  ```
-  > data URI 안에서 `url(#au)` 의 `#` 도 `%23` 로 인코딩합니다 → `url(%23au)`.
-- **`<g id='..'>` + `<use href='%23..'>`**: 단풍잎·꽃·눈결정·기어 같은 모티프를 한 번 정의하고
-  코너마다 `transform='translate(..) rotate(..) scale(..)'` 로 재사용하면, 적은 코드로 **풍부한 디테일**을 얻습니다.
-- **잎맥·면 분할 같은 미세 디테일**: 실루엣만 칠하지 말고 잎맥(가는 선), 보석 면 분할선, 금속 하이라이트 점을
-  함께 그리면 **일러스트에 가까운 밀도**가 나옵니다.
-
 ---
 
 ## 5. 살아 있게 만들기 — 애니메이션 레시피
@@ -175,29 +151,46 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 ```
 - **3D 글린트**: 흰 코어 양옆에 시안/마젠타를 살짝 두면 유리 굴절(색수차) 느낌이 납니다.
 
-### 5.2 떨어지는/피어오르는 입자 (꽃잎·눈·낙엽·불씨)
-여러 점을 `radial-gradient` 로 찍고, 세로 타일을 무한 스크롤하면 **이음매 없이** 흐릅니다.
+### 5.2 떨어지는/피어오르는 입자 (진짜 벚꽃잎·눈결정·단풍잎·불꽃 등) — 정밀 루프 및 복합 스웨이 설계법
+단순히 `radial-gradient`로 흐릿한 원을 그리는 것은 완성도를 떨어뜨립니다. **실제 나뭇잎, 꽃잎, 눈결정, 조개 소품 등을 정교한 SVG 코드로 디자인한 다음, 세로 픽셀 주기에 맞춰 상하 경계를 일치시키는 '무단절 벡터 타일링'**을 적용해야 완벽한 소장 가치를 지닙니다.
+
+또한, 입자가 수직으로만 떨어지면 기계적이고 지루합니다. **배경 스크롤(Y축)과 수평 산들 흔들림(translateX) 및 공기 저항 회전(rotate/skewX)을 단일 키프레임 속에 정밀하게 연동**하여 극강의 부드러움을 구현하세요.
 
 ```css
-.cb-mytheme::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
+.cb-mytheme::before {
+  content: ""; 
+  position: absolute; 
+  /* [중요] 흔들리거나 요동칠 때 카드 바깥 경계선이 툭 잘려 보이는 현상을 방지하는 마진 가이드 */
+  inset: -15px; 
+  pointer-events: none;
   background-repeat: repeat;
-  background-size: 100% 220px;               /* 세로 타일 높이 */
-  background-image:
-    radial-gradient(6px 4px at 14px 18px,  rgba(255,170,205,.95), transparent 65%),
-    radial-gradient(5px 3px at 72px 60px,  rgba(255,195,220,.85), transparent 65%),
-    radial-gradient(7px 5px at 40px 120px, rgba(255,160,200,.9),  transparent 65%);
-  animation: mytheme-fall 7.5s linear infinite,
-             mytheme-sway 3.2s ease-in-out infinite alternate;
+  background-size: 100% 160px;               /* 백가운드 타일 세로 주기를 160px로 박제 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160'%3E%3C!-- [핵심] 상하단 루프 완벽 일치를 위한 반 가른 보완용 장식 쌍 (예: Y=0 및 Y=160 에 나누어 배치) --%3E%3Cpath d='M50,-7 L52,-15 L55,-12 L60,-19 ...' fill='%23e03f1b' /%3E%3Cpath d='M50,153 L52,145 L55,148 L60,141 ...' fill='%23e03f1b' /%3E%3C!-- 중앙 지역 자유로운 리얼 일러스트 장물들 --%3E%3Cg transform='translate(15, 30)'%3E...%3C/g%3E%3C/svg%3E");
+  
+  /* 마법의 자연 풍향 2선식 복합 애니메이션 구현 */
+  animation: mytheme-drift 8.5s linear infinite;
+  mix-blend-mode: screen;
 }
-@keyframes mytheme-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
-@keyframes mytheme-sway { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
+
+/* [최고급 품질의 정수] 단순 이동이 아닌, 복합 물리 변환(translation + rotation)으로 산들산들 낙하하는 낙엽/꽃잎 기류 재현 */
+@keyframes mytheme-drift {
+  0% {
+    background-position-y: 0px;
+    transform: translateX(-4px) rotate(0deg);
+  }
+  50% {
+    /* 낙하 중간점에 수평 관성 흔들림과 미세 공용 회전각을 기여 */
+    transform: translateX(4px) rotate(1deg);
+  }
+  100% {
+    /* 타일링 주기인 160px에 정확히 끝점을 수렴시켜 무단절 연결 보장 */
+    background-position-y: 160px;
+    transform: translateX(-4px) rotate(0deg);
+  }
+}
 ```
-- 위로 피어오르게 하려면 `to { background-position-y: -220px; }` (불씨·기포).
-- 타일 높이(`220px`)와 이동량을 **같게** 맞춰야 이음매가 없습니다.
-- **입자도 SVG로**: 단순 점 대신 `<use>` 로 배치한 진짜 잎/꽃잎/눈결정 SVG를 타일에 넣으면 훨씬 사실적입니다.
-- **2겹 패럴랙스**: `::after`(가깝고 크고 빠름) + `::before`(멀고 작고 느리고 흐림, `opacity:.5`)로 두 층을 겹치면
-  깊이감이 생겨 "진짜 떨어지는" 느낌이 납니다. 두 층의 속도·크기·타일 높이를 다르게 두세요.
+- **상향 표류 (불씨·수중 기포)**: 피어오르는 효과는 이동 방향을 반대로 주어 `0% { background-position-y: 160px; } 100% { background-position-y: 0px; }` 처럼 위로 올리면서, `skewX(-0.5deg) -> skewX(0.5deg)` 와 같이 뜨거운 열풍 전단 진동을 가입하면 환상적입니다.
+- **경계 보호(Over-scan/Inset 오프셋)**: `translateX`나 `rotate` 변환을 실행하면 레이어 외각 모서리가 안쪽으로 침범되어 빈 구석이 노출됩니다. 이를 극복하기 위해 반드시 **`inset: -15px` 이상**을 부여하여 여유 프레임을 사전에 확보하세요.
 
 ### 5.3 회전 (기어·룬)
 ```css
