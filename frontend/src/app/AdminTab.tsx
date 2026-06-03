@@ -34,6 +34,12 @@ export const AdminTab: React.FC = () => {
   const [streamerSearch, setStreamerSearch] = useState('');
   const [streamerPage, setStreamerPage] = useState(1);
 
+  // 스트리머 카드 삭제(폐기) 검색/페이지네이션/확인
+  const [delSearch, setDelSearch] = useState('');
+  const [delPage, setDelPage] = useState(1);
+  const [delTarget, setDelTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // 상점 관리
   const [shopItems, setShopItems] = useState<any[]>([]);
   const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true };
@@ -277,6 +283,26 @@ export const AdminTab: React.FC = () => {
       price: item.price, style_json: item.style_json || '', font_url: item.font_url || '',
       font_family: item.font_family || '', active: item.active
     });
+  };
+
+  const handleDeleteStreamer = async () => {
+    if (!delTarget) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/admin/streamers/${delTarget.channel_id}/delete`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '스트리머 카드를 삭제했습니다.', 'success');
+        setDelTarget(null);
+        fetchCouponStreamers(true);
+      } else {
+        toast(data.message || '삭제 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string, star?: number) => {
@@ -695,9 +721,83 @@ export const AdminTab: React.FC = () => {
                 <button onClick={() => handleStreamerImageAction('unban')} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">차단 해제</button>
               </div>
             </div>
+
+            {/* 스트리머 카드 삭제(폐기) — 보유자에게 시세 보상 후 카드/스트리머 제거 */}
+            {(() => {
+              const kw = delSearch.trim().toLowerCase();
+              const list = (kw
+                ? couponStreamers.filter((s) => (s.name || '').toLowerCase().includes(kw) || (s.channel_id || '').toLowerCase().includes(kw))
+                : couponStreamers
+              ).slice().sort((a, b) => (b.base_value || 0) - (a.base_value || 0));
+              const PER = 8;
+              const totalPages = Math.max(1, Math.ceil(list.length / PER));
+              const page = Math.min(delPage, totalPages);
+              const paged = list.slice((page - 1) * PER, page * PER);
+              return (
+                <div className="rounded-2xl border border-red-500/30 bg-card p-5 shadow-sm">
+                  <h3 className="text-sm font-bold flex items-center gap-1.5 text-red-500"><Trash2 className="h-4 w-4" /> 스트리머 카드 삭제(폐기)</h3>
+                  <p className="mt-1 mb-3 text-[11px] text-muted-foreground leading-relaxed">
+                    삭제 시 해당 카드를 보유한 모든 유저에게 <b className="text-foreground/80">삭제 시점 시세(별 등급 반영)</b>만큼 포인트를 지급한 뒤 카드를 제거하고 스트리머를 폐기합니다. <b className="text-red-500">되돌릴 수 없습니다.</b>
+                  </p>
+                  <input
+                    type="text"
+                    placeholder="스트리머 이름 또는 채널 ID 검색"
+                    value={delSearch}
+                    onChange={(e) => { setDelSearch(e.target.value); setDelPage(1); }}
+                    className="mb-3 w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+                  />
+                  <div className="space-y-2">
+                    {paged.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-6">스트리머가 없습니다.</p>
+                    ) : paged.map((s) => (
+                      <div key={s.channel_id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-9 w-9 rounded object-cover border border-border" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold truncate">{s.name}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">현재 시세 {(s.base_value || 0).toLocaleString()} P · {s.channel_id}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => setDelTarget(s)} className="shrink-0 rounded bg-red-500/10 px-2.5 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500/20">카드 삭제</button>
+                      </div>
+                    ))}
+                  </div>
+                  {totalPages > 1 && (
+                    <div className="mt-3 flex items-center justify-center gap-2">
+                      <button onClick={() => setDelPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+                        className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none">이전</button>
+                      <span className="text-xs font-bold text-muted-foreground">{page} / {totalPages}</span>
+                      <button onClick={() => setDelPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                        className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none">다음</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </section>
         );
       })()}
+
+      {/* 스트리머 카드 삭제 확인 모달 */}
+      {delTarget && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !deleting && setDelTarget(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center" onClick={(e) => e.stopPropagation()}>
+            <Trash2 className="mx-auto h-9 w-9 text-red-500 mb-3" />
+            <h4 className="text-sm font-black text-foreground mb-2">스트리머 카드 삭제</h4>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <b className="text-foreground">{delTarget.name}</b> 카드를 모든 보유자에게서 삭제합니다.<br />
+              보유자에게는 <b className="text-emerald-500">현재 시세({(delTarget.base_value || 0).toLocaleString()} P, 별 등급 반영)</b>만큼 포인트가 지급됩니다.<br />
+              <b className="text-red-500">이 작업은 되돌릴 수 없습니다.</b>
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              <button onClick={() => setDelTarget(null)} disabled={deleting} className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80 disabled:opacity-50">취소</button>
+              <button onClick={handleDeleteStreamer} disabled={deleting} className="rounded-lg bg-red-500 px-5 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50">
+                {deleting ? '삭제 중...' : '삭제하고 보상 지급'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 상점 관리 */}
       {subTab === 'shop' && (

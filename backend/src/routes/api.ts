@@ -11,6 +11,7 @@ import {
   resetStreamerImage,
   banStreamerImage,
   unbanStreamerImage,
+  deleteStreamerCards,
   banUser,
   unbanUser,
   getReports,
@@ -237,6 +238,9 @@ router.post('/admin/streamers/:channel_id/image/ban', authMiddleware, adminMiddl
 
 // 특정 스트리머의 이미지 업로드 편집 권한 차단 해제 (언밴)
 router.post('/admin/streamers/:channel_id/image/unban', authMiddleware, adminMiddleware, unbanStreamerImage);
+
+// 특정 스트리머 카드 전량 삭제(폐기) + 보유자에게 시세 보상 지급
+router.post('/admin/streamers/:channel_id/delete', authMiddleware, adminMiddleware, deleteStreamerCards);
 
 // 특정 유저에 대한 활동 제재 실행 (1일, 7일, 30일, 영구 정지)
 router.post('/admin/users/:user_id/ban', authMiddleware, adminMiddleware, banUser);

@@ -168,6 +168,8 @@ export interface IStreamerRepository {
   getValue24hAgoMap(): Promise<Record<string, number>>;
   /** 채널별 약 1시간 전 시세 맵을 반환합니다(1시간 등락 랭킹용). */
   getValue1hAgoMap(): Promise<Record<string, number>>;
+  /** 스트리머를 삭제합니다(연관 카드/시세이력/신고는 FK CASCADE로 함께 제거). */
+  delete(channelId: string): Promise<void>;
 }
 
 // 3. 쿠폰 리포지토리 인터페이스
@@ -269,4 +271,8 @@ export interface IUserCardRepository {
   count(): Promise<number>;
   /** 같은 스트리머·같은 별 카드 2장을 합성하여 1장(별+1)으로 만듭니다. */
   fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }>;
+  /** 특정 스트리머 카드의 보유자·별 목록(보상 계산용). */
+  findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
+  /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
+  deleteByChannel(channelId: string): Promise<number>;
 }

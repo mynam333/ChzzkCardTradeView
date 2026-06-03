@@ -5,10 +5,66 @@ import {
   reportRepository,
   couponRepository,
   userCardRepository,
-  tradeRepository
+  tradeRepository,
+  notificationRepository
 } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import { sendPushToUser } from './pushController';
+
+/**
+ * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 삭제 시점 시세만큼 보상 지급
+ * - 보유 카드 1장당 base_value × (1 + star*0.6) 포인트를 보유자에게 지급
+ * - 이후 해당 스트리머의 카드를 모두 삭제하고 스트리머 레코드도 제거(시세이력/신고 CASCADE)
+ */
+export const deleteStreamerCards = async (req: Request, res: Response) => {
+  const { channel_id } = req.params;
+  if (!channel_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '대상 스트리머 채널 ID가 유효하지 않습니다.' });
+  }
+  try {
+    const streamer = await streamerRepository.findById(channel_id);
+    if (!streamer) {
+      return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
+    }
+
+    const baseValue = streamer.base_value || 0;
+    const cards = await userCardRepository.findByChannel(channel_id);
+
+    // 보유자별 보상 합산 (별 등급 배율 반영)
+    const payout: Record<string, number> = {};
+    for (const c of cards) {
+      payout[c.user_id] = (payout[c.user_id] || 0) + Math.round(baseValue * (1 + (c.star || 0) * 0.6));
+    }
+
+    // 포인트 지급 + 알림
+    let totalPaid = 0;
+    for (const [userId, amount] of Object.entries(payout)) {
+      if (amount <= 0) continue;
+      await userRepository.incrementPoint(userId, amount);
+      totalPaid += amount;
+      const title = '카드 보상 지급';
+      const body = `'${streamer.name}' 카드가 삭제되어 ${amount.toLocaleString()} P가 지급되었습니다.`;
+      sendPushToUser(userId, title, body, '/');
+      notificationRepository.create({ user_id: userId, title, body, link: 'gacha' }).catch(() => { /* 무시 */ });
+    }
+
+    // 카드 전량 삭제 후 스트리머 제거
+    const removed = await userCardRepository.deleteByChannel(channel_id);
+    await streamerRepository.delete(channel_id);
+
+    return res.status(200).json({
+      message: `'${streamer.name}' 스트리머 카드를 삭제했습니다. 보유자 ${Object.keys(payout).length}명에게 총 ${totalPaid.toLocaleString()} P를 지급했습니다. (삭제 카드 ${removed}장)`,
+      channel_id,
+      affected_users: Object.keys(payout).length,
+      cards_removed: removed,
+      total_points_paid: totalPaid
+    });
+  } catch (err: any) {
+    console.error('[AdminController] deleteStreamerCards 에러:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 카드 삭제 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
 
 /**
  * 1. 스트리머 카드 커스텀 이미지를 기본 프로필로 강제 초기화

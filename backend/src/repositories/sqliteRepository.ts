@@ -283,6 +283,10 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     this.getDb().prepare(`UPDATE streamers SET ${setClause}, updated_at = datetime('now') WHERE channel_id = ?`)
       .run(channelId);
   }
+  async delete(channelId: string): Promise<void> {
+    // 연관 user_cards/value_history/card_reports 는 FK ON DELETE CASCADE 로 함께 삭제됩니다.
+    this.getDb().prepare('DELETE FROM streamers WHERE channel_id = ?').run(channelId);
+  }
   async updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void> {
     this.getDb().prepare('UPDATE streamers SET is_image_banned = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
       .run(isBanned ? 1 : 0, channelId);
@@ -686,6 +690,18 @@ export class SqliteUserCardRepository implements IUserCardRepository {
   async count(): Promise<number> {
     const row = this.getDb().prepare('SELECT COUNT(*) AS c FROM user_cards').get() as any;
     return row?.c || 0;
+  }
+
+  async findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]> {
+    const rows = this.getDb().prepare(
+      'SELECT user_id, COALESCE(star, 0) AS star FROM user_cards WHERE channel_id = ?'
+    ).all(channelId) as any[];
+    return rows.map(r => ({ user_id: r.user_id, star: r.star || 0 }));
+  }
+
+  async deleteByChannel(channelId: string): Promise<number> {
+    const result = this.getDb().prepare('DELETE FROM user_cards WHERE channel_id = ?').run(channelId);
+    return result.changes;
   }
 }
 

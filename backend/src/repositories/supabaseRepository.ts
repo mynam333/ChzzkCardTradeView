@@ -331,6 +331,14 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
   }
+  async delete(channelId: string): Promise<void> {
+    // 연관 user_cards/value_history/card_reports 는 FK ON DELETE CASCADE 로 함께 삭제됩니다.
+    const { error } = await this.getClient()
+      .from('streamers')
+      .delete()
+      .eq('channel_id', channelId);
+    if (error) throw error;
+  }
   async updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void> {
     const { error } = await this.getClient()
       .from('streamers')
@@ -864,6 +872,24 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       .from('user_cards')
       .select('*', { count: 'exact', head: true });
     if (error) return 0;
+    return count || 0;
+  }
+
+  async findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .select('user_id, star')
+      .eq('channel_id', channelId);
+    if (error || !data) return [];
+    return data.map((r: any) => ({ user_id: r.user_id, star: r.star || 0 }));
+  }
+
+  async deleteByChannel(channelId: string): Promise<number> {
+    const { error, count } = await this.getClient()
+      .from('user_cards')
+      .delete({ count: 'exact' })
+      .eq('channel_id', channelId);
+    if (error) throw error;
     return count || 0;
   }
 }
