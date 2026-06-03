@@ -157,9 +157,9 @@ router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerL
 router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setRepresentativeCard);
 
 // 인앱 알림함
-router.get('/notifications', authMiddleware, getNotifications);
-router.post('/notifications/read-all', authMiddleware, markAllNotificationsRead);
-router.post('/notifications/:id/read', authMiddleware, markNotificationRead);
+router.get('/notifications', authMiddleware, banCheckMiddleware, getNotifications);
+router.post('/notifications/read-all', authMiddleware, banCheckMiddleware, markAllNotificationsRead);
+router.post('/notifications/:id/read', authMiddleware, banCheckMiddleware, markNotificationRead);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
 router.post('/trades', authMiddleware, banCheckMiddleware, tradeLimiter, createTrade);
@@ -235,7 +235,7 @@ router.get('/announcements/popups', getActivePopups);
 router.get('/push/vapid-key', getVapidPublicKey);
 
 // PWA 푸시 구독 등록
-router.post('/push/subscribe', authMiddleware, subscribePush);
+router.post('/push/subscribe', authMiddleware, banCheckMiddleware, subscribePush);
 
 // ==========================================
 // 3. 관리자(ADMIN) 전용 통제 기능 (Admin Guard 및 Auth Check 필터 통과)

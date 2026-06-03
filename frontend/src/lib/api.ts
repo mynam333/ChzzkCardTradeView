@@ -27,8 +27,28 @@ export const apiFetch = async (
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  return fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   });
+
+  // 밴 상태 체크 인터셉터 (403 BannedUser 예외)
+  if (response.status === 403) {
+    try {
+      const clone = response.clone();
+      const data = await clone.json();
+      if (data && data.error === 'BannedUser') {
+        if (typeof window !== 'undefined') {
+          // 경고창을 띄우고 즉시 토큰 폐기 및 강제 이탈(홈 화면 리다이렉트)
+          alert(data.message || '이용 정지 조치된 계정입니다.');
+          localStorage.removeItem('cctv_jwt_token');
+          window.location.href = '/';
+        }
+      }
+    } catch (err) {
+      // JSON 파싱 에러는 안전하게 무시
+    }
+  }
+
+  return response;
 };
