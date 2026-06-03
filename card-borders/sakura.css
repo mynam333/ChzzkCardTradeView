@@ -1,0 +1,37 @@
+/* ============================================================
+   벚꽃 (Cherry Blossom) — 분홍 프레임 + 흩날려 떨어지는 꽃잎
+   적용 클래스: cb-sakura
+   ============================================================ */
+.cb-sakura {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='10' fill='none' stroke='%23ffaecb' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='8' fill='none' stroke='%23ffd6e6' stroke-width='1'/%3E%3Cg fill='%23ff9ec2'%3E%3Cpath d='M14,12 q3,-6 6,0 q6,-3 0,5 q3,6 -3,3 q-3,6 -6,0 q-6,3 0,-5 q-3,-6 3,-3z'/%3E%3Cpath d='M86,148 q3,-6 6,0 q6,-3 0,5 q3,6 -3,3 q-3,6 -6,0 q-6,3 0,-5 q-3,-6 3,-3z'/%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: 0 0 12px rgba(255,158,194,.5), inset 0 0 10px rgba(255,200,220,.3);
+}
+.cb-sakura::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+  background-size: 100% 220px;
+  background-image:
+    radial-gradient(6px 4px at 14px 18px, rgba(255,170,205,.95), transparent 65%),
+    radial-gradient(5px 3px at 72px 60px, rgba(255,195,220,.85), transparent 65%),
+    radial-gradient(7px 5px at 40px 120px, rgba(255,160,200,.9), transparent 65%),
+    radial-gradient(4px 3px at 90px 96px, rgba(255,205,225,.8), transparent 65%),
+    radial-gradient(5px 4px at 24px 170px, rgba(255,180,210,.85), transparent 65%);
+  animation: sakura-fall 7.5s linear infinite, sakura-sway 3.2s ease-in-out infinite alternate;
+}
+@keyframes sakura-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
+@keyframes sakura-sway { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-sakura::after { animation: none; }
+}

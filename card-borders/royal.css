@@ -1,0 +1,33 @@
+/* ============================================================
+   황금 로얄 (Royal Gold) — 정교한 금장 + 보석 + 광택
+   적용 클래스: cb-royal
+   ============================================================ */
+.cb-royal {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='6' fill='none' stroke='%23f6d365' stroke-width='3'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='6' fill='none' stroke='%23a87b21' stroke-width='1'/%3E%3Crect x='7' y='7' width='86' height='146' rx='4' fill='none' stroke='%23ffe9a8' stroke-width='1' stroke-dasharray='1 2'/%3E%3Cpath d='M40,4 Q50,12 60,4' fill='none' stroke='%23f6d365' stroke-width='1.4'/%3E%3Cpath d='M40,156 Q50,148 60,156' fill='none' stroke='%23f6d365' stroke-width='1.4'/%3E%3Cpolygon points='50,2 53,6 50,10 47,6' fill='%23e8483f'/%3E%3Cpolygon points='50,150 53,154 50,158 47,154' fill='%234f8ef7'/%3E%3C/svg%3E");
+  box-shadow: 0 0 14px rgba(246,211,101,.55), inset 0 0 10px rgba(168,123,33,.4);
+}
+.cb-royal::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -90%; width: 48%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 43%, rgba(255,247,214,.85) 50%, transparent 57%);
+  mix-blend-mode: screen;
+  animation: royal-shine 4.6s cubic-bezier(.85,0,.15,1) infinite;
+}
+@keyframes royal-shine {
+  0%   { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(500%) skewX(-20deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-royal::after { animation: none; }
+}

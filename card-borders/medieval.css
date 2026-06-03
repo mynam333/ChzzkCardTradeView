@@ -1,0 +1,33 @@
+/* ============================================================
+   중세풍 (Medieval) — 강철·금장 프레임 + 리벳 + 방패 코너 + 금속 광택
+   적용 클래스: cb-medieval
+   ============================================================ */
+.cb-medieval {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='%23c8cdd6' stroke-width='4'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='%238a929e' stroke-width='1'/%3E%3Crect x='7' y='7' width='86' height='146' rx='2' fill='none' stroke='%23d9b25a' stroke-width='1.4'/%3E%3Cg fill='%23eef1f5' stroke='%237b828d' stroke-width='.5'%3E%3Ccircle cx='8' cy='8' r='2.4'/%3E%3Ccircle cx='92' cy='8' r='2.4'/%3E%3Ccircle cx='8' cy='152' r='2.4'/%3E%3Ccircle cx='92' cy='152' r='2.4'/%3E%3Ccircle cx='50' cy='6' r='2'/%3E%3Ccircle cx='50' cy='154' r='2'/%3E%3C/g%3E%3Cpath d='M44,4 L56,4 L56,9 L50,13 L44,9 Z' fill='%23d9b25a' stroke='%238a6a22' stroke-width='.6'/%3E%3C/svg%3E");
+  box-shadow: inset 0 0 10px rgba(0,0,0,.5), 0 0 8px rgba(200,205,214,.35);
+}
+.cb-medieval::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -90%; width: 45%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 44%, rgba(255,255,255,.55) 50%, transparent 56%);
+  mix-blend-mode: screen;
+  animation: medieval-shine 6s cubic-bezier(.85,0,.15,1) infinite;
+}
+@keyframes medieval-shine {
+  0%   { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(520%) skewX(-20deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-medieval::after { animation: none; }
+}

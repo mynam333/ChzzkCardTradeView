@@ -1,0 +1,37 @@
+/* ============================================================
+   낙엽 (Autumn) — 단풍 프레임 + 떨어지는 낙엽
+   적용 클래스: cb-autumn
+   ============================================================ */
+.cb-autumn {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='7' fill='none' stroke='%23c1622a' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='5' fill='none' stroke='%23e0973f' stroke-width='1'/%3E%3Cpath d='M12,10 l3,-5 3,5 -3,2z' fill='%23d2691e'/%3E%3Cpath d='M88,150 l3,-5 3,5 -3,2z' fill='%23a8431a'/%3E%3C/svg%3E");
+  box-shadow: 0 0 11px rgba(193,98,42,.45), inset 0 0 10px rgba(160,67,26,.3);
+}
+.cb-autumn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+  background-size: 100% 220px;
+  background-image:
+    radial-gradient(5px 4px at 16px 24px, rgba(214,105,30,.95), transparent 62%),
+    radial-gradient(6px 4px at 70px 70px, rgba(176,84,28,.9), transparent 62%),
+    radial-gradient(5px 5px at 42px 130px, rgba(224,151,63,.9), transparent 62%),
+    radial-gradient(4px 3px at 92px 104px, rgba(180,90,20,.85), transparent 62%),
+    radial-gradient(5px 4px at 28px 186px, rgba(205,120,45,.85), transparent 62%);
+  animation: autumn-fall 8s linear infinite, autumn-sway 2.6s ease-in-out infinite alternate;
+}
+@keyframes autumn-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
+@keyframes autumn-sway { from { transform: translateX(-7%); } to { transform: translateX(7%); } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-autumn::after { animation: none; }
+}

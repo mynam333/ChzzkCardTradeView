@@ -1,0 +1,40 @@
+/* ============================================================
+   화산 (Volcano) — 흑요석 프레임 + 피어오르는 불씨 + 적열 글로우
+   적용 클래스: cb-volcano
+   ============================================================ */
+.cb-volcano {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%232b2320' stroke-width='3.4'/%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%23ff5a1f' stroke-width='1' stroke-dasharray='3 4'/%3E%3Crect x='7.5' y='7.5' width='85' height='145' rx='3' fill='none' stroke='%23ff7a3c' stroke-width='.8'/%3E%3C/svg%3E");
+  box-shadow: 0 0 16px rgba(255,90,31,.55), inset 0 0 12px rgba(255,60,0,.4);
+  animation: volcano-glow 2.2s ease-in-out infinite;
+}
+.cb-volcano::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background-repeat: repeat;
+  background-size: 100% 220px;
+  background-image:
+    radial-gradient(2.4px 2.4px at 16px 200px, rgba(255,170,60,.95), transparent 60%),
+    radial-gradient(1.8px 1.8px at 70px 160px, rgba(255,120,30,.9), transparent 60%),
+    radial-gradient(2px 2px at 42px 120px, rgba(255,200,90,.9), transparent 60%),
+    radial-gradient(1.6px 1.6px at 88px 180px, rgba(255,90,20,.85), transparent 60%),
+    radial-gradient(2.2px 2.2px at 30px 90px, rgba(255,150,50,.85), transparent 60%);
+  animation: volcano-rise 3.4s linear infinite, volcano-sway 2s ease-in-out infinite alternate;
+}
+@keyframes volcano-glow { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+@keyframes volcano-rise { from { background-position-y: 0; } to { background-position-y: -220px; } }
+@keyframes volcano-sway { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-volcano, .cb-volcano::after { animation: none; }
+}

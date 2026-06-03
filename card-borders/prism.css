@@ -1,0 +1,43 @@
+/* ============================================================
+   프리즘 홀로 (Prism) — 무지개 홀로그램 보더(흐름) + 광택
+   적용 클래스: cb-prism
+   참고: 무지개 '보더'는 mask-composite 로 테두리만 남기는 기법을 사용합니다.
+   ============================================================ */
+.cb-prism {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 3px;
+  background:
+    linear-gradient(120deg, #ff6ec4, #f9d423, #3ee6c4, #5b8def, #b06ef9, #ff6ec4) border-box;
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  box-shadow: 0 0 16px rgba(180,110,249,.5);
+  animation: prism-flow 6s linear infinite;
+}
+.cb-prism::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -90%; width: 45%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 44%, rgba(255,255,255,.7) 50%, transparent 56%);
+  mix-blend-mode: screen;
+  animation: prism-shine 4s cubic-bezier(.85,0,.15,1) infinite;
+}
+@keyframes prism-flow {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+@keyframes prism-shine {
+  0%   { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(500%) skewX(-20deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-prism, .cb-prism::after { animation: none; }
+}

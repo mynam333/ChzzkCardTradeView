@@ -1,0 +1,47 @@
+/* ============================================================
+   사이버펑크 (Cyberpunk) — 네온 회로 코너 + 스캔라인 + 네온 글로우 펄스
+   적용 클래스: cb-cyberpunk
+   ============================================================ */
+.cb-cyberpunk {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='2' y='2' width='96' height='156' rx='2' fill='none' stroke='%2300eaff' stroke-width='1.4'/%3E%3Cpath d='M2,28 L2,10 Q2,2 10,2 L34,2' fill='none' stroke='%23ff2bd6' stroke-width='2.4'/%3E%3Cpath d='M98,132 L98,150 Q98,158 90,158 L66,158' fill='none' stroke='%23ff2bd6' stroke-width='2.4'/%3E%3Cpath d='M14,2 L14,9 L24,9' fill='none' stroke='%2300eaff' stroke-width='1'/%3E%3Cpath d='M86,158 L86,151 L76,151' fill='none' stroke='%2300eaff' stroke-width='1'/%3E%3Ccircle cx='6' cy='154' r='1.6' fill='%2300eaff'/%3E%3Ccircle cx='94' cy='6' r='1.6' fill='%23ff2bd6'/%3E%3C/svg%3E");
+  box-shadow: 0 0 12px rgba(0,234,255,.55), inset 0 0 12px rgba(255,43,214,.3);
+  animation: cyberpunk-glow 2.4s ease-in-out infinite;
+}
+.cb-cyberpunk::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,234,255,.10) 2px 3px);
+  background-size: 100% 14px;
+  background-repeat: repeat;
+  mix-blend-mode: screen;
+  animation: cyberpunk-scan 1.2s linear infinite;
+}
+.cb-cyberpunk::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -90%; width: 40%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 44%, rgba(0,234,255,.55) 50%, transparent 56%);
+  mix-blend-mode: screen;
+  animation: cyberpunk-shine 3.4s cubic-bezier(.85,0,.15,1) infinite;
+}
+@keyframes cyberpunk-glow { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+@keyframes cyberpunk-scan { from { background-position-y: 0; } to { background-position-y: 14px; } }
+@keyframes cyberpunk-shine {
+  0%   { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(520%) skewX(-20deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-cyberpunk, .cb-cyberpunk::before, .cb-cyberpunk::after { animation: none; }
+}

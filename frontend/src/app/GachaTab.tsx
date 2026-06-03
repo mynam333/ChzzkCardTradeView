@@ -16,8 +16,9 @@ import {
   Layers
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { borderStyle, nameEffectStyle, cardImage } from '@/lib/cosmetics';
+import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
 import { StreamerDetailModal } from './StreamerDetailModal';
+import { CosmeticFrame } from './CosmeticFrame';
 
 interface Streamer {
   channel_id: string;
@@ -1386,9 +1387,12 @@ export const GachaTab: React.FC = () => {
                       onMouseUp={endPress}
                       onTouchStart={startPress}
                       onTouchEnd={endPress}
-                      style={borderStyle(card.border)}
+                      style={borderClass(card.border) ? undefined : borderStyle(card.border)}
                       className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''} ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
                     >
+                      {/* 프리미엄 테두리 코스메틱 오버레이 */}
+                      <CosmeticFrame border={card.border} />
+
                       {/* 다중 선택 모드 체크박스 오버레이 */}
                       {selectionMode && (
                         <div className="absolute top-2.5 left-2.5 z-30 flex h-5 w-5 items-center justify-center rounded-md border border-primary bg-background shadow transition">
@@ -1490,9 +1494,12 @@ export const GachaTab: React.FC = () => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={borderStyle(live.border)}
+              style={borderClass(live.border) ? undefined : borderStyle(live.border)}
               className={`relative flex aspect-[5/8] h-[82vh] max-h-[82vh] max-w-[92vw] flex-col justify-between overflow-hidden rounded-3xl bg-card p-6 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
             >
+              {/* 프리미엄 테두리 코스메틱 오버레이 */}
+              <CosmeticFrame border={live.border} />
+
               {/* 카드 이미지 배경 */}
               <div className="absolute inset-0 z-0">
                 <img src={cardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
@@ -1627,7 +1634,9 @@ export const GachaTab: React.FC = () => {
                     <button key={it.id} onClick={() => handleEquip(live.id, it.id)}
                       className={`rounded-lg border p-2 flex flex-col items-center gap-1 transition ${isOn ? 'border-primary ring-2 ring-primary/30' : 'border-border/60 hover:bg-secondary/50'}`}>
                       {type === 'border'
-                        ? <div className="h-10 w-8 rounded bg-card border border-border/80" style={borderStyle(it)} />
+                        ? <div className="relative h-12 w-8 overflow-hidden rounded bg-card border border-border/80" style={borderClass(it) ? undefined : borderStyle(it)}>
+                            <CosmeticFrame border={it} />
+                          </div>
                         : <span className="text-sm font-black truncate max-w-full" style={nameEffectStyle(it)}>{it.name}</span>}
                       <span className="text-[9px] text-muted-foreground truncate max-w-full">{it.name} ×{it.quantity}</span>
                     </button>
@@ -1646,7 +1655,8 @@ export const GachaTab: React.FC = () => {
               </div>
               {/* 카드 미리보기 */}
               <div className="mt-4 flex justify-center">
-                <div className="relative flex h-44 w-28 flex-col justify-end overflow-hidden rounded-xl bg-card p-2 border border-border/80" style={borderStyle(live.border)}>
+                <div className="relative flex h-44 w-28 flex-col justify-end overflow-hidden rounded-xl bg-card p-2 border border-border/80" style={borderClass(live.border) ? undefined : borderStyle(live.border)}>
+                  <CosmeticFrame border={live.border} />
                   <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                   <h4 className="relative z-10 text-xs font-black text-white truncate drop-shadow" style={nameEffectStyle(live.name_effect)}>{live.streamer?.name}</h4>

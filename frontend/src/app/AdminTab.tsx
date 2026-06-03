@@ -18,7 +18,8 @@ import {
   Store
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { parseStyle, nameEffectStyle, cardImage } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, cardImage, borderClass } from '@/lib/cosmetics';
+import { CosmeticFrame } from './CosmeticFrame';
 
 type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop';
 
@@ -731,11 +732,49 @@ export const AdminTab: React.FC = () => {
               onChange={(e) => setShopForm({ ...shopForm, description: e.target.value })}
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
 
+            {/* 커스텀 CSS 테두리 (클래스명 + CSS 코드 전문) */}
+            {shopForm.type === 'border' && (() => {
+              const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
+              const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
+              const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
+              const setCustom = (cls: string, css: string) => {
+                const c = cls.trim();
+                if (!c && !css.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
+                const obj: any = { class: c || 'cb-custom' };
+                if (css.trim()) obj.css = css;
+                setShopForm({ ...shopForm, style_json: JSON.stringify(obj) });
+              };
+              return (
+                <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 p-3 space-y-2">
+                  <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS 테두리 (직접 작성)</p>
+                  <input
+                    type="text"
+                    placeholder="적용 클래스명 (예: cb-mydragon) — .cosmetic-frame 에 함께 부여됩니다"
+                    value={curClass}
+                    onChange={(e) => setCustom(e.target.value, curCss)}
+                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
+                  />
+                  <textarea
+                    rows={6}
+                    placeholder={'.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'}
+                    value={curCss}
+                    onChange={(e) => setCustom(curClass, e.target.value)}
+                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] font-mono leading-relaxed"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    위 <b>클래스명</b>과 <b>CSS 코드</b>를 입력하면 입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.
+                    예시 파일(<code>card-borders/*.css</code>)의 코드를 복사해 붙여넣으면 즉시 동작합니다. 작성법은 루트의 <code>CARD_BORDER_GUIDE.md</code>를 참고하세요.
+                    <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 테두리와 겹치지 않게 고유하게 지정하세요.
+                  </p>
+                </div>
+              );
+            })()}
+
             <div>
               <label className="text-[11px] font-bold text-muted-foreground block mb-1">
-                스타일 (CSS JSON) <span className="font-normal">예: {`{"borderColor":"#f00","borderWidth":"3px","boxShadow":"0 0 12px #f00"}`} / 이름 이펙트는 {`{"color":"#f0f","textShadow":"0 0 8px #f0f"}`}</span>
+                스타일 (CSS JSON · 고급) <span className="font-normal">간단 인라인 예: {`{"borderColor":"#f00","borderWidth":"3px"}`}</span>
               </label>
-              <textarea rows={3} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
+              <textarea rows={2} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
                 onChange={(e) => setShopForm({ ...shopForm, style_json: e.target.value })}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono" />
             </div>
@@ -755,7 +794,9 @@ export const AdminTab: React.FC = () => {
             <div className="flex items-center gap-4 rounded-lg bg-secondary/30 p-4">
               <span className="text-[11px] font-bold text-muted-foreground">미리보기</span>
               {shopForm.type === 'border' ? (
-                <div className="h-16 w-12 rounded-xl bg-card border border-border/80" style={parseStyle(shopForm.style_json)} />
+                <div className="relative h-20 w-12 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass({ style_json: shopForm.style_json }) ? undefined : parseStyle(shopForm.style_json)}>
+                  <CosmeticFrame border={{ style_json: shopForm.style_json }} />
+                </div>
               ) : (
                 <span className="text-lg font-black" style={nameEffectStyle({ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family })}>
                   {shopForm.name || '미리보기'}
@@ -791,7 +832,9 @@ export const AdminTab: React.FC = () => {
                 <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
                   <div className="flex items-center gap-3 min-w-0">
                     {item.type === 'border' ? (
-                      <div className="h-12 w-9 shrink-0 rounded-lg bg-card border border-border/80" style={parseStyle(item.style_json)} />
+                      <div className="relative h-14 w-9 shrink-0 overflow-hidden rounded-lg border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass(item) ? undefined : parseStyle(item.style_json)}>
+                        <CosmeticFrame border={item} />
+                      </div>
                     ) : (
                       <span className="shrink-0 text-base font-black px-1" style={nameEffectStyle(item)}>{item.name}</span>
                     )}

@@ -3,7 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { borderStyle, nameEffectStyle, proxiedImage, cardImage } from '@/lib/cosmetics';
+import { borderStyle, borderClass, nameEffectStyle, proxiedImage, cardImage } from '@/lib/cosmetics';
+import { CosmeticFrame } from './CosmeticFrame';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 
@@ -181,9 +182,10 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
               {rep && repStreamer ? (
                 <div className="mt-5 flex justify-center">
                   <div
-                    style={borderStyle(rep.border)}
+                    style={borderClass(rep.border) ? undefined : borderStyle(rep.border)}
                     className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 p-3 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
+                    <CosmeticFrame border={rep.border} />
                     <img
                       src={proxiedImage(cardImage(repStreamer, rep.star))}
                       alt={repStreamer.name}

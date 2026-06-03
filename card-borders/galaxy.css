@@ -1,0 +1,47 @@
+/* ============================================================
+   갤럭시 (Galaxy) — 성운 그라데이션(색 순환) + 반짝이는 별
+   적용 클래스: cb-galaxy
+   ============================================================ */
+.cb-galaxy {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23a78bfa' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='6' fill='none' stroke='%2360a5fa' stroke-width='1'/%3E%3C/svg%3E");
+  box-shadow: 0 0 16px rgba(167,139,250,.55), inset 0 0 14px rgba(96,165,250,.4);
+}
+.cb-galaxy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(60px 90px at 12% 16%, rgba(167,139,250,.4), transparent 70%),
+    radial-gradient(70px 80px at 88% 84%, rgba(56,189,248,.35), transparent 70%),
+    radial-gradient(50px 60px at 80% 12%, rgba(236,72,153,.3), transparent 70%);
+  animation: galaxy-hue 9s linear infinite;
+}
+.cb-galaxy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.6px 1.6px at 20px 24px, #fff, transparent 60%),
+    radial-gradient(1.2px 1.2px at 70px 60px, #fff, transparent 60%),
+    radial-gradient(2px 2px at 44px 110px, #fff, transparent 60%),
+    radial-gradient(1.4px 1.4px at 90px 90px, #cfe3ff, transparent 60%),
+    radial-gradient(1.6px 1.6px at 30px 150px, #fff, transparent 60%);
+  animation: galaxy-twinkle 2.8s ease-in-out infinite;
+}
+@keyframes galaxy-hue { to { filter: hue-rotate(360deg); } }
+@keyframes galaxy-twinkle { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-galaxy::before, .cb-galaxy::after { animation: none; }
+}

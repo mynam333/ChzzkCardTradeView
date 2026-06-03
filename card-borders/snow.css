@@ -1,0 +1,46 @@
+/* ============================================================
+   눈꽃 (Snow) — 얼음 결정 프레임 + 내리는 눈 + 반짝임
+   적용 클래스: cb-snow
+   ============================================================ */
+.cb-snow {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23bfe9ff' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='6' fill='none' stroke='%23e7f7ff' stroke-width='1'/%3E%3Cg stroke='%23dff3ff' stroke-width='1.1'%3E%3Cg transform='translate(14,14)'%3E%3Cline x1='-4' y1='0' x2='4' y2='0'/%3E%3Cline x1='0' y1='-4' x2='0' y2='4'/%3E%3Cline x1='-3' y1='-3' x2='3' y2='3'/%3E%3Cline x1='-3' y1='3' x2='3' y2='-3'/%3E%3C/g%3E%3Cg transform='translate(86,146)'%3E%3Cline x1='-4' y1='0' x2='4' y2='0'/%3E%3Cline x1='0' y1='-4' x2='0' y2='4'/%3E%3Cline x1='-3' y1='-3' x2='3' y2='3'/%3E%3Cline x1='-3' y1='3' x2='3' y2='-3'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: 0 0 13px rgba(191,233,255,.6), inset 0 0 10px rgba(231,247,255,.35);
+}
+.cb-snow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 16px rgba(191,233,255,.35);
+  animation: snow-twinkle 2.6s ease-in-out infinite;
+}
+.cb-snow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+  background-size: 100% 220px;
+  background-image:
+    radial-gradient(2px 2px at 18px 20px, rgba(255,255,255,.95), transparent 60%),
+    radial-gradient(1.6px 1.6px at 64px 56px, rgba(255,255,255,.85), transparent 60%),
+    radial-gradient(2.4px 2.4px at 40px 120px, rgba(255,255,255,.9), transparent 60%),
+    radial-gradient(1.4px 1.4px at 88px 92px, rgba(255,255,255,.8), transparent 60%),
+    radial-gradient(2px 2px at 28px 180px, rgba(255,255,255,.85), transparent 60%);
+  animation: snow-fall 6s linear infinite, snow-sway 4s ease-in-out infinite alternate;
+}
+@keyframes snow-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
+@keyframes snow-sway { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
+@keyframes snow-twinkle { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-snow::before, .cb-snow::after { animation: none; }
+}

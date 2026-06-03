@@ -1,0 +1,34 @@
+/* ============================================================
+   동양풍 (Oriental) — 금빛 이중 프레임 + 구름 코너 + 주칠 + 금빛 광택
+   적용 클래스: cb-oriental
+   이 파일 하나만으로 완성됩니다(레이아웃·비주얼·키프레임 모두 포함).
+   ============================================================ */
+.cb-oriental {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23e8c66a' stroke-width='2.6'/%3E%3Crect x='7.5' y='7.5' width='85' height='145' rx='5' fill='none' stroke='%23b8451f' stroke-width='1.1'/%3E%3Cpath d='M3,24 C18,21 20,8 17,3' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M97,24 C82,21 80,8 83,3' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M3,136 C18,139 20,152 17,157' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M97,136 C82,139 80,152 83,157' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='5.5' r='1.6' fill='%23e8c66a'/%3E%3Ccircle cx='50' cy='154.5' r='1.6' fill='%23e8c66a'/%3E%3C/svg%3E");
+  box-shadow: inset 0 0 14px rgba(184,69,31,.35), 0 0 14px rgba(232,198,106,.4);
+}
+.cb-oriental::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -90%; width: 50%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 44%, rgba(255,236,179,.7) 50%, transparent 56%);
+  mix-blend-mode: screen;
+  animation: oriental-shine 5s cubic-bezier(.85,0,.15,1) infinite;
+}
+@keyframes oriental-shine {
+  0%   { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(480%) skewX(-20deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-oriental::after { animation: none; }
+}

@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { parseStyle, nameEffectStyle } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, borderClass } from '@/lib/cosmetics';
+import { CosmeticFrame } from './CosmeticFrame';
 import { Sparkles, Coins, ShoppingBag, Store } from 'lucide-react';
 import canvasConfetti from 'canvas-confetti';
 
@@ -212,7 +213,9 @@ export const ShopTab: React.FC = () => {
               <div key={item.id} className="rounded-2xl border border-border bg-secondary/20 p-4 flex flex-col items-center gap-3">
                 {/* 미리보기 */}
                 {item.type === 'border' ? (
-                  <div className="h-20 w-16 rounded-xl bg-card border border-border/80" style={parseStyle(item.style_json)} />
+                  <div className="relative h-24 w-16 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass(item) ? undefined : parseStyle(item.style_json)}>
+                    <CosmeticFrame border={item} />
+                  </div>
                 ) : (
                   <div className="h-20 flex items-center justify-center">
                     <span className="text-lg font-black" style={nameEffectStyle(item)}>{item.name}</span>
