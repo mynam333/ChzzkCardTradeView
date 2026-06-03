@@ -142,14 +142,18 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -60%;
+  left: -90%;
   width: 55%;
   z-index: 11;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18) 35%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.18) 65%, transparent);
+  /* 3겹 그라데이션: 시안(좌)·흰 코어(중앙)·마젠타(우)로 색수차를 줘 유리 같은 입체 글린트 */
+  background:
+    linear-gradient(90deg, transparent 41%, rgba(120, 210, 255, 0.35) 47%, transparent 53%),
+    linear-gradient(90deg, transparent 43%, rgba(255, 255, 255, 0.5) 48%, rgba(255, 255, 255, 0.95) 50%, rgba(255, 255, 255, 0.5) 52%, transparent 57%),
+    linear-gradient(90deg, transparent 47%, rgba(255, 150, 235, 0.35) 53%, transparent 59%);
   mix-blend-mode: screen;
   /* off-screen에서 시작·종료하여 루프 경계가 보이지 않음(이음매 없는 연속 스윕) */
-  animation: cardSheen 3.6s ease-in-out infinite;
+  animation: cardSheen 3.6s cubic-bezier(0.85, 0, 0.15, 1) infinite;
 }
 
 /* 5성: 홀로그램 (무지개 테두리 + 전면 홀로 + 강한 스윕) */
@@ -182,29 +186,32 @@ body {
   mix-blend-mode: color-dodge;
   animation: holoHue 6s linear infinite;
 }
-/* 강한 광택 스윕 (off-screen 시작·종료로 끊김 없음) */
+/* 강한 광택 스윕 (off-screen 시작·종료로 끊김 없음) — 색수차를 더 강조해 홀로 유리 질감 */
 .card-star-5::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -60%;
+  left: -90%;
   width: 55%;
   z-index: 11;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28) 35%, rgba(255, 255, 255, 0.72) 50%, rgba(255, 255, 255, 0.28) 65%, transparent);
+  background:
+    linear-gradient(90deg, transparent 40%, rgba(110, 215, 255, 0.5) 47%, transparent 53%),
+    linear-gradient(90deg, transparent 43%, rgba(255, 255, 255, 0.6) 48%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.6) 52%, transparent 57%),
+    linear-gradient(90deg, transparent 47%, rgba(255, 130, 240, 0.5) 53%, transparent 60%);
   mix-blend-mode: screen;
-  animation: cardSheen 3.2s ease-in-out infinite;
+  animation: cardSheen 3.2s cubic-bezier(0.85, 0, 0.15, 1) infinite;
 }
 
 @keyframes cardPulse {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.13); }
 }
-/* 비스듬한 광택 띠가 카드 왼쪽 밖 → 오른쪽 밖으로 일정 속도로 지나감(루프 경계가 화면 밖이라 끊김 없음) */
+/* 비스듬한 광택 띠가 카드 왼쪽 밖 → 오른쪽 밖으로 지나감(양끝 모두 화면 밖이라 끊김 없음) */
 @keyframes cardSheen {
-  0% { transform: translateX(0) skewX(-18deg); }
-  100% { transform: translateX(320%) skewX(-18deg); }
+  0% { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(440%) skewX(-20deg); }
 }
 /* 홀로그램은 색상(hue)만 360도 순환 → 완벽하게 이음매 없는 루프 */
 @keyframes holoHue {
