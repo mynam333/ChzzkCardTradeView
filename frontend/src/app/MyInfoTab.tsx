@@ -416,8 +416,16 @@ export const MyInfoTab: React.FC = () => {
             const resolved = cardImage(myStreamer, st);             // 실제 적용되는 이미지(상속 포함)
             const inherited = !ownImage && resolved && resolved !== myStreamer?.logo_url; // 하위 성에서 상속
             return (
-              <label
+              <div
                 key={st}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  // 클릭된 요소가 삭제 버튼(button)이 아닌 경우에만 파일 업로드를 트리거
+                  if (!target.closest('button')) {
+                    const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
+                    fileInput?.click();
+                  }
+                }}
                 className="group relative flex aspect-[5/8] cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary shadow-sm transition hover:border-primary"
               >
                 <div className="absolute inset-0 z-0">
@@ -457,7 +465,7 @@ export const MyInfoTab: React.FC = () => {
                   <span className="text-[9px] font-bold">{ownImage ? '변경' : '등록'}</span>
                 </div>
                 <input type="file" accept="image/*" onChange={(e) => handleImageChange(e, st)} className="hidden" />
-              </label>
+              </div>
             );
           })}
         </div>
