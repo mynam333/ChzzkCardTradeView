@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
 import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
@@ -19,11 +20,13 @@ export const MainTab: React.FC = () => {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [activePopup, setActivePopup] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   // 치지직 실시간 스트리머 상위 가치 3명 (메인 노출용)
   const [hotStreamers, setHotStreamers] = useState<any[]>([]);
 
   useEffect(() => {
+    setMounted(true);
     fetchNotices();
     fetchHotStreamers();
     // 급상승/시세 요약을 준실시간으로 반영 (25초 주기)
@@ -88,8 +91,8 @@ export const MainTab: React.FC = () => {
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
 
-      {/* 팝업 오버레이 모달 */}
-      {activePopup && (
+      {/* 팝업 오버레이 모달 (Portal 적용으로 transform 영역 제약 및 배경 흐림 잘림 방지) */}
+      {mounted && activePopup && createPortal(
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-2 text-primary">
@@ -115,7 +118,8 @@ export const MainTab: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Hero Section */}
