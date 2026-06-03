@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
-export type TabId = 'main' | 'shop' | 'gacha' | 'ranking' | 'my-info' | 'admin';
+export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin';
 
 // 다크모드/라이트모드 및 현재 선택 탭, 사용자 인증 상태, 보유 재화 전역 관리
 interface AppContextType {
@@ -59,7 +59,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // URL 경로를 기반으로 활성화된 탭 상태를 유도
   const activeTab: TabId = (() => {
     if (pathname.startsWith('/shop')) return 'shop';
-    if (pathname.startsWith('/gacha')) return 'gacha';
+    if (pathname.startsWith('/inventory')) return 'inventory';
     if (pathname.startsWith('/ranking')) return 'ranking';
     if (pathname.startsWith('/my-info')) return 'my-info';
     if (pathname.startsWith('/admin')) return 'admin';
@@ -198,7 +198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try { await apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }); } catch { /* 무시 */ }
     }
     // 연관 위치로 이동
-    if (n.link && ['main', 'shop', 'gacha', 'ranking', 'my-info', 'admin'].includes(n.link)) {
+    if (n.link && ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin'].includes(n.link)) {
       setActiveTab(n.link as TabId);
     }
   };

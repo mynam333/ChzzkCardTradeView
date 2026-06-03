@@ -301,7 +301,7 @@ export const ShopTab: React.FC = () => {
           </div>
         )}
 
-        <button onClick={() => setActiveTab('gacha')} className="w-full rounded-xl bg-secondary py-2.5 text-xs font-bold text-muted-foreground hover:bg-secondary/80 transition">
+        <button onClick={() => setActiveTab('inventory')} className="w-full rounded-xl bg-secondary py-2.5 text-xs font-bold text-muted-foreground hover:bg-secondary/80 transition">
           보관함으로 이동하여 카드에 장착하기 →
         </button>
       </section>

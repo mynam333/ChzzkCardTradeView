@@ -45,7 +45,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const navItems: { id: TabId; label: string; icon: typeof Home }[] = [
     { id: 'main', label: '메인', icon: Home },
     { id: 'shop', label: '상점', icon: Store },
-    { id: 'gacha', label: '보관함', icon: Layers },
+    { id: 'inventory', label: '보관함', icon: Layers },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
     { id: 'my-info', label: '내 정보', icon: User },
     ...(user?.role === 'ADMIN'
