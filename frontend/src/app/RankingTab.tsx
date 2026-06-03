@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
+import { StreamerDetailModal } from './StreamerDetailModal';
 
 interface Streamer {
   channel_id: string;
@@ -42,6 +43,7 @@ export const RankingTab: React.FC = () => {
   const [page, setPage] = useState(1);
   const PER_PAGE = 10;
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchRankings();
@@ -220,7 +222,8 @@ export const RankingTab: React.FC = () => {
               return (
                 <div
                   key={st.channel_id}
-                  className="flex items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-border transition"
+                  onClick={() => setDetailChannelId(st.channel_id)}
+                  className="flex cursor-pointer items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-primary/60 hover:bg-secondary/30 transition"
                 >
                   <div className="flex items-center gap-4">
                     <span className={`w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
@@ -314,6 +317,9 @@ export const RankingTab: React.FC = () => {
 
       {/* 컬렉터 프로필 모달 */}
       {profileUserId && <ProfileModal userId={profileUserId} onClose={() => setProfileUserId(null)} />}
+
+      {/* 스트리머 시세 상세 모달 */}
+      {detailChannelId && <StreamerDetailModal channelId={detailChannelId} onClose={() => setDetailChannelId(null)} />}
 
     </div>
   );

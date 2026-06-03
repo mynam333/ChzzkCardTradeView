@@ -126,15 +126,16 @@ export class SqliteUserRepository implements IUserRepository {
 
   async findRankings(limit: number): Promise<UserRanking[]> {
     // 보유 카드 수와 카드 시세 합산을 조인 집계하여 (포인트 + 카드가치) 총자산 기준 정렬
+    // 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
     const rows = this.getDb().prepare(`
       SELECT u.*,
              COUNT(uc.id) AS card_count,
-             COALESCE(SUM(s.base_value), 0) AS cards_value
+             COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0) AS cards_value
       FROM users u
       LEFT JOIN user_cards uc ON uc.user_id = u.id
       LEFT JOIN streamers s ON s.channel_id = uc.channel_id
       GROUP BY u.id
-      ORDER BY (u.point + COALESCE(SUM(s.base_value), 0)) DESC
+      ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
       LIMIT ?
     `).all(limit);
 
@@ -148,10 +149,20 @@ export class SqliteUserRepository implements IUserRepository {
       banned_until: row.banned_until,
       created_at: row.created_at,
       card_count: row.card_count,
-      total_asset: row.point + row.cards_value
+      total_asset: row.point + Math.round(row.cards_value)
     }));
   }
 }
+
+// 별(0~5성)별 커스텀 이미지 컬럼명 (인덱스 0 = 0성 = custom_image_url)
+export const STAR_IMAGE_COLUMNS = [
+  'custom_image_url', 'custom_image_url_1', 'custom_image_url_2',
+  'custom_image_url_3', 'custom_image_url_4', 'custom_image_url_5'
+];
+
+// row에서 별별 커스텀 이미지 배열을 추출
+const extractStarImages = (row: any): (string | null)[] =>
+  STAR_IMAGE_COLUMNS.map((col) => row[col] ?? null);
 
 // 2. SQLite 스트리머 레포지토리
 export class SqliteStreamerRepository implements IStreamerRepository {
@@ -166,6 +177,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       name: row.name,
       logo_url: row.logo_url,
       custom_image_url: row.custom_image_url,
+      custom_images: extractStarImages(row),
       is_image_banned: row.is_image_banned === 1,
       follower_count: row.follower_count,
       activity_score: row.activity_score,
@@ -188,6 +200,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       name: row.name,
       logo_url: row.logo_url,
       custom_image_url: row.custom_image_url,
+      custom_images: extractStarImages(row),
       is_image_banned: row.is_image_banned === 1,
       follower_count: row.follower_count,
       activity_score: row.activity_score,
@@ -236,9 +249,16 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     );
   }
 
-  async updateCustomImage(channelId: string, imageUrl: string | null): Promise<void> {
-    this.getDb().prepare('UPDATE streamers SET custom_image_url = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
+  async updateCustomImage(channelId: string, imageUrl: string | null, star: number = 0): Promise<void> {
+    const idx = Math.max(0, Math.min(5, Math.floor(star || 0)));
+    const col = STAR_IMAGE_COLUMNS[idx];
+    this.getDb().prepare(`UPDATE streamers SET ${col} = ?, updated_at = datetime('now') WHERE channel_id = ?`)
       .run(imageUrl, channelId);
+  }
+  async resetAllCustomImages(channelId: string): Promise<void> {
+    const setClause = STAR_IMAGE_COLUMNS.map((c) => `${c} = NULL`).join(', ');
+    this.getDb().prepare(`UPDATE streamers SET ${setClause}, updated_at = datetime('now') WHERE channel_id = ?`)
+      .run(channelId);
   }
   async updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void> {
     this.getDb().prepare('UPDATE streamers SET is_image_banned = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
@@ -567,6 +587,8 @@ export class SqliteUserCardRepository implements IUserCardRepository {
   async findByUserId(userId: string): Promise<any[]> {
     const rows = this.getDb().prepare(`
       SELECT uc.*, s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image,
+             s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+             s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
              s.base_value as streamer_base_value, s.follower_count as streamer_follower,
              s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned,
              s.serial_number as streamer_serial,
@@ -596,6 +618,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         name: row.streamer_name,
         logo_url: row.streamer_logo,
         custom_image_url: row.streamer_custom_image,
+        custom_images: [row.streamer_custom_image ?? null, row.sci1 ?? null, row.sci2 ?? null, row.sci3 ?? null, row.sci4 ?? null, row.sci5 ?? null],
         base_value: row.streamer_base_value,
         follower_count: row.streamer_follower,
         is_image_banned: row.streamer_is_image_banned === 1,

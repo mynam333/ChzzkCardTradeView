@@ -20,6 +20,8 @@ export interface Streamer {
   name: string;
   logo_url: string | null;
   custom_image_url: string | null;
+  // 별(0~5성)별 커스텀 카드 이미지. 인덱스 0 = custom_image_url(0성). 미등록 성은 null.
+  custom_images?: (string | null)[];
   is_image_banned: boolean;
   follower_count: number;
   activity_score: number;
@@ -132,7 +134,10 @@ export interface IStreamerRepository {
   findAll(): Promise<Streamer[]>;
   findById(channelId: string): Promise<Streamer | null>;
   save(streamer: Streamer): Promise<void>;
-  updateCustomImage(channelId: string, imageUrl: string | null): Promise<void>;
+  /** 지정한 별(0~5성) 슬롯의 커스텀 카드 이미지를 갱신합니다. star 미지정 시 0성. */
+  updateCustomImage(channelId: string, imageUrl: string | null, star?: number): Promise<void>;
+  /** 모든 별 슬롯(0~5성)의 커스텀 카드 이미지를 초기화합니다. */
+  resetAllCustomImages(channelId: string): Promise<void>;
   updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void>;
   findStreamerIndex(channelId: string): Promise<number>;
   findMaxSerialNumber(): Promise<number>;

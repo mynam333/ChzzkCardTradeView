@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { borderStyle, nameEffectStyle, proxiedImage } from '@/lib/cosmetics';
+import { borderStyle, nameEffectStyle, proxiedImage, cardImage } from '@/lib/cosmetics';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 
@@ -13,6 +13,7 @@ interface StreamerLite {
   name: string;
   logo_url?: string | null;
   custom_image_url?: string | null;
+  custom_images?: (string | null)[] | null;
   base_value?: number;
   serial_number?: number | null;
   follower_count?: number;
@@ -184,7 +185,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                     className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 p-3 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
                     <img
-                      src={proxiedImage(repStreamer.custom_image_url || repStreamer.logo_url)}
+                      src={proxiedImage(cardImage(repStreamer, rep.star))}
                       alt={repStreamer.name}
                       crossOrigin="anonymous"
                       className="absolute inset-0 h-full w-full object-cover opacity-85"
@@ -246,7 +247,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                     {profile.collection.slice(0, 24).map((c) => (
                       <div key={c.channel_id} className="relative">
                         <img
-                          src={proxiedImage(c.streamer.custom_image_url || c.streamer.logo_url)}
+                          src={proxiedImage(cardImage(c.streamer, c.maxStar))}
                           alt={c.streamer.name}
                           crossOrigin="anonymous"
                           className="h-9 w-9 rounded-lg border border-white/10 object-cover"

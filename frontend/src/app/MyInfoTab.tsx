@@ -16,6 +16,7 @@ import {
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 import { ProfileModal } from './ProfileModal';
+import { cardImage } from '@/lib/cosmetics';
 
 interface UserCard {
   id: number;
@@ -43,8 +44,8 @@ export const MyInfoTab: React.FC = () => {
 
   // 본인 계정이 카드로 등록된 스트리머인지 여부 (이미지 관리 노출 조건)
   const [isStreamer, setIsStreamer] = useState(false);
-  // 본인 스트리머 카드에 현재 설정된 이미지(커스텀 또는 기본 로고)
-  const [myCardImage, setMyCardImage] = useState<string | null>(null);
+  // 본인 스트리머 데이터(별별 커스텀 이미지 custom_images 포함)
+  const [myStreamer, setMyStreamer] = useState<any | null>(null);
 
   // 프로필 카드(공유용) 모달
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -55,6 +56,7 @@ export const MyInfoTab: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
+  const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
 
   useEffect(() => {
     if (user) {
@@ -80,14 +82,13 @@ export const MyInfoTab: React.FC = () => {
       setIsStreamer(res.ok);
       if (res.ok) {
         const data = await res.json();
-        const s = data.streamer || data;
-        setMyCardImage(s.custom_image_url || s.logo_url || null);
+        setMyStreamer(data.streamer || data);
       } else {
-        setMyCardImage(null);
+        setMyStreamer(null);
       }
     } catch {
       setIsStreamer(false);
-      setMyCardImage(null);
+      setMyStreamer(null);
     }
   };
 
@@ -178,14 +179,17 @@ export const MyInfoTab: React.FC = () => {
   };
 
   // 이미지 선택 시 blob 생성하여 지연 렌더링 (Lazy Preview) 및 모달 오픈
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, star: number) => {
     const file = e.target.files?.[0];
     if (file) {
+      setUploadStar(star);
       setImageFile(file);
       setPreviewBlob(URL.createObjectURL(file));
       setUploadModalOpen(true);
       setImageDisclaimerChecked(false);
     }
+    // 같은 파일 재선택을 허용하기 위해 입력값 초기화
+    e.target.value = '';
   };
 
   const handleUploadImage = async () => {
@@ -196,6 +200,7 @@ export const MyInfoTab: React.FC = () => {
     const formData = new FormData();
     formData.append('image', imageFile);
     formData.append('channel_id', user.id);
+    formData.append('star', String(uploadStar));
 
     const token = localStorage.getItem('cctv_jwt_token');
     try {
@@ -207,17 +212,13 @@ export const MyInfoTab: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        toast('이미지가 성공적으로 저장 완료되었습니다.');
-        // 업로드 응답의 새 이미지 URL을 즉시 미리보기에 반영 (없으면 재조회로 동기화)
-        if (data.image_url || data.custom_image_url) {
-          setMyCardImage(data.image_url || data.custom_image_url);
-        }
+        toast(`${uploadStar}성 카드 이미지가 저장되었습니다.`, 'success');
         setPreviewBlob(null);
         setImageFile(null);
         setUploadModalOpen(false);
         refreshUserData();
         fetchInventory();
-        checkStreamerRegistration();
+        checkStreamerRegistration(); // 별별 이미지 상태 동기화
       } else {
         toast(data.message || '이미지 저장 권한 오류 또는 차단 상태입니다.');
       }
@@ -336,32 +337,53 @@ export const MyInfoTab: React.FC = () => {
         <h3 className="text-base font-bold flex items-center gap-2">
           <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 고유 카드 이미지 관리
         </h3>
-        <p className="text-xs text-muted-foreground">
-          본인 스트리머 카드 이미지를 커스텀으로 변경할 수 있습니다. (WebP 최대 1280px 자동 변환)
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          0성부터 5성까지 별 등급별 카드 이미지를 각각 등록할 수 있습니다. (WebP 최대 1280px 자동 변환)<br />
+          특정 성에 이미지를 등록하지 않으면 <strong className="text-foreground/80">바로 아래 등급의 이미지</strong>가 자동 적용되며, 더 낮은 등급도 없으면 기본 치지직 프로필이 노출됩니다.
         </p>
-        <div className="flex flex-col sm:flex-row items-center gap-6 pt-2">
-          <div className="relative flex h-60 w-36 flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary p-3 shadow-md">
-            <div className="absolute inset-0 z-0">
-              <img src={previewBlob || myCardImage || user.avatarUrl} alt="Card Preview" className="h-full w-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent z-10"></div>
-            </div>
-            <div className="relative z-20 flex justify-between">
-              <span className="rounded bg-primary px-1.5 py-0.5 text-[8px] font-bold text-primary-foreground">LIVE</span>
-            </div>
-            <div className="relative z-20 space-y-0.5 text-white">
-              <h4 className="text-xs font-bold truncate drop-shadow">{user.username}</h4>
-              <p className="text-[8px] text-zinc-300">No.0001</p>
-            </div>
-          </div>
-          <div className="flex-1 w-full">
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-xl cursor-pointer bg-secondary/20 hover:bg-secondary/40 transition">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                <p className="text-xs text-muted-foreground">클릭하여 이미지 파일 선택</p>
-              </div>
-              <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-            </label>
-          </div>
+
+        {/* 0~5성 슬롯 그리드 */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 pt-1">
+          {[0, 1, 2, 3, 4, 5].map((st) => {
+            const imgs: (string | null)[] = myStreamer?.custom_images || [myStreamer?.custom_image_url ?? null];
+            const ownImage = imgs[st] || null;                      // 이 성에 직접 등록된 이미지
+            const resolved = cardImage(myStreamer, st);             // 실제 적용되는 이미지(상속 포함)
+            const inherited = !ownImage && resolved && resolved !== myStreamer?.logo_url; // 하위 성에서 상속
+            return (
+              <label
+                key={st}
+                className="group relative flex aspect-[5/8] cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary shadow-sm transition hover:border-primary"
+              >
+                <div className="absolute inset-0 z-0">
+                  {resolved ? (
+                    <img src={resolved} alt={`${st}성`} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="h-full w-full bg-secondary" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-black/30 z-10" />
+                </div>
+                {/* 상단 별 표시 + 상태 칩 */}
+                <div className="relative z-20 flex items-start justify-between p-1.5">
+                  <span className="rounded bg-black/45 px-1.5 py-0.5 text-[9px] font-black text-amber-300">
+                    {st === 0 ? '0성' : '★'.repeat(st)}
+                  </span>
+                  {ownImage ? (
+                    <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[7px] font-black text-white">등록</span>
+                  ) : inherited ? (
+                    <span className="rounded bg-sky-500/90 px-1 py-0.5 text-[7px] font-black text-white">상속</span>
+                  ) : (
+                    <span className="rounded bg-zinc-700/90 px-1 py-0.5 text-[7px] font-black text-zinc-300">기본</span>
+                  )}
+                </div>
+                {/* 하단 변경 안내 */}
+                <div className="relative z-20 flex items-center justify-center gap-1 p-1.5 text-white opacity-90 group-hover:opacity-100">
+                  <Upload className="h-3 w-3" />
+                  <span className="text-[9px] font-bold">{ownImage ? '변경' : '등록'}</span>
+                </div>
+                <input type="file" accept="image/*" onChange={(e) => handleImageChange(e, st)} className="hidden" />
+              </label>
+            );
+          })}
         </div>
 
         {/* 업로드 동의 모달 */}
@@ -369,7 +391,7 @@ export const MyInfoTab: React.FC = () => {
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
-                <h3 className="text-base font-bold flex items-center gap-2"><Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 카드 이미지 업로드</h3>
+                <h3 className="text-base font-bold flex items-center gap-2"><Camera className="h-4.5 w-4.5 text-primary" /> {uploadStar === 0 ? '0성' : `${uploadStar}성`} 카드 이미지 업로드</h3>
                 <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setImageFile(null); setImageDisclaimerChecked(false); }} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
               </div>
               <div className="mt-4 space-y-4 flex flex-col items-center">
@@ -382,8 +404,9 @@ export const MyInfoTab: React.FC = () => {
                     <span className="rounded bg-primary px-1.5 py-0.5 text-[8px] font-bold text-primary-foreground">LIVE</span>
                   </div>
                   <div className="relative z-20 space-y-0.5 text-white">
+                    <div className="flex gap-0.5">{uploadStar > 0 && Array.from({ length: uploadStar }, (_, i) => <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>)}</div>
                     <h4 className="text-xs font-bold truncate drop-shadow">{user.username}</h4>
-                    <p className="text-[8px] text-zinc-300">No.0001</p>
+                    <p className="text-[8px] text-zinc-300">{uploadStar === 0 ? '0성 카드' : `${uploadStar}성 카드`}</p>
                   </div>
                 </div>
                 <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 space-y-2.5 w-full">

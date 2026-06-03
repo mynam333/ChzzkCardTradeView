@@ -15,6 +15,10 @@ import { IS_PRODUCTION } from '../config';
  */
 export const resetStreamerImage = async (req: Request, res: Response) => {
   const { channel_id } = req.params;
+  // star 미지정 시 전체 초기화, 0~5 지정 시 해당 별 슬롯만 초기화
+  const rawStar = req.body?.star ?? req.query?.star;
+  const hasStar = rawStar !== undefined && rawStar !== null && rawStar !== '';
+  const star = hasStar ? Math.max(0, Math.min(5, parseInt(String(rawStar), 10) || 0)) : null;
 
   if (!channel_id) {
     return res.status(400).json({ error: 'BadRequest', message: '대상 스트리머 채널 ID가 유효하지 않습니다.' });
@@ -26,12 +30,20 @@ export const resetStreamerImage = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
     }
 
-    // 커스텀 이미지 주소를 null로 초기화하여 기본 프로필 로고를 사용하도록 복원
-    await streamerRepository.updateCustomImage(channel_id, null);
+    if (star === null) {
+      // 전체 별 슬롯 초기화
+      await streamerRepository.resetAllCustomImages(channel_id);
+    } else {
+      // 특정 별 슬롯만 초기화
+      await streamerRepository.updateCustomImage(channel_id, null, star);
+    }
 
     return res.status(200).json({
-      message: `스트리머(${streamer.name})의 커스텀 카드 이미지가 성공적으로 강제 초기화되었습니다.`,
-      channel_id
+      message: star === null
+        ? `스트리머(${streamer.name})의 모든 커스텀 카드 이미지가 초기화되었습니다.`
+        : `스트리머(${streamer.name})의 ${star}성 카드 이미지가 초기화되었습니다.`,
+      channel_id,
+      star
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 이미지 초기화 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -56,8 +68,8 @@ export const banStreamerImage = async (req: Request, res: Response) => {
 
     // 업로드 권한 차단
     await streamerRepository.updateImageBanStatus(channel_id, true);
-    // 차단 완료 후 즉각적인 기존 커스텀 이미지 초기화 병행 (안전 조치)
-    await streamerRepository.updateCustomImage(channel_id, null);
+    // 차단 완료 후 즉각적인 기존 커스텀 이미지(전체 별 슬롯) 초기화 병행 (안전 조치)
+    await streamerRepository.resetAllCustomImages(channel_id);
 
     return res.status(200).json({
       message: `스트리머(${streamer.name})의 카드 이미지 업로드 권한이 성공적으로 차단되었으며, 기존 커스텀 이미지가 수거되었습니다.`,

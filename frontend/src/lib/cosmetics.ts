@@ -43,6 +43,26 @@ export const nameEffectStyle = (effect?: { style_json?: string | null; font_url?
   return style;
 };
 
+/**
+ * 카드 별(0~5성)에 맞는 커스텀 이미지를 해석합니다.
+ * 해당 성에 등록된 이미지가 없으면 더 낮은 성의 등록 이미지로 폴백하고,
+ * 그래도 없으면 기본 치지직 프로필(logo_url)을 사용합니다.
+ */
+export const cardImage = (
+  streamer?: { custom_images?: (string | null)[] | null; custom_image_url?: string | null; logo_url?: string | null } | null,
+  star: number = 0
+): string => {
+  if (!streamer) return '';
+  const imgs = streamer.custom_images && streamer.custom_images.length
+    ? streamer.custom_images
+    : [streamer.custom_image_url ?? null];
+  const s = Math.max(0, Math.min(5, Math.floor(star || 0)));
+  for (let j = s; j >= 0; j--) {
+    if (imgs[j]) return imgs[j] as string;
+  }
+  return streamer.logo_url || '';
+};
+
 /** 테두리 코스메틱 스타일 */
 export const borderStyle = (border?: { style_json?: string | null } | null): React.CSSProperties => {
   if (!border) return {};

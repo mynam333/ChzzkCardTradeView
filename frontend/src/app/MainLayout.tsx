@@ -99,7 +99,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             <h1 className="text-lg font-bold tracking-tight text-foreground">CCTV</h1>
             <p className="text-xs text-muted-foreground">치지직 카드 트레이드 뷰</p>
           </div>
-          {user && <NotificationBell />}
+          {user && <NotificationBell align="left" />}
         </div>
 
         {/* 유저 상태 카드 또는 로그인 버튼 */}

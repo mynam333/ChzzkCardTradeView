@@ -85,6 +85,15 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] streamers 테이블에 broadcast_minutes 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN broadcast_minutes INTEGER DEFAULT 0;");
       }
+      // 별(1~5성)별 커스텀 카드 이미지 컬럼 (0성은 기존 custom_image_url 사용)
+      for (let st = 1; st <= 5; st++) {
+        try {
+          sqliteDb.prepare(`SELECT custom_image_url_${st} FROM streamers LIMIT 1`).get();
+        } catch (e) {
+          console.log(`[DB Migration] streamers 테이블에 custom_image_url_${st} 컬럼이 없어 추가합니다.`);
+          sqliteDb.exec(`ALTER TABLE streamers ADD COLUMN custom_image_url_${st} TEXT;`);
+        }
+      }
       try {
         sqliteDb.prepare("SELECT representative_card_channel_id FROM users LIMIT 1").get();
       } catch (e) {

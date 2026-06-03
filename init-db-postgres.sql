@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS streamers (
     channel_id TEXT PRIMARY KEY,                 -- 치지직 채널 고유 ID
     name TEXT NOT NULL,                          -- 스트리머 활동명
     logo_url TEXT,                               -- 치지직 기본 프로필 로고 URL
-    custom_image_url TEXT,                       -- 커스텀 이미지 URL (NULL 가능)
+    custom_image_url TEXT,                       -- 커스텀 이미지 URL (0성, NULL 가능)
+    custom_image_url_1 TEXT,                      -- 1성 커스텀 카드 이미지
+    custom_image_url_2 TEXT,                      -- 2성 커스텀 카드 이미지
+    custom_image_url_3 TEXT,                      -- 3성 커스텀 카드 이미지
+    custom_image_url_4 TEXT,                      -- 4성 커스텀 카드 이미지
+    custom_image_url_5 TEXT,                      -- 5성 커스텀 카드 이미지
     is_image_banned BOOLEAN DEFAULT FALSE,       -- 커스텀 이미지 업로드 권한 차단 여부
     follower_count INTEGER DEFAULT 0,            -- 실시간 팔로워 수
     activity_score INTEGER DEFAULT 0,            -- 활동 지표 환산 점수
@@ -177,6 +182,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_1 TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_2 TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_3 TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_4 TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_5 TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
@@ -343,10 +353,11 @@ RETURNS TABLE (
   last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT
 ) AS $$
+  -- 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
   SELECT u.id, u.username, u.avatar_url, u.role, u.point,
          u.last_free_draw, u.banned_until, u.created_at,
          COUNT(uc.id) AS card_count,
-         (u.point + COALESCE(SUM(s.base_value), 0))::BIGINT AS total_asset
+         (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0))::BIGINT AS total_asset
     FROM users u
     LEFT JOIN user_cards uc ON uc.user_id = u.id
     LEFT JOIN streamers s ON s.channel_id = uc.channel_id

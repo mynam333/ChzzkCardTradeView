@@ -21,7 +21,12 @@ CREATE TABLE IF NOT EXISTS streamers (
     channel_id TEXT PRIMARY KEY,               -- 치지직 채널 고유 ID
     name TEXT NOT NULL,                        -- 스트리머 활동명
     logo_url TEXT,                             -- 치지직 기본 프로필 로고 URL
-    custom_image_url TEXT,                     -- 스트리머 업로드 커스텀 이미지 URL (NULL 가능)
+    custom_image_url TEXT,                     -- 스트리머 업로드 커스텀 이미지 URL (0성, NULL 가능)
+    custom_image_url_1 TEXT,                    -- 1성 커스텀 카드 이미지
+    custom_image_url_2 TEXT,                    -- 2성 커스텀 카드 이미지
+    custom_image_url_3 TEXT,                    -- 3성 커스텀 카드 이미지
+    custom_image_url_4 TEXT,                    -- 4성 커스텀 카드 이미지
+    custom_image_url_5 TEXT,                    -- 5성 커스텀 카드 이미지
     is_image_banned INTEGER DEFAULT 0,         -- 커스텀 이미지 업로드 권한 차단 여부 (0: false, 1: true)
     follower_count INTEGER DEFAULT 0,          -- 실시간 팔로워 수
     activity_score INTEGER DEFAULT 0,          -- 활동 지표 환산 점수

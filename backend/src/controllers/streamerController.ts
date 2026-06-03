@@ -13,6 +13,7 @@ import path from 'path';
 export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   const { channel_id } = req.body; // 수정하고자 하는 스트리머 채널 ID
+  const star = Math.max(0, Math.min(5, parseInt(req.body.star, 10) || 0)); // 0~5성 슬롯
 
   if (!user) {
     return res.status(401).json({ error: 'Unauthorized', message: '인증 정보가 유효하지 않습니다.' });
@@ -64,7 +65,7 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    const fileName = `custom_${Date.now()}.webp`;
+    const fileName = `custom_${star}_${Date.now()}.webp`;
     const filePath = path.join(uploadDir, fileName);
     fs.writeFileSync(filePath, webpBuffer);
 
@@ -73,12 +74,13 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     const backendBase = process.env.BACKEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
     const imageUrl = `${backendBase.replace(/\/$/, '')}/uploads/${folderName}/${encodeURIComponent(fileName)}`;
 
-    // 3. 데이터베이스 정보 갱신
-    await streamerRepository.updateCustomImage(channel_id, imageUrl);
+    // 3. 데이터베이스 정보 갱신 (해당 별 슬롯에 저장)
+    await streamerRepository.updateCustomImage(channel_id, imageUrl, star);
 
     return res.status(200).json({
-      message: '스트리머 카드 이미지가 성공적으로 최적화 및 업로드되었습니다.',
+      message: `${star}성 스트리머 카드 이미지가 성공적으로 최적화 및 업로드되었습니다.`,
       channel_id,
+      star,
       custom_image_url: imageUrl
     });
   } catch (err: any) {

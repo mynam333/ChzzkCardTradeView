@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Bell, CheckCheck } from 'lucide-react';
 import { useApp } from './AppContext';
 
-export const NotificationBell: React.FC<{ className?: string }> = ({ className }) => {
+export const NotificationBell: React.FC<{ className?: string; align?: 'left' | 'right' }> = ({ className, align = 'right' }) => {
   const { user, notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead } = useApp();
   const [open, setOpen] = useState(false);
 
@@ -47,7 +47,7 @@ export const NotificationBell: React.FC<{ className?: string }> = ({ className }
         <>
           {/* 바깥 클릭 닫기 */}
           <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-[95] mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-card shadow-2xl animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className={`absolute ${align === 'left' ? 'left-0' : 'right-0'} z-[95] mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-card shadow-2xl animate-in fade-in slide-in-from-top-2 duration-150`}>
             <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
               <h4 className="text-sm font-bold flex items-center gap-1.5"><Bell className="h-4 w-4 text-primary" /> 알림</h4>
               <button

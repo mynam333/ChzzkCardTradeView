@@ -212,21 +212,34 @@ export class SupabaseUserRepository implements IUserRepository {
     for (const u of users || []) {
       const { data: cards } = await this.getClient()
         .from('user_cards')
-        .select('streamer:streamers(base_value)')
+        .select('star, streamer:streamers(base_value)')
         .eq('user_id', u.id);
+      // 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
       const cardsValue = (cards || []).reduce(
-        (sum: number, c: any) => sum + (c.streamer?.base_value || 0), 0
+        (sum: number, c: any) => sum + (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.6), 0
       );
       enriched.push({
         ...(u as User),
         card_count: (cards || []).length,
-        total_asset: u.point + cardsValue
+        total_asset: u.point + Math.round(cardsValue)
       });
     }
     enriched.sort((a, b) => b.total_asset - a.total_asset);
     return enriched.slice(0, limit);
   }
 }
+
+// 별(0~5성)별 커스텀 이미지 컬럼명 (인덱스 0 = 0성 = custom_image_url)
+const STAR_IMAGE_COLUMNS = [
+  'custom_image_url', 'custom_image_url_1', 'custom_image_url_2',
+  'custom_image_url_3', 'custom_image_url_4', 'custom_image_url_5'
+];
+
+// row에 별별 커스텀 이미지 배열(custom_images)을 부여
+const withStarImages = (row: any): Streamer => ({
+  ...(row as Streamer),
+  custom_images: STAR_IMAGE_COLUMNS.map((col) => row[col] ?? null)
+});
 
 // 2. Supabase 스트리머 레포지토리
 export class SupabaseStreamerRepository implements IStreamerRepository {
@@ -241,7 +254,7 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       .order('base_value', { ascending: false });
 
     if (error) throw error;
-    return (data || []) as Streamer[];
+    return (data || []).map(withStarImages);
   }
 
   async findById(channelId: string): Promise<Streamer | null> {
@@ -252,7 +265,7 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       .single();
 
     if (error || !data) return null;
-    return data as Streamer;
+    return withStarImages(data);
   }
 
   async save(streamer: Streamer): Promise<void> {
@@ -263,10 +276,22 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     if (error) throw error;
   }
 
-  async updateCustomImage(channelId: string, imageUrl: string | null): Promise<void> {
+  async updateCustomImage(channelId: string, imageUrl: string | null, star: number = 0): Promise<void> {
+    const idx = Math.max(0, Math.min(5, Math.floor(star || 0)));
+    const col = STAR_IMAGE_COLUMNS[idx];
     const { error } = await this.getClient()
       .from('streamers')
-      .update({ custom_image_url: imageUrl, updated_at: new Date().toISOString() })
+      .update({ [col]: imageUrl, updated_at: new Date().toISOString() })
+      .eq('channel_id', channelId);
+
+    if (error) throw error;
+  }
+  async resetAllCustomImages(channelId: string): Promise<void> {
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    for (const c of STAR_IMAGE_COLUMNS) patch[c] = null;
+    const { error } = await this.getClient()
+      .from('streamers')
+      .update(patch)
       .eq('channel_id', channelId);
 
     if (error) throw error;
@@ -665,6 +690,11 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
           name,
           logo_url,
           custom_image_url,
+          custom_image_url_1,
+          custom_image_url_2,
+          custom_image_url_3,
+          custom_image_url_4,
+          custom_image_url_5,
           base_value,
           follower_count,
           is_active,
@@ -677,6 +707,12 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
 
     if (error) throw error;
     const cards = (data || []) as any[];
+    // 임베드된 스트리머에 별별 커스텀 이미지 배열 부여
+    for (const c of cards) {
+      if (c.streamer) {
+        c.streamer.custom_images = STAR_IMAGE_COLUMNS.map((col) => c.streamer[col] ?? null);
+      }
+    }
 
     // 장착된 코스메틱(테두리/이름이펙트) 상세를 한 번에 조회해 매핑
     const itemIds = Array.from(new Set(

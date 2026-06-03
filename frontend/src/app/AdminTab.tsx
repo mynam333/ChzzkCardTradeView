@@ -18,7 +18,7 @@ import {
   Store
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { parseStyle, nameEffectStyle } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, cardImage } from '@/lib/cosmetics';
 
 type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop';
 
@@ -274,11 +274,12 @@ export const AdminTab: React.FC = () => {
     });
   };
 
-  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string) => {
+  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string, star?: number) => {
     const target = (channelId || streamerChannelId).trim();
     if (!target) { toast('스트리머 채널 ID를 입력해 주세요.'); return; }
     try {
-      const res = await apiFetch(`/admin/streamers/${target}/image/${action}`, { method: 'POST' });
+      const body = action === 'reset' && star !== undefined ? JSON.stringify({ star }) : undefined;
+      const res = await apiFetch(`/admin/streamers/${target}/image/${action}`, { method: 'POST', ...(body ? { body } : {}) });
       const data = await res.json();
       toast(data.message || '처리되었습니다.');
       fetchCouponStreamers(true); // 목록 갱신
@@ -582,40 +583,65 @@ export const AdminTab: React.FC = () => {
 
       {/* 스트리머 이미지 */}
       {subTab === 'streamers' && (() => {
-        const customStreamers = couponStreamers.filter((s) => s.custom_image_url || s.is_image_banned);
+        const hasAnyCustom = (s: any) => (s.custom_images && s.custom_images.some(Boolean)) || s.custom_image_url;
+        const customStreamers = couponStreamers.filter((s) => hasAnyCustom(s) || s.is_image_banned);
         return (
           <section className="space-y-5">
-            {/* 커스텀 이미지 보유/차단 스트리머 원클릭 제어 */}
+            {/* 커스텀 이미지 보유/차단 스트리머 별별 제어 */}
             <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 커스텀 이미지 스트리머 ({customStreamers.length})</h3>
                 <button onClick={() => fetchCouponStreamers(true)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
               </div>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
+              <div className="space-y-3 max-h-[32rem] overflow-y-auto">
                 {customStreamers.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-6">커스텀 이미지를 등록했거나 차단된 스트리머가 없습니다.</p>
-                ) : customStreamers.map((s) => (
-                  <div key={s.channel_id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-10 w-10 rounded object-cover border border-border" />
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold truncate flex items-center gap-1.5">
-                          {s.name}
-                          {s.is_image_banned && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">차단됨</span>}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground truncate">{s.channel_id}</p>
+                ) : customStreamers.map((s) => {
+                  const imgs: (string | null)[] = s.custom_images || [s.custom_image_url ?? null];
+                  return (
+                    <div key={s.channel_id} className="rounded-lg bg-secondary/30 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate flex items-center gap-1.5">
+                            {s.name}
+                            {s.is_image_banned && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">차단됨</span>}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">{s.channel_id}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <button onClick={() => handleStreamerImageAction('reset', s.channel_id)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">전체 초기화</button>
+                          {s.is_image_banned ? (
+                            <button onClick={() => handleStreamerImageAction('unban', s.channel_id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500 hover:bg-emerald-500/20">해제</button>
+                          ) : (
+                            <button onClick={() => handleStreamerImageAction('ban', s.channel_id)} className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500/20">차단</button>
+                          )}
+                        </div>
+                      </div>
+                      {/* 0~5성 썸네일 + 개별 초기화 */}
+                      <div className="grid grid-cols-6 gap-1.5">
+                        {[0, 1, 2, 3, 4, 5].map((st) => {
+                          const own = imgs[st] || null;
+                          const resolved = cardImage(s, st);
+                          return (
+                            <div key={st} className="relative">
+                              <div className="aspect-[5/8] overflow-hidden rounded-md border border-border/70 bg-secondary">
+                                {resolved ? <img src={resolved} alt={`${st}성`} className="h-full w-full object-cover" /> : null}
+                              </div>
+                              <span className="absolute left-0.5 top-0.5 rounded bg-black/55 px-1 text-[7px] font-black text-amber-300">{st}★</span>
+                              {own ? (
+                                <button
+                                  onClick={() => handleStreamerImageAction('reset', s.channel_id, st)}
+                                  title={`${st}성 이미지 초기화`}
+                                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white shadow hover:bg-red-600"
+                                >×</button>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button onClick={() => handleStreamerImageAction('reset', s.channel_id)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">초기화</button>
-                      {s.is_image_banned ? (
-                        <button onClick={() => handleStreamerImageAction('unban', s.channel_id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500 hover:bg-emerald-500/20">해제</button>
-                      ) : (
-                        <button onClick={() => handleStreamerImageAction('ban', s.channel_id)} className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500/20">차단</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
