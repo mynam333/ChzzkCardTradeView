@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../AppContext';
 import { MainLayout } from '../MainLayout';
 import { AdminTab } from '../AdminTab';
 
 /**
- * CCTV 관리자 전용 페이지 (/admin)
- * 비관리자 계정이 진입 시 홈(/)으로 강제 리다이렉트 처리하는 가드가 포함되어 있습니다.
+ * CCTV 관리자 탭 컨텐츠 컴포넌트
  */
-export default function AdminPage() {
+function AdminPageContent() {
   const { user, authLoading, toast } = useApp();
   const router = useRouter();
 
@@ -33,9 +32,25 @@ export default function AdminPage() {
     );
   }
 
+  return <AdminTab />;
+}
+
+/**
+ * CCTV 관리자 전용 페이지 (/admin)
+ * useSearchParams() 정적 베일아웃 에러 방지를 위해 Suspense 경계로 래핑하여 렌더링합니다.
+ */
+export default function AdminPage() {
   return (
     <MainLayout>
-      <AdminTab />
+      <Suspense
+        fallback={
+          <div className="flex h-40 items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          </div>
+        }
+      >
+        <AdminPageContent />
+      </Suspense>
     </MainLayout>
   );
 }
