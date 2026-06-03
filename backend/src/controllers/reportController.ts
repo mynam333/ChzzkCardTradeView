@@ -9,7 +9,9 @@ import { IS_PRODUCTION } from '../config';
 export const reportStreamerCard = async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   const { channel_id } = req.params;
-  const { reason } = req.body;
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  // 신고 대상 카드의 별(0~5성). 미지정 시 0성.
+  const star = Math.max(0, Math.min(5, Math.floor(Number(req.body?.star)) || 0));
 
   if (!user) {
     return res.status(401).json({ error: 'Unauthorized', message: '인증 정보가 필요합니다.' });
@@ -17,6 +19,9 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
 
   if (!channel_id || !reason) {
     return res.status(400).json({ error: 'BadRequest', message: '신고 대상 스트리머 ID 및 신고 사유(reason)가 누락되었습니다.' });
+  }
+  if (reason.length > 500) {
+    return res.status(400).json({ error: 'BadRequest', message: '신고 사유는 500자 이내로 입력해 주세요.' });
   }
 
   try {
@@ -26,9 +31,16 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
       return res.status(404).json({ error: 'NotFound', message: '신고할 스트리머의 카드를 찾을 수 없습니다.' });
     }
 
-    // 증거 인멸 방지: 신고를 누른 당시 스트리머가 사용 중인 이미지 URL을 스냅샷으로 지정
-    // 커스텀 이미지 주소가 없으면 기본 치지직 로고 주소를 사용
-    const reportedSnapshotUrl = streamer.custom_image_url || streamer.logo_url;
+    // 증거 인멸 방지: 신고 시점에 해당 별(star)에 표시되던 이미지를 스냅샷으로 지정
+    // 해당 별 이미지가 없으면 하위 별 → 0성 → 기본 로고 순으로 폴백 (프론트 cardImage 로직과 동일)
+    const imgs = (streamer.custom_images && streamer.custom_images.length)
+      ? streamer.custom_images
+      : [streamer.custom_image_url ?? null];
+    let reportedSnapshotUrl: string | null = null;
+    for (let j = star; j >= 0; j--) {
+      if (imgs[j]) { reportedSnapshotUrl = imgs[j]; break; }
+    }
+    if (!reportedSnapshotUrl) reportedSnapshotUrl = streamer.logo_url;
     if (!reportedSnapshotUrl) {
       return res.status(400).json({
         error: 'BadRequest',
@@ -40,6 +52,7 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
       reporter_id: user.id,
       channel_id,
       reported_image_url: reportedSnapshotUrl,
+      star,
       reason,
       status: 'pending' as const
     };

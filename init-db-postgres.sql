@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     point INTEGER DEFAULT 0,                     -- 보유 재화
     last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 일시
     banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
+    ban_reason TEXT,                             -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     access_token TEXT,                           -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                          -- 치지직 OAuth refresh_token (암호화 저장)
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     chat_count INTEGER DEFAULT 0,                 -- 실시간 채팅 누적 갯수
     broadcast_multiplier DOUBLE PRECISION DEFAULT 1.0, -- 실시간 방송 감가 배율 (0.2 ~ 1.2)
     prev_value INTEGER DEFAULT 1000,              -- 이전 환산 시세 (등락률 계산용)
+    registered_by TEXT,                           -- 카드를 등록한 유저의 ID (nullable)
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -135,6 +137,7 @@ CREATE TABLE IF NOT EXISTS card_reports (
     reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
     reported_image_url TEXT NOT NULL,
+    star INTEGER DEFAULT 0,                       -- 신고된 카드의 별(0~5성)
     reason TEXT NOT NULL,
     status TEXT DEFAULT 'pending',               -- 'pending', 'resolved', 'rejected'
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -196,6 +199,7 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
@@ -205,6 +209,7 @@ ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_2 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_3 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_4 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_5 TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS registered_by TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
@@ -251,16 +256,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 무료 뽑기: 마지막 무료뽑기의 KST 날짜가 오늘과 다를 때만 갱신 (성공 시 TRUE)
-CREATE OR REPLACE FUNCTION claim_free_draw(p_id TEXT, p_today TEXT, p_now TIMESTAMPTZ)
+-- 무료 뽑기: 마지막 무료뽑기가 세그먼트 시작 이전일 때만 갱신 (p_segment_start가 NULL이면 무제한 무료뽑기)
+CREATE OR REPLACE FUNCTION claim_free_draw(p_id TEXT, p_now TIMESTAMPTZ, p_segment_start TIMESTAMPTZ)
 RETURNS BOOLEAN AS $$
 DECLARE
   updated INTEGER;
 BEGIN
   UPDATE users SET last_free_draw = p_now
    WHERE id = p_id
-     AND (last_free_draw IS NULL
-          OR to_char(last_free_draw AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') <> p_today);
+     AND (p_segment_start IS NULL
+          OR last_free_draw IS NULL
+          OR last_free_draw < p_segment_start);
   GET DIAGNOSTICS updated = ROW_COUNT;
   RETURN updated > 0;
 END;
@@ -438,4 +444,13 @@ BEGIN
         FOREIGN KEY (item_id) REFERENCES shop_items(id) ON DELETE CASCADE;
     END IF;
 END $$;
+
+-- ============================================================
+-- 하위 호환성 유지: 시스템 설정 테이블 생성 및 기본 무료뽑기 간격 설정 추가
+-- ============================================================
+CREATE TABLE IF NOT EXISTS system_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
 

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     point INTEGER DEFAULT 0,                   -- 보유 재화 (기본값: 0)
     last_free_draw TEXT,                       -- 마지막 무료 뽑기 일시 (ISO String)
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
+    ban_reason TEXT,                           -- 유저 차단 사유 (nullable)
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     activity_score INTEGER DEFAULT 0,          -- 활동 지표 환산 점수
     base_value INTEGER DEFAULT 1000,           -- 현재 환산 시세 (재화 기준)
     is_active INTEGER DEFAULT 0,               -- 현재 방송 중 여부 (0: false, 1: true)
+    registered_by TEXT,                         -- 카드를 등록한 유저의 ID (nullable)
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -131,5 +133,12 @@ CREATE TABLE IF NOT EXISTS card_reports (
     FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
 );
+
+-- 12. 시스템 설정 테이블
+CREATE TABLE IF NOT EXISTS system_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
 
 

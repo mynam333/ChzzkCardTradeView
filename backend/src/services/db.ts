@@ -85,6 +85,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] streamers 테이블에 broadcast_minutes 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN broadcast_minutes INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT registered_by FROM streamers LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] streamers 테이블에 registered_by 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE streamers ADD COLUMN registered_by TEXT;");
+      }
       // 별(1~5성)별 커스텀 카드 이미지 컬럼 (0성은 기존 custom_image_url 사용)
       for (let st = 1; st <= 5; st++) {
         try {
@@ -99,6 +105,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
       } catch (e) {
         console.log('[DB Migration] users 테이블에 representative_card_channel_id 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_channel_id TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT ban_reason FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 ban_reason 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN ban_reason TEXT;");
       }
       try {
         sqliteDb.prepare("SELECT access_token FROM users LIMIT 1").get();
@@ -151,6 +163,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] shop_items 테이블에 purchase_limit(1인 구매 제한) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN purchase_limit INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT star FROM card_reports LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] card_reports 테이블에 star(신고 카드 별) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE card_reports ADD COLUMN star INTEGER DEFAULT 0;");
+      }
       // 상점 구매 횟수 테이블 (구매 제한 추적) — 신규 배포 호환
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS shop_purchases (
         user_id TEXT NOT NULL,
@@ -158,6 +176,13 @@ export const initDatabaseConnection = async (): Promise<void> => {
         count INTEGER DEFAULT 0,
         PRIMARY KEY(user_id, item_id)
       );`);
+
+      // 시스템 설정 테이블 (무료 뽑기 간격 등)
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS system_configs (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );`);
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24')").run();
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

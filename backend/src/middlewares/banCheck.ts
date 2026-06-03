@@ -25,12 +25,14 @@ export const banCheckMiddleware = (req: AuthenticatedRequest, res: Response, nex
       // 만일 서기 9999년 근처라면 영구 정지로 표시
       const isPermanent = banExpiration.getFullYear() > 2099;
 
+      const reasonSuffix = user.ban_reason ? ` (사유: ${user.ban_reason})` : '';
       return res.status(403).json({
         error: 'BannedUser',
         message: isPermanent
-          ? '해당 계정은 규정 위반으로 인해 서비스 영구 이용 정지 상태입니다.'
-          : `해당 계정은 서비스 이용이 일시 제한되었습니다. (제한 만료: ${formattedDate})`,
-        banned_until: user.banned_until
+          ? `해당 계정은 규정 위반으로 인해 서비스 영구 이용 정지 상태입니다.${reasonSuffix}`
+          : `해당 계정은 서비스 이용이 일시 제한되었습니다. (제한 만료: ${formattedDate})${reasonSuffix}`,
+        banned_until: user.banned_until,
+        ban_reason: user.ban_reason
       });
     }
   }

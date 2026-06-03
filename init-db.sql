@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     point INTEGER DEFAULT 0,                   -- 보유 재화 (기본값: 0)
     last_free_draw TEXT,                       -- 마지막 무료 뽑기 일시 (ISO String)
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
+    ban_reason TEXT,                           -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     access_token TEXT,                         -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                        -- 치지직 OAuth refresh_token (암호화 저장)
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
     broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
     prev_value INTEGER DEFAULT 1000,            -- 이전 환산 시세 (등락률 계산용)
+    registered_by TEXT,                         -- 카드를 등록한 유저의 ID (nullable)
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -141,6 +143,7 @@ CREATE TABLE IF NOT EXISTS card_reports (
     reporter_id TEXT NOT NULL,                 -- 신고 유저 ID (users.id FK)
     channel_id TEXT NOT NULL,                  -- 신고 대상 카드 ID (streamers.channel_id FK)
     reported_image_url TEXT NOT NULL,          -- 신고 시점의 카드 이미지 스냅샷 URL
+    star INTEGER DEFAULT 0,                     -- 신고된 카드의 별(0~5성)
     reason TEXT NOT NULL,                      -- 신고 사유
     status TEXT DEFAULT 'pending',             -- 처리 상태 ('pending', 'resolved', 'rejected')
     created_at TEXT DEFAULT (datetime('now')),
@@ -206,5 +209,12 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     FOREIGN KEY(blocker_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- 15. 시스템 설정 테이블
+CREATE TABLE IF NOT EXISTS system_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
 
 

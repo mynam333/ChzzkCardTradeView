@@ -172,12 +172,14 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       if (banExpiration > new Date()) {
         const isPermanent = banExpiration.getFullYear() > 2099;
         const formatted = banExpiration.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+        const reasonSuffix = user.ban_reason ? ` (사유: ${user.ban_reason})` : '';
         return res.status(403).json({
           error: 'BannedUser',
           message: isPermanent
-            ? '해당 계정은 규정 위반으로 영구 이용 정지 상태입니다.'
-            : `해당 계정은 이용이 제한되어 로그인할 수 없습니다. (제한 만료: ${formatted})`,
-          banned_until: user.banned_until
+            ? `해당 계정은 규정 위반으로 영구 이용 정지 상태입니다.${reasonSuffix}`
+            : `해당 계정은 이용이 제한되어 로그인할 수 없습니다. (제한 만료: ${formatted})${reasonSuffix}`,
+          banned_until: user.banned_until,
+          ban_reason: user.ban_reason
         });
       }
     }

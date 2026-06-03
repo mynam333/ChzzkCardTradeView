@@ -8,6 +8,7 @@ import {
   IUserCardRepository,
   ITradeRepository,
   INotificationRepository,
+  ISystemConfigRepository,
   User,
   UserRanking,
   Streamer,
@@ -123,26 +124,24 @@ export class SupabaseUserRepository implements IUserRepository {
     return data === true;
   }
 
-  async updateBanStatus(id: string, bannedUntil: string | null): Promise<void> {
+  async updateBanStatus(id: string, bannedUntil: string | null, reason?: string | null): Promise<void> {
     const { error } = await this.getClient()
       .from('users')
-      .update({ banned_until: bannedUntil })
+      .update({ banned_until: bannedUntil, ban_reason: bannedUntil === null ? null : (reason || null) })
       .eq('id', id);
 
     if (error) throw error;
   }
 
-  async claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean> {
-    const { data, error } = await this.getClient().rpc('claim_free_draw', { p_id: id, p_today: todayKst, p_now: nowIso });
+  async claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean> {
+    const { data, error } = await this.getClient().rpc('claim_free_draw', { p_id: id, p_now: nowIso, p_segment_start: segmentStartIso });
     if (error) {
       console.warn('[Supabase] claim_free_draw RPC 실패, 폴백 사용:', error.message);
       const current = await this.findById(id);
       if (!current) return false;
       let eligible = true;
-      if (current.last_free_draw) {
-        const lastKst = new Date(new Date(current.last_free_draw).getTime() + 9 * 60 * 60 * 1000)
-          .toISOString().split('T')[0];
-        eligible = lastKst !== todayKst;
+      if (segmentStartIso !== null && current.last_free_draw) {
+        eligible = new Date(current.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
       }
       if (!eligible) return false;
       const { error: updErr } = await this.getClient().from('users').update({ last_free_draw: nowIso }).eq('id', id);
@@ -1120,6 +1119,36 @@ export class SupabaseNotificationRepository implements INotificationRepository {
       .update({ is_read: true })
       .eq('user_id', userId)
       .eq('is_read', false);
+    if (error) throw error;
+  }
+}
+
+// 8. Supabase 시스템 설정 레포지토리
+export class SupabaseSystemConfigRepository implements ISystemConfigRepository {
+  private getClient() {
+    return getSupabaseClient();
+  }
+
+  async get(key: string, defaultValue: string): Promise<string> {
+    try {
+      const { data, error } = await this.getClient()
+        .from('system_configs')
+        .select('value')
+        .eq('key', key)
+        .maybeSingle();
+
+      if (error || !data) return defaultValue;
+      return data.value;
+    } catch (e) {
+      return defaultValue;
+    }
+  }
+
+  async set(key: string, value: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('system_configs')
+      .upsert({ key, value }, { onConflict: 'key' });
+
     if (error) throw error;
   }
 }

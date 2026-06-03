@@ -102,6 +102,8 @@ export const AdminTab: React.FC = () => {
   const [shopItems, setShopItems] = useState<any[]>([]);
   const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
+  const [freeDrawInterval, setFreeDrawInterval] = useState('24');
+  const [isSavingInterval, setIsSavingInterval] = useState(false);
 
   // 쿠폰
   const [coupons, setCoupons] = useState<any[]>([]);
@@ -131,6 +133,7 @@ export const AdminTab: React.FC = () => {
   // 신고/밴
   const [reports, setReports] = useState<any[]>([]);
   const [banUserId, setBanUserId] = useState('');
+  const [banReason, setBanReason] = useState('');
 
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
@@ -144,7 +147,10 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') fetchReports();
     if (subTab === 'streamers') fetchCouponStreamers(true);
-    if (subTab === 'shop') fetchShopItems();
+    if (subTab === 'shop') {
+      fetchShopItems();
+      fetchFreeDrawInterval();
+    }
     if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
   }, [subTab, isAdmin]);
 
@@ -350,12 +356,16 @@ export const AdminTab: React.FC = () => {
     } catch { toast('서버 통신 에러'); }
   };
 
-  const handleBanUser = async (userId: string, duration: string) => {
+  const handleBanUser = async (userId: string, duration: string, reason: string = '') => {
     if (!userId.trim()) { toast('대상 유저 ID가 필요합니다.'); return; }
     try {
-      const res = await apiFetch(`/admin/users/${userId}/ban`, { method: 'POST', body: JSON.stringify({ duration }) });
+      const res = await apiFetch(`/admin/users/${userId}/ban`, { method: 'POST', body: JSON.stringify({ duration, reason }) });
       const data = await res.json();
       toast(data.message || '처리되었습니다.');
+      if (res.ok && userId === banUserId) {
+        setBanUserId('');
+        setBanReason('');
+      }
     } catch { toast('서버 통신 에러'); }
   };
 
@@ -374,6 +384,42 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/shop/items');
       if (res.ok) setShopItems(await res.json());
     } catch { /* noop */ }
+  };
+
+  const fetchFreeDrawInterval = async () => {
+    try {
+      const res = await apiFetch('/admin/config/free-draw');
+      if (res.ok) {
+        const data = await res.json();
+        setFreeDrawInterval(String(data.interval ?? '24'));
+      }
+    } catch { /* noop */ }
+  };
+
+  const handleSaveFreeDrawInterval = async () => {
+    const num = parseFloat(freeDrawInterval);
+    if (isNaN(num) || num < 0) {
+      toast('올바른 0 이상의 숫자를 지정해야 합니다.', 'error');
+      return;
+    }
+    setIsSavingInterval(true);
+    try {
+      const res = await apiFetch('/admin/config/free-draw', {
+        method: 'POST',
+        body: JSON.stringify({ interval: num })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '무료 뽑기 초기화 간격이 변경되었습니다.', 'success');
+        fetchFreeDrawInterval();
+      } else {
+        toast(data.message || '설정 저장 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingInterval(false);
+    }
   };
 
   const submitShopItem = async () => {
@@ -907,7 +953,7 @@ export const AdminTab: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5 border-t border-border/40 pt-2">
-                    <button onClick={() => handleBanUser(rep.reporter_id, '7d')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">신고자 7일 밴</button>
+                    <button onClick={() => handleBanUser(rep.reporter_id, '7d', '허위/악성 신고 누적으로 인한 제재')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">신고자 7일 밴</button>
                     <button onClick={() => handleResolveReport(rep.id, 'resolved')} className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20">신고 승인</button>
                     <button onClick={() => handleResolveReport(rep.id, 'rejected')} className="rounded bg-secondary px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary/80">기각</button>
                   </div>
@@ -921,9 +967,12 @@ export const AdminTab: React.FC = () => {
             <input type="text" placeholder="대상 유저 ID(channelId)" value={banUserId}
               onChange={(e) => setBanUserId(e.target.value)}
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+            <input type="text" placeholder="제재 사유 (선택)" value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
             <div className="flex flex-wrap gap-1.5">
               {[['1d', '1일'], ['7d', '7일'], ['30d', '30일'], ['permanent', '영구']].map(([d, label]) => (
-                <button key={d} onClick={() => handleBanUser(banUserId, d)} className="rounded bg-red-500/10 px-3 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-500/20">{label} 밴</button>
+                <button key={d} onClick={() => handleBanUser(banUserId, d, banReason)} className="rounded bg-red-500/10 px-3 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-500/20">{label} 밴</button>
               ))}
               <button onClick={() => handleUnbanUser(banUserId)} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">밴 해제</button>
             </div>
@@ -1121,6 +1170,39 @@ export const AdminTab: React.FC = () => {
       {/* 상점 관리 */}
       {subTab === 'shop' && (
         <section className="space-y-5">
+          {/* 무료 뽑기 초기화 간격 설정 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <RefreshCw className="h-4 w-4 text-primary" />
+              무료 뽑기 초기화 간격 설정
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              KST(한국 표준시) 기준 자정을 시작점으로 하여 무료 가챠가 초기화될 주기를 시간 단위(실수 허용)로 설정합니다.<br />
+              <b>0</b>으로 설정 시 대기 시간 없이 무제한으로 무료 뽑기가 가능합니다.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={freeDrawInterval}
+                  onChange={(e) => setFreeDrawInterval(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                  placeholder="예: 24 (시간 단위)"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">시간</span>
+              </div>
+              <button
+                onClick={handleSaveFreeDrawInterval}
+                disabled={isSavingInterval}
+                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all shadow-md active:scale-95"
+              >
+                {isSavingInterval ? '저장 중...' : '설정 저장'}
+              </button>
+            </div>
+          </div>
+
           {/* 아이템 추가/수정 폼 */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-bold flex items-center gap-1.5">

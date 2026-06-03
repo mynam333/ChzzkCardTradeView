@@ -6,7 +6,8 @@ import {
   couponRepository,
   userCardRepository,
   tradeRepository,
-  notificationRepository
+  notificationRepository,
+  systemConfigRepository
 } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
@@ -168,7 +169,7 @@ export const unbanStreamerImage = async (req: Request, res: Response) => {
  */
 export const banUser = async (req: Request, res: Response) => {
   const { user_id } = req.params;
-  const { duration } = req.body; // '1d', '7d', '30d', 'permanent'
+  const { duration, reason } = req.body; // '1d', '7d', '30d', 'permanent', 'reason'
 
   if (!user_id || !duration) {
     return res.status(400).json({ error: 'BadRequest', message: '대상 유저 ID 및 차단 기간(duration)이 필요합니다.' });
@@ -205,7 +206,7 @@ export const banUser = async (req: Request, res: Response) => {
     }
 
     const bannedUntilIso = banDate.toISOString();
-    await userRepository.updateBanStatus(user_id, bannedUntilIso);
+    await userRepository.updateBanStatus(user_id, bannedUntilIso, reason);
 
     return res.status(200).json({
       message: `사용자(${targetUser.username})가 제재 처리되었습니다.`,
@@ -250,7 +251,23 @@ export const unbanUser = async (req: Request, res: Response) => {
 export const getReports = async (req: Request, res: Response) => {
   try {
     const reports = await reportRepository.findAll();
-    return res.status(200).json(reports);
+
+    // 신고자 닉네임 / 대상 스트리머 닉네임을 함께 제공 (중복 ID는 한 번씩만 조회)
+    const reporterIds = [...new Set(reports.map((r) => r.reporter_id))];
+    const channelIds = [...new Set(reports.map((r) => r.channel_id))];
+    const [reporterEntries, streamerEntries] = await Promise.all([
+      Promise.all(reporterIds.map(async (id) => [id, (await userRepository.findById(id).catch(() => null))?.username || null] as const)),
+      Promise.all(channelIds.map(async (id) => [id, (await streamerRepository.findById(id).catch(() => null))?.name || null] as const))
+    ]);
+    const reporterNameMap = Object.fromEntries(reporterEntries);
+    const streamerNameMap = Object.fromEntries(streamerEntries);
+
+    const enriched = reports.map((r) => ({
+      ...r,
+      reporter_username: reporterNameMap[r.reporter_id] || null,
+      streamer_name: streamerNameMap[r.channel_id] || null
+    }));
+    return res.status(200).json(enriched);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '신고 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
@@ -325,6 +342,7 @@ export const listUsers = async (req: Request, res: Response) => {
       role: u.role,
       point: u.point,
       banned_until: u.banned_until ?? null,
+      ban_reason: u.ban_reason ?? null,
       created_at: u.created_at ?? null
     }));
 
@@ -349,5 +367,35 @@ export const getCoupons = async (req: Request, res: Response) => {
     return res.status(200).json(coupons);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 10. 무료 뽑기 초기화 간격 조회 (시간 단위)
+ */
+export const getFreeDrawInterval = async (req: Request, res: Response) => {
+  try {
+    const val = await systemConfigRepository.get('free_draw_interval', '24');
+    return res.status(200).json({ interval: parseFloat(val) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '설정 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 11. 무료 뽑기 초기화 간격 저장 (시간 단위)
+ */
+export const setFreeDrawInterval = async (req: Request, res: Response) => {
+  const { interval } = req.body;
+  const num = parseFloat(String(interval));
+  if (isNaN(num) || num < 0) {
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 0 이상의 숫자를 지정해야 합니다.' });
+  }
+
+  try {
+    await systemConfigRepository.set('free_draw_interval', String(num));
+    return res.status(200).json({ message: `무료 뽑기 초기화 간격이 ${num}시간으로 변경되었습니다.`, interval: num });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

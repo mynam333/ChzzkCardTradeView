@@ -8,6 +8,7 @@ export interface User {
   point: number;
   last_free_draw: string | null;
   banned_until: string | null;
+  ban_reason?: string | null;
   representative_card_channel_id?: string | null;
   access_token?: string | null;
   refresh_token?: string | null;
@@ -34,6 +35,7 @@ export interface Streamer {
   broadcast_multiplier?: number;
   prev_value?: number;
   updated_at?: string;
+  registered_by?: string | null;
 }
 
 // 시세 히스토리 한 점
@@ -85,6 +87,8 @@ export interface CardReport {
   reporter_id: string;
   channel_id: string;
   reported_image_url: string;
+  /** 신고된 카드의 별(0~5성) — 어떤 별 이미지를 신고했는지 식별용 */
+  star?: number;
   reason: string;
   status: 'pending' | 'resolved' | 'rejected';
   created_at?: string;
@@ -133,9 +137,9 @@ export interface IUserRepository {
   incrementPoint(id: string, delta: number): Promise<void>;
   /** 잔액이 충분할 때만 원자적으로 차감합니다. 성공 시 true, 잔액 부족 시 false. */
   tryDeductPoint(id: string, amount: number): Promise<boolean>;
-  updateBanStatus(id: string, bannedUntil: string | null): Promise<void>;
-  /** 마지막 무료 뽑기 일자가 today와 다를 때만 갱신합니다(KST 자정 기준 멱등). 갱신 성공 시 true. */
-  claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean>;
+  updateBanStatus(id: string, bannedUntil: string | null, reason?: string | null): Promise<void>;
+  /** 세그먼트 시작 시간보다 마지막 무료뽑기 시각이 이전일 때만 갱신합니다. 갱신 성공 시 true. segmentStartIso가 null이면 무제한. */
+  claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
@@ -305,4 +309,10 @@ export interface IUserCardRepository {
   findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
   deleteByChannel(channelId: string): Promise<number>;
+}
+
+// 8. 시스템 설정 리포지토리 인터페이스
+export interface ISystemConfigRepository {
+  get(key: string, defaultValue: string): Promise<string>;
+  set(key: string, value: string): Promise<void>;
 }

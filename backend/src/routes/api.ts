@@ -16,7 +16,9 @@ import {
   banUser,
   unbanUser,
   getReports,
-  resolveReport
+  resolveReport,
+  getFreeDrawInterval,
+  setFreeDrawInterval
 } from '../controllers/adminController';
 import { claimCoupon, createCoupon } from '../controllers/couponController';
 import {
@@ -287,5 +289,9 @@ router.post('/admin/announcements/:id/popup', authMiddleware, adminMiddleware, s
 
 // 푸시 알림 즉시 또는 예약 생성
 router.post('/admin/push/schedule', authMiddleware, adminMiddleware, scheduleNotification);
+
+// 시스템 설정 (무료 뽑기 간격 등)
+router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDrawInterval);
+router.post('/admin/config/free-draw', authMiddleware, adminMiddleware, setFreeDrawInterval);
 
 export default router;

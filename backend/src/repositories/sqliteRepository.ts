@@ -8,6 +8,7 @@ import {
   IUserCardRepository,
   ITradeRepository,
   INotificationRepository,
+  ISystemConfigRepository,
   User,
   UserRanking,
   Streamer,
@@ -34,6 +35,7 @@ export class SqliteUserRepository implements IUserRepository {
       point: row.point,
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
+      ban_reason: row.ban_reason ?? null,
       representative_card_channel_id: row.representative_card_channel_id ?? null,
       access_token: row.access_token,
       refresh_token: row.refresh_token,
@@ -97,19 +99,24 @@ export class SqliteUserRepository implements IUserRepository {
     return result.changes > 0;
   }
 
-  async updateBanStatus(id: string, bannedUntil: string | null): Promise<void> {
-    this.getDb().prepare('UPDATE users SET banned_until = ? WHERE id = ?').run(bannedUntil, id);
+  async updateBanStatus(id: string, bannedUntil: string | null, reason?: string | null): Promise<void> {
+    this.getDb().prepare('UPDATE users SET banned_until = ?, ban_reason = ? WHERE id = ?')
+      .run(bannedUntil, bannedUntil === null ? null : (reason || null), id);
   }
 
-  async claimFreeDrawIfEligible(id: string, todayKst: string, nowIso: string): Promise<boolean> {
-    // last_free_draw(UTC ISO)를 KST 날짜로 환산하여 오늘과 다를 때만 갱신 → 단일 UPDATE로 원자적 처리
+  async claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean> {
+    if (segmentStartIso === null) {
+      // 0시간마다 (무한 무료뽑기)
+      this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(nowIso, id);
+      return true;
+    }
     const result = this.getDb()
       .prepare(
         `UPDATE users SET last_free_draw = ?
          WHERE id = ?
-           AND (last_free_draw IS NULL OR date(datetime(last_free_draw, '+9 hours')) <> ?)`
+           AND (last_free_draw IS NULL OR datetime(last_free_draw) < datetime(?))`
       )
-      .run(nowIso, id, todayKst);
+      .run(nowIso, id, segmentStartIso);
     return result.changes > 0;
   }
 
@@ -187,6 +194,7 @@ export class SqliteUserRepository implements IUserRepository {
       point: row.point,
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
+      ban_reason: row.ban_reason ?? null,
       created_at: row.created_at,
       card_count: row.card_count,
       total_asset: row.point + Math.round(row.cards_value)
@@ -229,6 +237,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
+      registered_by: row.registered_by || null,
       updated_at: row.updated_at
     }));
   }
@@ -252,14 +261,15 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
+      registered_by: row.registered_by || null,
       updated_at: row.updated_at
     };
   }
 
   async save(streamer: Streamer): Promise<void> {
     this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value, registered_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(channel_id) DO UPDATE SET
         name = excluded.name,
         logo_url = excluded.logo_url,
@@ -272,6 +282,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
         chat_count = COALESCE(excluded.chat_count, streamers.chat_count),
         broadcast_multiplier = COALESCE(excluded.broadcast_multiplier, streamers.broadcast_multiplier),
         prev_value = COALESCE(excluded.prev_value, streamers.prev_value),
+        registered_by = COALESCE(excluded.registered_by, streamers.registered_by),
         updated_at = datetime('now')
     `).run(
       streamer.channel_id,
@@ -285,7 +296,8 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       streamer.broadcast_count || 0,
       streamer.chat_count || 0,
       streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0,
-      streamer.prev_value !== undefined ? streamer.prev_value : 1000
+      streamer.prev_value !== undefined ? streamer.prev_value : 1000,
+      streamer.registered_by || null
     );
   }
 
@@ -562,6 +574,7 @@ export class SqliteReportRepository implements IReportRepository {
       reporter_id: row.reporter_id,
       channel_id: row.channel_id,
       reported_image_url: row.reported_image_url,
+      star: row.star ?? 0,
       reason: row.reason,
       status: row.status as 'pending' | 'resolved' | 'rejected',
       created_at: row.created_at
@@ -570,8 +583,8 @@ export class SqliteReportRepository implements IReportRepository {
 
   async create(report: CardReport): Promise<CardReport> {
     const result = this.getDb().prepare(
-      'INSERT INTO card_reports (reporter_id, channel_id, reported_image_url, reason, status) VALUES (?, ?, ?, ?, ?)'
-    ).run(report.reporter_id, report.channel_id, report.reported_image_url, report.reason, report.status);
+      'INSERT INTO card_reports (reporter_id, channel_id, reported_image_url, star, reason, status) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(report.reporter_id, report.channel_id, report.reported_image_url, report.star ?? 0, report.reason, report.status);
 
     report.id = Number(result.lastInsertRowid);
     return report;
@@ -974,5 +987,29 @@ export class SqliteNotificationRepository implements INotificationRepository {
 
   async markAllRead(userId: string): Promise<void> {
     this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').run(userId);
+  }
+}
+
+// 8. SQLite 시스템 설정 레포지토리
+export class SqliteSystemConfigRepository implements ISystemConfigRepository {
+  private getDb() {
+    return getSqliteDb();
+  }
+
+  async get(key: string, defaultValue: string): Promise<string> {
+    try {
+      const row = this.getDb().prepare('SELECT value FROM system_configs WHERE key = ?').get(key) as any;
+      return row ? row.value : defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  }
+
+  async set(key: string, value: string): Promise<void> {
+    this.getDb().prepare(`
+      INSERT INTO system_configs (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, value);
   }
 }

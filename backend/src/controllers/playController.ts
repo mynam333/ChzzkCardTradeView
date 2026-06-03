@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import {
   userRepository,
   streamerRepository,
-  userCardRepository
+  userCardRepository,
+  systemConfigRepository
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile } from '../services/chzzkService';
@@ -298,10 +299,31 @@ export const drawCard = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
     }
 
-    // C. 무료 뽑기 시도 (KST 자정 기준, 단일 원자적 UPDATE로 이중 무료뽑기 방지)
+    // C. 무료 뽑기 시도 (KST 자정 기준, 설정된 n시간 간격에 의거하여 단일 원자적 UPDATE로 중복 무료뽑기 방지)
     const nowIso = new Date().toISOString();
-    const todayStrKst = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const isFreeDraw = await userRepository.claimFreeDrawIfEligible(userId, todayStrKst, nowIso);
+    const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
+    const intervalHours = parseFloat(intervalStr);
+
+    let segmentStartIso: string | null = null;
+    if (intervalHours > 0) {
+      const now = new Date();
+      const kstOffset = 9 * 60 * 60 * 1000;
+      const nowKstTime = now.getTime() + kstOffset;
+
+      const midnightKstDate = new Date(nowKstTime);
+      midnightKstDate.setUTCHours(0, 0, 0, 0);
+      const midnightKstTime = midnightKstDate.getTime();
+
+      const diffMs = nowKstTime - midnightKstTime;
+      const intervalMs = intervalHours * 60 * 60 * 1000;
+
+      const count = Math.floor(diffMs / intervalMs);
+      const segmentStartKstTime = midnightKstTime + count * intervalMs;
+      const segmentStartUtcTime = segmentStartKstTime - kstOffset;
+      segmentStartIso = new Date(segmentStartUtcTime).toISOString();
+    }
+
+    const isFreeDraw = await userRepository.claimFreeDrawIfEligible(userId, nowIso, segmentStartIso);
 
     // D. 무료가 아니면 잔액이 충분할 때만 원자적으로 차감
     if (!isFreeDraw) {
@@ -466,7 +488,8 @@ export const registerStreamer = async (req: Request, res: Response) => {
       activity_score: 50, // 기본 활동점수
       base_value: baseValue,
       is_active: profile.openLive,
-      serial_number: serialNumber
+      serial_number: serialNumber,
+      registered_by: (req as any).user?.id || null // 등록한 유저 ID 기록 (Null 가능)
     };
     await streamerRepository.save(newStreamer);
 

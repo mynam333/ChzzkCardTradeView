@@ -10,6 +10,7 @@ export interface AuthenticatedRequest extends Request {
     point: number;
     last_free_draw: string | null;
     banned_until: string | null;
+    ban_reason?: string | null;
   };
 }
 
