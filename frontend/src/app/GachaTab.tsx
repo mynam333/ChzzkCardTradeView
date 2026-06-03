@@ -1397,7 +1397,7 @@ export const GachaTab: React.FC = () => {
                         containerType: 'inline-size',
                         ...(borderClass(card.border) ? {} : (borderStyle(card.border) || {}))
                       }}
-                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''} ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
+                      className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''} ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
                     >
                       {/* 프리미엄 테두리 코스메틱 오버레이 */}
                       <CosmeticFrame border={card.border} />
@@ -1421,64 +1421,67 @@ export const GachaTab: React.FC = () => {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
                       </div>
 
-                      {/* 카드 상단 정보 */}
-                      <div className="relative z-20 flex items-center justify-between w-full">
-                        {streamer.is_active || (streamer as any).isLive ? (
-                          <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                            <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
-                          </span>
-                        ) : (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
-                            OFFLINE
-                          </span>
-                        )}
-
-                        <div className="flex items-center gap-1">
-                          {count > 1 && (
-                            <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
-                              ×{count}
+                      {/* 카드 콘텐츠 패딩 랩퍼 */}
+                      <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                        {/* 카드 상단 정보 */}
+                        <div className="flex items-center justify-between w-full pointer-events-auto">
+                          {streamer.is_active || (streamer as any).isLive ? (
+                            <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                              <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                            </span>
+                          ) : (
+                            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">
+                              OFFLINE
                             </span>
                           )}
-                          <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                            No.{String(streamer.serial_number ?? 0).padStart(4, '0')}
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* 카드 하단 정보 */}
-                      <div className="relative z-20 space-y-1 text-white block mt-auto">
-                        {/* 별 등급 표시 */}
-                        {star > 0 && (
-                          <div className="flex items-center gap-0.5 drop-shadow">
-                            {Array.from({ length: star }, (_, i) => (
-                              <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
-                            ))}
+                          <div className="flex items-center gap-1">
+                            {count > 1 && (
+                              <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
+                                ×{count}
+                              </span>
+                            )}
+                            <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                              No.{String(streamer.serial_number ?? 0).padStart(4, '0')}
+                            </span>
                           </div>
-                        )}
-                        <CosmeticName effect={card.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</CosmeticName>
-                        <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
-
-                        <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                          <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
-                          <span className="text-xs font-black text-emerald-400">{cardValue.toLocaleString()} P</span>
                         </div>
 
-                        {/* 한계돌파 버튼 (같은 스트리머 0성 카드를 재료로 소모해 별 +1) */}
-                        {(() => {
-                          if (selectionMode || star >= 5) return null;
-                          const zeroCount = zeroStarByChannel[streamer.channel_id] || 0;
-                          // 0성 카드를 올릴 땐 대상+재료로 2장 필요, 1성 이상은 재료 0성 1장 필요
-                          const canFuse = star === 0 ? zeroCount >= 2 : zeroCount >= 1;
-                          if (!canFuse) return null;
-                          return (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
-                              className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
-                            >
-                              ⭐ 한계돌파 ({star}★→{star + 1}★)
-                            </button>
-                          );
-                        })()}
+                        {/* 카드 하단 정보 */}
+                        <div className="space-y-1 text-white block mt-auto pointer-events-auto">
+                          {/* 별 등급 표시 */}
+                          {star > 0 && (
+                            <div className="flex items-center gap-0.5 drop-shadow">
+                              {Array.from({ length: star }, (_, i) => (
+                                <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                              ))}
+                            </div>
+                          )}
+                          <CosmeticName effect={card.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</CosmeticName>
+                          <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
+
+                          <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                            <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                            <span className="text-xs font-black text-emerald-400">{cardValue.toLocaleString()} P</span>
+                          </div>
+
+                          {/* 한계돌파 버튼 (같은 스트리머 0성 카드를 재료로 소모해 별 +1) */}
+                          {(() => {
+                            if (selectionMode || star >= 5) return null;
+                            const zeroCount = zeroStarByChannel[streamer.channel_id] || 0;
+                            // 0성 카드를 올릴 땐 대상+재료로 2장 필요, 1성 이상은 재료 0성 1장 필요
+                            const canFuse = star === 0 ? zeroCount >= 2 : zeroCount >= 1;
+                            if (!canFuse) return null;
+                            return (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
+                                className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
+                              >
+                                ⭐ 한계돌파 ({star}★→{star + 1}★)
+                              </button>
+                            );
+                          })()}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1511,7 +1514,7 @@ export const GachaTab: React.FC = () => {
                 containerType: 'inline-size',
                 ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
               }}
-              className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+              className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
             >
               {/* 프리미엄 테두리 코스메틱 오버레이 */}
               <CosmeticFrame border={live.border} />
@@ -1522,34 +1525,37 @@ export const GachaTab: React.FC = () => {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
               </div>
 
-              {/* 상단 정보 */}
-              <div className="relative z-20 flex items-center justify-between w-full">
-                {s.is_active || (s as any).isLive ? (
-                  <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                    <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+              {/* 카드 콘텐츠 패딩 랩퍼 */}
+              <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                {/* 상단 정보 */}
+                <div className="flex items-center justify-between w-full pointer-events-auto">
+                  {s.is_active || (s as any).isLive ? (
+                    <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                      <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                    </span>
+                  ) : (
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
+                  )}
+                  <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                    No.{String(s.serial_number ?? 0).padStart(4, '0')}
                   </span>
-                ) : (
-                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
-                )}
-                <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                  No.{String(s.serial_number ?? 0).padStart(4, '0')}
-                </span>
-              </div>
+                </div>
 
-              {/* 하단 정보 */}
-              <div className="relative z-20 space-y-1 text-white block mt-auto">
-                {star > 0 && (
-                  <div className="flex items-center gap-0.5 drop-shadow">
-                    {Array.from({ length: star }, (_, i) => (
-                      <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
-                    ))}
+                {/* 하단 정보 */}
+                <div className="space-y-1 text-white block mt-auto pointer-events-auto">
+                  {star > 0 && (
+                    <div className="flex items-center gap-0.5 drop-shadow">
+                      {Array.from({ length: star }, (_, i) => (
+                        <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                      ))}
+                    </div>
+                  )}
+                  <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
+                  <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
+                  <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                    <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                    <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
                   </div>
-                )}
-                <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
-                <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
-                <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                  <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
-                  <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
                 </div>
               </div>
             </div>
@@ -1696,38 +1702,45 @@ export const GachaTab: React.FC = () => {
                     containerType: 'inline-size',
                     ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
                   }}
-                    className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md border border-border/80 ${(live.star || 0) >= 1 ? `card-star card-star-${live.star}` : ''}`}
+                    className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-md border border-border/80 ${(live.star || 0) >= 1 ? `card-star card-star-${live.star}` : ''}`}
                   >
                     <CosmeticFrame border={live.border} />
                     <div className="absolute inset-0 z-0">
                       <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
                     </div>
-                    <div className="relative z-20 flex items-center justify-between w-full">
-                      {live.streamer?.is_active || (live.streamer as any)?.isLive ? (
-                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                          <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+
+                    {/* 카드 콘텐츠 패딩 랩퍼 */}
+                    <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                      {/* 카드 상단 정보 */}
+                      <div className="flex items-center justify-between w-full pointer-events-auto">
+                        {live.streamer?.is_active || (live.streamer as any)?.isLive ? (
+                          <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                            <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                          </span>
+                        ) : (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
+                        )}
+                        <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                          No.{String(live.streamer?.serial_number ?? 0).padStart(4, '0')}
                         </span>
-                      ) : (
-                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
-                      )}
-                      <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                        No.{String(live.streamer?.serial_number ?? 0).padStart(4, '0')}
-                      </span>
-                    </div>
-                    <div className="relative z-20 space-y-1 text-white block mt-auto">
-                      {(live.star || 0) > 0 && (
-                        <div className="flex items-center gap-0.5 drop-shadow">
-                          {Array.from({ length: live.star || 0 }, (_, i) => (
-                            <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
-                          ))}
+                      </div>
+
+                      {/* 카드 하단 정보 */}
+                      <div className="space-y-1 text-white block mt-auto pointer-events-auto">
+                        {(live.star || 0) > 0 && (
+                          <div className="flex items-center gap-0.5 drop-shadow">
+                            {Array.from({ length: live.star || 0 }, (_, i) => (
+                              <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                            ))}
+                          </div>
+                        )}
+                        <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{live.streamer?.name}</CosmeticName>
+                        <p className="text-[8.5px] text-zinc-300 drop-shadow">{(live.streamer?.follower_count || 0).toLocaleString()} 팔로워</p>
+                        <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                          <span className="text-[8.5px] text-zinc-400">{(live.star || 0) > 0 ? `${live.star}성 가치` : '시세 가치'}</span>
+                          <span className="text-xs font-black text-emerald-400">{Math.round((live.streamer?.base_value || 0) * starMult(live.star || 0)).toLocaleString()} P</span>
                         </div>
-                      )}
-                      <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{live.streamer?.name}</CosmeticName>
-                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(live.streamer?.follower_count || 0).toLocaleString()} 팔로워</p>
-                      <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                        <span className="text-[8.5px] text-zinc-400">{(live.star || 0) > 0 ? `${live.star}성 가치` : '시세 가치'}</span>
-                        <span className="text-xs font-black text-emerald-400">{Math.round((live.streamer?.base_value || 0) * starMult(live.star || 0)).toLocaleString()} P</span>
                       </div>
                     </div>
                   </div>

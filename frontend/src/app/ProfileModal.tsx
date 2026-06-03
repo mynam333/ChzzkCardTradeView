@@ -187,7 +187,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                       containerType: 'inline-size',
                       ...(borderClass(rep.border) ? {} : (borderStyle(rep.border) || {}))
                     }}
-                    className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 p-3 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
+                    className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
                     <CosmeticFrame border={rep.border} />
                     <img
@@ -197,28 +197,35 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                       className="absolute inset-0 h-full w-full object-cover opacity-85"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/10" />
-                    <div className="relative z-10 flex items-center justify-between">
-                      {repStreamer.is_active ? (
-                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold">LIVE</span>
-                      ) : <span />}
-                      <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">
-                        No.{String(rep.serial_number ?? 0).padStart(4, '0')}
-                      </span>
-                    </div>
-                    <div className="relative z-10 space-y-1">
-                      {rep.star >= 1 && (
-                        <div className="flex gap-0.5">
-                          {Array.from({ length: rep.star }).map((_, i) => (
-                            <Star key={i} className="h-3 w-3 fill-yellow-400 text-yellow-400 drop-shadow" />
-                          ))}
+
+                    {/* 카드 콘텐츠 패딩 랩퍼 */}
+                    <div className="relative z-10 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                      {/* 상단 정보 */}
+                      <div className="flex items-center justify-between w-full pointer-events-auto">
+                        {repStreamer.is_active ? (
+                          <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold">LIVE</span>
+                        ) : <span />}
+                        <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">
+                          No.{String(rep.serial_number ?? 0).padStart(4, '0')}
+                        </span>
+                      </div>
+
+                      {/* 하단 정보 */}
+                      <div className="space-y-1 w-full pointer-events-auto">
+                        {rep.star >= 1 && (
+                          <div className="flex gap-0.5">
+                            {Array.from({ length: rep.star }).map((_, i) => (
+                              <Star key={i} className="h-3 w-3 fill-yellow-400 text-yellow-400 drop-shadow" />
+                            ))}
+                          </div>
+                        )}
+                        <CosmeticName effect={rep.name_effect} className="block text-sm font-black tracking-tight truncate drop-shadow">
+                          {repStreamer.name}
+                        </CosmeticName>
+                        <div className="flex items-center justify-between border-t border-white/20 pt-1.5">
+                          <span className="text-[8px] text-zinc-300">대표 카드</span>
+                          <span className="text-xs font-black text-emerald-400">{(repStreamer.base_value || 0).toLocaleString()} P</span>
                         </div>
-                      )}
-                      <CosmeticName effect={rep.name_effect} className="block text-sm font-black tracking-tight truncate drop-shadow">
-                        {repStreamer.name}
-                      </CosmeticName>
-                      <div className="flex items-center justify-between border-t border-white/20 pt-1.5">
-                        <span className="text-[8px] text-zinc-300">대표 카드</span>
-                        <span className="text-xs font-black text-emerald-400">{(repStreamer.base_value || 0).toLocaleString()} P</span>
                       </div>
                     </div>
                   </div>
