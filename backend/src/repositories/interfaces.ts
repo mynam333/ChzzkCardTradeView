@@ -42,6 +42,27 @@ export interface ValueHistoryPoint {
   recorded_at: string;
 }
 
+// 스케줄러 1주기 계산 결과(스트리머 1명) — 일괄 반영용
+export interface StreamerScheduleResult {
+  channel_id: string;
+  prev_value: number;
+  base_value: number;
+  activity_score: number;
+  broadcast_multiplier: number;
+  /** 누적 방송 시간 가산(분). 0이면 미가산 */
+  add_minutes: number;
+  /** 방송 시작 트랜지션 시 1, 아니면 0 */
+  add_broadcast_count: number;
+  /** 차감할 채팅 수(0 하한). 집계 도중 유입분 보존을 위해 상대 차감 */
+  consumed_chats: number;
+  /** 이번 주기에 HTTP로 라이브 상태를 폴링했는지 여부 */
+  polled: boolean;
+  /** polled === true 일 때만 반영되는 라이브 상태 */
+  is_active: boolean;
+  /** polled === true 일 때만 반영되는 팔로워 수 */
+  follower_count: number;
+}
+
 export interface Coupon {
   id?: number;
   code: string;
@@ -122,6 +143,8 @@ export interface IUserRepository {
   updateRepresentativeCard(id: string, channelId: string | null): Promise<void>;
   findRankings(limit: number): Promise<UserRanking[]>;
   count(): Promise<number>;
+  /** 관리자용 유저 목록(닉네임/ID 부분검색 + 페이지네이션). keyword 비면 전체. */
+  listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }>;
   /** blockerId가 blockedId를 차단합니다(멱등). */
   blockUser(blockerId: string, blockedId: string): Promise<void>;
   /** blockerId가 blockedId 차단을 해제합니다. */
@@ -165,6 +188,12 @@ export interface IStreamerRepository {
   decrementChatCount(channelId: string, amount: number): Promise<void>;
   /** 현재 시세를 value_history에 기록하고 오래된 이력을 정리합니다. */
   recordValueHistory(channelId: string, value: number): Promise<void>;
+  /** 스케줄러 1주기 계산 결과를 일괄(단일 트랜잭션/RPC) 반영합니다. */
+  bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void>;
+  /** 여러 스트리머의 시세 이력을 한 번에 기록합니다. */
+  bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void>;
+  /** 지정한 일수보다 오래된 시세 이력을 전 채널 일괄 정리합니다. */
+  pruneValueHistory(olderThanDays: number): Promise<void>;
   /** 채널별 약 24시간 전 시세 맵을 반환합니다(등락률 계산용). */
   getValue24hAgoMap(): Promise<Record<string, number>>;
   /** 채널별 약 1시간 전 시세 맵을 반환합니다(1시간 등락 랭킹용). */

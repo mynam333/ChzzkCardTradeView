@@ -62,7 +62,8 @@ import {
 } from '../controllers/playController';
 import {
   getAdminStats,
-  getCoupons
+  getCoupons,
+  listUsers
 } from '../controllers/adminController';
 import {
   getNotifications,
@@ -267,6 +268,9 @@ router.post('/admin/reports/:report_id/resolve', authMiddleware, adminMiddleware
 
 // 관리자 대시보드 통계
 router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
+
+// 관리자 유저 목록 (닉네임/채널ID 검색 + 페이지네이션)
+router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);
 
 // 쿠폰 발급 및 목록/사용현황 조회
 router.post('/admin/coupons', authMiddleware, adminMiddleware, createCoupon);

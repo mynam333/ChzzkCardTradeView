@@ -294,6 +294,37 @@ RETURNS VOID AS $$
    WHERE channel_id = p_channel_id;
 $$ LANGUAGE sql;
 
+-- 스케줄러 1주기 계산 결과를 단일 호출로 일괄 반영 (네트워크 왕복 최소화)
+-- p_updates: StreamerScheduleResult[] 형태의 JSONB 배열
+--   { channel_id, prev_value, base_value, activity_score, broadcast_multiplier,
+--     add_minutes, add_broadcast_count, consumed_chats, polled, is_active, follower_count }
+-- chat_count는 GREATEST(chat_count - consumed_chats, 0)로 상대 차감하여 집계 도중 유입분 보존.
+-- is_active/follower_count는 polled=true(이번 주기 HTTP 폴링)인 경우에만 갱신.
+CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
+RETURNS VOID AS $$
+DECLARE
+  u JSONB;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates)
+  LOOP
+    UPDATE streamers SET
+      prev_value           = (u->>'prev_value')::INTEGER,
+      base_value           = (u->>'base_value')::INTEGER,
+      activity_score       = (u->>'activity_score')::INTEGER,
+      broadcast_multiplier = (u->>'broadcast_multiplier')::REAL,
+      broadcast_minutes    = broadcast_minutes + COALESCE((u->>'add_minutes')::INTEGER, 0),
+      broadcast_count      = broadcast_count + COALESCE((u->>'add_broadcast_count')::INTEGER, 0),
+      chat_count           = GREATEST(chat_count - COALESCE((u->>'consumed_chats')::INTEGER, 0), 0),
+      is_active            = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
+                                  THEN (u->>'is_active')::BOOLEAN ELSE is_active END,
+      follower_count       = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
+                                  THEN (u->>'follower_count')::INTEGER ELSE follower_count END,
+      updated_at           = NOW()
+    WHERE channel_id = u->>'channel_id';
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트 양방향 이전을 단일 트랜잭션으로 수행
 -- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE'
 --       | 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT' | 'FAILED:<msg>'

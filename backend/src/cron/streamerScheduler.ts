@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { streamerRepository, userRepository } from '../repositories';
-import { fetchChzzkChannelProfile, refreshChzzkToken } from '../services/chzzkService';
+import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
+import { fetchChzzkChannelProfile, ChzzkProfile, refreshChzzkToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
 import { decryptToken, encryptToken } from '../services/cryptoService';
 
@@ -134,11 +135,112 @@ export const calculateCardValue = (
   return Math.min(Math.max(finalValue, 100), 500000);
 };
 
+// ============================================================
+//  스케줄러 부하/지연 최적화 설정
+// ============================================================
+// 오프라인 스트리머는 매 주기 전부가 아니라 N개 샤드로 나눠 순회 폴링합니다.
+// (라이브 중인 스트리머는 항상 매 주기 폴링) → HTTP 호출량 대폭 절감.
+const OFFLINE_POLL_SHARDS = 3;          // 3주기(약 6분)에 걸쳐 오프라인 1회 폴링
+const PRUNE_EVERY_CYCLES = 30;          // 약 1시간마다 시세 이력 정리
+const VALUE_HISTORY_RETENTION_DAYS = 7; // 7일 초과 시세 이력 삭제
+const POLL_JITTER_MS = 30;              // 호출 버스트 완화용 소량 지터(ms)
+
+// 이전 주기가 끝나기 전 다음 크론이 겹쳐 실행되는 것을 막는 가드(오버랩 방지)
+let isSyncRunning = false;
+let scheduleCycle = 0;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// channel_id를 안정적으로 0..(shards-1)로 분배 (오프라인 샤드 순회 폴링용)
+const shardOf = (channelId: string, shards: number): number => {
+  let h = 0;
+  for (let i = 0; i < channelId.length; i++) h = (h * 31 + channelId.charCodeAt(i)) >>> 0;
+  return h % shards;
+};
+
 /**
- * 모든 등록된 스트리머의 방송 여부(is_active) 및 팔로워 수를 순차적으로 갱신합니다.
+ * 스트리머 1명의 1주기 가치/배율/활동점수를 계산해 일괄 반영용 결과로 반환합니다.
+ * profile === null 이면 이번 주기에 HTTP 폴링하지 않은(오프라인) 스트리머로 간주하여
+ * 순수 계산(감가·랜덤 드리프트)만 적용합니다. (HTTP 호출 없음)
+ */
+const buildScheduleResult = (
+  streamer: Streamer,
+  profile: ChzzkProfile | null
+): { update: StreamerScheduleResult; history: { channel_id: string; value: number } } => {
+  const polled = profile !== null;
+  const openLive = polled ? profile!.openLive : false;
+  // 폴링한 라이브 스트리머만 채팅 소켓 연결 여부를 따져 실질 라이브 판정
+  // (19금/연령제한/해외차단 등으로 라이브지만 소켓 미연결이면 오프라인 취급 → 감가)
+  const isChatConnected = polled ? chatManager.isConnected(streamer.channel_id) : false;
+  const isEffectiveLive = openLive && isChatConnected;
+
+  const concurrentUserCount = polled ? (profile!.concurrentUserCount || 0) : 0;
+  const followerCount = polled ? profile!.followerCount : (streamer.follower_count || 0);
+  const followerDelta = polled ? (profile!.followerCount - (streamer.follower_count || 0)) : 0;
+  const addBroadcastCount = (polled && !streamer.is_active && openLive) ? 1 : 0;
+
+  // 감가/복구 배율 (원본 로직 유지)
+  let m = streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0;
+  const MAX_DELTA = 0.05; // 1주기당 배율 변동 절댓값 한계
+  const delta = isEffectiveLive
+    // 복구(Recovery): 0.2 부근에서 빠르게 복구되다 1.0에 가까울수록 완만히 안착
+    ? Math.log(1 + (1.0 - m) * 10) * 0.0055
+    // 감가(Decay): 처음엔 작게, 점점 가속. 약 5일 연속 미방송 시 최저 0.2 도달
+    : -((Math.pow(1.25 - m, 2) * 0.00035) + 0.00005);
+  const clampedDelta = Math.max(Math.min(delta, MAX_DELTA), -MAX_DELTA);
+  m = m + clampedDelta;
+  const newMultiplier = Math.min(Math.max(m, 0.2), 1.2); // 0.2 ~ 1.2 범위
+
+  // 이번 주기에 집계에 소비한 채팅 수(스냅샷 기준). 라이브 폴링이 아니면 차감하지 않음.
+  const consumedChats = streamer.chat_count || 0;
+  const finalVal = calculateCardValue(
+    streamer.base_value || streamer.follower_count,
+    followerCount,
+    clampedDelta,
+    consumedChats,
+    concurrentUserCount,
+    isEffectiveLive,
+    followerDelta
+  );
+
+  const addMinutes = isEffectiveLive ? SCHEDULE_INTERVAL_MINUTES : 0;
+  const broadcastMinutes = (streamer.broadcast_minutes || 0) + addMinutes;
+  const activityScore = Math.round((broadcastMinutes / 60 * 50 + consumedChats) * newMultiplier);
+  const prevValue = streamer.base_value || streamer.follower_count;
+
+  return {
+    update: {
+      channel_id: streamer.channel_id,
+      prev_value: prevValue,
+      base_value: finalVal,
+      activity_score: activityScore,
+      broadcast_multiplier: newMultiplier,
+      add_minutes: addMinutes,
+      add_broadcast_count: addBroadcastCount,
+      // 폴링하지 않은 오프라인 스트리머의 chat_count는 건드리지 않음
+      consumed_chats: polled ? consumedChats : 0,
+      polled,
+      is_active: openLive,
+      follower_count: followerCount
+    },
+    history: { channel_id: streamer.channel_id, value: finalVal }
+  };
+};
+
+/**
+ * 등록된 스트리머의 방송 상태·팔로워·시세를 1주기 갱신합니다.
+ * - 라이브 스트리머: 매 주기 HTTP 폴링
+ * - 오프라인 스트리머: N개 샤드로 나눠 순회 폴링(감가·드리프트는 매 주기 순수 계산)
+ * - 모든 DB 반영은 단일 트랜잭션/RPC로 일괄 처리
+ * - 이전 주기 미완 시 이번 틱은 건너뜀(오버랩 방지)
  */
 export const syncAllStreamersLiveStatus = async () => {
-  console.log('[LiveStatusScheduler] 스트리머 실시간 방송 상태 및 팔로워 수 동기화 시작...');
+  if (isSyncRunning) {
+    console.warn('[LiveStatusScheduler] 이전 주기가 아직 진행 중이라 이번 틱을 건너뜁니다(오버랩 방지).');
+    return;
+  }
+  isSyncRunning = true;
+  const cycle = scheduleCycle++;
   try {
     const streamers = await streamerRepository.findAll();
     if (streamers.length === 0) {
@@ -146,137 +248,77 @@ export const syncAllStreamersLiveStatus = async () => {
       return;
     }
 
-    let successCount = 0;
-    const CONCURRENCY = 4; // 동시 처리 스트리머 수 상한 (2분 주기 초과 방지 + 과도한 동시 요청 억제)
+    const results: StreamerScheduleResult[] = [];
+    const historyPoints: { channel_id: string; value: number }[] = [];
 
-    const processStreamer = async (streamer: typeof streamers[number]) => {
-      try {
-        const profile = await fetchChzzkChannelProfile(streamer.channel_id);
-        
-        // 1. 방송 켬 트랜지션 감지 (기존 오프라인이었는데 생방송이 켜진 경우)
-        const isTransitionToLive = !streamer.is_active && profile.openLive;
-        if (isTransitionToLive) {
-          console.log(`[LiveStatusScheduler] 방송 시작 감지 -> 방송 횟수 증가 (대상: ${streamer.name})`);
-          await streamerRepository.incrementBroadcastCount(streamer.channel_id);
-        }
+    // 1) 폴링 대상(라이브 + 이번 샤드의 오프라인)과 계산 전용(나머지 오프라인) 분리
+    const pollTargets: Streamer[] = [];
+    const computeOnly: Streamer[] = [];
+    const activeShard = cycle % OFFLINE_POLL_SHARDS;
+    for (const s of streamers) {
+      const shouldPoll = s.is_active || shardOf(s.channel_id, OFFLINE_POLL_SHARDS) === activeShard;
+      if (shouldPoll) pollTargets.push(s);
+      else computeOnly.push(s);
+    }
 
-        // 2. 방송 상태 및 팔로워 수 1차 업데이트
-        await streamerRepository.updateLiveStatus(
-          streamer.channel_id,
-          profile.openLive,
-          profile.followerCount
-        );
+    // 2) 계산 전용 오프라인 스트리머: HTTP 없이 즉시 감가/드리프트 계산
+    for (const s of computeOnly) {
+      const r = buildScheduleResult(s, null);
+      results.push(r.update);
+      historyPoints.push(r.history);
+    }
 
-        // 3. 실시간 채팅 수집을 위한 Websocket 연결/종료 관리
-        if (profile.openLive && profile.chatChannelId) {
-          // 만료 임박 시 자동 갱신된 유효 토큰 사용 (없으면 비로그인 수집)
-          const streamerAccessToken = await getValidStreamerAccessToken(streamer.channel_id);
-          // 방송 중이면 웹소켓 연결 수립
-          chatManager.connect(streamer.channel_id, profile.chatChannelId, streamerAccessToken);
-        } else {
-          // 방송 중이 아니면 웹소켓 연결 해제
-          chatManager.disconnect(streamer.channel_id);
-        }
-
-        // 4. 가치 및 감가 배율 재계산을 위해 최신 상태 조회
-        const updatedStreamer = await streamerRepository.findById(streamer.channel_id);
-        if (updatedStreamer) {
-          let m = updatedStreamer.broadcast_multiplier !== undefined ? updatedStreamer.broadcast_multiplier : 1.0;
-
-          const MAX_DELTA = 0.05; // 1회 스케줄러 당 변경 가능한 배율의 최대 절댓값 한계
-          let delta = 0;
-
-          // 19금/연령제한/해외차단 등으로 생방송 중(profile.openLive = true)이지만 채팅 수집 소켓이 비활성화된 경우 가치 계산 시 오프라인(감가) 처리
-          const isChatConnected = chatManager.isConnected(streamer.channel_id);
-          const isEffectiveLive = profile.openLive && isChatConnected;
-
-          if (isEffectiveLive) {
-            // 방송 중일 때 복구 (Recovery): 초반(0.2 부근)에 급격히 복구되다가 1.0에 갈수록 완만히 안착
-            // 2분 주기 기준, 약 4~6시간(120~180 루프) 정도 방송을 유지하면 거의 1.0 수준으로 완벽하게 복구되도록 설계
-            delta = Math.log(1 + (1.0 - m) * 10) * 0.0055;
-          } else {
-            // 방송 중이 아닐 때 감가 (Decay): 처음에는 작게 깎이다가 점점 더 속도가 붙어 크게 깎이는 가속 감가
-            // 5일(120시간 = 3600 루프) 연속 미방송 시 최저치인 0.2에 도달하도록 감가 속도 밸런싱 (상한 1.2 연동하여 기준을 1.25로 변경)
-            delta = -((Math.pow(1.25 - m, 2) * 0.00035) + 0.00005);
-          }
-
-          // 스케줄러 회당 최대 변동 제한 적용 (+- 0.05 한계)
-          const clampedDelta = Math.max(Math.min(delta, MAX_DELTA), -MAX_DELTA);
-          m = m + clampedDelta;
-
-          // 감가 한계 범위 제한 (0.2 ~ 1.2)
-          const newMultiplier = Math.min(Math.max(m, 0.2), 1.2);
-
-          // 팔로워 증감량 계산
-          const followerDelta = profile.followerCount - (streamer.follower_count || 0);
-
-          // 이번 주기에 집계에 사용한 채팅 수(소비량). 집계 도중 새로 들어온 채팅은 보존하기 위해 별도 보관.
-          const consumedChats = updatedStreamer.chat_count || 0;
-
-          // 최종 가치 연산 (이전 base_value 기준 누적식 변동 적용, 방송중 여부 및 팔로워 증감 전달)
-          const finalVal = calculateCardValue(
-            updatedStreamer.base_value || updatedStreamer.follower_count,
-            updatedStreamer.follower_count,
-            clampedDelta,
-            consumedChats,
-            profile.concurrentUserCount || 0,
-            isEffectiveLive,
-            followerDelta
-          );
-
-          console.log(`[LiveStatusScheduler] 가치 계산 상세 (스트리머: ${updatedStreamer.name}) - 이전가치: ${updatedStreamer.base_value}, 팔로워: ${updatedStreamer.follower_count}, 팔로워변동: ${followerDelta}, 시청자: ${profile.concurrentUserCount || 0}, 채팅: ${consumedChats}, 배율델타: ${clampedDelta.toFixed(5)} -> 최종가치: ${finalVal}`);
-
-          // 방송 시간 누적: effective live면 이번 스케줄 주기(2분)만큼 방송 시간(분) 가산
-          if (isEffectiveLive) {
-            await streamerRepository.incrementBroadcastMinutes(streamer.channel_id, SCHEDULE_INTERVAL_MINUTES);
-          }
-
-          // 활동 지표는 누적 방송 시간(시간 단위) + 채팅량에 감가 배율 가중치를 합성하여 점수화
-          const broadcastMinutes = (updatedStreamer.broadcast_minutes || 0) + (isEffectiveLive ? SCHEDULE_INTERVAL_MINUTES : 0);
-          const broadcastHours = broadcastMinutes / 60;
-          const activityScore = Math.round(
-            (broadcastHours * 50 + consumedChats) * newMultiplier
-          );
-
-          const prevValue = updatedStreamer.base_value || updatedStreamer.follower_count;
-
-          // 시세/배율/점수만 원자적으로 반영 (chat_count는 건드리지 않아 집계 중 유입 채팅 보존)
-          await streamerRepository.updateValueMetrics(
-            streamer.channel_id,
-            prevValue,
-            finalVal,
-            activityScore,
-            newMultiplier
-          );
-
-          // 집계에 소비한 만큼만 chat_count 차감 (집계 도중 들어온 채팅은 다음 주기로 이월)
-          await streamerRepository.decrementChatCount(streamer.channel_id, consumedChats);
-
-          // 시세 히스토리 기록 (24시간 등락률/차트용)
-          await streamerRepository.recordValueHistory(streamer.channel_id, finalVal);
-        }
-
-        successCount++;
-      } catch (err: any) {
-        console.error(`[LiveStatusScheduler] 스트리머 정보 업데이트 실패 (ID: ${streamer.channel_id}):`, err.message);
-      }
-    };
-
-    // 동시성 제한 워커 풀: 커서를 공유하며 최대 CONCURRENCY개씩 병렬 처리
+    // 3) 폴링 대상: 적응형 동시성 워커 풀로 HTTP 폴링 + 채팅 소켓 관리
+    let liveCount = 0;
+    let failCount = 0;
+    const CONCURRENCY = Math.min(16, Math.max(4, Math.ceil(pollTargets.length / 25)));
     let cursor = 0;
     const worker = async () => {
-      while (cursor < streamers.length) {
-        const idx = cursor++;
-        await processStreamer(streamers[idx]);
+      while (cursor < pollTargets.length) {
+        const streamer = pollTargets[cursor++];
+        try {
+          const profile = await fetchChzzkChannelProfile(streamer.channel_id);
+
+          // 채팅 수집 소켓 연결/해제 관리 (방송 켬 트랜지션은 결과의 add_broadcast_count로 일괄 반영)
+          if (profile.openLive && profile.chatChannelId) {
+            const streamerAccessToken = await getValidStreamerAccessToken(streamer.channel_id);
+            chatManager.connect(streamer.channel_id, profile.chatChannelId, streamerAccessToken);
+          } else {
+            chatManager.disconnect(streamer.channel_id);
+          }
+
+          const r = buildScheduleResult(streamer, profile);
+          results.push(r.update);
+          historyPoints.push(r.history);
+          if (r.update.is_active) liveCount++;
+        } catch (err: any) {
+          failCount++;
+          console.error(`[LiveStatusScheduler] 스트리머 폴링 실패 (ID: ${streamer.channel_id}):`, err.message);
+        }
+        // 소량 지터로 호출 버스트 완화 (Chzzk 레이트리밋/차단 회피)
+        if (POLL_JITTER_MS > 0) await sleep(Math.random() * POLL_JITTER_MS);
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, streamers.length) }, () => worker())
+      Array.from({ length: Math.min(CONCURRENCY, pollTargets.length) }, () => worker())
     );
 
-    console.log(`[LiveStatusScheduler] 동기화 완료: 총 ${streamers.length}명 중 ${successCount}명 성공`);
+    // 4) DB 일괄 반영 (단일 트랜잭션/RPC로 왕복 최소화)
+    await streamerRepository.bulkApplyScheduleResults(results);
+    await streamerRepository.bulkRecordValueHistory(historyPoints);
+    // 5) 주기적으로 오래된 시세 이력 정리 (7일 초과분)
+    if (cycle % PRUNE_EVERY_CYCLES === 0) {
+      await streamerRepository.pruneValueHistory(VALUE_HISTORY_RETENTION_DAYS);
+    }
+
+    console.log(
+      `[LiveStatusScheduler] 동기화 완료: 총 ${streamers.length}명 ` +
+      `(폴링 ${pollTargets.length} / 라이브 ${liveCount} / 계산전용 ${computeOnly.length} / 실패 ${failCount}, 동시성 ${CONCURRENCY})`
+    );
   } catch (error: any) {
     console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error.message);
+  } finally {
+    isSyncRunning = false;
   }
 };
 

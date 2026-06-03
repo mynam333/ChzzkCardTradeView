@@ -11,6 +11,7 @@ import {
   User,
   UserRanking,
   Streamer,
+  StreamerScheduleResult,
   Coupon,
   CardReport,
   Announcement,
@@ -56,6 +57,22 @@ export class SqliteUserRepository implements IUserRepository {
       'SELECT * FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT ?'
     ).all(`%${keyword}%`, limit) as any[];
     return rows.map((r) => this.mapUser(r));
+  }
+
+  async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
+    const db = this.getDb();
+    const kw = (keyword || '').trim();
+    if (kw) {
+      const like = `%${kw}%`;
+      const total = (db.prepare('SELECT COUNT(*) AS c FROM users WHERE username LIKE ? OR id LIKE ?').get(like, like) as any)?.c || 0;
+      const rows = db.prepare(
+        'SELECT * FROM users WHERE username LIKE ? OR id LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      ).all(like, like, limit, offset) as any[];
+      return { users: rows.map((r) => this.mapUser(r)), total };
+    }
+    const total = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as any)?.c || 0;
+    const rows = db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset) as any[];
+    return { users: rows.map((r) => this.mapUser(r)), total };
   }
 
   async create(user: User): Promise<User> {
@@ -365,6 +382,65 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     this.getDb().prepare(
       `DELETE FROM value_history WHERE channel_id = ? AND datetime(recorded_at) < datetime('now', '-8 days')`
     ).run(channelId);
+  }
+
+  async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
+    if (results.length === 0) return;
+    const db = this.getDb();
+    // 라이브 폴링 여부에 따라 컬럼 집합이 달라 두 종류의 prepared statement 사용
+    const updPolled = db.prepare(
+      `UPDATE streamers SET
+         prev_value = ?, base_value = ?, activity_score = ?, broadcast_multiplier = ?,
+         broadcast_minutes = broadcast_minutes + ?,
+         broadcast_count = broadcast_count + ?,
+         chat_count = MAX(chat_count - ?, 0),
+         is_active = ?, follower_count = ?,
+         updated_at = datetime('now')
+       WHERE channel_id = ?`
+    );
+    const updCompute = db.prepare(
+      `UPDATE streamers SET
+         prev_value = ?, base_value = ?, activity_score = ?, broadcast_multiplier = ?,
+         broadcast_minutes = broadcast_minutes + ?,
+         broadcast_count = broadcast_count + ?,
+         chat_count = MAX(chat_count - ?, 0),
+         updated_at = datetime('now')
+       WHERE channel_id = ?`
+    );
+    const tx = db.transaction((rows: StreamerScheduleResult[]) => {
+      for (const r of rows) {
+        if (r.polled) {
+          updPolled.run(
+            r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
+            r.add_minutes, r.add_broadcast_count, r.consumed_chats,
+            r.is_active ? 1 : 0, r.follower_count, r.channel_id
+          );
+        } else {
+          updCompute.run(
+            r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
+            r.add_minutes, r.add_broadcast_count, r.consumed_chats, r.channel_id
+          );
+        }
+      }
+    });
+    tx(results);
+  }
+
+  async bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void> {
+    if (points.length === 0) return;
+    const db = this.getDb();
+    const ins = db.prepare('INSERT INTO value_history (channel_id, value) VALUES (?, ?)');
+    const tx = db.transaction((rows: { channel_id: string; value: number }[]) => {
+      for (const p of rows) ins.run(p.channel_id, p.value);
+    });
+    tx(points);
+  }
+
+  async pruneValueHistory(olderThanDays: number): Promise<void> {
+    const days = Math.max(1, Math.floor(olderThanDays));
+    this.getDb().prepare(
+      `DELETE FROM value_history WHERE datetime(recorded_at) < datetime('now', '-' || ? || ' days')`
+    ).run(days);
   }
 
   // 채널별로 지정한 시간 경계에 가장 근접한(경계 이전 중 가장 최근) 시세를 선택

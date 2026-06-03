@@ -305,6 +305,42 @@ export const getAdminStats = async (req: Request, res: Response) => {
 };
 
 /**
+ * 관리자용 유저 목록 조회 (닉네임/채널ID 검색 + 페이지네이션)
+ * - 프로필 이미지(avatar_url), 닉네임(username), 채널ID(id)만 노출
+ * - 토큰 등 민감 정보는 응답에서 제외
+ */
+export const listUsers = async (req: Request, res: Response) => {
+  try {
+    const keyword = typeof req.query.q === 'string' ? req.query.q : '';
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const rawLimit = parseInt(String(req.query.limit || '20'), 10) || 20;
+    const limit = Math.min(50, Math.max(1, rawLimit));
+    const offset = (page - 1) * limit;
+
+    const { users, total } = await userRepository.listUsers(keyword, limit, offset);
+    const items = users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      avatar_url: u.avatar_url,
+      role: u.role,
+      point: u.point,
+      banned_until: u.banned_until ?? null,
+      created_at: u.created_at ?? null
+    }));
+
+    return res.status(200).json({
+      users: items,
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit))
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '유저 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 9. 발급된 쿠폰 목록 및 사용 현황 조회
  */
 export const getCoupons = async (req: Request, res: Response) => {

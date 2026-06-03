@@ -11,6 +11,7 @@ import {
   User,
   UserRanking,
   Streamer,
+  StreamerScheduleResult,
   Coupon,
   CardReport,
   Announcement,
@@ -57,6 +58,23 @@ export class SupabaseUserRepository implements IUserRepository {
       .limit(limit);
     if (error || !data) return [];
     return data as User[];
+  }
+
+  async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
+    const kw = (keyword || '').trim();
+    let query = this.getClient()
+      .from('users')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (kw) {
+      // 닉네임 또는 ID 부분일치 (특수문자 escape: 콤마/괄호는 or 필터 구문 충돌 방지)
+      const safe = kw.replace(/[,()]/g, ' ');
+      query = query.or(`username.ilike.%${safe}%,id.ilike.%${safe}%`);
+    }
+    const { data, error, count } = await query;
+    if (error || !data) return { users: [], total: 0 };
+    return { users: data as User[], total: count || 0 };
   }
 
   async create(user: User): Promise<User> {
@@ -485,6 +503,55 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     // 오래된 이력 정리 (8일 초과)
     const cutoff = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
     await this.getClient().from('value_history').delete().eq('channel_id', channelId).lt('recorded_at', cutoff);
+  }
+
+  async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
+    if (results.length === 0) return;
+    const client = this.getClient();
+    // 1차: 서버측 단일 RPC로 일괄 반영 (네트워크 왕복 1회). 미배포 시 폴백.
+    const { error } = await client.rpc('bulk_apply_streamer_schedule', { p_updates: results });
+    if (!error) return;
+    console.warn('[Supabase] bulk_apply_streamer_schedule RPC 실패, 행별 폴백 사용:', error.message);
+    // 폴백: 행마다 개별 update (느리지만 정확)
+    for (const r of results) {
+      const patch: any = {
+        prev_value: r.prev_value,
+        base_value: r.base_value,
+        activity_score: r.activity_score,
+        broadcast_multiplier: r.broadcast_multiplier,
+        updated_at: new Date().toISOString()
+      };
+      if (r.polled) {
+        patch.is_active = r.is_active;
+        patch.follower_count = r.follower_count;
+      }
+      await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
+      if (r.add_minutes > 0) {
+        await client.rpc('increment_streamer_minutes', { p_channel_id: r.channel_id, p_minutes: r.add_minutes })
+          .then(({ error: e }) => { if (e) console.warn('[Supabase] minutes 폴백 실패:', e.message); });
+      }
+      if (r.add_broadcast_count > 0) {
+        await client.rpc('increment_streamer_broadcast', { p_channel_id: r.channel_id })
+          .then(({ error: e }) => { if (e) console.warn('[Supabase] broadcast 폴백 실패:', e.message); });
+      }
+      if (r.consumed_chats > 0) {
+        await client.rpc('decrement_streamer_chat', { p_channel_id: r.channel_id, p_amount: r.consumed_chats })
+          .then(({ error: e }) => { if (e) console.warn('[Supabase] chat 폴백 실패:', e.message); });
+      }
+    }
+  }
+
+  async bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void> {
+    if (points.length === 0) return;
+    const { error } = await this.getClient().from('value_history').insert(points);
+    if (error) throw error;
+  }
+
+  async pruneValueHistory(olderThanDays: number): Promise<void> {
+    const days = Math.max(1, Math.floor(olderThanDays));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await this.getClient().from('value_history').delete().lt('recorded_at', cutoff);
+    if (error) throw error;
   }
 
   private async valueAgoMap(hours: number): Promise<Record<string, number>> {

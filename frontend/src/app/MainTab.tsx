@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
 import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface Notice {
   id: number;
@@ -96,9 +97,9 @@ export const MainTab: React.FC = () => {
               <h3 className="font-bold text-foreground">공지사항</h3>
             </div>
             <h4 className="mt-3 text-lg font-bold text-foreground">{activePopup.title}</h4>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
-              {activePopup.content}
-            </p>
+            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              <MarkdownRenderer content={activePopup.content} />
+            </div>
             <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
               <button
                 onClick={() => dismissPopup(true)}
@@ -174,7 +175,9 @@ export const MainTab: React.FC = () => {
                       <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">팝업</span>
                     )}
                   </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{notice.content}</p>
+                  <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    <MarkdownRenderer content={notice.content} />
+                  </div>
                 </div>
               ))
             )}
