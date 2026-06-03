@@ -183,7 +183,10 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
               {rep && repStreamer ? (
                 <div className="mt-5 flex justify-center">
                   <div
-                    style={borderClass(rep.border) ? undefined : borderStyle(rep.border)}
+                    style={{
+                      containerType: 'inline-size',
+                      ...(borderClass(rep.border) ? {} : (borderStyle(rep.border) || {}))
+                    }}
                     className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 p-3 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
                     <CosmeticFrame border={rep.border} />

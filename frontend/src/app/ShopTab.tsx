@@ -227,8 +227,21 @@ export const ShopTab: React.FC = () => {
               <div key={item.id} className="rounded-2xl border border-border bg-secondary/20 p-4 flex flex-col items-center gap-3">
                 {/* 미리보기 */}
                 {item.type === 'border' ? (
-                  <div className="relative h-24 w-16 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass(item) ? undefined : parseStyle(item.style_json)}>
-                    <CosmeticFrame border={item} />
+                  <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '64px', height: '102.4px' }}>
+                    <div style={{
+                      width: '224px',
+                      height: '358.4px',
+                      transform: 'scale(calc(64 / 224))',
+                      transformOrigin: 'top left',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      pointerEvents: 'none',
+                      containerType: 'inline-size',
+                      ...(borderClass(item) ? {} : (parseStyle(item.style_json) || {}))
+                    }}>
+                      <CosmeticFrame border={item} />
+                    </div>
                   </div>
                 ) : (
                   <div className="h-20 flex items-center justify-center">

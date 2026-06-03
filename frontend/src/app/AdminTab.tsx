@@ -558,7 +558,12 @@ export const AdminTab: React.FC = () => {
                         onClick={() => setCouponForm({ ...couponForm, reward_item_id: it.id })}
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_item_id === it.id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
                         {it.type === 'border' ? (
-                          <div className="relative h-7 w-5 shrink-0 overflow-hidden rounded bg-gradient-to-br from-secondary to-card border border-border/70" style={borderClass(it) ? undefined : parseStyle(it.style_json)}>
+                          <div className="relative h-7 w-5 shrink-0 overflow-hidden rounded bg-gradient-to-br from-secondary to-card border border-border/70"
+                            style={{
+                              containerType: 'inline-size',
+                              ...(borderClass(it) ? {} : (parseStyle(it.style_json) || {}))
+                            }}
+                          >
                             <CosmeticFrame border={it} />
                           </div>
                         ) : (
@@ -1033,8 +1038,21 @@ export const AdminTab: React.FC = () => {
             <div className="flex items-center gap-4 rounded-lg bg-secondary/30 p-4">
               <span className="text-[11px] font-bold text-muted-foreground">미리보기</span>
               {shopForm.type === 'border' ? (
-                <div className="relative h-20 w-12 overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass({ style_json: shopForm.style_json }) ? undefined : parseStyle(shopForm.style_json)}>
-                  <CosmeticFrame border={{ style_json: shopForm.style_json }} />
+                <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '40px', height: '64px' }}>
+                  <div style={{
+                    width: '224px',
+                    height: '358.4px',
+                    transform: 'scale(calc(40 / 224))',
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    pointerEvents: 'none',
+                    containerType: 'inline-size',
+                    ...(borderClass({ style_json: shopForm.style_json }) ? {} : (parseStyle(shopForm.style_json) || {}))
+                  }}>
+                    <CosmeticFrame border={{ style_json: shopForm.style_json }} />
+                  </div>
                 </div>
               ) : (
                 <CosmeticName effect={{ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family }} className="text-lg font-black">
@@ -1071,8 +1089,21 @@ export const AdminTab: React.FC = () => {
                 <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
                   <div className="flex items-center gap-3 min-w-0">
                     {item.type === 'border' ? (
-                      <div className="relative h-14 w-9 shrink-0 overflow-hidden rounded-lg border border-border/80 bg-gradient-to-br from-secondary to-card" style={borderClass(item) ? undefined : parseStyle(item.style_json)}>
-                        <CosmeticFrame border={item} />
+                      <div className="relative shrink-0 overflow-hidden rounded-lg border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '32px', height: '51.2px' }}>
+                        <div style={{
+                          width: '224px',
+                          height: '358.4px',
+                          transform: 'scale(calc(32 / 224))',
+                          transformOrigin: 'top left',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          pointerEvents: 'none',
+                          containerType: 'inline-size',
+                          ...(borderClass(item) ? {} : (parseStyle(item.style_json) || {}))
+                         }}>
+                          <CosmeticFrame border={item} />
+                        </div>
                       </div>
                     ) : (
                       <CosmeticName effect={item} className="shrink-0 text-base font-black px-1">{item.name}</CosmeticName>

@@ -110,9 +110,18 @@ body {
    실제 테두리 비주얼은 관리자가 입력한 CSS({"class","css"})가 주입되어
    .cosmetic-frame 위의 .cb-* 클래스로 적용됩니다. (card-borders/ 참고)
    ============================================================ */
+.card-container {
+  container-type: inline-size;
+}
+
 .cosmetic-frame {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 64px;
+  height: 102.4px;
+  transform: scale(calc(100cqw / 64));
+  transform-origin: top left;
   z-index: 10 !important;
   border-radius: inherit;
   pointer-events: none;

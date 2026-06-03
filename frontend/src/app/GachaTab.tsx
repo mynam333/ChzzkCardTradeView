@@ -1393,7 +1393,10 @@ export const GachaTab: React.FC = () => {
                       onMouseUp={endPress}
                       onTouchStart={startPress}
                       onTouchEnd={endPress}
-                      style={borderClass(card.border) ? undefined : borderStyle(card.border)}
+                      style={{
+                        containerType: 'inline-size',
+                        ...(borderClass(card.border) ? {} : (borderStyle(card.border) || {}))
+                      }}
                       className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-lg select-none cursor-pointer border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''} ${isSelected ? 'ring-4 ring-primary ring-offset-2 ring-offset-background scale-[0.98]' : ''}`}
                     >
                       {/* 프리미엄 테두리 코스메틱 오버레이 */}
@@ -1502,9 +1505,10 @@ export const GachaTab: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
               style={{
                 width: '224px',
-                height: '358px',
-                transform: 'scale(min(calc(82vh / 358px), calc(92vw / 224px)))',
+                height: '358.4px',
+                transform: 'scale(min(calc(82vh / 358.4px), calc(92vw / 224px)))',
                 transformOrigin: 'center',
+                containerType: 'inline-size',
                 ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
               }}
               className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
@@ -1646,8 +1650,21 @@ export const GachaTab: React.FC = () => {
                     <button key={it.id} onClick={() => handleEquip(live.id, it.id)}
                       className={`rounded-lg border p-2 flex flex-col items-center gap-1 transition ${isOn ? 'border-primary ring-2 ring-primary/30' : 'border-border/60 hover:bg-secondary/50'}`}>
                       {type === 'border'
-                        ? <div className="relative h-12 w-8 overflow-hidden rounded bg-card border border-border/80" style={borderClass(it) ? undefined : borderStyle(it)}>
-                            <CosmeticFrame border={it} />
+                        ? <div className="relative overflow-hidden rounded bg-card border border-border/80" style={{ width: '32px', height: '51.2px' }}>
+                            <div style={{
+                              width: '224px',
+                              height: '358.4px',
+                              transform: 'scale(calc(32 / 224))',
+                              transformOrigin: 'top left',
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              pointerEvents: 'none',
+                              containerType: 'inline-size',
+                              ...(borderClass(it) ? {} : (borderStyle(it) || {}))
+                            }}>
+                              <CosmeticFrame border={it} />
+                            </div>
                           </div>
                         : <CosmeticName effect={it} className="text-sm font-black truncate max-w-full">{it.name}</CosmeticName>}
                       <span className="text-[9px] text-muted-foreground truncate max-w-full">{it.name} ×{it.quantity}</span>
@@ -1667,11 +1684,53 @@ export const GachaTab: React.FC = () => {
               </div>
               {/* 카드 미리보기 */}
               <div className="mt-4 flex justify-center">
-                <div className="relative flex h-44 w-28 flex-col justify-end overflow-hidden rounded-xl bg-card p-2 border border-border/80" style={borderClass(live.border) ? undefined : borderStyle(live.border)}>
-                  <CosmeticFrame border={live.border} />
-                  <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                  <CosmeticName effect={live.name_effect} className="relative z-10 block text-xs font-black text-white truncate drop-shadow">{live.streamer?.name}</CosmeticName>
+                <div style={{ width: '112px', height: '179.2px', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{
+                    width: '224px',
+                    height: '358.4px',
+                    transform: 'scale(0.5)',
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    containerType: 'inline-size',
+                    ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
+                  }}
+                    className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-md border border-border/80 ${(live.star || 0) >= 1 ? `card-star card-star-${live.star}` : ''}`}
+                  >
+                    <CosmeticFrame border={live.border} />
+                    <div className="absolute inset-0 z-0">
+                      <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
+                    </div>
+                    <div className="relative z-20 flex items-center justify-between w-full">
+                      {live.streamer?.is_active || (live.streamer as any)?.isLive ? (
+                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                          <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                        </span>
+                      ) : (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
+                      )}
+                      <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                        No.{String(live.streamer?.serial_number ?? 0).padStart(4, '0')}
+                      </span>
+                    </div>
+                    <div className="relative z-20 space-y-1 text-white block mt-auto">
+                      {(live.star || 0) > 0 && (
+                        <div className="flex items-center gap-0.5 drop-shadow">
+                          {Array.from({ length: live.star || 0 }, (_, i) => (
+                            <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                          ))}
+                        </div>
+                      )}
+                      <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{live.streamer?.name}</CosmeticName>
+                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(live.streamer?.follower_count || 0).toLocaleString()} 팔로워</p>
+                      <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                        <span className="text-[8.5px] text-zinc-400">{(live.star || 0) > 0 ? `${live.star}성 가치` : '시세 가치'}</span>
+                        <span className="text-xs font-black text-emerald-400">{Math.round((live.streamer?.base_value || 0) * starMult(live.star || 0)).toLocaleString()} P</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="mt-4 space-y-3">
