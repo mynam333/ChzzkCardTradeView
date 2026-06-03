@@ -92,13 +92,37 @@ export const borderClass = (border?: { style_json?: string | null } | null): str
   }
 };
 
-// 커스텀 테두리 CSS를 클래스 단위로 1회 주입(또는 변경 시 갱신)
+/**
+ * CSS 안의 인라인 SVG 데이터 URI를 브라우저가 처리할 수 있도록 정규화합니다.
+ * - url("data:image/svg+xml,...") / url('...') 의 SVG 페이로드만 대상으로,
+ *   CSS·URL 파서를 깨뜨리는 문자( `<` `>` `#` , 줄바꿈/탭 )를 퍼센트 인코딩/공백 치환합니다.
+ * - 이미 인코딩된 SVG(`%3C` 등)는 변화가 없습니다(멱등). base64 데이터 URI는 건드리지 않습니다.
+ * 이렇게 하면 관리자가 인코딩을 일부 빠뜨린 SVG를 붙여넣어도 브라우저처럼 정상 렌더됩니다.
+ */
+export const normalizeSvgInCss = (css: string): string => {
+  if (!css || css.indexOf('data:image/svg+xml,') === -1) return css;
+  // url( <quote> data:image/svg+xml, <payload> <same quote> )  — base64(;base64,)는 매칭되지 않음
+  return css.replace(
+    /(url\(\s*)(['"])(data:image\/svg\+xml,)([\s\S]*?)\2(\s*\))/gi,
+    (_m, pre: string, quote: string, prefix: string, payload: string, post: string) => {
+      const fixed = payload
+        .replace(/[\r\n\t]+/g, ' ') // 줄바꿈/탭 → 공백 (CSS 문자열 파싱 보호)
+        .replace(/</g, '%3C')
+        .replace(/>/g, '%3E')
+        .replace(/#/g, '%23');      // 색상 #fff, 참조 url(#id) 등 — 이미 %23이면 변화 없음
+      return `${pre}${quote}${prefix}${fixed}${quote}${post}`;
+    }
+  );
+};
+
+// 커스텀 코스메틱 CSS를 클래스 단위로 1회 주입(또는 변경 시 갱신)
 const injectedBorderCss = new Map<string, HTMLStyleElement>();
 
 /**
  * 코스메틱(테두리·이름 이펙트)이 style_json에 {"class":..,"css":..} 형태로 원본 CSS를 담고 있으면,
  * 해당 CSS를 <style data-cb-css="class"> 태그로 문서에 주입합니다(클래스 단위 dedupe·갱신).
- * 입력된 CSS가 그대로 적용되며, css 없이 class만 있으면 아무것도 주입하지 않습니다.
+ * 주입 직전 SVG 데이터 URI를 정규화하여 인코딩 누락(`#`·`<`·`>`·줄바꿈)도 브라우저처럼 처리합니다.
+ * css 없이 class만 있으면 아무것도 주입하지 않습니다.
  */
 export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | null): void => {
   if (typeof document === 'undefined' || !cosmetic?.style_json) return;
@@ -106,6 +130,7 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
   try { obj = JSON.parse(cosmetic.style_json); } catch { return; }
   if (!obj || typeof obj.class !== 'string' || typeof obj.css !== 'string' || !obj.css.trim()) return;
   const key = obj.class.trim();
+  const cssText = normalizeSvgInCss(obj.css);
   let el = injectedBorderCss.get(key);
   if (!el) {
     el = document.createElement('style');
@@ -113,7 +138,7 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     document.head.appendChild(el);
     injectedBorderCss.set(key, el);
   }
-  if (el.textContent !== obj.css) el.textContent = obj.css;
+  if (el.textContent !== cssText) el.textContent = cssText;
 };
 /** 하위 호환 별칭 */
 export const ensureBorderCss = ensureCosmeticCss;
