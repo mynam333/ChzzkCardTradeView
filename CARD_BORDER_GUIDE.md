@@ -151,8 +151,8 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 ```
 - **3D 글린트**: 흰 코어 양옆에 시안/마젠타를 살짝 두면 유리 굴절(색수차) 느낌이 납니다.
 
-### 5.2 떨어지는/피어오르는 입자 (진짜 벚꽃잎·눈결정·단풍잎·불꽃 등) — 정밀 루프 및 복합 스웨이 설계법
-단순히 `radial-gradient`로 흐릿한 원을 그리는 것은 완성도를 떨어뜨립니다. **실제 나뭇잎, 꽃잎, 눈결정, 조개 소품 등을 정교한 SVG 코드로 디자인한 다음, 세로 픽셀 주기에 맞춰 상하 경계를 일치시키는 '무단절 벡터 타일링'**을 적용해야 완벽한 소장 가치를 지닙니다.
+### 5.2 떨어지는/피어오르는 입자 (진짜 벚꽃잎·눈결정·단풍잎·불꽃 등) — 160px 정밀 루프 및 복합 스웨이 설계법
+단순히 `radial-gradient`로 흐릿한 원을 그리는 것은 완성도를 떨어뜨립니다. **실제 나뭇잎, 꽃잎, 눈결정, 조개 소품 등을 정교한 SVG 코드로 디자인한 다음, 160px 세로 픽셀 주기에 맞춰 상하 경계를 일치시키는 '무단절 벡터 타일링'**을 적용해야 완벽한 소장 가치를 지닙니다.
 
 또한, 입자가 수직으로만 떨어지면 기계적이고 지루합니다. **배경 스크롤(Y축)과 수평 산들 흔들림(translateX) 및 공기 저항 회전(rotate/skewX)을 단일 키프레임 속에 정밀하게 연동**하여 극강의 부드러움을 구현하세요.
 
@@ -192,7 +192,32 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 - **상향 표류 (불씨·수중 기포)**: 피어오르는 효과는 이동 방향을 반대로 주어 `0% { background-position-y: 160px; } 100% { background-position-y: 0px; }` 처럼 위로 올리면서, `skewX(-0.5deg) -> skewX(0.5deg)` 와 같이 뜨거운 열풍 전단 진동을 가입하면 환상적입니다.
 - **경계 보호(Over-scan/Inset 오프셋)**: `translateX`나 `rotate` 변환을 실행하면 레이어 외각 모서리가 안쪽으로 침범되어 빈 구석이 노출됩니다. 이를 극복하기 위해 반드시 **`inset: -15px` 이상**을 부여하여 여유 프레임을 사전에 확보하세요.
 
-### 5.3 회전 (기어·룬)
+### 5.3 3D 입체감 있는 파티클 & 소품의 다차원 물리 애니메이션 설계 (3D Stereoscopic Animation System)
+단순한 2D 평면 `translateX`와 `Y`는 눈이 쉽게 모션의 패턴을 인식하여 단조롭게 보입니다. 파티클이나 소품이 3D 공간을 유영하는 것처럼 느끼게 만들기 위해서는 변환 함수(`transform`)에 입체 오프셋과 원근 축을 통합해야 합니다:
+
+1. **`perspective()`와 3D 축 회전**: `transform: perspective(400px) rotateX(...) rotateY(...)`를 사용해 평면 벡터 이미지에 3D 기울임(Tilt)을 주면, 입자들이 화면 뒤로 넘어갔다 앞으로 다가오는 듯한 입체 궤적을 그립니다.
+2. **다차원 바람 저항 (3-Way Pitch/Roll/Yaw)**: 나뭇잎, 벚꽃잎, 눈꽃송이 등 비정형 소품들은 하강 시 3D 공간 상에서 앞뒷면을 미세하게 뒤집어야 생동감이 극대화됩니다. `rotate3d(x, y, z, deg)` 혹은 `rotateX()`와 `rotateY()`를 독립적으로 교차 진동시켜 입체 나풀거림(3D Fluttering)을 더하세요.
+3. **가속 및 감속 물리 (Natural Ease)**: 선형적인 `linear` 스크롤뿐만 아니라, `cubic-bezier`를 활용한 흔들림이나 다중 입자 레이어의 원근 격차(Parallax Depth)를 연동하면 마치 카메라 렌즈 안에 깊이가 생긴 듯한 가상 3D 공간이 탄생합니다.
+
+```css
+/* 3D 원근감을 입힌 단풍잎 전경의 입체 궤적 예시 */
+@keyframes mytheme-drift-3d {
+  0% {
+    background-position-y: 0px;
+    transform: perspective(500px) rotateX(4deg) rotateY(-4deg) translateX(-4px) translateZ(0px);
+  }
+  50% {
+    /* 하강 중간점: 3D 면회전을 가입하여 나풀거림과 공간 깊이를 표현 (앞으로 돌출했다가 들어가는 효과) */
+    transform: perspective(500px) rotateX(-5deg) rotateY(15deg) translateX(4px) translateZ(8px);
+  }
+  100% {
+    background-position-y: 160px;
+    transform: perspective(500px) rotateX(4deg) rotateY(-4deg) translateX(-4px) translateZ(0px);
+  }
+}
+```
+
+### 5.4 회전 (기어·룬)
 ```css
 .cb-mytheme::before {
   content: ""; position: absolute; right: -8px; bottom: -8px; width: 34px; height: 34px;
