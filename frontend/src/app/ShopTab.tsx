@@ -67,6 +67,39 @@ export const ShopTab: React.FC = () => {
     if (user) { fetchOwned(); fetchPurchased(); }
   }, [user]);
 
+  // 1. 마운트 시 즉시 최신 정보 가져오기 및 주기적(10초) 폴링
+  useEffect(() => {
+    if (!user) return;
+    
+    // 마운트 시 즉각 데이터 리프레시
+    refreshUserData();
+
+    // 10초 주기 백그라운드 갱신 인터벌
+    const intervalId = setInterval(() => {
+      refreshUserData();
+    }, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [user?.id]); // 유저가 변경될 때마다 갱신 주기 재설정
+
+  // 2. 차기 무료 뽑기 리셋 시각(nextFreeDrawAt) 정각 감지 타이머
+  useEffect(() => {
+    if (!user || !user.nextFreeDrawAt) return;
+
+    const nextTime = new Date(user.nextFreeDrawAt).getTime();
+    const diffMs = nextTime - Date.now();
+
+    // 리셋 시각이 미래의 시점인 경우 타이머 예약
+    if (diffMs > 0) {
+      // 틱 오차 보정을 위해 1초(1000ms) 정도 마진을 두어 실행
+      const timeoutId = setTimeout(() => {
+        refreshUserData();
+      }, diffMs + 1000);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [user?.nextFreeDrawAt]);
+
   const fetchItems = async () => {
     try {
       const res = await apiFetch('/shop/items');
