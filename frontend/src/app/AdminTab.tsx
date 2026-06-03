@@ -104,6 +104,8 @@ export const AdminTab: React.FC = () => {
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
   const [isSavingInterval, setIsSavingInterval] = useState(false);
+  const [drawCost, setDrawCost] = useState('10000');           // 뽑기 1회 비용 (P)
+  const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
 
   // 쿠폰
   const [coupons, setCoupons] = useState<any[]>([]);
@@ -150,6 +152,7 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'shop') {
       fetchShopItems();
       fetchFreeDrawInterval();
+      fetchDrawCost();
     }
     if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
   }, [subTab, isAdmin]);
@@ -419,6 +422,42 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러', 'error');
     } finally {
       setIsSavingInterval(false);
+    }
+  };
+
+  const fetchDrawCost = async () => {
+    try {
+      const res = await apiFetch('/admin/config/draw-cost');
+      if (res.ok) {
+        const data = await res.json();
+        setDrawCost(String(data.cost ?? '10000'));
+      }
+    } catch { /* noop */ }
+  };
+
+  const handleSaveDrawCost = async () => {
+    const num = parseInt(drawCost, 10);
+    if (isNaN(num) || num < 0) {
+      toast('올바른 0 이상의 정수를 지정해야 합니다.', 'error');
+      return;
+    }
+    setIsSavingCost(true);
+    try {
+      const res = await apiFetch('/admin/config/draw-cost', {
+        method: 'POST',
+        body: JSON.stringify({ cost: num })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '뽑기 비용이 변경되었습니다.', 'success');
+        fetchDrawCost();
+      } else {
+        toast(data.message || '설정 저장 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingCost(false);
     }
   };
 
@@ -1174,11 +1213,13 @@ export const AdminTab: React.FC = () => {
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-bold flex items-center gap-1.5">
               <RefreshCw className="h-4 w-4 text-primary" />
-              무료 뽑기 초기화 간격 설정
+              무료 뽑기 리셋 주기 설정
             </h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              KST(한국 표준시) 기준 자정을 시작점으로 하여 무료 가챠가 초기화될 주기를 시간 단위(실수 허용)로 설정합니다.<br />
-              <b>0</b>으로 설정 시 대기 시간 없이 무제한으로 무료 뽑기가 가능합니다.
+              KST 자정(00:00)을 기준으로 n시간마다 정각에 무료 뽑기를 리셋합니다.<br />
+              예) <b>1</b>시간 → 00:00, 01:00, 02:00 ... KST 매 정각 리셋<br />
+              예) <b>6</b>시간 → 00:00, 06:00, 12:00, 18:00 KST 리셋<br />
+              <b>0</b>으로 설정 시 대기 없이 무제한 무료 뽑기가 가능합니다.
             </p>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
@@ -1199,6 +1240,38 @@ export const AdminTab: React.FC = () => {
                 className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all shadow-md active:scale-95"
               >
                 {isSavingInterval ? '저장 중...' : '설정 저장'}
+              </button>
+            </div>
+          </div>
+
+          {/* 뽑기 비용 설정 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Store className="h-4 w-4 text-amber-500" />
+              뽑기 1회 비용 설정
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              유료 가챠 1회에 소모되는 포인트를 설정합니다. <b>0</b>으로 설정 시 모든 뽑기가 무료가 됩니다.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={drawCost}
+                  onChange={(e) => setDrawCost(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                  placeholder="예: 10000"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">P</span>
+              </div>
+              <button
+                onClick={handleSaveDrawCost}
+                disabled={isSavingCost}
+                className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-white hover:bg-amber-600 disabled:opacity-50 transition-all shadow-md active:scale-95"
+              >
+                {isSavingCost ? '저장 중...' : '설정 저장'}
               </button>
             </div>
           </div>

@@ -453,4 +453,5 @@ CREATE TABLE IF NOT EXISTS system_configs (
     value TEXT NOT NULL
 );
 INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
 

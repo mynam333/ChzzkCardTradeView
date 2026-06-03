@@ -183,6 +183,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
         value TEXT NOT NULL
       );`);
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24')").run();
+      // 뽑기 비용 기본값 (하드코딩 제거, DB 관리)
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000')").run();
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

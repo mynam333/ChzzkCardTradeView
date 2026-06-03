@@ -216,5 +216,6 @@ CREATE TABLE IF NOT EXISTS system_configs (
     value TEXT NOT NULL
 );
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000'); -- 뽑기 1회 기본 비용
 
 

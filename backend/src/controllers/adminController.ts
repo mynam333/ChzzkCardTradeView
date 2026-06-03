@@ -399,3 +399,33 @@ export const setFreeDrawInterval = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'InternalServerError', message: '설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
+
+/**
+ * 12. 뽑기 1회 비용 조회 (포인트 단위)
+ */
+export const getDrawCost = async (req: Request, res: Response) => {
+  try {
+    const val = await systemConfigRepository.get('draw_cost', '10000');
+    return res.status(200).json({ cost: parseInt(val, 10) || 10000 });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '설정 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 13. 뽑기 1회 비용 저장 (포인트 단위, 0 이상 정수)
+ */
+export const setDrawCost = async (req: Request, res: Response) => {
+  const { cost } = req.body;
+  const num = parseInt(String(cost), 10);
+  if (isNaN(num) || num < 0) {
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 0 이상의 정수를 지정해야 합니다.' });
+  }
+
+  try {
+    await systemConfigRepository.set('draw_cost', String(num));
+    return res.status(200).json({ message: `뽑기 비용이 ${num.toLocaleString()} P로 변경되었습니다.`, cost: num });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};

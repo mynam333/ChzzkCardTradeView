@@ -18,7 +18,9 @@ import {
   getReports,
   resolveReport,
   getFreeDrawInterval,
-  setFreeDrawInterval
+  setFreeDrawInterval,
+  getDrawCost,
+  setDrawCost
 } from '../controllers/adminController';
 import { claimCoupon, createCoupon } from '../controllers/couponController';
 import {
@@ -290,8 +292,10 @@ router.post('/admin/announcements/:id/popup', authMiddleware, adminMiddleware, s
 // 푸시 알림 즉시 또는 예약 생성
 router.post('/admin/push/schedule', authMiddleware, adminMiddleware, scheduleNotification);
 
-// 시스템 설정 (무료 뽑기 간격 등)
+// 시스템 설정 (무료 뽑기 간격, 뽑기 비용)
 router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDrawInterval);
 router.post('/admin/config/free-draw', authMiddleware, adminMiddleware, setFreeDrawInterval);
+router.get('/admin/config/draw-cost', authMiddleware, adminMiddleware, getDrawCost);
+router.post('/admin/config/draw-cost', authMiddleware, adminMiddleware, setDrawCost);
 
 export default router;
