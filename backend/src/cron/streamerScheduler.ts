@@ -72,6 +72,7 @@ export const computeRandomDrift = (value: number): number => {
  * @param concurrentUserCount 실시간 동시 시청자 수
  * @param isLive 실시간 채팅 집계 및 보너스 적용 대상이 되는 생방송 활성화 여부
  * @returns 100 ~ 500,000 범위 내로 보정된 최종 가치
+ *          (채팅 부족으로 인한 하락은 max(100, 팔로워의 20%)까지만, 그 외 요인은 100까지 하락 가능)
  */
 export const calculateCardValue = (
   prevValue: number,
@@ -87,9 +88,15 @@ export const calculateCardValue = (
 
   // 2. 필요 기준 채팅량 (시청자 규모별 타겟 튜닝 모델 적용)
   // 시청자 10명일 때 약 4개, 5,000명일 때 약 750개가 되도록 밸런싱되었습니다.
-  const requiredChats = Math.round(
+  const requiredChatsRaw = Math.round(
     0.23 * Math.pow(concurrentUserCount, 0.95) + Math.sqrt(followers) * 0.03 + 1
   );
+  // 2-1. 소규모 방 완화: 시청자 10명 미만은 채팅 화력이 낮아도 기준치를 낮춰 너그럽게 평가
+  // (0명 → 0.4배, 10명 → 1.0배로 선형 보간)
+  const smallRoomLeniency = concurrentUserCount < 10
+    ? 0.4 + 0.06 * concurrentUserCount
+    : 1;
+  const requiredChats = Math.max(1, Math.round(requiredChatsRaw * smallRoomLeniency));
 
   // 3. 채팅량 영향 요인 보너스/감가 (이전 가치 규모에 맞게 유동적으로 스케일링)
   // 방송 중(isLive = true) 일 때만 채팅 보너스가 작용합니다.
@@ -99,6 +106,10 @@ export const calculateCardValue = (
     const chatSign = Math.sign(chatDiff);
     const scaleFactor = Math.sqrt(currentVal) * 0.5; // 채팅량 편차에 의한 가치 변동폭을 대폭 축소하여 안정성 확보 (15 -> 0.5)
     chatBonus = chatSign * Math.log(1 + Math.abs(chatDiff) / 10) * scaleFactor;
+    // 소규모 방(시청자 10명 미만)은 채팅 부족으로 인한 감가를 추가로 절반만 적용
+    if (chatBonus < 0 && concurrentUserCount < 10) {
+      chatBonus *= 0.5;
+    }
   }
 
   // 4. 최종 가치 계산 (이전 가치 + 방송 상태 델타 변동 + 채팅 보너스 + 팔로워 증감 반영)
@@ -107,9 +118,19 @@ export const calculateCardValue = (
   const followerBonus = followerDelta;
   // 5. 랜덤 시세 변동: 방송 여부와 무관하게 모든 카드에 소폭 등락을 부여 (재미 요소)
   const randomDrift = computeRandomDrift(currentVal);
-  const finalValue = Math.round(currentVal + valueChangeFromBroadcast + chatBonus + followerBonus + randomDrift);
+  // 채팅 외 요인(방송 델타·팔로워 증감·랜덤 드리프트)만 반영한 값 — 이 요인들은 20% 밑으로도 내려갈 수 있음
+  const valueWithoutChat = currentVal + valueChangeFromBroadcast + followerBonus + randomDrift;
+  let finalValue = Math.round(valueWithoutChat + chatBonus);
 
-  // 6. 상하한 한계 제한 (100 ~ 500,000)
+  // 6. 채팅 부족 하한선: 채팅 수가 적어서 내려가는 가치는 max(100, 팔로워의 20%)까지만 허용
+  //    (채팅 외 요인으로 이미 그보다 낮아진 경우엔 채팅이 더 끌어내리지 않도록 보호만 적용)
+  if (chatBonus < 0) {
+    const chatFloor = Math.max(100, Math.round(followers * 0.2));
+    const floorRef = Math.min(valueWithoutChat, chatFloor);
+    finalValue = Math.max(finalValue, Math.round(floorRef));
+  }
+
+  // 7. 상하한 한계 제한 (절대 하한 100 ~ 상한 500,000)
   return Math.min(Math.max(finalValue, 100), 500000);
 };
 

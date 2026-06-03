@@ -37,6 +37,26 @@ const resetAllPoints = async (): Promise<void> => {
   }
 };
 
+// 모든 스트리머 카드 가치를 초기값(팔로워 수)으로 리셋 (시세 이력 초기화와 함께 사용)
+const resetStreamerValuesToFollowers = async (): Promise<void> => {
+  if (getDbMode() === 'SUPABASE') {
+    const client = getSupabaseClient();
+    const { data, error } = await client.from('streamers').select('channel_id, follower_count');
+    if (error) throw error;
+    for (const s of data || []) {
+      const v = (s as any).follower_count || 0;
+      const { error: uErr } = await client.from('streamers')
+        .update({ base_value: v, prev_value: v, updated_at: new Date().toISOString() })
+        .eq('channel_id', (s as any).channel_id);
+      if (uErr) throw uErr;
+    }
+  } else {
+    getSqliteDb().prepare(
+      "UPDATE streamers SET base_value = follower_count, prev_value = follower_count, updated_at = datetime('now')"
+    ).run();
+  }
+};
+
 const countTable = async (table: string): Promise<number> => {
   if (getDbMode() === 'SUPABASE') {
     const { count } = await getSupabaseClient().from(table).select('*', { count: 'exact', head: true });
@@ -60,7 +80,7 @@ const CATEGORIES: { id: string; label: string; description: string; countTable: 
   { id: 'push', label: '푸시 구독/예약', description: '웹푸시 구독과 예약 발송 내역을 삭제합니다.', countTable: 'push_subscriptions', run: async () => { await wipeTable('push_notifications'); await wipeTable('push_subscriptions'); } },
   { id: 'announcements', label: '공지', description: '모든 공지를 삭제합니다.', countTable: 'announcements', run: () => wipeTable('announcements') },
   { id: 'reports', label: '카드 신고', description: '카드 신고 내역을 삭제합니다.', countTable: 'card_reports', run: () => wipeTable('card_reports') },
-  { id: 'value_history', label: '시세 이력', description: '스트리머 시세 변동 이력을 삭제합니다.', countTable: 'value_history', run: () => wipeTable('value_history') },
+  { id: 'value_history', label: '시세 이력', description: '시세 이력을 삭제하고, 모든 카드 가치를 초기값(팔로워 수)으로 되돌립니다.', countTable: 'value_history', run: async () => { await wipeTable('value_history'); await resetStreamerValuesToFollowers(); } },
   { id: 'blocks', label: '유저 차단', description: '모든 유저 차단 관계를 삭제합니다.', countTable: 'user_blocks', run: () => wipeTable('user_blocks', 'blocker_id') },
   { id: 'points', label: '유저 포인트 초기화(0)', description: '모든 유저의 보유 포인트를 0으로 만듭니다.', countTable: 'users', run: () => resetAllPoints() },
 ];

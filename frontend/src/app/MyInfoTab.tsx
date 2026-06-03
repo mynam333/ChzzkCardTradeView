@@ -576,7 +576,7 @@ export const MyInfoTab: React.FC = () => {
       </button>
 
       {/* 개발자 SNS (새 창) — 일반 링크라 팝업 차단에 걸리지 않음 */}
-      <div className="pt-1 text-center">
+      <div className="pt-1 text-right">
         <a
           href="https://x.com/Chzzk_YuAru"
           target="_blank"
