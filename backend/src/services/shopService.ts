@@ -92,15 +92,26 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
 // ---- 보유 코스메틱 ----
 export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { quantity: number })[]> => {
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient()
+    const { data, error } = await getSupabaseClient()
       .from('user_cosmetics')
       .select('quantity, item:shop_items(*)')
       .eq('user_id', userId)
       .gt('quantity', 0);
+    
+    if (error) {
+      console.error('[Supabase] getUserCosmetics - 조인 쿼리 실패:', error.message);
+      return [];
+    }
     return (data || []).map((r: any) => ({ ...(r.item), quantity: r.quantity }));
   }
+
+  // SQLite 모드: uc.id와 si.id 컬럼명 충돌로 인해 si.id가 uc.id로 덮어씌워지는 현상을 해결하기 위해 컬럼을 명시적으로 SELECT
   const rows = getSqliteDb().prepare(`
-    SELECT uc.quantity, si.* FROM user_cosmetics uc
+    SELECT 
+      si.id, si.type, si.name, si.description, si.price, 
+      si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+      uc.quantity 
+    FROM user_cosmetics uc
     JOIN shop_items si ON uc.item_id = si.id
     WHERE uc.user_id = ? AND uc.quantity > 0
   `).all(userId) as any[];

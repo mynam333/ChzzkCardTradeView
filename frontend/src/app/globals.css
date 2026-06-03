@@ -113,7 +113,7 @@ body {
 .cosmetic-frame {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  z-index: 10 !important;
   border-radius: inherit;
   pointer-events: none;
   overflow: hidden;

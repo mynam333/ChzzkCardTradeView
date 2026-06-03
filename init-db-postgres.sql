@@ -390,3 +390,21 @@ RETURNS TABLE (
    ORDER BY total_asset DESC
    LIMIT p_limit;
 $$ LANGUAGE sql;
+
+-- ============================================================
+-- 하위 호환성 유지: user_cosmetics 테이블의 item_id 외래키가 없는 경우 추가
+-- ============================================================
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'user_cosmetics' 
+          AND constraint_name = 'user_cosmetics_item_id_fkey'
+    ) THEN
+        ALTER TABLE user_cosmetics 
+        ADD CONSTRAINT user_cosmetics_item_id_fkey 
+        FOREIGN KEY (item_id) REFERENCES shop_items(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+

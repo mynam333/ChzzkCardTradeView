@@ -1500,8 +1500,14 @@ export const GachaTab: React.FC = () => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={borderClass(live.border) ? undefined : borderStyle(live.border)}
-              className={`relative flex aspect-[5/8] h-[82vh] max-h-[82vh] max-w-[92vw] flex-col justify-between overflow-hidden rounded-3xl bg-card p-6 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+              style={{
+                width: '224px',
+                height: '358px',
+                transform: 'scale(min(calc(82vh / 358px), calc(92vw / 224px)))',
+                transformOrigin: 'center',
+                ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
+              }}
+              className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card p-3 shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
             >
               {/* 프리미엄 테두리 코스메틱 오버레이 */}
               <CosmeticFrame border={live.border} />
@@ -1513,33 +1519,33 @@ export const GachaTab: React.FC = () => {
               </div>
 
               {/* 상단 정보 */}
-              <div className="relative z-20 flex items-center justify-between">
+              <div className="relative z-20 flex items-center justify-between w-full">
                 {s.is_active || (s as any).isLive ? (
-                  <span className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-bold text-white flex items-center gap-1 animate-pulse">
-                    <span className="h-1.5 w-1.5 rounded-full bg-white"></span> LIVE
+                  <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                    <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
                   </span>
                 ) : (
-                  <span className="rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-bold text-zinc-400">OFFLINE</span>
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
                 )}
-                <span className="rounded-md bg-black/40 px-2.5 py-1 text-xs font-black text-white/90">
+                <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
                   No.{String(s.serial_number ?? 0).padStart(4, '0')}
                 </span>
               </div>
 
               {/* 하단 정보 */}
-              <div className="relative z-20 space-y-2 text-white">
+              <div className="relative z-20 space-y-1 text-white block mt-auto">
                 {star > 0 && (
-                  <div className="flex items-center gap-1 drop-shadow">
+                  <div className="flex items-center gap-0.5 drop-shadow">
                     {Array.from({ length: star }, (_, i) => (
-                      <span key={i} className="text-amber-300 text-2xl leading-none">★</span>
+                      <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
                     ))}
                   </div>
                 )}
-                <CosmeticName effect={live.name_effect} className="block text-3xl font-black tracking-tight drop-shadow-lg">{s.name}</CosmeticName>
-                <p className="text-sm text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
-                <div className="flex items-center justify-between border-t border-white/20 pt-3">
-                  <span className="text-sm text-zinc-300">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
-                  <span className="text-2xl font-black text-emerald-400 drop-shadow">{value.toLocaleString()} P</span>
+                <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
+                <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
+                <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                  <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                  <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
                 </div>
               </div>
             </div>
