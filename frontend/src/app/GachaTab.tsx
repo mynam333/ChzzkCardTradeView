@@ -125,6 +125,15 @@ export const GachaTab: React.FC = () => {
   // 일괄 판매 항목 설정: { [channelId]: count }
   const [bulkSellQuantities, setBulkSellQuantities] = useState<{ [key: string]: number }>({});
 
+  // 스트리머 등록 모달 상태
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [streamerSearchKeyword, setStreamerSearchKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedStreamer, setSelectedStreamer] = useState<any | null>(null);
+  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+  const [registering, setRegistering] = useState(false);
+
   // 모바일 롱프레스 타이머 레프
   const longPressTimer = React.useRef<any>(null);
   // 롱프레스로 메뉴가 떠서 직후의 클릭(확대 모달)을 무시해야 하는지 여부
@@ -232,14 +241,6 @@ export const GachaTab: React.FC = () => {
   };
 
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
-  // 스트리머 등록 모달 상태
-  const [registerModalOpen, setRegisterModalOpen] = useState(false);
-  const [streamerSearchKeyword, setStreamerSearchKeyword] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [selectedStreamer, setSelectedStreamer] = useState<any | null>(null);
-  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
-  const [registering, setRegistering] = useState(false);
 
   const handleOpenTrade = () => {
     resetTradeForm();
