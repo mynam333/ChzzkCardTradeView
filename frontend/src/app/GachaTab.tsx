@@ -1041,35 +1041,13 @@ export const GachaTab: React.FC = () => {
         </section>
       )}
 
-      {/* 교환 이력 보기 버튼 + 통계 요약 */}
-      {tradeHistory.length > 0 && (() => {
-        const accepted = tradeHistory.filter((t) => t.status === 'ACCEPTED').length;
-        const rejected = tradeHistory.filter((t) => t.status === 'REJECTED').length;
-        const cancelled = tradeHistory.filter((t) => t.status === 'CANCELLED').length;
-        return (
-          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-black flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력 ({tradeHistory.length})</h3>
-              <button
-                onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
-                className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90"
-              >
-                이력 보기
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-emerald-500/10 p-2.5 text-center"><p className="text-lg font-black text-emerald-500">{accepted}</p><p className="text-[10px] text-muted-foreground">체결</p></div>
-              <div className="rounded-lg bg-rose-500/10 p-2.5 text-center"><p className="text-lg font-black text-rose-500">{rejected}</p><p className="text-[10px] text-muted-foreground">거절</p></div>
-              <div className="rounded-lg bg-secondary p-2.5 text-center"><p className="text-lg font-black text-muted-foreground">{cancelled}</p><p className="text-[10px] text-muted-foreground">취소</p></div>
-            </div>
-          </section>
-        );
-      })()}
-
-      {/* 교환 이력 모달 (5개 단위 페이지네이션) */}
+      {/* 교환 이력 모달 (5개 단위 페이지네이션) — 보관함의 '교환 이력' 버튼으로 열림 */}
       {historyModalOpen && (() => {
         const statusLabel: Record<string, string> = { ACCEPTED: '체결', REJECTED: '거절', CANCELLED: '취소' };
         const statusColor: Record<string, string> = { ACCEPTED: 'text-emerald-500', REJECTED: 'text-rose-500', CANCELLED: 'text-muted-foreground' };
+        const accepted = tradeHistory.filter((t) => t.status === 'ACCEPTED').length;
+        const rejected = tradeHistory.filter((t) => t.status === 'REJECTED').length;
+        const cancelled = tradeHistory.filter((t) => t.status === 'CANCELLED').length;
         const nameOf = (cid: string) => streamers.find((s) => s.channel_id === cid)?.name || cid;
         const summarize = (offer: any) => {
           const parts: string[] = [];
@@ -1096,7 +1074,16 @@ export const GachaTab: React.FC = () => {
                 <h3 className="text-base font-bold flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력 ({tradeHistory.length})</h3>
                 <button onClick={() => setHistoryModalOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
               </div>
-              <div className="mt-4 space-y-2">
+              {/* 통계 요약 */}
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <div className="rounded-lg bg-emerald-500/10 p-2.5 text-center"><p className="text-lg font-black text-emerald-500">{accepted}</p><p className="text-[10px] text-muted-foreground">체결</p></div>
+                <div className="rounded-lg bg-rose-500/10 p-2.5 text-center"><p className="text-lg font-black text-rose-500">{rejected}</p><p className="text-[10px] text-muted-foreground">거절</p></div>
+                <div className="rounded-lg bg-secondary p-2.5 text-center"><p className="text-lg font-black text-muted-foreground">{cancelled}</p><p className="text-[10px] text-muted-foreground">취소</p></div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {paged.length === 0 && (
+                  <p className="py-8 text-center text-xs text-muted-foreground">교환 이력이 없습니다.</p>
+                )}
                 {paged.map((t) => {
                   const incoming = t.direction === 'incoming';
                   const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
@@ -1147,12 +1134,20 @@ export const GachaTab: React.FC = () => {
             <h3 className="text-base font-bold flex items-center gap-2">
               <Layers className="h-4.5 w-4.5 text-primary" /> 나의 카드 보관함 ({inventory.length}장)
             </h3>
-            <button
-              onClick={handleOpenTrade}
-              className="sm:hidden rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 flex items-center gap-1"
-            >
-              <ArrowRightLeft className="h-3.5 w-3.5" /> 1:1 교환
-            </button>
+            <div className="flex items-center gap-2 sm:hidden">
+              <button
+                onClick={handleOpenTrade}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 flex items-center gap-1"
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" /> 1:1 교환
+              </button>
+              <button
+                onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
+                className="rounded-lg bg-secondary border border-border/80 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-1"
+              >
+                <Clock className="h-3.5 w-3.5" /> 이력
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto mt-2 sm:mt-0">
@@ -1204,6 +1199,13 @@ export const GachaTab: React.FC = () => {
               className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
             >
               <ArrowRightLeft className="h-3.5 w-3.5" /> 교환 제안
+            </button>
+
+            <button
+              onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
+              className="hidden sm:flex rounded-lg bg-secondary border border-border/80 px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1 shadow-sm"
+            >
+              <Clock className="h-3.5 w-3.5" /> 교환 이력
             </button>
           </div>
         </div>
