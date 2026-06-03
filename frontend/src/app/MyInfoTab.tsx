@@ -404,7 +404,7 @@ export const MyInfoTab: React.FC = () => {
           <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 고유 카드 이미지 관리
         </h3>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          0성부터 5성까지 별 등급별 카드 이미지를 각각 등록할 수 있습니다. (WebP 최대 1280px 자동 변환)<br />
+          0성부터 5성까지 별 등급별 카드 이미지를 각각 등록할 수 있습니다. (WebP 최대 1280px 자동 변환, 5:8 비율)<br />
           특정 성에 이미지를 등록하지 않으면 <strong className="text-foreground/80">바로 아래 등급의 이미지</strong>가 자동 적용되며, 더 낮은 등급도 없으면 기본 치지직 프로필이 노출됩니다.
         </p>
 
