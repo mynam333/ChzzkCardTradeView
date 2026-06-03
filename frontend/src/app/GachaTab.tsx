@@ -951,7 +951,11 @@ export const GachaTab: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
+            <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
+              ※ 카드에 장착된 코스메틱(테두리·이름 효과)은 카드와 함께 상대에게 소유권이 넘어갑니다.
+            </p>
+
+            <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
               <button
                 onClick={() => { resetTradeForm(); setTradeModalOpen(false); }}
                 className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
@@ -1022,7 +1026,10 @@ export const GachaTab: React.FC = () => {
                       <p className="text-muted-foreground">{summarize(t.receiver_offer)}</p>
                     </div>
                   </div>
-                  <div className="mt-2.5 flex justify-end gap-2">
+                  <p className="mt-2 text-[9.5px] leading-relaxed text-muted-foreground">
+                    ※ 카드에 장착된 코스메틱(테두리·이름 효과)은 카드와 함께 소유권이 이전됩니다.
+                  </p>
+                  <div className="mt-2 flex justify-end gap-2">
                     {/* 수신자: PENDING이면 '동의' 가능. 제안자: CONFIRMED면 '최종 승인' 가능. 양측 항상 취소/거절 가능 */}
                     <button onClick={() => handleRejectTrade(t.id)} className="rounded-lg bg-secondary px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-secondary/80">
                       {incoming ? '거절' : '취소'}

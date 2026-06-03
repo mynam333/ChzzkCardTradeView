@@ -114,6 +114,29 @@ export class SqliteUserRepository implements IUserRepository {
     return row?.c || 0;
   }
 
+  // ---- 유저 차단 ----
+  async blockUser(blockerId: string, blockedId: string): Promise<void> {
+    this.getDb().prepare(
+      "INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, datetime('now'))"
+    ).run(blockerId, blockedId);
+  }
+  async unblockUser(blockerId: string, blockedId: string): Promise<void> {
+    this.getDb().prepare('DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?').run(blockerId, blockedId);
+  }
+  async getBlockedUsers(blockerId: string): Promise<User[]> {
+    const rows = this.getDb().prepare(`
+      SELECT u.* FROM user_blocks b JOIN users u ON u.id = b.blocked_id
+      WHERE b.blocker_id = ? ORDER BY b.created_at DESC
+    `).all(blockerId) as User[];
+    return rows;
+  }
+  async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {
+    const row = this.getDb().prepare(
+      'SELECT 1 AS x FROM user_blocks WHERE blocker_id = ? AND blocked_id = ? LIMIT 1'
+    ).get(blockerId, blockedId) as any;
+    return !!row;
+  }
+
   async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {
     if (accessToken !== undefined && refreshToken !== undefined) {
       this.getDb().prepare('UPDATE users SET username = ?, avatar_url = ?, access_token = ?, refresh_token = ? WHERE id = ?').run(username, avatarUrl, accessToken, refreshToken, id);

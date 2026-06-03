@@ -121,6 +121,14 @@ export interface IUserRepository {
   updateRepresentativeCard(id: string, channelId: string | null): Promise<void>;
   findRankings(limit: number): Promise<UserRanking[]>;
   count(): Promise<number>;
+  /** blockerId가 blockedId를 차단합니다(멱등). */
+  blockUser(blockerId: string, blockedId: string): Promise<void>;
+  /** blockerId가 blockedId 차단을 해제합니다. */
+  unblockUser(blockerId: string, blockedId: string): Promise<void>;
+  /** blockerId가 차단한 사용자 목록을 반환합니다. */
+  getBlockedUsers(blockerId: string): Promise<User[]>;
+  /** blockerId가 blockedId를 차단했는지 여부. */
+  isBlocked(blockerId: string, blockedId: string): Promise<boolean>;
 }
 
 // 유저 랭킹 응답용 확장 타입 (보유 카드 수 및 자산 합산 포함)

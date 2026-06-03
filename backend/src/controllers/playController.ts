@@ -94,6 +94,71 @@ export const getUserCollection = async (req: Request, res: Response) => {
 };
 
 /**
+ * 차단 목록 조회
+ */
+export const getMyBlocks = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    const users = await userRepository.getBlockedUsers(userId);
+    return res.status(200).json(users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`
+    })));
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '차단 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 유저 차단 (닉네임으로 검색하여 차단)
+ * Body: { user_id?: string, username?: string }
+ */
+export const blockUser = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const { user_id, username } = req.body;
+  if (!user_id && !(username && String(username).trim())) {
+    return res.status(400).json({ error: 'BadRequest', message: '차단할 사용자를 지정해 주세요.' });
+  }
+  try {
+    const target = user_id
+      ? await userRepository.findById(String(user_id))
+      : await userRepository.findByUsername(String(username).trim());
+    if (!target) {
+      return res.status(404).json({ error: 'NotFound', message: '해당 사용자를 찾을 수 없습니다.' });
+    }
+    if (target.id === userId) {
+      return res.status(400).json({ error: 'BadRequest', message: '자기 자신은 차단할 수 없습니다.' });
+    }
+    await userRepository.blockUser(userId, target.id);
+    return res.status(200).json({
+      message: `${target.username}님을 차단했습니다. 해당 사용자는 회원님에게 교환을 제안할 수 없습니다.`,
+      blocked: { id: target.id, username: target.username }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '차단 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 유저 차단 해제
+ */
+export const unblockUser = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const targetId = req.params.user_id;
+  if (!targetId) return res.status(400).json({ error: 'BadRequest', message: '대상 사용자 ID가 필요합니다.' });
+  try {
+    await userRepository.unblockUser(userId, targetId);
+    return res.status(200).json({ message: '차단을 해제했습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '차단 해제 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 유저 공개 프로필 조회 — 프로필 모달(닉네임/포인트/대표 카드/보유 카드 요약/총자산)
  */
 export const getUserProfile = async (req: Request, res: Response) => {

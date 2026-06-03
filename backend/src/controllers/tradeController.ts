@@ -107,6 +107,11 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'BadRequest', message: '자기 자신과는 교환할 수 없습니다.' });
     }
 
+    // 수신자가 제안자를 차단한 경우 교환 제안 불가
+    if (await userRepository.isBlocked(receiver.id, sender.id)) {
+      return res.status(403).json({ error: 'Blocked', message: '상대방에게 교환을 제안할 수 없습니다. (차단됨)' });
+    }
+
     // 제안자가 제시한 카드/포인트가 "사용 가능"한지 검증
     // (보유량에서 이미 다른 진행 중 거래에 묶인 예약량을 뺀 값 기준 → 이중 지출 방지)
     const ownedByStar = await getOwnedByStarMap(sender.id);

@@ -11,7 +11,8 @@ import {
   Upload,
   Star,
   Check,
-  Share2
+  Share2,
+  Ban
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
@@ -50,6 +51,11 @@ export const MyInfoTab: React.FC = () => {
   // 프로필 카드(공유용) 모달
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
+  // 유저 차단
+  const [blockSearch, setBlockSearch] = useState('');
+  const [blockedUsers, setBlockedUsers] = useState<{ id: string; username: string; avatar_url: string }[]>([]);
+  const [blocking, setBlocking] = useState(false);
+
   // 스트리머 프로필 커스텀 이미지 업로드 상태 (지연 업로드)
   const [previewBlob, setPreviewBlob] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -62,8 +68,51 @@ export const MyInfoTab: React.FC = () => {
     if (user) {
       fetchInventory();
       checkStreamerRegistration();
+      fetchBlocks();
     }
   }, [user]);
+
+  const fetchBlocks = async () => {
+    try {
+      const res = await apiFetch('/users/me/blocks');
+      if (res.ok) setBlockedUsers(await res.json());
+    } catch { /* noop */ }
+  };
+
+  const handleBlock = async () => {
+    const name = blockSearch.trim();
+    if (!name) { toast('차단할 유저명을 입력해 주세요.', 'warning'); return; }
+    setBlocking(true);
+    try {
+      const res = await apiFetch('/users/me/blocks', { method: 'POST', body: JSON.stringify({ username: name }) });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '차단했습니다.', 'success');
+        setBlockSearch('');
+        fetchBlocks();
+      } else {
+        toast(data.message || '차단 실패', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  const handleUnblock = async (targetId: string) => {
+    try {
+      const res = await apiFetch(`/users/me/blocks/${targetId}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast('차단을 해제했습니다.', 'info');
+        fetchBlocks();
+      } else {
+        toast('차단 해제 실패', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    }
+  };
 
   const fetchInventory = async () => {
     try {
@@ -478,6 +527,47 @@ export const MyInfoTab: React.FC = () => {
         <button onClick={handleEnablePush} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition shadow-sm">
           알림 받기 (구독하기)
         </button>
+      </section>
+
+      {/* 유저 차단 관리 */}
+      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+        <h3 className="text-base font-bold flex items-center gap-2"><Ban className="h-4.5 w-4.5 text-rose-500" /> 유저 차단 관리</h3>
+        <p className="text-xs text-muted-foreground">차단한 유저는 회원님에게 <strong className="text-foreground/80">교환을 제안할 수 없습니다.</strong></p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="차단할 유저명 입력"
+            value={blockSearch}
+            onChange={(e) => setBlockSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleBlock(); }}
+            className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+          />
+          <button onClick={handleBlock} disabled={blocking} className="rounded-lg bg-rose-500 px-5 py-2 text-xs font-bold text-white hover:bg-rose-600 disabled:opacity-50">
+            {blocking ? '처리 중...' : '차단'}
+          </button>
+        </div>
+
+        {blockedUsers.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-[11px] font-bold text-muted-foreground">차단 목록 ({blockedUsers.length})</p>
+            {blockedUsers.map((b) => (
+              <div key={b.id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img src={b.avatar_url} alt={b.username} className="h-8 w-8 rounded-full border border-border object-cover" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold truncate">{b.username}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{b.id}</p>
+                  </div>
+                </div>
+                <button onClick={() => handleUnblock(b.id)} className="shrink-0 rounded bg-secondary px-2.5 py-1 text-[10px] font-bold text-foreground hover:bg-secondary/80">
+                  차단 해제
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted-foreground text-center py-3">차단한 유저가 없습니다.</p>
+        )}
       </section>
 
       {/* 로그아웃 */}

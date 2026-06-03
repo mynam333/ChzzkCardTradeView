@@ -53,6 +53,9 @@ import {
   searchUsers,
   getUserCollection,
   getUserProfile,
+  getMyBlocks,
+  blockUser,
+  unblockUser,
   fuseCards
 } from '../controllers/playController';
 import {
@@ -116,6 +119,10 @@ router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, s
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);
 router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);
+// 유저 차단 관리
+router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
+router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
+router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
 router.post('/cards/fuse', authMiddleware, banCheckMiddleware, fuseCards);

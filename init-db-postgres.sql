@@ -174,6 +174,14 @@ CREATE TABLE IF NOT EXISTS user_cosmetics (
     UNIQUE(user_id, item_id)
 );
 
+-- 유저 차단 (blocker_id가 blocked_id에게 받은 교환 제안을 차단)
+CREATE TABLE IF NOT EXISTS user_blocks (
+    blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY(blocker_id, blocked_id)
+);
+
 -- ============================================================
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
 -- ============================================================

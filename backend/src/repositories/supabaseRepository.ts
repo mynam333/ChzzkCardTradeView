@@ -180,6 +180,41 @@ export class SupabaseUserRepository implements IUserRepository {
     return count || 0;
   }
 
+  // ---- 유저 차단 ----
+  async blockUser(blockerId: string, blockedId: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('user_blocks')
+      .upsert({ blocker_id: blockerId, blocked_id: blockedId }, { onConflict: 'blocker_id,blocked_id' });
+    if (error) throw error;
+  }
+  async unblockUser(blockerId: string, blockedId: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('user_blocks')
+      .delete()
+      .eq('blocker_id', blockerId)
+      .eq('blocked_id', blockedId);
+    if (error) throw error;
+  }
+  async getBlockedUsers(blockerId: string): Promise<User[]> {
+    const { data, error } = await this.getClient()
+      .from('user_blocks')
+      .select('created_at, blocked:users!user_blocks_blocked_id_fkey(*)')
+      .eq('blocker_id', blockerId)
+      .order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map((r: any) => r.blocked).filter(Boolean) as User[];
+  }
+  async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('user_blocks')
+      .select('blocker_id', { head: false })
+      .eq('blocker_id', blockerId)
+      .eq('blocked_id', blockedId)
+      .limit(1);
+    if (error || !data) return false;
+    return data.length > 0;
+  }
+
   async findRankings(limit: number): Promise<UserRanking[]> {
     // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용
     const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit });

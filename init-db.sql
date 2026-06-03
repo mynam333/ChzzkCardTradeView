@@ -185,4 +185,14 @@ CREATE TABLE IF NOT EXISTS user_cosmetics (
     FOREIGN KEY(item_id) REFERENCES shop_items(id) ON DELETE CASCADE
 );
 
+-- 유저 차단 (blocker_id가 blocked_id에게 받은 교환 제안을 차단)
+CREATE TABLE IF NOT EXISTS user_blocks (
+    blocker_id TEXT NOT NULL,
+    blocked_id TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(blocker_id, blocked_id),
+    FOREIGN KEY(blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 
