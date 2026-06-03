@@ -6,14 +6,14 @@
 .cb-beach {
   position: absolute;
   inset: 0;
-  z-index: 30;
-  border-radius: inherit;
+  z-index: 5;
+  border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322c1d6'/%3E%3Cstop offset='.55' stop-color='%2362d0d6'/%3E%3Cstop offset='1' stop-color='%23ffd98a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='9' fill='none' stroke='url(%23bg)' stroke-width='2.6'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='7' fill='none' stroke='%23ffe9b0' stroke-width='.9' opacity='.65'/%3E%3Cg stroke='%23ffffff' stroke-width='1' fill='none' opacity='.7' stroke-linecap='round'%3E%3Cpath d='M16,30 Q19,26 22,30 Q25,26 28,30'/%3E%3Cpath d='M30,38 Q32.5,35 35,38 Q37.5,35 40,38'/%3E%3C/g%3E%3Cg transform='translate(11,150)'%3E%3Cpath d='M0,0 C-1,-9 1,-18 4,-24' fill='none' stroke='%238a5a2a' stroke-width='1.6' stroke-linecap='round'/%3E%3Cg fill='none' stroke='%232f9e54' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M4,-24 C0,-30 -6,-31 -10,-29'/%3E%3Cpath d='M4,-24 C2,-31 8,-34 13,-32'/%3E%3Cpath d='M4,-24 C9,-28 15,-27 18,-23'/%3E%3Cpath d='M4,-24 C-2,-27 -6,-23 -7,-19'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(88,140)' fill='%23ff9a6b' stroke='%23e8633a' stroke-width='.5'%3E%3Cpath d='M0,-5 L1.5,-1.5 L5,-1.5 L2.2,1 L3.2,5 L0,2.5 L-3.2,5 L-2.2,1 L-5,-1.5 L-1.5,-1.5 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322c1d6'/%3E%3Cstop offset='.55' stop-color='%2362d0d6'/%3E%3Cstop offset='1' stop-color='%23ffd98a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23bg)' stroke-width='2.6'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='1' ry='1' fill='none' stroke='%23ffe9b0' stroke-width='.9' opacity='.65'/%3E%3Cg stroke='%23ffffff' stroke-width='1' fill='none' opacity='.7' stroke-linecap='round'%3E%3Cpath d='M16,30 Q19,26 22,30 Q25,26 28,30'/%3E%3Cpath d='M30,38 Q32.5,35 35,38 Q37.5,35 40,38'/%3E%3C/g%3E%3Cg transform='translate(11,150)'%3E%3Cpath d='M0,0 C-1,-9 1,-18 4,-24' fill='none' stroke='%238a5a2a' stroke-width='1.6' stroke-linecap='round'/%3E%3Cg fill='none' stroke='%232f9e54' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M4,-24 C0,-30 -6,-31 -10,-29'/%3E%3Cpath d='M4,-24 C2,-31 8,-34 13,-32'/%3E%3Cpath d='M4,-24 C9,-28 15,-27 18,-23'/%3E%3Cpath d='M4,-24 C-2,-27 -6,-23 -7,-19'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(88,140)' fill='%23ff9a6b' stroke='%23e8633a' stroke-width='.5'%3E%3Cpath d='M0,-5 L1.5,-1.5 L5,-1.5 L2.2,1 L3.2,5 L0,2.5 L-3.2,5 L-2.2,1 L-5,-1.5 L-1.5,-1.5 Z'/%3E%3C/g%3E%3C/svg%3E");
   box-shadow: 0 0 12px rgba(34,193,214,.45), inset 0 0 12px rgba(255,217,138,.26);
 }
 /* 태양 — 회전 광선 + 입체 구체 + 맥동 코로나 (우상단 코너에 바짝) */

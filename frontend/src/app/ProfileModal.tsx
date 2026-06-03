@@ -187,19 +187,26 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                       containerType: 'inline-size',
                       ...(borderClass(rep.border) ? {} : (borderStyle(rep.border) || {}))
                     }}
-                    className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-2xl bg-zinc-800 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
+                    className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-xl bg-zinc-800 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
+                    {/* 프리미엄 테두리 코스메틱 오버레이 */}
                     <CosmeticFrame border={rep.border} />
-                    <img
-                      src={proxiedImage(cardImage(repStreamer, rep.star))}
-                      alt={repStreamer.name}
-                      crossOrigin="anonymous"
-                      className="absolute inset-0 h-full w-full object-cover opacity-85"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/10" />
+                    
+                    {/* 카드 이미지 배경 */}
+                    <div className="absolute inset-0 z-0">
+                      <img
+                        src={proxiedImage(cardImage(repStreamer, rep.star))}
+                        alt={repStreamer.name}
+                        crossOrigin="anonymous"
+                        className="h-full w-full object-cover opacity-85"
+                      />
+                    </div>
+                    
+                    {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none" />
 
                     {/* 카드 콘텐츠 패딩 랩퍼 */}
-                    <div className="relative z-10 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                    <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
                       {/* 상단 정보 */}
                       <div className="flex items-center justify-between w-full pointer-events-auto">
                         {repStreamer.is_active ? (

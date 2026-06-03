@@ -1417,9 +1417,10 @@ export const GachaTab: React.FC = () => {
                           loading="lazy"
                           className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                         />
-                        {/* 하단만 어둡게 처리해 텍스트 가독성은 유지하면서 이미지는 선명하게 노출 */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
                       </div>
+                      
+                      {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
 
                       {/* 카드 콘텐츠 패딩 랩퍼 */}
                       <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
@@ -1522,8 +1523,10 @@ export const GachaTab: React.FC = () => {
               {/* 카드 이미지 배경 */}
               <div className="absolute inset-0 z-0">
                 <img src={cardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
               </div>
+              
+              {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
 
               {/* 카드 콘텐츠 패딩 랩퍼 */}
               <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
@@ -1707,8 +1710,10 @@ export const GachaTab: React.FC = () => {
                     <CosmeticFrame border={live.border} />
                     <div className="absolute inset-0 z-0">
                       <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-10"></div>
                     </div>
+                    
+                    {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
 
                     {/* 카드 콘텐츠 패딩 랩퍼 */}
                     <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">

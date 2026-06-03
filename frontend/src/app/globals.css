@@ -124,8 +124,8 @@ body {
   height: 102.4px !important;
   transform: scale(calc(100cqw / 64px)) !important;
   transform-origin: top left !important;
-  z-index: 10 !important;
-  border-radius: inherit;
+  z-index: 5 !important;
+  border-radius: 3.43px !important;
   pointer-events: none;
   overflow: hidden;
 }

@@ -6,8 +6,8 @@
 .cb-prism {
   position: absolute;
   inset: 0;
-  z-index: 30;
-  border-radius: inherit;
+  z-index: 5;
+  border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
   padding: 3px;
