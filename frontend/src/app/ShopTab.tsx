@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass } from '@/lib/cosmetics';
@@ -24,6 +25,9 @@ interface ShopItem {
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   // ---- 가챠(소환) ----
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnCard, setDrawnCard] = useState<any | null>(null);
@@ -32,8 +36,31 @@ export const ShopTab: React.FC = () => {
   const [items, setItems] = useState<ShopItem[]>([]);
   const [owned, setOwned] = useState<Record<number, number>>({});
   const [purchased, setPurchased] = useState<Record<number, number>>({});
-  const [shopType, setShopType] = useState<'border' | 'name_effect'>('border');
+
+  // URL category 쿼리 파라미터를 기반으로 초기 shopType 결정
+  const categoryParam = searchParams.get('category');
+  const initialShopType = (categoryParam === 'name_effect' || categoryParam === 'border')
+    ? categoryParam
+    : 'border';
+
+  const [shopType, setShopType] = useState<'border' | 'name_effect'>(initialShopType);
   const [buying, setBuying] = useState<number | null>(null);
+
+  // 외부(뒤로가기 등)에서 URL 파라미터가 바뀔 때 상태 동기화
+  useEffect(() => {
+    const param = searchParams.get('category');
+    if (param === 'border' || param === 'name_effect') {
+      setShopType(param);
+    }
+  }, [searchParams]);
+
+  // 카테고리 전환 시 URL 쿼리 파라미터 동기화
+  const handleShopTypeChange = (type: 'border' | 'name_effect') => {
+    setShopType(type);
+    const newParams = new URLSearchParams(window.location.search);
+    newParams.set('category', type);
+    router.replace(`/shop?${newParams.toString()}`);
+  };
 
   useEffect(() => {
     fetchItems();
@@ -208,7 +235,7 @@ export const ShopTab: React.FC = () => {
         {/* 종류 탭 */}
         <div className="flex rounded-lg bg-secondary p-1 w-fit">
           {([['border', '테두리'], ['name_effect', '이름 이펙트']] as const).map(([t, label]) => (
-            <button key={t} onClick={() => setShopType(t)}
+            <button key={t} onClick={() => handleShopTypeChange(t)}
               className={`rounded-md px-3.5 py-1.5 text-xs font-bold transition ${shopType === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               {label}
             </button>

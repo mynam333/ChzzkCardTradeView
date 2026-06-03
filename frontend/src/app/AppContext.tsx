@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
@@ -50,8 +51,25 @@ export interface AppNotificationItem {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const pathname = usePathname();
+  const router = useRouter();
+
   const [theme, setTheme] = useState<'light' | 'dark'>('dark'); // 기본 다크모드 선호
-  const [activeTab, setActiveTab] = useState<TabId>('main');
+
+  // URL 경로를 기반으로 활성화된 탭 상태를 유도
+  const activeTab: TabId = (() => {
+    if (pathname.startsWith('/shop')) return 'shop';
+    if (pathname.startsWith('/gacha')) return 'gacha';
+    if (pathname.startsWith('/ranking')) return 'ranking';
+    if (pathname.startsWith('/my-info')) return 'my-info';
+    if (pathname.startsWith('/admin')) return 'admin';
+    return 'main';
+  })();
+
+  const setActiveTab = (tab: TabId) => {
+    const route = tab === 'main' ? '/' : `/${tab}`;
+    router.push(route);
+  };
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
 

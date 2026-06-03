@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from './AppContext';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   ShieldAlert,
   LayoutDashboard,
@@ -27,7 +28,43 @@ type AdminSubTab = 'dashboard' | 'users' | 'coupons' | 'announcements' | 'push' 
 
 export const AdminTab: React.FC = () => {
   const { user, toast } = useApp();
-  const [subTab, setSubTab] = useState<AdminSubTab>('dashboard');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // URL tab 쿼리 파라미터를 기반으로 초기 subTab 결정
+  const tabParam = searchParams.get('tab') as AdminSubTab | null;
+  const initialSubTab: AdminSubTab = (
+    tabParam === 'dashboard' ||
+    tabParam === 'users' ||
+    tabParam === 'coupons' ||
+    tabParam === 'announcements' ||
+    tabParam === 'push' ||
+    tabParam === 'reports' ||
+    tabParam === 'streamers' ||
+    tabParam === 'shop' ||
+    tabParam === 'maintenance'
+  ) ? tabParam : 'dashboard';
+
+  const [subTab, setSubTab] = useState<AdminSubTab>(initialSubTab);
+
+  // 외부(뒤로가기 등)에서 URL 파라미터가 바뀔 때 상태 동기화
+  useEffect(() => {
+    const param = searchParams.get('tab') as AdminSubTab | null;
+    if (param && [
+      'dashboard', 'users', 'coupons', 'announcements', 
+      'push', 'reports', 'streamers', 'shop', 'maintenance'
+    ].includes(param)) {
+      setSubTab(param);
+    }
+  }, [searchParams]);
+
+  // 서브 탭 전환 시 URL 쿼리 파라미터 동기화
+  const handleSubTabChange = (tab: AdminSubTab) => {
+    setSubTab(tab);
+    const newParams = new URLSearchParams(window.location.search);
+    newParams.set('tab', tab);
+    router.replace(`/admin?${newParams.toString()}`);
+  };
 
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
@@ -498,7 +535,7 @@ export const AdminTab: React.FC = () => {
           return (
             <button
               key={t.id}
-              onClick={() => setSubTab(t.id)}
+              onClick={() => handleSubTabChange(t.id)}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition ${active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
             >
               <Icon className="h-3.5 w-3.5" /> {t.label}
