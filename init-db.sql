@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS coupons (
     reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point' 재화 또는 'card' 스트리머 카드)
     points INTEGER NOT NULL DEFAULT 0,         -- 지급 재화 크기 (reward_type='point')
     reward_channel_id TEXT,                    -- 지급 스트리머 채널 ID (reward_type='card')
-    reward_quantity INTEGER DEFAULT 0,         -- 지급 카드 수량 (reward_type='card')
+    reward_item_id INTEGER,                    -- 지급 상점 아이템 ID (reward_type='cosmetic')
+    reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic)
     max_uses INTEGER DEFAULT 1,                -- 발급 갯수 (single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,              -- 현재 사용 횟수
     expires_at TEXT,                           -- 유효 만료 기한 (ISO String)
@@ -171,6 +172,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
     font_url TEXT,                             -- 이름 이펙트용 웹폰트 URL (선택)
     font_family TEXT,                          -- 폰트 패밀리명 (선택)
     active INTEGER DEFAULT 1,                  -- 판매 활성 여부 (0/1)
+    purchase_limit INTEGER DEFAULT 0,         -- 1인 최대 구매 갯수 (0 = 무제한)
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -181,6 +183,16 @@ CREATE TABLE IF NOT EXISTS user_cosmetics (
     item_id INTEGER NOT NULL,
     quantity INTEGER DEFAULT 0,
     UNIQUE(user_id, item_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(item_id) REFERENCES shop_items(id) ON DELETE CASCADE
+);
+
+-- 상점 아이템 1인 구매 횟수 (구매 제한 추적)
+CREATE TABLE IF NOT EXISTS shop_purchases (
+    user_id TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    count INTEGER DEFAULT 0,
+    PRIMARY KEY(user_id, item_id),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(item_id) REFERENCES shop_items(id) ON DELETE CASCADE
 );

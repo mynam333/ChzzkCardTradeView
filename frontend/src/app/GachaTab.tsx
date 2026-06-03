@@ -19,6 +19,7 @@ import { apiFetch } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { CosmeticFrame } from './CosmeticFrame';
+import { CosmeticName } from './CosmeticName';
 
 interface Streamer {
   channel_id: string;
@@ -152,6 +153,11 @@ export const GachaTab: React.FC = () => {
       fetchMyCosmetics();
     }
   }, [user]);
+
+  // 장착 모달을 열 때마다 보유 코스메틱을 최신화 (상점 구매 후 등 상태 불일치로 "미보유" 오류 방지)
+  useEffect(() => {
+    if (equipCard) fetchMyCosmetics();
+  }, [equipCard?.id]);
 
   const fetchMyCosmetics = async () => {
     try {
@@ -1446,7 +1452,7 @@ export const GachaTab: React.FC = () => {
                             ))}
                           </div>
                         )}
-                        <h4 className="text-sm font-bold tracking-tight truncate drop-shadow" style={nameEffectStyle(card.name_effect)}>{streamer.name}</h4>
+                        <CosmeticName effect={card.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</CosmeticName>
                         <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
 
                         <div className="flex items-center justify-between border-t border-white/10 pt-1">
@@ -1529,7 +1535,7 @@ export const GachaTab: React.FC = () => {
                     ))}
                   </div>
                 )}
-                <h3 className="text-3xl font-black tracking-tight drop-shadow-lg" style={nameEffectStyle(live.name_effect)}>{s.name}</h3>
+                <CosmeticName effect={live.name_effect} className="block text-3xl font-black tracking-tight drop-shadow-lg">{s.name}</CosmeticName>
                 <p className="text-sm text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
                 <div className="flex items-center justify-between border-t border-white/20 pt-3">
                   <span className="text-sm text-zinc-300">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
@@ -1637,7 +1643,7 @@ export const GachaTab: React.FC = () => {
                         ? <div className="relative h-12 w-8 overflow-hidden rounded bg-card border border-border/80" style={borderClass(it) ? undefined : borderStyle(it)}>
                             <CosmeticFrame border={it} />
                           </div>
-                        : <span className="text-sm font-black truncate max-w-full" style={nameEffectStyle(it)}>{it.name}</span>}
+                        : <CosmeticName effect={it} className="text-sm font-black truncate max-w-full">{it.name}</CosmeticName>}
                       <span className="text-[9px] text-muted-foreground truncate max-w-full">{it.name} ×{it.quantity}</span>
                     </button>
                   );
@@ -1659,7 +1665,7 @@ export const GachaTab: React.FC = () => {
                   <CosmeticFrame border={live.border} />
                   <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                  <h4 className="relative z-10 text-xs font-black text-white truncate drop-shadow" style={nameEffectStyle(live.name_effect)}>{live.streamer?.name}</h4>
+                  <CosmeticName effect={live.name_effect} className="relative z-10 block text-xs font-black text-white truncate drop-shadow">{live.streamer?.name}</CosmeticName>
                 </div>
               </div>
               <div className="mt-4 space-y-3">

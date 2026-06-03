@@ -47,11 +47,12 @@ export interface Coupon {
   code: string;
   // single: 선착순 발급 갯수(max_uses) 제한, multi: 기간 내 1인 1회 · 총량 무제한
   coupon_type: 'single' | 'multi';
-  // 보상 종류: point(재화) | card(스트리머 카드)
-  reward_type: 'point' | 'card';
+  // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템)
+  reward_type: 'point' | 'card' | 'cosmetic';
   points: number;                     // reward_type === 'point' 일 때 지급 재화량
   reward_channel_id: string | null;   // reward_type === 'card' 일 때 지급 스트리머 채널 ID
-  reward_quantity: number;            // reward_type === 'card' 일 때 지급 카드 수량
+  reward_item_id?: number | null;     // reward_type === 'cosmetic' 일 때 지급 상점 아이템 ID
+  reward_quantity: number;            // card/cosmetic 일 때 지급 수량
   max_uses: number;                   // single: 발급 갯수, multi: 0(무제한)
   used_count: number;
   expires_at: string | null;

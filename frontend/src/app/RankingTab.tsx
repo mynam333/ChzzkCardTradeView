@@ -100,7 +100,7 @@ export const RankingTab: React.FC = () => {
     (s) => s.name
   );
 
-  // 컬렉터 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
+  // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
@@ -117,7 +117,7 @@ export const RankingTab: React.FC = () => {
   const subTabs: { id: SubTab; label: string }[] = [
     { id: 'value', label: '스트리머 시세' },
     { id: 'change', label: '스트리머 등락률' },
-    { id: 'user', label: '컬렉터 자산' }
+    { id: 'user', label: '수집가 자산' }
   ];
 
   return (

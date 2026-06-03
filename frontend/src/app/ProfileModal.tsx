@@ -5,6 +5,7 @@ import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, proxiedImage, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
+import { CosmeticName } from './CosmeticName';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 
@@ -209,9 +210,9 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                           ))}
                         </div>
                       )}
-                      <h4 className="text-sm font-black tracking-tight truncate drop-shadow" style={nameEffectStyle(rep.name_effect)}>
+                      <CosmeticName effect={rep.name_effect} className="block text-sm font-black tracking-tight truncate drop-shadow">
                         {repStreamer.name}
-                      </h4>
+                      </CosmeticName>
                       <div className="flex items-center justify-between border-t border-white/20 pt-1.5">
                         <span className="text-[8px] text-zinc-300">대표 카드</span>
                         <span className="text-xs font-black text-emerald-400">{(repStreamer.base_value || 0).toLocaleString()} P</span>

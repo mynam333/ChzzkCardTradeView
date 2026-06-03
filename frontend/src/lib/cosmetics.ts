@@ -34,7 +34,7 @@ export const ensureFont = (url?: string | null) => {
   document.head.appendChild(link);
 };
 
-/** 이름 이펙트 객체로부터 적용할 스타일(폰트 포함) 생성 */
+/** 이름 이펙트 객체로부터 적용할 스타일(폰트 포함) 생성 — 레거시 인라인 방식 */
 export const nameEffectStyle = (effect?: { style_json?: string | null; font_url?: string | null; font_family?: string | null } | null): React.CSSProperties => {
   if (!effect) return {};
   ensureFont(effect.font_url);
@@ -42,6 +42,13 @@ export const nameEffectStyle = (effect?: { style_json?: string | null; font_url?
   if (effect.font_family) style.fontFamily = effect.font_family;
   return style;
 };
+
+/**
+ * 이름 이펙트(클래스 기반) 식별: style_json 에 {"class":"ne-xxx"} 가 있으면 클래스명을 반환합니다.
+ * 실제 비주얼 CSS는 함께 저장된 {"css":...}가 ensureCosmeticCss로 주입됩니다.
+ * (테두리의 borderClass 와 동일한 규칙 — 텍스트 요소에 적용)
+ */
+export const nameEffectClass = (effect?: { style_json?: string | null } | null): string => borderClass(effect);
 
 /**
  * 카드 별(0~5성)에 맞는 커스텀 이미지를 해석합니다.
@@ -89,14 +96,14 @@ export const borderClass = (border?: { style_json?: string | null } | null): str
 const injectedBorderCss = new Map<string, HTMLStyleElement>();
 
 /**
- * 테두리 코스메틱이 style_json에 {"class":..,"css":..} 형태로 원본 CSS를 담고 있으면,
+ * 코스메틱(테두리·이름 이펙트)이 style_json에 {"class":..,"css":..} 형태로 원본 CSS를 담고 있으면,
  * 해당 CSS를 <style data-cb-css="class"> 태그로 문서에 주입합니다(클래스 단위 dedupe·갱신).
  * 입력된 CSS가 그대로 적용되며, css 없이 class만 있으면 아무것도 주입하지 않습니다.
  */
-export const ensureBorderCss = (border?: { style_json?: string | null } | null): void => {
-  if (typeof document === 'undefined' || !border?.style_json) return;
+export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | null): void => {
+  if (typeof document === 'undefined' || !cosmetic?.style_json) return;
   let obj: any;
-  try { obj = JSON.parse(border.style_json); } catch { return; }
+  try { obj = JSON.parse(cosmetic.style_json); } catch { return; }
   if (!obj || typeof obj.class !== 'string' || typeof obj.css !== 'string' || !obj.css.trim()) return;
   const key = obj.class.trim();
   let el = injectedBorderCss.get(key);
@@ -108,5 +115,7 @@ export const ensureBorderCss = (border?: { style_json?: string | null } | null):
   }
   if (el.textContent !== obj.css) el.textContent = obj.css;
 };
+/** 하위 호환 별칭 */
+export const ensureBorderCss = ensureCosmeticCss;
 
 // (테두리 프리셋 목록은 제거됨 — 이제 관리자가 card-borders/*.css 의 CSS를 직접 입력해 등록합니다)

@@ -1,6 +1,7 @@
 /* ============================================================
-   스팀펑크 (Steampunk) — 황동 프레임 + 회전 기어 2개 + 리벳
+   스팀펑크 (Steampunk) — 황동 프레임 + 파이프·압력계·정적 기어 + 회전 기어 2종
    적용 클래스: cb-steampunk
+   ▶ 회전 기어는 좌상/우하 코너에만 있어 중앙~상단(얼굴)을 가리지 않습니다.
    ============================================================ */
 .cb-steampunk {
   position: absolute;
@@ -12,30 +13,32 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%23b87333' stroke-width='3.4'/%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%238a5524' stroke-width='1'/%3E%3Crect x='8' y='8' width='84' height='144' rx='3' fill='none' stroke='%23d9a441' stroke-width='1' stroke-dasharray='2 3'/%3E%3Cg fill='%23e7b15a'%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Ccircle cx='91' cy='9' r='2'/%3E%3Ccircle cx='9' cy='151' r='2'/%3E%3Ccircle cx='91' cy='151' r='2'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: inset 0 0 12px rgba(80,40,0,.5), 0 0 10px rgba(184,115,51,.45);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='br' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f0cd88'/%3E%3Cstop offset='.5' stop-color='%23b87333'/%3E%3Cstop offset='1' stop-color='%236e3f17'/%3E%3C/linearGradient%3E%3CradialGradient id='gauge' cx='40%25' cy='36%25' r='65%25'%3E%3Cstop offset='0' stop-color='%23fbe7bf'/%3E%3Cstop offset='1' stop-color='%23c79a5b'/%3E%3C/radialGradient%3E%3CradialGradient id='sg' cx='40%25' cy='36%25' r='65%25'%3E%3Cstop offset='0' stop-color='%23d6a25c'/%3E%3Cstop offset='1' stop-color='%237a4a1e'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='url(%23br)' stroke-width='3.6'/%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%235a3413' stroke-width='1'/%3E%3Crect x='8' y='8' width='84' height='144' rx='3' fill='none' stroke='%23e0a94e' stroke-width='1' stroke-dasharray='2 3'/%3E%3Cg stroke='url(%23br)' stroke-width='2.4' fill='none' stroke-linecap='round'%3E%3Cpath d='M5,118 L5,142'/%3E%3Cpath d='M95,26 L95,50'/%3E%3C/g%3E%3Cg fill='%23e7b15a' stroke='%235a3413' stroke-width='.4'%3E%3Ccircle cx='5' cy='118' r='1.6'/%3E%3Ccircle cx='5' cy='142' r='1.6'/%3E%3Ccircle cx='95' cy='26' r='1.6'/%3E%3Ccircle cx='95' cy='50' r='1.6'/%3E%3C/g%3E%3Cg transform='translate(92,130)'%3E%3Ccircle r='6' fill='url(%23gauge)' stroke='%236e3f17' stroke-width='1'/%3E%3Cpath d='M0,0 L3,-3' stroke='%238a1f14' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle r='.8' fill='%235a3413'/%3E%3C/g%3E%3Cg transform='translate(50,153)' fill='url(%23sg)' stroke='%235a3413' stroke-width='.5'%3E%3Cg id='sgear'%3E%3Cpath d='M0,-6 2,-2 -2,-2 Z'/%3E%3Cpath d='M0,6 2,2 -2,2 Z'/%3E%3Cpath d='M-6,0 -2,2 -2,-2 Z'/%3E%3Cpath d='M6,0 2,2 2,-2 Z'/%3E%3Ccircle r='4'/%3E%3C/g%3E%3Ccircle r='1.6' fill='%23331d09'/%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: inset 0 0 12px rgba(70,35,0,.55), 0 0 11px rgba(184,115,51,.45);
 }
+/* 큰 기어 (오른쪽 아래) — 12 사다리꼴 이빨 + 내륜 + 스포크 + 허브 */
 .cb-steampunk::before {
   content: "";
   position: absolute;
-  right: -8px; bottom: -8px;
-  width: 34px; height: 34px;
+  right: -11px; bottom: -11px;
+  width: 30px; height: 30px;
   pointer-events: none;
   background-repeat: no-repeat;
   background-size: contain;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23c98a3a' stroke='%238a5524' stroke-width='1'%3E%3Cpath d='M20,3 22,8 18,8 Z'/%3E%3Cpath d='M20,37 22,32 18,32 Z'/%3E%3Cpath d='M3,20 8,22 8,18 Z'/%3E%3Cpath d='M37,20 32,22 32,18 Z'/%3E%3Cpath d='M8,8 13,11 11,13 Z'/%3E%3Cpath d='M32,32 27,29 29,27 Z'/%3E%3Cpath d='M32,8 29,13 27,11 Z'/%3E%3Cpath d='M8,32 11,27 13,29 Z'/%3E%3Ccircle cx='20' cy='20' r='12'/%3E%3C/g%3E%3Ccircle cx='20' cy='20' r='5' fill='%23704214'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3CradialGradient id='g1' cx='38%25' cy='34%25' r='68%25'%3E%3Cstop offset='0' stop-color='%23f3d08e'/%3E%3Cstop offset='.6' stop-color='%23b87333'/%3E%3Cstop offset='1' stop-color='%236e3f17'/%3E%3C/radialGradient%3E%3CradialGradient id='h1' cx='38%25' cy='34%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23ecbf76'/%3E%3Cstop offset='1' stop-color='%237a4a1e'/%3E%3C/radialGradient%3E%3Cpath id='t1' d='M-3,-17 L-2.2,-22 L2.2,-22 L3,-17 Z'/%3E%3C/defs%3E%3Cg transform='translate(24,24)'%3E%3Cg fill='url(%23g1)' stroke='%235a3413' stroke-width='.6'%3E%3Cuse href='%23t1'/%3E%3Cuse href='%23t1' transform='rotate(30)'/%3E%3Cuse href='%23t1' transform='rotate(60)'/%3E%3Cuse href='%23t1' transform='rotate(90)'/%3E%3Cuse href='%23t1' transform='rotate(120)'/%3E%3Cuse href='%23t1' transform='rotate(150)'/%3E%3Cuse href='%23t1' transform='rotate(180)'/%3E%3Cuse href='%23t1' transform='rotate(210)'/%3E%3Cuse href='%23t1' transform='rotate(240)'/%3E%3Cuse href='%23t1' transform='rotate(270)'/%3E%3Cuse href='%23t1' transform='rotate(300)'/%3E%3Cuse href='%23t1' transform='rotate(330)'/%3E%3C/g%3E%3Ccircle r='17' fill='url(%23g1)' stroke='%235a3413' stroke-width='.6'/%3E%3Ccircle r='13' fill='none' stroke='%235a3413' stroke-width='.7' opacity='.5'/%3E%3Cg fill='%236e3f17'%3E%3Ccircle cy='-9' r='2.2'/%3E%3Ccircle cx='8.56' cy='-2.78' r='2.2'/%3E%3Ccircle cx='5.29' cy='7.28' r='2.2'/%3E%3Ccircle cx='-5.29' cy='7.28' r='2.2'/%3E%3Ccircle cx='-8.56' cy='-2.78' r='2.2'/%3E%3C/g%3E%3Ccircle r='5' fill='url(%23h1)' stroke='%235a3413' stroke-width='.6'/%3E%3Ccircle r='1.9' fill='%23583310'/%3E%3C/g%3E%3C/svg%3E");
   transform-origin: 50% 50%;
-  animation: steampunk-spin 9s linear infinite;
+  animation: steampunk-spin 10s linear infinite;
 }
+/* 작은 기어 (왼쪽 위) — 9 사다리꼴 이빨 + 내륜 + 허브 */
 .cb-steampunk::after {
   content: "";
   position: absolute;
   left: -8px; top: -8px;
-  width: 26px; height: 26px;
+  width: 22px; height: 22px;
   pointer-events: none;
   background-repeat: no-repeat;
   background-size: contain;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23a8742f' stroke='%23704214' stroke-width='1'%3E%3Cpath d='M20,4 23,9 17,9 Z'/%3E%3Cpath d='M20,36 23,31 17,31 Z'/%3E%3Cpath d='M4,20 9,23 9,17 Z'/%3E%3Cpath d='M36,20 31,23 31,17 Z'/%3E%3Ccircle cx='20' cy='20' r='11'/%3E%3C/g%3E%3Ccircle cx='20' cy='20' r='4.5' fill='%23583310'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3CradialGradient id='g2' cx='38%25' cy='34%25' r='68%25'%3E%3Cstop offset='0' stop-color='%23dbab61'/%3E%3Cstop offset='.6' stop-color='%23a8651f'/%3E%3Cstop offset='1' stop-color='%235e340f'/%3E%3C/radialGradient%3E%3Cpath id='t2' d='M-2.6,-16 L-1.9,-21 L1.9,-21 L2.6,-16 Z'/%3E%3C/defs%3E%3Cg transform='translate(24,24)'%3E%3Cg fill='url(%23g2)' stroke='%23452810' stroke-width='.6'%3E%3Cuse href='%23t2'/%3E%3Cuse href='%23t2' transform='rotate(40)'/%3E%3Cuse href='%23t2' transform='rotate(80)'/%3E%3Cuse href='%23t2' transform='rotate(120)'/%3E%3Cuse href='%23t2' transform='rotate(160)'/%3E%3Cuse href='%23t2' transform='rotate(200)'/%3E%3Cuse href='%23t2' transform='rotate(240)'/%3E%3Cuse href='%23t2' transform='rotate(280)'/%3E%3Cuse href='%23t2' transform='rotate(320)'/%3E%3C/g%3E%3Ccircle r='16' fill='url(%23g2)' stroke='%23452810' stroke-width='.6'/%3E%3Ccircle r='12' fill='none' stroke='%23452810' stroke-width='.7' opacity='.5'/%3E%3Cg fill='%235e340f'%3E%3Ccircle cy='-8' r='2'/%3E%3Ccircle cx='8' r='2'/%3E%3Ccircle cy='8' r='2'/%3E%3Ccircle cx='-8' r='2'/%3E%3C/g%3E%3Ccircle r='4.4' fill='url(%23g2)' stroke='%23452810' stroke-width='.6'/%3E%3Ccircle r='1.7' fill='%23331d09'/%3E%3C/g%3E%3C/svg%3E");
   transform-origin: 50% 50%;
   animation: steampunk-spin 7s linear infinite reverse;
 }

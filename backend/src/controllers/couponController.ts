@@ -3,6 +3,7 @@ import { couponRepository, userRepository, streamerRepository, userCardRepositor
 import crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import { getItem as getShopItem, grantCosmetic } from '../services/shopService';
 
 /**
  * 1. 쿠폰 생성 (ADMIN 전용)
@@ -23,6 +24,7 @@ export const createCoupon = async (req: Request, res: Response) => {
     reward_type = 'point',
     points,
     reward_channel_id,
+    reward_item_id,
     reward_quantity,
     max_uses,
     expires_at
@@ -31,13 +33,14 @@ export const createCoupon = async (req: Request, res: Response) => {
   if (!['single', 'multi'].includes(coupon_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '쿠폰 타입은 single 또는 multi만 가능합니다.' });
   }
-  if (!['point', 'card'].includes(reward_type)) {
-    return res.status(400).json({ error: 'BadRequest', message: '보상 종류는 point 또는 card만 가능합니다.' });
+  if (!['point', 'card', 'cosmetic'].includes(reward_type)) {
+    return res.status(400).json({ error: 'BadRequest', message: '보상 종류는 point · card · cosmetic만 가능합니다.' });
   }
 
   // 보상 종류별 필수값 검증
   let rewardPoints = 0;
   let rewardChannelId: string | null = null;
+  let rewardItemId: number | null = null;
   let rewardQuantity = 0;
 
   if (reward_type === 'point') {
@@ -45,7 +48,7 @@ export const createCoupon = async (req: Request, res: Response) => {
     if (!rewardPoints || rewardPoints <= 0) {
       return res.status(400).json({ error: 'BadRequest', message: '재화 쿠폰은 0보다 큰 지급 포인트가 필요합니다.' });
     }
-  } else {
+  } else if (reward_type === 'card') {
     rewardChannelId = reward_channel_id;
     rewardQuantity = Number(reward_quantity);
     if (!rewardChannelId) {
@@ -53,6 +56,16 @@ export const createCoupon = async (req: Request, res: Response) => {
     }
     if (!rewardQuantity || rewardQuantity <= 0) {
       return res.status(400).json({ error: 'BadRequest', message: '카드 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
+    }
+  } else {
+    // cosmetic
+    rewardItemId = Number(reward_item_id);
+    rewardQuantity = Number(reward_quantity);
+    if (!rewardItemId) {
+      return res.status(400).json({ error: 'BadRequest', message: '코스메틱 쿠폰은 지급할 상점 아이템을 선택해야 합니다.' });
+    }
+    if (!rewardQuantity || rewardQuantity <= 0) {
+      return res.status(400).json({ error: 'BadRequest', message: '코스메틱 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
     }
   }
 
@@ -62,6 +75,13 @@ export const createCoupon = async (req: Request, res: Response) => {
       const streamer = await streamerRepository.findById(rewardChannelId);
       if (!streamer) {
         return res.status(404).json({ error: 'NotFound', message: '지급할 스트리머 카드를 찾을 수 없습니다.' });
+      }
+    }
+    // 코스메틱 보상이면 상점 아이템 실존 여부 확인
+    if (reward_type === 'cosmetic' && rewardItemId) {
+      const item = await getShopItem(rewardItemId);
+      if (!item) {
+        return res.status(404).json({ error: 'NotFound', message: '지급할 상점 아이템을 찾을 수 없습니다.' });
       }
     }
 
@@ -85,6 +105,7 @@ export const createCoupon = async (req: Request, res: Response) => {
       reward_type,
       points: rewardPoints,
       reward_channel_id: rewardChannelId,
+      reward_item_id: rewardItemId,
       reward_quantity: rewardQuantity,
       max_uses: maxUsesCount,
       used_count: 0,
@@ -144,6 +165,17 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
         return res.status(404).json({ error: 'NotFound', message: '지급 대상 스트리머 카드를 더 이상 찾을 수 없습니다.' });
       }
     }
+    // 코스메틱 보상이면 지급 전에 아이템 실존 여부 확인
+    let rewardItem = null;
+    if (coupon.reward_type === 'cosmetic') {
+      if (!coupon.reward_item_id) {
+        return res.status(500).json({ error: 'InternalServerError', message: '코스메틱 쿠폰 정보가 올바르지 않습니다.' });
+      }
+      rewardItem = await getShopItem(coupon.reward_item_id);
+      if (!rewardItem) {
+        return res.status(404).json({ error: 'NotFound', message: '지급 대상 코스메틱 아이템을 더 이상 찾을 수 없습니다.' });
+      }
+    }
 
     // 중복 사용 차단을 원자적으로 처리: 로그 INSERT가 UNIQUE 제약에 의해 실패하면 이미 사용한 것으로 간주
     const inserted = await couponRepository.logCouponRedeem(coupon.id, userId);
@@ -167,6 +199,18 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
         message: `쿠폰이 등록되어 '${rewardStreamer.name}' 카드 ${coupon.reward_quantity}장이 지급되었습니다!`,
         reward_type: 'card',
         reward_channel_id: rewardStreamer.channel_id,
+        reward_quantity: coupon.reward_quantity,
+        points_added: 0
+      });
+    }
+
+    if (coupon.reward_type === 'cosmetic' && rewardItem) {
+      // 코스메틱 보상 지급 (보관함에 수량 추가)
+      await grantCosmetic(userId, rewardItem.id, coupon.reward_quantity);
+      return res.status(200).json({
+        message: `쿠폰이 등록되어 '${rewardItem.name}' 코스메틱 ${coupon.reward_quantity}개가 지급되었습니다! (상점 보관함에서 확인)`,
+        reward_type: 'cosmetic',
+        reward_item_id: rewardItem.id,
         reward_quantity: coupon.reward_quantity,
         points_added: 0
       });

@@ -1,6 +1,7 @@
 /* ============================================================
-   낙엽 (Autumn) — 단풍 프레임 + 떨어지는 낙엽
+   낙엽 (Autumn) — 단풍/참나무 잎 프레임 + 2겹 가장자리 낙엽 + 따뜻한 광택
    적용 클래스: cb-autumn
+   ▶ 파티클은 --em 마스크로 가장자리에 모여, 카드 중앙~상단(얼굴)을 비웁니다.
    ============================================================ */
 .cb-autumn {
   position: absolute;
@@ -12,26 +13,40 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='7' fill='none' stroke='%23c1622a' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='5' fill='none' stroke='%23e0973f' stroke-width='1'/%3E%3Cpath d='M12,10 l3,-5 3,5 -3,2z' fill='%23d2691e'/%3E%3Cpath d='M88,150 l3,-5 3,5 -3,2z' fill='%23a8431a'/%3E%3C/svg%3E");
-  box-shadow: 0 0 11px rgba(193,98,42,.45), inset 0 0 10px rgba(160,67,26,.3);
+  /* 가장자리 가중 마스크: 중앙 상단을 비우고 테두리 쪽만 남김 */
+  --em: radial-gradient(78% 70% at 50% 36%, transparent 40%, #000 80%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ag' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f6c062'/%3E%3Cstop offset='.5' stop-color='%23c1622a'/%3E%3Cstop offset='1' stop-color='%237f3413'/%3E%3C/linearGradient%3E%3CradialGradient id='glow' cx='50%25' cy='100%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23ffb55a' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23ffb55a' stop-opacity='0'/%3E%3C/radialGradient%3E%3Cg id='mp'%3E%3Cpath d='M0,-9 L1.6,-3.6 L6,-5.2 L3.4,-0.8 L8,0.8 L3.4,1.6 L5,7 L1,3.6 L0,8.4 L-1,3.6 L-5,7 L-3.4,1.6 L-8,0.8 L-3.4,-0.8 L-6,-5.2 L-1.6,-3.6 Z'/%3E%3Crect x='-0.4' y='8' width='0.8' height='3.6'/%3E%3Cg stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.45'%3E%3Cpath d='M0,7 L0,-7'/%3E%3Cpath d='M0,0 L4.6,-1.2'/%3E%3Cpath d='M0,0 L-4.6,-1.2'/%3E%3Cpath d='M0,3.4 L3,5.4'/%3E%3Cpath d='M0,3.4 L-3,5.4'/%3E%3C/g%3E%3C/g%3E%3Cg id='oak'%3E%3Cpath d='M0,-8 C2,-7 2,-5 1,-4 C3,-4 3,-2 1,-1 C3,-1 3,1 1,2 C2,3 2,5 0,7 C-2,5 -2,3 -1,2 C-3,1 -3,-1 -1,-1 C-3,-2 -3,-4 -1,-4 C-2,-5 -2,-7 0,-8 Z'/%3E%3Cpath d='M0,6 L0,-6' stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.4'/%3E%3C/g%3E%3C/defs%3E%3Crect x='0' y='0' width='100' height='160' fill='url(%23glow)'/%3E%3Crect x='3' y='3' width='94' height='154' rx='7' fill='none' stroke='url(%23ag)' stroke-width='3'/%3E%3Crect x='7' y='7' width='86' height='146' rx='5' fill='none' stroke='%23e0973f' stroke-width='.9' opacity='.65'/%3E%3Cuse href='%23mp' transform='translate(13,13) rotate(-28) scale(1.2)' fill='%23d2691e'/%3E%3Cuse href='%23oak' transform='translate(24,11) rotate(30) scale(.9)' fill='%23b8541c'/%3E%3Cuse href='%23mp' transform='translate(87,13) rotate(34) scale(1.1)' fill='%23c1622a'/%3E%3Cuse href='%23oak' transform='translate(76,12) rotate(-26) scale(.85)' fill='%23a8431a'/%3E%3Cuse href='%23mp' transform='translate(13,147) rotate(206) scale(1.05)' fill='%23cf7a2d'/%3E%3Cuse href='%23mp' transform='translate(87,147) rotate(150) scale(1.15)' fill='%23a8431a'/%3E%3C/svg%3E");
+  box-shadow: 0 0 13px rgba(193,98,42,.45), inset 0 -14px 18px rgba(255,150,60,.22), inset 0 0 12px rgba(120,55,22,.3);
 }
+/* 가까운 낙엽 (크고 빠름) */
 .cb-autumn::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
+  -webkit-mask: var(--em); mask: var(--em);
   background-repeat: repeat;
   background-size: 100% 220px;
-  background-image:
-    radial-gradient(5px 4px at 16px 24px, rgba(214,105,30,.95), transparent 62%),
-    radial-gradient(6px 4px at 70px 70px, rgba(176,84,28,.9), transparent 62%),
-    radial-gradient(5px 5px at 42px 130px, rgba(224,151,63,.9), transparent 62%),
-    radial-gradient(4px 3px at 92px 104px, rgba(180,90,20,.85), transparent 62%),
-    radial-gradient(5px 4px at 28px 186px, rgba(205,120,45,.85), transparent 62%);
-  animation: autumn-fall 8s linear infinite, autumn-sway 2.6s ease-in-out infinite alternate;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 220'%3E%3Cdefs%3E%3Cg id='l'%3E%3Cpath d='M0,-9 L1.6,-3.6 L6,-5.2 L3.4,-0.8 L8,0.8 L3.4,1.6 L5,7 L1,3.6 L0,8.4 L-1,3.6 L-5,7 L-3.4,1.6 L-8,0.8 L-3.4,-0.8 L-6,-5.2 L-1.6,-3.6 Z'/%3E%3Cpath d='M0,7 L0,-7' stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.4'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23l' transform='translate(10,28) rotate(18) scale(1.05)' fill='%23d2691e'/%3E%3Cuse href='%23l' transform='translate(90,66) rotate(-40) scale(.9)' fill='%23b8541c'/%3E%3Cuse href='%23l' transform='translate(7,128) rotate(65) scale(1.05)' fill='%23e0973f'/%3E%3Cuse href='%23l' transform='translate(93,104) rotate(150) scale(.85)' fill='%23a8431a'/%3E%3Cuse href='%23l' transform='translate(14,186) rotate(-12) scale(1)' fill='%23cf7a2d'/%3E%3Cuse href='%23l' transform='translate(86,200) rotate(205) scale(.82)' fill='%23c1622a'/%3E%3C/svg%3E");
+  animation: autumn-fall 8.5s linear infinite, autumn-sway 2.8s ease-in-out infinite alternate;
+}
+/* 먼 낙엽 (작고 느림, 흐림) */
+.cb-autumn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .5;
+  -webkit-mask: var(--em); mask: var(--em);
+  background-repeat: repeat;
+  background-size: 100% 260px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 260'%3E%3Cdefs%3E%3Cpath id='lf' d='M0,-7 L1.2,-2.8 L4.6,-4 L2.6,-0.6 L6.2,0.6 L2.6,1.2 L3.8,5.4 L0.8,2.8 L0,6.4 L-0.8,2.8 L-3.8,5.4 L-2.6,1.2 L-6.2,0.6 L-2.6,-0.6 L-4.6,-4 L-1.2,-2.8 Z'/%3E%3C/defs%3E%3Cuse href='%23lf' transform='translate(12,24) rotate(80) scale(.6)' fill='%23b8541c'/%3E%3Cuse href='%23lf' transform='translate(90,72) rotate(-60) scale(.55)' fill='%23cf7a2d'/%3E%3Cuse href='%23lf' transform='translate(8,138) rotate(15) scale(.6)' fill='%23a8431a'/%3E%3Cuse href='%23lf' transform='translate(94,196) rotate(130) scale(.5)' fill='%23d2691e'/%3E%3Cuse href='%23lf' transform='translate(16,224) rotate(-30) scale(.58)' fill='%23c1622a'/%3E%3C/svg%3E");
+  animation: autumn-fall-far 13s linear infinite, autumn-sway-far 4.4s ease-in-out infinite alternate;
 }
 @keyframes autumn-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
-@keyframes autumn-sway { from { transform: translateX(-7%); } to { transform: translateX(7%); } }
+@keyframes autumn-sway { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
+@keyframes autumn-fall-far { from { background-position-y: 0; } to { background-position-y: 260px; } }
+@keyframes autumn-sway-far { from { transform: translateX(4%); } to { transform: translateX(-4%); } }
 @media (prefers-reduced-motion: reduce) {
-  .cb-autumn::after { animation: none; }
+  .cb-autumn::before, .cb-autumn::after { animation: none; }
 }

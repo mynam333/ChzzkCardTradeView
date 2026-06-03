@@ -1,6 +1,7 @@
 /* ============================================================
-   여름 해변 (Summer Beach) — 청록 프레임 + 태양 + 움직이는 물결
+   여름 해변 (Summer Beach) — 생동 태양(코너) + 야자수·갈매기 프레임 + 3겹 파도
    적용 클래스: cb-beach
+   ▶ 태양은 우상단 코너, 파도는 하단 → 중앙~상단은 자연히 비어 있습니다.
    ============================================================ */
 .cb-beach {
   position: absolute;
@@ -12,21 +13,43 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='9' fill='none' stroke='%2322c1d6' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='7' fill='none' stroke='%23ffe08a' stroke-width='1.1'/%3E%3Ccircle cx='84' cy='16' r='7' fill='none' stroke='%23ffd34d' stroke-width='1.4'/%3E%3Cg stroke='%23ffd34d' stroke-width='1'%3E%3Cline x1='84' y1='4' x2='84' y2='8'/%3E%3Cline x1='96' y1='16' x2='92' y2='16'/%3E%3Cline x1='75' y1='8' x2='78' y2='11'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 12px rgba(34,193,214,.45), inset 0 0 10px rgba(255,224,138,.3);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322c1d6'/%3E%3Cstop offset='.55' stop-color='%2362d0d6'/%3E%3Cstop offset='1' stop-color='%23ffd98a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='9' fill='none' stroke='url(%23bg)' stroke-width='2.6'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='7' fill='none' stroke='%23ffe9b0' stroke-width='.9' opacity='.65'/%3E%3Cg stroke='%23ffffff' stroke-width='1' fill='none' opacity='.7' stroke-linecap='round'%3E%3Cpath d='M16,30 Q19,26 22,30 Q25,26 28,30'/%3E%3Cpath d='M30,38 Q32.5,35 35,38 Q37.5,35 40,38'/%3E%3C/g%3E%3Cg transform='translate(11,150)'%3E%3Cpath d='M0,0 C-1,-9 1,-18 4,-24' fill='none' stroke='%238a5a2a' stroke-width='1.6' stroke-linecap='round'/%3E%3Cg fill='none' stroke='%232f9e54' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath d='M4,-24 C0,-30 -6,-31 -10,-29'/%3E%3Cpath d='M4,-24 C2,-31 8,-34 13,-32'/%3E%3Cpath d='M4,-24 C9,-28 15,-27 18,-23'/%3E%3Cpath d='M4,-24 C-2,-27 -6,-23 -7,-19'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(88,140)' fill='%23ff9a6b' stroke='%23e8633a' stroke-width='.5'%3E%3Cpath d='M0,-5 L1.5,-1.5 L5,-1.5 L2.2,1 L3.2,5 L0,2.5 L-3.2,5 L-2.2,1 L-5,-1.5 L-1.5,-1.5 Z'/%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: 0 0 12px rgba(34,193,214,.45), inset 0 0 12px rgba(255,217,138,.26);
 }
+/* 태양 — 회전 광선 + 입체 구체 + 맥동 코로나 (우상단 코너에 바짝) */
 .cb-beach::before {
   content: "";
   position: absolute;
-  left: 0; right: 0; bottom: 0; height: 22px;
+  top: 1px; right: 1px;
+  width: 19px; height: 19px;
+  pointer-events: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 37%, #fffef4 0 14%, #ffefae 26%, #ffc24d 47%, rgba(255,150,40,0) 70%),
+    repeating-conic-gradient(rgba(255,222,120,.6) 0deg 2.5deg, transparent 2.5deg 12deg);
+  -webkit-mask: radial-gradient(circle, #000 0 44%, transparent 63%);
+          mask: radial-gradient(circle, #000 0 44%, transparent 63%);
+  box-shadow: 0 0 7px 1px rgba(255,179,59,.42);
+  animation: beach-sun-spin 16s linear infinite, beach-sun-pulse 3.6s ease-in-out infinite;
+}
+@keyframes beach-sun-spin { to { transform: rotate(360deg); } }
+@keyframes beach-sun-pulse {
+  0%,100% { opacity: .9;  box-shadow: 0 0 6px 1px rgba(255,179,59,.38); }
+  50%     { opacity: 1;   box-shadow: 0 0 11px 3px rgba(255,179,59,.58); }
+}
+/* 하단 파도 (3겹) */
+.cb-beach::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0; height: 30px;
   pointer-events: none;
   background-repeat: repeat-x;
   background-position: bottom;
-  background-size: 64px 16px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 16'%3E%3Cpath d='M0,10 Q8,4 16,10 T32,10 T48,10 T64,10 V16 H0 Z' fill='%2322c1d6' opacity='.55'/%3E%3Cpath d='M0,12 Q8,7 16,12 T32,12 T48,12 T64,12 V16 H0 Z' fill='%233ad1e6' opacity='.45'/%3E%3C/svg%3E");
-  animation: beach-wave 3s linear infinite;
+  background-size: 80px 22px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 22'%3E%3Cpath d='M0,12 Q10,5 20,12 T40,12 T60,12 T80,12 V22 H0 Z' fill='%231fb0c6' opacity='.5'/%3E%3Cpath d='M0,15 Q10,9 20,15 T40,15 T60,15 T80,15 V22 H0 Z' fill='%2340cfe0' opacity='.45'/%3E%3Cpath d='M0,18 Q10,14 20,18 T40,18 T60,18 T80,18 V22 H0 Z' fill='%23bdeef5' opacity='.5'/%3E%3C/svg%3E");
+  animation: beach-wave 3.4s linear infinite;
 }
-@keyframes beach-wave { from { background-position-x: 0; } to { background-position-x: 64px; } }
+@keyframes beach-wave { from { background-position-x: 0; } to { background-position-x: 80px; } }
 @media (prefers-reduced-motion: reduce) {
-  .cb-beach::before { animation: none; }
+  .cb-beach::before, .cb-beach::after { animation: none; }
 }

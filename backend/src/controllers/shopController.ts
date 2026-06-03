@@ -22,6 +22,15 @@ export const getMyCosmetics = async (req: AuthenticatedRequest, res: Response) =
   } catch (err) { return fail(res, '보유 코스메틱 조회 실패', err); }
 };
 
+/** 내 아이템별 구매 횟수 맵 (구매 제한 표시용) */
+export const getMyPurchases = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    return res.status(200).json(await shop.getUserPurchases(userId));
+  } catch (err) { return fail(res, '구매 내역 조회 실패', err); }
+};
+
 /** 구매 */
 export const buyShopItem = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
@@ -31,7 +40,10 @@ export const buyShopItem = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const r = await shop.buyItem(userId, itemId);
     if (!r.ok) {
-      const msg = r.reason === 'INSUFFICIENT_POINT' ? '포인트가 부족합니다.' : r.reason === 'NOT_FOUND' ? '판매 중인 아이템이 아닙니다.' : '구매에 실패했습니다.';
+      const msg = r.reason === 'INSUFFICIENT_POINT' ? '포인트가 부족합니다.'
+        : r.reason === 'NOT_FOUND' ? '판매 중인 아이템이 아닙니다.'
+        : r.reason === 'LIMIT_REACHED' ? '이 아이템의 최대 구매 갯수에 도달했습니다.'
+        : '구매에 실패했습니다.';
       return res.status(400).json({ error: 'BuyFailed', reason: r.reason, message: msg });
     }
     return res.status(200).json({ message: '구매가 완료되었습니다.' });
@@ -79,16 +91,26 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
 };
 
 export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Response) => {
-  const { type, name, description, price, style_json, font_url, font_family, active } = req.body;
+  const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit } = req.body;
   if (!['border', 'name_effect'].includes(type) || !name) {
     return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect)와 이름이 필요합니다.' });
   }
   // style_json 유효성(파싱 가능) 검사
   if (style_json) { try { JSON.parse(style_json); } catch { return res.status(400).json({ error: 'BadRequest', message: '스타일(JSON) 형식이 올바르지 않습니다.' }); } }
   try {
-    await shop.createItem({ type, name, description: description ?? null, price: Math.max(0, Number(price) || 0), style_json: style_json ?? null, font_url: font_url ?? null, font_family: font_family ?? null, active });
+    await shop.createItem({ type, name, description: description ?? null, price: Math.max(0, Number(price) || 0), style_json: style_json ?? null, font_url: font_url ?? null, font_family: font_family ?? null, active, purchase_limit: Math.max(0, Number(purchase_limit) || 0) });
     return res.status(201).json({ message: '아이템이 추가되었습니다.' });
   } catch (err) { return fail(res, '아이템 추가 실패', err); }
+};
+
+/** 특정 아이템의 1인 구매 횟수 전체 초기화 */
+export const adminResetPurchases = async (req: AuthenticatedRequest, res: Response) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'BadRequest', message: '아이템 ID가 필요합니다.' });
+  try {
+    await shop.resetPurchases(id);
+    return res.status(200).json({ message: '해당 아이템의 구매 제한이 초기화되었습니다. (모든 유저 재구매 가능)' });
+  } catch (err) { return fail(res, '구매 제한 초기화 실패', err); }
 };
 
 export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Response) => {

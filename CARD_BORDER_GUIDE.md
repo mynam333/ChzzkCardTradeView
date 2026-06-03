@@ -126,6 +126,28 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 > 모서리가 둥근 곡선 장식은 `preserveAspectRatio='none'` 로 약간 늘어납니다.
 > 너무 동그란 모티프보다 **사선·결정·기하학** 모티프가 늘어짐을 잘 견딥니다.
 
+### 4.4 고급 SVG — 그라데이션 · 재사용 · 입체감 (완성도의 핵심)
+플랫한 단색 선만 쓰면 "대충 그린 테두리"가 됩니다. 아래 기법으로 **금속/유리/보석 질감**을 만드세요.
+
+- **`<defs>` + 그라데이션**: 프레임 선을 단색 대신 그라데이션으로 칠하면 입체감이 확 살아납니다.
+  ```svg
+  <defs>
+    <linearGradient id='au' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0' stop-color='#fff1bd'/><stop offset='.5' stop-color='#e8c66a'/><stop offset='1' stop-color='#a8842a'/>
+    </linearGradient>
+    <radialGradient id='gem' cx='38%' cy='34%' r='70%'>
+      <stop offset='0' stop-color='#ff9a9a'/><stop offset='1' stop-color='#c01726'/>
+    </radialGradient>
+  </defs>
+  <rect ... stroke='url(#au)'/>      <!-- 금속 광택 프레임 -->
+  <path ... fill='url(#gem)'/>       <!-- 면이 살아있는 보석 -->
+  ```
+  > data URI 안에서 `url(#au)` 의 `#` 도 `%23` 로 인코딩합니다 → `url(%23au)`.
+- **`<g id='..'>` + `<use href='%23..'>`**: 단풍잎·꽃·눈결정·기어 같은 모티프를 한 번 정의하고
+  코너마다 `transform='translate(..) rotate(..) scale(..)'` 로 재사용하면, 적은 코드로 **풍부한 디테일**을 얻습니다.
+- **잎맥·면 분할 같은 미세 디테일**: 실루엣만 칠하지 말고 잎맥(가는 선), 보석 면 분할선, 금속 하이라이트 점을
+  함께 그리면 **일러스트에 가까운 밀도**가 나옵니다.
+
 ---
 
 ## 5. 살아 있게 만들기 — 애니메이션 레시피
@@ -171,6 +193,9 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 ```
 - 위로 피어오르게 하려면 `to { background-position-y: -220px; }` (불씨·기포).
 - 타일 높이(`220px`)와 이동량을 **같게** 맞춰야 이음매가 없습니다.
+- **입자도 SVG로**: 단순 점 대신 `<use>` 로 배치한 진짜 잎/꽃잎/눈결정 SVG를 타일에 넣으면 훨씬 사실적입니다.
+- **2겹 패럴랙스**: `::after`(가깝고 크고 빠름) + `::before`(멀고 작고 느리고 흐림, `opacity:.5`)로 두 층을 겹치면
+  깊이감이 생겨 "진짜 떨어지는" 느낌이 납니다. 두 층의 속도·크기·타일 높이를 다르게 두세요.
 
 ### 5.3 회전 (기어·룬)
 ```css

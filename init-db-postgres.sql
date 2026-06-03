@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS coupons (
     reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화) 또는 'card'(스트리머 카드)
     points INTEGER NOT NULL DEFAULT 0,           -- reward_type='point' 지급 재화
     reward_channel_id TEXT,                      -- reward_type='card' 지급 스트리머 채널 ID
-    reward_quantity INTEGER DEFAULT 0,           -- reward_type='card' 지급 카드 수량
+    reward_item_id INTEGER,                      -- reward_type='cosmetic' 지급 상점 아이템 ID
+    reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic 지급 수량
     max_uses INTEGER DEFAULT 1,                  -- 발급 갯수(single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,
@@ -162,6 +163,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
     font_url TEXT,                               -- 이름 이펙트용 웹폰트 URL (선택)
     font_family TEXT,                            -- 폰트 패밀리명 (선택)
     active BOOLEAN DEFAULT TRUE,
+    purchase_limit INTEGER DEFAULT 0,            -- 1인 최대 구매 갯수 (0 = 무제한)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -172,6 +174,14 @@ CREATE TABLE IF NOT EXISTS user_cosmetics (
     item_id INTEGER NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
     quantity INTEGER DEFAULT 0,
     UNIQUE(user_id, item_id)
+);
+
+-- 상점 아이템 1인 구매 횟수 (구매 제한 추적)
+CREATE TABLE IF NOT EXISTS shop_purchases (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
+    count INTEGER DEFAULT 0,
+    PRIMARY KEY(user_id, item_id)
 );
 
 -- 유저 차단 (blocker_id가 blocked_id에게 받은 교환 제안을 차단)
@@ -197,7 +207,9 @@ ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_4 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_5 TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS purchase_limit INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;

@@ -1,6 +1,7 @@
 /* ============================================================
-   중세풍 (Medieval) — 강철·금장 프레임 + 리벳 + 방패 코너 + 금속 광택
+   중세풍 (Medieval) — 베벨 강철 + 금장 인레이 + 리벳 + 방패/교차검 + 횃불 글로우 + 광택
    적용 클래스: cb-medieval
+   ▶ 횃불 글로우는 상단 양 코너에만 켜져 중앙~상단(얼굴)을 가리지 않습니다.
    ============================================================ */
 .cb-medieval {
   position: absolute;
@@ -12,22 +13,22 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='%23c8cdd6' stroke-width='4'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='%238a929e' stroke-width='1'/%3E%3Crect x='7' y='7' width='86' height='146' rx='2' fill='none' stroke='%23d9b25a' stroke-width='1.4'/%3E%3Cg fill='%23eef1f5' stroke='%237b828d' stroke-width='.5'%3E%3Ccircle cx='8' cy='8' r='2.4'/%3E%3Ccircle cx='92' cy='8' r='2.4'/%3E%3Ccircle cx='8' cy='152' r='2.4'/%3E%3Ccircle cx='92' cy='152' r='2.4'/%3E%3Ccircle cx='50' cy='6' r='2'/%3E%3Ccircle cx='50' cy='154' r='2'/%3E%3C/g%3E%3Cpath d='M44,4 L56,4 L56,9 L50,13 L44,9 Z' fill='%23d9b25a' stroke='%238a6a22' stroke-width='.6'/%3E%3C/svg%3E");
-  box-shadow: inset 0 0 10px rgba(0,0,0,.5), 0 0 8px rgba(200,205,214,.35);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='steel' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f4f7fb'/%3E%3Cstop offset='.45' stop-color='%23aab2bd'/%3E%3Cstop offset='1' stop-color='%2358606e'/%3E%3C/linearGradient%3E%3ClinearGradient id='gold2' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe9a8'/%3E%3Cstop offset='.5' stop-color='%23d9b25a'/%3E%3Cstop offset='1' stop-color='%238a6a22'/%3E%3C/linearGradient%3E%3CradialGradient id='rivet' cx='38%25' cy='34%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23ffffff'/%3E%3Cstop offset='.5' stop-color='%23c4ccd6'/%3E%3Cstop offset='1' stop-color='%236f7682'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='url(%23steel)' stroke-width='4.6'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='4' fill='none' stroke='%23414753' stroke-width='1'/%3E%3Crect x='7' y='7' width='86' height='146' rx='2' fill='none' stroke='url(%23gold2)' stroke-width='1.5'/%3E%3Cg fill='url(%23rivet)' stroke='%236b7280' stroke-width='.4'%3E%3Ccircle cx='8' cy='8' r='2.6'/%3E%3Ccircle cx='92' cy='8' r='2.6'/%3E%3Ccircle cx='8' cy='152' r='2.6'/%3E%3Ccircle cx='92' cy='152' r='2.6'/%3E%3Ccircle cx='8' cy='80' r='2'/%3E%3Ccircle cx='92' cy='80' r='2'/%3E%3C/g%3E%3Cg transform='translate(50,8)'%3E%3Cpath d='M-6,-4 L6,-4 L6,2 L0,7 L-6,2 Z' fill='url(%23gold2)' stroke='%238a6a22' stroke-width='.6'/%3E%3Cpath d='M0,-3 L0,5 M-4,0 L4,0' stroke='%238a3b16' stroke-width='.8'/%3E%3C/g%3E%3Cg transform='translate(50,152)' stroke='url(%23steel)' stroke-width='1.4' stroke-linecap='round'%3E%3Cline x1='-7' y1='-5' x2='7' y2='5'/%3E%3Cline x1='7' y1='-5' x2='-7' y2='5'/%3E%3Cline x1='-8' y1='-6' x2='-5.5' y2='-3.5' stroke='url(%23gold2)' stroke-width='2'/%3E%3Cline x1='8' y1='-6' x2='5.5' y2='-3.5' stroke='url(%23gold2)' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: inset 0 0 10px rgba(0,0,0,.5), 0 0 9px rgba(200,205,214,.4);
 }
-.cb-medieval::after {
+/* 상단 양 코너 횃불 글로우 (깜빡임) */
+.cb-medieval::before {
   content: "";
   position: absolute;
-  top: 0; bottom: 0; left: -90%; width: 45%;
+  inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent 44%, rgba(255,255,255,.55) 50%, transparent 56%);
   mix-blend-mode: screen;
-  animation: medieval-shine 6s cubic-bezier(.85,0,.15,1) infinite;
+  background:
+    radial-gradient(42% 28% at 7% 3%, rgba(255,168,72,.45), transparent 70%),
+    radial-gradient(42% 28% at 93% 3%, rgba(255,168,72,.45), transparent 70%);
+  animation: medieval-torch 2.6s ease-in-out infinite;
 }
-@keyframes medieval-shine {
-  0%   { transform: translateX(0) skewX(-20deg); }
-  100% { transform: translateX(520%) skewX(-20deg); }
-}
+@keyframes medieval-torch { 0%,100% { opacity: .5; } 45% { opacity: .95; } 60% { opacity: .7; } }
 @media (prefers-reduced-motion: reduce) {
-  .cb-medieval::after { animation: none; }
+  .cb-medieval::before { animation: none; }
 }

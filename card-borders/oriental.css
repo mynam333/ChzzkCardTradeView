@@ -1,7 +1,7 @@
 /* ============================================================
-   동양풍 (Oriental) — 금빛 이중 프레임 + 구름 코너 + 주칠 + 금빛 광택
+   동양풍 (Oriental) — 금빛 운문 프레임 + 낙관(붉은 인장) + 가장자리 금가루 + 금빛 광택
    적용 클래스: cb-oriental
-   이 파일 하나만으로 완성됩니다(레이아웃·비주얼·키프레임 모두 포함).
+   ▶ 금가루는 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-oriental {
   position: absolute;
@@ -13,22 +13,30 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23e8c66a' stroke-width='2.6'/%3E%3Crect x='7.5' y='7.5' width='85' height='145' rx='5' fill='none' stroke='%23b8451f' stroke-width='1.1'/%3E%3Cpath d='M3,24 C18,21 20,8 17,3' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M97,24 C82,21 80,8 83,3' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M3,136 C18,139 20,152 17,157' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Cpath d='M97,136 C82,139 80,152 83,157' fill='none' stroke='%23e8c66a' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='5.5' r='1.6' fill='%23e8c66a'/%3E%3Ccircle cx='50' cy='154.5' r='1.6' fill='%23e8c66a'/%3E%3C/svg%3E");
-  box-shadow: inset 0 0 14px rgba(184,69,31,.35), 0 0 14px rgba(232,198,106,.4);
+  --em: radial-gradient(80% 72% at 50% 36%, transparent 42%, #000 82%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='au' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fff1bd'/%3E%3Cstop offset='.5' stop-color='%23e8c66a'/%3E%3Cstop offset='1' stop-color='%23a8842a'/%3E%3C/linearGradient%3E%3Cg id='cl' fill='none' stroke='url(%23au)' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M0,0 C-3.4,0 -3.4,-4.4 1,-4.4 C5,-4.4 5,1.6 0.4,1.6 C-2.4,1.6 -2.4,-1.2 0.4,-1.2'/%3E%3Cpath d='M6,-5 C9,-5 9,-1.4 6,-1.4'/%3E%3C/g%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='url(%23au)' stroke-width='2.8'/%3E%3Crect x='7.4' y='7.4' width='85.2' height='145.2' rx='5' fill='none' stroke='%23b8451f' stroke-width='1.1'/%3E%3Crect x='10.4' y='10.4' width='79.2' height='139.2' rx='4' fill='none' stroke='url(%23au)' stroke-width='.5' opacity='.6'/%3E%3Cuse href='%23cl' transform='translate(11,11)'/%3E%3Cuse href='%23cl' transform='translate(89,11) rotate(90)'/%3E%3Cuse href='%23cl' transform='translate(89,149) rotate(180)'/%3E%3Cuse href='%23cl' transform='translate(11,149) rotate(270)'/%3E%3Ccircle cx='50' cy='6' r='2.6' fill='none' stroke='url(%23au)' stroke-width='1'/%3E%3Ccircle cx='50' cy='6' r='1' fill='%23b8451f'/%3E%3Ccircle cx='50' cy='154' r='2.6' fill='none' stroke='url(%23au)' stroke-width='1'/%3E%3Ccircle cx='50' cy='154' r='1' fill='%23b8451f'/%3E%3Cg transform='translate(85,142)'%3E%3Crect x='-5' y='-5' width='10' height='10' rx='1.4' fill='%23c0341f' stroke='%238a1f12' stroke-width='.5'/%3E%3Cg fill='none' stroke='%23ffe7d8' stroke-width='.8'%3E%3Cpath d='M-2.6,-2.6 L2.6,-2.6 L2.6,2.6 L-2.6,2.6 Z'/%3E%3Cpath d='M0,-2.6 L0,2.6'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: inset 0 0 14px rgba(184,69,31,.35), 0 0 14px rgba(232,198,106,.42);
 }
-.cb-oriental::after {
+/* 떠오르는 금가루 (가장자리) */
+.cb-oriental::before {
   content: "";
   position: absolute;
-  top: 0; bottom: 0; left: -90%; width: 50%;
+  inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent 44%, rgba(255,236,179,.7) 50%, transparent 56%);
   mix-blend-mode: screen;
-  animation: oriental-shine 5s cubic-bezier(.85,0,.15,1) infinite;
+  -webkit-mask: var(--em); mask: var(--em);
+  background-repeat: repeat;
+  background-size: 100% 240px;
+  background-image:
+    radial-gradient(1.6px 1.6px at 14px 220px, rgba(255,228,150,.9), transparent 60%),
+    radial-gradient(1.2px 1.2px at 90px 170px, rgba(255,214,120,.8), transparent 60%),
+    radial-gradient(1.8px 1.8px at 8px 120px, rgba(255,236,170,.85), transparent 60%),
+    radial-gradient(1.1px 1.1px at 92px 90px, rgba(255,210,110,.7), transparent 60%),
+    radial-gradient(1.4px 1.4px at 16px 60px, rgba(255,224,140,.8), transparent 60%);
+  animation: oriental-dust 9s linear infinite, oriental-twinkle 2.6s ease-in-out infinite;
 }
-@keyframes oriental-shine {
-  0%   { transform: translateX(0) skewX(-20deg); }
-  100% { transform: translateX(480%) skewX(-20deg); }
-}
+@keyframes oriental-dust { from { background-position-y: 0; } to { background-position-y: -240px; } }
+@keyframes oriental-twinkle { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .cb-oriental::after { animation: none; }
+  .cb-oriental::before { animation: none; }
 }

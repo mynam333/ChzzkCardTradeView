@@ -1,6 +1,7 @@
 /* ============================================================
-   눈꽃 (Snow) — 얼음 결정 프레임 + 내리는 눈 + 반짝임
+   눈꽃 (Snow) — 6방향 결정 눈송이 + 코너 성에(서리) 프레임 + 가장자리 강설 + 스파클
    적용 클래스: cb-snow
+   ▶ 내리는 눈은 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-snow {
   position: absolute;
@@ -12,35 +13,41 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23bfe9ff' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='6' fill='none' stroke='%23e7f7ff' stroke-width='1'/%3E%3Cg stroke='%23dff3ff' stroke-width='1.1'%3E%3Cg transform='translate(14,14)'%3E%3Cline x1='-4' y1='0' x2='4' y2='0'/%3E%3Cline x1='0' y1='-4' x2='0' y2='4'/%3E%3Cline x1='-3' y1='-3' x2='3' y2='3'/%3E%3Cline x1='-3' y1='3' x2='3' y2='-3'/%3E%3C/g%3E%3Cg transform='translate(86,146)'%3E%3Cline x1='-4' y1='0' x2='4' y2='0'/%3E%3Cline x1='0' y1='-4' x2='0' y2='4'/%3E%3Cline x1='-3' y1='-3' x2='3' y2='3'/%3E%3Cline x1='-3' y1='3' x2='3' y2='-3'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 13px rgba(191,233,255,.6), inset 0 0 10px rgba(231,247,255,.35);
-}
-.cb-snow::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 16px rgba(191,233,255,.35);
-  animation: snow-twinkle 2.6s ease-in-out infinite;
+  --em: radial-gradient(80% 72% at 50% 36%, transparent 42%, #000 82%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ice' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23cfeeff'/%3E%3Cstop offset='.5' stop-color='%23f3fbff'/%3E%3Cstop offset='1' stop-color='%239ccaf2'/%3E%3C/linearGradient%3E%3Cg id='arm' stroke='%23eaf7ff' stroke-width='.7' fill='none' stroke-linecap='round'%3E%3Cpath d='M0,0 L0,-8'/%3E%3Cpath d='M0,-3 L2.2,-5'/%3E%3Cpath d='M0,-3 L-2.2,-5'/%3E%3Cpath d='M0,-5.5 L1.6,-7'/%3E%3Cpath d='M0,-5.5 L-1.6,-7'/%3E%3C/g%3E%3Cg id='flake'%3E%3Cuse href='%23arm'/%3E%3Cuse href='%23arm' transform='rotate(60)'/%3E%3Cuse href='%23arm' transform='rotate(120)'/%3E%3Cuse href='%23arm' transform='rotate(180)'/%3E%3Cuse href='%23arm' transform='rotate(240)'/%3E%3Cuse href='%23arm' transform='rotate(300)'/%3E%3C/g%3E%3Cg id='frost' fill='none' stroke='%23dff3ff' stroke-width='.6' stroke-linecap='round' opacity='.85'%3E%3Cpath d='M0,0 L14,4 M5,1.4 L7,-1 M9,2.6 L11,0.2 M0,0 L4,14 M1.4,5 L-1,7 M2.6,9 L0.2,11'/%3E%3C/g%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='url(%23ice)' stroke-width='2.6'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='6' fill='none' stroke='%23e7f7ff' stroke-width='.9' opacity='.65'/%3E%3Cuse href='%23frost' transform='translate(4,4)'/%3E%3Cuse href='%23frost' transform='translate(96,4) scale(-1,1)'/%3E%3Cuse href='%23frost' transform='translate(4,156) scale(1,-1)'/%3E%3Cuse href='%23frost' transform='translate(96,156) scale(-1,-1)'/%3E%3Cuse href='%23flake' transform='translate(15,16) scale(1)'/%3E%3Cuse href='%23flake' transform='translate(85,16) scale(.8)'/%3E%3Cuse href='%23flake' transform='translate(15,144) scale(.8)'/%3E%3Cuse href='%23flake' transform='translate(85,144) scale(1)'/%3E%3C/svg%3E");
+  box-shadow: 0 0 13px rgba(191,233,255,.6), inset 0 0 14px rgba(231,247,255,.4);
 }
 .cb-snow::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
+  -webkit-mask: var(--em); mask: var(--em);
   background-repeat: repeat;
-  background-size: 100% 220px;
+  background-size: 100% 200px;
   background-image:
-    radial-gradient(2px 2px at 18px 20px, rgba(255,255,255,.95), transparent 60%),
-    radial-gradient(1.6px 1.6px at 64px 56px, rgba(255,255,255,.85), transparent 60%),
-    radial-gradient(2.4px 2.4px at 40px 120px, rgba(255,255,255,.9), transparent 60%),
-    radial-gradient(1.4px 1.4px at 88px 92px, rgba(255,255,255,.8), transparent 60%),
-    radial-gradient(2px 2px at 28px 180px, rgba(255,255,255,.85), transparent 60%);
+    radial-gradient(2.6px 2.6px at 18px 20px, rgba(255,255,255,.98), transparent 60%),
+    radial-gradient(1.5px 1.5px at 64px 48px, rgba(255,255,255,.8), transparent 60%),
+    radial-gradient(3px 3px at 40px 110px, rgba(255,255,255,.95), transparent 60%),
+    radial-gradient(1.4px 1.4px at 86px 84px, rgba(255,255,255,.75), transparent 60%),
+    radial-gradient(2px 2px at 28px 168px, rgba(255,255,255,.9), transparent 60%),
+    radial-gradient(1.3px 1.3px at 54px 150px, rgba(255,255,255,.7), transparent 60%);
   animation: snow-fall 6s linear infinite, snow-sway 4s ease-in-out infinite alternate;
 }
-@keyframes snow-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
+.cb-snow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160'%3E%3Cg fill='%23ffffff'%3E%3Cpath d='M14,34 L14.8,31.4 L17.4,30.6 L14.8,29.8 L14,27.2 L13.2,29.8 L10.6,30.6 L13.2,31.4 Z'/%3E%3Cpath d='M88,118 L88.8,115.4 L91.4,114.6 L88.8,113.8 L88,111.2 L87.2,113.8 L84.6,114.6 L87.2,115.4 Z'/%3E%3Cpath d='M10,96 L10.6,94.3 L12.4,93.7 L10.6,93.1 L10,91.4 L9.4,93.1 L7.6,93.7 L9.4,94.3 Z'/%3E%3C/g%3E%3C/svg%3E");
+  filter: drop-shadow(0 0 2px rgba(255,255,255,.8));
+  animation: snow-twinkle 2.4s ease-in-out infinite;
+}
+@keyframes snow-fall { from { background-position-y: 0; } to { background-position-y: 200px; } }
 @keyframes snow-sway { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
-@keyframes snow-twinkle { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+@keyframes snow-twinkle { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .cb-snow::before, .cb-snow::after { animation: none; }
 }

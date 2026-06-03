@@ -407,9 +407,10 @@ export class SqliteCouponRepository implements ICouponRepository {
       id: row.id,
       code: row.code,
       coupon_type: row.coupon_type as 'single' | 'multi',
-      reward_type: (row.reward_type || 'point') as 'point' | 'card',
+      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic',
       points: row.points,
       reward_channel_id: row.reward_channel_id ?? null,
+      reward_item_id: row.reward_item_id ?? null,
       reward_quantity: row.reward_quantity ?? 0,
       max_uses: row.max_uses,
       used_count: row.used_count,
@@ -425,14 +426,15 @@ export class SqliteCouponRepository implements ICouponRepository {
 
   async create(coupon: Coupon): Promise<Coupon> {
     const result = this.getDb().prepare(
-      `INSERT INTO coupons (code, coupon_type, reward_type, points, reward_channel_id, reward_quantity, max_uses, used_count, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO coupons (code, coupon_type, reward_type, points, reward_channel_id, reward_item_id, reward_quantity, max_uses, used_count, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       coupon.code,
       coupon.coupon_type,
       coupon.reward_type,
       coupon.points,
       coupon.reward_channel_id,
+      coupon.reward_item_id ?? null,
       coupon.reward_quantity,
       coupon.max_uses,
       coupon.used_count,

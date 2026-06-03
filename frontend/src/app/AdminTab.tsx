@@ -15,13 +15,15 @@ import {
   Layers,
   Trash2,
   RefreshCw,
-  Store
+  Store,
+  Database
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, cardImage, borderClass } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
+import { CosmeticName } from './CosmeticName';
 
-type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop';
+type AdminSubTab = 'dashboard' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
 
 export const AdminTab: React.FC = () => {
   const { user, toast } = useApp();
@@ -40,9 +42,20 @@ export const AdminTab: React.FC = () => {
   const [delTarget, setDelTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // 유지보수: DB 초기화 + 미사용 이미지
+  const [resetInfo, setResetInfo] = useState<any[]>([]);
+  const [selectedCats, setSelectedCats] = useState<string[]>([]);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [orphans, setOrphans] = useState<any[]>([]);
+  const [orphanInfo, setOrphanInfo] = useState<{ total_files: number; referenced: number } | null>(null);
+  const [selectedOrphans, setSelectedOrphans] = useState<string[]>([]);
+  const [orphanLoading, setOrphanLoading] = useState(false);
+  const [deletingOrphans, setDeletingOrphans] = useState(false);
+
   // 상점 관리
   const [shopItems, setShopItems] = useState<any[]>([]);
-  const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true };
+  const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
 
   // 쿠폰
@@ -52,13 +65,16 @@ export const AdminTab: React.FC = () => {
   const [couponForm, setCouponForm] = useState({
     code: '',
     coupon_type: 'single' as 'single' | 'multi',
-    reward_type: 'point' as 'point' | 'card',
+    reward_type: 'point' as 'point' | 'card' | 'cosmetic',
     points: 1000,
     reward_channel_id: '',
+    reward_item_id: 0,
     reward_quantity: 1,
     max_uses: 1,
     expires_at: ''
   });
+  // 쿠폰 코스메틱 보상용 상점 아이템 목록
+  const [couponCosmetics, setCouponCosmetics] = useState<any[]>([]);
 
   // 공지
   const [announcements, setAnnouncements] = useState<any[]>([]);
@@ -79,11 +95,12 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
     if (subTab === 'dashboard') fetchStats();
-    if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); }
+    if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); fetchCouponCosmetics(); }
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') fetchReports();
     if (subTab === 'streamers') fetchCouponStreamers(true);
     if (subTab === 'shop') fetchShopItems();
+    if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
   }, [subTab, isAdmin]);
 
   if (!isAdmin) {
@@ -107,6 +124,12 @@ export const AdminTab: React.FC = () => {
     try {
       const res = await apiFetch('/admin/coupons');
       if (res.ok) setCoupons(await res.json());
+    } catch { /* noop */ }
+  };
+  const fetchCouponCosmetics = async () => {
+    try {
+      const res = await apiFetch('/admin/shop/items');
+      if (res.ok) setCouponCosmetics(await res.json());
     } catch { /* noop */ }
   };
   const fetchCouponStreamers = async (force = false) => {
@@ -137,6 +160,10 @@ export const AdminTab: React.FC = () => {
       toast('지급할 스트리머 카드를 선택해 주세요.');
       return;
     }
+    if (couponForm.reward_type === 'cosmetic' && !couponForm.reward_item_id) {
+      toast('지급할 코스메틱 아이템을 선택해 주세요.');
+      return;
+    }
     // 만료 일시는 datetime-local → ISO 변환
     const payload = {
       ...couponForm,
@@ -147,7 +174,7 @@ export const AdminTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast(`쿠폰이 발급되었습니다.\n코드: ${data.code}`);
-        setCouponForm({ code: '', coupon_type: 'single', reward_type: 'point', points: 1000, reward_channel_id: '', reward_quantity: 1, max_uses: 1, expires_at: '' });
+        setCouponForm({ code: '', coupon_type: 'single', reward_type: 'point', points: 1000, reward_channel_id: '', reward_item_id: 0, reward_quantity: 1, max_uses: 1, expires_at: '' });
         setCouponStreamerSearch('');
         fetchCoupons();
       } else {
@@ -255,7 +282,8 @@ export const AdminTab: React.FC = () => {
     const payload = {
       type: shopForm.type, name: shopForm.name, description: shopForm.description || null,
       price: Math.max(0, Number(shopForm.price) || 0), style_json: shopForm.style_json || null,
-      font_url: shopForm.font_url || null, font_family: shopForm.font_family || null, active: shopForm.active
+      font_url: shopForm.font_url || null, font_family: shopForm.font_family || null, active: shopForm.active,
+      purchase_limit: Math.max(0, Number(shopForm.purchase_limit) || 0)
     };
     try {
       const url = shopForm.id ? `/admin/shop/items/${shopForm.id}` : '/admin/shop/items';
@@ -281,8 +309,69 @@ export const AdminTab: React.FC = () => {
     setShopForm({
       id: item.id, type: item.type, name: item.name, description: item.description || '',
       price: item.price, style_json: item.style_json || '', font_url: item.font_url || '',
-      font_family: item.font_family || '', active: item.active
+      font_family: item.font_family || '', active: item.active, purchase_limit: item.purchase_limit || 0
     });
+  };
+
+  // ---- 유지보수 ----
+  const fetchResetInfo = async () => {
+    try {
+      const res = await apiFetch('/admin/reset/info');
+      if (res.ok) setResetInfo(await res.json());
+    } catch { /* noop */ }
+  };
+  const fetchOrphans = async () => {
+    setOrphanLoading(true);
+    try {
+      const res = await apiFetch('/admin/uploads/orphans');
+      if (res.ok) {
+        const data = await res.json();
+        setOrphans(data.orphans || []);
+        setOrphanInfo({ total_files: data.total_files || 0, referenced: data.referenced || 0 });
+        setSelectedOrphans([]);
+      }
+    } catch { /* noop */ } finally { setOrphanLoading(false); }
+  };
+  const toggleCat = (id: string) => {
+    setSelectedCats((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+  const handleResetData = async () => {
+    setResetting(true);
+    try {
+      const res = await apiFetch('/admin/reset', { method: 'POST', body: JSON.stringify({ categories: selectedCats }) });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '초기화되었습니다.', 'success');
+        setSelectedCats([]);
+        setResetConfirmOpen(false);
+        fetchResetInfo();
+      } else toast(data.message || '초기화 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); } finally { setResetting(false); }
+  };
+  const toggleOrphan = (rel: string) => {
+    setSelectedOrphans((prev) => prev.includes(rel) ? prev.filter((x) => x !== rel) : [...prev, rel]);
+  };
+  const toggleAllOrphans = () => {
+    setSelectedOrphans((prev) => prev.length === orphans.length ? [] : orphans.map((o) => o.rel));
+  };
+  const handleDeleteOrphans = async () => {
+    if (selectedOrphans.length === 0) { toast('삭제할 이미지를 선택해 주세요.', 'warning'); return; }
+    setDeletingOrphans(true);
+    try {
+      const res = await apiFetch('/admin/uploads/orphans/delete', { method: 'POST', body: JSON.stringify({ paths: selectedOrphans }) });
+      const data = await res.json();
+      if (res.ok) { toast(data.message || '삭제되었습니다.', 'success'); fetchOrphans(); }
+      else toast(data.message || '삭제 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); } finally { setDeletingOrphans(false); }
+  };
+
+  const resetItemPurchases = async (item: any) => {
+    try {
+      const res = await apiFetch(`/admin/shop/items/${item.id}/reset-purchases`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) { toast(data.message || '구매 제한이 초기화되었습니다.', 'success'); fetchShopItems(); }
+      else toast(data.message || '초기화 실패', 'error');
+    } catch { toast('서버 통신 에러', 'error'); }
   };
 
   const handleDeleteStreamer = async () => {
@@ -324,7 +413,8 @@ export const AdminTab: React.FC = () => {
     { id: 'push', label: '푸시', icon: BellRing },
     { id: 'reports', label: '신고·밴', icon: AlertTriangle },
     { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
-    { id: 'shop', label: '상점 관리', icon: Store }
+    { id: 'shop', label: '상점 관리', icon: Store },
+    { id: 'maintenance', label: 'DB 초기화', icon: Database }
   ];
 
   return (
@@ -420,14 +510,17 @@ export const AdminTab: React.FC = () => {
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
                 <option value="point">재화 (포인트)</option>
                 <option value="card">스트리머 카드</option>
+                <option value="cosmetic">코스메틱 아이템</option>
               </select>
             </div>
 
-            {couponForm.reward_type === 'point' ? (
+            {couponForm.reward_type === 'point' && (
               <input type="number" min={1} placeholder="지급 포인트" value={couponForm.points}
                 onChange={(e) => setCouponForm({ ...couponForm, points: Number(e.target.value) })}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            ) : (
+            )}
+
+            {couponForm.reward_type === 'card' && (
               <div className="space-y-2 rounded-lg border border-border/60 bg-secondary/20 p-2.5">
                 <input type="text" placeholder="스트리머 검색" value={couponStreamerSearch}
                   onChange={(e) => setCouponStreamerSearch(e.target.value)}
@@ -445,6 +538,39 @@ export const AdminTab: React.FC = () => {
                       </button>
                     ))}
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">지급 수량</span>
+                  <input type="number" min={1} value={couponForm.reward_quantity}
+                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                    className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-xs" />
+                </div>
+              </div>
+            )}
+
+            {couponForm.reward_type === 'cosmetic' && (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-secondary/20 p-2.5">
+                {couponCosmetics.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground py-2 text-center">등록된 코스메틱 아이템이 없습니다. 상점 관리에서 먼저 추가하세요.</p>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {couponCosmetics.map((it) => (
+                      <button key={it.id}
+                        onClick={() => setCouponForm({ ...couponForm, reward_item_id: it.id })}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_item_id === it.id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
+                        {it.type === 'border' ? (
+                          <div className="relative h-7 w-5 shrink-0 overflow-hidden rounded bg-gradient-to-br from-secondary to-card border border-border/70" style={borderClass(it) ? undefined : parseStyle(it.style_json)}>
+                            <CosmeticFrame border={it} />
+                          </div>
+                        ) : (
+                          <CosmeticName effect={it} className="shrink-0 text-sm font-black px-1">{it.name}</CosmeticName>
+                        )}
+                        <span className="text-[11px] font-bold truncate flex-1">{it.name}</span>
+                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground shrink-0">{it.type === 'border' ? '테두리' : '이름효과'}</span>
+                        {!it.active && <span className="rounded bg-red-500/15 px-1 text-[8px] font-bold text-red-500 shrink-0">비활성</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">지급 수량</span>
                   <input type="number" min={1} value={couponForm.reward_quantity}
@@ -476,6 +602,8 @@ export const AdminTab: React.FC = () => {
               ) : coupons.map((c) => {
                 const reward = c.reward_type === 'card'
                   ? `🃏 ${streamerName(c.reward_channel_id)} 카드 ×${c.reward_quantity}`
+                  : c.reward_type === 'cosmetic'
+                  ? `🎨 ${couponCosmetics.find((it) => it.id === c.reward_item_id)?.name || `아이템#${c.reward_item_id}`} ×${c.reward_quantity}`
                   : `💰 ${(c.points || 0).toLocaleString()}P`;
                 return (
                   <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
@@ -832,39 +960,50 @@ export const AdminTab: React.FC = () => {
               onChange={(e) => setShopForm({ ...shopForm, description: e.target.value })}
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
 
-            {/* 커스텀 CSS 테두리 (클래스명 + CSS 코드 전문) */}
-            {shopForm.type === 'border' && (() => {
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground block mb-1">1인 최대 구매 갯수 (0 = 무제한)</label>
+              <input type="number" min={0} value={shopForm.purchase_limit}
+                onChange={(e) => setShopForm({ ...shopForm, purchase_limit: Math.max(0, Number(e.target.value) || 0) })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+            </div>
+
+            {/* 커스텀 CSS (테두리/이름 이펙트 공통 · 클래스명 + CSS 코드 전문) */}
+            {(() => {
+              const isBorder = shopForm.type === 'border';
               const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
               const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
               const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
               const setCustom = (cls: string, css: string) => {
                 const c = cls.trim();
                 if (!c && !css.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
-                const obj: any = { class: c || 'cb-custom' };
+                const obj: any = { class: c || (isBorder ? 'cb-custom' : 'ne-custom') };
                 if (css.trim()) obj.css = css;
                 setShopForm({ ...shopForm, style_json: JSON.stringify(obj) });
               };
               return (
                 <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 p-3 space-y-2">
-                  <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS 테두리 (직접 작성)</p>
+                  <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS {isBorder ? '테두리' : '이름 이펙트'} (직접 작성)</p>
                   <input
                     type="text"
-                    placeholder="적용 클래스명 (예: cb-mydragon) — .cosmetic-frame 에 함께 부여됩니다"
+                    placeholder={isBorder ? '적용 클래스명 (예: cb-mydragon)' : '적용 클래스명 (예: ne-rainbow)'}
                     value={curClass}
                     onChange={(e) => setCustom(e.target.value, curCss)}
                     className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
                   />
                   <textarea
                     rows={6}
-                    placeholder={'.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'}
+                    placeholder={isBorder
+                      ? '.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'
+                      : '.ne-rainbow { background: linear-gradient(90deg,#f0f,#0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }\n@keyframes ... { }'}
                     value={curCss}
                     onChange={(e) => setCustom(curClass, e.target.value)}
                     className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] font-mono leading-relaxed"
                   />
                   <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    위 <b>클래스명</b>과 <b>CSS 코드</b>를 입력하면 입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.
-                    예시 파일(<code>card-borders/*.css</code>)의 코드를 복사해 붙여넣으면 즉시 동작합니다. 작성법은 루트의 <code>CARD_BORDER_GUIDE.md</code>를 참고하세요.
-                    <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 테두리와 겹치지 않게 고유하게 지정하세요.
+                    {isBorder
+                      ? <>입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다. 예시: <code>card-borders/*.css</code> · 가이드: <code>CARD_BORDER_GUIDE.md</code></>
+                      : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
+                    <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
                   </p>
                 </div>
               );
@@ -898,9 +1037,9 @@ export const AdminTab: React.FC = () => {
                   <CosmeticFrame border={{ style_json: shopForm.style_json }} />
                 </div>
               ) : (
-                <span className="text-lg font-black" style={nameEffectStyle({ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family })}>
+                <CosmeticName effect={{ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family }} className="text-lg font-black">
                   {shopForm.name || '미리보기'}
-                </span>
+                </CosmeticName>
               )}
             </div>
 
@@ -936,7 +1075,7 @@ export const AdminTab: React.FC = () => {
                         <CosmeticFrame border={item} />
                       </div>
                     ) : (
-                      <span className="shrink-0 text-base font-black px-1" style={nameEffectStyle(item)}>{item.name}</span>
+                      <CosmeticName effect={item} className="shrink-0 text-base font-black px-1">{item.name}</CosmeticName>
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-bold truncate flex items-center gap-1.5">
@@ -944,21 +1083,134 @@ export const AdminTab: React.FC = () => {
                         <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">{item.type === 'border' ? '테두리' : '이름 이펙트'}</span>
                         {!item.active && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">비활성</span>}
                       </p>
-                      <p className="text-[10px] text-muted-foreground truncate">{item.price.toLocaleString()} P · {item.description || '설명 없음'}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {item.price.toLocaleString()} P · {item.purchase_limit > 0 ? `1인 ${item.purchase_limit}개 제한` : '구매 무제한'} · {item.description || '설명 없음'}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button onClick={() => editShopItem(item)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">수정</button>
-                    <button onClick={() => toggleShopActive(item)}
-                      className={`rounded px-2 py-1 text-[10px] font-bold ${item.active ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}>
-                      {item.active ? '비활성화' : '활성화'}
-                    </button>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <div className="flex gap-1">
+                      <button onClick={() => editShopItem(item)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">수정</button>
+                      <button onClick={() => toggleShopActive(item)}
+                        className={`rounded px-2 py-1 text-[10px] font-bold ${item.active ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}>
+                        {item.active ? '비활성화' : '활성화'}
+                      </button>
+                    </div>
+                    {item.purchase_limit > 0 && (
+                      <button onClick={() => resetItemPurchases(item)} className="rounded bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-600 hover:bg-amber-500/20">구매제한 초기화</button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
         </section>
+      )}
+
+      {/* 유지보수: DB 초기화 + 미사용 업로드 이미지 */}
+      {subTab === 'maintenance' && (
+        <section className="space-y-5">
+          {/* DB 부분 초기화 */}
+          <div className="rounded-2xl border border-red-500/30 bg-card p-5 shadow-sm">
+            <h3 className="text-sm font-bold flex items-center gap-1.5 text-red-500"><Database className="h-4 w-4" /> DB 부분 초기화</h3>
+            <p className="mt-1 mb-3 text-[11px] text-muted-foreground leading-relaxed">
+              선택한 항목만 초기화합니다. <b className="text-foreground/80">유저 가입/로그인 · 스트리머 등록 · 카드 이미지</b>는 보존됩니다. <b className="text-red-500">되돌릴 수 없습니다.</b>
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {resetInfo.map((c) => {
+                const on = selectedCats.includes(c.id);
+                return (
+                  <button key={c.id} onClick={() => toggleCat(c.id)}
+                    className={`flex items-start gap-2 rounded-lg border p-2.5 text-left transition ${on ? 'border-red-500 bg-red-500/10' : 'border-border/60 hover:bg-secondary/40'}`}>
+                    <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-red-500 bg-red-500 text-white' : 'border-border'}`}>{on ? '✓' : ''}</span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-bold truncate">{c.label} <span className="text-[10px] font-normal text-muted-foreground">({c.count.toLocaleString()})</span></span>
+                      <span className="block text-[10px] text-muted-foreground leading-snug">{c.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button onClick={fetchResetInfo} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"><RefreshCw className="h-3.5 w-3.5" /> 새로고침</button>
+              <button
+                onClick={() => setResetConfirmOpen(true)}
+                disabled={selectedCats.length === 0}
+                className="rounded-lg bg-red-500 px-4 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                선택 항목 초기화 ({selectedCats.length})
+              </button>
+            </div>
+          </div>
+
+          {/* 미사용 업로드 이미지 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 미사용 업로드 이미지 ({orphans.length})</h3>
+              <button onClick={fetchOrphans} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+            </div>
+            <p className="mb-3 text-[11px] text-muted-foreground leading-relaxed">
+              현재 어떤 스트리머 카드에도 연결되지 않은 업로드 이미지입니다.
+              {orphanInfo && <> (전체 {orphanInfo.total_files}개 중 사용 {orphanInfo.referenced}개)</>}
+            </p>
+            {orphanLoading ? (
+              <p className="text-xs text-muted-foreground text-center py-8">불러오는 중...</p>
+            ) : orphans.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">미사용 이미지가 없습니다. 🎉</p>
+            ) : (
+              <>
+                <div className="mb-2 flex items-center justify-between">
+                  <button onClick={toggleAllOrphans} className="rounded bg-secondary px-2.5 py-1 text-[11px] font-bold hover:bg-secondary/80">
+                    {selectedOrphans.length === orphans.length ? '전체 해제' : '전체 선택'}
+                  </button>
+                  <span className="text-[11px] text-muted-foreground">{selectedOrphans.length}개 선택됨</span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 max-h-80 overflow-y-auto">
+                  {orphans.map((o) => {
+                    const on = selectedOrphans.includes(o.rel);
+                    return (
+                      <button key={o.rel} onClick={() => toggleOrphan(o.rel)}
+                        className={`relative aspect-square overflow-hidden rounded-lg border-2 transition ${on ? 'border-red-500 ring-2 ring-red-500/30' : 'border-border/60 hover:border-border'}`}
+                        title={o.rel}>
+                        <img src={o.url} alt={o.rel} className="h-full w-full object-cover" />
+                        {on && <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white">✓</span>}
+                        <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-0.5 text-[8px] text-white">{(o.size / 1024).toFixed(0)}KB</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={handleDeleteOrphans}
+                  disabled={deletingOrphans || selectedOrphans.length === 0}
+                  className="mt-3 w-full rounded-lg bg-red-500 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> {deletingOrphans ? '삭제 중...' : `선택한 ${selectedOrphans.length}개 영구 삭제`}
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* DB 초기화 확인 모달 */}
+      {resetConfirmOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !resetting && setResetConfirmOpen(false)}>
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center" onClick={(e) => e.stopPropagation()}>
+            <Database className="mx-auto h-9 w-9 text-red-500 mb-3" />
+            <h4 className="text-sm font-black text-foreground mb-2">선택 항목 초기화</h4>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              다음 항목을 초기화합니다:<br />
+              <b className="text-foreground">{resetInfo.filter((c) => selectedCats.includes(c.id)).map((c) => c.label).join(', ')}</b><br />
+              <b className="text-red-500">이 작업은 되돌릴 수 없습니다.</b>
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              <button onClick={() => setResetConfirmOpen(false)} disabled={resetting} className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80 disabled:opacity-50">취소</button>
+              <button onClick={handleResetData} disabled={resetting} className="rounded-lg bg-red-500 px-5 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50">
+                {resetting ? '초기화 중...' : '초기화 실행'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

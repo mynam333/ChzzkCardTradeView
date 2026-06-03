@@ -1,6 +1,7 @@
 /* ============================================================
-   화산 (Volcano) — 흑요석 프레임 + 피어오르는 불씨 + 적열 글로우
+   화산 (Volcano) — 갈라진 흑요석 + 발광 용암 균열(블룸) + 가장자리 불씨 + 하단 적열
    적용 클래스: cb-volcano
+   ▶ 불씨는 --em 마스크로 가장자리에 모이고, 글로우는 하단에 집중 → 중앙~상단 비움.
    ============================================================ */
 .cb-volcano {
   position: absolute;
@@ -12,29 +13,44 @@
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%232b2320' stroke-width='3.4'/%3E%3Crect x='3' y='3' width='94' height='154' rx='5' fill='none' stroke='%23ff5a1f' stroke-width='1' stroke-dasharray='3 4'/%3E%3Crect x='7.5' y='7.5' width='85' height='145' rx='3' fill='none' stroke='%23ff7a3c' stroke-width='.8'/%3E%3C/svg%3E");
+  --em: radial-gradient(80% 72% at 50% 36%, transparent 42%, #000 82%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ob' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233a302b'/%3E%3Cstop offset='.5' stop-color='%23181310'/%3E%3Cstop offset='1' stop-color='%23322822'/%3E%3C/linearGradient%3E%3ClinearGradient id='lava' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fff0a0'/%3E%3Cstop offset='.5' stop-color='%23ff7a1f'/%3E%3Cstop offset='1' stop-color='%23e2240a'/%3E%3C/linearGradient%3E%3Cfilter id='bloom' x='-40%25' y='-40%25' width='180%25' height='180%25'%3E%3CfeGaussianBlur stdDeviation='1.6'/%3E%3C/filter%3E%3Cpath id='cracks' d='M5,40 L3,52 L6,60 L3,74 M97,46 L95,58 L98,70 L95,86 M30,4 L38,2.5 L46,4 M58,156 L66,157.5 L74,156 M5,104 L3,116 L6,128 M95,104 L98,118'/%3E%3C/defs%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='5' fill='none' stroke='url(%23ob)' stroke-width='4.4'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='5' fill='none' stroke='%23000' stroke-width='1' opacity='.5'/%3E%3Cuse href='%23cracks' fill='none' stroke='url(%23lava)' stroke-width='2.6' stroke-linecap='round' filter='url(%23bloom)' opacity='.9'/%3E%3Cuse href='%23cracks' fill='none' stroke='%23ffd76a' stroke-width='.9' stroke-linecap='round'/%3E%3Cg fill='%23ffce6a' filter='url(%23bloom)'%3E%3Ccircle cx='3' cy='52' r='1.4'/%3E%3Ccircle cx='97' cy='58' r='1.4'/%3E%3Ccircle cx='38' cy='2.5' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
   box-shadow: 0 0 16px rgba(255,90,31,.55), inset 0 0 12px rgba(255,60,0,.4);
+}
+/* 하단 적열 글로우 (맥동) — 중앙 상단은 비움 */
+.cb-volcano::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(130% 65% at 50% 114%, rgba(255,90,20,.6), rgba(255,60,0,0) 70%),
+    radial-gradient(90% 42% at 50% 118%, rgba(255,185,65,.5), rgba(255,120,0,0) 64%);
   animation: volcano-glow 2.2s ease-in-out infinite;
 }
+/* 가장자리 불씨 (위로 피어오름) */
 .cb-volcano::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   mix-blend-mode: screen;
+  -webkit-mask: var(--em); mask: var(--em);
   background-repeat: repeat;
   background-size: 100% 220px;
   background-image:
-    radial-gradient(2.4px 2.4px at 16px 200px, rgba(255,170,60,.95), transparent 60%),
-    radial-gradient(1.8px 1.8px at 70px 160px, rgba(255,120,30,.9), transparent 60%),
-    radial-gradient(2px 2px at 42px 120px, rgba(255,200,90,.9), transparent 60%),
-    radial-gradient(1.6px 1.6px at 88px 180px, rgba(255,90,20,.85), transparent 60%),
-    radial-gradient(2.2px 2.2px at 30px 90px, rgba(255,150,50,.85), transparent 60%);
-  animation: volcano-rise 3.4s linear infinite, volcano-sway 2s ease-in-out infinite alternate;
+    radial-gradient(2.6px 2.6px at 12px 200px, rgba(255,180,70,.98), transparent 60%),
+    radial-gradient(1.7px 1.7px at 90px 158px, rgba(255,120,30,.9), transparent 60%),
+    radial-gradient(2.1px 2.1px at 8px 118px, rgba(255,210,100,.95), transparent 60%),
+    radial-gradient(1.5px 1.5px at 92px 178px, rgba(255,90,20,.85), transparent 60%),
+    radial-gradient(2.3px 2.3px at 16px 70px, rgba(255,150,50,.9), transparent 60%),
+    radial-gradient(1.4px 1.4px at 88px 96px, rgba(255,200,90,.85), transparent 60%);
+  animation: volcano-rise 3.2s linear infinite, volcano-sway 2s ease-in-out infinite alternate;
 }
-@keyframes volcano-glow { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+@keyframes volcano-glow { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
 @keyframes volcano-rise { from { background-position-y: 0; } to { background-position-y: -220px; } }
 @keyframes volcano-sway { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
 @media (prefers-reduced-motion: reduce) {
-  .cb-volcano, .cb-volcano::after { animation: none; }
+  .cb-volcano, .cb-volcano::before, .cb-volcano::after { animation: none; }
 }

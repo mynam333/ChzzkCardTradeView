@@ -5,6 +5,7 @@ import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
+import { CosmeticName } from './CosmeticName';
 import { Sparkles, Coins, ShoppingBag, Store } from 'lucide-react';
 import canvasConfetti from 'canvas-confetti';
 
@@ -17,6 +18,7 @@ interface ShopItem {
   style_json: string | null;
   font_url: string | null;
   font_family: string | null;
+  purchase_limit: number;
 }
 
 export const ShopTab: React.FC = () => {
@@ -29,12 +31,13 @@ export const ShopTab: React.FC = () => {
   // ---- 상점 ----
   const [items, setItems] = useState<ShopItem[]>([]);
   const [owned, setOwned] = useState<Record<number, number>>({});
+  const [purchased, setPurchased] = useState<Record<number, number>>({});
   const [shopType, setShopType] = useState<'border' | 'name_effect'>('border');
   const [buying, setBuying] = useState<number | null>(null);
 
   useEffect(() => {
     fetchItems();
-    if (user) fetchOwned();
+    if (user) { fetchOwned(); fetchPurchased(); }
   }, [user]);
 
   const fetchItems = async () => {
@@ -52,6 +55,12 @@ export const ShopTab: React.FC = () => {
         for (const c of list) map[c.id] = c.quantity;
         setOwned(map);
       }
+    } catch { /* noop */ }
+  };
+  const fetchPurchased = async () => {
+    try {
+      const res = await apiFetch('/shop/purchases');
+      if (res.ok) setPurchased(await res.json());
     } catch { /* noop */ }
   };
 
@@ -103,6 +112,7 @@ export const ShopTab: React.FC = () => {
         updatePoints(-item.price);
         refreshUserData();
         fetchOwned();
+        fetchPurchased();
       } else {
         toast(data.message || '구매 실패', 'error');
       }
@@ -209,7 +219,11 @@ export const ShopTab: React.FC = () => {
           <p className="text-center text-xs text-muted-foreground py-10">판매 중인 {shopType === 'border' ? '테두리' : '이름 이펙트'}가 없습니다.</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filtered.map((item) => (
+            {filtered.map((item) => {
+              const limited = item.purchase_limit > 0;
+              const bought = purchased[item.id] || 0;
+              const soldOut = limited && bought >= item.purchase_limit;
+              return (
               <div key={item.id} className="rounded-2xl border border-border bg-secondary/20 p-4 flex flex-col items-center gap-3">
                 {/* 미리보기 */}
                 {item.type === 'border' ? (
@@ -218,7 +232,7 @@ export const ShopTab: React.FC = () => {
                   </div>
                 ) : (
                   <div className="h-20 flex items-center justify-center">
-                    <span className="text-lg font-black" style={nameEffectStyle(item)}>{item.name}</span>
+                    <CosmeticName effect={item} className="text-lg font-black">{item.name}</CosmeticName>
                   </div>
                 )}
                 <div className="text-center">
@@ -226,18 +240,24 @@ export const ShopTab: React.FC = () => {
                   {item.description && <p className="text-[10px] text-muted-foreground line-clamp-2">{item.description}</p>}
                 </div>
                 <div className="flex items-center gap-1 text-xs font-black text-yellow-500"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
-                {owned[item.id] ? (
-                  <span className="text-[10px] font-bold text-emerald-500">보유 {owned[item.id]}개</span>
-                ) : null}
+                <div className="flex items-center gap-2">
+                  {owned[item.id] ? (
+                    <span className="text-[10px] font-bold text-emerald-500">보유 {owned[item.id]}개</span>
+                  ) : null}
+                  {limited && (
+                    <span className={`text-[10px] font-bold ${soldOut ? 'text-rose-500' : 'text-muted-foreground'}`}>구매 {bought}/{item.purchase_limit}</span>
+                  )}
+                </div>
                 <button
                   onClick={() => handleBuy(item)}
-                  disabled={buying === item.id}
-                  className="w-full rounded-lg bg-primary py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1"
+                  disabled={buying === item.id || soldOut}
+                  className="w-full rounded-lg bg-primary py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1"
                 >
-                  <ShoppingBag className="h-3.5 w-3.5" /> {buying === item.id ? '구매 중...' : '구매'}
+                  <ShoppingBag className="h-3.5 w-3.5" /> {soldOut ? '구매 완료' : buying === item.id ? '구매 중...' : '구매'}
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

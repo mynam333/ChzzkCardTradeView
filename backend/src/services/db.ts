@@ -139,6 +139,25 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_channel_id TEXT;");
         sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_quantity INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT reward_item_id FROM coupons LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] coupons 테이블에 reward_item_id(코스메틱 보상) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_item_id INTEGER;");
+      }
+      try {
+        sqliteDb.prepare("SELECT purchase_limit FROM shop_items LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] shop_items 테이블에 purchase_limit(1인 구매 제한) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN purchase_limit INTEGER DEFAULT 0;");
+      }
+      // 상점 구매 횟수 테이블 (구매 제한 추적) — 신규 배포 호환
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS shop_purchases (
+        user_id TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        count INTEGER DEFAULT 0,
+        PRIMARY KEY(user_id, item_id)
+      );`);
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

@@ -6,6 +6,7 @@ import { banCheckMiddleware } from '../middlewares/banCheck';
 import { uploadCustomImage, deleteOwnCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
 import { proxyImage } from '../controllers/imageProxyController';
+import { getResetInfo, resetData, listOrphanImages, deleteOrphanImages } from '../controllers/adminMaintenanceController';
 import { getChzzkAuthUrl, handleChzzkCallback } from '../controllers/chzzkAuthController';
 import {
   resetStreamerImage,
@@ -71,12 +72,14 @@ import {
 import {
   getShopItems,
   getMyCosmetics,
+  getMyPurchases,
   buyShopItem,
   equipToCard,
   unequipFromCard,
   adminGetShopItems,
   adminCreateShopItem,
-  adminUpdateShopItem
+  adminUpdateShopItem,
+  adminResetPurchases
 } from '../controllers/shopController';
 import { streamerRepository } from '../repositories';
 import { rateLimit } from '../middlewares/rateLimit';
@@ -131,12 +134,14 @@ router.post('/cards/fuse', authMiddleware, banCheckMiddleware, fuseCards);
 // 상점 (코스메틱: 테두리 / 이름 이펙트)
 router.get('/shop/items', authMiddleware, getShopItems);
 router.get('/shop/inventory', authMiddleware, getMyCosmetics);
+router.get('/shop/purchases', authMiddleware, getMyPurchases);
 router.post('/shop/buy', authMiddleware, banCheckMiddleware, buyShopItem);
 router.post('/cards/:card_id/equip', authMiddleware, banCheckMiddleware, equipToCard);
 router.post('/cards/:card_id/unequip', authMiddleware, banCheckMiddleware, unequipFromCard);
 // 관리자 상점 관리
 router.get('/admin/shop/items', authMiddleware, adminMiddleware, adminGetShopItems);
 router.post('/admin/shop/items', authMiddleware, adminMiddleware, adminCreateShopItem);
+router.post('/admin/shop/items/:id/reset-purchases', authMiddleware, adminMiddleware, adminResetPurchases);
 router.post('/admin/shop/items/:id', authMiddleware, adminMiddleware, adminUpdateShopItem);
 
 // 신규 스트리머 검색 및 카드 등록 API
@@ -241,6 +246,12 @@ router.post('/admin/streamers/:channel_id/image/unban', authMiddleware, adminMid
 
 // 특정 스트리머 카드 전량 삭제(폐기) + 보유자에게 시세 보상 지급
 router.post('/admin/streamers/:channel_id/delete', authMiddleware, adminMiddleware, deleteStreamerCards);
+
+// DB 부분 초기화 + 미사용 업로드 이미지 정리 (유지보수)
+router.get('/admin/reset/info', authMiddleware, adminMiddleware, getResetInfo);
+router.post('/admin/reset', authMiddleware, adminMiddleware, resetData);
+router.get('/admin/uploads/orphans', authMiddleware, adminMiddleware, listOrphanImages);
+router.post('/admin/uploads/orphans/delete', authMiddleware, adminMiddleware, deleteOrphanImages);
 
 // 특정 유저에 대한 활동 제재 실행 (1일, 7일, 30일, 영구 정지)
 router.post('/admin/users/:user_id/ban', authMiddleware, adminMiddleware, banUser);
