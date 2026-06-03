@@ -21,6 +21,10 @@ interface AppContextType {
     point: number;
     lastFreeDraw: string | null;
     representativeCardChannelId: string | null;
+    drawCost: number;
+    freeDrawInterval: number;
+    isFreeDrawEligible: boolean;
+    nextFreeDrawAt: string | null;
   } | null;
   authLoading: boolean;
   setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
@@ -148,7 +152,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           role: data.role,
           point: data.point,
           lastFreeDraw: data.lastFreeDraw,
-          representativeCardChannelId: data.representativeCardChannelId ?? null
+          representativeCardChannelId: data.representativeCardChannelId ?? null,
+          drawCost: data.drawCost ?? 10000,
+          freeDrawInterval: data.freeDrawInterval ?? 24,
+          isFreeDrawEligible: !!data.isFreeDrawEligible,
+          nextFreeDrawAt: data.nextFreeDrawAt ?? null
         });
       } else if (response.status === 401) {
         // 만료되었거나 비정상적인 토큰인 경우 로그아웃 처리

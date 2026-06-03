@@ -91,17 +91,11 @@ export const ShopTab: React.FC = () => {
     } catch { /* noop */ }
   };
 
-  const isFreeDraw = (() => {
-    if (!user) return false;
-    if (!user.lastFreeDraw) return true;
-    const todayKst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().split('T')[0];
-    const lastKst = new Date(new Date(user.lastFreeDraw).getTime() + 9 * 3600 * 1000).toISOString().split('T')[0];
-    return lastKst !== todayKst;
-  })();
+  const isFreeDraw = user?.isFreeDrawEligible ?? false;
 
   const handleDraw = async () => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
-    const drawCost = 10000;
+    const drawCost = user.drawCost ?? 10000;
     if (!isFreeDraw && user.point < drawCost) {
       toast(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`, 'warning');
       return;
@@ -163,7 +157,12 @@ export const ShopTab: React.FC = () => {
             </span>
             <h2 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">치지직 카드 즉시 소환</h2>
             <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
-              매일 한국 표준시(KST) 자정에 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다.<br />무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">10,000 포인트</strong>입니다.
+              {user?.freeDrawInterval === 0 ? (
+                <>쿨타임 없는 <strong className="text-primary font-bold">무제한 무료 소환</strong> 기회를 제공합니다.</>
+              ) : (
+                <>매 자정 기준 <strong className="text-primary font-bold">{user?.freeDrawInterval ?? 24}시간마다</strong> 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다.</>
+              )}
+              <br />무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">{(user?.drawCost ?? 10000).toLocaleString()} 포인트</strong>입니다.
             </p>
           </div>
           <div className="flex flex-col items-center gap-2">
@@ -178,7 +177,7 @@ export const ShopTab: React.FC = () => {
                 {isFreeDraw ? (
                   <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 뽑기 가능</p>
                 ) : (
-                  <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> 10,000 P</p>
+                  <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> {(user?.drawCost ?? 10000).toLocaleString()} P</p>
                 )}
               </div>
             </button>

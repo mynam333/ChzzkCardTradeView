@@ -24,6 +24,45 @@ export const getUserMe = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
 
+    // 무료 뽑기 간격 및 가챠 비용 정보 추가
+    const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
+    const intervalHours = parseFloat(intervalStr);
+    const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
+    const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
+
+    let segmentStartIso: string | null = null;
+    let nextFreeDrawAt: string | null = null;
+    
+    if (intervalHours > 0) {
+      const now = new Date();
+      const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+      
+      const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
+      const kstYear  = kstDate.getUTCFullYear();
+      const kstMonth = kstDate.getUTCMonth();
+      const kstDay   = kstDate.getUTCDate();
+      
+      const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
+      
+      const diffMs     = now.getTime() - midnightKstUtcMs;
+      const intervalMs = intervalHours * 60 * 60 * 1000;
+      const count      = Math.floor(diffMs / intervalMs);
+      
+      segmentStartIso = new Date(midnightKstUtcMs + count * intervalMs).toISOString();
+      nextFreeDrawAt = new Date(midnightKstUtcMs + (count + 1) * intervalMs).toISOString();
+    }
+
+    let isFreeDrawEligible = false;
+    if (segmentStartIso === null) {
+      isFreeDrawEligible = true; // 0시간마다 = 무제한 무료
+    } else {
+      if (!user.last_free_draw) {
+        isFreeDrawEligible = true;
+      } else {
+        isFreeDrawEligible = new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+      }
+    }
+
     return res.status(200).json({
       id: user.id,
       username: user.username,
@@ -31,7 +70,11 @@ export const getUserMe = async (req: Request, res: Response) => {
       role: user.role,
       point: user.point,
       lastFreeDraw: user.last_free_draw,
-      representativeCardChannelId: user.representative_card_channel_id || null
+      representativeCardChannelId: user.representative_card_channel_id || null,
+      drawCost,
+      freeDrawInterval: intervalHours,
+      isFreeDrawEligible,
+      nextFreeDrawAt
     });
   } catch (err: any) {
     console.error('[PlayController] getUserMe 에러:', err);
