@@ -123,7 +123,7 @@ export const MainTab: React.FC = () => {
       )}
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-sky-700 to-indigo-900 p-6 text-white shadow-xl md:p-10">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500 dark:from-blue-600 dark:via-sky-700 dark:to-indigo-900 p-6 text-white shadow-lg dark:shadow-xl md:p-10">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
         <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-sky-400/20 blur-2xl"></div>
 
@@ -241,7 +241,7 @@ export const MainTab: React.FC = () => {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">2</span>
               <h4 className="font-bold text-foreground">가챠로 스트리머 카드 수집</h4>
             </div>
-            <p>포인트를 사용해 가챠를 돌리고 다양한 스트리머 카드를 뽑아보세요. 어떤 카드가 나올지 두근두근한 순간을 매일 즐길 수 있어요!</p>
+            <p>상점에서 포인트를 사용해 가챠를 돌리고 다양한 스트리머 카드를 뽑아보세요. 어떤 카드가 나올지 두근두근한 순간을 매일 즐길 수 있어요!</p>
           </div>
           <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
             <div className="flex items-center gap-2 mb-2">

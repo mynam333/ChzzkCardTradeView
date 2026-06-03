@@ -143,7 +143,7 @@ export const ShopTab: React.FC = () => {
             <button
               onClick={handleDraw}
               disabled={isDrawing}
-              className="group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-emerald-500 to-teal-600 font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none"
+              className="group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 dark:from-primary dark:via-emerald-500 dark:to-teal-600 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 dark:shadow-lg dark:shadow-primary/20 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none"
             >
               <Sparkles className="h-8 w-8 animate-pulse text-white" />
               <div className="text-center">
