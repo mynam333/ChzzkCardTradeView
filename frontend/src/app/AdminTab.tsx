@@ -29,6 +29,10 @@ export const AdminTab: React.FC = () => {
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
 
+  // 스트리머 이미지 검색/페이지네이션
+  const [streamerSearch, setStreamerSearch] = useState('');
+  const [streamerPage, setStreamerPage] = useState(1);
+
   // 상점 관리
   const [shopItems, setShopItems] = useState<any[]>([]);
   const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true };
@@ -584,7 +588,15 @@ export const AdminTab: React.FC = () => {
       {/* 스트리머 이미지 */}
       {subTab === 'streamers' && (() => {
         const hasAnyCustom = (s: any) => (s.custom_images && s.custom_images.some(Boolean)) || s.custom_image_url;
-        const customStreamers = couponStreamers.filter((s) => hasAnyCustom(s) || s.is_image_banned);
+        const allCustom = couponStreamers.filter((s) => hasAnyCustom(s) || s.is_image_banned);
+        const kw = streamerSearch.trim().toLowerCase();
+        const customStreamers = kw
+          ? allCustom.filter((s) => (s.name || '').toLowerCase().includes(kw) || (s.channel_id || '').toLowerCase().includes(kw))
+          : allCustom;
+        const PER_PAGE = 6;
+        const totalPages = Math.max(1, Math.ceil(customStreamers.length / PER_PAGE));
+        const page = Math.min(streamerPage, totalPages);
+        const paged = customStreamers.slice((page - 1) * PER_PAGE, page * PER_PAGE);
         return (
           <section className="space-y-5">
             {/* 커스텀 이미지 보유/차단 스트리머 별별 제어 */}
@@ -593,10 +605,18 @@ export const AdminTab: React.FC = () => {
                 <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 커스텀 이미지 스트리머 ({customStreamers.length})</h3>
                 <button onClick={() => fetchCouponStreamers(true)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
               </div>
-              <div className="space-y-3 max-h-[32rem] overflow-y-auto">
+              {/* 검색 */}
+              <input
+                type="text"
+                placeholder="스트리머 이름 또는 채널 ID 검색"
+                value={streamerSearch}
+                onChange={(e) => { setStreamerSearch(e.target.value); setStreamerPage(1); }}
+                className="mb-3 w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              />
+              <div className="space-y-3">
                 {customStreamers.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-6">커스텀 이미지를 등록했거나 차단된 스트리머가 없습니다.</p>
-                ) : customStreamers.map((s) => {
+                  <p className="text-xs text-muted-foreground text-center py-6">{kw ? '검색 결과가 없습니다.' : '커스텀 이미지를 등록했거나 차단된 스트리머가 없습니다.'}</p>
+                ) : paged.map((s) => {
                   const imgs: (string | null)[] = s.custom_images || [s.custom_image_url ?? null];
                   return (
                     <div key={s.channel_id} className="rounded-lg bg-secondary/30 p-3 space-y-2.5">
@@ -643,6 +663,23 @@ export const AdminTab: React.FC = () => {
                   );
                 })}
               </div>
+
+              {/* 페이지네이션 */}
+              {totalPages > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setStreamerPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+                  >이전</button>
+                  <span className="text-xs font-bold text-muted-foreground">{page} / {totalPages}</span>
+                  <button
+                    onClick={() => setStreamerPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+                  >다음</button>
+                </div>
+              )}
             </div>
 
             {/* 수동 채널 ID 직접 제어 (보조) */}

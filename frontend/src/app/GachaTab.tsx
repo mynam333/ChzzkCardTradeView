@@ -75,6 +75,9 @@ export const GachaTab: React.FC = () => {
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
   const [tradeRequestSearch, setTradeRequestSearch] = useState('');
+  // 교환 이력 모달 + 페이지네이션
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
 
   // 스트리머 상세 + 시세 그래프 모달 (공용 StreamerDetailModal 사용, channel_id만 보관)
   const [detailStreamer, setDetailStreamer] = useState<{ channel_id: string } | null>(null);
@@ -259,23 +262,28 @@ export const GachaTab: React.FC = () => {
     } catch { /* 무시 */ }
   };
 
-  // 내 보유 카드 channel_id별 묶음
+  // 내 보유 카드 channel_id + 별(star)별 묶음 (같은 스트리머라도 성별로 분리)
   const myCollection = (() => {
-    const map: { [cid: string]: { channel_id: string; count: number; streamer: any } } = {};
+    const map: { [key: string]: { key: string; channel_id: string; star: number; count: number; streamer: any } } = {};
     for (const c of inventory) {
       if (!c.streamer) continue;
-      if (!map[c.channel_id]) map[c.channel_id] = { channel_id: c.channel_id, count: 0, streamer: c.streamer };
-      map[c.channel_id].count += 1;
+      const star = c.star || 0;
+      const key = `${c.channel_id}#${star}`;
+      if (!map[key]) map[key] = { key, channel_id: c.channel_id, star, count: 0, streamer: c.streamer };
+      map[key].count += 1;
     }
-    return Object.values(map);
+    return Object.values(map).sort((a, b) => {
+      const an = a.streamer?.name || '', bn = b.streamer?.name || '';
+      return an === bn ? a.star - b.star : an.localeCompare(bn);
+    });
   })();
 
-  const adjustOfferCard = (channelId: string, delta: number, max: number) => {
+  const adjustOfferCard = (key: string, delta: number, max: number) => {
     setOfferCards(prev => {
       const next = { ...prev };
-      const v = Math.max(0, Math.min(max, (next[channelId] || 0) + delta));
-      if (v <= 0) delete next[channelId];
-      else next[channelId] = v;
+      const v = Math.max(0, Math.min(max, (next[key] || 0) + delta));
+      if (v <= 0) delete next[key];
+      else next[key] = v;
       return next;
     });
   };
@@ -326,8 +334,13 @@ export const GachaTab: React.FC = () => {
       return;
     }
 
-    const offerList = Object.entries(offerCards).filter(([, c]) => c > 0).map(([channel_id, count]) => ({ channel_id, count }));
-    const reqList = Object.entries(requestCards).filter(([, c]) => c > 0).map(([channel_id, count]) => ({ channel_id, count }));
+    // 복합키(channel#star)를 { channel_id, star, count }로 분해
+    const parseKey = ([key, count]: [string, number]) => {
+      const [channel_id, starStr] = key.split('#');
+      return { channel_id, star: Number(starStr) || 0, count };
+    };
+    const offerList = Object.entries(offerCards).filter(([, c]) => c > 0).map(parseKey);
+    const reqList = Object.entries(requestCards).filter(([, c]) => c > 0).map(parseKey);
 
     if (offerList.length === 0 && offerPoint <= 0 && reqList.length === 0 && requestPoint <= 0) {
       showAlert('내용 부족', '제시하거나 요청할 카드/포인트를 최소 한 가지 이상 지정해 주세요.', 'warning');
@@ -424,13 +437,13 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 요청 카드 수량 증감 (상대 보유량 상한)
-  const adjustRequestCard = (channelId: string, delta: number, max: number) => {
+  // 요청 카드 수량 증감 (상대 보유량 상한) — key = channel#star
+  const adjustRequestCard = (key: string, delta: number, max: number) => {
     setRequestCards(prev => {
       const next = { ...prev };
-      const v = Math.max(0, Math.min(max, (next[channelId] || 0) + delta));
-      if (v <= 0) delete next[channelId];
-      else next[channelId] = v;
+      const v = Math.max(0, Math.min(max, (next[key] || 0) + delta));
+      if (v <= 0) delete next[key];
+      else next[key] = v;
       return next;
     });
   };
@@ -866,16 +879,17 @@ export const GachaTab: React.FC = () => {
                   ) : myCollection
                     .filter((c) => offerSearch.trim() === '' ? true : c.streamer.name.toLowerCase().includes(offerSearch.toLowerCase()))
                     .map((c) => (
-                      <div key={c.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                      <div key={c.key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                         <div className="flex items-center gap-2 min-w-0">
-                          <img src={c.streamer.custom_image_url || c.streamer.logo_url} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                          <img src={cardImage(c.streamer, c.star)} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
                           <span className="text-[11px] font-bold truncate">{c.streamer.name}</span>
-                          <span className="text-[9px] text-muted-foreground">보유 {c.count}</span>
+                          {c.star > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
+                          <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <button onClick={() => adjustOfferCard(c.channel_id, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
-                          <span className="w-5 text-center text-xs font-bold">{offerCards[c.channel_id] || 0}</span>
-                          <button onClick={() => adjustOfferCard(c.channel_id, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                          <button onClick={() => adjustOfferCard(c.key, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
+                          <span className="w-5 text-center text-xs font-bold">{offerCards[c.key] || 0}</span>
+                          <button onClick={() => adjustOfferCard(c.key, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
                         </div>
                       </div>
                     ))}
@@ -907,20 +921,24 @@ export const GachaTab: React.FC = () => {
                         <p className="text-[10px] text-muted-foreground py-1">상대가 보유한 카드가 없습니다.</p>
                       ) : partnerCollection
                         .filter((c) => requestSearch.trim() === '' ? true : c.streamer?.name?.toLowerCase().includes(requestSearch.toLowerCase()))
-                        .map((c) => (
-                          <div key={c.channel_id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                        .map((c) => {
+                          const key = `${c.channel_id}#${c.star || 0}`;
+                          return (
+                          <div key={key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                             <div className="flex items-center gap-2 min-w-0">
-                              <img src={c.streamer?.custom_image_url || c.streamer?.logo_url} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                              <img src={cardImage(c.streamer, c.star || 0)} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
                               <span className="text-[11px] font-bold truncate">{c.streamer?.name}</span>
-                              <span className="text-[9px] text-muted-foreground">보유 {c.count}</span>
+                              {(c.star || 0) > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
+                              <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <button onClick={() => adjustRequestCard(c.channel_id, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
-                              <span className="w-5 text-center text-xs font-bold">{requestCards[c.channel_id] || 0}</span>
-                              <button onClick={() => adjustRequestCard(c.channel_id, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                              <button onClick={() => adjustRequestCard(key, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
+                              <span className="w-5 text-center text-xs font-bold">{requestCards[key] || 0}</span>
+                              <button onClick={() => adjustRequestCard(key, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                     </div>
                   </>
                 )}
@@ -966,12 +984,16 @@ export const GachaTab: React.FC = () => {
           <div className="space-y-2.5">
             {activeTrades.map((t) => {
               const incoming = t.direction === 'incoming';
+              // 채널 ID → 스트리머 이름 (보드의 전체 스트리머 목록 기준)
+              const nameOf = (cid: string) => streamers.find((s) => s.channel_id === cid)?.name || cid;
               const summarize = (offer: any) => {
                 const parts: string[] = [];
-                const cardCount = (offer?.cards || []).reduce((a: number, c: any) => a + c.count, 0);
-                if (cardCount > 0) parts.push(`카드 ${cardCount}장`);
+                for (const c of (offer?.cards || [])) {
+                  const starLabel = (c.star || 0) > 0 ? ` ${c.star}★` : '';
+                  parts.push(`${nameOf(c.channel_id)}${starLabel} ${c.count}장`);
+                }
                 if (offer?.point > 0) parts.push(`${offer.point.toLocaleString()} P`);
-                return parts.length ? parts.join(' + ') : '없음';
+                return parts.length ? parts.join(', ') : '없음';
               };
               const counterpartName = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
               const confirmed = t.status === 'CONFIRMED';
@@ -1019,34 +1041,102 @@ export const GachaTab: React.FC = () => {
         </section>
       )}
 
-      {/* 교환 이력 + 통계 */}
+      {/* 교환 이력 보기 버튼 + 통계 요약 */}
       {tradeHistory.length > 0 && (() => {
         const accepted = tradeHistory.filter((t) => t.status === 'ACCEPTED').length;
         const rejected = tradeHistory.filter((t) => t.status === 'REJECTED').length;
         const cancelled = tradeHistory.filter((t) => t.status === 'CANCELLED').length;
-        const statusLabel: Record<string, string> = { ACCEPTED: '체결', REJECTED: '거절', CANCELLED: '취소' };
-        const statusColor: Record<string, string> = { ACCEPTED: 'text-emerald-500', REJECTED: 'text-rose-500', CANCELLED: 'text-muted-foreground' };
         return (
           <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-3">
-            <h3 className="text-base font-black flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력 ({tradeHistory.length})</h3>
+              <button
+                onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
+                className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+              >
+                이력 보기
+              </button>
+            </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-emerald-500/10 p-2.5 text-center"><p className="text-lg font-black text-emerald-500">{accepted}</p><p className="text-[10px] text-muted-foreground">체결</p></div>
               <div className="rounded-lg bg-rose-500/10 p-2.5 text-center"><p className="text-lg font-black text-rose-500">{rejected}</p><p className="text-[10px] text-muted-foreground">거절</p></div>
               <div className="rounded-lg bg-secondary p-2.5 text-center"><p className="text-lg font-black text-muted-foreground">{cancelled}</p><p className="text-[10px] text-muted-foreground">취소</p></div>
             </div>
-            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-              {tradeHistory.map((t) => {
-                const incoming = t.direction === 'incoming';
-                const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
-                return (
-                  <div key={t.id} className="flex items-center justify-between rounded-lg bg-secondary/20 px-3 py-2 text-[11px]">
-                    <span className="truncate">{incoming ? '받음' : '보냄'} · {counterpart}</span>
-                    <span className={`font-bold ${statusColor[t.status]}`}>{statusLabel[t.status] || t.status}</span>
-                  </div>
-                );
-              })}
-            </div>
           </section>
+        );
+      })()}
+
+      {/* 교환 이력 모달 (5개 단위 페이지네이션) */}
+      {historyModalOpen && (() => {
+        const statusLabel: Record<string, string> = { ACCEPTED: '체결', REJECTED: '거절', CANCELLED: '취소' };
+        const statusColor: Record<string, string> = { ACCEPTED: 'text-emerald-500', REJECTED: 'text-rose-500', CANCELLED: 'text-muted-foreground' };
+        const nameOf = (cid: string) => streamers.find((s) => s.channel_id === cid)?.name || cid;
+        const summarize = (offer: any) => {
+          const parts: string[] = [];
+          for (const c of (offer?.cards || [])) {
+            const starLabel = (c.star || 0) > 0 ? ` ${c.star}★` : '';
+            parts.push(`${nameOf(c.channel_id)}${starLabel} ${c.count}장`);
+          }
+          if (offer?.point > 0) parts.push(`${offer.point.toLocaleString()} P`);
+          return parts.length ? parts.join(', ') : '없음';
+        };
+        const PER = 5;
+        const totalPages = Math.max(1, Math.ceil(tradeHistory.length / PER));
+        const page = Math.min(historyPage, totalPages);
+        const paged = tradeHistory.slice((page - 1) * PER, page * PER);
+        const fmtDate = (iso?: string) => {
+          if (!iso) return '';
+          const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
+          return d.toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' });
+        };
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setHistoryModalOpen(false)}>
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <h3 className="text-base font-bold flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력 ({tradeHistory.length})</h3>
+                <button onClick={() => setHistoryModalOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {paged.map((t) => {
+                  const incoming = t.direction === 'incoming';
+                  const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
+                  return (
+                    <div key={t.id} className="rounded-xl border border-border/60 bg-secondary/20 p-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[11px] font-bold text-muted-foreground truncate">
+                          {incoming ? '받음' : '보냄'} · {counterpart}
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[9px] text-muted-foreground">{fmtDate(t.completed_at || t.created_at)}</span>
+                          <span className={`text-[11px] font-black ${statusColor[t.status]}`}>{statusLabel[t.status] || t.status}</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                        <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-1.5">
+                          <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
+                          <p className="text-muted-foreground leading-snug">{summarize(t.sender_offer)}</p>
+                        </div>
+                        <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 p-1.5">
+                          <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
+                          <p className="text-muted-foreground leading-snug">{summarize(t.receiver_offer)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* 페이지네이션 */}
+              {totalPages > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button onClick={() => setHistoryPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none">이전</button>
+                  <span className="text-xs font-bold text-muted-foreground">{page} / {totalPages}</span>
+                  <button onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none">다음</button>
+                </div>
+              )}
+            </div>
+          </div>
         );
       })()}
 

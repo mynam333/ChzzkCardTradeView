@@ -284,6 +284,7 @@ DECLARE
   item         JSONB;
   cid          TEXT;
   cnt          INTEGER;
+  star_val     INTEGER;
   moved        INTEGER;
   sender_out   INTEGER;
   receiver_out INTEGER;
@@ -304,30 +305,34 @@ BEGIN
   IF s_point < sender_out THEN RETURN 'SENDER_POINT_SHORT'; END IF;
   IF r_point < receiver_out THEN RETURN 'RECEIVER_POINT_SHORT'; END IF;
 
-  -- 보낸 사람 카드 → 받는 사람
+  -- 보낸 사람 카드 → 받는 사람 (별 지정 시 해당 별만)
   FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.sender_offer->'cards', '[]'::jsonb)) LOOP
     cid := item->>'channel_id';
     cnt := (item->>'count')::INTEGER;
+    star_val := (item->>'star')::INTEGER;
     IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
     UPDATE user_cards SET user_id = t.receiver_id
      WHERE id IN (
        SELECT id FROM user_cards
         WHERE user_id = t.sender_id AND channel_id = cid
+          AND (star_val IS NULL OR star = star_val)
         ORDER BY id ASC LIMIT cnt FOR UPDATE
      );
     GET DIAGNOSTICS moved = ROW_COUNT;
     IF moved < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
   END LOOP;
 
-  -- 받는 사람 카드 → 보낸 사람
+  -- 받는 사람 카드 → 보낸 사람 (별 지정 시 해당 별만)
   FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.receiver_offer->'cards', '[]'::jsonb)) LOOP
     cid := item->>'channel_id';
     cnt := (item->>'count')::INTEGER;
+    star_val := (item->>'star')::INTEGER;
     IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
     UPDATE user_cards SET user_id = t.sender_id
      WHERE id IN (
        SELECT id FROM user_cards
         WHERE user_id = t.receiver_id AND channel_id = cid
+          AND (star_val IS NULL OR star = star_val)
         ORDER BY id ASC LIMIT cnt FOR UPDATE
      );
     GET DIAGNOSTICS moved = ROW_COUNT;

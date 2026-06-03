@@ -757,13 +757,18 @@ export class SqliteTradeRepository implements ITradeRepository {
   async finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
     const db = this.getDb();
 
-    // 카드 channel_id+count 만큼 소유자를 from→to로 이전하는 헬퍼 (부족 시 throw)
-    const moveCards = (fromId: string, toId: string, cards: { channel_id: string; count: number }[]) => {
+    // 카드 channel_id(+star)+count 만큼 소유자를 from→to로 이전하는 헬퍼 (부족 시 throw)
+    const moveCards = (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[]) => {
       for (const c of cards) {
         if (!c.channel_id || !c.count || c.count <= 0) continue;
-        const owned = db.prepare(
-          'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
-        ).all(fromId, c.channel_id, c.count) as { id: number }[];
+        const hasStar = c.star !== undefined && c.star !== null;
+        const owned = hasStar
+          ? db.prepare(
+              'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND star = ? ORDER BY id ASC LIMIT ?'
+            ).all(fromId, c.channel_id, c.star, c.count) as { id: number }[]
+          : db.prepare(
+              'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
+            ).all(fromId, c.channel_id, c.count) as { id: number }[];
         if (owned.length < c.count) {
           throw new Error('CARD_SHORTAGE');
         }

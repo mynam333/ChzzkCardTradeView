@@ -3,7 +3,7 @@ import multer from 'multer';
 import { authMiddleware } from '../middlewares/auth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
-import { uploadCustomImage } from '../controllers/streamerController';
+import { uploadCustomImage, deleteOwnCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
 import { proxyImage } from '../controllers/imageProxyController';
 import { getChzzkAuthUrl, handleChzzkCallback } from '../controllers/chzzkAuthController';
@@ -192,6 +192,8 @@ router.get('/streamers', async (req, res) => {
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, upload.single('image'), uploadCustomImage);
+// 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제
+router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, deleteOwnCustomImage);
 
 // 특정 스트리머 상세 + 시세 변화 그래프 데이터 (공개) — /streamers/search, /streamers/register 보다 뒤에 위치
 router.get('/streamers/:channel_id', getStreamerDetail);

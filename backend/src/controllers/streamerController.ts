@@ -8,6 +8,34 @@ import fs from 'fs';
 import path from 'path';
 
 /**
+ * 스트리머 본인이 등록한 특정 별(0~5성) 커스텀 카드 이미지를 삭제(초기화)
+ */
+export const deleteOwnCustomImage = async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized', message: '인증 정보가 유효하지 않습니다.' });
+  }
+  const channel_id = String(req.body.channel_id || user.id);
+  const star = Math.max(0, Math.min(5, parseInt(req.body.star, 10) || 0));
+
+  const isOwner = user.id === channel_id || user.role === 'ADMIN';
+  if (!isOwner) {
+    return res.status(403).json({ error: 'Forbidden', message: '해당 스트리머 카드의 수정 권한이 없습니다.' });
+  }
+
+  try {
+    const streamer = await streamerRepository.findById(channel_id);
+    if (!streamer) {
+      return res.status(404).json({ error: 'NotFound', message: '존재하지 않는 스트리머 채널입니다.' });
+    }
+    await streamerRepository.updateCustomImage(channel_id, null, star);
+    return res.status(200).json({ message: `${star}성 카드 이미지가 삭제되었습니다.`, channel_id, star });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '이미지 삭제 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 스트리머 본인의 카드 커스텀 배경 이미지 업로드 핸들러
  */
 export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response) => {

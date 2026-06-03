@@ -17,7 +17,11 @@ const notify = (userId: string, title: string, body: string) => {
 const normalizeOffer = (raw: any): TradeOffer => {
   const cards = Array.isArray(raw?.cards)
     ? raw.cards
-        .map((c: any) => ({ channel_id: String(c.channel_id), count: Math.floor(Number(c.count)) }))
+        .map((c: any) => ({
+          channel_id: String(c.channel_id),
+          star: Math.max(0, Math.min(5, Math.floor(Number(c.star) || 0))),
+          count: Math.floor(Number(c.count))
+        }))
         .filter((c: any) => c.channel_id && c.count > 0)
     : [];
   const point = Math.max(0, Math.floor(Number(raw?.point) || 0));
@@ -26,14 +30,17 @@ const normalizeOffer = (raw: any): TradeOffer => {
 
 const isEmptyOffer = (offer: TradeOffer): boolean => offer.cards.length === 0 && offer.point === 0;
 
+// 카드 식별 복합키: 채널 + 별
+const cardKey = (channelId: string, star?: number) => `${channelId}#${star ?? 0}`;
+
 /**
- * 특정 유저의 channel_id별 보유 카드 수량 맵을 구합니다.
+ * 특정 유저의 (채널+별)별 보유 카드 수량 맵을 구합니다.
  */
-const getOwnedCountMap = async (userId: string): Promise<Record<string, number>> => {
+const getOwnedByStarMap = async (userId: string): Promise<Record<string, number>> => {
   const cards = await userCardRepository.findByUserId(userId);
   const map: Record<string, number> = {};
   for (const c of cards) {
-    map[c.channel_id] = (map[c.channel_id] || 0) + 1;
+    map[cardKey(c.channel_id, c.star)] = (map[cardKey(c.channel_id, c.star)] || 0) + 1;
   }
   return map;
 };
@@ -44,14 +51,18 @@ const getOwnedCountMap = async (userId: string): Promise<Record<string, number>>
  * - 수신자 측: CONFIRMED(동의 완료)일 때 요청받은 품목(receiver_offer)이 예약됨
  * 다른 곳(판매/신규 제안)에서 available = 보유 - 예약 으로 검증해 이중 지출을 막습니다.
  */
-export const getUserReservations = async (userId: string): Promise<{ cards: Record<string, number>; points: number }> => {
+export const getUserReservations = async (userId: string): Promise<{ cards: Record<string, number>; cardsByStar: Record<string, number>; points: number }> => {
   const active = await tradeRepository.findActiveByUser(userId);
-  const cards: Record<string, number> = {};
+  const cards: Record<string, number> = {};        // 채널 단위 합산(판매 가드용 하위호환)
+  const cardsByStar: Record<string, number> = {};  // 채널+별 복합키(교환 검증용)
   let points = 0;
 
   const reserve = (offer: TradeOffer | undefined) => {
     if (!offer) return;
-    for (const c of offer.cards || []) cards[c.channel_id] = (cards[c.channel_id] || 0) + c.count;
+    for (const c of offer.cards || []) {
+      cards[c.channel_id] = (cards[c.channel_id] || 0) + c.count;
+      cardsByStar[cardKey(c.channel_id, c.star)] = (cardsByStar[cardKey(c.channel_id, c.star)] || 0) + c.count;
+    }
     points += offer.point || 0;
   };
 
@@ -59,7 +70,7 @@ export const getUserReservations = async (userId: string): Promise<{ cards: Reco
     if (t.sender_id === userId) reserve(t.sender_offer);
     if (t.receiver_id === userId && t.status === 'CONFIRMED') reserve(t.receiver_offer);
   }
-  return { cards, points };
+  return { cards, cardsByStar, points };
 };
 
 /**
@@ -98,10 +109,11 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
 
     // 제안자가 제시한 카드/포인트가 "사용 가능"한지 검증
     // (보유량에서 이미 다른 진행 중 거래에 묶인 예약량을 뺀 값 기준 → 이중 지출 방지)
-    const ownedMap = await getOwnedCountMap(sender.id);
+    const ownedByStar = await getOwnedByStarMap(sender.id);
     const reservations = await getUserReservations(sender.id);
     for (const c of senderOffer.cards) {
-      const available = (ownedMap[c.channel_id] || 0) - (reservations.cards[c.channel_id] || 0);
+      const key = cardKey(c.channel_id, c.star);
+      const available = (ownedByStar[key] || 0) - (reservations.cardsByStar[key] || 0);
       if (available < c.count) {
         return res.status(400).json({ error: 'InsufficientCards', message: '제안하려는 카드가 부족합니다. (이미 다른 거래에 묶여 있을 수 있어요)' });
       }

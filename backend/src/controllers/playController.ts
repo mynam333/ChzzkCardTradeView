@@ -72,14 +72,22 @@ export const getUserCollection = async (req: Request, res: Response) => {
   }
   try {
     const cards = await userCardRepository.findByUserId(user_id);
-    const map: { [cid: string]: any } = {};
+    // 같은 스트리머라도 별(0~5성)별로 분리해 묶음
+    const map: { [key: string]: any } = {};
     for (const c of cards) {
-      if (!map[c.channel_id]) {
-        map[c.channel_id] = { channel_id: c.channel_id, count: 0, streamer: c.streamer };
+      const star = c.star || 0;
+      const key = `${c.channel_id}#${star}`;
+      if (!map[key]) {
+        map[key] = { channel_id: c.channel_id, star, count: 0, streamer: c.streamer };
       }
-      map[c.channel_id].count += 1;
+      map[key].count += 1;
     }
-    return res.status(200).json(Object.values(map));
+    // 채널명 → 별 오름차순 정렬
+    const list = Object.values(map).sort((a: any, b: any) => {
+      const an = a.streamer?.name || '', bn = b.streamer?.name || '';
+      return an === bn ? a.star - b.star : an.localeCompare(bn);
+    });
+    return res.status(200).json(list);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '컬렉션 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }

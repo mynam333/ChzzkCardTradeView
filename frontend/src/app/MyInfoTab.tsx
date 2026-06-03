@@ -178,6 +178,23 @@ export const MyInfoTab: React.FC = () => {
     }
   };
 
+  // 등록한 별 이미지 직접 삭제(초기화)
+  const handleDeleteImage = async (star: number) => {
+    try {
+      const res = await apiFetch('/streamers/me/image/reset', { method: 'POST', body: JSON.stringify({ channel_id: user.id, star }) });
+      const data = await res.json();
+      if (res.ok) {
+        toast(`${star}성 카드 이미지를 삭제했습니다.`, 'success');
+        fetchInventory();
+        checkStreamerRegistration();
+      } else {
+        toast(data.message || '이미지 삭제 실패', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    }
+  };
+
   // 이미지 선택 시 blob 생성하여 지연 렌더링 (Lazy Preview) 및 모달 오픈
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, star: number) => {
     const file = e.target.files?.[0];
@@ -367,13 +384,23 @@ export const MyInfoTab: React.FC = () => {
                   <span className="rounded bg-black/45 px-1.5 py-0.5 text-[9px] font-black text-amber-300">
                     {st === 0 ? '0성' : '★'.repeat(st)}
                   </span>
-                  {ownImage ? (
-                    <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[7px] font-black text-white">등록</span>
-                  ) : inherited ? (
-                    <span className="rounded bg-sky-500/90 px-1 py-0.5 text-[7px] font-black text-white">상속</span>
-                  ) : (
-                    <span className="rounded bg-zinc-700/90 px-1 py-0.5 text-[7px] font-black text-zinc-300">기본</span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {ownImage ? (
+                      <span className="rounded bg-emerald-500/90 px-1 py-0.5 text-[7px] font-black text-white">등록</span>
+                    ) : inherited ? (
+                      <span className="rounded bg-sky-500/90 px-1 py-0.5 text-[7px] font-black text-white">상속</span>
+                    ) : (
+                      <span className="rounded bg-zinc-700/90 px-1 py-0.5 text-[7px] font-black text-zinc-300">기본</span>
+                    )}
+                    {ownImage && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteImage(st); }}
+                        title={`${st}성 이미지 삭제`}
+                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500/90 text-[9px] font-black text-white hover:bg-red-600"
+                      >×</button>
+                    )}
+                  </div>
                 </div>
                 {/* 하단 변경 안내 */}
                 <div className="relative z-20 flex items-center justify-center gap-1 p-1.5 text-white opacity-90 group-hover:opacity-100">

@@ -196,7 +196,8 @@ export interface IAnnouncementRepository {
 
 // 거래 제안 한쪽의 제시 내용 (카드 묶음 + 포인트)
 export interface TradeOffer {
-  cards: { channel_id: string; count: number }[];
+  // star: 별(0~5성) 구분. 레거시 데이터는 star가 없을 수 있음(미지정 시 별 무관 처리)
+  cards: { channel_id: string; star?: number; count: number }[];
   point: number;
 }
 
