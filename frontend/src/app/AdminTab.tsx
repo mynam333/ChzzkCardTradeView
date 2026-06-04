@@ -133,6 +133,8 @@ export const AdminTab: React.FC = () => {
   const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '' });
   const [scheduledPushes, setScheduledPushes] = useState<any[]>([]);
   const [sentPushes, setSentPushes] = useState<any[]>([]);
+  const [sentPushesPage, setSentPushesPage] = useState(1);
+  const [sentPushesTotalPages, setSentPushesTotalPages] = useState(1);
   const [editingPushId, setEditingPushId] = useState<number | null>(null);
   const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '' });
 
@@ -160,10 +162,10 @@ export const AdminTab: React.FC = () => {
     }
     if (subTab === 'push') {
       fetchScheduledPushes();
-      fetchSentPushes();
+      fetchSentPushes(sentPushesPage);
     }
     if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
-  }, [subTab, isAdmin]);
+  }, [subTab, isAdmin, sentPushesPage]);
 
   // 유저 탭: 검색어 디바운스(닉네임/ID) → 1페이지부터 재조회
   useEffect(() => {
@@ -354,7 +356,7 @@ export const AdminTab: React.FC = () => {
         toast(data.message || '푸시가 등록되었습니다.');
         setPushForm({ title: '', body: '', scheduled_at: '' });
         fetchScheduledPushes();
-        fetchSentPushes();
+        fetchSentPushes(sentPushesPage);
       } else toast('푸시 등록 실패');
     } catch { toast('서버 통신 에러'); }
   };
@@ -366,10 +368,14 @@ export const AdminTab: React.FC = () => {
     } catch { /* noop */ }
   };
 
-  const fetchSentPushes = async () => {
+  const fetchSentPushes = async (page = sentPushesPage) => {
     try {
-      const res = await apiFetch('/admin/push/sent');
-      if (res.ok) setSentPushes(await res.json());
+      const res = await apiFetch(`/admin/push/sent?page=${page}&limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        setSentPushes(data.notifications || []);
+        setSentPushesTotalPages(data.total_pages || 1);
+      }
     } catch { /* noop */ }
   };
 
@@ -392,7 +398,7 @@ export const AdminTab: React.FC = () => {
         toast('예약된 푸시 알림이 수정되었습니다.');
         setEditingPushId(null);
         fetchScheduledPushes();
-        fetchSentPushes();
+        fetchSentPushes(sentPushesPage);
       } else {
         toast(data.message || '푸시 수정 실패');
       }
@@ -1121,8 +1127,8 @@ export const AdminTab: React.FC = () => {
           <div className="space-y-6">
             <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between mb-1">
-                <h3 className="text-sm font-bold flex items-center gap-1.5">📬 발송 완료된 알림 이력 ({sentPushes.length})</h3>
-                <button onClick={fetchSentPushes} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+                <h3 className="text-sm font-bold flex items-center gap-1.5">📬 발송 완료된 알림 이력</h3>
+                <button onClick={() => fetchSentPushes(sentPushesPage)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
               </div>
               <div className="space-y-2.5 max-h-[36rem] overflow-y-auto">
                 {sentPushes.length === 0 ? (
@@ -1145,6 +1151,23 @@ export const AdminTab: React.FC = () => {
                   })
                 )}
               </div>
+
+              {/* 페이지네이션 */}
+              {sentPushesTotalPages > 1 && (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setSentPushesPage((p) => Math.max(1, p - 1))}
+                    disabled={sentPushesPage <= 1}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  >이전</button>
+                  <span className="text-xs font-bold text-muted-foreground">{sentPushesPage} / {sentPushesTotalPages}</span>
+                  <button
+                    onClick={() => setSentPushesPage((p) => Math.min(sentPushesTotalPages, p + 1))}
+                    disabled={sentPushesPage >= sentPushesTotalPages}
+                    className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  >다음</button>
+                </div>
+              )}
             </section>
           </div>
         </div>

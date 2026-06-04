@@ -310,26 +310,63 @@ export const getScheduledNotifications = async (req: Request, res: Response) => 
  */
 export const getSentNotifications = async (req: Request, res: Response) => {
   try {
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const rawLimit = parseInt(String(req.query.limit || '10'), 10) || 10;
+    const limit = Math.min(100, Math.max(1, rawLimit));
+    const offset = (page - 1) * limit;
+
     const dbMode = getDbMode();
     let list: any[] = [];
+    let total = 0;
+
     if (dbMode === 'SUPABASE') {
       const client = getSupabaseClient();
+      
+      // 전체 개수 조회
+      const { count, error: countErr } = await client
+        .from('push_notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'sent');
+        
+      if (countErr) throw countErr;
+      total = count || 0;
+
+      // 페이징 데이터 조회
       const { data, error } = await client
         .from('push_notifications')
         .select('*')
         .eq('status', 'sent')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+        
       if (error) throw error;
       list = data || [];
     } else {
       const db = getSqliteDb();
+      
+      // 전체 개수 조회
+      const countRes = db.prepare(`
+        SELECT COUNT(*) as cnt FROM push_notifications 
+        WHERE status = 'sent'
+      `).get() as any;
+      total = countRes ? countRes.cnt : 0;
+
+      // 페이징 데이터 조회
       list = db.prepare(`
         SELECT * FROM push_notifications 
         WHERE status = 'sent' 
         ORDER BY created_at DESC
-      `).all();
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
     }
-    return res.status(200).json(list);
+
+    return res.status(200).json({
+      notifications: list,
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit))
+    });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '전송 이력 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
