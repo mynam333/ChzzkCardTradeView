@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, isAuthed, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin';
@@ -182,15 +182,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
-    localStorage.removeItem('cctv_jwt_token');
+    // 서버 측 httpOnly 세션 쿠키 제거 요청 (응답 대기 불필요)
+    apiFetch('/auth/logout', { method: 'POST' }).catch(() => { /* noop */ });
+    clearAuthFlag();
     setUser(null);
     setActiveTab('main');
     toast('로그아웃되었습니다.', 'info');
   };
 
   const refreshUserData = async () => {
-    const token = localStorage.getItem('cctv_jwt_token');
-    if (!token) {
+    if (!isAuthed()) {
       setUser(null);
       setAuthLoading(false);
       return;
@@ -214,8 +215,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           nextFreeDrawAt: data.nextFreeDrawAt ?? null
         });
       } else if (response.status === 401) {
-        // 만료되었거나 비정상적인 토큰인 경우 로그아웃 처리
-        localStorage.removeItem('cctv_jwt_token');
+        // 만료되었거나 비정상적인 세션인 경우 로그아웃 처리
+        clearAuthFlag();
         setUser(null);
       }
     } catch (e) {
@@ -236,7 +237,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ---- 인앱 알림함 ----
   const fetchNotifications = async () => {
-    if (!localStorage.getItem('cctv_jwt_token')) {
+    if (!isAuthed()) {
       setNotifications([]);
       setUnreadCount(0);
       return;

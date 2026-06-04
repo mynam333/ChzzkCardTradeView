@@ -25,6 +25,44 @@ describe('calculateCardValue', () => {
     expect(v).toBeGreaterThanOrEqual(100);
     expect(v).toBeLessThanOrEqual(500000);
   });
+
+  it('채팅 부족으로 인한 하락은 max(100, 팔로워의 20%) 밑으로 내려가지 않는다', () => {
+    // 팔로워 1000 → 채팅 하한 = max(100, 200) = 200.
+    // 라이브·시청자 많음·채팅 0 → 큰 채팅 감가가 발생하지만 200에서 멈춰야 함.
+    // (채팅 외 요인 없음: deltaMultiplier=0, followerDelta=0)
+    for (let i = 0; i < 30; i++) {
+      const v = calculateCardValue(210, 1000, 0, 0, 10000, true, 0);
+      expect(v).toBe(200);
+    }
+  });
+
+  it('팔로워 20% 하한은 100 미만일 때 100으로 보정된다', () => {
+    // 팔로워 100 → 20% = 20 → max(100, 20) = 100. 채팅 감가가 100 밑으로 끌어내려도 100에서 멈춤.
+    for (let i = 0; i < 20; i++) {
+      const v = calculateCardValue(110, 100, 0, 0, 5000, true, 0);
+      expect(v).toBe(100);
+    }
+  });
+
+  it('채팅 외 요인(팔로워 급감 등)은 20% 하한 밑으로도 내려갈 수 있다', () => {
+    // 라이브 아님(채팅 감가 없음) + 큰 폭의 팔로워 감소 → 200(20%) 밑으로 하락 허용
+    const v = calculateCardValue(210, 1000, 0, 0, 0, false, -100);
+    expect(v).toBeLessThan(200);
+    expect(v).toBeGreaterThanOrEqual(100);
+  });
+
+  it('소규모 방(시청자 10명 미만)은 채팅 화력이 낮아도 덜 감가된다', () => {
+    // 동일하게 채팅 0인데, 시청자 5명(소규모, 완화 적용)이 시청자 30명(완화 없음)보다 가치가 높아야 함.
+    // 랜덤 드리프트 노이즈를 줄이기 위해 다회 평균 비교.
+    let smallSum = 0;
+    let normalSum = 0;
+    const N = 300;
+    for (let i = 0; i < N; i++) {
+      smallSum += calculateCardValue(5000, 2000, 0, 0, 5, true, 0);
+      normalSum += calculateCardValue(5000, 2000, 0, 0, 30, true, 0);
+    }
+    expect(smallSum / N).toBeGreaterThan(normalSum / N);
+  });
 });
 
 describe('computeRandomDrift', () => {

@@ -31,6 +31,15 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
       return res.status(404).json({ error: 'NotFound', message: '신고할 스트리머의 카드를 찾을 수 없습니다.' });
     }
 
+    // 중복 신고 차단: 같은 유저가 같은 카드(별 포함)를 이미 신고해 처리 대기 중이면 거부
+    const alreadyReported = await reportRepository.hasPendingReport(user.id, channel_id, star);
+    if (alreadyReported) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: '이미 신고하여 검토 대기 중인 카드입니다. 중복 신고는 접수되지 않습니다.'
+      });
+    }
+
     // 증거 인멸 방지: 신고 시점에 해당 별(star)에 표시되던 이미지를 스냅샷으로 지정
     // 해당 별 이미지가 없으면 하위 별 → 0성 → 기본 로고 순으로 폴백 (프론트 cardImage 로직과 동일)
     const imgs = (streamer.custom_images && streamer.custom_images.length)

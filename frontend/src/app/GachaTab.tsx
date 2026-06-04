@@ -12,14 +12,14 @@ import {
   Clock,
   ArrowRightLeft,
   X,
-  Plus,
   Layers
 } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
+import { ReportCardModal } from './ReportCardModal';
 
 interface Streamer {
   channel_id: string;
@@ -48,15 +48,6 @@ interface UserCard {
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.6;
 
-// 이미지 신고 사유 프리셋 (마지막 '기타'는 직접 입력)
-const REPORT_REASONS = [
-  '선정적/음란한 이미지',
-  '폭력적·혐오스러운 이미지',
-  '저작권 침해 이미지',
-  '타인 사칭·도용',
-  '욕설·비방 등 부적절한 내용',
-  '기타',
-];
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
@@ -66,11 +57,8 @@ export const GachaTab: React.FC = () => {
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
   const [equipCard, setEquipCard] = useState<UserCard | null>(null);
 
-  // 이미지 신고 모달
+  // 이미지 신고 모달 (세부 상태는 ReportCardModal 컴포넌트가 자체 관리)
   const [reportCard, setReportCard] = useState<UserCard | null>(null);
-  const [reportReason, setReportReason] = useState('');
-  const [reportCustom, setReportCustom] = useState('');
-  const [reportSubmitting, setReportSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -140,15 +128,6 @@ export const GachaTab: React.FC = () => {
   const [bulkSellConfirmOpen, setBulkSellConfirmOpen] = useState(false);
   // 일괄 판매 항목 설정: { [channelId]: count }
   const [bulkSellQuantities, setBulkSellQuantities] = useState<{ [key: string]: number }>({});
-
-  // 스트리머 등록 모달 상태
-  const [registerModalOpen, setRegisterModalOpen] = useState(false);
-  const [streamerSearchKeyword, setStreamerSearchKeyword] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [selectedStreamer, setSelectedStreamer] = useState<any | null>(null);
-  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
-  const [registering, setRegistering] = useState(false);
 
   // 모바일 롱프레스 타이머 레프
   const longPressTimer = React.useRef<any>(null);
@@ -242,7 +221,7 @@ export const GachaTab: React.FC = () => {
   };
 
   const fetchInventory = async () => {
-    if (!localStorage.getItem('cctv_jwt_token')) return;
+    if (!isAuthed()) return;
     try {
       const res = await apiFetch('/users/me/cards');
       if (res.ok) {
@@ -462,40 +441,7 @@ export const GachaTab: React.FC = () => {
   };
 
   // 이미지 신고 모달 열기 (우클릭 메뉴 → 이미지 신고)
-  const openReport = (card: UserCard) => {
-    setReportCard(card);
-    setReportReason('');
-    setReportCustom('');
-  };
-
-  // 이미지 신고 제출
-  const handleReport = async () => {
-    if (!reportCard?.streamer) return;
-    const isEtc = reportReason === '기타';
-    const finalReason = isEtc ? reportCustom.trim() : reportReason;
-    if (!finalReason) {
-      showAlert('신고 사유 필요', isEtc ? '신고 사유를 직접 입력해 주세요.' : '신고 사유를 선택해 주세요.', 'warning');
-      return;
-    }
-    setReportSubmitting(true);
-    try {
-      const res = await apiFetch(`/cards/${reportCard.streamer.channel_id}/report`, {
-        method: 'POST',
-        body: JSON.stringify({ reason: finalReason, star: reportCard.star || 0 })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        showAlert('신고 접수 완료', '신고가 접수되었습니다. 검토 후 조치하겠습니다.', 'success');
-        setReportCard(null);
-      } else {
-        showAlert('신고 실패', data.message || '신고 접수에 실패했습니다.', 'error');
-      }
-    } catch {
-      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
-    } finally {
-      setReportSubmitting(false);
-    }
-  };
+  const openReport = (card: UserCard) => setReportCard(card);
 
   // 요청 카드 수량 증감 (상대 보유량 상한) — key = channel#star
   const adjustRequestCard = (key: string, delta: number, max: number) => {
@@ -508,110 +454,6 @@ export const GachaTab: React.FC = () => {
     });
   };
 
-  // 신규 스트리머 검색 API 호출
-  const handleSearchStreamer = async () => {
-    if (!streamerSearchKeyword.trim()) {
-      toast('검색할 스트리머 명칭을 입력해 주세요.');
-      return;
-    }
-    setSearching(true);
-    setSelectedStreamer(null);
-    try {
-      const res = await apiFetch(`/streamers/search?keyword=${encodeURIComponent(streamerSearchKeyword)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data);
-      } else {
-        toast('스트리머 검색에 실패했습니다.');
-      }
-    } catch (e) {
-      console.error(e);
-      toast('통신 중 오류가 발생했습니다.');
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  // 신규 스트리머 카드 등록 API 호출
-  const handleRegisterStreamer = async () => {
-    if (!selectedStreamer) {
-      setAlertModal({
-        open: true,
-        title: '등록 오류',
-        message: '등록할 스트리머를 리스트에서 선택해 주세요.',
-        type: 'error'
-      });
-      return;
-    }
-
-    // README 명세 기준 팔로워 150명 미만 프론트 단 1차 차단 필터
-    if (selectedStreamer.followerCount !== undefined && Number(selectedStreamer.followerCount) < 150) {
-      setAlertModal({
-        open: true,
-        title: '등록 불가',
-        message: `팔로워 수 150명 이상인 스트리머만 등록할 수 있습니다. (현재: ${Number(selectedStreamer.followerCount).toLocaleString()}명)`,
-        type: 'warning'
-      });
-      return;
-    }
-
-    if (!disclaimerChecked) {
-      setAlertModal({
-        open: true,
-        title: '동의 필요',
-        message: '등록 책임 조항 및 약관 동의를 완료해 주세요.',
-        type: 'warning'
-      });
-      return;
-    }
-
-    setRegistering(true);
-    try {
-      const res = await apiFetch('/streamers/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          channelId: selectedStreamer.channelId,
-          channelName: selectedStreamer.channelName,
-          channelImageUrl: selectedStreamer.channelImageUrl,
-          followerCount: selectedStreamer.followerCount
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setAlertModal({
-          open: true,
-          title: '등록 완료',
-          message: data.message || '성공적으로 스트리머 카드가 등록되었습니다!',
-          type: 'success'
-        });
-        setRegisterModalOpen(false);
-        // 상태 초기화 및 스트리머 데이터 갱신
-        setSelectedStreamer(null);
-        setSearchResults([]);
-        setStreamerSearchKeyword('');
-        setDisclaimerChecked(false);
-        fetchStreamers();
-      } else {
-        setAlertModal({
-          open: true,
-          title: '등록 실패',
-          message: data.message || '스트리머 등록에 실패했습니다.',
-          type: 'error'
-        });
-      }
-    } catch (e) {
-      console.error(e);
-      setAlertModal({
-        open: true,
-        title: '통신 오류',
-        message: '서버 전송 중 에러가 발생했습니다.',
-        type: 'error'
-      });
-    } finally {
-      setRegistering(false);
-    }
-  };
 
   // 단일 카드 판매 실행
   const executeSell = async () => {
@@ -762,118 +604,6 @@ export const GachaTab: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
-
-      {/* 신규 스트리머 카드 등록 팝업 모달 */}
-      {registerModalOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
-              <h3 className="text-base font-bold flex items-center gap-2">
-                <Plus className="h-4.5 w-4.5 text-primary" /> 신규 스트리머 카드 등록
-              </h3>
-              <button
-                onClick={() => {
-                  setRegisterModalOpen(false);
-                  setSelectedStreamer(null);
-                  setSearchResults([]);
-                  setStreamerSearchKeyword('');
-                  setDisclaimerChecked(false);
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={streamerSearchKeyword}
-                  onChange={(e) => setStreamerSearchKeyword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearchStreamer(); }}
-                  placeholder="치지직 스트리머 이름을 입력하세요"
-                  className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
-                />
-                <button
-                  onClick={handleSearchStreamer}
-                  disabled={searching}
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
-                >
-                  {searching ? '검색 중...' : '검색'}
-                </button>
-              </div>
-
-              {/* 검색 결과 리스트 */}
-              {searchResults.length > 0 && (
-                <div className="border border-border/80 rounded-xl max-h-48 overflow-y-auto p-1.5 space-y-1">
-                  {searchResults.map((ch) => {
-                    const isSelected = selectedStreamer?.channelId === ch.channelId;
-                    return (
-                      <div
-                        key={ch.channelId}
-                        onClick={() => setSelectedStreamer(ch)}
-                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition ${isSelected ? 'bg-primary/10 border border-primary/40' : 'hover:bg-secondary/60 border border-transparent'
-                          }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <img src={ch.channelImageUrl} alt={ch.channelName} className="h-8 w-8 rounded-full border border-border/60 object-cover" />
-                          <div>
-                            <p className="text-xs font-bold text-foreground">{ch.channelName}</p>
-                            <p className="text-[9.5px] text-muted-foreground">{(ch.followerCount || 0).toLocaleString()} 팔로워</p>
-                          </div>
-                        </div>
-                        {isSelected && <Check className="h-4 w-4 text-primary" />}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* 하단 약관 및 동의 체크 */}
-              <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 space-y-2.5">
-                <div className="text-[0.62rem] text-muted-foreground leading-relaxed">
-                  <p className="font-bold text-foreground/80 mb-1">⚠️ 신규 스트리머 카드 등록 책임 조항</p>
-                  본 서비스를 통해 신규 스트리머의 정보를 등록하여 카드를 활성화하는 모든 행위의 주체는 사용자 본인이며, 이로 인해 발생할 수 있는 초상권, 저작권, 퍼블리시티권 분쟁을 포함한 민형사상의 모든 법적 책임은 카드 등록자 본인에게 전적으로 귀속됩니다.
-                </div>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={disclaimerChecked}
-                    onChange={(e) => setDisclaimerChecked(e.target.checked)}
-                    className="mt-0.5 rounded border-border"
-                  />
-                  <span className="text-[0.65rem] font-semibold text-foreground/90">
-                    위 조항의 내용을 충분히 숙지하였으며 책임을 확인했습니다.
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
-              <button
-                onClick={() => {
-                  setRegisterModalOpen(false);
-                  setSelectedStreamer(null);
-                  setSearchResults([]);
-                  setStreamerSearchKeyword('');
-                  setDisclaimerChecked(false);
-                }}
-                className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleRegisterStreamer}
-                disabled={registering || !selectedStreamer || !disclaimerChecked}
-                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
-              >
-                {registering ? '등록 중...' : '스트리머 등록 완료'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 1:1 교환 거래 팝업 */}
       {tradeModalOpen && (
@@ -1253,13 +983,6 @@ export const GachaTab: React.FC = () => {
                 className="w-full sm:w-44 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs focus:border-primary focus:outline-none"
               />
             </div>
-
-            <button
-              onClick={() => setRegisterModalOpen(true)}
-              className="rounded-lg bg-secondary border border-border/80 px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1 shadow-sm flex"
-            >
-              <Plus className="h-3.5 w-3.5" /> 스트리머 등록
-            </button>
 
             <button
               onClick={handleOpenTrade}
@@ -1698,63 +1421,9 @@ export const GachaTab: React.FC = () => {
         </div>
       )}
 
-      {/* 이미지 신고 모달 */}
-      {reportCard && reportCard.streamer && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => !reportSubmitting && setReportCard(null)}>
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
-              <h3 className="text-base font-bold flex items-center gap-1.5 text-red-500">🚩 이미지 신고</h3>
-              <button onClick={() => setReportCard(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
-            </div>
-
-            {/* 신고 대상 카드 이미지 + 정보 */}
-            <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-3">
-              <div className="relative h-24 w-[60px] shrink-0 overflow-hidden rounded-lg border border-border/70 bg-secondary">
-                <img src={cardImage(reportCard.streamer, reportCard.star || 0)} alt={reportCard.streamer.name} className="h-full w-full object-cover" />
-                <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[9px] font-black text-amber-300">{reportCard.star || 0}★</span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-bold truncate">{reportCard.streamer.name}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{reportCard.streamer.channel_id}</p>
-                <p className="mt-1 text-[10px] text-muted-foreground">{reportCard.star || 0}성 카드 이미지를 신고합니다.</p>
-              </div>
-            </div>
-
-            {/* 신고 사유 선택 */}
-            <div className="mt-4 space-y-1.5">
-              <p className="text-xs font-bold text-muted-foreground">신고 사유</p>
-              {REPORT_REASONS.map((r) => (
-                <label key={r} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition ${reportReason === r ? 'border-red-500/50 bg-red-500/10 font-bold text-foreground' : 'border-border bg-secondary/30 text-muted-foreground hover:bg-secondary/60'}`}>
-                  <input type="radio" name="report-reason" value={r} checked={reportReason === r} onChange={() => setReportReason(r)} className="accent-red-500" />
-                  {r}
-                </label>
-              ))}
-              {reportReason === '기타' && (
-                <textarea
-                  value={reportCustom}
-                  onChange={(e) => setReportCustom(e.target.value)}
-                  maxLength={500}
-                  rows={3}
-                  placeholder="신고 사유를 직접 입력해 주세요. (최대 500자)"
-                  className="mt-1 w-full resize-none rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
-                />
-              )}
-            </div>
-
-            <div className="mt-5 flex gap-2">
-              <button
-                onClick={() => setReportCard(null)}
-                disabled={reportSubmitting}
-                className="flex-1 rounded-lg bg-secondary px-4 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >취소</button>
-              <button
-                onClick={handleReport}
-                disabled={reportSubmitting || !reportReason || (reportReason === '기타' && !reportCustom.trim())}
-                className="flex-1 rounded-lg bg-red-500 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50 disabled:pointer-events-none"
-              >{reportSubmitting ? '접수 중…' : '신고 접수'}</button>
-            </div>
-          </div>
-        </div>
+      {/* 이미지 신고 모달 (자기완결형 컴포넌트로 분리) */}
+      {reportCard && (
+        <ReportCardModal card={reportCard} onClose={() => setReportCard(null)} onResult={showAlert} />
       )}
 
       {/* 코스메틱 장착 모달 */}

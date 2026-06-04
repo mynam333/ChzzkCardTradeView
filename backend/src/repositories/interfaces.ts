@@ -127,6 +127,8 @@ export interface UserCard {
 // 1. 유저 리포지토리 인터페이스
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
+  /** 여러 사용자를 ID 배열로 한 번에 조회합니다(N+1 방지). */
+  findByIds(ids: string[]): Promise<User[]>;
   /** 닉네임으로 사용자를 조회합니다(거래 상대 지정용). 동명이인 시 가장 먼저 가입한 1명. */
   findByUsername(username: string): Promise<User | null>;
   /** 닉네임 부분일치로 사용자 목록을 검색합니다(거래 상대 검색용). */
@@ -172,6 +174,8 @@ export interface UserRanking extends User {
 export interface IStreamerRepository {
   findAll(): Promise<Streamer[]>;
   findById(channelId: string): Promise<Streamer | null>;
+  /** 여러 스트리머를 channel_id 배열로 한 번에 조회합니다(N+1 방지). */
+  findByIds(channelIds: string[]): Promise<Streamer[]>;
   save(streamer: Streamer): Promise<void>;
   /** 지정한 별(0~5성) 슬롯의 커스텀 카드 이미지를 갱신합니다. star 미지정 시 0성. */
   updateCustomImage(channelId: string, imageUrl: string | null, star?: number): Promise<void>;
@@ -229,6 +233,8 @@ export interface IReportRepository {
   create(report: CardReport): Promise<CardReport>;
   updateStatus(reportId: number, status: 'resolved' | 'rejected'): Promise<void>;
   countPending(): Promise<number>;
+  /** 동일 신고자가 같은 스트리머 카드(별 포함)에 대해 이미 미처리(pending) 신고를 했는지 여부 (중복 신고 차단용) */
+  hasPendingReport(reporterId: string, channelId: string, star: number): Promise<boolean>;
 }
 
 // 5. 공지사항 리포지토리 인터페이스

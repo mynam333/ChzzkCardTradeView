@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
 import { JWT_SECRET, IS_PRODUCTION } from '../config';
 import { encryptToken } from '../services/cryptoService';
+import { setSessionCookie, clearSessionCookie } from '../services/sessionCookie';
 
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
@@ -191,6 +192,9 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
+    // httpOnly 쿠키로 세션 발급(XSS 토큰 탈취 방지). token도 함께 반환하여 점진적 전환 지원.
+    setSessionCookie(res, sessionToken);
+
     return res.status(200).json({
       message: '치지직 인증을 통해 로그인되었습니다.',
       token: sessionToken,
@@ -211,6 +215,15 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       details: IS_PRODUCTION ? undefined : err.message
     });
   }
+};
+
+/**
+ * 로그아웃 — httpOnly 세션 쿠키 제거
+ * (Bearer 토큰을 쓰는 클라이언트는 추가로 로컬 토큰을 폐기해야 함)
+ */
+export const logout = (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  return res.status(200).json({ message: '로그아웃되었습니다.' });
 };
 
 // 헬퍼 함수

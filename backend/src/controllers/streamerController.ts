@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { streamerRepository } from '../repositories';
 import { getDbMode } from '../services/db';
-import { resizeAndConvertToWebp } from '../services/imageService';
+import { resizeAndConvertToWebp, deleteLocalUploadByUrl } from '../services/imageService';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import fs from 'fs';
@@ -28,7 +28,10 @@ export const deleteOwnCustomImage = async (req: AuthenticatedRequest, res: Respo
     if (!streamer) {
       return res.status(404).json({ error: 'NotFound', message: '존재하지 않는 스트리머 채널입니다.' });
     }
+    // 해당 슬롯의 기존 로컬 업로드 파일 정리 후 DB에서 제거
+    const prevUrl = (streamer.custom_images && streamer.custom_images[star]) || (star === 0 ? streamer.custom_image_url : null);
     await streamerRepository.updateCustomImage(channel_id, null, star);
+    deleteLocalUploadByUrl(prevUrl);
     return res.status(200).json({ message: `${star}성 카드 이미지가 삭제되었습니다.`, channel_id, star });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '이미지 삭제 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -103,7 +106,10 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     const imageUrl = `${backendBase.replace(/\/$/, '')}/uploads/${folderName}/${encodeURIComponent(fileName)}`;
 
     // 3. 데이터베이스 정보 갱신 (해당 별 슬롯에 저장)
+    // 같은 슬롯의 이전 로컬 업로드 파일은 교체되므로 삭제하여 디스크 누적(orphan) 방지
+    const prevUrl = (streamer.custom_images && streamer.custom_images[star]) || (star === 0 ? streamer.custom_image_url : null);
     await streamerRepository.updateCustomImage(channel_id, imageUrl, star);
+    if (prevUrl && prevUrl !== imageUrl) deleteLocalUploadByUrl(prevUrl);
 
     return res.status(200).json({
       message: `${star}성 스트리머 카드 이미지가 성공적으로 최적화 및 업로드되었습니다.`,

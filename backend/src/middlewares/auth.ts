@@ -3,27 +3,29 @@ import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
 import { AuthenticatedRequest } from './admin';
 import { JWT_SECRET, IS_PRODUCTION } from '../config';
+import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
 
 /**
- * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어
+ * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어.
+ * 우선순위: httpOnly 세션 쿠키 → Authorization: Bearer 헤더 (둘 다 지원하여 점진적 전환).
  */
 export const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
+  // 1) httpOnly 세션 쿠키 우선
+  let token: string | undefined = (req as any).cookies?.[SESSION_COOKIE_NAME];
 
-  if (!authHeader) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: '인증 헤더(Authorization)가 제공되지 않았습니다.'
-    });
+  // 2) 없으면 Authorization: Bearer 헤더 폴백
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const [type, headerToken] = authHeader.split(' ');
+      if (type === 'Bearer' && headerToken) token = headerToken;
+    }
   }
 
-  const [type, token] = authHeader.split(' ');
-
-  // 오직 표준 Bearer JWT 검증만 수행
-  if (type !== 'Bearer' || !token) {
+  if (!token) {
     return res.status(401).json({
       error: 'Unauthorized',
-      message: '유효한 Bearer 토큰 형식이 아닙니다.'
+      message: '인증 정보가 제공되지 않았습니다. (세션 쿠키 또는 Bearer 토큰 필요)'
     });
   }
 

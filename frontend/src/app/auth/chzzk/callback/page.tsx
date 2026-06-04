@@ -3,7 +3,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '../../../AppContext';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, setAuthFlag } from '@/lib/api';
 
 import { Loader2 } from 'lucide-react';
 
@@ -46,11 +46,11 @@ const ChzzkCallbackContent: React.FC = () => {
           role: data.user.role,
           point: data.user.point,
           lastFreeDraw: null,
-          representativeCardChannelId: null,
-          token: data.token
+          representativeCardChannelId: null
         };
 
-        localStorage.setItem('cctv_jwt_token', data.token);
+        // 인증은 백엔드가 발급한 httpOnly 세션 쿠키로 유지됨. JS에는 민감 토큰 대신 비민감 플래그만 저장.
+        setAuthFlag();
 
         if (setUser) {
           setUser(sessionUser);

@@ -10,26 +10,38 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 /**
- * 백엔드 API fetch 래퍼 (JWT 토큰 자동 첨부)
+ * 로그인 상태 플래그.
+ * 실제 인증은 httpOnly 세션 쿠키(JS 접근 불가)로 처리되며, 여기에는 민감한 JWT를
+ * 저장하지 않습니다. UI에서 "로그인했는가"만 빠르게 판별하기 위한 비민감 플래그입니다.
+ */
+const AUTH_FLAG_KEY = 'cctv_auth';
+export const setAuthFlag = (): void => {
+  if (typeof window !== 'undefined') localStorage.setItem(AUTH_FLAG_KEY, '1');
+};
+export const clearAuthFlag = (): void => {
+  if (typeof window !== 'undefined') localStorage.removeItem(AUTH_FLAG_KEY);
+};
+export const isAuthed = (): boolean =>
+  typeof window !== 'undefined' && !!localStorage.getItem(AUTH_FLAG_KEY);
+
+/**
+ * 백엔드 API fetch 래퍼.
+ * 인증은 httpOnly 세션 쿠키로 전송되므로(credentials: 'include') JS가 토큰을 다루지 않습니다.
  */
 export const apiFetch = async (
   path: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  const token =
-    typeof window !== 'undefined'
-      ? localStorage.getItem('cctv_jwt_token')
-      : null;
-
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
+    // httpOnly 세션 쿠키 전송 (CORS credentials)
+    credentials: 'include',
   });
 
   // 밴 상태 체크 인터셉터 (403 BannedUser 예외)
@@ -39,9 +51,9 @@ export const apiFetch = async (
       const data = await clone.json();
       if (data && data.error === 'BannedUser') {
         if (typeof window !== 'undefined') {
-          // 경고창을 띄우고 즉시 토큰 폐기 및 강제 이탈(홈 화면 리다이렉트)
+          // 경고창을 띄우고 즉시 세션 플래그 폐기 및 강제 이탈(홈 화면 리다이렉트)
           alert(data.message || '이용 정지 조치된 계정입니다.');
-          localStorage.removeItem('cctv_jwt_token');
+          clearAuthFlag();
           window.location.href = '/';
         }
       }

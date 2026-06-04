@@ -21,8 +21,8 @@ setInterval(() => {
 }, 60 * 1000).unref?.();
 
 const getClientIp = (req: Request): string => {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
+  // app.set('trust proxy', 1) 설정 하에서 Express가 신뢰 프록시 체인을 반영해 req.ip를 산출하므로
+  // 클라이언트가 임의로 위조한 X-Forwarded-For로 버킷을 우회할 수 없습니다.
   return req.ip || req.socket.remoteAddress || 'unknown';
 };
 

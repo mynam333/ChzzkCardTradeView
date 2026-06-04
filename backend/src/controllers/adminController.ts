@@ -12,6 +12,7 @@ import {
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
+import { deleteLocalUploadByUrl } from '../services/imageService';
 
 /**
  * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 삭제 시점 시세만큼 보상 지급
@@ -88,11 +89,15 @@ export const resetStreamerImage = async (req: Request, res: Response) => {
     }
 
     if (star === null) {
-      // 전체 별 슬롯 초기화
+      // 전체 별 슬롯 초기화 + 로컬 업로드 파일 정리
+      const urls = [streamer.custom_image_url, ...(streamer.custom_images || [])];
       await streamerRepository.resetAllCustomImages(channel_id);
+      for (const u of urls) deleteLocalUploadByUrl(u);
     } else {
-      // 특정 별 슬롯만 초기화
+      // 특정 별 슬롯만 초기화 + 해당 파일 정리
+      const prevUrl = (streamer.custom_images && streamer.custom_images[star]) || (star === 0 ? streamer.custom_image_url : null);
       await streamerRepository.updateCustomImage(channel_id, null, star);
+      deleteLocalUploadByUrl(prevUrl);
     }
 
     return res.status(200).json({
@@ -126,7 +131,9 @@ export const banStreamerImage = async (req: Request, res: Response) => {
     // 업로드 권한 차단
     await streamerRepository.updateImageBanStatus(channel_id, true);
     // 차단 완료 후 즉각적인 기존 커스텀 이미지(전체 별 슬롯) 초기화 병행 (안전 조치)
+    const urls = [streamer.custom_image_url, ...(streamer.custom_images || [])];
     await streamerRepository.resetAllCustomImages(channel_id);
+    for (const u of urls) deleteLocalUploadByUrl(u);
 
     return res.status(200).json({
       message: `스트리머(${streamer.name})의 카드 이미지 업로드 권한이 성공적으로 차단되었으며, 기존 커스텀 이미지가 수거되었습니다.`,
@@ -351,15 +358,15 @@ export const getReports = async (req: Request, res: Response) => {
   try {
     const reports = await reportRepository.findAll();
 
-    // 신고자 닉네임 / 대상 스트리머 닉네임을 함께 제공 (중복 ID는 한 번씩만 조회)
+    // 신고자 닉네임 / 대상 스트리머 닉네임을 함께 제공 (배치 조회로 N+1 방지)
     const reporterIds = [...new Set(reports.map((r) => r.reporter_id))];
     const channelIds = [...new Set(reports.map((r) => r.channel_id))];
-    const [reporterEntries, streamerEntries] = await Promise.all([
-      Promise.all(reporterIds.map(async (id) => [id, (await userRepository.findById(id).catch(() => null))?.username || null] as const)),
-      Promise.all(channelIds.map(async (id) => [id, (await streamerRepository.findById(id).catch(() => null))?.name || null] as const))
+    const [reporters, streamers] = await Promise.all([
+      userRepository.findByIds(reporterIds).catch(() => []),
+      streamerRepository.findByIds(channelIds).catch(() => [])
     ]);
-    const reporterNameMap = Object.fromEntries(reporterEntries);
-    const streamerNameMap = Object.fromEntries(streamerEntries);
+    const reporterNameMap = Object.fromEntries(reporters.map((u) => [u.id, u.username]));
+    const streamerNameMap = Object.fromEntries(streamers.map((s) => [s.channel_id, s.name]));
 
     const enriched = reports.map((r) => ({
       ...r,

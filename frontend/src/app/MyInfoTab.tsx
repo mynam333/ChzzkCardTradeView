@@ -268,13 +268,12 @@ export const MyInfoTab: React.FC = () => {
     formData.append('channel_id', user.id);
     formData.append('star', String(uploadStar));
 
-    const token = localStorage.getItem('cctv_jwt_token');
     try {
-      // 멀티파트 업로드는 apiFetch(JSON) 대신 직접 fetch 사용
+      // 멀티파트 업로드는 apiFetch(JSON) 대신 직접 fetch 사용 — 인증은 httpOnly 쿠키로 전송
       const res = await fetch(`${API_BASE_URL}/streamers/me/image`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
+        body: formData,
+        credentials: 'include'
       });
       const data = await res.json();
       if (res.ok) {

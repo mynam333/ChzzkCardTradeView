@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import https from 'https';
 import fs from 'fs';
@@ -17,8 +19,21 @@ initVapid();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// 리버스 프록시(nginx 등) 뒤에서 X-Forwarded-For/Proto를 신뢰하여 req.ip·https 판별이 정확하도록 설정.
+// (rate limiter가 클라이언트 위조 헤더로 우회되지 않도록 첫 프록시 1홉만 신뢰)
+app.set('trust proxy', 1);
+
+// 보안 헤더 (X-Frame-Options·X-Content-Type-Options·HSTS 등).
+// 정적 업로드 이미지를 타 오리진(프론트)에서 로드할 수 있도록 CORP는 cross-origin 허용.
+// API 서버라 HTML을 서빙하지 않으므로 CSP는 비활성화(과도한 제약 회피).
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+
 // 미들웨어 설정
 // CORS: 환경변수로 지정된 오리진 화이트리스트만 허용 (origin 없는 동일출처/서버간 요청은 통과)
+// httpOnly 세션 쿠키 사용을 위해 credentials 허용.
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || CORS_ALLOWED_ORIGINS.includes(origin)) {
@@ -26,12 +41,16 @@ app.use(cors({
     } else {
       callback(new Error(`CORS 정책에 의해 차단된 오리진입니다: ${origin}`));
     }
-  }
+  },
+  credentials: true
 }));
 app.use(express.json());
+app.use(cookieParser());
 
-// 로컬 SQLite 업로드 이미지 정적 서빙 경로 마운트
-app.use('/uploads', express.static(path.join(__dirname, '../../public/uploads')));
+// 로컬 SQLite 업로드 이미지 정적 서빙 경로 마운트 (타 오리진 로드 허용)
+app.use('/uploads', express.static(path.join(__dirname, '../../public/uploads'), {
+  setHeaders: (res) => { res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); }
+}));
 
 // 통합 API 라우터 등록
 app.use('/api', apiRouter);

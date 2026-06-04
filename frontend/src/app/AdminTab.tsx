@@ -20,6 +20,8 @@ import {
   Database
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
+import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
@@ -69,14 +71,6 @@ export const AdminTab: React.FC = () => {
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
 
-  // 유저 목록 (서버 검색 + 페이지네이션)
-  const [users, setUsers] = useState<any[]>([]);
-  const [userSearch, setUserSearch] = useState('');
-  const [userPage, setUserPage] = useState(1);
-  const [userTotal, setUserTotal] = useState(0);
-  const [userTotalPages, setUserTotalPages] = useState(1);
-  const [usersLoading, setUsersLoading] = useState(false);
-
   // 스트리머 이미지 검색/페이지네이션
   const [streamerSearch, setStreamerSearch] = useState('');
   const [streamerPage, setStreamerPage] = useState(1);
@@ -92,14 +86,14 @@ export const AdminTab: React.FC = () => {
   const [selectedCats, setSelectedCats] = useState<string[]>([]);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [orphans, setOrphans] = useState<any[]>([]);
+  const [orphans, setOrphans] = useState<OrphanImage[]>([]);
   const [orphanInfo, setOrphanInfo] = useState<{ total_files: number; referenced: number } | null>(null);
   const [selectedOrphans, setSelectedOrphans] = useState<string[]>([]);
   const [orphanLoading, setOrphanLoading] = useState(false);
   const [deletingOrphans, setDeletingOrphans] = useState(false);
 
   // 상점 관리
-  const [shopItems, setShopItems] = useState<any[]>([]);
+  const [shopItems, setShopItems] = useState<ShopItem[]>([]);
   const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
@@ -108,7 +102,7 @@ export const AdminTab: React.FC = () => {
   const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
 
   // 쿠폰
-  const [coupons, setCoupons] = useState<any[]>([]);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [couponStreamers, setCouponStreamers] = useState<any[]>([]);
   const [couponStreamerSearch, setCouponStreamerSearch] = useState('');
   const [couponForm, setCouponForm] = useState({
@@ -126,7 +120,7 @@ export const AdminTab: React.FC = () => {
   const [couponCosmetics, setCouponCosmetics] = useState<any[]>([]);
 
   // 공지
-  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [noticeForm, setNoticeForm] = useState({ title: '', content: '', is_popup: false });
 
   // 푸시
@@ -139,7 +133,7 @@ export const AdminTab: React.FC = () => {
   const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '' });
 
   // 신고/밴
-  const [reports, setReports] = useState<any[]>([]);
+  const [reports, setReports] = useState<AdminReport[]>([]);
   const [banUserId, setBanUserId] = useState('');
   const [banReason, setBanReason] = useState('');
 
@@ -209,24 +203,6 @@ export const AdminTab: React.FC = () => {
     fetchBannedUsers(bannedPage, bannedSearch, bannedSortBy, bannedSortOrder);
   }, [bannedPage]);
 
-  // 유저 탭: 검색어 디바운스(닉네임/ID) → 1페이지부터 재조회
-  useEffect(() => {
-    if (!isAdmin || subTab !== 'users') return;
-    const t = setTimeout(() => {
-      setUserPage(1);
-      fetchUsers(1, userSearch);
-    }, 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userSearch, subTab, isAdmin]);
-
-  // 유저 탭: 페이지 변경 시 재조회
-  useEffect(() => {
-    if (!isAdmin || subTab !== 'users') return;
-    fetchUsers(userPage, userSearch);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPage]);
-
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -244,45 +220,6 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setStats(await res.json());
     } catch { /* noop */ }
   };
-  const USERS_PER_PAGE = 20;
-  const fetchUsers = async (page = userPage, keyword = userSearch) => {
-    setUsersLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: String(USERS_PER_PAGE) });
-      if (keyword.trim()) params.set('q', keyword.trim());
-      const res = await apiFetch(`/admin/users?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users || []);
-        setUserTotal(data.total || 0);
-        setUserTotalPages(data.total_pages || 1);
-      }
-    } catch { /* noop */ } finally {
-      setUsersLoading(false);
-    }
-  };
-
-  // 닉네임/ID 클립보드 복사 (HTTPS 미지원 환경 폴백 포함)
-  const copyText = async (text: string, label: string) => {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      toast(`${label} 복사됨: ${text}`);
-    } catch {
-      toast('복사에 실패했습니다.');
-    }
-  };
-
   const fetchCoupons = async () => {
     try {
       const res = await apiFetch('/admin/coupons');
@@ -909,88 +846,8 @@ export const AdminTab: React.FC = () => {
         </section>
       )}
 
-      {/* 유저 목록 */}
-      {subTab === 'users' && (
-        <section className="space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users className="h-4 w-4" /> 유저 목록 ({userTotal.toLocaleString()})</h3>
-              <button onClick={() => fetchUsers(userPage, userSearch)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
-            </div>
-
-            {/* 검색 */}
-            <input
-              type="text"
-              placeholder="닉네임 또는 채널 ID로 검색"
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              className="mb-1 w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
-            />
-            <p className="mb-3 text-[10px] text-muted-foreground">프로필 이미지·닉네임·채널 ID를 클릭하면 복사됩니다.</p>
-
-            <div className="space-y-2">
-              {usersLoading ? (
-                <p className="py-8 text-center text-xs text-muted-foreground">불러오는 중…</p>
-              ) : users.length === 0 ? (
-                <p className="py-8 text-center text-xs text-muted-foreground">{userSearch.trim() ? '검색 결과가 없습니다.' : '유저가 없습니다.'}</p>
-              ) : users.map((u) => (
-                <div key={u.id} className="flex items-center gap-3 rounded-lg bg-secondary/30 p-2.5">
-                  {/* 프로필 이미지 (클릭 시 닉네임 복사) */}
-                  <button
-                    type="button"
-                    onClick={() => copyText(u.username, '닉네임')}
-                    title="닉네임 복사"
-                    className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full border border-border bg-secondary"
-                  >
-                    {u.avatar_url
-                      ? <img src={u.avatar_url} alt={u.username} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                      : <span className="flex h-full w-full items-center justify-center text-[10px] font-bold text-muted-foreground">{(u.username || '?').slice(0, 2)}</span>}
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    {/* 닉네임 (클릭 복사) */}
-                    <button
-                      type="button"
-                      onClick={() => copyText(u.username, '닉네임')}
-                      title="닉네임 복사"
-                      className="flex max-w-full items-center gap-1.5 text-left"
-                    >
-                      <span className="truncate text-xs font-bold text-foreground hover:underline">{u.username}</span>
-                      {u.role === 'ADMIN' && <span className="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-500">ADMIN</span>}
-                      {u.banned_until && new Date(u.banned_until).getTime() > Date.now() && (
-                        <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">정지</span>
-                      )}
-                    </button>
-                    {/* 채널 ID (클릭 복사) */}
-                    <button
-                      type="button"
-                      onClick={() => copyText(u.id, '채널 ID')}
-                      title="채널 ID 복사"
-                      className="block max-w-full truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                    >{u.id}</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* 페이지네이션 */}
-            {userTotalPages > 1 && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <button
-                  onClick={() => setUserPage((p) => Math.max(1, p - 1))}
-                  disabled={userPage <= 1 || usersLoading}
-                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                >이전</button>
-                <span className="text-xs font-bold text-muted-foreground">{userPage} / {userTotalPages}</span>
-                <button
-                  onClick={() => setUserPage((p) => Math.min(userTotalPages, p + 1))}
-                  disabled={userPage >= userTotalPages || usersLoading}
-                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                >다음</button>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+      {/* 유저 목록 (자기완결형 컴포넌트로 분리) */}
+      {subTab === 'users' && <AdminUsersTab />}
 
       {/* 쿠폰 */}
       {subTab === 'coupons' && (
@@ -1124,7 +981,7 @@ export const AdminTab: React.FC = () => {
                 <p className="text-xs text-muted-foreground text-center py-6">발급된 쿠폰이 없습니다.</p>
               ) : coupons.map((c) => {
                 const reward = c.reward_type === 'card'
-                  ? `🃏 ${streamerName(c.reward_channel_id)} 카드 ×${c.reward_quantity}`
+                  ? `🃏 ${streamerName(c.reward_channel_id || '')} 카드 ×${c.reward_quantity}`
                   : c.reward_type === 'cosmetic'
                   ? `🎨 ${couponCosmetics.find((it) => it.id === c.reward_item_id)?.name || `아이템#${c.reward_item_id}`} ×${c.reward_quantity}`
                   : `💰 ${(c.points || 0).toLocaleString()}P`;

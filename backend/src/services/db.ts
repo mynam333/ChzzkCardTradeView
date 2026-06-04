@@ -223,3 +223,12 @@ export const getSupabaseClient = (): SupabaseClient => {
   }
   return supabaseClient;
 };
+
+/**
+ * 테스트 전용: in-memory SQLite 인스턴스를 주입합니다.
+ * (운영 코드 경로에서는 호출되지 않습니다)
+ */
+export const __setSqliteDbForTest = (db: Database.Database | null): void => {
+  sqliteDb = db;
+  dbMode = 'LOCAL_SQL';
+};

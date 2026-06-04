@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
-import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert } from 'lucide-react';
+import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { StreamerRegisterModal } from './StreamerRegisterModal';
 
 interface Notice {
   id: number;
@@ -126,6 +127,19 @@ export const MainTab: React.FC = () => {
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500 dark:from-blue-600 dark:via-sky-700 dark:to-indigo-900 p-6 text-white shadow-lg dark:shadow-xl md:p-10">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
         <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-sky-400/20 blur-2xl"></div>
+
+        {/* 스트리머 추가 버튼 (그라디언트 우측, 로그인 시 노출) — 글래스 톤으로 두 모드 그라디언트에 모두 어울림 */}
+        {user && (
+          <StreamerRegisterModal
+            onRegistered={fetchHotStreamers}
+            className="group absolute right-5 top-5 z-20 inline-flex items-center gap-2 rounded-2xl border border-white/30 bg-white/15 px-3.5 py-2.5 text-xs font-bold text-white shadow-lg shadow-black/10 ring-1 ring-inset ring-white/10 backdrop-blur-md transition-all hover:border-white/50 hover:bg-white/25 hover:shadow-xl active:scale-95 md:right-8 md:top-1/2 md:-translate-y-1/2 md:px-5 md:py-3 md:text-sm"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/25 transition group-hover:rotate-90 group-hover:bg-white/40 md:h-7 md:w-7">
+              <Plus className="h-4 w-4 md:h-4.5 md:w-4.5" />
+            </span>
+            <span>스트리머 추가</span>
+          </StreamerRegisterModal>
+        )}
 
         <div className="relative z-10 max-w-xl">
           <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">

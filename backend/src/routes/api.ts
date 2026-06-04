@@ -7,7 +7,7 @@ import { uploadCustomImage, deleteOwnCustomImage } from '../controllers/streamer
 import { reportStreamerCard } from '../controllers/reportController';
 import { proxyImage } from '../controllers/imageProxyController';
 import { getResetInfo, resetData, listOrphanImages, deleteOrphanImages } from '../controllers/adminMaintenanceController';
-import { getChzzkAuthUrl, handleChzzkCallback } from '../controllers/chzzkAuthController';
+import { getChzzkAuthUrl, handleChzzkCallback, logout } from '../controllers/chzzkAuthController';
 import {
   resetStreamerImage,
   banStreamerImage,
@@ -108,12 +108,32 @@ const tradeLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'trade' });
 const couponLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'coupon' });
 const authLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'auth' });
 const registerLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'register' });
+const reportLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'report' });
 
-// Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한)
+// Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한 + 이미지 MIME 사전 필터)
+const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    // 비이미지 업로드를 5MB 버퍼링 전에 조기 차단 (sharp 처리 이전 1차 방어)
+    if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
+    else cb(new Error('이미지 파일(JPEG/PNG/WebP/GIF/AVIF)만 업로드할 수 있습니다.'));
+  }
 });
+
+// Multer 에러(용량 초과·비이미지 등)를 500이 아닌 400 JSON으로 일관 처리하는 래퍼
+const uploadSingleImage = (req: any, res: any, next: any) => {
+  upload.single('image')(req, res, (err: any) => {
+    if (err) {
+      const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
+        ? '이미지 용량은 5MB 이하만 업로드할 수 있습니다.'
+        : (err.message || '파일 업로드 중 오류가 발생했습니다.');
+      return res.status(400).json({ error: 'BadRequest', message: msg });
+    }
+    next();
+  });
+};
 
 // ==========================================
 // 헬스체크 엔드포인트 (/api/health)
@@ -131,6 +151,8 @@ router.get('/health', (req, res) => {
 // ==========================================
 router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
+// 로그아웃 — httpOnly 세션 쿠키 제거
+router.post('/auth/logout', logout);
 router.get('/image-proxy', proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.get('/users/ranking', getUserRankings);
@@ -219,7 +241,7 @@ router.get('/streamers', async (req, res) => {
 });
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
-router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, upload.single('image'), uploadCustomImage);
+router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, uploadSingleImage, uploadCustomImage);
 // 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제
 router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, deleteOwnCustomImage);
 
@@ -229,8 +251,8 @@ router.get('/streamers/:channel_id', getStreamerDetail);
 // ==========================================
 // 2. 일반 유저 및 공용 기능
 // ==========================================
-// 스트리머 부적절 카드 신고 (스냅샷 보존형)
-router.post('/cards/:channel_id/report', authMiddleware, banCheckMiddleware, reportStreamerCard);
+// 스트리머 부적절 카드 신고 (스냅샷 보존형) — 분당 10회 제한 + 컨트롤러에서 중복 신고 차단
+router.post('/cards/:channel_id/report', authMiddleware, banCheckMiddleware, reportLimiter, reportStreamerCard);
 
 // 쿠폰 등록(사용) API
 router.post('/coupons/claim', authMiddleware, banCheckMiddleware, couponLimiter, claimCoupon);
