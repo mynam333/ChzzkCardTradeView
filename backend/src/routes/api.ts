@@ -15,6 +15,8 @@ import {
   deleteStreamerCards,
   banUser,
   unbanUser,
+  getBannedUsers,
+  bulkUpdateBans,
   getReports,
   resolveReport,
   getFreeDrawInterval,
@@ -265,6 +267,12 @@ router.get('/admin/reset/info', authMiddleware, adminMiddleware, getResetInfo);
 router.post('/admin/reset', authMiddleware, adminMiddleware, resetData);
 router.get('/admin/uploads/orphans', authMiddleware, adminMiddleware, listOrphanImages);
 router.post('/admin/uploads/orphans/delete', authMiddleware, adminMiddleware, deleteOrphanImages);
+
+// 제재된 유저 목록 조회 (닉네임/ID 검색, 정렬, 페이지네이션 지원)
+router.get('/admin/users/banned', authMiddleware, adminMiddleware, getBannedUsers);
+
+// 선택된 유저들의 제재 상태 일괄 수정
+router.post('/admin/users/banned/bulk-update', authMiddleware, adminMiddleware, bulkUpdateBans);
 
 // 특정 유저에 대한 활동 제재 실행 (1일, 7일, 30일, 영구 정지)
 router.post('/admin/users/:user_id/ban', authMiddleware, adminMiddleware, banUser);

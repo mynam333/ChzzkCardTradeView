@@ -77,6 +77,35 @@ export class SqliteUserRepository implements IUserRepository {
     return { users: rows.map((r) => this.mapUser(r)), total };
   }
 
+  async listBannedUsers(keyword: string, sortBy: string, sortOrder: 'asc' | 'desc', limit: number, offset: number): Promise<{ users: User[]; total: number }> {
+    const db = this.getDb();
+    const kw = (keyword || '').trim();
+
+    // 허용 정렬 컬럼 화이트리스트
+    const validSortColumns = ['banned_until', 'username', 'id', 'created_at'];
+    const orderCol = validSortColumns.includes(sortBy) ? sortBy : 'banned_until';
+    const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    let countQuery = "SELECT COUNT(*) AS c FROM users WHERE banned_until IS NOT NULL AND datetime(banned_until) > datetime('now')";
+    let selectQuery = "SELECT * FROM users WHERE banned_until IS NOT NULL AND datetime(banned_until) > datetime('now')";
+    const params: any[] = [];
+
+    if (kw) {
+      const like = `%${kw}%`;
+      countQuery += ' AND (username LIKE ? OR id LIKE ?)';
+      selectQuery += ' AND (username LIKE ? OR id LIKE ?)';
+      params.push(like, like);
+    }
+
+    selectQuery += ` ORDER BY ${orderCol} ${orderDir} LIMIT ? OFFSET ?`;
+    const total = (db.prepare(countQuery).get(...params) as any)?.c || 0;
+
+    params.push(limit, offset);
+    const rows = db.prepare(selectQuery).all(...params) as any[];
+
+    return { users: rows.map((r) => this.mapUser(r)), total };
+  }
+
   async create(user: User): Promise<User> {
     this.getDb().prepare(
       'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token) VALUES (?, ?, ?, ?, ?, ?, ?)'

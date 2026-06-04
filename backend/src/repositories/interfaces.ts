@@ -149,6 +149,8 @@ export interface IUserRepository {
   count(): Promise<number>;
   /** 관리자용 유저 목록(닉네임/ID 부분검색 + 페이지네이션). keyword 비면 전체. */
   listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }>;
+  /** 제재된 유저 목록(닉네임/ID 부분검색 + 정렬 + 페이지네이션). */
+  listBannedUsers(keyword: string, sortBy: string, sortOrder: 'asc' | 'desc', limit: number, offset: number): Promise<{ users: User[]; total: number }>;
   /** blockerId가 blockedId를 차단합니다(멱등). */
   blockUser(blockerId: string, blockedId: string): Promise<void>;
   /** blockerId가 blockedId 차단을 해제합니다. */

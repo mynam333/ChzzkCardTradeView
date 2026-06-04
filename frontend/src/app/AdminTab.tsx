@@ -152,6 +152,19 @@ export const AdminTab: React.FC = () => {
   const [mActive, setMActive] = useState(false);
   const [isSavingMaintenance, setIsSavingMaintenance] = useState(false);
 
+  // 제재 유저 관리 상태
+  const [bannedUsers, setBannedUsers] = useState<any[]>([]);
+  const [bannedSearch, setBannedSearch] = useState('');
+  const [bannedPage, setBannedPage] = useState(1);
+  const [bannedTotalPages, setBannedTotalPages] = useState(1);
+  const [bannedSortBy, setBannedSortBy] = useState('banned_until');
+  const [bannedSortOrder, setBannedSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedBannedUserIds, setSelectedBannedUserIds] = useState<string[]>([]);
+  const [bulkBanDuration, setBulkBanDuration] = useState('1d');
+  const [bulkBanReason, setBulkBanReason] = useState('');
+  const [isBannedUsersLoading, setIsBannedUsersLoading] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+
   const isAdmin = user?.role === 'ADMIN';
 
   useEffect(() => {
@@ -159,7 +172,10 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'dashboard') fetchStats();
     if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); fetchCouponCosmetics(); }
     if (subTab === 'announcements') fetchAnnouncements();
-    if (subTab === 'reports') fetchReports();
+    if (subTab === 'reports') {
+      fetchReports();
+      fetchBannedUsers(1, bannedSearch, bannedSortBy, bannedSortOrder);
+    }
     if (subTab === 'streamers') fetchCouponStreamers(true);
     if (subTab === 'shop') {
       fetchShopItems();
@@ -176,6 +192,22 @@ export const AdminTab: React.FC = () => {
       fetchMaintenanceStatus();
     }
   }, [subTab, isAdmin, sentPushesPage]);
+
+  // 제재 유저 검색/정렬 변경 시 재조회 (디바운스 포함)
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'reports') return;
+    const t = setTimeout(() => {
+      setBannedPage(1);
+      fetchBannedUsers(1, bannedSearch, bannedSortBy, bannedSortOrder);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [bannedSearch, bannedSortBy, bannedSortOrder, subTab, isAdmin]);
+
+  // 제재 유저 페이지 변경 시 재조회
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'reports') return;
+    fetchBannedUsers(bannedPage, bannedSearch, bannedSortBy, bannedSortOrder);
+  }, [bannedPage]);
 
   // 유저 탭: 검색어 디바운스(닉네임/ID) → 1페이지부터 재조회
   useEffect(() => {
@@ -474,6 +506,76 @@ export const AdminTab: React.FC = () => {
       const data = await res.json();
       toast(data.message || '해제되었습니다.');
     } catch { toast('서버 통신 에러'); }
+  };
+
+  const fetchBannedUsers = async (page = bannedPage, keyword = bannedSearch, sortBy = bannedSortBy, sortOrder = bannedSortOrder) => {
+    setIsBannedUsersLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '10',
+        sortBy,
+        sortOrder
+      });
+      if (keyword.trim()) params.set('q', keyword.trim());
+
+      const res = await apiFetch(`/admin/users/banned?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBannedUsers(data.users || []);
+        setBannedTotalPages(data.total_pages || 1);
+      }
+    } catch { /* noop */ } finally {
+      setIsBannedUsersLoading(false);
+    }
+  };
+
+  const handleBulkBanUpdate = async () => {
+    if (selectedBannedUserIds.length === 0) {
+      toast('제재를 수정할 대상을 1명 이상 선택해 주세요.', 'warning');
+      return;
+    }
+    if (!confirm(`선택한 ${selectedBannedUserIds.length}명의 제재 상태를 변경하시겠습니까?`)) {
+      return;
+    }
+    setIsBulkUpdating(true);
+    try {
+      const res = await apiFetch('/admin/users/banned/bulk-update', {
+        method: 'POST',
+        body: JSON.stringify({
+          userIds: selectedBannedUserIds,
+          duration: bulkBanDuration,
+          reason: bulkBanReason
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '일괄 수정이 완료되었습니다.', 'success');
+        setSelectedBannedUserIds([]);
+        setBulkBanReason('');
+        fetchBannedUsers(bannedPage, bannedSearch, bannedSortBy, bannedSortOrder);
+      } else {
+        toast(data.message || '수정 중 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  const toggleSelectAllBanned = () => {
+    if (selectedBannedUserIds.length === bannedUsers.length) {
+      setSelectedBannedUserIds([]);
+    } else {
+      setSelectedBannedUserIds(bannedUsers.map(u => u.id));
+    }
+  };
+
+  const toggleSelectBannedUser = (id: string) => {
+    setSelectedBannedUserIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   };
 
   // ---- 상점 관리 ----
@@ -1289,6 +1391,228 @@ export const AdminTab: React.FC = () => {
               ))}
               <button onClick={() => handleUnbanUser(banUserId)} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">밴 해제</button>
             </div>
+          </div>
+
+          {/* 제재된 유저 목록 및 관리 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-border/50 pb-2">
+              <h3 className="text-sm font-bold flex items-center gap-1.5 text-red-500">
+                <Users className="h-4 w-4" /> 제재 중인 유저 관리
+              </h3>
+              <button
+                onClick={() => fetchBannedUsers(bannedPage, bannedSearch, bannedSortBy, bannedSortOrder)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* 필터 및 검색 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input
+                type="text"
+                placeholder="닉네임 또는 유저 ID 검색"
+                value={bannedSearch}
+                onChange={(e) => setBannedSearch(e.target.value)}
+                className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs w-full"
+              />
+              <div className="flex gap-2">
+                <select
+                  value={bannedSortBy}
+                  onChange={(e) => setBannedSortBy(e.target.value)}
+                  className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs flex-1"
+                >
+                  <option value="banned_until">제재 해제일</option>
+                  <option value="username">닉네임</option>
+                  <option value="id">유저 ID</option>
+                  <option value="created_at">가입일</option>
+                </select>
+                <select
+                  value={bannedSortOrder}
+                  onChange={(e) => setBannedSortOrder(e.target.value as any)}
+                  className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs w-24"
+                >
+                  <option value="desc">내림차순</option>
+                  <option value="asc">오름차순</option>
+                </select>
+              </div>
+              <div className="text-[10px] text-muted-foreground flex items-center">
+                ※ 제재 해제일이 현재 시간보다 미래인 유저들만 표시됩니다.
+              </div>
+            </div>
+
+            {/* 일괄 수정 컨트롤 */}
+            {selectedBannedUserIds.length > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-500">
+                    선택된 유저 {selectedBannedUserIds.length}명 제재 상태 일괄 수정
+                  </span>
+                  <button
+                    onClick={() => setSelectedBannedUserIds([])}
+                    className="text-[10px] text-muted-foreground hover:text-foreground"
+                  >
+                    선택 해제
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <select
+                    value={bulkBanDuration}
+                    onChange={(e) => setBulkBanDuration(e.target.value)}
+                    className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs w-32"
+                  >
+                    <option value="1d">1일 정지</option>
+                    <option value="7d">7일 정지</option>
+                    <option value="30d">30일 정지</option>
+                    <option value="permanent">영구 정지</option>
+                    <option value="unban">제재 해제 (정상화)</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="제재 변경 사유"
+                    value={bulkBanReason}
+                    onChange={(e) => setBulkBanReason(e.target.value)}
+                    className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs flex-1 min-w-[150px]"
+                  />
+                  <button
+                    onClick={handleBulkBanUpdate}
+                    disabled={isBulkUpdating}
+                    className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 text-xs font-bold disabled:opacity-50 transition"
+                  >
+                    {isBulkUpdating ? '수정 중...' : '일괄 수정 적용'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 테이블 목록 */}
+            <div className="overflow-x-auto rounded-xl border border-border/60">
+              <table className="w-full text-xs text-left border-collapse bg-secondary/10">
+                <thead>
+                  <tr className="border-b border-border/80 bg-secondary/50 text-[10px] font-bold text-muted-foreground">
+                    <th className="p-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={bannedUsers.length > 0 && selectedBannedUserIds.length === bannedUsers.length}
+                        onChange={toggleSelectAllBanned}
+                        className="rounded border-border focus:ring-0"
+                      />
+                    </th>
+                    <th className="p-3">닉네임 / ID</th>
+                    <th className="p-3">제재 상태</th>
+                    <th className="p-3">제재 해제 일시</th>
+                    <th className="p-3">제재 사유</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {isBannedUsersLoading ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-muted-foreground font-bold">
+                        로딩 중...
+                      </td>
+                    </tr>
+                  ) : bannedUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-muted-foreground">
+                        현재 제재 중인 유저가 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    bannedUsers.map((u) => {
+                      const expiration = u.banned_until ? new Date(u.banned_until) : null;
+                      const isPermanent = expiration ? expiration.getFullYear() > 2099 : false;
+                      const formattedExp = expiration
+                        ? isPermanent
+                          ? '영구 정지'
+                          : expiration.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                        : '-';
+
+                      let timeLeftStr = '';
+                      if (expiration && !isPermanent) {
+                        const diff = expiration.getTime() - Date.now();
+                        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                        const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+                        if (days > 0) timeLeftStr = `${days}일 ${hours}시간 남음`;
+                        else timeLeftStr = `${hours}시간 남음`;
+                      }
+
+                      return (
+                        <tr key={u.id} className="hover:bg-secondary/20 transition-colors">
+                          <td className="p-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedBannedUserIds.includes(u.id)}
+                              onChange={() => toggleSelectBannedUser(u.id)}
+                              className="rounded border-border focus:ring-0"
+                            />
+                          </td>
+                          <td className="p-3 min-w-[150px]">
+                            <div className="flex items-center gap-2">
+                              {u.avatar_url ? (
+                                <img
+                                  src={u.avatar_url}
+                                  alt={u.username}
+                                  className="h-6 w-6 rounded-full object-cover shrink-0"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="h-6 w-6 rounded-full bg-secondary flex items-center justify-center text-[8px] font-bold text-muted-foreground shrink-0">
+                                  {(u.username || '?').slice(0, 2)}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="font-bold text-foreground truncate">{u.username}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">{u.id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3 font-semibold">
+                            {isPermanent ? (
+                              <span className="text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded text-[10px]">
+                                영구 정지
+                              </span>
+                            ) : (
+                              <span className="text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded text-[10px]">
+                                {timeLeftStr || '만료 임박'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-muted-foreground font-mono text-[10.5px]">
+                            {formattedExp}
+                          </td>
+                          <td className="p-3 text-foreground break-all max-w-[200px]">
+                            {u.ban_reason || <span className="text-muted-foreground italic">사유 없음</span>}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 페이지네이션 */}
+            {bannedTotalPages > 1 && (
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setBannedPage((p) => Math.max(1, p - 1))}
+                  disabled={bannedPage <= 1 || isBannedUsersLoading}
+                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                >
+                  이전
+                </button>
+                <span className="text-xs font-bold text-muted-foreground">
+                  {bannedPage} / {bannedTotalPages}
+                </span>
+                <button
+                  onClick={() => setBannedPage((p) => Math.min(bannedTotalPages, p + 1))}
+                  disabled={bannedPage >= bannedTotalPages || isBannedUsersLoading}
+                  className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                >
+                  다음
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}

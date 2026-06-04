@@ -165,6 +165,105 @@ export const unbanStreamerImage = async (req: Request, res: Response) => {
 };
 
 /**
+ * 제재된 유저 목록 조회 (닉네임/ID 검색, 정렬, 페이지네이션 지원)
+ */
+export const getBannedUsers = async (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string, 10) || 1;
+  const limit = parseInt(req.query.limit as string, 10) || 10;
+  const keyword = (req.query.q as string) || '';
+  const sortBy = (req.query.sortBy as string) || 'banned_until';
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
+
+  const offset = (page - 1) * limit;
+
+  try {
+    const { users, total } = await userRepository.listBannedUsers(keyword, sortBy, sortOrder, limit, offset);
+
+    return res.status(200).json({
+      users: users.map(u => ({
+        id: u.id,
+        username: u.username,
+        avatar_url: u.avatar_url,
+        banned_until: u.banned_until,
+        ban_reason: u.ban_reason,
+        created_at: u.created_at
+      })),
+      total,
+      page,
+      total_pages: Math.ceil(total / limit)
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '제재 유저 목록 조회 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
+  }
+};
+
+/**
+ * 선택된 유저들의 제재 상태 일괄 수정
+ */
+export const bulkUpdateBans = async (req: Request, res: Response) => {
+  const { userIds, duration, reason } = req.body;
+
+  if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'BadRequest', message: '대상 유저 ID 목록(userIds)이 필요합니다.' });
+  }
+
+  if (!duration) {
+    return res.status(400).json({ error: 'BadRequest', message: '제재 방식(duration)이 필요합니다.' });
+  }
+
+  try {
+    let banDate: Date | null = null;
+    let bannedUntilIso: string | null = null;
+
+    if (duration !== 'unban') {
+      banDate = new Date();
+      switch (duration) {
+        case '1d':
+          banDate.setDate(banDate.getDate() + 1);
+          break;
+        case '7d':
+          banDate.setDate(banDate.getDate() + 7);
+          break;
+        case '30d':
+          banDate.setDate(banDate.getDate() + 30);
+          break;
+        case 'permanent':
+          banDate = new Date('9999-12-31T23:59:59Z');
+          break;
+        default:
+          return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 제재 기간 형식입니다.' });
+      }
+      bannedUntilIso = banDate.toISOString();
+    }
+
+    const results = [];
+    for (const userId of userIds) {
+      const targetUser = await userRepository.findById(userId);
+      if (targetUser && targetUser.role !== 'ADMIN') {
+        await userRepository.updateBanStatus(userId, bannedUntilIso, duration === 'unban' ? null : reason);
+        results.push(userId);
+      }
+    }
+
+    return res.status(200).json({
+      message: `${results.length}명의 사용자 제재가 수정되었습니다.`,
+      updated_user_ids: results,
+      banned_until: bannedUntilIso
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '일괄 제재 수정 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
+  }
+};
+
+/**
  * 4. 특정 유저에 대한 활동 제재 실행 (1일, 7일, 30일, 영구 정지)
  */
 export const banUser = async (req: Request, res: Response) => {

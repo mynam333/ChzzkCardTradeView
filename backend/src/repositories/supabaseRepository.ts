@@ -78,6 +78,32 @@ export class SupabaseUserRepository implements IUserRepository {
     return { users: data as User[], total: count || 0 };
   }
 
+  async listBannedUsers(keyword: string, sortBy: string, sortOrder: 'asc' | 'desc', limit: number, offset: number): Promise<{ users: User[]; total: number }> {
+    const kw = (keyword || '').trim();
+
+    // 허용 정렬 컬럼 화이트리스트
+    const validSortColumns = ['banned_until', 'username', 'id', 'created_at'];
+    const orderCol = validSortColumns.includes(sortBy) ? sortBy : 'banned_until';
+    const ascending = sortOrder === 'asc';
+
+    let query = this.getClient()
+      .from('users')
+      .select('*', { count: 'exact' })
+      .not('banned_until', 'is', null)
+      .gt('banned_until', new Date().toISOString())
+      .order(orderCol, { ascending })
+      .range(offset, offset + limit - 1);
+
+    if (kw) {
+      const safe = kw.replace(/[,()]/g, ' ');
+      query = query.or(`username.ilike.%${safe}%,id.ilike.%${safe}%`);
+    }
+
+    const { data, error, count } = await query;
+    if (error || !data) return { users: [], total: 0 };
+    return { users: data as User[], total: count || 0 };
+  }
+
   async create(user: User): Promise<User> {
     const { data, error } = await this.getClient()
       .from('users')
