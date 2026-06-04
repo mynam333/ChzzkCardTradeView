@@ -188,6 +188,24 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();
+
+      // 이미지 URL 자동 상대경로 마이그레이션 (호스트/포트 변경 방어 장치)
+      try {
+        const columns = [
+          'custom_image_url', 'custom_image_url_1', 'custom_image_url_2',
+          'custom_image_url_3', 'custom_image_url_4', 'custom_image_url_5'
+        ];
+        for (const col of columns) {
+          sqliteDb.prepare(`
+            UPDATE streamers
+            SET ${col} = '/' || SUBSTR(${col}, INSTR(${col}, 'uploads/'))
+            WHERE ${col} LIKE '%/uploads/%'
+          `).run();
+        }
+        console.log('[DB Migration] SQLite 이미지 절대경로를 상대경로로 변환 완료했습니다.');
+      } catch (migrateErr: any) {
+        console.warn('[DB Migration] SQLite 이미지 경로 마이그레이션 경고:', migrateErr?.message);
+      }
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
     }

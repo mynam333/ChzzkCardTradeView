@@ -20,6 +20,7 @@ import {
   AppNotification
 } from '../interfaces';
 import { STAR_IMAGE_COLUMNS } from "./shared";
+import { formatUploadUrl } from "../../services/imageService";
 
 export class SupabaseUserCardRepository implements IUserCardRepository {
   private getClient() {
@@ -72,10 +73,11 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
 
     if (error) throw error;
     const cards = (data || []) as any[];
-    // 임베드된 스트리머에 별별 커스텀 이미지 배열 부여
+    // 임베드된 스트리머에 별별 커스텀 이미지 배열 부여 및 업로드 URL 포맷팅 적용
     for (const c of cards) {
       if (c.streamer) {
-        c.streamer.custom_images = STAR_IMAGE_COLUMNS.map((col) => c.streamer[col] ?? null);
+        c.streamer.custom_image_url = formatUploadUrl(c.streamer.custom_image_url);
+        c.streamer.custom_images = STAR_IMAGE_COLUMNS.map((col) => formatUploadUrl(c.streamer[col]) ?? null);
       }
     }
 

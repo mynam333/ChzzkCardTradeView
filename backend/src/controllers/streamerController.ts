@@ -100,10 +100,8 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     const filePath = path.join(uploadDir, fileName);
     fs.writeFileSync(filePath, webpBuffer);
 
-    // 호스팅 경로 매핑 — 정적 파일은 백엔드가 서빙하므로 백엔드 절대 URL로 반환
-    // (상대경로면 프론트엔드 오리진 기준이 되어 파일을 찾지 못함)
-    const backendBase = process.env.BACKEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-    const imageUrl = `${backendBase.replace(/\/$/, '')}/uploads/${folderName}/${encodeURIComponent(fileName)}`;
+    // 호스팅 경로 매핑 — 주소 변경 대비를 위해 상대 경로로만 저장
+    const imageUrl = `/uploads/${folderName}/${encodeURIComponent(fileName)}`;
 
     // 3. 데이터베이스 정보 갱신 (해당 별 슬롯에 저장)
     // 같은 슬롯의 이전 로컬 업로드 파일은 교체되므로 삭제하여 디스크 누적(orphan) 방지

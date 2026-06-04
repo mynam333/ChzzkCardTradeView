@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { IS_PRODUCTION } from '../config';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * 이미지 프록시 — 치지직 CDN/외부 이미지를 동일 출처(+CORS 허용)로 우회 제공.
@@ -32,9 +34,39 @@ const isAllowedHost = (hostname: string): boolean => {
 };
 
 export const proxyImage = async (req: Request, res: Response) => {
-  const raw = String(req.query.url || '');
+  const raw = String(req.query.url || '').trim();
   if (!raw) {
     return res.status(400).json({ error: 'BadRequest', message: 'url 파라미터가 필요합니다.' });
+  }
+
+  // 1. 상대 경로(/uploads/...)인 경우 로컬 파일 시스템에서 직접 전송 (네트워크 미경유)
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
+    const cleanPath = raw.startsWith('/') ? raw : '/' + raw;
+    let decodedPath = '';
+    try {
+      decodedPath = decodeURIComponent(cleanPath);
+    } catch {
+      decodedPath = cleanPath;
+    }
+
+    const localFilePath = path.join(__dirname, '../../../public', decodedPath);
+    const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
+    const resolvedPath = path.resolve(localFilePath);
+
+    if (!resolvedPath.startsWith(absoluteUploadsDir)) {
+      return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 파일 경로입니다.' });
+    }
+
+    if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+      const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      return res.status(200).sendFile(resolvedPath);
+    } else {
+      return res.status(404).json({ error: 'NotFound', message: '파일을 찾을 수 없습니다.' });
+    }
   }
 
   let target: URL;
@@ -42,6 +74,47 @@ export const proxyImage = async (req: Request, res: Response) => {
     target = new URL(raw);
   } catch {
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 URL입니다.' });
+  }
+
+  // 2. 자체 서버를 가리키는 절대 경로인 경우 포트 변경 및 호스트 도메인 유연하게 로컬 파일로 우회
+  const selfUrl = process.env.BACKEND_PUBLIC_URL;
+  let isSelfHost = false;
+  try {
+    if (selfUrl) {
+      const selfHost = new URL(selfUrl).hostname.toLowerCase();
+      if (target.hostname.toLowerCase() === selfHost && target.pathname.startsWith('/uploads/')) {
+        isSelfHost = true;
+      }
+    }
+  } catch { /* noop */ }
+  
+  if (target.hostname.toLowerCase() === 'localhost' || target.hostname.toLowerCase() === '127.0.0.1') {
+    if (target.pathname.startsWith('/uploads/')) {
+      isSelfHost = true;
+    }
+  }
+
+  if (isSelfHost) {
+    let decodedPath = '';
+    try {
+      decodedPath = decodeURIComponent(target.pathname);
+    } catch {
+      decodedPath = target.pathname;
+    }
+
+    const localFilePath = path.join(__dirname, '../../../public', decodedPath);
+    const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
+    const resolvedPath = path.resolve(localFilePath);
+
+    if (resolvedPath.startsWith(absoluteUploadsDir) && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+      const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      return res.status(200).sendFile(resolvedPath);
+    }
+    return res.status(404).json({ error: 'NotFound', message: '자체 업로드 파일을 찾을 수 없습니다.' });
   }
 
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {

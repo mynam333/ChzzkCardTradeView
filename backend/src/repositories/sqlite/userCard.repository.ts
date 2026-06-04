@@ -20,6 +20,7 @@ import {
   AppNotification
 } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
+import { formatUploadUrl } from "../../services/imageService";
 
 export class SqliteUserCardRepository implements IUserCardRepository {
   private getDb() {
@@ -94,8 +95,15 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         channel_id: row.channel_id,
         name: row.streamer_name,
         logo_url: row.streamer_logo,
-        custom_image_url: row.streamer_custom_image,
-        custom_images: [row.streamer_custom_image ?? null, row.sci1 ?? null, row.sci2 ?? null, row.sci3 ?? null, row.sci4 ?? null, row.sci5 ?? null],
+        custom_image_url: formatUploadUrl(row.streamer_custom_image),
+        custom_images: [
+          formatUploadUrl(row.streamer_custom_image) ?? null,
+          formatUploadUrl(row.sci1) ?? null,
+          formatUploadUrl(row.sci2) ?? null,
+          formatUploadUrl(row.sci3) ?? null,
+          formatUploadUrl(row.sci4) ?? null,
+          formatUploadUrl(row.sci5) ?? null
+        ],
         base_value: row.streamer_base_value,
         follower_count: row.streamer_follower,
         is_image_banned: row.streamer_is_image_banned === 1,

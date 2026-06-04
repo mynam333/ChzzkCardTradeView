@@ -20,6 +20,7 @@ import {
   AppNotification
 } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
+import { formatUploadUrl } from "../../services/imageService";
 
 export class SqliteStreamerRepository implements IStreamerRepository {
   private getDb() {
@@ -32,7 +33,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       channel_id: row.channel_id,
       name: row.name,
       logo_url: row.logo_url,
-      custom_image_url: row.custom_image_url,
+      custom_image_url: formatUploadUrl(row.custom_image_url),
       custom_images: extractStarImages(row),
       is_image_banned: row.is_image_banned === 1,
       follower_count: row.follower_count,
@@ -56,7 +57,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       channel_id: row.channel_id,
       name: row.name,
       logo_url: row.logo_url,
-      custom_image_url: row.custom_image_url,
+      custom_image_url: formatUploadUrl(row.custom_image_url),
       custom_images: extractStarImages(row),
       is_image_banned: row.is_image_banned === 1,
       follower_count: row.follower_count,
@@ -82,7 +83,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       channel_id: row.channel_id,
       name: row.name,
       logo_url: row.logo_url,
-      custom_image_url: row.custom_image_url,
+      custom_image_url: formatUploadUrl(row.custom_image_url),
       custom_images: extractStarImages(row),
       is_image_banned: row.is_image_banned === 1,
       follower_count: row.follower_count,

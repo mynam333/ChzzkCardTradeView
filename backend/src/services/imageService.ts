@@ -82,3 +82,35 @@ export const resizeAndConvertToWebp = async (fileBuffer: Buffer): Promise<Buffer
     throw new Error(`이미지 변환 실패: ${error.message}`);
   }
 };
+
+/**
+ * DB에 저장된 이미지 경로를 현재 서버 환경의 올바른 절대 경로 URL로 변환합니다.
+ * - 상대 경로(예: /uploads/...)인 경우: 환경변수 BACKEND_PUBLIC_URL을 붙여 절대 경로로 만듭니다.
+ * - 타 포트 절대 경로(예: https://api.yuaru.com:5000/uploads/...)인 경우: 포트를 현재 백엔드 환경에 맞게 치환합니다.
+ */
+export const formatUploadUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  
+  const backendBase = (process.env.BACKEND_PUBLIC_URL || '').replace(/\/$/, '');
+  
+  // 1. 상대 경로인 경우 바로 백엔드 주소를 붙여서 리턴
+  if (url.startsWith('/uploads/') || url.startsWith('uploads/')) {
+    const cleanPath = url.startsWith('/') ? url : '/' + url;
+    return backendBase ? `${backendBase}${cleanPath}` : cleanPath;
+  }
+  
+  // 2. 다른 주소나 포트가 포함된 절대 경로인 경우
+  if (url.includes('/uploads/')) {
+    try {
+      const parsed = new URL(url);
+      const marker = '/uploads/';
+      const idx = parsed.pathname.indexOf(marker);
+      if (idx >= 0) {
+        const cleanPath = parsed.pathname.slice(idx);
+        return backendBase ? `${backendBase}${cleanPath}` : cleanPath;
+      }
+    } catch { /* noop */ }
+  }
+  
+  return url;
+};
