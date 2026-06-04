@@ -50,5 +50,24 @@ export const apiFetch = async (
     }
   }
 
+  // 점검 상태 체크 인터셉터 (503 Maintenance 예외)
+  if (response.status === 503) {
+    try {
+      const clone = response.clone();
+      const data = await clone.json();
+      if (data && data.error === 'Maintenance') {
+        if (typeof window !== 'undefined') {
+          const bypassRoutes = ['/maintenance', '/login', '/auth/chzzk/callback'];
+          const isBypass = bypassRoutes.some(route => window.location.pathname === route);
+          if (!isBypass) {
+            window.location.href = '/maintenance';
+          }
+        }
+      }
+    } catch (err) {
+      // JSON 파싱 에러는 안전하게 무시
+    }
+  }
+
   return response;
 };

@@ -480,4 +480,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
 );
 INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
+INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_configs (key, value) VALUES ('maintenance_end_at', '') ON CONFLICT (key) DO NOTHING;
 

@@ -429,3 +429,54 @@ export const setDrawCost = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'InternalServerError', message: '설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
+
+/**
+ * 14. 점검 상태 조회 (모든 유저 가능)
+ */
+export const getMaintenanceStatus = async (req: Request, res: Response) => {
+  try {
+    const active = await systemConfigRepository.get('maintenance_active', 'false');
+    const startAt = await systemConfigRepository.get('maintenance_start_at', '');
+    const endAt = await systemConfigRepository.get('maintenance_end_at', '');
+
+    return res.status(200).json({
+      active: active === 'true',
+      startAt: startAt || null,
+      endAt: endAt || null
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '점검 상태 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 15. 점검 상태 설정 (ADMIN 전용)
+ */
+export const setMaintenanceStatus = async (req: Request, res: Response) => {
+  const { active, startAt, endAt } = req.body;
+
+  if (active !== undefined && typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'BadRequest', message: 'active 값은 boolean 타입이어야 합니다.' });
+  }
+
+  try {
+    if (active !== undefined) {
+      await systemConfigRepository.set('maintenance_active', active ? 'true' : 'false');
+    }
+    if (startAt !== undefined) {
+      await systemConfigRepository.set('maintenance_start_at', startAt || '');
+    }
+    if (endAt !== undefined) {
+      await systemConfigRepository.set('maintenance_end_at', endAt || '');
+    }
+
+    return res.status(200).json({
+      message: '점검 설정이 성공적으로 저장되었습니다.',
+      active: active ?? false,
+      startAt: startAt || null,
+      endAt: endAt || null
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '점검 설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};

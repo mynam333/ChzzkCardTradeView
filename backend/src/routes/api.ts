@@ -20,7 +20,9 @@ import {
   getFreeDrawInterval,
   setFreeDrawInterval,
   getDrawCost,
-  setDrawCost
+  setDrawCost,
+  getMaintenanceStatus,
+  setMaintenanceStatus
 } from '../controllers/adminController';
 import { claimCoupon, createCoupon } from '../controllers/couponController';
 import {
@@ -92,8 +94,10 @@ import {
 } from '../controllers/shopController';
 import { streamerRepository } from '../repositories';
 import { rateLimit } from '../middlewares/rateLimit';
+import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
 
 const router = Router();
+router.use(maintenanceCheckMiddleware);
 
 // 라우트별 레이트 리미터 (IP 기준 고정 윈도우)
 const drawLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'draw' });
@@ -305,5 +309,9 @@ router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDr
 router.post('/admin/config/free-draw', authMiddleware, adminMiddleware, setFreeDrawInterval);
 router.get('/admin/config/draw-cost', authMiddleware, adminMiddleware, getDrawCost);
 router.post('/admin/config/draw-cost', authMiddleware, adminMiddleware, setDrawCost);
+
+// 점검 시스템 API
+router.get('/maintenance/status', getMaintenanceStatus);
+router.post('/admin/maintenance/status', authMiddleware, adminMiddleware, setMaintenanceStatus);
 
 export default router;

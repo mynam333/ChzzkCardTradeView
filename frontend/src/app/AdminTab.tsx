@@ -27,7 +27,7 @@ import { CosmeticName } from './CosmeticName';
 type AdminSubTab = 'dashboard' | 'users' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
 
 export const AdminTab: React.FC = () => {
-  const { user, toast } = useApp();
+  const { user, toast, checkMaintenanceStatus } = useApp();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -146,6 +146,12 @@ export const AdminTab: React.FC = () => {
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
 
+  // 서비스 점검 설정 상태
+  const [mStartAt, setMStartAt] = useState('');
+  const [mEndAt, setMEndAt] = useState('');
+  const [mActive, setMActive] = useState(false);
+  const [isSavingMaintenance, setIsSavingMaintenance] = useState(false);
+
   const isAdmin = user?.role === 'ADMIN';
 
   useEffect(() => {
@@ -164,7 +170,11 @@ export const AdminTab: React.FC = () => {
       fetchScheduledPushes();
       fetchSentPushes(sentPushesPage);
     }
-    if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
+    if (subTab === 'maintenance') {
+      fetchResetInfo();
+      fetchOrphans();
+      fetchMaintenanceStatus();
+    }
   }, [subTab, isAdmin, sentPushesPage]);
 
   // 유저 탭: 검색어 디바운스(닉네임/ID) → 1페이지부터 재조회
@@ -586,6 +596,56 @@ export const AdminTab: React.FC = () => {
   };
 
   // ---- 유지보수 ----
+  const fetchMaintenanceStatus = async () => {
+    try {
+      const res = await apiFetch('/maintenance/status');
+      if (res.ok) {
+        const data = await res.json();
+        setMActive(!!data.active);
+
+        const formatForInput = (isoStr: string | null) => {
+          if (!isoStr) return '';
+          const d = new Date(isoStr);
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        setMStartAt(formatForInput(data.startAt));
+        setMEndAt(formatForInput(data.endAt));
+      }
+    } catch { /* noop */ }
+  };
+
+  const saveMaintenanceStatus = async (active: boolean) => {
+    setIsSavingMaintenance(true);
+    try {
+      const startAtIso = mStartAt ? new Date(mStartAt).toISOString() : null;
+      const endAtIso = mEndAt ? new Date(mEndAt).toISOString() : null;
+
+      const res = await apiFetch('/admin/maintenance/status', {
+        method: 'POST',
+        body: JSON.stringify({
+          active,
+          startAt: startAtIso,
+          endAt: endAtIso
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        toast(active ? '서비스 점검이 시작되었습니다.' : '서비스 점검이 종료되었습니다.', 'success');
+        setMActive(!!data.active);
+        await checkMaintenanceStatus(); // 전역 점검 상태 동기화
+      } else {
+        toast(data.message || '점검 설정 변경 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingMaintenance(false);
+    }
+  };
+
   const fetchResetInfo = async () => {
     try {
       const res = await apiFetch('/admin/reset/info');
@@ -1696,6 +1756,70 @@ export const AdminTab: React.FC = () => {
       {/* 유지보수: DB 초기화 + 미사용 업로드 이미지 */}
       {subTab === 'maintenance' && (
         <section className="space-y-5">
+          {/* 서비스 유지보수 및 점검 설정 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-border/50 pb-2">
+              <h3 className="text-sm font-bold flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4 text-rose-500" />
+                서비스 유지보수 및 점검 설정
+              </h3>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold text-muted-foreground">현재 상태:</span>
+                {mActive ? (
+                  <span className="rounded bg-rose-500/15 px-2 py-0.5 text-[10px] font-bold text-rose-500">점검 진행 중</span>
+                ) : (
+                  <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-500">정상 운영 중</span>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              서비스 점검 모드를 켜면 ADMIN 권한을 가진 유저를 제외한 모든 접속자가 점검 안내 화면으로 강제 리디렉션됩니다.<br />
+              점검 시작 및 예상 종료 일정을 입력한 후 설정을 적용할 수 있습니다.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground block mb-1">점검 시작 날짜</label>
+                <input
+                  type="datetime-local"
+                  value={mStartAt}
+                  onChange={(e) => setMStartAt(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground block mb-1">점검 종료 예상 날짜</label>
+                <input
+                  type="datetime-local"
+                  value={mEndAt}
+                  onChange={(e) => setMEndAt(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1 border-t border-border/30">
+              {mActive ? (
+                <button
+                  onClick={() => saveMaintenanceStatus(false)}
+                  disabled={isSavingMaintenance}
+                  className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2.5 text-xs font-bold text-white disabled:opacity-50 transition shadow-md active:scale-[0.98]"
+                >
+                  {isSavingMaintenance ? '처리 중...' : '점검 종료 (서비스 재개)'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => saveMaintenanceStatus(true)}
+                  disabled={isSavingMaintenance}
+                  className="flex-1 rounded-lg bg-rose-600 hover:bg-rose-700 py-2.5 text-xs font-bold text-white disabled:opacity-50 transition shadow-md active:scale-[0.98]"
+                >
+                  {isSavingMaintenance ? '처리 중...' : '점검 시작 (차단 활성화)'}
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* DB 부분 초기화 */}
           <div className="rounded-2xl border border-red-500/30 bg-card p-5 shadow-sm">
             <h3 className="text-sm font-bold flex items-center gap-1.5 text-red-500"><Database className="h-4 w-4" /> DB 부분 초기화</h3>

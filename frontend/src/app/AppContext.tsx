@@ -39,6 +39,10 @@ interface AppContextType {
   fetchNotifications: () => Promise<void>;
   openNotification: (n: AppNotificationItem) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
+  maintenanceActive: boolean;
+  maintenanceStartAt: string | null;
+  maintenanceEndAt: string | null;
+  checkMaintenanceStatus: () => Promise<void>;
 }
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -76,6 +80,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
+
+  const [maintenanceActive, setMaintenanceActive] = useState<boolean>(false);
+  const [maintenanceStartAt, setMaintenanceStartAt] = useState<string | null>(null);
+  const [maintenanceEndAt, setMaintenanceEndAt] = useState<string | null>(null);
+
+  const checkMaintenanceStatus = async () => {
+    try {
+      const res = await apiFetch('/maintenance/status');
+      if (res.ok) {
+        const data = await res.json();
+        setMaintenanceActive(!!data.active);
+        setMaintenanceStartAt(data.startAt || null);
+        setMaintenanceEndAt(data.endAt || null);
+      }
+    } catch (err) {
+      console.error('[AppContext] 점검 상태 조회 실패:', err);
+    }
+  };
+
+  // 점검 상태 주기적 폴링 (30초) 및 초기 조회
+  useEffect(() => {
+    checkMaintenanceStatus();
+    const timer = setInterval(checkMaintenanceStatus, 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 미어드민 유저 점검 강제 리디렉션 가드
+  useEffect(() => {
+    if (authLoading) return;
+
+    const isMaintenanceRoute = pathname === '/maintenance';
+    const isLoginRoute = pathname === '/login';
+    const isCallbackRoute = pathname === '/auth/chzzk/callback';
+
+    if (isLoginRoute || isCallbackRoute) {
+      return;
+    }
+
+    if (maintenanceActive) {
+      if (user?.role === 'ADMIN') {
+        return;
+      }
+      if (!isMaintenanceRoute) {
+        router.replace('/maintenance');
+      }
+    } else {
+      if (isMaintenanceRoute) {
+        router.replace('/');
+      }
+    }
+  }, [maintenanceActive, user, authLoading, pathname, router]);
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
@@ -246,7 +301,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unreadCount,
       fetchNotifications,
       openNotification,
-      markAllNotificationsRead
+      markAllNotificationsRead,
+      maintenanceActive,
+      maintenanceStartAt,
+      maintenanceEndAt,
+      checkMaintenanceStatus
     }}>
       {children}
 
