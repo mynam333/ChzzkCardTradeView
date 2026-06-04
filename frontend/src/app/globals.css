@@ -237,8 +237,8 @@ body {
 
 /* 3성 이상 네온 펄스 시 밝기 변동폭을 13% -> 24%로 2배가량 늘리고 부드러운 드롭 섀도 글로우 진동 추가 */
 @keyframes cardPulse {
-  0%, 100% { filter: brightness(1) drop-shadow(0 0 2px rgba(255,255,255,0.05)); }
-  50% { filter: brightness(1.24) drop-shadow(0 0 8px rgba(255,255,255,0.3)); }
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.24); }
 }
 /* 비스듬한 광택 띠가 카드 왼쪽 밖 → 오른쪽 밖으로 지나감(양끝 모두 화면 밖이라 끊김 없음) */
 @keyframes cardSheen {
