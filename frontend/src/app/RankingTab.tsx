@@ -97,9 +97,20 @@ export const RankingTab: React.FC = () => {
   };
 
   // 공통: 정렬된 목록에 실제 순위(rank)를 부여한 뒤 검색어로 필터(순위는 유지)
-  const rankAndFilter = <T,>(sorted: T[], getName: (item: T) => string): (T & { rank: number })[] => {
-    const withRank = sorted.map((item, i) => ({ ...item, rank: i + 1 }));
-    return searchQuery ? withRank.filter((item) => fuzzySearch(getName(item), searchQuery)) : withRank;
+  const rankAndFilter = <T,>(
+    sorted: T[],
+    getName: (item: T) => string
+  ): (T & { rank: number })[] => {
+    const withRank = sorted.map((item, i) => ({
+      ...item,
+      rank: (item as any).rank ? (item as any).rank : i + 1
+    })) as (T & { rank: number })[];
+
+    if (searchQuery) {
+      return withRank.filter((item) => fuzzySearch(getName(item), searchQuery));
+    } else {
+      return withRank.slice(0, 100);
+    }
   };
 
   // 시세/등락률 탭: 서브탭 기준 정렬 후 순위·검색 적용
