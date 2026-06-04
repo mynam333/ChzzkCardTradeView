@@ -145,7 +145,7 @@ export interface IUserRepository {
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
   updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void>;
   updateRepresentativeCard(id: string, channelId: string | null): Promise<void>;
-  findRankings(limit: number): Promise<UserRanking[]>;
+  findRankings(limit: number, keyword?: string): Promise<UserRanking[]>;
   count(): Promise<number>;
   /** 관리자용 유저 목록(닉네임/ID 부분검색 + 페이지네이션). keyword 비면 전체. */
   listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }>;
@@ -163,6 +163,7 @@ export interface IUserRepository {
 export interface UserRanking extends User {
   card_count: number;
   total_asset: number;
+  rank?: number;
 }
 
 // 2. 스트리머 리포지토리 인터페이스

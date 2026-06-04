@@ -29,6 +29,7 @@ interface UserRank {
   point: number;
   card_count: number;
   total_asset?: number;
+  rank?: number;
 }
 
 type SubTab = 'value' | 'change' | 'user';
@@ -44,13 +45,22 @@ export const RankingTab: React.FC = () => {
   const PER_PAGE = 10;
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+  // 검색어 디바운스 (타이핑 성능 최적화)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     fetchRankings();
     // 시세를 준실시간으로 반영하기 위해 25초마다 조용히 갱신 (로딩 스피너 없이)
     const timer = setInterval(() => fetchRankings(true), 25_000);
     return () => clearInterval(timer);
-  }, [subTab]);
+  }, [subTab, debouncedSearchQuery]);
 
   // 탭 전환·검색 시 1페이지로 초기화
   useEffect(() => { setPage(1); }, [subTab, searchQuery]);
@@ -59,7 +69,8 @@ export const RankingTab: React.FC = () => {
     if (!silent) setLoading(true);
     try {
       if (subTab === 'user') {
-        const res = await apiFetch('/users/ranking');
+        const qParam = debouncedSearchQuery.trim() ? `?q=${encodeURIComponent(debouncedSearchQuery.trim())}` : '';
+        const res = await apiFetch(`/users/ranking${qParam}`);
         if (res.ok) setUserRankings(await res.json());
       } else {
         const res = await apiFetch('/streamers');
@@ -101,7 +112,8 @@ export const RankingTab: React.FC = () => {
   );
 
   // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
-  const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
+  // 수집가 자산 탭: 백엔드가 이미 전체 순위와 함께 필터링해서 돌려주므로 매핑만 수행
+  const rankedUsers = userRankings.map((ur) => ({ ...ur, rank: ur.rank ?? 0 }));
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
   const activeLength = subTab === 'user' ? rankedUsers.length : rankedStreamers.length;

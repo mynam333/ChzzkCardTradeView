@@ -171,20 +171,25 @@ export class SqliteUserRepository implements IUserRepository {
     }
   }
 
-  async findRankings(limit: number): Promise<UserRanking[]> {
-    // 보유 카드 수와 카드 시세 합산을 조인 집계하여 (포인트 + 카드가치) 총자산 기준 정렬
-    // 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
+  async findRankings(limit: number, keyword: string = ''): Promise<UserRanking[]> {
+    // 윈도우 함수 ROW_NUMBER()를 사용하여 전체 유저에 대한 순위(rank)를 우선 매긴 후 검색어로 필터링
     const rows = this.getDb().prepare(`
-      SELECT u.*,
-             COUNT(uc.id) AS card_count,
-             COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0) AS cards_value
-      FROM users u
-      LEFT JOIN user_cards uc ON uc.user_id = u.id
-      LEFT JOIN streamers s ON s.channel_id = uc.channel_id
-      GROUP BY u.id
-      ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
+      WITH RankedUsers AS (
+        SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.created_at,
+               COUNT(uc.id) AS card_count,
+               COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0) AS cards_value,
+               ROW_NUMBER() OVER (
+                 ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
+               ) AS rank
+        FROM users u
+        LEFT JOIN user_cards uc ON uc.user_id = u.id
+        LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+        GROUP BY u.id
+      )
+      SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
+      WHERE (? = '' OR username LIKE ?)
       LIMIT ?
-    `).all(limit);
+    `).all(keyword, `%${keyword}%`, limit);
 
     return rows.map((row: any) => ({
       id: row.id,
@@ -197,7 +202,8 @@ export class SqliteUserRepository implements IUserRepository {
       ban_reason: row.ban_reason ?? null,
       created_at: row.created_at,
       card_count: row.card_count,
-      total_asset: row.point + Math.round(row.cards_value)
+      total_asset: row.point + Math.round(row.cards_value),
+      rank: row.rank
     }));
   }
 }

@@ -232,9 +232,9 @@ export class SupabaseUserRepository implements IUserRepository {
     return data.length > 0;
   }
 
-  async findRankings(limit: number): Promise<UserRanking[]> {
-    // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용
-    const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit });
+  async findRankings(limit: number, keyword: string = ''): Promise<UserRanking[]> {
+    // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용 (keyword 및 rank 포함)
+    const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword });
     if (!error && Array.isArray(data)) {
       return data.map((row: any) => ({
         id: row.id,
@@ -246,11 +246,12 @@ export class SupabaseUserRepository implements IUserRepository {
         banned_until: row.banned_until,
         created_at: row.created_at,
         card_count: Number(row.card_count) || 0,
-        total_asset: Number(row.total_asset) || row.point
+        total_asset: Number(row.total_asset) || row.point,
+        rank: Number(row.rank)
       }));
     }
 
-    // 폴백: 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 총자산 기준 재정렬
+    // 폴백: 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 총자산 기준 정렬
     console.warn('[Supabase] get_user_rankings RPC 실패, 폴백 사용:', error?.message);
     const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
     const { data: users, error: uErr } = await this.getClient()
@@ -277,7 +278,19 @@ export class SupabaseUserRepository implements IUserRepository {
       });
     }
     enriched.sort((a, b) => b.total_asset - a.total_asset);
-    return enriched.slice(0, limit);
+    
+    // 전체 목록 기준 순위를 매겨서 반환
+    const mapped = enriched.map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
+
+    // 검색어가 있다면 필터링
+    const filtered = keyword.trim()
+      ? mapped.filter((u) => u.username.toLowerCase().includes(keyword.toLowerCase()))
+      : mapped;
+
+    return filtered.slice(0, limit);
   }
 }
 

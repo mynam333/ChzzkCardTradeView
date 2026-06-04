@@ -428,6 +428,32 @@ RETURNS TABLE (
    LIMIT p_limit;
 $$ LANGUAGE sql;
 
+-- [추가] 검색어 대응 및 전체 랭킹 인덱스(rank)를 포함하는 오버로딩 유저 랭킹 RPC
+CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER, p_keyword TEXT)
+RETURNS TABLE (
+  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
+  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  card_count BIGINT, total_asset BIGINT, rank BIGINT
+) AS $$
+  WITH RankedUsers AS (
+    SELECT u.id, u.username, u.avatar_url, u.role, u.point,
+           u.last_free_draw, u.banned_until, u.created_at,
+           COUNT(uc.id) AS card_count,
+           (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0))::BIGINT AS total_asset,
+           ROW_NUMBER() OVER (
+             ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
+           )::BIGINT AS rank
+      FROM users u
+      LEFT JOIN user_cards uc ON uc.user_id = u.id
+      LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+     GROUP BY u.id
+  )
+  SELECT * FROM RankedUsers
+   WHERE (p_keyword = '' OR username ILIKE '%' || p_keyword || '%')
+   ORDER BY total_asset DESC
+   LIMIT p_limit;
+$$ LANGUAGE sql;
+
 -- ============================================================
 -- 하위 호환성 유지: user_cosmetics 테이블의 item_id 외래키가 없는 경우 추가
 -- ============================================================
