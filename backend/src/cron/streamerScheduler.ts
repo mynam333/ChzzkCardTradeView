@@ -111,9 +111,15 @@ export const calculateCardValue = (
   const currentVal = prevValue > 0 ? prevValue : followers;
 
   // 2. 필요 기준 채팅량 (시청자 규모별 타겟 튜닝 모델 적용)
-  // 시청자 10명일 때 약 4개, 5,000명일 때 약 750개가 되도록 밸런싱되었습니다.
+  // 500명 이상 시청 시 요구량이 부드럽게 꺾이도록 로그 보정(C1 연속 보간)을 적용하여 성장을 주춤하게 만듭니다.
+  let effUserCount = concurrentUserCount;
+  if (concurrentUserCount > 500) {
+    effUserCount = 500 + 300 * Math.log1p((concurrentUserCount - 500) / 300);
+  }
+
+  // 시청자 10명일 때 약 4개, 5,000명일 때 약 160개 내외가 되도록 밸런싱되었습니다.
   const requiredChatsRaw = Math.round(
-    0.23 * Math.pow(concurrentUserCount, 0.95) + Math.sqrt(followers) * 0.03 + 1
+    0.23 * Math.pow(effUserCount, 0.91) + Math.sqrt(followers) * 0.03 + 1
   );
   // 2-1. 소규모 방 완화: 시청자 10명 미만은 채팅 화력이 낮아도 기준치를 낮춰 너그럽게 평가
   // (0명 → 0.4배, 10명 → 1.0배로 선형 보간)
