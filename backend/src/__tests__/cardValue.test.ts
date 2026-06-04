@@ -46,4 +46,47 @@ describe('computeRandomDrift', () => {
     expect(ups).toBeGreaterThan(0);
     expect(downs).toBeGreaterThan(0);
   });
+
+  it('현재 가치가 팔로워보다 훨씬 작으면 상승 확률이 급격하게(기하급수적으로) 올라간다', () => {
+    const followers = 10000;
+    const value = 100; // 팔로워 대비 99% 작음 -> 상승 확률 100%에 근접
+    let ups = 0;
+    const iterations = 1000;
+    for (let i = 0; i < iterations; i++) {
+      const d = computeRandomDrift(value, followers);
+      if (d > 0) ups++;
+    }
+    // 거의 대부분 상승해야 함 (95% 이상으로 보수적 검증)
+    expect(ups).toBeGreaterThan(iterations * 0.95);
+  });
+
+  it('현재 가치가 팔로워보다 훨씬 크면(200% 이상) 하락 확률이 100%에 근접한다', () => {
+    const followers = 10000;
+    const value = 30001; // 팔로워 대비 200% 초과하여 큼 -> 상승 확률 0%에 근접
+    let downs = 0;
+    const iterations = 1000;
+    for (let i = 0; i < iterations; i++) {
+      const d = computeRandomDrift(value, followers);
+      if (d < 0) downs++;
+    }
+    // 거의 대부분 하락해야 함 (95% 이상으로 보수적 검증)
+    expect(downs).toBeGreaterThan(iterations * 0.95);
+  });
+
+  it('현재 가치와 팔로워의 차이가 미세하면 확률 변동도 미세하다 (50:50에 가깝다)', () => {
+    const followers = 10000;
+    const value = 9900; // 차이가 1% 수준 -> 변동 미세
+    let ups = 0;
+    const iterations = 2000;
+    for (let i = 0; i < iterations; i++) {
+      const d = computeRandomDrift(value, followers);
+      if (d > 0) ups++;
+    }
+    // z = 0.01일 때 w = (e^0.04 - 1)/(e^4 - 1) = (1.0408 - 1)/53.598 = 0.00076
+    // pUp = 0.5 + 0.5 * 0.00076 = 0.50038
+    // 따라서 45% ~ 55% 사이로 분포해야 함
+    expect(ups).toBeGreaterThan(iterations * 0.43);
+    expect(ups).toBeLessThan(iterations * 0.57);
+  });
 });
+

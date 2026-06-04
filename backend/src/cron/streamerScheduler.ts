@@ -53,15 +53,38 @@ const SCHEDULE_INTERVAL_MINUTES = 2;
  * @param value 현재(이전) 가치
  * @returns 가치에 더해질 랜덤 변동량 (양수=상승, 음수=하락)
  */
-export const computeRandomDrift = (value: number): number => {
+export const computeRandomDrift = (value: number, followers: number = 0): number => {
   const BASE_PCT = 0.008;   // 평상시 최대 변동폭 0.8%
   const SPIKE_PCT = 0.025;  // 가끔 발생하는 큰 변동 2.5%
   const SPIKE_CHANCE = 0.15;
 
   const maxPct = Math.random() < SPIKE_CHANCE ? SPIKE_PCT : BASE_PCT;
-  // -maxPct ~ +maxPct 사이 균등 분포 (상승/하락 동일 확률)
-  const pct = (Math.random() * 2 - 1) * maxPct;
-  return value * pct;
+
+  let pUp = 0.5;
+  if (followers > 0) {
+    if (value < followers) {
+      // 현재 가치가 팔로워 수보다 작을 때 (상승 선호)
+      // 밑으로는 팔로워 수의 100%만큼 차이나면 100% 확률 변동
+      const gapPct = (followers - value) / followers;
+      const z = Math.min(1.0, Math.max(0.0, gapPct));
+      // 기하급수적 곡선: y = (e^(4z) - 1) / (e^4 - 1)
+      const w = (Math.exp(4 * z) - 1) / (Math.exp(4) - 1);
+      pUp = 0.5 + 0.5 * w;
+    } else if (value > followers) {
+      // 현재 가치가 팔로워 수보다 클 때 (하락 선호)
+      // 위로는 팔로워 수의 200%만큼 차이나면 100% 확률 변동
+      const gapPct = (value - followers) / followers;
+      const z = Math.min(1.0, Math.max(0.0, gapPct / 2.0));
+      // 기하급수적 곡선
+      const w = (Math.exp(4 * z) - 1) / (Math.exp(4) - 1);
+      pUp = 0.5 - 0.5 * w;
+    }
+  }
+
+  // 결정된 상승 확률 pUp에 따라 변동 방향 및 크기 결정
+  const isUp = Math.random() < pUp;
+  const pct = Math.random() * maxPct;
+  return isUp ? value * pct : -value * pct;
 };
 
 /**
@@ -118,7 +141,7 @@ export const calculateCardValue = (
   // 팔로워 1명 증감당 가치 1 변동 (필요에 따라 가중치 조정 가능)
   const followerBonus = followerDelta;
   // 5. 랜덤 시세 변동: 방송 여부와 무관하게 모든 카드에 소폭 등락을 부여 (재미 요소)
-  const randomDrift = computeRandomDrift(currentVal);
+  const randomDrift = computeRandomDrift(currentVal, followers);
   // 채팅 외 요인(방송 델타·팔로워 증감·랜덤 드리프트)만 반영한 값 — 이 요인들은 20% 밑으로도 내려갈 수 있음
   const valueWithoutChat = currentVal + valueChangeFromBroadcast + followerBonus + randomDrift;
   let finalValue = Math.round(valueWithoutChat + chatBonus);
