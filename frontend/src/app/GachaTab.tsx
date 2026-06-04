@@ -48,6 +48,16 @@ interface UserCard {
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.6;
 
+// 이미지 신고 사유 프리셋 (마지막 '기타'는 직접 입력)
+const REPORT_REASONS = [
+  '선정적/음란한 이미지',
+  '폭력적·혐오스러운 이미지',
+  '저작권 침해 이미지',
+  '타인 사칭·도용',
+  '욕설·비방 등 부적절한 내용',
+  '기타',
+];
+
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
   const [streamers, setStreamers] = useState<Streamer[]>([]);
@@ -55,6 +65,12 @@ export const GachaTab: React.FC = () => {
   // 코스메틱 장착
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
   const [equipCard, setEquipCard] = useState<UserCard | null>(null);
+
+  // 이미지 신고 모달
+  const [reportCard, setReportCard] = useState<UserCard | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportCustom, setReportCustom] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -442,6 +458,42 @@ export const GachaTab: React.FC = () => {
       }
     } catch {
       showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 이미지 신고 모달 열기 (우클릭 메뉴 → 이미지 신고)
+  const openReport = (card: UserCard) => {
+    setReportCard(card);
+    setReportReason('');
+    setReportCustom('');
+  };
+
+  // 이미지 신고 제출
+  const handleReport = async () => {
+    if (!reportCard?.streamer) return;
+    const isEtc = reportReason === '기타';
+    const finalReason = isEtc ? reportCustom.trim() : reportReason;
+    if (!finalReason) {
+      showAlert('신고 사유 필요', isEtc ? '신고 사유를 직접 입력해 주세요.' : '신고 사유를 선택해 주세요.', 'warning');
+      return;
+    }
+    setReportSubmitting(true);
+    try {
+      const res = await apiFetch(`/cards/${reportCard.streamer.channel_id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: finalReason, star: reportCard.star || 0 })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('신고 접수 완료', '신고가 접수되었습니다. 검토 후 조치하겠습니다.', 'success');
+        setReportCard(null);
+      } else {
+        showAlert('신고 실패', data.message || '신고 접수에 실패했습니다.', 'error');
+      }
+    } catch {
+      showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setReportSubmitting(false);
     }
   };
 
@@ -1610,6 +1662,15 @@ export const GachaTab: React.FC = () => {
           </button>
           <button
             onClick={() => {
+              if (contextMenu.card) openReport(contextMenu.card);
+              setContextMenu(prev => ({ ...prev, open: false }));
+            }}
+            className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-2"
+          >
+            🚩 이미지 신고
+          </button>
+          <button
+            onClick={() => {
               if (contextMenu.card?.streamer) {
                 setSelectionMode(true);
                 setSelectedChannelIds([contextMenu.card.streamer.channel_id]);
@@ -1634,6 +1695,65 @@ export const GachaTab: React.FC = () => {
           >
             📺 스트리머 채널 이동
           </button>
+        </div>
+      )}
+
+      {/* 이미지 신고 모달 */}
+      {reportCard && reportCard.streamer && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => !reportSubmitting && setReportCard(null)}>
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-base font-bold flex items-center gap-1.5 text-red-500">🚩 이미지 신고</h3>
+              <button onClick={() => setReportCard(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+            </div>
+
+            {/* 신고 대상 카드 이미지 + 정보 */}
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-3">
+              <div className="relative h-24 w-[60px] shrink-0 overflow-hidden rounded-lg border border-border/70 bg-secondary">
+                <img src={cardImage(reportCard.streamer, reportCard.star || 0)} alt={reportCard.streamer.name} className="h-full w-full object-cover" />
+                <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[9px] font-black text-amber-300">{reportCard.star || 0}★</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-bold truncate">{reportCard.streamer.name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{reportCard.streamer.channel_id}</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">{reportCard.star || 0}성 카드 이미지를 신고합니다.</p>
+              </div>
+            </div>
+
+            {/* 신고 사유 선택 */}
+            <div className="mt-4 space-y-1.5">
+              <p className="text-xs font-bold text-muted-foreground">신고 사유</p>
+              {REPORT_REASONS.map((r) => (
+                <label key={r} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition ${reportReason === r ? 'border-red-500/50 bg-red-500/10 font-bold text-foreground' : 'border-border bg-secondary/30 text-muted-foreground hover:bg-secondary/60'}`}>
+                  <input type="radio" name="report-reason" value={r} checked={reportReason === r} onChange={() => setReportReason(r)} className="accent-red-500" />
+                  {r}
+                </label>
+              ))}
+              {reportReason === '기타' && (
+                <textarea
+                  value={reportCustom}
+                  onChange={(e) => setReportCustom(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  placeholder="신고 사유를 직접 입력해 주세요. (최대 500자)"
+                  className="mt-1 w-full resize-none rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+                />
+              )}
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => setReportCard(null)}
+                disabled={reportSubmitting}
+                className="flex-1 rounded-lg bg-secondary px-4 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >취소</button>
+              <button
+                onClick={handleReport}
+                disabled={reportSubmitting || !reportReason || (reportReason === '기타' && !reportCustom.trim())}
+                className="flex-1 rounded-lg bg-red-500 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50 disabled:pointer-events-none"
+              >{reportSubmitting ? '접수 중…' : '신고 접수'}</button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -274,3 +274,177 @@ export const startPushNotificationScheduler = () => {
 
   console.log('[Scheduler] PWA 예약 푸시 스케줄러 감시 워커가 가동되었습니다. (1분 간격)');
 };
+
+/**
+ * 5. 예약된 푸시 알림 목록 조회 API (ADMIN 전용)
+ */
+export const getScheduledNotifications = async (req: Request, res: Response) => {
+  try {
+    const dbMode = getDbMode();
+    let list: any[] = [];
+    if (dbMode === 'SUPABASE') {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('push_notifications')
+        .select('*')
+        .eq('status', 'pending')
+        .order('scheduled_at', { ascending: true });
+      if (error) throw error;
+      list = data || [];
+    } else {
+      const db = getSqliteDb();
+      list = db.prepare(`
+        SELECT * FROM push_notifications 
+        WHERE status = 'pending' 
+        ORDER BY scheduled_at ASC
+      `).all();
+    }
+    return res.status(200).json(list);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '예약 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 6. 전송 완료된 푸시 알림 목록 조회 API (ADMIN 전용)
+ */
+export const getSentNotifications = async (req: Request, res: Response) => {
+  try {
+    const dbMode = getDbMode();
+    let list: any[] = [];
+    if (dbMode === 'SUPABASE') {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('push_notifications')
+        .select('*')
+        .eq('status', 'sent')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      list = data || [];
+    } else {
+      const db = getSqliteDb();
+      list = db.prepare(`
+        SELECT * FROM push_notifications 
+        WHERE status = 'sent' 
+        ORDER BY created_at DESC
+      `).all();
+    }
+    return res.status(200).json(list);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '전송 이력 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 7. 예약 푸시 알림 수정 API (ADMIN 전용)
+ */
+export const updateScheduledNotification = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, body, scheduled_at } = req.body;
+
+  if (!title || !body) {
+    return res.status(400).json({ error: 'BadRequest', message: '제목(title)과 본문(body)은 필수입니다.' });
+  }
+
+  try {
+    const dbMode = getDbMode();
+    let scheduledTime = null;
+    if (scheduled_at) {
+      scheduledTime = new Date(scheduled_at).toISOString();
+    }
+
+    if (dbMode === 'SUPABASE') {
+      const client = getSupabaseClient();
+      // 기존 상태 체크
+      const { data: existing, error: findErr } = await client
+        .from('push_notifications')
+        .select('status')
+        .eq('id', id)
+        .single();
+      
+      if (findErr || !existing) {
+        return res.status(404).json({ error: 'NotFound', message: '수정할 푸시 알림을 찾을 수 없습니다.' });
+      }
+
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송된 푸시 알림은 수정할 수 없습니다.' });
+      }
+
+      const { error } = await client
+        .from('push_notifications')
+        .update({ title, body, scheduled_at: scheduledTime })
+        .eq('id', id);
+
+      if (error) throw error;
+    } else {
+      const db = getSqliteDb();
+      const existing = db.prepare('SELECT status FROM push_notifications WHERE id = ?').get(id) as any;
+      if (!existing) {
+        return res.status(404).json({ error: 'NotFound', message: '수정할 푸시 알림을 찾을 수 없습니다.' });
+      }
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송된 푸시 알림은 수정할 수 없습니다.' });
+      }
+
+      db.prepare(`
+        UPDATE push_notifications 
+        SET title = ?, body = ?, scheduled_at = ? 
+        WHERE id = ?
+      `).run(title, body, scheduledTime, id);
+    }
+
+    return res.status(200).json({ message: '예약된 푸시 알림이 성공적으로 수정되었습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '푸시 수정 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 8. 예약 푸시 알림 취소(삭제) API (ADMIN 전용)
+ */
+export const deleteScheduledNotification = async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const dbMode = getDbMode();
+
+    if (dbMode === 'SUPABASE') {
+      const client = getSupabaseClient();
+      const { data: existing, error: findErr } = await client
+        .from('push_notifications')
+        .select('status')
+        .eq('id', id)
+        .single();
+      
+      if (findErr || !existing) {
+        return res.status(404).json({ error: 'NotFound', message: '취소할 푸시 알림을 찾을 수 없습니다.' });
+      }
+
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송 완료된 푸시 알림은 취소할 수 없습니다.' });
+      }
+
+      const { error } = await client
+        .from('push_notifications')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    } else {
+      const db = getSqliteDb();
+      const existing = db.prepare('SELECT status FROM push_notifications WHERE id = ?').get(id) as any;
+      if (!existing) {
+        return res.status(404).json({ error: 'NotFound', message: '취소할 푸시 알림을 찾을 수 없습니다.' });
+      }
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송 완료된 푸시 알림은 취소할 수 없습니다.' });
+      }
+
+      db.prepare('DELETE FROM push_notifications WHERE id = ?').run(id);
+    }
+
+    return res.status(200).json({ message: '예약된 푸시 알림이 성공적으로 취소(삭제)되었습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '푸시 취소 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};

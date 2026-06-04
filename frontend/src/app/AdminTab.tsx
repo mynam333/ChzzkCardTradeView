@@ -131,6 +131,10 @@ export const AdminTab: React.FC = () => {
 
   // 푸시
   const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '' });
+  const [scheduledPushes, setScheduledPushes] = useState<any[]>([]);
+  const [sentPushes, setSentPushes] = useState<any[]>([]);
+  const [editingPushId, setEditingPushId] = useState<number | null>(null);
+  const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '' });
 
   // 신고/밴
   const [reports, setReports] = useState<any[]>([]);
@@ -153,6 +157,10 @@ export const AdminTab: React.FC = () => {
       fetchShopItems();
       fetchFreeDrawInterval();
       fetchDrawCost();
+    }
+    if (subTab === 'push') {
+      fetchScheduledPushes();
+      fetchSentPushes();
     }
     if (subTab === 'maintenance') { fetchResetInfo(); fetchOrphans(); }
   }, [subTab, isAdmin]);
@@ -345,8 +353,79 @@ export const AdminTab: React.FC = () => {
       if (res.ok) {
         toast(data.message || '푸시가 등록되었습니다.');
         setPushForm({ title: '', body: '', scheduled_at: '' });
+        fetchScheduledPushes();
+        fetchSentPushes();
       } else toast('푸시 등록 실패');
     } catch { toast('서버 통신 에러'); }
+  };
+
+  const fetchScheduledPushes = async () => {
+    try {
+      const res = await apiFetch('/admin/push/scheduled');
+      if (res.ok) setScheduledPushes(await res.json());
+    } catch { /* noop */ }
+  };
+
+  const fetchSentPushes = async () => {
+    try {
+      const res = await apiFetch('/admin/push/sent');
+      if (res.ok) setSentPushes(await res.json());
+    } catch { /* noop */ }
+  };
+
+  const handleUpdatePush = async (id: number) => {
+    if (!editingForm.title.trim() || !editingForm.body.trim()) {
+      toast('알림 제목과 본문을 입력해 주세요.');
+      return;
+    }
+    try {
+      const payload = {
+        ...editingForm,
+        scheduled_at: editingForm.scheduled_at ? new Date(editingForm.scheduled_at).toISOString() : null
+      };
+      const res = await apiFetch(`/admin/push/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast('예약된 푸시 알림이 수정되었습니다.');
+        setEditingPushId(null);
+        fetchScheduledPushes();
+        fetchSentPushes();
+      } else {
+        toast(data.message || '푸시 수정 실패');
+      }
+    } catch { toast('서버 통신 에러'); }
+  };
+
+  const handleDeletePush = async (id: number) => {
+    if (!confirm('이 푸시 예약을 취소(삭제)하시겠습니까?')) return;
+    try {
+      const res = await apiFetch(`/admin/push/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        toast('푸시 예약이 취소되었습니다.');
+        fetchScheduledPushes();
+      } else {
+        toast(data.message || '푸시 취소 실패');
+      }
+    } catch { toast('서버 통신 에러'); }
+  };
+
+  const startEditPush = (push: any) => {
+    setEditingPushId(push.id);
+    let localTime = '';
+    if (push.scheduled_at) {
+      const d = new Date(push.scheduled_at);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      localTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    setEditingForm({
+      title: push.title,
+      body: push.body,
+      scheduled_at: localTime
+    });
   };
 
   const handleResolveReport = async (reportId: number, status: 'resolved' | 'rejected') => {
@@ -954,20 +1033,121 @@ export const AdminTab: React.FC = () => {
 
       {/* 푸시 */}
       {subTab === 'push' && (
-        <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-          <h3 className="text-sm font-bold flex items-center gap-1.5"><BellRing className="h-4 w-4" /> PWA 푸시 알림 발송</h3>
-          <p className="text-xs text-muted-foreground">발송 시각을 비우면 즉시(다음 1분 이내) 발송됩니다.</p>
-          <input type="text" placeholder="알림 제목" value={pushForm.title}
-            onChange={(e) => setPushForm({ ...pushForm, title: e.target.value })}
-            className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-          <input type="text" placeholder="알림 본문" value={pushForm.body}
-            onChange={(e) => setPushForm({ ...pushForm, body: e.target.value })}
-            className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-          <input type="datetime-local" value={pushForm.scheduled_at}
-            onChange={(e) => setPushForm({ ...pushForm, scheduled_at: e.target.value })}
-            className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-          <button onClick={handleSchedulePush} className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">발송 등록</button>
-        </section>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 좌측: 푸시 발송 폼 & 예약 목록 */}
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold flex items-center gap-1.5"><BellRing className="h-4 w-4" /> PWA 푸시 알림 발송</h3>
+              <p className="text-xs text-muted-foreground">발송 시각을 비우면 즉시(다음 1분 이내) 발송됩니다.</p>
+              <input type="text" placeholder="알림 제목" value={pushForm.title}
+                onChange={(e) => setPushForm({ ...pushForm, title: e.target.value })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              <input type="text" placeholder="알림 본문" value={pushForm.body}
+                onChange={(e) => setPushForm({ ...pushForm, body: e.target.value })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              <input type="datetime-local" value={pushForm.scheduled_at}
+                onChange={(e) => setPushForm({ ...pushForm, scheduled_at: e.target.value })}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              <button onClick={handleSchedulePush} className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">발송 등록</button>
+            </section>
+
+            {/* 예약된 푸시 알림 목록 */}
+            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold flex items-center gap-1.5">⏰ 예약된 푸시 알림 ({scheduledPushes.length})</h3>
+                <button onClick={fetchScheduledPushes} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+              </div>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {scheduledPushes.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-6">예약된 푸시 알림이 없습니다.</p>
+                ) : (
+                  scheduledPushes.map((p) => {
+                    const isEditing = editingPushId === p.id;
+                    const dateStr = p.scheduled_at
+                      ? new Date(p.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                      : '즉시 발송 예정';
+                    return (
+                      <div key={p.id} className="p-3 bg-secondary/25 border border-border/40 rounded-xl space-y-2">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editingForm.title}
+                              onChange={(e) => setEditingForm({ ...editingForm, title: e.target.value })}
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
+                              placeholder="수정할 제목"
+                            />
+                            <input
+                              type="text"
+                              value={editingForm.body}
+                              onChange={(e) => setEditingForm({ ...editingForm, body: e.target.value })}
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
+                              placeholder="수정할 본문"
+                            />
+                            <input
+                              type="datetime-local"
+                              value={editingForm.scheduled_at}
+                              onChange={(e) => setEditingForm({ ...editingForm, scheduled_at: e.target.value })}
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
+                            />
+                            <div className="flex gap-1.5 justify-end">
+                              <button onClick={() => setEditingPushId(null)} className="rounded bg-secondary px-2.5 py-1 text-[10px] font-bold">취소</button>
+                              <button onClick={() => handleUpdatePush(p.id)} className="rounded bg-primary text-primary-foreground px-3 py-1 text-[10px] font-bold">저장</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-primary font-mono">예약 대기 (ID: {p.id})</span>
+                              <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+                            </div>
+                            <h4 className="text-xs font-bold text-foreground mt-1">{p.title}</h4>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-pre-wrap">{p.body}</p>
+                            <div className="flex justify-end gap-1.5 mt-2 border-t border-border/20 pt-2">
+                              <button onClick={() => startEditPush(p)} className="rounded bg-secondary hover:bg-secondary/80 px-2.5 py-1 text-[10px] font-bold text-foreground">수정</button>
+                              <button onClick={() => handleDeletePush(p.id)} className="rounded bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-bold text-red-500">예약 취소</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* 우측: 발송 완료된 푸시 이력 */}
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold flex items-center gap-1.5">📬 발송 완료된 알림 이력 ({sentPushes.length})</h3>
+                <button onClick={fetchSentPushes} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+              </div>
+              <div className="space-y-2.5 max-h-[36rem] overflow-y-auto">
+                {sentPushes.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">발송된 알림 내역이 없습니다.</p>
+                ) : (
+                  sentPushes.map((p) => {
+                    const sentTimeStr = p.created_at
+                      ? new Date(p.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                      : '기록 없음';
+                    return (
+                      <div key={p.id} className="p-3 bg-secondary/15 border border-border/20 rounded-xl space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9.5px] rounded bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 font-bold">발송 완료</span>
+                          <span className="text-[10px] text-muted-foreground">{sentTimeStr}</span>
+                        </div>
+                        <h4 className="text-xs font-bold text-foreground mt-1.5">{p.title}</h4>
+                        <p className="text-[11px] text-muted-foreground whitespace-pre-wrap">{p.body}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
       )}
 
       {/* 신고·밴 */}
@@ -984,11 +1164,22 @@ export const AdminTab: React.FC = () => {
               ) : reports.map((rep) => (
                 <div key={rep.id} className="p-3 bg-secondary/30 rounded-lg space-y-2">
                   <div className="flex items-center gap-3">
-                    <img src={rep.reported_image_url} alt="snapshot" className="h-12 w-12 rounded border border-border object-cover" />
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-bold">신고 #{rep.id} · 대상: {rep.channel_id}</p>
-                      <p className="text-[10px] text-muted-foreground">상태: {rep.status} / 사유: {rep.reason}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">신고자: {rep.reporter_id}</p>
+                    <a href={rep.reported_image_url} target="_blank" rel="noopener noreferrer" className="shrink-0" title="원본 이미지 새 창으로 열기">
+                      <img src={rep.reported_image_url} alt="snapshot" className="h-16 w-16 rounded border border-border object-cover" />
+                    </a>
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-[11px] font-bold flex items-center gap-1.5">
+                        신고 #{rep.id}
+                        <span className="rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{rep.star || 0}★</span>
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${rep.status === 'pending' ? 'bg-red-500/15 text-red-500' : rep.status === 'resolved' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-secondary text-muted-foreground'}`}>{rep.status}</span>
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        대상 스트리머: <span className="font-bold text-foreground">{rep.streamer_name || '(알 수 없음)'}</span> · {rep.channel_id}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        신고자: <span className="font-bold text-foreground">{rep.reporter_username || '(알 수 없음)'}</span> · {rep.reporter_id}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground"><span className="text-foreground">사유:</span> {rep.reason}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5 border-t border-border/40 pt-2">

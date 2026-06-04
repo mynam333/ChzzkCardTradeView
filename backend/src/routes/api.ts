@@ -33,7 +33,11 @@ import {
 import {
   getVapidPublicKey,
   subscribePush,
-  scheduleNotification
+  scheduleNotification,
+  getScheduledNotifications,
+  getSentNotifications,
+  updateScheduledNotification,
+  deleteScheduledNotification
 } from '../controllers/pushController';
 
 import {
@@ -291,6 +295,10 @@ router.post('/admin/announcements/:id/popup', authMiddleware, adminMiddleware, s
 
 // 푸시 알림 즉시 또는 예약 생성
 router.post('/admin/push/schedule', authMiddleware, adminMiddleware, scheduleNotification);
+router.get('/admin/push/scheduled', authMiddleware, adminMiddleware, getScheduledNotifications);
+router.get('/admin/push/sent', authMiddleware, adminMiddleware, getSentNotifications);
+router.put('/admin/push/:id', authMiddleware, adminMiddleware, updateScheduledNotification);
+router.delete('/admin/push/:id', authMiddleware, adminMiddleware, deleteScheduledNotification);
 
 // 시스템 설정 (무료 뽑기 간격, 뽑기 비용)
 router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDrawInterval);
