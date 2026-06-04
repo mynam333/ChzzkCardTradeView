@@ -17,6 +17,7 @@ import {
 import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
 import { StreamerDetailModal } from './StreamerDetailModal';
+import { fuzzySearch } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { ReportCardModal } from './ReportCardModal';
@@ -555,8 +556,8 @@ export const GachaTab: React.FC = () => {
       const streamer = card.streamer;
       if (!streamer) return false;
 
-      // 이름 검색 필터
-      const matchesSearch = streamer.name.toLowerCase().includes(searchQuery.toLowerCase());
+      // 이름 검색 필터 (초성 매칭 및 띄어쓰기 무시 유사도 매칭 적용)
+      const matchesSearch = fuzzySearch(streamer.name, searchQuery);
 
       // 라이브 상태 필터 (DB 필드 또는 객체의 is_active 속성 매칭)
       const isActive = streamer.is_active || (streamer as any).isLive;

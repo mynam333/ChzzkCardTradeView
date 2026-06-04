@@ -9,6 +9,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
+import { fuzzySearch } from '@/lib/search';
 
 interface Streamer {
   channel_id: string;
@@ -98,8 +99,7 @@ export const RankingTab: React.FC = () => {
   // 공통: 정렬된 목록에 실제 순위(rank)를 부여한 뒤 검색어로 필터(순위는 유지)
   const rankAndFilter = <T,>(sorted: T[], getName: (item: T) => string): (T & { rank: number })[] => {
     const withRank = sorted.map((item, i) => ({ ...item, rank: i + 1 }));
-    const q = searchQuery.trim().toLowerCase();
-    return q ? withRank.filter((item) => getName(item).toLowerCase().includes(q)) : withRank;
+    return searchQuery ? withRank.filter((item) => fuzzySearch(getName(item), searchQuery)) : withRank;
   };
 
   // 시세/등락률 탭: 서브탭 기준 정렬 후 순위·검색 적용
@@ -111,9 +111,8 @@ export const RankingTab: React.FC = () => {
     (s) => s.name
   );
 
-  // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용
-  // 수집가 자산 탭: 백엔드가 이미 전체 순위와 함께 필터링해서 돌려주므로 매핑만 수행
-  const rankedUsers = userRankings.map((ur) => ({ ...ur, rank: ur.rank ?? 0 }));
+  // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용 (프론트엔드 2차 필터 적용)
+  const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
   const activeLength = subTab === 'user' ? rankedUsers.length : rankedStreamers.length;
