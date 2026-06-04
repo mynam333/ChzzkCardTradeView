@@ -128,40 +128,55 @@ export const MainTab: React.FC = () => {
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
         <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-sky-400/20 blur-2xl"></div>
 
-        {/* 스트리머 추가 버튼 (그라디언트 우측, 로그인 시 노출) — 글래스 톤으로 두 모드 그라디언트에 모두 어울림 */}
-        {user && (
-          <StreamerRegisterModal
-            onRegistered={fetchHotStreamers}
-            className="group absolute right-5 top-5 z-20 inline-flex items-center gap-2 rounded-2xl border border-white/30 bg-white/15 px-3.5 py-2.5 text-xs font-bold text-white shadow-lg shadow-black/10 ring-1 ring-inset ring-white/10 backdrop-blur-md transition-all hover:border-white/50 hover:bg-white/25 hover:shadow-xl active:scale-95 md:right-8 md:top-1/2 md:-translate-y-1/2 md:px-5 md:py-3 md:text-sm"
-          >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/25 transition group-hover:rotate-90 group-hover:bg-white/40 md:h-7 md:w-7">
-              <Plus className="h-4 w-4 md:h-4.5 md:w-4.5" />
+        {/* 
+          메인 레이아웃: PC에서는 가로 분할(justify-between, items-center),
+          모바일에서는 세로 분할(flex-col, gap-6) 구조로 텍스트와 버튼이 겹치지 않고 온전한 영역을 확보함.
+        */}
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          
+          {/* 왼쪽 텍스트 블록 */}
+          <div className="max-w-xl">
+            <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
+              치지직 스트리머 카드 수집 게임
             </span>
-            <span>스트리머 추가</span>
-          </StreamerRegisterModal>
-        )}
-
-        <div className="relative z-10 max-w-xl">
-          <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
-            치지직 스트리머 카드 수집 게임
-          </span>
-          <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
-            최애 스트리머 카드를 뽑고<br />최고의 수집가가 되어보세요!
-          </h2>
-          <p className="mt-3 text-sm text-sky-100/90 leading-relaxed">
-            치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 매일 무료 가챠 제공
-            </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <Award className="h-3.5 w-3.5 text-yellow-300" /> 컬렉터 랭킹 경쟁
-            </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-              <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 스트리머 인기 반영 시세
+            <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
+              최애 스트리머 카드를 뽑고<br />최고의 수집가가 되어보세요!
+            </h2>
+            <p className="mt-3 text-sm text-sky-100/90 leading-relaxed">
+              치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
+                <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 매일 무료 가챠 제공
+              </div>
+              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
+                <Award className="h-3.5 w-3.5 text-yellow-300" /> 컬렉터 랭킹 경쟁
+              </div>
+              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
+                <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 스트리머 인기 반영 시세
+              </div>
             </div>
           </div>
+
+          {/* 
+            오른쪽 스트리머 추가 버튼 블록
+            - 가로 크기를 약 1.2배 키우고 세로 영역의 볼륨감(총 높이)을 늘려 웅장하고 예쁘게 개선.
+            - 모바일(md 이하)에서는 w-full로 채우고 그라디언트 박스의 가장 아랫부분에 화면 너비에 맞춰 납작하고 조화롭게 고정됨.
+          */}
+          {user && (
+            <div className="w-full md:w-auto shrink-0 flex justify-center pt-2 md:pt-0">
+              <StreamerRegisterModal
+                onRegistered={fetchHotStreamers}
+                className="group w-full md:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-white/30 bg-white/15 px-5 py-4 text-sm font-black text-white shadow-lg shadow-black/10 ring-1 ring-inset ring-white/10 backdrop-blur-md transition-all hover:border-white/50 hover:bg-white/25 hover:shadow-xl active:scale-95 md:px-7 md:py-6 md:text-base"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/25 transition group-hover:rotate-90 group-hover:bg-white/40 md:h-8 md:w-8">
+                  <Plus className="h-4.5 w-4.5 md:h-5 md:w-5" />
+                </span>
+                <span>스트리머 추가</span>
+              </StreamerRegisterModal>
+            </div>
+          )}
+
         </div>
       </section>
 
