@@ -91,26 +91,28 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .from('user_cards')
       .select(`
         *,
-        streamer:streamers(*),
-        border:shop_items!user_cards_border_item_id_fkey(*),
-        name_effect:shop_items!user_cards_name_effect_item_id_fkey(*)
+        streamer:streamers(*)
       `)
       .eq('id', cardId)
       .maybeSingle();
 
-    if (cardErr || !card) {
-      // border/name_effect 조인 실패 대비 안전장치
-      const { data: plainCard, error: plainErr } = await this.getClient()
-        .from('user_cards')
-        .select(`
-          *,
-          streamer:streamers(*)
-        `)
-        .eq('id', cardId)
-        .maybeSingle();
-      if (plainErr || !plainCard) return null;
-      return plainCard;
+    if (cardErr || !card) return null;
+
+    // 코스메틱 로드
+    const itemIds = [card.border_item_id, card.name_effect_item_id].filter((v): v is number => !!v);
+    let itemMap: Record<number, any> = {};
+    if (itemIds.length > 0) {
+      const { data: items } = await this.getClient()
+        .from('shop_items')
+        .select('id, style_json, font_url, font_family')
+        .in('id', itemIds);
+      for (const it of items || []) itemMap[it.id] = it;
     }
+
+    const b = card.border_item_id ? itemMap[card.border_item_id] : null;
+    const n = card.name_effect_item_id ? itemMap[card.name_effect_item_id] : null;
+    card.border = b ? { id: b.id, style_json: b.style_json } : null;
+    card.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
 
     return card;
   }
@@ -186,14 +188,29 @@ export class SupabaseMarketRepository implements IMarketRepository {
         .from('user_cards')
         .select(`
           *,
-          streamer:streamers(*),
-          border:shop_items!user_cards_border_item_id_fkey(*),
-          name_effect:shop_items!user_cards_name_effect_item_id_fkey(*)
+          streamer:streamers(*)
         `)
         .in('id', cardIds);
 
       if (cardsData) {
+        // 코스메틱 일괄 로드
+        const itemIds = Array.from(new Set(
+          cardsData.flatMap((c) => [c.border_item_id, c.name_effect_item_id]).filter((v): v is number => !!v)
+        ));
+        let itemMap: Record<number, any> = {};
+        if (itemIds.length > 0) {
+          const { data: items } = await this.getClient()
+            .from('shop_items')
+            .select('id, style_json, font_url, font_family')
+            .in('id', itemIds);
+          for (const it of items || []) itemMap[it.id] = it;
+        }
+
         cardsData.forEach(c => {
+          const b = c.border_item_id ? itemMap[c.border_item_id] : null;
+          const n = c.name_effect_item_id ? itemMap[c.name_effect_item_id] : null;
+          c.border = b ? { id: b.id, style_json: b.style_json } : null;
+          c.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
           cardsMap[c.id] = c;
         });
       }
@@ -253,14 +270,29 @@ export class SupabaseMarketRepository implements IMarketRepository {
         .from('user_cards')
         .select(`
           *,
-          streamer:streamers(*),
-          border:shop_items!user_cards_border_item_id_fkey(*),
-          name_effect:shop_items!user_cards_name_effect_item_id_fkey(*)
+          streamer:streamers(*)
         `)
         .in('id', cardIds);
 
       if (cardsData) {
+        // 코스메틱 일괄 로드
+        const itemIds = Array.from(new Set(
+          cardsData.flatMap((c) => [c.border_item_id, c.name_effect_item_id]).filter((v): v is number => !!v)
+        ));
+        let itemMap: Record<number, any> = {};
+        if (itemIds.length > 0) {
+          const { data: items } = await this.getClient()
+            .from('shop_items')
+            .select('id, style_json, font_url, font_family')
+            .in('id', itemIds);
+          for (const it of items || []) itemMap[it.id] = it;
+        }
+
         cardsData.forEach(c => {
+          const b = c.border_item_id ? itemMap[c.border_item_id] : null;
+          const n = c.name_effect_item_id ? itemMap[c.name_effect_item_id] : null;
+          c.border = b ? { id: b.id, style_json: b.style_json } : null;
+          c.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
           cardsMap[c.id] = c;
         });
       }
@@ -333,14 +365,29 @@ export class SupabaseMarketRepository implements IMarketRepository {
         .from('user_cards')
         .select(`
           *,
-          streamer:streamers(*),
-          border:shop_items!user_cards_border_item_id_fkey(*),
-          name_effect:shop_items!user_cards_name_effect_item_id_fkey(*)
+          streamer:streamers(*)
         `)
         .in('id', cardIds);
 
       if (cardsData) {
+        // 코스메틱 일괄 로드
+        const itemIds = Array.from(new Set(
+          cardsData.flatMap((c) => [c.border_item_id, c.name_effect_item_id]).filter((v): v is number => !!v)
+        ));
+        let itemMap: Record<number, any> = {};
+        if (itemIds.length > 0) {
+          const { data: items } = await this.getClient()
+            .from('shop_items')
+            .select('id, style_json, font_url, font_family')
+            .in('id', itemIds);
+          for (const it of items || []) itemMap[it.id] = it;
+        }
+
         cardsData.forEach(c => {
+          const b = c.border_item_id ? itemMap[c.border_item_id] : null;
+          const n = c.name_effect_item_id ? itemMap[c.name_effect_item_id] : null;
+          c.border = b ? { id: b.id, style_json: b.style_json } : null;
+          c.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
           cardsMap[c.id] = c;
         });
       }

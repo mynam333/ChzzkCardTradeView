@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS user_cards (
     name_effect_item_id INTEGER,               -- 장착된 이름 이펙트 코스메틱 ID
     acquired_at TEXT DEFAULT (datetime('now')),-- 획득 일시
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+    FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE,
+    FOREIGN KEY(border_item_id) REFERENCES shop_items(id) ON DELETE SET NULL,
+    FOREIGN KEY(name_effect_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
 );
 
 -- 4. 1:1 교환 제안 테이블

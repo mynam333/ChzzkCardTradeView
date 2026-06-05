@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS user_cards (
     channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
     serial_number INTEGER NOT NULL,              -- 발행 일련번호
     star INTEGER DEFAULT 0,                       -- 합성 별 등급 (0~5)
+    border_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
+    name_effect_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
     acquired_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -240,6 +242,32 @@ ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
+
+-- 하위 호환성 유지: user_cards 테이블에 코스메틱 외래키 제약조건 추가
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'user_cards' 
+          AND constraint_name = 'user_cards_border_item_id_fkey'
+    ) THEN
+        ALTER TABLE user_cards 
+        ADD CONSTRAINT user_cards_border_item_id_fkey 
+        FOREIGN KEY (border_item_id) REFERENCES shop_items(id) ON DELETE SET NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'user_cards' 
+          AND constraint_name = 'user_cards_name_effect_item_id_fkey'
+    ) THEN
+        ALTER TABLE user_cards 
+        ADD CONSTRAINT user_cards_name_effect_item_id_fkey 
+        FOREIGN KEY (name_effect_item_id) REFERENCES shop_items(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- ============================================================
 -- 인덱스 설정 (자주 조회되는 컬럼 최적화)
