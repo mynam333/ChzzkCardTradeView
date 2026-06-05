@@ -72,6 +72,14 @@ type StartGameResponse = {
 };
 
 const PUZZLE_PIECE_COUNT = 12;
+const QUIZ_DISTORTION_SCALE = 0.2;
+const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
+const QUIZ_MOTION_MAX_BLUR_PX = 80 * QUIZ_DISTORTION_SCALE;
+const QUIZ_MOSAIC_MIN_PERCENT = 100 - (100 - 1) * QUIZ_DISTORTION_SCALE;
+const QUIZ_RADIAL_MAX_ROTATE_DEG = 45 * QUIZ_DISTORTION_SCALE;
+const QUIZ_RADIAL_MAX_SCALE = 0.22 * QUIZ_DISTORTION_SCALE;
+const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.25 * QUIZ_DISTORTION_SCALE;
+const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.08 * QUIZ_DISTORTION_SCALE;
 
 const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
 
@@ -680,7 +688,7 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <h3 className="mt-4 text-sm font-black text-foreground">송출 오류난 스트리머 맞추기</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                무작위 스트리머 카드가 전송 오류가 났습니다. 10초 내로 복원되는 카드를 보고 누구인지 맞춰보세요!
+                무작위 스트리머 카드가 전송 오류가 났습니다. 15초 내로 복원되는 카드를 보고 누구인지 맞춰보세요!
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
@@ -848,16 +856,14 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
           {activeGame === 'quiz' && (() => {
-            // 1. 모션 블러: 최대 80px 강도의 SVG feGaussianBlur 파라미터 계산
+            // 1. 모션 블러: 기존 강도의 1/5 수준으로 SVG feGaussianBlur 파라미터 계산
             const rad = (quizBlurAngle * Math.PI) / 180;
-            const stdDev = (quizIntensity / 100) * 80; // 최대 80px (기존 35px → 대폭 강화)
+            const stdDev = (quizIntensity / 100) * QUIZ_MOTION_MAX_BLUR_PX;
             const stdX = Math.abs(stdDev * Math.cos(rad));
             const stdY = Math.abs(stdDev * Math.sin(rad));
 
-            // 2. 모자이크: 픽셀 크기 기반 계산 (intensity 100 = 픽셀 크기 100px → 1px)
-            // 작은 픽셀 크기로 다운-업스케일하여 극단적 모자이크 효과 구현
-            const mosaicPixelSize = Math.max(1, (quizIntensity / 100) * 100); // 1~100px
-            const mosaicPercent = mosaicPixelSize; // 컨테이너 대비 % 크기로 사용
+            // 2. 모자이크: 원본을 약하게 다운스케일한 뒤 업스케일하여 픽셀화
+            const mosaicPercent = 100 - (quizIntensity / 100) * (100 - QUIZ_MOSAIC_MIN_PERCENT);
             const mosaicScale = 100 / mosaicPercent;
 
             return (
@@ -907,19 +913,19 @@ export const ArcadeTab: React.FC = () => {
                 {/* 카드 이미지 컨테이너 */}
                 <div className="relative aspect-[5/8] w-48 overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-md flex items-center justify-center">
 
-                  {/* 가우시안 블러 모드 - 최대 100px (기존 36px → 대폭 강화) */}
+                  {/* 가우시안 블러 모드 */}
                   {quizBlurType === 'gaussian' && (
                     <img
                       src={gameData.image_url}
                       alt="Quiz card"
                       style={{
-                        filter: `blur(${(quizIntensity / 100) * 100}px) contrast(1.1)`,
+                        filter: `blur(${(quizIntensity / 100) * QUIZ_GAUSSIAN_MAX_BLUR_PX}px) contrast(1.1)`,
                       }}
                       className="h-full w-full object-cover select-none pointer-events-none transition-all duration-75"
                     />
                   )}
 
-                  {/* 모자이크 블러 모드 - 극단적 픽셀 모자이크 (최대 픽셀 100px 크기) */}
+                  {/* 모자이크 블러 모드 */}
                   {quizBlurType === 'mosaic' && (
                     <div className="w-full h-full relative overflow-hidden">
                       <img
@@ -937,7 +943,7 @@ export const ArcadeTab: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 모션 블러 모드 - SVG feGaussianBlur 최대 80px */}
+                  {/* 모션 블러 모드 */}
                   {quizBlurType === 'motion' && (
                     <img
                       src={gameData.image_url}
@@ -949,16 +955,15 @@ export const ArcadeTab: React.FC = () => {
                     />
                   )}
 
-                  {/* 방사형 회전 잔상 블러 모드 (13겹 강력 소용돌이 - 최대 45도 회전각) */}
+                  {/* 방사형 회전 잔상 블러 모드 */}
                   {quizBlurType === 'radial' && (
                     <div className="w-full h-full relative">
                       {Array.from({ length: 13 }).map((_, i) => {
                         const offsetFactor = i - 6; // -6, -5, ..., 0, ..., 5, 6
-                        // 최대 회전각 45도 (기존 20도 → 대폭 강화)
-                        const rotateAngle = (quizIntensity / 100) * 45 * (offsetFactor / 6);
-                        const scale = 1 + (quizIntensity / 100) * 0.22 * Math.abs(offsetFactor / 6);
+                        const rotateAngle = (quizIntensity / 100) * QUIZ_RADIAL_MAX_ROTATE_DEG * (offsetFactor / 6);
+                        const scale = 1 + (quizIntensity / 100) * QUIZ_RADIAL_MAX_SCALE * Math.abs(offsetFactor / 6);
                         // 중앙(i=6)은 원본, 외곽 잔상은 거리에 따라 점감하는 불투명도
-                        const opacity = i === 6 ? 1 : Math.max(0.08, 0.25 - Math.abs(offsetFactor) * 0.025);
+                        const opacity = i === 6 ? 1 : Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - Math.abs(offsetFactor) * 0.005);
                         return (
                           <img
                             key={i}
