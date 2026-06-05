@@ -8,7 +8,6 @@ import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers } from 'lucide-react';
-import canvasConfetti from 'canvas-confetti';
 
 interface ShopItem {
   id: number;
@@ -300,7 +299,11 @@ export const ShopTab: React.FC = () => {
         setIsDrawing(false);
         if (!data.is_free) updatePoints(-drawCost);
         refreshUserData();
-        canvasConfetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#3b82f6'] });
+        // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
+        import('canvas-confetti').then((module) => {
+          const confetti = module.default;
+          confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#3b82f6'] });
+        }).catch((err) => console.error('Confetti 로드 실패:', err));
       }, 1200);
     } catch (e: any) {
       setIsDrawing(false);
