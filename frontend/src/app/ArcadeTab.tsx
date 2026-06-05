@@ -488,7 +488,7 @@ export const ArcadeTab: React.FC = () => {
                 미니게임 아케이드
                 <span className="text-xs font-bold text-muted-foreground bg-secondary/80 px-2 py-0.5 rounded-full"> Arcade </span>
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">치팅이 불가능한 서버 기반의 공정하고 재미있는 카드 미니게임!</p>
+              <p className="text-xs text-muted-foreground mt-0.5">포인트를 두고 벌이는 재미있는 카드 미니게임!</p>
             </div>
           </div>
 
@@ -498,7 +498,7 @@ export const ArcadeTab: React.FC = () => {
               <span className="text-xs font-black text-amber-400 flex items-center gap-1">
                 🪙 아케이드 동전
               </span>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">총 {tickets}장</span>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">총 {tickets}개</span>
             </div>
 
             <div className="flex items-center justify-between mt-1 gap-4">
@@ -561,9 +561,9 @@ export const ArcadeTab: React.FC = () => {
               <div className="inline-block rounded-lg bg-emerald-500/10 p-2.5 text-emerald-500">
                 <HelpCircle className="h-5 w-5" />
               </div>
-              <h3 className="mt-4 text-sm font-black text-foreground">지직... 송출 오류 해독</h3>
+              <h3 className="mt-4 text-sm font-black text-foreground">송출 오류 해독 인물 맞추기</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                무작위 스트리머 카드가 가우시안/모자이크/모션/소용돌이 블러 등으로 전송 오류가 났습니다. 10초 내로 복원되는 카드를 보고 맞춰보세요!
+                무작위 스트리머 카드가 전송 오류가 났습니다. 10초 내로 복원되는 카드를 보고 누구인지 맞춰보세요!
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
@@ -586,7 +586,7 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <h3 className="mt-4 text-sm font-black text-foreground">3x4 회전 퍼즐</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                카드를 3:4 비율로 자동 크롭한 뒤, 12개의 정사각형 조각으로 나누어 회전된 그림을 터치해 올바르게 복구하는 직소 퍼즐입니다.
+                카드를 12개의 정사각형 조각으로 나누어 회전된 그림을 터치해 올바르게 복구하는 직소 퍼즐입니다.
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
@@ -609,7 +609,7 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <h3 className="mt-4 text-sm font-black text-foreground">스트리머 짝맞추기</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                처음 2초간 카드를 전체 공개한 뒤 뒤집힙니다. 60초 시간 제한 내에 뒤집힌 카드의 짝을 3D 애니메이션과 함께 모두 맞춰 보세요!
+                처음 2초간 카드를 전체 공개한 뒤 뒤집힙니다. 60초 시간 제한 내에 뒤집힌 카드의 짝을 모두 맞춰 보세요!
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
