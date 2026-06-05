@@ -348,3 +348,48 @@ export interface ISystemConfigRepository {
   get(key: string, defaultValue: string): Promise<string>;
   set(key: string, value: string): Promise<void>;
 }
+
+// 9. 오픈마켓 (유저 간 카드 거래 장터)
+export interface MarketListing {
+  id?: number;
+  seller_id: string;
+  user_card_id: number;
+  price: number;
+  status: 'PENDING' | 'SOLD' | 'CANCELLED';
+  buyer_id: string | null;
+  fee: number;
+  settled_amount: number;
+  with_cosmetics?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  // 비정규화 조인 정보
+  seller_username?: string;
+  buyer_username?: string;
+  card?: UserCard & { streamer: Streamer };
+}
+
+export interface IMarketRepository {
+  create(listing: { seller_id: string; user_card_id: number; price: number; with_cosmetics?: boolean }): Promise<MarketListing>;
+  findById(id: number): Promise<MarketListing | null>;
+  /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */
+  findPendingCardIdsByUser(userId: string): Promise<number[]>;
+  /** 마켓 목록 조회 (유사도 검색 필터 및 페이지네이션, 정렬 지원) */
+  listActive(options: {
+    page: number;
+    limit: number;
+    search?: string;
+    sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc';
+  }): Promise<{ listings: MarketListing[]; total: number }>;
+  /** 내 판매 목록 관리 */
+  listByUser(userId: string): Promise<MarketListing[]>;
+  updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void>;
+  /**
+   * 원자적 구매 처리 (트랜잭션)
+   * 성공 시 { ok: true, settled_amount, seller_id, price }, 실패 시 { ok: false, reason } 반환
+   */
+  buyAtomic(listingId: number, buyerId: string): Promise<{ ok: boolean; reason: string; settled_amount?: number; seller_id?: string; price?: number }>;
+  /** 내가 판매 완료했거나 구매 완료한 거래 로그 조회 */
+  listHistory(userId: string): Promise<MarketListing[]>;
+  /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
+  getRecentPrice(channelId: string): Promise<number | null>;
+}

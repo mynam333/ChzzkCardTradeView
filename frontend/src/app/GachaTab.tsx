@@ -12,7 +12,9 @@ import {
   Clock,
   ArrowRightLeft,
   X,
-  Layers
+  Layers,
+  Store,
+  Coins
 } from 'lucide-react';
 import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
@@ -92,6 +94,18 @@ export const GachaTab: React.FC = () => {
   // 카드 확대(상세) 모달 — 테두리/이름 효과가 적용된 카드를 크게 표시
   const [zoomCard, setZoomCard] = useState<UserCard | null>(null);
 
+  // ---- 오픈마켓 관련 보관함 상태 ----
+  const [marketPendingCardIds, setMarketPendingCardIds] = useState<number[]>([]);
+  const [myMarketListings, setMyMarketListings] = useState<any[]>([]);
+  const [marketRegisterCard, setMarketRegisterCard] = useState<UserCard | null>(null);
+  const [marketPriceInput, setMarketPriceInput] = useState('100');
+  const [withCosmetics, setWithCosmetics] = useState(false);
+  const [marketRegisterBusy, setMarketRegisterBusy] = useState(false);
+  const [marketCancelBusy, setMarketCancelBusy] = useState(false);
+  
+  // 1:1 교환 예약량 상태 ( available 계산용 )
+  const [reservations, setReservations] = useState<{ cards: Record<string, number>; cardsByStar: Record<string, number>; points: number }>({ cards: {}, cardsByStar: {}, points: 0 });
+
 
   // 알림 피드백: 전역 토스트로 통일 (title은 메시지 앞에 간단히 덧붙임)
   const showAlert = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
@@ -111,8 +125,10 @@ export const GachaTab: React.FC = () => {
     x: number;
     y: number;
     open: boolean;
+    channel_id: string;
+    star: number;
     card: UserCard | null;
-  }>({ x: 0, y: 0, open: false, card: null });
+  }>({ x: 0, y: 0, open: false, channel_id: '', star: 0, card: null });
 
   // 카드 선택 모드 및 선택된 채널 ID 목록 (수집 갯수 단위로 묶여있으므로 channel_id 기반 일괄 선택 지원)
   const [selectionMode, setSelectionMode] = useState(false);
@@ -156,13 +172,63 @@ export const GachaTab: React.FC = () => {
       fetchActiveTrades();
       fetchTradeHistory();
       fetchMyCosmetics();
+      fetchMarketPending();
     }
   }, [user]);
+
+  // 진행 중 거래의 예약 카드/포인트 집계
+  useEffect(() => {
+    if (!user) return;
+    const cards: Record<string, number> = {};
+    const cardsByStar: Record<string, number> = {};
+    let points = 0;
+
+    const reserve = (offer: any) => {
+      if (!offer) return;
+      for (const c of offer.cards || []) {
+        const key = c.channel_id;
+        const compKey = `${c.channel_id}#${c.star ?? 0}`;
+        cards[key] = (cards[key] || 0) + c.count;
+        cardsByStar[compKey] = (cardsByStar[compKey] || 0) + c.count;
+      }
+      points += offer.point || 0;
+    };
+
+    for (const t of activeTrades) {
+      if (t.sender_id === user.id) reserve(t.sender_offer);
+      if (t.receiver_id === user.id && t.status === 'CONFIRMED') reserve(t.receiver_offer);
+    }
+    setReservations({ cards, cardsByStar, points });
+  }, [activeTrades, user?.id]);
 
   // 장착 모달을 열 때마다 보유 코스메틱을 최신화 (상점 구매 후 등 상태 불일치로 "미보유" 오류 방지)
   useEffect(() => {
     if (equipCard) fetchMyCosmetics();
   }, [equipCard?.id]);
+
+  const fetchMarketPending = async () => {
+    if (!isAuthed()) return;
+    try {
+      const res = await apiFetch('/market/my');
+      if (res.ok) {
+        const data = await res.json();
+        setMyMarketListings(data);
+        const pendingIds = data.filter((l: any) => l.status === 'PENDING').map((l: any) => l.user_card_id);
+        setMarketPendingCardIds(pendingIds);
+      }
+    } catch (e) {
+      console.error('마켓 판매 중인 목록 로드 실패:', e);
+    }
+  };
+
+  const getAvailableCount = (channelId: string, star: number) => {
+    const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
+    const total = owned.length;
+    const key = `${channelId}#${star}`;
+    const reserved = reservations.cardsByStar[key] || 0;
+    const pendingMarket = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
+    return Math.max(0, total - reserved - pendingMarket);
+  };
 
   const fetchMyCosmetics = async () => {
     try {
@@ -229,12 +295,71 @@ export const GachaTab: React.FC = () => {
         const data = await res.json();
         setInventory(data);
       }
+      // 마켓 예약 카드 동기화
+      await fetchMarketPending();
     } catch (e) {
       console.error('인벤토리 조회 실패:', e);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleMarketCancel = async (cardId: number) => {
+    const listing = myMarketListings.find(l => l.user_card_id === cardId && l.status === 'PENDING');
+    if (!listing) return;
+    setMarketCancelBusy(true);
+    try {
+      const res = await apiFetch(`/market/cancel/${listing.id}`, { method: 'POST' });
+      if (res.ok) {
+        showAlert('취소 성공', '오픈마켓 카드 등록이 취소되었습니다.', 'success');
+        refreshUserData();
+        fetchInventory();
+      } else {
+        const data = await res.json();
+        showAlert('취소 실패', data.message || '오류가 발생했습니다.', 'error');
+      }
+    } catch {
+      showAlert('통신 오류', '서버와의 통신에 실패했습니다.', 'error');
+    } finally {
+      setMarketCancelBusy(false);
+    }
+  };
+  const handleMarketRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!marketRegisterCard) return;
+    const price = Math.floor(Number(marketPriceInput));
+    if (isNaN(price) || price < 100) {
+      showAlert('등록 실패', '최소 등록 가격은 100 P 이상입니다.', 'warning');
+      return;
+    }
+
+    setMarketRegisterBusy(true);
+    try {
+      const res = await apiFetch('/market/list', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_card_id: marketRegisterCard.id,
+          price: price,
+          with_cosmetics: withCosmetics
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showAlert('등록 성공', '카드가 오픈마켓에 판매 등록되었습니다.', 'success');
+        setMarketRegisterCard(null);
+        setWithCosmetics(false);
+        refreshUserData();
+        fetchInventory();
+      } else {
+        showAlert('등록 실패', data.message || '등록에 실패했습니다.', 'error');
+      }
+    } catch {
+      showAlert('통신 오류', '서버와의 통신에 실패했습니다.', 'error');
+    } finally {
+      setMarketRegisterBusy(false);
+    }
+  };
+
 
   // KST 자정 무료 뽑기 가능 여부 판단 헬퍼
 
@@ -1096,6 +1221,9 @@ export const GachaTab: React.FC = () => {
 
                   const isSelected = selectedChannelIds.includes(streamer.channel_id);
                   const cardValue = Math.round((streamer.base_value || 0) * starMult(star));
+                  const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
+                  const avail = getAvailableCount(streamer.channel_id, star);
+                  const pendingMarketCount = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
 
                   // 우클릭 이벤트 핸들러
                   const handleContextMenu = (e: React.MouseEvent) => {
@@ -1110,11 +1238,20 @@ export const GachaTab: React.FC = () => {
                       setBulkSellModalOpen(true);
                       return;
                     }
+                    const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
+                    const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+                    const key = `${streamer.channel_id}#${star}`;
+                    const reserved = reservations.cardsByStar[key] || 0;
+                    const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+                    const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+
                     setContextMenu({
                       x: e.clientX,
                       y: e.clientY,
                       open: true,
-                      card: card
+                      channel_id: streamer.channel_id,
+                      star: star,
+                      card: availableCard || pendingCard || card
                     });
                   };
 
@@ -1150,7 +1287,20 @@ export const GachaTab: React.FC = () => {
                       const menuW = 180, menuH = 200;
                       const cx = Math.min(x, window.innerWidth - menuW);
                       const cy = Math.min(y, window.innerHeight - menuH);
-                      setContextMenu({ x: Math.max(8, cx), y: Math.max(8, cy), open: true, card });
+                      const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
+                      const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+                      const key = `${streamer.channel_id}#${star}`;
+                      const reserved = reservations.cardsByStar[key] || 0;
+                      const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+                      const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+                      setContextMenu({
+                        x: Math.max(8, cx),
+                        y: Math.max(8, cy),
+                        open: true,
+                        channel_id: streamer.channel_id,
+                        star: star,
+                        card: availableCard || pendingCard || card
+                      });
                       if (navigator.vibrate) navigator.vibrate(40);
                     }, 500);
                   };
@@ -1214,9 +1364,14 @@ export const GachaTab: React.FC = () => {
                           )}
 
                           <div className="flex items-center gap-1">
-                            {count > 1 && (
-                              <span className="rounded bg-primary px-1.5 py-0.5 text-[8.5px] font-extrabold text-primary-foreground animate-bounce">
-                                ×{count}
+                            {pendingMarketCount > 0 && (
+                              <span className="rounded bg-sky-500 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5" title="오픈마켓 판매 중인 수량">
+                                🏪 {pendingMarketCount}
+                              </span>
+                            )}
+                            {(count > 1 || avail < count) && (
+                              <span className={`rounded px-1.5 py-0.5 text-[8.5px] font-extrabold shadow-sm ${avail === 0 ? 'bg-zinc-700 text-zinc-400' : avail < count ? 'bg-amber-500/90 text-black animate-pulse' : 'bg-primary text-primary-foreground'}`}>
+                                {avail}/{count}
                               </span>
                             )}
                             <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
@@ -1344,83 +1499,132 @@ export const GachaTab: React.FC = () => {
       })()}
 
       {/* 우클릭 컨텍스트 메뉴 오버레이 */}
-      {contextMenu.open && contextMenu.card && (
-        <div
-          className="fixed z-50 rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 min-w-36"
-          style={{
-            left: `${contextMenu.x}px`,
-            top: `${contextMenu.y}px`,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => {
-              if (contextMenu.card) {
-                setSellingStreamer(contextMenu.card.streamer || null);
-                setSellQuantity(1);
-                setSellModalOpen(true);
-              }
-              setContextMenu(prev => ({ ...prev, open: false }));
+      {contextMenu.open && (() => {
+        const channelId = contextMenu.channel_id;
+        const star = contextMenu.star;
+        const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
+        const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+        
+        // 가용한 카드 찾기
+        const key = `${channelId}#${star}`;
+        const reserved = reservations.cardsByStar[key] || 0;
+        const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+        const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+
+        // 대표로 사용할 카드 객체
+        const displayCard = availableCard || pendingCard || contextMenu.card;
+        if (!displayCard) return null;
+
+        return (
+          <div
+            className="fixed z-50 rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 min-w-36"
+            style={{
+              left: `${contextMenu.x}px`,
+              top: `${contextMenu.y}px`,
             }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
           >
-            💰 카드 판매하기
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.card?.streamer) openStreamerDetail(contextMenu.card.streamer.channel_id);
-              setContextMenu(prev => ({ ...prev, open: false }));
-            }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
-          >
-            📈 스트리머 시세 상세
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.card) setEquipCard(contextMenu.card);
-              setContextMenu(prev => ({ ...prev, open: false }));
-            }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
-          >
-            🎨 코스메틱 장착
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.card) openReport(contextMenu.card);
-              setContextMenu(prev => ({ ...prev, open: false }));
-            }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-2"
-          >
-            🚩 이미지 신고
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.card?.streamer) {
-                setSelectionMode(true);
-                setSelectedChannelIds([contextMenu.card.streamer.channel_id]);
-              }
-              setContextMenu(prev => ({ ...prev, open: false }));
-            }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
-          >
-            ✔️ 다중 선택 모드
-          </button>
-          <button
-            onClick={() => {
-              if (contextMenu.card?.streamer) {
-                const targetUrl = contextMenu.card.streamer.is_active
-                  ? `https://chzzk.naver.com/live/${contextMenu.card.streamer.channel_id}`
-                  : `https://chzzk.naver.com/${contextMenu.card.streamer.channel_id}`;
-                window.open(targetUrl, '_blank');
-              }
-              setContextMenu(prev => ({ ...prev, open: false }));
-            }}
-            className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2 border-t border-border/50"
-          >
-            📺 스트리머 채널 이동
-          </button>
-        </div>
-      )}
+            {pendingCard && (
+              <button
+                onClick={() => {
+                  handleMarketCancel(pendingCard.id);
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                disabled={marketCancelBusy}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-rose-500 hover:bg-rose-500/10 flex items-center gap-2"
+              >
+                🏪 마켓 판매 취소
+              </button>
+            )}
+
+            {availableCard && (
+              <button
+                onClick={() => {
+                  setMarketRegisterCard(availableCard);
+                  setMarketPriceInput('10');
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                🏪 마켓 판매 등록
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                if (!availableCard) {
+                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
+                } else {
+                  setSellingStreamer(displayCard.streamer || null);
+                  setSellQuantity(1);
+                  setSellModalOpen(true);
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!availableCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
+            >
+              💰 카드 판매하기
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard.streamer) openStreamerDetail(displayCard.streamer.channel_id);
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            >
+              📈 스트리머 시세 상세
+            </button>
+            <button
+              onClick={() => {
+                if (!availableCard) {
+                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
+                } else {
+                  setEquipCard(availableCard);
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!availableCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
+            >
+              🎨 코스메틱 장착
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard) openReport(displayCard);
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-2"
+            >
+              🚩 이미지 신고
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard.streamer) {
+                  setSelectionMode(true);
+                  setSelectedChannelIds([displayCard.streamer.channel_id]);
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            >
+              ✔️ 다중 선택 모드
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard.streamer) {
+                  const targetUrl = displayCard.streamer.is_active
+                    ? `https://chzzk.naver.com/live/${displayCard.streamer.channel_id}`
+                    : `https://chzzk.naver.com/${displayCard.streamer.channel_id}`;
+                  window.open(targetUrl, '_blank');
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2 border-t border-border/50"
+            >
+              📺 스트리머 채널 이동
+            </button>
+          </div>
+        );
+      })()}
 
       {/* 이미지 신고 모달 (자기완결형 컴포넌트로 분리) */}
       {reportCard && (
@@ -1799,6 +2003,141 @@ export const GachaTab: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 오픈마켓 판매 등록 가격 입력 모달 */}
+      {marketRegisterCard && (() => {
+        const streamer = marketRegisterCard.streamer;
+        if (!streamer) return null;
+        const star = marketRegisterCard.star || 0;
+        const baseVal = streamer.base_value || 0;
+        const cardVal = Math.round(baseVal * starMult(star));
+        const price = Math.floor(Number(marketPriceInput)) || 0;
+        const fee = Math.floor(price * 0.05);
+        const settlement = Math.max(0, price - fee);
+
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setMarketRegisterCard(null)}>
+            <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  🏪 오픈마켓 카드 등록
+                </h3>
+                <button onClick={() => setMarketRegisterCard(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
+                <div style={{ width: '48px', height: '76.8px', position: 'relative', overflow: 'hidden' }} className="shrink-0 rounded-lg">
+                  <div style={{
+                    width: '224px',
+                    height: '358.4px',
+                    transform: 'scale(calc(48 / 224))',
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    containerType: 'inline-size',
+                    ...(borderClass(marketRegisterCard.border) ? {} : (borderStyle(marketRegisterCard.border) || {}))
+                  }}
+                    className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-md border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+                  >
+                    <CosmeticFrame border={marketRegisterCard.border} />
+                    <div className="absolute inset-0 z-0">
+                      <img src={cardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-foreground truncate">
+                    <CosmeticName effect={marketRegisterCard.name_effect}>{streamer.name}</CosmeticName>
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    No.{String(streamer.serial_number ?? 0).padStart(4, '0')} · {star}성 카드
+                  </p>
+                  <p className="text-[10px] text-emerald-500 font-bold mt-0.5">
+                    시세 가치: {cardVal.toLocaleString()} P
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleMarketRegisterSubmit} className="mt-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground">판매 희망 가격 (최소 100 P)</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="100"
+                      value={marketPriceInput}
+                      onChange={(e) => setMarketPriceInput(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-secondary/50 pl-3 pr-8 py-2 text-xs font-bold focus:border-primary focus:outline-none"
+                      placeholder="가격을 입력하세요"
+                      required
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs font-bold text-muted-foreground">P</span>
+                  </div>
+                </div>
+
+                {/* 코스메틱 패키지 거래 체크박스 */}
+                {(() => {
+                  const hasCosmetics = !!(marketRegisterCard.border || marketRegisterCard.name_effect);
+                  return (
+                    <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-secondary/20 p-2.5">
+                      <input
+                        type="checkbox"
+                        id="withCosmetics"
+                        checked={withCosmetics}
+                        disabled={!hasCosmetics}
+                        onChange={(e) => setWithCosmetics(e.target.checked)}
+                        className="h-4 w-4 rounded border-border bg-secondary text-primary focus:ring-primary disabled:opacity-50"
+                      />
+                      <label 
+                        htmlFor="withCosmetics" 
+                        className={`text-xs font-bold select-none cursor-pointer ${hasCosmetics ? 'text-foreground' : 'text-muted-foreground'}`}
+                      >
+                        장착된 코스메틱 포함하여 판매 {!hasCosmetics && '(장착된 효과 없음)'}
+                      </label>
+                    </div>
+                  );
+                })()}
+
+                <div className="rounded-xl bg-secondary/20 border border-border/40 p-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">수수료 (5%)</span>
+                    <span className="text-rose-500 font-bold">-{fee.toLocaleString()} P</span>
+                  </div>
+                  <div className="flex justify-between border-t border-border/40 pt-1.5 font-bold">
+                    <span>정산 예정 금액</span>
+                    <span className="text-emerald-500 font-black">{settlement.toLocaleString()} P</span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-red-500/80 leading-relaxed">
+                  ※ 오픈마켓에 등록하면 거래 체결 혹은 취소 전까지는 교환/합성/판매를 할 수 없습니다. 코스메틱 포함을 체크하지 않고 등록 시 장착된 코스메틱은 회수되어 판매자 보관함으로 반환됩니다.
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setMarketRegisterCard(null)}
+                    className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={marketRegisterBusy || price < 100}
+                    className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50"
+                  >
+                    {marketRegisterBusy ? '등록 중...' : '마켓에 등록'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

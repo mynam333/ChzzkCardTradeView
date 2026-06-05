@@ -218,4 +218,26 @@ CREATE TABLE IF NOT EXISTS system_configs (
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000'); -- 뽑기 1회 기본 비용
 
+-- 16. 오픈마켓 매물 테이블
+CREATE TABLE IF NOT EXISTS market_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id TEXT NOT NULL,
+    user_card_id INTEGER NOT NULL UNIQUE,
+    price INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    buyer_id TEXT,
+    fee INTEGER DEFAULT 0,
+    settled_amount INTEGER DEFAULT 0,
+    with_cosmetics INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
+CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);
+
+
 

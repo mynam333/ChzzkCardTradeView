@@ -62,6 +62,14 @@ import {
   getTradeHistory
 } from '../controllers/tradeController';
 import {
+  listActiveListings,
+  listMyListings,
+  createListing,
+  cancelListing,
+  purchaseListing,
+  listMarketHistory
+} from '../controllers/marketController';
+import {
   getStreamerDetail,
   setRepresentativeCard,
   searchUsers,
@@ -200,6 +208,14 @@ router.get('/trades/history', authMiddleware, banCheckMiddleware, getTradeHistor
 router.post('/trades/:trade_id/confirm', authMiddleware, banCheckMiddleware, confirmTrade);
 router.post('/trades/:trade_id/finalize', authMiddleware, banCheckMiddleware, finalizeTrade);
 router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, rejectTrade);
+
+// 오픈마켓 API
+router.get('/market/listings', authMiddleware, listActiveListings);
+router.get('/market/my', authMiddleware, listMyListings);
+router.get('/market/history', authMiddleware, listMarketHistory);
+router.post('/market/list', authMiddleware, banCheckMiddleware, createListing);
+router.post('/market/cancel/:id', authMiddleware, banCheckMiddleware, cancelListing);
+router.post('/market/buy/:id', authMiddleware, banCheckMiddleware, purchaseListing);
 
 
 

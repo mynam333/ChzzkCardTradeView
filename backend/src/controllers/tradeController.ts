@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { tradeRepository, userRepository, userCardRepository, notificationRepository } from '../repositories';
+import { tradeRepository, userRepository, userCardRepository, notificationRepository, marketRepository } from '../repositories';
 import { TradeOffer } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
@@ -70,6 +70,23 @@ export const getUserReservations = async (userId: string): Promise<{ cards: Reco
     if (t.sender_id === userId) reserve(t.sender_offer);
     if (t.receiver_id === userId && t.status === 'CONFIRMED') reserve(t.receiver_offer);
   }
+
+  // 오픈마켓 PENDING 매물 카드들 예약량에 가산
+  try {
+    const myListings = await marketRepository.listByUser(userId);
+    const pendingListings = myListings.filter(l => l.status === 'PENDING');
+    for (const l of pendingListings) {
+      if (l.card) {
+        const cid = l.card.channel_id;
+        const star = l.card.star ?? 0;
+        cards[cid] = (cards[cid] || 0) + 1;
+        cardsByStar[cardKey(cid, star)] = (cardsByStar[cardKey(cid, star)] || 0) + 1;
+      }
+    }
+  } catch (err) {
+    console.error('[Escrow] 오픈마켓 예약 로드 실패:', err);
+  }
+
   return { cards, cardsByStar, points };
 };
 

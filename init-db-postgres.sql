@@ -875,3 +875,119 @@ INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') O
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_end_at', '') ON CONFLICT (key) DO NOTHING;
 
+-- ============================================================
+-- 오픈마켓 테이블 및 인덱스 추가
+-- ============================================================
+CREATE TABLE IF NOT EXISTS market_listings (
+  id BIGSERIAL PRIMARY KEY,
+  seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE UNIQUE,
+  price INTEGER NOT NULL CHECK (price >= 10),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED')),
+  buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  fee INTEGER DEFAULT 0,
+  settled_amount INTEGER DEFAULT 0,
+  with_cosmetics BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
+CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at DESC);
+
+-- ============================================================
+-- 오픈마켓 원자적 구매를 위한 RPC 함수
+-- ============================================================
+CREATE OR REPLACE FUNCTION buy_market_item_atomic(p_listing_id INTEGER, p_buyer_id TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  listing market_listings%ROWTYPE;
+  s_point INTEGER;
+  b_point INTEGER;
+  calc_fee INTEGER;
+  calc_settled INTEGER;
+  card_border_id INTEGER;
+  card_name_effect_id INTEGER;
+BEGIN
+  -- 동시 거래 락 획득
+  PERFORM pg_advisory_xact_lock(hashtext('buy_market_item:' || p_listing_id::TEXT));
+
+  -- 매물 정보 조회 (FOR UPDATE로 잠금)
+  SELECT * INTO listing FROM market_listings WHERE id = p_listing_id AND status = 'PENDING' FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN 'NOT_FOUND_OR_NOT_PENDING';
+  END IF;
+
+  IF listing.seller_id = p_buyer_id THEN
+    RETURN 'CANNOT_BUY_OWN_ITEM';
+  END IF;
+
+  -- 구매자 포인트 조회 및 검증
+  SELECT point INTO b_point FROM users WHERE id = p_buyer_id FOR UPDATE;
+  IF b_point IS NULL THEN
+    RETURN 'BUYER_NOT_FOUND';
+  END IF;
+  IF b_point < listing.price THEN
+    RETURN 'INSUFFICIENT_POINT';
+  END IF;
+
+  -- 수수료 계산 (5% 소수점 버림)
+  calc_fee := FLOOR(listing.price * 0.05)::INTEGER;
+  calc_settled := listing.price - calc_fee;
+
+  -- 구매자 포인트 차감
+  UPDATE users SET point = point - listing.price WHERE id = p_buyer_id;
+
+  -- 판매자 포인트 가산
+  UPDATE users SET point = point + calc_settled WHERE id = listing.seller_id;
+
+  -- 매물 상태 업데이트
+  UPDATE market_listings
+     SET status = 'SOLD',
+         buyer_id = p_buyer_id,
+         fee = calc_fee,
+         settled_amount = calc_settled,
+         updated_at = NOW()
+   WHERE id = p_listing_id;
+
+  -- 카드 소유권 이전 및 코스메틱 처리 분기
+  IF listing.with_cosmetics THEN
+    -- 코스메틱 정보를 유지한 채 소유권만 이전
+    UPDATE user_cards
+       SET user_id = p_buyer_id
+     WHERE id = listing.user_card_id;
+  ELSE
+    -- 코스메틱 정보를 해제하고 판매자 계정으로 반환 처리
+    SELECT border_item_id, name_effect_item_id INTO card_border_id, card_name_effect_id 
+      FROM user_cards 
+     WHERE id = listing.user_card_id;
+
+    IF card_border_id IS NOT NULL THEN
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES (listing.seller_id, card_border_id, 1)
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + 1;
+    END IF;
+
+    IF card_name_effect_id IS NOT NULL THEN
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES (listing.seller_id, card_name_effect_id, 1)
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + 1;
+    END IF;
+
+    UPDATE user_cards
+       SET user_id = p_buyer_id,
+           border_item_id = NULL,
+           name_effect_item_id = NULL
+     WHERE id = listing.user_card_id;
+  END IF;
+
+  RETURN 'OK';
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN 'FAILED:' || SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
+

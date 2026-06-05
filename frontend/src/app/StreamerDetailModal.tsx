@@ -72,6 +72,11 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                   const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '-';
                   return <p className={`text-[11px] font-bold ${cls}`}>{arrow} {rate.toFixed(1)}% (24h)</p>;
                 })()}
+                {streamer.recent_market_price !== undefined && streamer.recent_market_price !== null ? (
+                  <p className="text-[10px] text-emerald-500 font-bold mt-1">최근 마켓 체결: {streamer.recent_market_price.toLocaleString()} P</p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">마켓 거래 이력 없음</p>
+                )}
               </div>
             </div>
 

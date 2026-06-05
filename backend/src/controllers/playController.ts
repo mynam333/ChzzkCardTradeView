@@ -3,7 +3,8 @@ import {
   userRepository,
   streamerRepository,
   userCardRepository,
-  systemConfigRepository
+  systemConfigRepository,
+  marketRepository
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile } from '../services/chzzkService';
@@ -702,8 +703,15 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
     const value24hMap = await streamerRepository.getValue24hAgoMap();
     const prevValue24h = value24hMap[channel_id] ?? streamer.prev_value ?? streamer.base_value;
 
+    // 최근 마켓 거래 체결가 조회
+    const recentMarketPrice = await marketRepository.getRecentPrice(channel_id);
+
     return res.status(200).json({
-      streamer: { ...streamer, prev_value: prevValue24h },
+      streamer: { 
+        ...streamer, 
+        prev_value: prevValue24h,
+        recent_market_price: recentMarketPrice 
+      },
       history
     });
   } catch (err: any) {

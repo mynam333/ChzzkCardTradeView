@@ -177,6 +177,33 @@ export const initDatabaseConnection = async (): Promise<void> => {
         PRIMARY KEY(user_id, item_id)
       );`);
 
+      // 오픈마켓 매물 테이블 생성 — 신규 배포 호환
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_listings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        seller_id TEXT NOT NULL,
+        user_card_id INTEGER NOT NULL UNIQUE,
+        price INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        buyer_id TEXT,
+        fee INTEGER DEFAULT 0,
+        settled_amount INTEGER DEFAULT 0,
+        with_cosmetics INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+        FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
+
+      try {
+        sqliteDb.prepare("SELECT with_cosmetics FROM market_listings LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] market_listings 테이블에 with_cosmetics 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE market_listings ADD COLUMN with_cosmetics INTEGER DEFAULT 0;");
+      }
+
       // 시스템 설정 테이블 (무료 뽑기 간격 등)
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS system_configs (
         key TEXT PRIMARY KEY,

@@ -9,3 +9,5 @@ export { SqliteUserCardRepository } from "./sqlite/userCard.repository";
 export { SqliteTradeRepository } from "./sqlite/trade.repository";
 export { SqliteNotificationRepository } from "./sqlite/notification.repository";
 export { SqliteSystemConfigRepository } from "./sqlite/systemConfig.repository";
+export { SqliteMarketRepository } from "./sqlite/market.repository";
+
