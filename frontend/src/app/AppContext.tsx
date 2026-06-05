@@ -58,6 +58,75 @@ export interface AppNotificationItem {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const SwipeableToast: React.FC<{
+  toast: ToastItem;
+  onDismiss: (id: number) => void;
+}> = ({ toast, onDismiss }) => {
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const startXRef = useRef(0);
+  const dismissedRef = useRef(false);
+
+  const threshold = 120; // 스와이프로 치우는 임계 거리 (px)
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dismissedRef.current) return;
+    setIsDragging(true);
+    startXRef.current = e.clientX - dragX;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || dismissedRef.current) return;
+    const deltaX = e.clientX - startXRef.current;
+    setDragX(deltaX);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+
+    if (Math.abs(dragX) > threshold) {
+      dismissedRef.current = true;
+      const direction = dragX > 0 ? 1 : -1;
+      // 자연스럽게 옆으로 휙 밀려나며 화면 밖으로 날아가도록 유도
+      setDragX(direction * 400);
+      setTimeout(() => {
+        onDismiss(toast.id);
+      }, 150);
+    } else {
+      setDragX(0);
+    }
+  };
+
+  const tone =
+    toast.type === 'success' ? 'bg-emerald-600'
+    : toast.type === 'error' ? 'bg-rose-600'
+    : toast.type === 'warning' ? 'bg-amber-500'
+    : 'bg-sky-600';
+
+  const style: React.CSSProperties = {
+    transform: `translateX(${dragX}px)`,
+    opacity: Math.max(0, 1 - Math.abs(dragX) / threshold),
+    transition: isDragging ? 'none' : 'transform 0.2s ease-out, opacity 0.2s ease-out',
+    touchAction: 'none' // 터치 중 스크롤 방지
+  };
+
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      style={style}
+      className={`pointer-events-auto rounded-xl px-4 py-3 text-xs font-bold text-white shadow-lg ring-1 ring-black/10 animate-in fade-in slide-in-from-top-2 duration-200 whitespace-pre-line cursor-grab active:cursor-grabbing select-none ${tone}`}
+    >
+      {toast.message}
+    </div>
+  );
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const pathname = usePathname();
   const router = useRouter();
@@ -319,22 +388,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       {/* 전역 토스트 컨테이너 */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => {
-          // 라이트/다크 양쪽에서 가독성을 위해 솔리드 배경 + 흰 글자 사용
-          const tone =
-            t.type === 'success' ? 'bg-emerald-600'
-            : t.type === 'error' ? 'bg-rose-600'
-            : t.type === 'warning' ? 'bg-amber-500'
-            : 'bg-sky-600';
-          return (
-            <div
-              key={t.id}
-              className={`pointer-events-auto rounded-xl px-4 py-3 text-xs font-bold text-white shadow-lg ring-1 ring-black/10 animate-in fade-in slide-in-from-top-2 duration-200 whitespace-pre-line ${tone}`}
-            >
-              {t.message}
-            </div>
-          );
-        })}
+        {toasts.map((t) => (
+          <SwipeableToast
+            key={t.id}
+            toast={t}
+            onDismiss={(id) => setToasts((prev) => prev.filter((item) => item.id !== id))}
+          />
+        ))}
       </div>
     </AppContext.Provider>
   );
