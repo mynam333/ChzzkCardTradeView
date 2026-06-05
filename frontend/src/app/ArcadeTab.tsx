@@ -546,9 +546,11 @@ export const ArcadeTab: React.FC = () => {
       if (firstCard.channel_id === secondCard.channel_id) {
         // 짝 맞춤 성공
         setTimeout(() => {
-          const matchedDeck = [...matchCards];
-          matchedDeck[firstIdx].isMatched = true;
-          matchedDeck[secondIdx].isMatched = true;
+          const matchedDeck = updatedDeck.map((card, cardIndex) =>
+            cardIndex === firstIdx || cardIndex === secondIdx
+              ? { ...card, isFlipped: true, isMatched: true }
+              : card
+          );
           setMatchCards(matchedDeck);
           setFlippedIndices([]);
 
@@ -562,9 +564,11 @@ export const ArcadeTab: React.FC = () => {
       } else {
         // 매치 실패 -> 0.8초 뒤에 원복
         setTimeout(() => {
-          const resetDeck = [...matchCards];
-          resetDeck[firstIdx].isFlipped = false;
-          resetDeck[secondIdx].isFlipped = false;
+          const resetDeck = updatedDeck.map((card, cardIndex) =>
+            cardIndex === firstIdx || cardIndex === secondIdx
+              ? { ...card, isFlipped: false }
+              : card
+          );
           setMatchCards(resetDeck);
           setFlippedIndices([]);
         }, 800);
