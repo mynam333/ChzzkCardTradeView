@@ -316,11 +316,12 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, countdownLeft, quizStartTime, gameResult, selectedQuizChoice]);
 
-  // 포맷팅 헬퍼 (초 -> MM:SS)
+  // 포맷팅 헬퍼 (초 -> HH:MM:SS)
   const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
     const s = secs % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
   // 게임 시작 처리
@@ -677,7 +678,7 @@ export const ArcadeTab: React.FC = () => {
               <div className="inline-block rounded-lg bg-emerald-500/10 p-2.5 text-emerald-500">
                 <HelpCircle className="h-5 w-5" />
               </div>
-              <h3 className="mt-4 text-sm font-black text-foreground">송출 오류 해독 인물 맞추기</h3>
+              <h3 className="mt-4 text-sm font-black text-foreground">송출 오류난 스트리머 맞추기</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
                 무작위 스트리머 카드가 전송 오류가 났습니다. 10초 내로 복원되는 카드를 보고 누구인지 맞춰보세요!
               </p>
