@@ -290,13 +290,15 @@ export const GachaTab: React.FC = () => {
   const fetchInventory = async () => {
     if (!isAuthed()) return;
     try {
-      const res = await apiFetch('/users/me/cards');
+      // API 병렬 호출을 적용하여 보관함 로딩 지연을 최소화합니다.
+      const [res] = await Promise.all([
+        apiFetch('/users/me/cards'),
+        fetchMarketPending()
+      ]);
       if (res.ok) {
         const data = await res.json();
         setInventory(data);
       }
-      // 마켓 예약 카드 동기화
-      await fetchMarketPending();
     } catch (e) {
       console.error('인벤토리 조회 실패:', e);
     } finally {
@@ -1126,8 +1128,13 @@ export const GachaTab: React.FC = () => {
           </div>
         </div>
 
-        {/* 보관함 카드 그리드 */}
-        {filteredInventory.length === 0 ? (
+        {/* 보관함 카드 그리드 (로딩 중 상태 추가하여 빈 안내 문구 오노출 해결) */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+            <p className="text-xs text-muted-foreground">보유 카드 목록을 불러오는 중입니다...</p>
+          </div>
+        ) : filteredInventory.length === 0 ? (
           <div className="rounded-2xl border border-border/80 border-dashed py-12 text-center text-xs text-muted-foreground">
             {searchQuery ? '검색된 카드가 없습니다.' : '보유 중인 스트리머 카드가 없습니다. 상단에서 소환을 완료해 주세요!'}
           </div>
