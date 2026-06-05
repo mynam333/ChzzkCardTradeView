@@ -102,7 +102,13 @@ import {
   adminUpdateShopItem,
   adminResetPurchases
 } from '../controllers/shopController';
+import {
+  getMinigameStatus,
+  startMinigame,
+  submitMinigameResult
+} from '../controllers/minigameController';
 import { streamerRepository } from '../repositories';
+
 import { rateLimit } from '../middlewares/rateLimit';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
 
@@ -217,9 +223,15 @@ router.post('/market/list', authMiddleware, banCheckMiddleware, createListing);
 router.post('/market/cancel/:id', authMiddleware, banCheckMiddleware, cancelListing);
 router.post('/market/buy/:id', authMiddleware, banCheckMiddleware, purchaseListing);
 
-
+// ==========================================
+// 미니게임 API (티켓 충전식 포인트 획득 기능)
+// ==========================================
+router.get('/minigames/status', authMiddleware, banCheckMiddleware, getMinigameStatus);
+router.post('/minigames/start', authMiddleware, banCheckMiddleware, startMinigame);
+router.post('/minigames/submit', authMiddleware, banCheckMiddleware, submitMinigameResult);
 
 // ==========================================
+
 // ==========================================
 // 1. 스트리머 관련 기능
 // ==========================================

@@ -49,7 +49,29 @@ interface UserCard {
 }
 
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
-const starMult = (star: number) => 1 + (star || 0) * 0.6;
+const starMult = (star: number) => 1 + (star || 0) * 0.8;
+
+const CONTEXT_MENU_MARGIN = 8;
+const CONTEXT_MENU_FALLBACK_SIZE = { width: 208, height: 320 };
+
+const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FALLBACK_SIZE.width, height = CONTEXT_MENU_FALLBACK_SIZE.height) => {
+  if (typeof window === 'undefined') return { x, y };
+
+  const viewport = window.visualViewport;
+  const viewportLeft = viewport?.offsetLeft ?? 0;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const minX = viewportLeft + CONTEXT_MENU_MARGIN;
+  const minY = viewportTop + CONTEXT_MENU_MARGIN;
+  const maxX = viewportLeft + viewportWidth - width - CONTEXT_MENU_MARGIN;
+  const maxY = viewportTop + viewportHeight - height - CONTEXT_MENU_MARGIN;
+
+  return {
+    x: Math.round(Math.min(Math.max(x, minX), Math.max(minX, maxX))),
+    y: Math.round(Math.min(Math.max(y, minY), Math.max(minY, maxY))),
+  };
+};
 
 
 export const GachaTab: React.FC = () => {
@@ -129,6 +151,7 @@ export const GachaTab: React.FC = () => {
     star: number;
     card: UserCard | null;
   }>({ x: 0, y: 0, open: false, channel_id: '', star: 0, card: null });
+  const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   // 카드 선택 모드 및 선택된 채널 ID 목록 (수집 갯수 단위로 묶여있으므로 channel_id 기반 일괄 선택 지원)
   const [selectionMode, setSelectionMode] = useState(false);
@@ -164,6 +187,33 @@ export const GachaTab: React.FC = () => {
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
+
+  useEffect(() => {
+    if (!contextMenu.open) return;
+
+    const repositionContextMenu = () => {
+      const menu = contextMenuRef.current;
+      if (!menu) return;
+
+      const rect = menu.getBoundingClientRect();
+      const next = clampContextMenuPosition(contextMenu.x, contextMenu.y, rect.width, rect.height);
+      if (next.x !== contextMenu.x || next.y !== contextMenu.y) {
+        setContextMenu(prev => prev.open ? { ...prev, x: next.x, y: next.y } : prev);
+      }
+    };
+
+    const frame = window.requestAnimationFrame(repositionContextMenu);
+    window.addEventListener('resize', repositionContextMenu);
+    window.visualViewport?.addEventListener('resize', repositionContextMenu);
+    window.visualViewport?.addEventListener('scroll', repositionContextMenu);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', repositionContextMenu);
+      window.visualViewport?.removeEventListener('resize', repositionContextMenu);
+      window.visualViewport?.removeEventListener('scroll', repositionContextMenu);
+    };
+  }, [contextMenu.open, contextMenu.x, contextMenu.y]);
 
   useEffect(() => {
     if (user) {
@@ -735,8 +785,8 @@ export const GachaTab: React.FC = () => {
 
       {/* 1:1 교환 거래 팝업 */}
       {tradeModalOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-lg modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 1:1 스트리머 카드 교환 제안
@@ -993,8 +1043,8 @@ export const GachaTab: React.FC = () => {
           return d.toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' });
         };
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setHistoryModalOpen(false)}>
-            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setHistoryModalOpen(false)}>
+            <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-base font-bold flex items-center gap-2"><Clock className="h-4.5 w-4.5 text-primary" /> 교환 이력 ({tradeHistory.length})</h3>
                 <button onClick={() => setHistoryModalOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
@@ -1252,9 +1302,10 @@ export const GachaTab: React.FC = () => {
                     const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
                     const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
 
+                    const menuPosition = clampContextMenuPosition(e.clientX, e.clientY);
                     setContextMenu({
-                      x: e.clientX,
-                      y: e.clientY,
+                      x: menuPosition.x,
+                      y: menuPosition.y,
                       open: true,
                       channel_id: streamer.channel_id,
                       star: star,
@@ -1290,10 +1341,7 @@ export const GachaTab: React.FC = () => {
                     longPressTimer.current = setTimeout(() => {
                       if (selectionMode) return;
                       longPressFired.current = true;
-                      // 화면 밖으로 넘치지 않도록 메뉴 좌표 보정
-                      const menuW = 180, menuH = 200;
-                      const cx = Math.min(x, window.innerWidth - menuW);
-                      const cy = Math.min(y, window.innerHeight - menuH);
+                      const menuPosition = clampContextMenuPosition(x, y);
                       const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
                       const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
                       const key = `${streamer.channel_id}#${star}`;
@@ -1301,8 +1349,8 @@ export const GachaTab: React.FC = () => {
                       const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
                       const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
                       setContextMenu({
-                        x: Math.max(8, cx),
-                        y: Math.max(8, cy),
+                        x: menuPosition.x,
+                        y: menuPosition.y,
                         open: true,
                         channel_id: streamer.channel_id,
                         star: star,
@@ -1441,7 +1489,7 @@ export const GachaTab: React.FC = () => {
         const value = Math.round((s.base_value || 0) * starMult(star));
         return (
           <div
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-150"
+            className="modal-backdrop modal-backdrop-center z-[80] bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
             onClick={() => setZoomCard(null)}
           >
             <div
@@ -1524,7 +1572,8 @@ export const GachaTab: React.FC = () => {
 
         return (
           <div
-            className="fixed z-50 rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100 min-w-36"
+            ref={contextMenuRef}
+            className="fixed z-50 max-h-[calc(100dvh-1rem)] w-52 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100"
             style={{
               left: `${contextMenu.x}px`,
               top: `${contextMenu.y}px`,
@@ -1688,8 +1737,8 @@ export const GachaTab: React.FC = () => {
           </div>
         );
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setEquipCard(null)}>
-            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setEquipCard(null)}>
+            <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-base font-bold">코스메틱 장착</h3>
                 <button onClick={() => setEquipCard(null)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
@@ -1765,8 +1814,8 @@ export const GachaTab: React.FC = () => {
 
       {/* 단일 판매 설정 모달 */}
       {sellModalOpen && sellingStreamer && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="modal-backdrop modal-backdrop-center z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
               💰 카드 시스템 판매
             </h3>
@@ -1855,8 +1904,8 @@ export const GachaTab: React.FC = () => {
 
       {/* 단일 판매 확인 모달 */}
       {sellConfirmOpen && sellingStreamer && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+        <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/75 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <h4 className="text-sm font-black text-foreground mb-3">⚠️ 판매 최종 확인</h4>
             <div className="text-xs text-muted-foreground leading-relaxed py-2">
               정말로 <strong className="text-foreground">{sellingStreamer.name}</strong> 카드{' '}
@@ -1886,8 +1935,8 @@ export const GachaTab: React.FC = () => {
 
       {/* 일괄 판매 설정 모달 */}
       {bulkSellModalOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2 border-b border-border/60 pb-3">
               💰 선택 카드 일괄 판매 설정
             </h3>
@@ -1977,8 +2026,8 @@ export const GachaTab: React.FC = () => {
 
       {/* 일괄 판매 확인 모달 */}
       {bulkSellConfirmOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center">
+        <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/75 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <h4 className="text-sm font-black text-foreground mb-3">⚠️ 일괄 판매 최종 확인</h4>
             <div className="text-xs text-muted-foreground leading-relaxed py-2">
               선택한 스트리머 카드 총 <strong className="text-primary font-bold">
@@ -2024,8 +2073,8 @@ export const GachaTab: React.FC = () => {
         const settlement = Math.max(0, price - fee);
 
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setMarketRegisterCard(null)}>
-            <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-backdrop modal-backdrop-center z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setMarketRegisterCard(null)}>
+            <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                   🏪 오픈마켓 카드 등록

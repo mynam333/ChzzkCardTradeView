@@ -212,9 +212,9 @@ export class SqliteUserRepository implements IUserRepository {
       WITH RankedUsers AS (
         SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.created_at,
                COUNT(uc.id) AS card_count,
-               COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0) AS cards_value,
+               COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value,
                ROW_NUMBER() OVER (
-                 ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
+                 ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0)) DESC
                ) AS rank
         FROM users u
         LEFT JOIN user_cards uc ON uc.user_id = u.id

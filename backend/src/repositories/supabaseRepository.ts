@@ -10,4 +10,4 @@ export { SupabaseTradeRepository } from "./supabase/trade.repository";
 export { SupabaseNotificationRepository } from "./supabase/notification.repository";
 export { SupabaseSystemConfigRepository } from "./supabase/systemConfig.repository";
 export { SupabaseMarketRepository } from "./supabase/market.repository";
-
+export { SupabaseMinigameRepository } from "./supabase/minigame.repository";

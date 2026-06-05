@@ -228,7 +228,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         }
 
         for (const row of rows) {
-          total += Math.round(action.baseValue * (1 + (row.star || 0) * 0.6));
+          total += Math.round(action.baseValue * (1 + (row.star || 0) * 0.8));
         }
 
         const placeholders = rows.map(() => '?').join(',');

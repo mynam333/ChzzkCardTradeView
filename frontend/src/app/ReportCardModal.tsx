@@ -75,8 +75,8 @@ export const ReportCardModal: React.FC<Props> = ({ card, onClose, onResult }) =>
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => !submitting && onClose()}>
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm" onClick={() => !submitting && onClose()}>
+      <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border/60 pb-3">
           <h3 className="text-base font-bold flex items-center gap-1.5 text-red-500">🚩 이미지 신고</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>

@@ -626,7 +626,7 @@ export const sellCards = async (req: Request, res: Response) => {
 };
 
 /** 별 등급에 따른 가치 배율 (0성=1배 ~ 5성=4배) */
-export const starValueMultiplier = (star: number): number => 1 + (star || 0) * 0.6;
+export const starValueMultiplier = (star: number): number => 1 + (star || 0) * 0.8;
 
 /**
  * 카드 합성: 같은 스트리머·같은 별 카드 2장 → 1장(별+1)

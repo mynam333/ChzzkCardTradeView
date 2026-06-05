@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { userRepository } from '../repositories';
+import { minigameRepository, userRepository } from '../repositories';
 import { JWT_SECRET, IS_PRODUCTION, CORS_ALLOWED_ORIGINS } from '../config';
 import { encryptToken } from '../services/cryptoService';
 import {
@@ -213,6 +213,9 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
 
     // 토큰 만료 시각 저장 (리프레시 기준점)
     await userRepository.updateTokens(user.id, encAccessToken, encRefreshToken, tokenExpiresAt);
+    await minigameRepository.getTicketStatus(user.id).catch((err: any) => {
+      console.warn('[ChzzkAuthController] 미니게임 티켓 초기화 실패:', err?.message || err);
+    });
 
     // E-2. 차단(밴) 계정은 로그인 시점에 안내하고 토큰을 발급하지 않음
     if (user.banned_until) {

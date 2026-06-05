@@ -299,9 +299,9 @@ export class SupabaseUserRepository implements IUserRepository {
         .from('user_cards')
         .select('star, streamer:streamers(base_value)')
         .eq('user_id', u.id);
-      // 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
+      // 카드 가치는 별(0~5성) 배수(1 + star*0.8)를 반영하여 합산
       const cardsValue = (cards || []).reduce(
-        (sum: number, c: any) => sum + (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.6), 0
+        (sum: number, c: any) => sum + (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8), 0
       );
       enriched.push({
         ...(u as User),

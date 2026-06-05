@@ -197,6 +197,35 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
 
+      // 미니게임 티켓 및 세션 테이블 생성
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS user_minigame_tickets (
+        user_id TEXT PRIMARY KEY,
+        current_tickets INTEGER NOT NULL DEFAULT 5,
+        bonus_tickets INTEGER NOT NULL DEFAULT 0,
+        last_charged_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );`);
+
+      try {
+        sqliteDb.prepare("SELECT bonus_tickets FROM user_minigame_tickets LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_minigame_tickets 테이블에 bonus_tickets 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_minigame_tickets ADD COLUMN bonus_tickets INTEGER NOT NULL DEFAULT 0;");
+      }
+
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS minigame_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        game_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'STARTED',
+        target_data TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        earned_points INTEGER DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );`);
+
       try {
         sqliteDb.prepare("SELECT with_cosmetics FROM market_listings LIMIT 1").get();
       } catch (e) {

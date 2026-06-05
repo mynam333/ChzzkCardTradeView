@@ -16,7 +16,7 @@ import { deleteLocalUploadByUrl } from '../services/imageService';
 
 /**
  * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 삭제 시점 시세만큼 보상 지급
- * - 보유 카드 1장당 base_value × (1 + star*0.6) 포인트를 보유자에게 지급
+ * - 보유 카드 1장당 base_value × (1 + star*0.8) 포인트를 보유자에게 지급
  * - 이후 해당 스트리머의 카드를 모두 삭제하고 스트리머 레코드도 제거(시세이력/신고 CASCADE)
  */
 export const deleteStreamerCards = async (req: Request, res: Response) => {
@@ -39,7 +39,7 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
     // 보유자별 보상 합산 (별 등급 배율 반영)
     const payout: Record<string, number> = {};
     for (const c of cards) {
-      payout[c.user_id] = (payout[c.user_id] || 0) + Math.round(baseValue * (1 + (c.star || 0) * 0.6));
+      payout[c.user_id] = (payout[c.user_id] || 0) + Math.round(baseValue * (1 + (c.star || 0) * 0.8));
     }
 
     // 포인트 지급 + 알림

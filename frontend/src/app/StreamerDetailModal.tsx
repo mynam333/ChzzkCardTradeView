@@ -1,11 +1,25 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '@/lib/api';
 import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
 
 interface HistoryPoint { value: number; recorded_at: string; }
+interface StreamerDetail {
+  channel_id: string;
+  name: string;
+  logo_url?: string | null;
+  custom_image_url?: string | null;
+  follower_count?: number | null;
+  is_active?: boolean | null;
+  base_value?: number | null;
+  prev_value?: number | null;
+  recent_market_price?: number | null;
+  activity_score?: number | null;
+  broadcast_minutes?: number | null;
+}
 
 /**
  * 스트리머 시세 상세 + 그래프 모달 (보관함/실시간 랭킹 공용).
@@ -13,7 +27,7 @@ interface HistoryPoint { value: number; recorded_at: string; }
  */
 export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => void }> = ({ channelId, onClose }) => {
   const { toast } = useApp();
-  const [streamer, setStreamer] = useState<any | null>(null);
+  const [streamer, setStreamer] = useState<StreamerDetail | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<'24h' | '7d'>('7d');
@@ -28,7 +42,7 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
         const res = await apiFetch(`/streamers/${channelId}?range=${range}`);
         if (res.ok && alive) {
           const data = await res.json();
-          setStreamer(data.streamer);
+          setStreamer(data.streamer as StreamerDetail);
           setHistory(data.history || []);
         } else if (alive) {
           toast('스트리머 상세 정보를 불러오지 못했습니다.', 'error');
@@ -40,30 +54,57 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
       }
     })();
     return () => { alive = false; };
-  }, [channelId, range]);
+  }, [channelId, range, toast]);
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-border/60 pb-3">
-          <h3 className="text-base font-bold flex items-center gap-2"><BarChart3 className="h-4.5 w-4.5 text-primary" /> 스트리머 시세 상세</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+  const modal = (
+    <div className="modal-backdrop z-[80] bg-black/65 backdrop-blur-md" onClick={onClose}>
+      <div className="modal-panel modal-panel-lg flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/95 px-4 py-3 sm:px-5">
+          <h3 className="flex min-w-0 items-center gap-2 text-base font-black text-foreground">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <BarChart3 className="h-4.5 w-4.5 text-primary" />
+            </span>
+            <span className="truncate">스트리머 시세 상세</span>
+          </h3>
+          <button
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary/60 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+            aria-label="닫기"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {loading || !streamer ? (
-          <div className="flex items-center justify-center py-16">
+          <div className="flex flex-1 items-center justify-center py-20">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
           </div>
         ) : (
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center gap-3">
-              <img src={streamer.custom_image_url || streamer.logo_url} alt={streamer.name} className="h-14 w-14 rounded-full object-cover border border-border" />
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-black truncate">{streamer.name}</h4>
-                <p className="text-[11px] text-muted-foreground">{(streamer.follower_count || 0).toLocaleString()} 팔로워 · {streamer.is_active ? '🟢 방송 중' : '⚫ 오프라인'}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-black text-primary">{(streamer.base_value || 0).toLocaleString()} P</p>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+            <div className="rounded-2xl border border-border/70 bg-secondary/20 p-3.5">
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <img
+                    src={streamer.custom_image_url || streamer.logo_url || '/icon.png'}
+                    alt={streamer.name}
+                    className="h-14 w-14 shrink-0 rounded-full border border-border object-cover"
+                  />
+                  <div className="min-w-0">
+                    <h4 className="truncate text-base font-black text-foreground">{streamer.name}</h4>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>{(streamer.follower_count || 0).toLocaleString()} 팔로워</span>
+                      <span className="text-border">·</span>
+                      <span className={`inline-flex items-center gap-1 font-bold ${streamer.is_active ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                        <span className={`h-2 w-2 rounded-full ${streamer.is_active ? 'bg-emerald-500' : 'bg-zinc-700'}`} />
+                        {streamer.is_active ? '방송 중' : '오프라인'}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 sm:min-w-36 sm:text-right">
+                  <p className="text-[10px] font-bold text-muted-foreground">현재 시세</p>
+                  <p className="mt-0.5 text-lg font-black text-primary">{(streamer.base_value || 0).toLocaleString()} P</p>
                 {(() => {
                   const prev = streamer.prev_value ?? streamer.base_value ?? 1000;
                   const diff = (streamer.base_value || 0) - prev;
@@ -73,29 +114,33 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                   return <p className={`text-[11px] font-bold ${cls}`}>{arrow} {rate.toFixed(1)}% (24h)</p>;
                 })()}
                 {streamer.recent_market_price !== undefined && streamer.recent_market_price !== null ? (
-                  <p className="text-[10px] text-emerald-500 font-bold mt-1">최근 마켓 체결: {streamer.recent_market_price.toLocaleString()} P</p>
+                  <p className="mt-1 text-[10px] font-bold text-emerald-500">최근 체결 {streamer.recent_market_price.toLocaleString()} P</p>
                 ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">마켓 거래 이력 없음</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">마켓 거래 이력 없음</p>
                 )}
+                </div>
               </div>
             </div>
 
             {/* 그래프 기간 토글 */}
-            <div className="flex items-center justify-end gap-1">
-              {(['24h', '7d'] as const).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setRange(r)}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition ${range === r ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
-                >
-                  {r === '24h' ? '24시간' : '7일'}
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-bold text-muted-foreground">시세 기록</p>
+              <div className="flex shrink-0 items-center gap-1 rounded-xl bg-secondary/50 p-1">
+                {(['24h', '7d'] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setRange(r)}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-black transition ${range === r ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {r === '24h' ? '24시간' : '7일'}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* SVG 라인 차트 (hover 시 해당 시점 강조 + 툴팁) */}
             {history.length >= 2 ? (() => {
-              const W = 460, H = 140, P = 8;
+              const W = 460, H = 170, P = 10;
               const n = history.length;
               const values = history.map(h => h.value);
               const min = Math.min(...values), max = Math.max(...values);
@@ -121,11 +166,11 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               };
 
               return (
-                <div className="rounded-xl border border-border bg-secondary/20 p-3">
+                <div className="rounded-2xl border border-border bg-secondary/20 p-3">
                   <div className="relative">
                     <svg
                       viewBox={`0 0 ${W} ${H}`}
-                      className="w-full h-auto"
+                      className="h-44 w-full min-w-0"
                       preserveAspectRatio="none"
                       onMouseMove={onMove}
                       onMouseLeave={() => setHover(null)}
@@ -147,10 +192,10 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                       </div>
                     )}
                   </div>
-                  <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
-                    <span>{new Date(history[0].recorded_at).toLocaleDateString('ko-KR')}</span>
-                    <span>최저 {min.toLocaleString()}P · 최고 {max.toLocaleString()}P</span>
-                    <span>{new Date(history[n - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
+                  <div className="mt-2 grid gap-1 text-[10px] text-muted-foreground sm:grid-cols-3 sm:items-center">
+                    <span className="truncate">{new Date(history[0].recorded_at).toLocaleDateString('ko-KR')}</span>
+                    <span className="text-left font-bold sm:text-center">최저 {min.toLocaleString()}P · 최고 {max.toLocaleString()}P</span>
+                    <span className="truncate text-left sm:text-right">{new Date(history[n - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
                   </div>
                 </div>
               );
@@ -165,18 +210,27 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               href={streamer.is_active ? `https://chzzk.naver.com/live/${streamer.channel_id}` : `https://chzzk.naver.com/${streamer.channel_id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00ffa3] py-2.5 text-xs font-black text-black hover:brightness-95 transition"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00ffa3] py-3 text-sm font-black text-black transition hover:brightness-95"
             >
               치지직 바로가기
             </a>
 
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="rounded-lg bg-secondary/30 p-2.5"><p className="text-muted-foreground">활동 점수</p><p className="font-bold">{(streamer.activity_score || 0).toLocaleString()}</p></div>
-              <div className="rounded-lg bg-secondary/30 p-2.5"><p className="text-muted-foreground">누적 방송 시간</p><p className="font-bold">{Math.floor((streamer.broadcast_minutes || 0) / 60)}시간 {(streamer.broadcast_minutes || 0) % 60}분</p></div>
+            <div className="grid gap-2 text-[11px] sm:grid-cols-2">
+              <div className="rounded-xl border border-border/50 bg-secondary/30 p-3">
+                <p className="text-muted-foreground">활동 점수</p>
+                <p className="mt-1 text-sm font-black text-foreground">{(streamer.activity_score || 0).toLocaleString()}</p>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-secondary/30 p-3">
+                <p className="text-muted-foreground">누적 방송 시간</p>
+                <p className="mt-1 text-sm font-black text-foreground">{Math.floor((streamer.broadcast_minutes || 0) / 60)}시간 {(streamer.broadcast_minutes || 0) % 60}분</p>
+              </div>
             </div>
           </div>
         )}
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(modal, document.body);
 };

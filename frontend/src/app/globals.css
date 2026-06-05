@@ -258,16 +258,59 @@ body {
 }
 
 /* ============================================================
-   모달/팝업 백드롭(어둡고 흐림 처리) 하단 잘림 해결
-   - 부모 요소에 transform/filter 애니메이션(예: animate-in fade-in)이 있으면 Containing Block이 격리됨
-   - fixed inset-0이 부모 영역을 벗어나지 못해 아래쪽 스크롤이나 여백이 잘리는 버그 방지
-   - 상하좌우 안전 여백(-100vh, -100vw)을 제공하여 화면 밖 가상 영역까지 100% 가림막을 보장
+   Modal layout utilities
+   - Keep overlays bound to the visual viewport on mobile.
+   - Give long dialogs their own scroll area so Safari bottom bars do not crop content.
+   - Avoid the old 300vw backdrop expansion, which made w-full panels resolve wider than
+     the viewport and clipped modal content on phones.
    ============================================================ */
-div[class*="fixed"][class*="inset-0"][class*="backdrop-blur"] {
-  top: -100vh !important;
-  bottom: -100vh !important;
-  left: -100vw !important;
-  right: -100vw !important;
-  height: 300vh !important;
-  width: 300vw !important;
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100dvw;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: max(0.75rem, env(safe-area-inset-top))
+    max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom))
+    max(0.75rem, env(safe-area-inset-left));
+}
+
+.modal-backdrop-center {
+  align-items: center;
+}
+
+.modal-panel {
+  width: min(100%, var(--modal-max, 32rem));
+  max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.modal-panel-xs { --modal-max: 20rem; }
+.modal-panel-sm { --modal-max: 24rem; }
+.modal-panel-md { --modal-max: 28rem; }
+.modal-panel-lg { --modal-max: 34rem; }
+.modal-panel-xl { --modal-max: 48rem; }
+
+.modal-panel-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 640px) {
+  .modal-backdrop {
+    align-items: center;
+    padding: 1rem;
+  }
+
+  .modal-panel {
+    max-height: calc(100dvh - 2rem);
+  }
 }

@@ -17,7 +17,8 @@ import {
   Trash2,
   RefreshCw,
   Store,
-  Database
+  Database,
+  Gamepad2
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
@@ -108,7 +109,7 @@ export const AdminTab: React.FC = () => {
   const [couponForm, setCouponForm] = useState({
     code: '',
     coupon_type: 'single' as 'single' | 'multi',
-    reward_type: 'point' as 'point' | 'card' | 'cosmetic',
+    reward_type: 'point' as 'point' | 'card' | 'cosmetic' | 'minigame_ticket',
     points: 1000,
     reward_channel_id: '',
     reward_item_id: 0,
@@ -262,6 +263,10 @@ export const AdminTab: React.FC = () => {
     }
     if (couponForm.reward_type === 'cosmetic' && !couponForm.reward_item_id) {
       toast('지급할 코스메틱 아이템을 선택해 주세요.');
+      return;
+    }
+    if (couponForm.reward_type === 'minigame_ticket' && (!couponForm.reward_quantity || couponForm.reward_quantity <= 0)) {
+      toast('지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
       return;
     }
     // 만료 일시는 datetime-local → ISO 변환
@@ -927,6 +932,7 @@ export const AdminTab: React.FC = () => {
                 <option value="point">재화 (포인트)</option>
                 <option value="card">스트리머 카드</option>
                 <option value="cosmetic">코스메틱 아이템</option>
+                <option value="minigame_ticket">추가 미니게임 티켓</option>
               </select>
             </div>
 
@@ -1001,6 +1007,29 @@ export const AdminTab: React.FC = () => {
               </div>
             )}
 
+            {couponForm.reward_type === 'minigame_ticket' && (
+              <div className="overflow-hidden rounded-xl border border-sky-500/25 bg-gradient-to-br from-sky-500/10 via-secondary/20 to-primary/10 p-3">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-sky-500/15 p-2 text-sky-400 ring-1 ring-sky-500/25">
+                    <Gamepad2 className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-foreground">추가 미니게임 티켓</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      기본 5장 충전 한도와 별도로 누적됩니다. 유저가 게임을 시작하면 이 추가 티켓이 기본 티켓보다 먼저 소모됩니다.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 bg-card/70 px-3 py-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">지급 수량</span>
+                  <input type="number" min={1} value={couponForm.reward_quantity}
+                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                    className="ml-auto w-24 rounded-lg border border-border bg-secondary/40 px-2 py-1.5 text-xs font-bold" />
+                  <span className="text-[10px] font-black text-sky-400">tickets</span>
+                </div>
+              </div>
+            )}
+
             {/* 사용 가능 기간 (만료 일시) */}
             <div>
               <label className="text-[11px] font-bold text-muted-foreground block mb-1">사용 가능 만료 일시 (비우면 무기한)</label>
@@ -1025,6 +1054,8 @@ export const AdminTab: React.FC = () => {
                   ? `🃏 ${streamerName(c.reward_channel_id || '')} 카드 ×${c.reward_quantity}`
                   : c.reward_type === 'cosmetic'
                   ? `🎨 ${couponCosmetics.find((it) => it.id === c.reward_item_id)?.name || `아이템#${c.reward_item_id}`} ×${c.reward_quantity}`
+                  : c.reward_type === 'minigame_ticket'
+                  ? `🎮 추가 미니게임 티켓 ×${c.reward_quantity}`
                   : `💰 ${(c.points || 0).toLocaleString()}P`;
                 return (
                   <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
@@ -1683,8 +1714,8 @@ export const AdminTab: React.FC = () => {
 
       {/* 스트리머 카드 삭제 확인 모달 */}
       {delTarget && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !deleting && setDelTarget(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm" onClick={() => !deleting && setDelTarget(null)}>
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <Trash2 className="mx-auto h-9 w-9 text-red-500 mb-3" />
             <h4 className="text-sm font-black text-foreground mb-2">스트리머 카드 삭제</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -2126,8 +2157,8 @@ export const AdminTab: React.FC = () => {
 
       {/* DB 초기화 확인 모달 */}
       {resetConfirmOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => !resetting && setResetConfirmOpen(false)}>
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200 text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm" onClick={() => !resetting && setResetConfirmOpen(false)}>
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <Database className="mx-auto h-9 w-9 text-red-500 mb-3" />
             <h4 className="text-sm font-black text-foreground mb-2">선택 항목 초기화</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">

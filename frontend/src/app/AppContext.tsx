@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch, isAuthed, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 
-export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin';
+export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
 
 // 다크모드/라이트모드 및 현재 선택 탭, 사용자 인증 상태, 보유 재화 전역 관리
 interface AppContextType {
@@ -71,8 +71,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (pathname.startsWith('/ranking')) return 'ranking';
     if (pathname.startsWith('/my-info')) return 'my-info';
     if (pathname.startsWith('/admin')) return 'admin';
+    if (pathname.startsWith('/arcade')) return 'arcade';
     return 'main';
   })();
+
 
   const setActiveTab = (tab: TabId) => {
     const route = tab === 'main' ? '/' : `/${tab}`;

@@ -136,11 +136,11 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl border border-border bg-card shadow-2xl"
+        className="modal-panel modal-panel-md modal-panel-scroll relative rounded-3xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button

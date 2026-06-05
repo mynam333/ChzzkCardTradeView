@@ -31,7 +31,7 @@ export class SqliteCouponRepository implements ICouponRepository {
       id: row.id,
       code: row.code,
       coupon_type: row.coupon_type as 'single' | 'multi',
-      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic',
+      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic' | 'minigame_ticket',
       points: row.points,
       reward_channel_id: row.reward_channel_id ?? null,
       reward_item_id: row.reward_item_id ?? null,
@@ -115,6 +115,9 @@ export class SqliteCouponRepository implements ICouponRepository {
       if (coupon.reward_type === 'cosmetic' && !coupon.reward_item_id) {
         return { ok: false, reason: 'INVALID_REWARD' };
       }
+      if (coupon.reward_type === 'minigame_ticket' && coupon.reward_quantity <= 0) {
+        return { ok: false, reason: 'INVALID_REWARD' };
+      }
 
       try {
         db.prepare('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)').run(couponId, userId);
@@ -155,6 +158,24 @@ export class SqliteCouponRepository implements ICouponRepository {
           reason: 'OK',
           reward_type: 'cosmetic',
           reward_item_id: coupon.reward_item_id,
+          reward_quantity: coupon.reward_quantity,
+          points_added: 0
+        };
+      }
+
+      if (coupon.reward_type === 'minigame_ticket') {
+        const now = new Date().toISOString();
+        db.prepare(`
+          INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+          VALUES (?, 5, ?, ?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET
+            bonus_tickets = bonus_tickets + excluded.bonus_tickets,
+            updated_at = excluded.updated_at
+        `).run(userId, coupon.reward_quantity, now, now);
+        return {
+          ok: true,
+          reason: 'OK',
+          reward_type: 'minigame_ticket',
           reward_quantity: coupon.reward_quantity,
           points_added: 0
         };

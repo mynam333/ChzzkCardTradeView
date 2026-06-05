@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle2, XCircle, AlertTriangle, Info } from 'lucide-react';
 
 export type AlertType = 'success' | 'error' | 'warning' | 'info';
@@ -28,10 +29,10 @@ export const AlertModal: React.FC<Props> = ({ open, title, message, type = 'info
   if (!open) return null;
   const { Icon, color, bg } = TYPE_META[type];
 
-  return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+  const modal = (
+    <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-full max-w-xs rounded-2xl border border-border bg-card p-6 text-center shadow-2xl animate-in zoom-in-95 duration-200"
+        className="modal-panel modal-panel-xs modal-panel-scroll rounded-2xl border border-border bg-card p-6 text-center shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full ${bg}`}>
@@ -48,4 +49,7 @@ export const AlertModal: React.FC<Props> = ({ open, title, message, type = 'info
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(modal, document.body);
 };

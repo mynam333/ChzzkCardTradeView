@@ -94,8 +94,8 @@ export const MainTab: React.FC = () => {
 
       {/* 팝업 오버레이 모달 (Portal 적용으로 transform 영역 제약 및 배경 흐림 잘림 방지) */}
       {mounted && activePopup && createPortal(
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <div className="flex items-center gap-2 text-primary">
               <Megaphone className="h-5 w-5" />
               <h3 className="font-bold text-foreground">공지사항</h3>

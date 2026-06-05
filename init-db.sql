@@ -84,11 +84,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,                 -- 쿠폰 코드 (수동 입력 또는 랜덤)
     coupon_type TEXT NOT NULL,                 -- 쿠폰 유형 ('single' 또는 'multi')
-    reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point' 재화 또는 'card' 스트리머 카드)
+    reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point', 'card', 'cosmetic', 'minigame_ticket')
     points INTEGER NOT NULL DEFAULT 0,         -- 지급 재화 크기 (reward_type='point')
     reward_channel_id TEXT,                    -- 지급 스트리머 채널 ID (reward_type='card')
     reward_item_id INTEGER,                    -- 지급 상점 아이템 ID (reward_type='cosmetic')
-    reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic)
+    reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic/minigame_ticket)
     max_uses INTEGER DEFAULT 1,                -- 발급 갯수 (single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,              -- 현재 사용 횟수
     expires_at TEXT,                           -- 유효 만료 기한 (ISO String)
@@ -239,5 +239,26 @@ CREATE TABLE IF NOT EXISTS market_listings (
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);
 
+-- 17. 미니게임 티켓 및 세션 테이블
+CREATE TABLE IF NOT EXISTS user_minigame_tickets (
+    user_id TEXT PRIMARY KEY,
+    current_tickets INTEGER NOT NULL DEFAULT 5,
+    bonus_tickets INTEGER NOT NULL DEFAULT 0,
+    last_charged_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS minigame_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    game_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'STARTED',
+    target_data TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    earned_points INTEGER DEFAULT 0,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
 

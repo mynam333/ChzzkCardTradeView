@@ -106,8 +106,8 @@ export const StreamerRegisterModal: React.FC<Props> = ({ className, children, on
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => !registering && close()}>
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm" onClick={() => !registering && close()}>
+          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <Plus className="h-4.5 w-4.5 text-primary" /> 신규 스트리머 카드 등록

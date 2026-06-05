@@ -354,8 +354,8 @@ export const MyInfoTab: React.FC = () => {
 
       {/* 대표 카드 선택 모달 */}
       {repModalOpen && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
             <div className="flex items-center justify-between border-b border-border/60 pb-3">
               <h3 className="text-base font-bold flex items-center gap-2"><Star className="h-4.5 w-4.5 text-amber-500" /> 대표 카드 선택</h3>
               <button onClick={() => setRepModalOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
@@ -471,8 +471,8 @@ export const MyInfoTab: React.FC = () => {
 
         {/* 업로드 동의 모달 */}
         {uploadModalOpen && previewBlob && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+            <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-base font-bold flex items-center gap-2"><Camera className="h-4.5 w-4.5 text-primary" /> {uploadStar === 0 ? '0성' : `${uploadStar}성`} 카드 이미지 업로드</h3>
                 <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setImageFile(null); setImageDisclaimerChecked(false); }} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>

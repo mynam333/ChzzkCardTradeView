@@ -11,7 +11,8 @@ import {
   Moon,
   Coins,
   Shield,
-  Store
+  Store,
+  Gamepad2
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
@@ -46,6 +47,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     { id: 'main', label: '메인', icon: Home },
     { id: 'shop', label: '상점', icon: Store },
     { id: 'inventory', label: '보관함', icon: Layers },
+    { id: 'arcade', label: '미니게임', icon: Gamepad2 },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
     { id: 'my-info', label: '내 정보', icon: User },
     ...(user?.role === 'ADMIN'

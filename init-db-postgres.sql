@@ -80,11 +80,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id SERIAL PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
     coupon_type TEXT NOT NULL,                   -- 'single' 또는 'multi'
-    reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화) 또는 'card'(스트리머 카드)
+    reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화), 'card'(스트리머 카드), 'cosmetic'(코스메틱), 'minigame_ticket'(추가 미니게임 티켓)
     points INTEGER NOT NULL DEFAULT 0,           -- reward_type='point' 지급 재화
     reward_channel_id TEXT,                      -- reward_type='card' 지급 스트리머 채널 ID
     reward_item_id INTEGER,                      -- reward_type='cosmetic' 지급 상점 아이템 ID
-    reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic 지급 수량
+    reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic/minigame_ticket 지급 수량
     max_uses INTEGER DEFAULT 1,                  -- 발급 갯수(single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,
@@ -187,6 +187,26 @@ CREATE TABLE IF NOT EXISTS shop_purchases (
     PRIMARY KEY(user_id, item_id)
 );
 
+-- 15. 미니게임 티켓 및 세션
+CREATE TABLE IF NOT EXISTS user_minigame_tickets (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    current_tickets INTEGER NOT NULL DEFAULT 5,  -- 자동 충전되는 기본 티켓(최대 5장)
+    bonus_tickets INTEGER NOT NULL DEFAULT 0,    -- 쿠폰 등으로 지급되는 초과 티켓(먼저 소모)
+    last_charged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS minigame_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    game_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'STARTED',
+    target_data TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    earned_points INTEGER DEFAULT 0
+);
+
 -- 유저 차단 (blocker_id가 blocked_id에게 받은 교환 제안을 차단)
 CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -219,6 +239,7 @@ ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
+ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
 
 -- ============================================================
 -- 인덱스 설정 (자주 조회되는 컬럼 최적화)
@@ -259,6 +280,68 @@ BEGIN
    WHERE id = p_id AND point >= p_amount;
   GET DIAGNOSTICS updated = ROW_COUNT;
   RETURN updated > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 미니게임 보너스 티켓 지급: 기본 티켓은 5장으로 초기화하고, 보너스 티켓은 상한 없이 누적
+CREATE OR REPLACE FUNCTION add_minigame_bonus_tickets(p_user_id TEXT, p_amount INTEGER)
+RETURNS user_minigame_tickets AS $$
+DECLARE
+  ticket user_minigame_tickets%ROWTYPE;
+  qty INTEGER := GREATEST(COALESCE(p_amount, 0), 0);
+BEGIN
+  INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+  VALUES (p_user_id, 5, qty, NOW(), NOW())
+  ON CONFLICT (user_id)
+  DO UPDATE SET
+    bonus_tickets = user_minigame_tickets.bonus_tickets + EXCLUDED.bonus_tickets,
+    updated_at = NOW()
+  RETURNING * INTO ticket;
+
+  RETURN ticket;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 미니게임 세션 시작: 보너스 티켓을 먼저 차감하고, 없을 때 기본 충전 티켓을 차감
+CREATE OR REPLACE FUNCTION start_minigame_session_atomic(
+  p_session_id TEXT,
+  p_user_id TEXT,
+  p_game_type TEXT,
+  p_target_data TEXT
+)
+RETURNS TEXT AS $$
+DECLARE
+  ticket user_minigame_tickets%ROWTYPE;
+BEGIN
+  INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+  VALUES (p_user_id, 5, 0, NOW(), NOW())
+  ON CONFLICT (user_id) DO NOTHING;
+
+  SELECT * INTO ticket
+    FROM user_minigame_tickets
+   WHERE user_id = p_user_id
+   FOR UPDATE;
+
+  IF COALESCE(ticket.bonus_tickets, 0) + COALESCE(ticket.current_tickets, 0) <= 0 THEN
+    RETURN 'NO_TICKET';
+  END IF;
+
+  IF COALESCE(ticket.bonus_tickets, 0) > 0 THEN
+    UPDATE user_minigame_tickets
+       SET bonus_tickets = bonus_tickets - 1,
+           updated_at = NOW()
+     WHERE user_id = p_user_id;
+  ELSE
+    UPDATE user_minigame_tickets
+       SET current_tickets = current_tickets - 1,
+           updated_at = NOW()
+     WHERE user_id = p_user_id;
+  END IF;
+
+  INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, created_at)
+  VALUES (p_session_id, p_user_id, p_game_type, 'STARTED', p_target_data, NOW());
+
+  RETURN 'OK';
 END;
 $$ LANGUAGE plpgsql;
 
@@ -439,7 +522,7 @@ BEGIN
     SELECT
       ARRAY_AGG(id),
       COUNT(*),
-      COALESCE(SUM(ROUND(base_value * (1 + COALESCE(star, 0) * 0.6))::INTEGER), 0)
+      COALESCE(SUM(ROUND(base_value * (1 + COALESCE(star, 0) * 0.8))::INTEGER), 0)
     INTO picked_ids, picked_count, gained
     FROM (
       SELECT id, star
@@ -625,11 +708,11 @@ RETURNS TABLE (
   last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT
 ) AS $$
-  -- 카드 가치는 별(0~5성) 배수(1 + star*0.6)를 반영하여 합산
+  -- 카드 가치는 별(0~5성) 배수(1 + star*0.8)를 반영하여 합산
   SELECT u.id, u.username, u.avatar_url, u.role, u.point,
          u.last_free_draw, u.banned_until, u.created_at,
          COUNT(uc.id) AS card_count,
-         (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0))::BIGINT AS total_asset
+         (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0))::BIGINT AS total_asset
     FROM users u
     LEFT JOIN user_cards uc ON uc.user_id = u.id
     LEFT JOIN streamers s ON s.channel_id = uc.channel_id
@@ -649,9 +732,9 @@ RETURNS TABLE (
     SELECT u.id, u.username, u.avatar_url, u.role, u.point,
            u.last_free_draw, u.banned_until, u.created_at,
            COUNT(uc.id) AS card_count,
-           (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0))::BIGINT AS total_asset,
+           (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0))::BIGINT AS total_asset,
            ROW_NUMBER() OVER (
-             ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.6)), 0)) DESC
+             ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0)) DESC
            )::BIGINT AS rank
       FROM users u
       LEFT JOIN user_cards uc ON uc.user_id = u.id
@@ -796,6 +879,11 @@ BEGIN
     RETURN;
   END IF;
 
+  IF c.reward_type = 'minigame_ticket' AND COALESCE(c.reward_quantity, 0) <= 0 THEN
+    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
   BEGIN
     INSERT INTO coupon_logs (coupon_id, user_id) VALUES (p_coupon_id, p_user_id);
   EXCEPTION WHEN unique_violation THEN
@@ -827,6 +915,12 @@ BEGIN
     DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
 
     RETURN QUERY SELECT TRUE, 'OK', 'cosmetic', 0, NULL::INTEGER, NULL::TEXT, c.reward_item_id, c.reward_quantity;
+    RETURN;
+  END IF;
+
+  IF c.reward_type = 'minigame_ticket' THEN
+    PERFORM add_minigame_bonus_tickets(p_user_id, c.reward_quantity);
+    RETURN QUERY SELECT TRUE, 'OK', 'minigame_ticket', 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, c.reward_quantity;
     RETURN;
   END IF;
 

@@ -10,4 +10,4 @@ export { SqliteTradeRepository } from "./sqlite/trade.repository";
 export { SqliteNotificationRepository } from "./sqlite/notification.repository";
 export { SqliteSystemConfigRepository } from "./sqlite/systemConfig.repository";
 export { SqliteMarketRepository } from "./sqlite/market.repository";
-
+export { SqliteMinigameRepository } from "./sqlite/minigame.repository";

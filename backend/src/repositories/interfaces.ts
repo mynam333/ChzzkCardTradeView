@@ -70,12 +70,12 @@ export interface Coupon {
   code: string;
   // single: 선착순 발급 갯수(max_uses) 제한, multi: 기간 내 1인 1회 · 총량 무제한
   coupon_type: 'single' | 'multi';
-  // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템)
-  reward_type: 'point' | 'card' | 'cosmetic';
+  // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템) | minigame_ticket(추가 미니게임 티켓)
+  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket';
   points: number;                     // reward_type === 'point' 일 때 지급 재화량
   reward_channel_id: string | null;   // reward_type === 'card' 일 때 지급 스트리머 채널 ID
   reward_item_id?: number | null;     // reward_type === 'cosmetic' 일 때 지급 상점 아이템 ID
-  reward_quantity: number;            // card/cosmetic 일 때 지급 수량
+  reward_quantity: number;            // card/cosmetic/minigame_ticket 일 때 지급 수량
   max_uses: number;                   // single: 발급 갯수, multi: 0(무제한)
   used_count: number;
   expires_at: string | null;
@@ -85,7 +85,7 @@ export interface Coupon {
 export interface CouponRedeemResult {
   ok: boolean;
   reason: string;
-  reward_type?: 'point' | 'card' | 'cosmetic';
+  reward_type?: 'point' | 'card' | 'cosmetic' | 'minigame_ticket';
   points_added?: number;
   new_points?: number;
   reward_channel_id?: string | null;
@@ -392,4 +392,36 @@ export interface IMarketRepository {
   listHistory(userId: string): Promise<MarketListing[]>;
   /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
   getRecentPrice(channelId: string): Promise<number | null>;
+}
+
+// 10. 미니게임 티켓 및 세션 데이터 인터페이스
+export interface UserMinigameTicket {
+  user_id: string;
+  /** 자동 충전되는 기본 티켓. 최대 5장까지 충전됩니다. */
+  current_tickets: number;
+  /** 쿠폰 등으로 지급되는 초과 보너스 티켓. 5장 상한을 받지 않고 먼저 소모됩니다. */
+  bonus_tickets: number;
+  last_charged_at: string;
+  updated_at?: string;
+}
+
+export interface MinigameSession {
+  id: string;
+  user_id: string;
+  game_type: 'quiz' | 'puzzle' | 'match';
+  status: 'STARTED' | 'COMPLETED' | 'EXPIRED';
+  target_data: string; // JSON string
+  created_at?: string;
+  completed_at?: string | null;
+  earned_points?: number;
+}
+
+export interface IMinigameRepository {
+  getTicketStatus(userId: string): Promise<UserMinigameTicket>;
+  updateTickets(userId: string, currentTickets: number, lastChargedAt: string): Promise<void>;
+  addBonusTickets(userId: string, amount: number): Promise<UserMinigameTicket>;
+  startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }>;
+  completeSession(sessionId: string, earnedPoints: number): Promise<{ ok: boolean; reason?: string; newPoints?: number }>;
+  findSessionById(id: string): Promise<MinigameSession | null>;
+  expireSessions(olderThanMinutes: number): Promise<void>;
 }
