@@ -35,6 +35,57 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return card;
   }
 
+  async drawAtomic(
+    userId: string,
+    channelId: string,
+    drawCost: number,
+    nowIso: string,
+    segmentStartIso: string | null
+  ): Promise<{ ok: boolean; reason: string; card?: any; is_free?: boolean; points_left?: number }> {
+    const db = this.getDb();
+    const txn = db.transaction(() => {
+      const user = db.prepare('SELECT id, point, last_free_draw FROM users WHERE id = ?').get(userId) as any;
+      if (!user) return { ok: false, reason: 'USER_NOT_FOUND' };
+
+      const isFree = segmentStartIso === null
+        || !user.last_free_draw
+        || new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+
+      let nextPoint = Number(user.point || 0);
+      if (isFree) {
+        db.prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(nowIso, userId);
+      } else {
+        const deducted = db.prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
+          .run(drawCost, userId, drawCost);
+        if (deducted.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+        nextPoint -= drawCost;
+      }
+
+      const latest = db.prepare('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ?')
+        .get(channelId) as any;
+      const serialNumber = Number(latest?.max_sn || 0) + 1;
+      const result = db.prepare(
+        'INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)'
+      ).run(userId, channelId, serialNumber);
+
+      return {
+        ok: true,
+        reason: 'OK',
+        is_free: isFree,
+        points_left: nextPoint,
+        card: {
+          id: Number(result.lastInsertRowid),
+          user_id: userId,
+          channel_id: channelId,
+          serial_number: serialNumber,
+          star: 0
+        }
+      };
+    });
+
+    return txn();
+  }
+
   // 같은 스트리머·같은 별 카드 2장 → 1장(별+1). better-sqlite3 트랜잭션으로 원자 처리
   async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
@@ -160,6 +211,38 @@ export class SqliteUserCardRepository implements IUserCardRepository {
   async deleteByChannel(channelId: string): Promise<number> {
     const result = this.getDb().prepare('DELETE FROM user_cards WHERE channel_id = ?').run(channelId);
     return result.changes;
+  }
+
+  async sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number> {
+    const db = this.getDb();
+    const txn = db.transaction(() => {
+      let total = 0;
+
+      for (const action of actions) {
+        const rows = db.prepare(
+          'SELECT id, COALESCE(star, 0) AS star FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
+        ).all(userId, action.channelId, action.count) as { id: number; star: number }[];
+
+        if (rows.length < action.count) {
+          throw new Error('CARD_SHORTAGE');
+        }
+
+        for (const row of rows) {
+          total += Math.round(action.baseValue * (1 + (row.star || 0) * 0.6));
+        }
+
+        const placeholders = rows.map(() => '?').join(',');
+        db.prepare(`DELETE FROM user_cards WHERE id IN (${placeholders})`).run(...rows.map((r) => r.id));
+      }
+
+      if (total > 0) {
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(total, userId);
+      }
+
+      return total;
+    });
+
+    return txn();
   }
 }
 

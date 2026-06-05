@@ -29,7 +29,7 @@ interface AppContextType {
   authLoading: boolean;
   setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
   logout: () => void;
-  refreshUserData: () => Promise<void>;
+  refreshUserData: (showLoading?: boolean) => Promise<void>;
   updatePoints: (diff: number) => Promise<void>;
   // 전역 토스트 알림 (alert 대체)
   toast: (message: string, type?: ToastType) => void;
@@ -158,13 +158,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // PWA 서비스 워커 등록 (푸시 알림 수신 기반 마련)
     registerServiceWorker();
+  }, []);
 
-    // 첫 사용자 상호작용 시 알림 권한 네이티브 프롬프트만 노출 (앱 자동 설치는 제거됨)
+  // 로그인한 유저에게만 첫 상호작용 시 알림 권한을 요청합니다.
+  useEffect(() => {
+    if (!user || askedPushRef.current || !isPushSupported() || Notification.permission !== 'default') return;
+
     const handleFirstGesture = async () => {
-      if (!askedPushRef.current && isPushSupported() && Notification.permission === 'default') {
-        askedPushRef.current = true;
-        try { await subscribeToPush(); } catch { /* 권한 거부/실패 무시 */ }
-      }
+      askedPushRef.current = true;
+      try { await subscribeToPush(); } catch { /* 권한 거부/실패 무시 */ }
       window.removeEventListener('pointerdown', handleFirstGesture);
     };
     window.addEventListener('pointerdown', handleFirstGesture);
@@ -172,7 +174,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       window.removeEventListener('pointerdown', handleFirstGesture);
     };
-  }, []);
+  }, [user?.id]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
@@ -190,13 +192,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     toast('로그아웃되었습니다.', 'info');
   };
 
-  const refreshUserData = async () => {
+  const refreshUserData = async (showLoading = false) => {
     if (!isAuthed()) {
       setUser(null);
       setAuthLoading(false);
       return;
     }
-    setAuthLoading(true);
+    // 최초 로드 시점이거나 명시적으로 지시한 경우에만 로딩 스켈레톤 활성화 (깜빡임 방지)
+    if (showLoading || !user) {
+      setAuthLoading(true);
+    }
     try {
       const response = await apiFetch('/users/me');
       if (response.ok) {

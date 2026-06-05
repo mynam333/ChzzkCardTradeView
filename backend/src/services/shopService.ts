@@ -3,7 +3,6 @@
  * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트). 카드당 각 1개 장착, 해제 시 보유로 반환.
  */
 import { getDbMode, getSqliteDb, getSupabaseClient } from './db';
-import { userRepository } from '../repositories';
 
 export interface ShopItem {
   id: number;
@@ -132,39 +131,6 @@ const addCosmetic = async (userId: string, itemId: number, delta: number): Promi
   }
 };
 
-const getCosmeticQuantity = async (userId: string, itemId: number): Promise<number> => {
-  if (getDbMode() === 'SUPABASE') {
-    // maybeSingle은 중복 행이 있으면 null을 반환할 수 있어, 전체 합산으로 안전하게 계산
-    const { data } = await getSupabaseClient().from('user_cosmetics').select('quantity').eq('user_id', userId).eq('item_id', itemId);
-    return (data || []).reduce((s: number, r: any) => s + (r.quantity || 0), 0);
-  }
-  const r = getSqliteDb().prepare('SELECT COALESCE(SUM(quantity),0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ?').get(userId, itemId) as any;
-  return r?.q || 0;
-};
-
-// ---- 구매 횟수(1인 최대 구매 제한용) ----
-const getPurchaseCount = async (userId: string, itemId: number): Promise<number> => {
-  if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('shop_purchases').select('count').eq('user_id', userId).eq('item_id', itemId);
-    return (data || []).reduce((s: number, r: any) => s + (r.count || 0), 0);
-  }
-  const r = getSqliteDb().prepare('SELECT COALESCE(SUM(count),0) AS c FROM shop_purchases WHERE user_id = ? AND item_id = ?').get(userId, itemId) as any;
-  return r?.c || 0;
-};
-
-const incrementPurchase = async (userId: string, itemId: number): Promise<void> => {
-  if (getDbMode() === 'SUPABASE') {
-    const client = getSupabaseClient();
-    const { data } = await client.from('shop_purchases').select('count').eq('user_id', userId).eq('item_id', itemId).maybeSingle();
-    await client.from('shop_purchases').upsert({ user_id: userId, item_id: itemId, count: (data?.count || 0) + 1 }, { onConflict: 'user_id,item_id' });
-  } else {
-    getSqliteDb().prepare(`
-      INSERT INTO shop_purchases (user_id, item_id, count) VALUES (?, ?, 1)
-      ON CONFLICT(user_id, item_id) DO UPDATE SET count = count + 1
-    `).run(userId, itemId);
-  }
-};
-
 /** 유저의 아이템별 구매 횟수 맵 (상점 UI용) */
 export const getUserPurchases = async (userId: string): Promise<Record<number, number>> => {
   const map: Record<number, number> = {};
@@ -198,67 +164,126 @@ export const grantCosmetic = async (userId: string, itemId: number, quantity: nu
 
 // ---- 구매 ----
 export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boolean; reason: string }> => {
-  const item = await getItem(itemId);
-  if (!item || !item.active) return { ok: false, reason: 'NOT_FOUND' };
-  // 1인 최대 구매 제한 확인
-  if (item.purchase_limit && item.purchase_limit > 0) {
-    const bought = await getPurchaseCount(userId, itemId);
-    if (bought >= item.purchase_limit) return { ok: false, reason: 'LIMIT_REACHED' };
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient().rpc('buy_shop_item_atomic', {
+      p_user_id: userId,
+      p_item_id: itemId
+    });
+    if (error) {
+      console.error('[Supabase] buy_shop_item_atomic RPC 실패:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+    const reason = String(data);
+    return { ok: reason === 'OK', reason };
   }
-  const paid = await userRepository.tryDeductPoint(userId, item.price);
-  if (!paid) return { ok: false, reason: 'INSUFFICIENT_POINT' };
-  await addCosmetic(userId, itemId, 1);
-  if (item.purchase_limit && item.purchase_limit > 0) await incrementPurchase(userId, itemId);
-  return { ok: true, reason: 'OK' };
+
+  const db = getSqliteDb();
+  return db.transaction(() => {
+    const item = db.prepare('SELECT * FROM shop_items WHERE id = ? AND active = 1').get(itemId) as any;
+    if (!item) return { ok: false, reason: 'NOT_FOUND' };
+
+    if ((item.purchase_limit || 0) > 0) {
+      const boughtRow = db.prepare('SELECT COALESCE(count, 0) AS c FROM shop_purchases WHERE user_id = ? AND item_id = ?')
+        .get(userId, itemId) as any;
+      if ((boughtRow?.c || 0) >= item.purchase_limit) return { ok: false, reason: 'LIMIT_REACHED' };
+    }
+
+    const paid = db.prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
+      .run(item.price, userId, item.price);
+    if (paid.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+
+    db.prepare(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+      ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+    `).run(userId, itemId);
+
+    if ((item.purchase_limit || 0) > 0) {
+      db.prepare(`
+        INSERT INTO shop_purchases (user_id, item_id, count) VALUES (?, ?, 1)
+        ON CONFLICT(user_id, item_id) DO UPDATE SET count = count + 1
+      `).run(userId, itemId);
+    }
+
+    return { ok: true, reason: 'OK' };
+  })();
 };
 
 // ---- 카드 슬롯 조회/설정 ----
 const slotColumn = (type: 'border' | 'name_effect') => (type === 'border' ? 'border_item_id' : 'name_effect_item_id');
 
-const getCardOwnerAndSlot = async (userId: string, cardId: number, type: 'border' | 'name_effect'): Promise<{ exists: boolean; current: number | null }> => {
-  const col = slotColumn(type);
-  if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('user_cards').select(`id, ${col}`).eq('id', cardId).eq('user_id', userId).maybeSingle();
-    if (!data) return { exists: false, current: null };
-    return { exists: true, current: (data as any)[col] ?? null };
-  }
-  const r = getSqliteDb().prepare(`SELECT ${col} as cur FROM user_cards WHERE id = ? AND user_id = ?`).get(cardId, userId) as any;
-  if (!r) return { exists: false, current: null };
-  return { exists: true, current: r.cur ?? null };
-};
-
-const setCardSlot = async (cardId: number, type: 'border' | 'name_effect', itemId: number | null): Promise<void> => {
-  const col = slotColumn(type);
-  if (getDbMode() === 'SUPABASE') {
-    await getSupabaseClient().from('user_cards').update({ [col]: itemId }).eq('id', cardId);
-  } else {
-    getSqliteDb().prepare(`UPDATE user_cards SET ${col} = ? WHERE id = ?`).run(itemId, cardId);
-  }
-};
-
 // ---- 장착 ----
 export const equipCosmetic = async (userId: string, cardId: number, itemId: number): Promise<{ ok: boolean; reason: string }> => {
-  const item = await getItem(itemId);
-  if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
-  const type = item.type;
-  const { exists, current } = await getCardOwnerAndSlot(userId, cardId, type);
-  if (!exists) return { ok: false, reason: 'CARD_NOT_FOUND' };
-  if (current === itemId) return { ok: true, reason: 'OK' }; // 이미 장착됨
-  if ((await getCosmeticQuantity(userId, itemId)) < 1) return { ok: false, reason: 'NOT_OWNED' };
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient().rpc('equip_cosmetic_atomic', {
+      p_user_id: userId,
+      p_card_id: cardId,
+      p_item_id: itemId
+    });
+    if (error) {
+      console.error('[Supabase] equip_cosmetic_atomic RPC 실패:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+    const reason = String(data);
+    return { ok: reason === 'OK', reason };
+  }
 
-  // 기존 장착품은 보유로 반환
-  if (current) await addCosmetic(userId, current, 1);
-  await addCosmetic(userId, itemId, -1);
-  await setCardSlot(cardId, type, itemId);
-  return { ok: true, reason: 'OK' };
+  const db = getSqliteDb();
+  return db.transaction(() => {
+    const item = db.prepare('SELECT * FROM shop_items WHERE id = ?').get(itemId) as any;
+    if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
+    const col = slotColumn(item.type);
+    const card = db.prepare(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ?`)
+      .get(cardId, userId) as any;
+    if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (card.current === itemId) return { ok: true, reason: 'OK' };
+
+    const owned = db.prepare('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ?')
+      .get(userId, itemId) as any;
+    if ((owned?.q || 0) < 1) return { ok: false, reason: 'NOT_OWNED' };
+
+    if (card.current) {
+      db.prepare(`
+        INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+        ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+      `).run(userId, card.current);
+    }
+    db.prepare('UPDATE user_cosmetics SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND item_id = ?')
+      .run(userId, itemId);
+    db.prepare(`UPDATE user_cards SET ${col} = ? WHERE id = ? AND user_id = ?`)
+      .run(itemId, cardId, userId);
+    return { ok: true, reason: 'OK' };
+  })();
 };
 
 // ---- 해제 (보유로 반환) ----
 export const unequipCosmetic = async (userId: string, cardId: number, type: 'border' | 'name_effect'): Promise<{ ok: boolean; reason: string }> => {
-  const { exists, current } = await getCardOwnerAndSlot(userId, cardId, type);
-  if (!exists) return { ok: false, reason: 'CARD_NOT_FOUND' };
-  if (!current) return { ok: true, reason: 'OK' };
-  await addCosmetic(userId, current, 1);
-  await setCardSlot(cardId, type, null);
-  return { ok: true, reason: 'OK' };
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient().rpc('unequip_cosmetic_atomic', {
+      p_user_id: userId,
+      p_card_id: cardId,
+      p_type: type
+    });
+    if (error) {
+      console.error('[Supabase] unequip_cosmetic_atomic RPC 실패:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+    const reason = String(data);
+    return { ok: reason === 'OK', reason };
+  }
+
+  const db = getSqliteDb();
+  return db.transaction(() => {
+    const col = slotColumn(type);
+    const card = db.prepare(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ?`)
+      .get(cardId, userId) as any;
+    if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (!card.current) return { ok: true, reason: 'OK' };
+
+    db.prepare(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+      ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+    `).run(userId, card.current);
+    db.prepare(`UPDATE user_cards SET ${col} = NULL WHERE id = ? AND user_id = ?`).run(cardId, userId);
+    return { ok: true, reason: 'OK' };
+  })();
 };

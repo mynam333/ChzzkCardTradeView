@@ -3,6 +3,7 @@ import "./globals.css";
 import { AppProvider } from "./AppContext";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
   title: "CCTV - 치지직 카드 트레이드 뷰",
   description: "매일 무료 가챠를 돌려 치지직 최애 스트리머 카드를 수집하고, 실시간 시세 변동에 맞춰 거래하며 나만의 덱을 만들어보세요!",
   manifest: "/manifest.json",
@@ -54,4 +55,3 @@ export default function RootLayout({
     </html>
   );
 }
-

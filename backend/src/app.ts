@@ -12,6 +12,7 @@ import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 import { startStreamerLiveStatusScheduler } from './cron/streamerScheduler';
 import { CORS_ALLOWED_ORIGINS } from './config';
+import { csrfOriginGuard } from './middlewares/csrf';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -46,6 +47,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+app.use(csrfOriginGuard);
 
 // 로컬 SQLite 업로드 이미지 정적 서빙 경로 마운트 (타 오리진 로드 허용)
 app.use('/uploads', express.static(path.join(__dirname, '../../public/uploads'), {

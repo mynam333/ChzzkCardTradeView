@@ -82,6 +82,17 @@ export interface Coupon {
   created_at?: string;
 }
 
+export interface CouponRedeemResult {
+  ok: boolean;
+  reason: string;
+  reward_type?: 'point' | 'card' | 'cosmetic';
+  points_added?: number;
+  new_points?: number;
+  reward_channel_id?: string | null;
+  reward_item_id?: number | null;
+  reward_quantity?: number;
+}
+
 export interface CardReport {
   id?: number;
   reporter_id: string;
@@ -225,6 +236,8 @@ export interface ICouponRepository {
    * 동시 중복 사용을 원자적으로 차단합니다. 신규 기록 시 true, 이미 사용한 경우 false.
    */
   logCouponRedeem(couponId: number, userId: string): Promise<boolean>;
+  /** 쿠폰 사용 로그, 사용 횟수, 보상 지급을 단일 트랜잭션/RPC로 처리합니다. */
+  redeemAtomic(couponId: number, userId: string): Promise<CouponRedeemResult>;
 }
 
 // 4. 신고 리포지토리 인터페이스
@@ -307,6 +320,14 @@ export interface INotificationRepository {
 // 6. 유저 보유 카드 리포지토리 인터페이스
 export interface IUserCardRepository {
   create(card: UserCard): Promise<UserCard>;
+  /** 무료권/포인트 차감, 시리얼 채번, 카드 생성을 단일 트랜잭션/RPC로 처리합니다. */
+  drawAtomic(
+    userId: string,
+    channelId: string,
+    drawCost: number,
+    nowIso: string,
+    segmentStartIso: string | null
+  ): Promise<{ ok: boolean; reason: string; card?: UserCard; is_free?: boolean; points_left?: number }>;
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
   findLatestSerialNumber(channelId: string): Promise<number>;
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
@@ -318,6 +339,8 @@ export interface IUserCardRepository {
   findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
   deleteByChannel(channelId: string): Promise<number>;
+  /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */
+  sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number>;
 }
 
 // 8. 시스템 설정 리포지토리 인터페이스

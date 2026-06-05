@@ -20,11 +20,9 @@ const result = dotenv.config({ path: envPath });
 if (result.error) {
   console.error(`[ENV] .env 파일 로드 실패: ${envPath}`, result.error.message);
 } else {
-  const pub = process.env.VAPID_PUBLIC_KEY;
-  const priv = process.env.VAPID_PRIVATE_KEY;
   console.log(`[ENV] .env 파일 로드 완료`);
-  console.log(`[ENV] VAPID_PUBLIC_KEY  = ${pub ? pub.substring(0, 15) + '...' : '(없음 - 키 확인 필요)'}`);
-  console.log(`[ENV] VAPID_PRIVATE_KEY = ${priv ? priv.substring(0, 10) + '...' : '(없음 - 키 확인 필요)'}`);
+  console.log(`[ENV] VAPID_PUBLIC_KEY  = ${process.env.VAPID_PUBLIC_KEY ? '(설정됨)' : '(없음 - 키 확인 필요)'}`);
+  console.log(`[ENV] VAPID_PRIVATE_KEY = ${process.env.VAPID_PRIVATE_KEY ? '(설정됨)' : '(없음 - 키 확인 필요)'}`);
 }
 
 // dotenv 로드 완료 후 앱 모듈 동적 로드

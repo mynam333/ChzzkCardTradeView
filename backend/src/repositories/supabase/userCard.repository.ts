@@ -38,6 +38,43 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return data;
   }
 
+  async drawAtomic(
+    userId: string,
+    channelId: string,
+    drawCost: number,
+    nowIso: string,
+    segmentStartIso: string | null
+  ): Promise<{ ok: boolean; reason: string; card?: any; is_free?: boolean; points_left?: number }> {
+    const { data, error } = await this.getClient().rpc('draw_card_atomic', {
+      p_user_id: userId,
+      p_channel_id: channelId,
+      p_draw_cost: drawCost,
+      p_now: nowIso,
+      p_segment_start: segmentStartIso
+    });
+
+    if (error) {
+      console.error('[SupabaseUserCardRepository] draw_card_atomic RPC 에러:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.ok) return { ok: false, reason: row?.reason || 'FAILED' };
+    return {
+      ok: true,
+      reason: 'OK',
+      is_free: !!row.is_free,
+      points_left: Number(row.points_left) || 0,
+      card: {
+        id: Number(row.card_id),
+        user_id: userId,
+        channel_id: channelId,
+        serial_number: Number(row.serial_number),
+        star: 0
+      }
+    };
+  }
+
   async findByUserId(userId: string): Promise<any[]> {
     // Supabase 상에서 user_cards와 streamers를 Inner Join
     const { data, error } = await this.getClient()
@@ -104,39 +141,17 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
 
   async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
-    const client = this.getClient();
-
-    // 1) 업그레이드 대상: 현재 star인 카드 1장
-    const { data: targetRows, error: tErr } = await client
-      .from('user_cards')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('channel_id', channelId)
-      .eq('star', star)
-      .order('id', { ascending: true })
-      .limit(1);
-    if (tErr || !targetRows || targetRows.length === 0) return { ok: false, reason: 'NO_TARGET' };
-    const targetId = targetRows[0].id;
-
-    // 2) 한계돌파 재료: 같은 스트리머의 0성 카드 1장 (대상과 다른 카드)
-    const { data: fodderRows, error: fErr } = await client
-      .from('user_cards')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('channel_id', channelId)
-      .eq('star', 0)
-      .neq('id', targetId)
-      .order('id', { ascending: true })
-      .limit(1);
-    if (fErr || !fodderRows || fodderRows.length === 0) return { ok: false, reason: 'NO_FODDER' };
-    const fodderId = fodderRows[0].id;
-
-    // 대상 카드의 별을 1 올리고, 재료 0성 카드는 소모(삭제)
-    const { error: updErr } = await client.from('user_cards').update({ star: star + 1 }).eq('id', targetId);
-    if (updErr) return { ok: false, reason: 'FAILED' };
-    const { error: delErr } = await client.from('user_cards').delete().eq('id', fodderId);
-    if (delErr) return { ok: false, reason: 'FAILED' };
-    return { ok: true, reason: 'OK', newStar: star + 1 };
+    const { data, error } = await this.getClient().rpc('fuse_card_atomic', {
+      p_user_id: userId,
+      p_channel_id: channelId,
+      p_star: star
+    });
+    if (error) {
+      console.error('[SupabaseUserCardRepository] fuse_card_atomic RPC 에러:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+    const reason = String(data);
+    return { ok: reason === 'OK', reason, newStar: reason === 'OK' ? star + 1 : undefined };
   }
 
   async findLatestSerialNumber(channelId: string): Promise<number> {
@@ -215,6 +230,20 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       .eq('channel_id', channelId);
     if (error) throw error;
     return count || 0;
+  }
+
+  async sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number> {
+    const payload = actions.map((a) => ({
+      channel_id: a.channelId,
+      count: a.count,
+      base_value: a.baseValue
+    }));
+    const { data, error } = await this.getClient().rpc('sell_cards_atomic', {
+      p_user_id: userId,
+      p_actions: payload
+    });
+    if (error) throw error;
+    return Number(data) || 0;
   }
 }
 

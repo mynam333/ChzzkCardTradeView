@@ -233,20 +233,29 @@ export const startPushNotificationScheduler = () => {
         const client = getSupabaseClient();
         const { data, error } = await client
           .from('push_notifications')
-          .select('*')
+          .update({ status: 'sending' })
           .eq('status', 'pending')
-          .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`);
+          .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`)
+          .select('*');
         
         if (!error && data) {
           pendingNotifs = data;
         }
       } else {
         const db = getSqliteDb();
-        pendingNotifs = db.prepare(`
-          SELECT * FROM push_notifications 
-          WHERE status = 'pending' 
-            AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
-        `).all(nowIso);
+        pendingNotifs = db.transaction(() => {
+          const rows = db.prepare(`
+            SELECT * FROM push_notifications
+            WHERE status = 'pending'
+              AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
+          `).all(nowIso) as any[];
+          if (rows.length === 0) return rows;
+
+          const placeholders = rows.map(() => '?').join(',');
+          db.prepare(`UPDATE push_notifications SET status = 'sending' WHERE id IN (${placeholders}) AND status = 'pending'`)
+            .run(...rows.map((r) => r.id));
+          return rows;
+        })();
       }
 
       if (pendingNotifs.length === 0) return;

@@ -4,6 +4,7 @@ import type { Streamer, StreamerScheduleResult } from '../repositories/interface
 import { fetchChzzkChannelProfile, ChzzkProfile, refreshChzzkToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
 import { decryptToken, encryptToken } from '../services/cryptoService';
+import { acquireSchedulerLock } from '../services/schedulerLock';
 
 /**
  * 스트리머(유저)의 유효한 치지직 access_token을 반환합니다.
@@ -269,6 +270,12 @@ export const syncAllStreamersLiveStatus = async () => {
     return;
   }
   isSyncRunning = true;
+  const releaseLock = await acquireSchedulerLock('scheduler:streamer-live-status', 4 * 60 * 1000);
+  if (!releaseLock) {
+    console.warn('[LiveStatusScheduler] 다른 인스턴스가 동기화를 수행 중이라 이번 틱을 건너뜁니다.');
+    isSyncRunning = false;
+    return;
+  }
   const cycle = scheduleCycle++;
   try {
     const streamers = await streamerRepository.findAll();
@@ -347,6 +354,7 @@ export const syncAllStreamersLiveStatus = async () => {
   } catch (error: any) {
     console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error.message);
   } finally {
+    await releaseLock().catch(() => undefined);
     isSyncRunning = false;
   }
 };

@@ -101,6 +101,9 @@ export const getResetInfo = async (_req: Request, res: Response) => {
 /** 선택한 카테고리들을 초기화 */
 export const resetData = async (req: Request, res: Response) => {
   const categories: string[] = Array.isArray(req.body?.categories) ? req.body.categories : [];
+  if (req.body?.confirmation !== 'RESET') {
+    return res.status(400).json({ error: 'BadRequest', message: '초기화 확인 값이 올바르지 않습니다.' });
+  }
   if (categories.length === 0) {
     return res.status(400).json({ error: 'BadRequest', message: '초기화할 항목을 1개 이상 선택해 주세요.' });
   }
@@ -190,6 +193,9 @@ export const listOrphanImages = async (req: Request, res: Response) => {
 /** 선택한 미사용 업로드 이미지 삭제 */
 export const deleteOrphanImages = async (req: Request, res: Response) => {
   const rels: string[] = Array.isArray(req.body?.paths) ? req.body.paths : [];
+  if (req.body?.confirmation !== 'DELETE_ORPHANS') {
+    return res.status(400).json({ error: 'BadRequest', message: '이미지 삭제 확인 값이 올바르지 않습니다.' });
+  }
   if (rels.length === 0) {
     return res.status(400).json({ error: 'BadRequest', message: '삭제할 이미지를 선택해 주세요.' });
   }

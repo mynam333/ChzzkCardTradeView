@@ -24,6 +24,9 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
   if (!channel_id) {
     return res.status(400).json({ error: 'BadRequest', message: '대상 스트리머 채널 ID가 유효하지 않습니다.' });
   }
+  if (req.body?.confirmation !== channel_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '스트리머 삭제 확인 값이 올바르지 않습니다.' });
+  }
   try {
     const streamer = await streamerRepository.findById(channel_id);
     if (!streamer) {

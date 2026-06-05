@@ -53,7 +53,8 @@ export const proxyImage = async (req: Request, res: Response) => {
     const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
     const resolvedPath = path.resolve(localFilePath);
 
-    if (!resolvedPath.startsWith(absoluteUploadsDir)) {
+    const relCheck = path.relative(absoluteUploadsDir, resolvedPath);
+    if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
       return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 파일 경로입니다.' });
     }
 
@@ -106,7 +107,8 @@ export const proxyImage = async (req: Request, res: Response) => {
     const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
     const resolvedPath = path.resolve(localFilePath);
 
-    if (resolvedPath.startsWith(absoluteUploadsDir) && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+    const relCheck = path.relative(absoluteUploadsDir, resolvedPath);
+    if (!relCheck.startsWith('..') && !path.isAbsolute(relCheck) && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
       const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400');

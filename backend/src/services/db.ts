@@ -11,8 +11,8 @@ let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
 export const initDatabaseConnection = async (): Promise<void> => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (supabaseUrl && supabaseKey) {
     try {

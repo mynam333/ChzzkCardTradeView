@@ -232,6 +232,11 @@ CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(record
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);
 
+CREATE TABLE IF NOT EXISTS system_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- ============================================================
 -- 원자적 연산을 위한 RPC 함수 (동시성 안전성 보장)
 -- 백엔드 SupabaseRepository에서 .rpc()로 호출합니다.
@@ -408,6 +413,210 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
+-- 카드 판매: 삭제 대상 카드의 별 배율을 반영해 포인트 지급까지 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION sell_cards_atomic(p_user_id TEXT, p_actions JSONB)
+RETURNS INTEGER AS $$
+DECLARE
+  a JSONB;
+  cid TEXT;
+  cnt INTEGER;
+  base_value INTEGER;
+  picked_ids INTEGER[];
+  picked_count INTEGER;
+  gained INTEGER;
+  total INTEGER := 0;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('sell_cards:' || p_user_id));
+
+  FOR a IN SELECT * FROM jsonb_array_elements(p_actions)
+  LOOP
+    cid := a->>'channel_id';
+    cnt := (a->>'count')::INTEGER;
+    base_value := (a->>'base_value')::INTEGER;
+    IF cid IS NULL OR cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
+
+    SELECT
+      ARRAY_AGG(id),
+      COUNT(*),
+      COALESCE(SUM(ROUND(base_value * (1 + COALESCE(star, 0) * 0.6))::INTEGER), 0)
+    INTO picked_ids, picked_count, gained
+    FROM (
+      SELECT id, star
+        FROM user_cards
+       WHERE user_id = p_user_id AND channel_id = cid
+       ORDER BY id ASC
+       LIMIT cnt
+       FOR UPDATE
+    ) picked;
+
+    IF picked_count < cnt THEN
+      RAISE EXCEPTION 'CARD_SHORTAGE';
+    END IF;
+
+    DELETE FROM user_cards WHERE id = ANY(picked_ids);
+    total := total + gained;
+  END LOOP;
+
+  IF total > 0 THEN
+    UPDATE users SET point = point + total WHERE id = p_user_id;
+  END IF;
+
+  RETURN total;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 카드 합성: 대상 카드 별 상승과 0성 재료 소모를 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION fuse_card_atomic(p_user_id TEXT, p_channel_id TEXT, p_star INTEGER)
+RETURNS TEXT AS $$
+DECLARE
+  target_id INTEGER;
+  fodder_id INTEGER;
+BEGIN
+  IF p_star >= 5 THEN RETURN 'MAX_STAR'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('fuse_card:' || p_user_id || ':' || p_channel_id));
+
+  SELECT id INTO target_id
+    FROM user_cards
+   WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = p_star
+   ORDER BY id ASC
+   LIMIT 1
+   FOR UPDATE;
+  IF target_id IS NULL THEN RETURN 'NO_TARGET'; END IF;
+
+  SELECT id INTO fodder_id
+    FROM user_cards
+   WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = 0 AND id <> target_id
+   ORDER BY id ASC
+   LIMIT 1
+   FOR UPDATE;
+  IF fodder_id IS NULL THEN RETURN 'NO_FODDER'; END IF;
+
+  UPDATE user_cards SET star = p_star + 1 WHERE id = target_id;
+  DELETE FROM user_cards WHERE id = fodder_id;
+  RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
+-- 상점 구매: 포인트 차감, 보유 수량 증가, 구매 제한 카운트를 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION buy_shop_item_atomic(p_user_id TEXT, p_item_id INTEGER)
+RETURNS TEXT AS $$
+DECLARE
+  item shop_items%ROWTYPE;
+  bought INTEGER;
+  updated INTEGER;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('buy_shop_item:' || p_user_id || ':' || p_item_id::TEXT));
+
+  SELECT * INTO item FROM shop_items WHERE id = p_item_id AND active = TRUE;
+  IF NOT FOUND THEN RETURN 'NOT_FOUND'; END IF;
+
+  IF item.purchase_limit > 0 THEN
+    SELECT COALESCE(count, 0) INTO bought FROM shop_purchases WHERE user_id = p_user_id AND item_id = p_item_id;
+    IF COALESCE(bought, 0) >= item.purchase_limit THEN RETURN 'LIMIT_REACHED'; END IF;
+  END IF;
+
+  UPDATE users SET point = point - item.price
+   WHERE id = p_user_id AND point >= item.price;
+  GET DIAGNOSTICS updated = ROW_COUNT;
+  IF updated = 0 THEN RETURN 'INSUFFICIENT_POINT'; END IF;
+
+  INSERT INTO user_cosmetics (user_id, item_id, quantity)
+  VALUES (p_user_id, p_item_id, 1)
+  ON CONFLICT (user_id, item_id)
+  DO UPDATE SET quantity = user_cosmetics.quantity + 1;
+
+  IF item.purchase_limit > 0 THEN
+    INSERT INTO shop_purchases (user_id, item_id, count)
+    VALUES (p_user_id, p_item_id, 1)
+    ON CONFLICT (user_id, item_id)
+    DO UPDATE SET count = shop_purchases.count + 1;
+  END IF;
+
+  RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
+-- 코스메틱 장착: 보유 수량, 기존 장착 반환, 카드 슬롯 갱신을 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION equip_cosmetic_atomic(p_user_id TEXT, p_card_id INTEGER, p_item_id INTEGER)
+RETURNS TEXT AS $$
+DECLARE
+  item shop_items%ROWTYPE;
+  current_item INTEGER;
+  available INTEGER;
+  slot_col TEXT;
+BEGIN
+  SELECT * INTO item FROM shop_items WHERE id = p_item_id;
+  IF NOT FOUND THEN RETURN 'ITEM_NOT_FOUND'; END IF;
+
+  slot_col := CASE WHEN item.type = 'border' THEN 'border_item_id' ELSE 'name_effect_item_id' END;
+  PERFORM pg_advisory_xact_lock(hashtext('equip_cosmetic:' || p_user_id || ':' || p_card_id::TEXT || ':' || item.type));
+
+  IF item.type = 'border' THEN
+    SELECT border_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
+  ELSE
+    SELECT name_effect_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
+  END IF;
+  IF NOT FOUND THEN RETURN 'CARD_NOT_FOUND'; END IF;
+  IF current_item = p_item_id THEN RETURN 'OK'; END IF;
+
+  SELECT COALESCE(quantity, 0) INTO available
+    FROM user_cosmetics
+   WHERE user_id = p_user_id AND item_id = p_item_id
+   FOR UPDATE;
+  IF COALESCE(available, 0) < 1 THEN RETURN 'NOT_OWNED'; END IF;
+
+  IF current_item IS NOT NULL THEN
+    INSERT INTO user_cosmetics (user_id, item_id, quantity)
+    VALUES (p_user_id, current_item, 1)
+    ON CONFLICT (user_id, item_id)
+    DO UPDATE SET quantity = user_cosmetics.quantity + 1;
+  END IF;
+
+  UPDATE user_cosmetics SET quantity = GREATEST(quantity - 1, 0)
+   WHERE user_id = p_user_id AND item_id = p_item_id;
+
+  IF item.type = 'border' THEN
+    UPDATE user_cards SET border_item_id = p_item_id WHERE id = p_card_id AND user_id = p_user_id;
+  ELSE
+    UPDATE user_cards SET name_effect_item_id = p_item_id WHERE id = p_card_id AND user_id = p_user_id;
+  END IF;
+
+  RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
+-- 코스메틱 해제: 카드 슬롯 초기화와 보유 수량 반환을 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION unequip_cosmetic_atomic(p_user_id TEXT, p_card_id INTEGER, p_type TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  current_item INTEGER;
+BEGIN
+  IF p_type NOT IN ('border', 'name_effect') THEN RETURN 'INVALID_TYPE'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtext('equip_cosmetic:' || p_user_id || ':' || p_card_id::TEXT || ':' || p_type));
+
+  IF p_type = 'border' THEN
+    SELECT border_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
+  ELSE
+    SELECT name_effect_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
+  END IF;
+  IF NOT FOUND THEN RETURN 'CARD_NOT_FOUND'; END IF;
+  IF current_item IS NULL THEN RETURN 'OK'; END IF;
+
+  INSERT INTO user_cosmetics (user_id, item_id, quantity)
+  VALUES (p_user_id, current_item, 1)
+  ON CONFLICT (user_id, item_id)
+  DO UPDATE SET quantity = user_cosmetics.quantity + 1;
+
+  IF p_type = 'border' THEN
+    UPDATE user_cards SET border_item_id = NULL WHERE id = p_card_id AND user_id = p_user_id;
+  ELSE
+    UPDATE user_cards SET name_effect_item_id = NULL WHERE id = p_card_id AND user_id = p_user_id;
+  END IF;
+
+  RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
 -- 유저 랭킹: (포인트 + 보유 카드 시세 합산) 총자산 기준 정렬
 CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER)
 RETURNS TABLE (
@@ -453,6 +662,187 @@ RETURNS TABLE (
    ORDER BY total_asset DESC
    LIMIT p_limit;
 $$ LANGUAGE sql;
+
+-- 여러 백엔드 인스턴스에서 동일 스케줄러가 중복 실행되지 않도록 system_configs를 lease 저장소로 사용
+CREATE OR REPLACE FUNCTION try_acquire_scheduler_lock(p_key TEXT, p_token TEXT, p_expires_at TIMESTAMPTZ)
+RETURNS BOOLEAN AS $$
+DECLARE
+  current_value JSONB;
+  current_token TEXT;
+  current_expires TIMESTAMPTZ;
+BEGIN
+  INSERT INTO system_configs (key, value)
+  VALUES (p_key, jsonb_build_object('token', p_token, 'expiresAt', p_expires_at)::TEXT)
+  ON CONFLICT (key) DO NOTHING;
+
+  SELECT CASE
+           WHEN NULLIF(value, '') IS NULL THEN '{}'::JSONB
+           ELSE value::JSONB
+         END
+    INTO current_value
+    FROM system_configs
+   WHERE key = p_key
+   FOR UPDATE;
+
+  current_token := current_value->>'token';
+  current_expires := NULLIF(current_value->>'expiresAt', '')::TIMESTAMPTZ;
+
+  IF current_token IS NOT NULL AND current_token <> p_token AND current_expires > NOW() THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE system_configs
+     SET value = jsonb_build_object('token', p_token, 'expiresAt', p_expires_at)::TEXT
+   WHERE key = p_key;
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 뽑기: 무료권/포인트 차감, 시리얼 채번, 카드 생성을 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION draw_card_atomic(
+  p_user_id TEXT,
+  p_channel_id TEXT,
+  p_draw_cost INTEGER,
+  p_now TIMESTAMPTZ,
+  p_segment_start TIMESTAMPTZ
+)
+RETURNS TABLE (
+  ok BOOLEAN,
+  reason TEXT,
+  card_id INTEGER,
+  serial_number INTEGER,
+  is_free BOOLEAN,
+  points_left INTEGER
+) AS $$
+DECLARE
+  u users%ROWTYPE;
+  free_draw BOOLEAN;
+  next_serial INTEGER;
+  new_card_id INTEGER;
+BEGIN
+  SELECT * INTO u FROM users WHERE id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND', NULL::INTEGER, NULL::INTEGER, FALSE, NULL::INTEGER;
+    RETURN;
+  END IF;
+
+  free_draw := p_segment_start IS NULL OR u.last_free_draw IS NULL OR u.last_free_draw < p_segment_start;
+  IF free_draw THEN
+    UPDATE users SET last_free_draw = p_now WHERE id = p_user_id;
+  ELSE
+    IF u.point < p_draw_cost THEN
+      RETURN QUERY SELECT FALSE, 'INSUFFICIENT_POINT', NULL::INTEGER, NULL::INTEGER, FALSE, u.point;
+      RETURN;
+    END IF;
+    UPDATE users SET point = point - p_draw_cost WHERE id = p_user_id;
+    u.point := u.point - p_draw_cost;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('user_card_serial:' || p_channel_id));
+  SELECT COALESCE(MAX(user_cards.serial_number), 0) + 1 INTO next_serial
+    FROM user_cards
+   WHERE channel_id = p_channel_id;
+
+  INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+  VALUES (p_user_id, p_channel_id, next_serial, 0)
+  RETURNING id INTO new_card_id;
+
+  RETURN QUERY SELECT TRUE, 'OK', new_card_id, next_serial, free_draw, u.point;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 쿠폰 사용: 사용 로그, 사용 횟수, 보상 지급을 단일 트랜잭션으로 처리
+CREATE OR REPLACE FUNCTION redeem_coupon_atomic(p_coupon_id INTEGER, p_user_id TEXT)
+RETURNS TABLE (
+  ok BOOLEAN,
+  reason TEXT,
+  reward_type TEXT,
+  points_added INTEGER,
+  new_points INTEGER,
+  reward_channel_id TEXT,
+  reward_item_id INTEGER,
+  reward_quantity INTEGER
+) AS $$
+DECLARE
+  c coupons%ROWTYPE;
+  base_serial INTEGER;
+  i INTEGER;
+  updated_point INTEGER;
+BEGIN
+  SELECT * INTO c FROM coupons WHERE id = p_coupon_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT FALSE, 'NOT_FOUND', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
+  IF c.expires_at IS NOT NULL AND c.expires_at < NOW() THEN
+    RETURN QUERY SELECT FALSE, 'EXPIRED', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
+  IF c.coupon_type = 'single' AND c.used_count >= c.max_uses THEN
+    RETURN QUERY SELECT FALSE, 'SOLD_OUT', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
+  IF c.reward_type = 'card' AND c.reward_channel_id IS NULL THEN
+    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
+  IF c.reward_type = 'cosmetic' AND c.reward_item_id IS NULL THEN
+    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END IF;
+
+  BEGIN
+    INSERT INTO coupon_logs (coupon_id, user_id) VALUES (p_coupon_id, p_user_id);
+  EXCEPTION WHEN unique_violation THEN
+    RETURN QUERY SELECT FALSE, 'DUPLICATE', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN;
+  END;
+
+  UPDATE coupons SET used_count = used_count + 1 WHERE id = p_coupon_id;
+
+  IF c.reward_type = 'card' THEN
+    PERFORM pg_advisory_xact_lock(hashtext('user_card_serial:' || c.reward_channel_id));
+    SELECT COALESCE(MAX(user_cards.serial_number), 0) INTO base_serial
+      FROM user_cards
+     WHERE channel_id = c.reward_channel_id;
+
+    FOR i IN 1..GREATEST(c.reward_quantity, 0) LOOP
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES (p_user_id, c.reward_channel_id, base_serial + i, 0);
+    END LOOP;
+
+    RETURN QUERY SELECT TRUE, 'OK', 'card', 0, NULL::INTEGER, c.reward_channel_id, NULL::INTEGER, c.reward_quantity;
+    RETURN;
+  END IF;
+
+  IF c.reward_type = 'cosmetic' THEN
+    INSERT INTO user_cosmetics (user_id, item_id, quantity)
+    VALUES (p_user_id, c.reward_item_id, GREATEST(c.reward_quantity, 1))
+    ON CONFLICT (user_id, item_id)
+    DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+
+    RETURN QUERY SELECT TRUE, 'OK', 'cosmetic', 0, NULL::INTEGER, NULL::TEXT, c.reward_item_id, c.reward_quantity;
+    RETURN;
+  END IF;
+
+  UPDATE users SET point = point + c.points WHERE id = p_user_id RETURNING point INTO updated_point;
+  RETURN QUERY SELECT TRUE, 'OK', 'point', c.points, updated_point, NULL::TEXT, NULL::INTEGER, 0;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION release_scheduler_lock(p_key TEXT, p_token TEXT)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE system_configs
+     SET value = '{"token":"","expiresAt":"1970-01-01T00:00:00Z"}'
+   WHERE key = p_key
+     AND COALESCE((NULLIF(value, '')::JSONB)->>'token', '') = p_token;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================
 -- 하위 호환성 유지: user_cosmetics 테이블의 item_id 외래키가 없는 경우 추가

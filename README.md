@@ -134,11 +134,11 @@
 
 | 구분 | 기술 기술 | 역할 및 상세 사양 |
 | :--- | :--- | :--- |
-| **Frontend** | `Next.js 14+ (App Router)` | SSR/ISR 기반 최적화 렌더링, SEO 친화적 라우팅 |
+| **Frontend** | `Next.js 16 (App Router)` | SSR/ISR 기반 최적화 렌더링, SEO 친화적 라우팅 |
 | | `TypeScript` | 타입 안정성 확보 및 컴파일 타임 에러 방지 |
 | | `Tailwind CSS` & `shadcn/ui` | 유틸리티 퍼스트 디자인 기반 및 Radix UI 기반의 컴포넌트 설계 |
-| | `Zustand` / `React Query` | 전역 클라이언트 상태 및 서버 데이터 캐싱 관리 |
-| | `PWA (next-pwa)` | 서비스 워커 셋업, 앱 설치 매니페스트 및 백그라운드 푸시 알림 수신 지원 |
+| | `React Context` / `apiFetch` | 전역 클라이언트 상태 및 백엔드 API 호출 관리 |
+| | `PWA (custom service worker)` | 서비스 워커, 앱 설치 매니페스트 및 백그라운드 푸시 알림 수신 지원 |
 | **Backend** | `Node.js` & `Express` | RESTful API 서버, 비즈니스 로직 처리 (TypeScript 적용) |
 | | `Node-cron` | 스트리머 정보 갱신 배치 및 푸시 알림 예약 스케줄 처리 |
 | | `Web-push` | VAPID 암호화 프로토콜을 활용한 모바일/PC 브라우저 푸시 알림 발송 라이브러리 |
@@ -387,16 +387,17 @@ cd ChzzkCardTradeView
 
 #### Frontend Environment (`frontend/.env.local`)
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:5000
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
 #### Backend Environment (`backend/.env`)
 ```env
 PORT=5000
 DATABASE_URL=your_supabase_postgresql_connection_string
+SUPABASE_URL=your_supabase_project_url
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret
 CHZZK_API_URL=https://api.chzzk.naver.com
@@ -433,13 +434,11 @@ npm run dev
    * Output Directory: `.next`
 3. **환경 변수 구성:**
    * Vercel Project Settings -> Environment Variables 메뉴에서 다음 변수들을 등록합니다.
-     * `NEXT_PUBLIC_API_URL` (백엔드 배포 주소)
-     * `NEXT_PUBLIC_SUPABASE_URL`
-     * `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   * `NEXT_PUBLIC_API_URL` (예: `https://your-backend.example.com/api`)
+   * `NEXT_PUBLIC_SITE_URL` (예: `https://your-frontend.example.com`)
 4. **배포 실행:**
    * `main` 브랜치에 코드가 push될 때마다 자동으로 배포가 이루어집니다.
 
 ### 8.2 Backend 배포
 백엔드 Node.js/Express 서버 및 스케줄러는 Render, Fly.io, 혹은 Docker 컨테이너 기반 클라우드 서비스를 통해 배포합니다.
 * 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
-

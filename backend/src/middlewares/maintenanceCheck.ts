@@ -2,15 +2,26 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { systemConfigRepository, userRepository } from '../repositories';
 import { JWT_SECRET } from '../config';
+import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
 
 // 점검 예외 허용 API 경로 목록 (Prefix 매칭 또는 Exact 매칭)
 const MAINTENANCE_BYPASS_PATHS = [
-  '/api/maintenance/status',
-  '/api/auth/chzzk/url',
-  '/api/auth/chzzk/callback',
-  '/api/users/me',
-  '/api/health'
+  '/maintenance/status',
+  '/auth/chzzk/url',
+  '/auth/chzzk/callback',
+  '/users/me',
+  '/health'
 ];
+
+const getSessionToken = (req: Request): string | undefined => {
+  const cookieToken = (req as any).cookies?.[SESSION_COOKIE_NAME];
+  if (cookieToken) return cookieToken;
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return undefined;
+  const [type, token] = authHeader.split(' ');
+  return type === 'Bearer' && token ? token : undefined;
+};
 
 /**
  * 점검 상태 점검 미들웨어
@@ -27,20 +38,17 @@ export const maintenanceCheckMiddleware = async (req: Request, res: Response, ne
     // 2. DB에서 점검 활성화 여부 확인
     const active = await systemConfigRepository.get('maintenance_active', 'false');
     if (active === 'true') {
-      // 3. Authorization 헤더를 디코딩하여 ADMIN 검사
-      const authHeader = req.headers.authorization;
-      if (authHeader) {
-        const [type, token] = authHeader.split(' ');
-        if (type === 'Bearer' && token) {
-          try {
-            const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
-            const user = await userRepository.findById(decoded.id);
-            if (user && user.role === 'ADMIN') {
-              return next();
-            }
-          } catch (err) {
-            // 토큰 에러 시 무시하고 503 반환
+      // 3. 세션 쿠키 또는 Authorization 헤더를 디코딩하여 ADMIN 검사
+      const token = getSessionToken(req);
+      if (token) {
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+          const user = await userRepository.findById(decoded.id);
+          if (user && user.role === 'ADMIN') {
+            return next();
           }
+        } catch (err) {
+          // 토큰 에러 시 무시하고 503 반환
         }
       }
 

@@ -709,7 +709,7 @@ export const AdminTab: React.FC = () => {
   const handleResetData = async () => {
     setResetting(true);
     try {
-      const res = await apiFetch('/admin/reset', { method: 'POST', body: JSON.stringify({ categories: selectedCats }) });
+      const res = await apiFetch('/admin/reset', { method: 'POST', body: JSON.stringify({ categories: selectedCats, confirmation: 'RESET' }) });
       const data = await res.json();
       if (res.ok) {
         toast(data.message || '초기화되었습니다.', 'success');
@@ -729,7 +729,7 @@ export const AdminTab: React.FC = () => {
     if (selectedOrphans.length === 0) { toast('삭제할 이미지를 선택해 주세요.', 'warning'); return; }
     setDeletingOrphans(true);
     try {
-      const res = await apiFetch('/admin/uploads/orphans/delete', { method: 'POST', body: JSON.stringify({ paths: selectedOrphans }) });
+      const res = await apiFetch('/admin/uploads/orphans/delete', { method: 'POST', body: JSON.stringify({ paths: selectedOrphans, confirmation: 'DELETE_ORPHANS' }) });
       const data = await res.json();
       if (res.ok) { toast(data.message || '삭제되었습니다.', 'success'); fetchOrphans(); }
       else toast(data.message || '삭제 실패', 'error');
@@ -749,7 +749,10 @@ export const AdminTab: React.FC = () => {
     if (!delTarget) return;
     setDeleting(true);
     try {
-      const res = await apiFetch(`/admin/streamers/${delTarget.channel_id}/delete`, { method: 'POST' });
+      const res = await apiFetch(`/admin/streamers/${delTarget.channel_id}/delete`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: delTarget.channel_id })
+      });
       const data = await res.json();
       if (res.ok) {
         toast(data.message || '스트리머 카드를 삭제했습니다.', 'success');

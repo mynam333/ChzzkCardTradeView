@@ -14,6 +14,7 @@ import {
   Streamer,
   StreamerScheduleResult,
   Coupon,
+  CouponRedeemResult,
   CardReport,
   Announcement,
   Trade,
@@ -93,6 +94,84 @@ export class SqliteCouponRepository implements ICouponRepository {
       }
       throw err;
     }
+  }
+
+  async redeemAtomic(couponId: number, userId: string): Promise<CouponRedeemResult> {
+    const db = this.getDb();
+    const txn = db.transaction((): CouponRedeemResult => {
+      const couponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(couponId) as any;
+      if (!couponRow) return { ok: false, reason: 'NOT_FOUND' };
+      const coupon = this.mapCoupon(couponRow);
+
+      if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) {
+        return { ok: false, reason: 'EXPIRED' };
+      }
+      if (coupon.coupon_type === 'single' && coupon.used_count >= coupon.max_uses) {
+        return { ok: false, reason: 'SOLD_OUT' };
+      }
+      if (coupon.reward_type === 'card' && !coupon.reward_channel_id) {
+        return { ok: false, reason: 'INVALID_REWARD' };
+      }
+      if (coupon.reward_type === 'cosmetic' && !coupon.reward_item_id) {
+        return { ok: false, reason: 'INVALID_REWARD' };
+      }
+
+      try {
+        db.prepare('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)').run(couponId, userId);
+      } catch (err: any) {
+        if (err && typeof err.code === 'string' && err.code.startsWith('SQLITE_CONSTRAINT')) {
+          return { ok: false, reason: 'DUPLICATE' };
+        }
+        throw err;
+      }
+
+      db.prepare('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?').run(couponId);
+
+      if (coupon.reward_type === 'card') {
+        const latest = db.prepare('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ?')
+          .get(coupon.reward_channel_id) as any;
+        const baseSn = Number(latest?.max_sn || 0);
+        for (let i = 1; i <= coupon.reward_quantity; i++) {
+          db.prepare('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)')
+            .run(userId, coupon.reward_channel_id, baseSn + i);
+        }
+        return {
+          ok: true,
+          reason: 'OK',
+          reward_type: 'card',
+          reward_channel_id: coupon.reward_channel_id,
+          reward_quantity: coupon.reward_quantity,
+          points_added: 0
+        };
+      }
+
+      if (coupon.reward_type === 'cosmetic') {
+        db.prepare(`
+          INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
+          ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity
+        `).run(userId, coupon.reward_item_id, coupon.reward_quantity);
+        return {
+          ok: true,
+          reason: 'OK',
+          reward_type: 'cosmetic',
+          reward_item_id: coupon.reward_item_id,
+          reward_quantity: coupon.reward_quantity,
+          points_added: 0
+        };
+      }
+
+      db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(coupon.points, userId);
+      const updated = db.prepare('SELECT point FROM users WHERE id = ?').get(userId) as any;
+      return {
+        ok: true,
+        reason: 'OK',
+        reward_type: 'point',
+        points_added: coupon.points,
+        new_points: updated?.point ?? coupon.points
+      };
+    });
+
+    return txn();
   }
 }
 

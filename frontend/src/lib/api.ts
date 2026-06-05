@@ -32,10 +32,13 @@ export const apiFetch = async (
   path: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(options.headers || {}),
-  };
+  const headers = new Headers(options.headers);
+  const hasBody = options.body !== undefined && options.body !== null;
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
+  if (hasBody && !isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -57,7 +60,7 @@ export const apiFetch = async (
           window.location.href = '/';
         }
       }
-    } catch (err) {
+    } catch {
       // JSON 파싱 에러는 안전하게 무시
     }
   }
@@ -76,7 +79,7 @@ export const apiFetch = async (
           }
         }
       }
-    } catch (err) {
+    } catch {
       // JSON 파싱 에러는 안전하게 무시
     }
   }

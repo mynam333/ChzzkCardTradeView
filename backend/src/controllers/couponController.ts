@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { couponRepository, userRepository, streamerRepository, userCardRepository } from '../repositories';
+import { couponRepository, streamerRepository } from '../repositories';
 import crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
-import { getItem as getShopItem, grantCosmetic } from '../services/shopService';
+import { getItem as getShopItem } from '../services/shopService';
 
 /**
  * 1. 쿠폰 생성 (ADMIN 전용)
@@ -177,24 +177,21 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    // 중복 사용 차단을 원자적으로 처리: 로그 INSERT가 UNIQUE 제약에 의해 실패하면 이미 사용한 것으로 간주
-    const inserted = await couponRepository.logCouponRedeem(coupon.id, userId);
-    if (!inserted) {
-      return res.status(409).json({ error: 'Conflict', message: '이미 사용하신 쿠폰입니다.' });
+    const redeem = await couponRepository.redeemAtomic(coupon.id, userId);
+    if (!redeem.ok) {
+      if (redeem.reason === 'DUPLICATE') {
+        return res.status(409).json({ error: 'Conflict', message: '이미 사용하신 쿠폰입니다.' });
+      }
+      if (redeem.reason === 'EXPIRED') {
+        return res.status(410).json({ error: 'Gone', message: '사용 기간이 만료된 쿠폰입니다.' });
+      }
+      if (redeem.reason === 'SOLD_OUT') {
+        return res.status(410).json({ error: 'Gone', message: '선착순 발급 수량이 모두 소진된 쿠폰입니다.' });
+      }
+      return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 보상 지급에 실패했습니다.' });
     }
 
-    await couponRepository.incrementUsedCount(coupon.id);
-
     if (coupon.reward_type === 'card' && rewardStreamer) {
-      // 카드 보상 지급: 발행 일련번호를 연속 부여하여 reward_quantity 만큼 생성
-      const baseSn = await userCardRepository.findLatestSerialNumber(rewardStreamer.channel_id);
-      for (let i = 1; i <= coupon.reward_quantity; i++) {
-        await userCardRepository.create({
-          user_id: userId,
-          channel_id: rewardStreamer.channel_id,
-          serial_number: baseSn + i
-        });
-      }
       return res.status(200).json({
         message: `쿠폰이 등록되어 '${rewardStreamer.name}' 카드 ${coupon.reward_quantity}장이 지급되었습니다!`,
         reward_type: 'card',
@@ -205,8 +202,6 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     if (coupon.reward_type === 'cosmetic' && rewardItem) {
-      // 코스메틱 보상 지급 (보관함에 수량 추가)
-      await grantCosmetic(userId, rewardItem.id, coupon.reward_quantity);
       return res.status(200).json({
         message: `쿠폰이 등록되어 '${rewardItem.name}' 코스메틱 ${coupon.reward_quantity}개가 지급되었습니다! (상점 보관함에서 확인)`,
         reward_type: 'cosmetic',
@@ -217,13 +212,11 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // 포인트 보상 지급
-    await userRepository.incrementPoint(userId, coupon.points);
-    const updated = await userRepository.findById(userId);
     return res.status(200).json({
       message: `쿠폰이 정상적으로 등록되어 ${coupon.points}포인트가 지급되었습니다.`,
       reward_type: 'point',
       points_added: coupon.points,
-      new_points: updated ? updated.point : coupon.points
+      new_points: redeem.new_points ?? coupon.points
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 사용 실패', details: IS_PRODUCTION ? undefined : err.message });

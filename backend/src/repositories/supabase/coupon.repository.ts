@@ -14,6 +14,7 @@ import {
   Streamer,
   StreamerScheduleResult,
   Coupon,
+  CouponRedeemResult,
   CardReport,
   Announcement,
   Trade,
@@ -95,6 +96,31 @@ export class SupabaseCouponRepository implements ICouponRepository {
       throw error;
     }
     return true;
+  }
+
+  async redeemAtomic(couponId: number, userId: string): Promise<CouponRedeemResult> {
+    const { data, error } = await this.getClient().rpc('redeem_coupon_atomic', {
+      p_coupon_id: couponId,
+      p_user_id: userId
+    });
+
+    if (error) {
+      console.error('[SupabaseCouponRepository] redeem_coupon_atomic RPC 에러:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.ok) return { ok: false, reason: row?.reason || 'FAILED' };
+    return {
+      ok: true,
+      reason: 'OK',
+      reward_type: row.reward_type,
+      points_added: Number(row.points_added) || 0,
+      new_points: row.new_points === null || row.new_points === undefined ? undefined : Number(row.new_points),
+      reward_channel_id: row.reward_channel_id ?? null,
+      reward_item_id: row.reward_item_id ?? null,
+      reward_quantity: Number(row.reward_quantity) || 0
+    };
   }
 }
 

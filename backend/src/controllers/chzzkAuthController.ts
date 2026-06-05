@@ -1,9 +1,16 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { userRepository } from '../repositories';
-import { JWT_SECRET, IS_PRODUCTION } from '../config';
+import { JWT_SECRET, IS_PRODUCTION, CORS_ALLOWED_ORIGINS } from '../config';
 import { encryptToken } from '../services/cryptoService';
-import { setSessionCookie, clearSessionCookie } from '../services/sessionCookie';
+import {
+  setSessionCookie,
+  clearSessionCookie,
+  setOAuthStateCookie,
+  clearOAuthStateCookie,
+  OAUTH_STATE_COOKIE_NAME
+} from '../services/sessionCookie';
 
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
@@ -13,13 +20,27 @@ const CHZZK_API_URL = process.env.CHZZK_API_URL || 'https://api.chzzk.naver.com'
  * 1. 치지직 로그인 인터록 URL 반환 API
  */
 export const getChzzkAuthUrl = (req: Request, res: Response) => {
-  const { redirect_uri, state } = queryParser(req);
+  const { redirect_uri } = queryParser(req);
   
   if (!redirect_uri) {
     return res.status(400).json({ error: 'BadRequest', message: 'redirect_uri 쿼리 파라미터가 필요합니다.' });
   }
 
-  const authUrl = `https://chzzk.naver.com/account-interlock?clientId=${CHZZK_CLIENT_ID}&redirectUri=${encodeURIComponent(redirect_uri)}&state=${encodeURIComponent(state || 'cctv_state')}`;
+  let redirectOrigin: string;
+  try {
+    redirectOrigin = new URL(redirect_uri).origin;
+  } catch {
+    return res.status(400).json({ error: 'BadRequest', message: 'redirect_uri 형식이 올바르지 않습니다.' });
+  }
+
+  if (!CORS_ALLOWED_ORIGINS.includes(redirectOrigin)) {
+    return res.status(400).json({ error: 'BadRequest', message: '허용되지 않은 로그인 리다이렉트 출처입니다.' });
+  }
+
+  const state = crypto.randomBytes(24).toString('base64url');
+  setOAuthStateCookie(res, state);
+
+  const authUrl = `https://chzzk.naver.com/account-interlock?clientId=${CHZZK_CLIENT_ID}&redirectUri=${encodeURIComponent(redirect_uri)}&state=${encodeURIComponent(state)}`;
   
   return res.status(200).json({ auth_url: authUrl });
 };
@@ -33,6 +54,16 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
   if (!code) {
     return res.status(400).json({ error: 'BadRequest', message: 'code(Authorization Code)가 필요합니다.' });
   }
+
+  const expectedState = (req as any).cookies?.[OAUTH_STATE_COOKIE_NAME];
+  if (!state || !expectedState || state !== expectedState) {
+    clearOAuthStateCookie(res);
+    return res.status(400).json({
+      error: 'InvalidOAuthState',
+      message: '로그인 요청 상태값이 일치하지 않습니다. 다시 로그인해 주세요.'
+    });
+  }
+  clearOAuthStateCookie(res);
 
   try {
     // A. 치지직 OpenAPI Token Endpoint로 POST 요청 수행
@@ -192,12 +223,11 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
-    // httpOnly 쿠키로 세션 발급(XSS 토큰 탈취 방지). token도 함께 반환하여 점진적 전환 지원.
+    // httpOnly 쿠키로 세션 발급(XSS 토큰 탈취 방지). JS 응답에는 세션 토큰을 노출하지 않습니다.
     setSessionCookie(res, sessionToken);
 
     return res.status(200).json({
       message: '치지직 인증을 통해 로그인되었습니다.',
-      token: sessionToken,
       user: {
         id: user.id,
         username: user.username,

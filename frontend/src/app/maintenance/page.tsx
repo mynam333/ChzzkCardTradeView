@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 
 export default function MaintenancePage() {
   const [maintenanceInfo, setMaintenanceInfo] = useState<{ startAt: string | null; endAt: string | null } | null>(null);
@@ -10,7 +11,7 @@ export default function MaintenancePage() {
     // 점검 일정 조회
     const fetchStatus = async () => {
       try {
-        const res = await fetch('/api/maintenance/status');
+        const res = await apiFetch('/maintenance/status');
         if (res.ok) {
           const data = await res.json();
           setMaintenanceInfo(data);

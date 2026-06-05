@@ -335,19 +335,13 @@ export const drawCard = async (req: Request, res: Response) => {
   const DRAW_COST = Math.max(0, parseInt(drawCostStr, 10) || 10000);
 
   try {
-    // A. 유저 정보 조회
-    const user = await userRepository.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
-    }
-
-    // B. 가챠 대상 스트리머 목록 추출 (재화 소모 전에 먼저 검증)
+    // A. 가챠 대상 스트리머 목록 추출 (재화 소모 전에 먼저 검증)
     const streamers = await streamerRepository.findAll();
     if (streamers.length === 0) {
       return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
     }
 
-    // C. 무료 뽑기 시도 — KST 자정 기준으로 설정된 n시간 간격마다 정각에 리셋
+    // B. 무료 뽑기 가능 세그먼트 계산 — KST 자정 기준으로 설정된 n시간 간격마다 정각에 리셋
     // 예) 1시간 설정 시: 00:00, 01:00, 02:00 ... KST 정각마다 리셋
     //     → 00:59에 뽑아도 01:00 정각이 되면 다시 뽑을 수 있음
     const nowIso = new Date().toISOString();
@@ -379,18 +373,7 @@ export const drawCard = async (req: Request, res: Response) => {
     }
     // intervalHours === 0 이면 segmentStartIso = null → 무제한 무료뽑기
 
-
-    const isFreeDraw = await userRepository.claimFreeDrawIfEligible(userId, nowIso, segmentStartIso);
-
-    // D. 무료가 아니면 잔액이 충분할 때만 원자적으로 차감
-    if (!isFreeDraw) {
-      const deducted = await userRepository.tryDeductPoint(userId, DRAW_COST);
-      if (!deducted) {
-        return res.status(400).json({ error: 'BadRequest', message: `포인트가 부족합니다. (1회 뽑기: ${DRAW_COST.toLocaleString()} P)` });
-      }
-    }
-
-    // E. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 높을수록 확률 하락, 낮을수록 확률 상승)
+    // C. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 높을수록 확률 하락, 낮을수록 확률 상승)
     const weights = streamers.map(s => 1 / (s.base_value || 100));
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
@@ -405,31 +388,28 @@ export const drawCard = async (req: Request, res: Response) => {
       }
     }
 
-    // F. 해당 스트리머 카드의 발행 일련번호 부여 (기존 발행분 + 1)
-    const latestSn = await userCardRepository.findLatestSerialNumber(luckyStreamer.channel_id);
-    const serialNumber = latestSn + 1;
-
-    // G. 보유 카드 레코드 영구 등록
-    const newCard = await userCardRepository.create({
-      user_id: userId,
-      channel_id: luckyStreamer.channel_id,
-      serial_number: serialNumber
-    });
-
-    // 차감/지급 이후 최신 잔액 조회
-    const refreshed = await userRepository.findById(userId);
-    const nextPoint = refreshed ? refreshed.point : user.point;
+    // D. 무료권/포인트 차감 + 시리얼 채번 + 카드 생성을 단일 트랜잭션/RPC로 처리
+    const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, DRAW_COST, nowIso, segmentStartIso);
+    if (!draw.ok) {
+      if (draw.reason === 'USER_NOT_FOUND') {
+        return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+      }
+      if (draw.reason === 'INSUFFICIENT_POINT') {
+        return res.status(400).json({ error: 'BadRequest', message: `포인트가 부족합니다. (1회 뽑기: ${DRAW_COST.toLocaleString()} P)` });
+      }
+      return res.status(500).json({ error: 'InternalServerError', message: '카드 뽑기 처리에 실패했습니다.' });
+    }
 
     return res.status(200).json({
-      message: isFreeDraw
+      message: draw.is_free
         ? `일일 무료 뽑기로 ${luckyStreamer.name} 카드를 획득하였습니다!`
         : `${luckyStreamer.name} 카드를 획득하였습니다!`,
-      points_left: nextPoint,
-      is_free: isFreeDraw,
+      points_left: draw.points_left,
+      is_free: draw.is_free,
       card: {
-        id: newCard.id,
+        id: draw.card?.id,
         channel_id: luckyStreamer.channel_id,
-        serial_number: serialNumber,
+        serial_number: draw.card?.serial_number,
         acquired_at: new Date().toISOString(),
         streamer: luckyStreamer
       }
@@ -599,7 +579,6 @@ export const sellCards = async (req: Request, res: Response) => {
     // 진행 중인 거래에 묶인(에스크로) 카드는 판매 불가하도록 예약량 차감
     const reservations = await getUserReservations(userId);
 
-    let totalGainedPoints = 0;
     const sellActions: { channelId: string, count: number, baseValue: number }[] = [];
 
     // C. 판매 항목 수량 및 시세 검증
@@ -626,26 +605,11 @@ export const sellCards = async (req: Request, res: Response) => {
       }
 
       const baseValue = streamer.base_value || 0;
-      totalGainedPoints += baseValue * count;
       sellActions.push({ channelId, count, baseValue });
     }
 
-    // D. 판매 처리: 실제로 삭제된 카드 수량만큼만 정산 (별 등급 배율 반영)
-    let actualGainedPoints = 0;
-    for (const action of sellActions) {
-      // 삭제 대상은 오래된(id 오름차순) count장 → 그 카드들의 별 배율을 합산해 정산
-      const ownedAsc = [...(userCardsByChannel[action.channelId] || [])].sort((a, b) => (a.id || 0) - (b.id || 0));
-      const deletedCount = await userCardRepository.deleteCards(userId, action.channelId, action.count);
-      const targets = ownedAsc.slice(0, deletedCount);
-      for (const t of targets) {
-        actualGainedPoints += Math.round(action.baseValue * starValueMultiplier(t.star || 0));
-      }
-    }
-
-    // 원자적으로 포인트 가산
-    if (actualGainedPoints > 0) {
-      await userRepository.incrementPoint(userId, actualGainedPoints);
-    }
+    // D. 판매 처리: 카드 삭제와 포인트 가산을 단일 트랜잭션/RPC로 처리
+    const actualGainedPoints = await userCardRepository.sellCardsAtomic(userId, sellActions);
     const refreshed = await userRepository.findById(userId);
     const nextPoint = refreshed ? refreshed.point : user.point + actualGainedPoints;
 
@@ -677,6 +641,23 @@ export const fuseCards = async (req: Request, res: Response) => {
   if (starNum < 0 || starNum >= 5) return res.status(400).json({ error: 'BadRequest', message: '0~4성 카드만 합성할 수 있습니다.' });
 
   try {
+    // 진행 중 거래에 예약된 카드는 합성 재료로 사용할 수 없도록 차단
+    const cards = await userCardRepository.findByUserId(userId);
+    const reservations = await getUserReservations(userId);
+    const key = (st: number) => `${channel_id}#${st}`;
+    const available = (st: number) =>
+      cards.filter((c) => c.channel_id === channel_id && (c.star || 0) === st).length
+      - (reservations.cardsByStar[key(st)] || 0);
+    const targetAvailable = available(starNum);
+    const fodderAvailable = available(0) - (starNum === 0 ? 1 : 0);
+    if (targetAvailable < 1 || fodderAvailable < 1) {
+      return res.status(400).json({
+        error: 'FuseFailed',
+        reason: 'RESERVED_OR_SHORT',
+        message: '한계돌파에 사용할 수 있는 카드가 부족합니다. 진행 중인 교환에 묶인 카드는 사용할 수 없습니다.'
+      });
+    }
+
     const result = await userCardRepository.fuse(userId, channel_id, starNum);
     if (!result.ok) {
       let msg = '한계돌파에 실패했습니다.';
