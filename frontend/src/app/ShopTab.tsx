@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
-import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X } from 'lucide-react';
+import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers } from 'lucide-react';
 import canvasConfetti from 'canvas-confetti';
 
 interface ShopItem {
@@ -339,26 +339,29 @@ export const ShopTab: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* 대분류 탭 */}
-      <div className="flex border-b border-border/80 pb-px gap-2">
-        <button
-          onClick={() => setSubTab('gacha_shop')}
-          className={`pb-3 text-sm font-black transition relative ${subTab === 'gacha_shop' ? 'text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:text-foreground'}`}
-        >
-          소환 및 일반 상점
-        </button>
-        <button
-          onClick={() => setSubTab('market')}
-          className={`pb-3 text-sm font-black transition relative ${subTab === 'market' ? 'text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:text-foreground'}`}
-        >
-          오픈마켓 (유저 거래)
-        </button>
-        <button
-          onClick={() => setSubTab('history')}
-          className={`pb-3 text-sm font-black transition relative ${subTab === 'history' ? 'text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:text-foreground'}`}
-        >
-          거래 이력 (영수증)
-        </button>
+      {/* 대분류 탭 (아이콘 및 입체적인 캡슐 버튼 스타일로 시인성 개선) */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-3">
+        {([
+          ['gacha_shop', '소환 및 일반 상점', Store],
+          ['market', '오픈마켓 (유저 거래)', ArrowRightLeft],
+          ['history', '거래 이력 (영수증)', Clock]
+        ] as const).map(([tabId, label, Icon]) => {
+          const isActive = subTab === tabId;
+          return (
+            <button
+              key={tabId}
+              onClick={() => setSubTab(tabId)}
+              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition-all duration-200 cursor-pointer ${
+                isActive
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-105'
+                  : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {subTab === 'gacha_shop' ? (
@@ -446,11 +449,22 @@ export const ShopTab: React.FC = () => {
         </div>
         <p className="text-xs text-muted-foreground">포인트로 카드 테두리와 이름 이펙트를 구매하세요. 구매한 코스메틱은 보관함에서 카드에 장착할 수 있습니다.</p>
 
-        {/* 종류 탭 */}
-        <div className="flex rounded-lg bg-secondary p-1 w-fit">
-          {([['border', '테두리'], ['name_effect', '이름 이펙트']] as const).map(([t, label]) => (
-            <button key={t} onClick={() => handleShopTypeChange(t)}
-              className={`rounded-md px-3.5 py-1.5 text-xs font-bold transition ${shopType === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+        {/* 종류 탭 (아이콘 추가로 시각적 조화성 증대) */}
+        <div className="flex rounded-lg bg-secondary p-1 w-fit border border-border/40">
+          {([
+            ['border', '테두리', Layers],
+            ['name_effect', '이름 이펙트', Sparkles]
+          ] as const).map(([t, label, Icon]) => (
+            <button
+              key={t}
+              onClick={() => handleShopTypeChange(t)}
+              className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition-all duration-150 ${
+                shopType === t
+                  ? 'bg-card text-foreground shadow-sm font-extrabold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
               {label}
             </button>
           ))}

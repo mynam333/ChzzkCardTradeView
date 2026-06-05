@@ -229,7 +229,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       </main>
 
       {/* 모바일 하단 탭 내비게이션 바 (Mobile Bottom Navigation) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card/90 backdrop-blur-md py-2 md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-center border-t border-border bg-card/90 backdrop-blur-md py-2 md:hidden">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -237,12 +237,12 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center justify-center gap-1 px-3 py-1 transition-all ${
+              className={`flex flex-1 flex-col items-center justify-center gap-1 py-1 transition-all min-w-0 ${
                 isActive ? 'text-primary' : 'text-muted-foreground'
               }`}
             >
               <Icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium">{item.label}</span>
+              <span className="text-[10px] font-medium truncate w-full text-center">{item.label}</span>
             </button>
           );
         })}
