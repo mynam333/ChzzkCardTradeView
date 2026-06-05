@@ -28,12 +28,28 @@ export const getChzzkAuthUrl = (req: Request, res: Response) => {
 
   let redirectOrigin: string;
   try {
-    redirectOrigin = new URL(redirect_uri).origin;
+    const parsedUrl = new URL(redirect_uri);
+    redirectOrigin = parsedUrl.origin;
+    
+    // 포트가 명시적으로 다르면 다르게 인식하도록, 역슬래시나 @ 등의 오동작 방지
+    if (parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash) {
+      // 제어 문자나 비정상 크리덴셜 주입 차단
+      return res.status(400).json({ error: 'BadRequest', message: 'redirect_uri 형식이 잘못되었습니다.' });
+    }
   } catch {
     return res.status(400).json({ error: 'BadRequest', message: 'redirect_uri 형식이 올바르지 않습니다.' });
   }
 
-  if (!CORS_ALLOWED_ORIGINS.includes(redirectOrigin)) {
+  // 정확한 origin 비교 검사
+  const isAllowedRedirect = CORS_ALLOWED_ORIGINS.some(allowed => {
+    try {
+      return new URL(allowed).origin === redirectOrigin;
+    } catch {
+      return allowed === redirectOrigin;
+    }
+  });
+
+  if (!isAllowedRedirect) {
     return res.status(400).json({ error: 'BadRequest', message: '허용되지 않은 로그인 리다이렉트 출처입니다.' });
   }
 

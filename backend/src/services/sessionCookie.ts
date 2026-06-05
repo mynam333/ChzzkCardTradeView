@@ -10,11 +10,12 @@ export const OAUTH_STATE_COOKIE_NAME = 'cctv_oauth_state';
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // JWT 만료(7d)와 동일
 
-// 운영 환경에서는 교차 출처(프론트↔API 다른 도메인) 쿠키 전송을 위해 SameSite=None; Secure 사용.
-// 개발(localhost http)에서는 Secure가 불가하므로 Lax로 동작.
+// 운영 환경 및 개발 환경 모두에서 가능하면 Secure 속성을 강제합니다.
+// (단, localhost 개발 시 httpOnly, sameSite=lax는 동작하나 https가 아닐 경우 secure는 브라우저가 거부할 수 있으므로
+// 실배포 도메인 주소에서는 무조건 secure: true가 설정되도록 IS_PRODUCTION 기준 설정을 따릅니다)
 export const cookieBaseOptions = () => ({
   httpOnly: true,
-  secure: IS_PRODUCTION,
+  secure: IS_PRODUCTION, // HTTPS 배포 환경에서 필수
   sameSite: (IS_PRODUCTION ? 'none' : 'lax') as 'none' | 'lax',
   path: '/'
 });

@@ -232,6 +232,7 @@ router.get('/streamers', async (req, res) => {
   try {
     const now = Date.now();
     if (streamersCache && streamersCache.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=15');
       return res.status(200).json(streamersCache.data);
     }
 
@@ -241,15 +242,24 @@ router.get('/streamers', async (req, res) => {
       streamerRepository.getValue24hAgoMap(),
       streamerRepository.getValue1hAgoMap()
     ]);
+    
+    // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출
     const enriched = streamers.map((s) => ({
-      ...s,
-      // 24h 이력이 있으면 그 값을, 없으면(신규 등록 등) 기존 prev_value 유지
+      channel_id: s.channel_id,
+      name: s.name,
+      logo_url: s.logo_url,
+      custom_image_url: s.custom_image_url,
+      is_image_banned: s.is_image_banned,
+      follower_count: s.follower_count,
+      base_value: s.base_value,
+      is_active: s.is_active,
+      serial_number: s.serial_number,
       prev_value: value24hMap[s.channel_id] ?? s.prev_value,
-      // 1시간 전 시세 (1시간 등락 랭킹용). 이력이 없으면 현재 시세로 폴백(변동 0)
       value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
     }));
 
     streamersCache = { data: enriched, expiresAt: now + STREAMERS_CACHE_TTL };
+    res.set('Cache-Control', 'public, max-age=15');
     return res.status(200).json(enriched);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });

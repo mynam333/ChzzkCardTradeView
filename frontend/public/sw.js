@@ -38,7 +38,19 @@ self.addEventListener('push', (event) => {
 // 알림 클릭 시 앱 창을 포커스하거나 새로 엽니다.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  
+  let targetUrl = '/';
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/';
+  
+  try {
+    const parsedUrl = new URL(rawUrl, self.location.origin);
+    // 동일 출처(Same-Origin) 검사 수행
+    if (parsedUrl.origin === self.location.origin) {
+      targetUrl = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+    }
+  } catch (e) {
+    targetUrl = '/';
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {

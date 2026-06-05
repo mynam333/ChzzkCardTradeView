@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -11,8 +11,9 @@ import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 import { startStreamerLiveStatusScheduler } from './cron/streamerScheduler';
-import { CORS_ALLOWED_ORIGINS } from './config';
+import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
+import { rateLimit } from './middlewares/rateLimit';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -26,25 +27,32 @@ app.set('trust proxy', 1);
 
 // 보안 헤더 (X-Frame-Options·X-Content-Type-Options·HSTS 등).
 // 정적 업로드 이미지를 타 오리진(프론트)에서 로드할 수 있도록 CORP는 cross-origin 허용.
-// API 서버라 HTML을 서빙하지 않으므로 CSP는 비활성화(과도한 제약 회피).
+// API 응답에 최소한의 CSP 설정 적용
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"]
+    }
+  },
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
 // 미들웨어 설정
 // CORS: 환경변수로 지정된 오리진 화이트리스트만 허용 (origin 없는 동일출처/서버간 요청은 통과)
+// 거부 시 throw 대신 false 반환하여 500 에러 및 스택 트레이스 노출 방지
 // httpOnly 세션 쿠키 사용을 위해 credentials 허용.
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || CORS_ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS 정책에 의해 차단된 오리진입니다: ${origin}`));
-    }
+    const isAllowed = !origin || CORS_ALLOWED_ORIGINS.includes(origin);
+    callback(null, isAllowed);
   },
   credentials: true
 }));
+
+// API 전체 경로에 기본 레이트 리밋 적용 (1분당 최대 100회)
+app.use('/api', rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(cookieParser());
@@ -57,6 +65,24 @@ app.use('/uploads', express.static(path.join(__dirname, '../../public/uploads'),
 
 // 통합 API 라우터 등록
 app.use('/api', apiRouter);
+
+// 전역 에러 핸들러 (스택 트레이스 노출 방지 및 일관된 에러 응답)
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error('[Global Error]', err.stack || err);
+  
+  const status = err.status || err.statusCode || 500;
+  const response: { error: string; message: string; details?: any } = {
+    error: status === 400 ? 'BadRequest' : 'InternalServerError',
+    message: status === 400 ? (err.message || '잘못된 요청입니다.') : '서버 내부 오류가 발생했습니다.'
+  };
+
+  // 개발 환경일 때만 디버그 메시지 제공
+  if (!IS_PRODUCTION && err.message) {
+    response.details = err.message;
+  }
+
+  res.status(status).json(response);
+});
 
 // 기본 헬스체크 API 라우트
 app.get('/health', (req: Request, res: Response) => {
