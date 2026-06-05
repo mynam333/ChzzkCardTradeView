@@ -531,45 +531,49 @@ export const ArcadeTab: React.FC = () => {
     const clickedCard = matchCards[index];
     if (clickedCard.isFlipped || clickedCard.isMatched) return;
 
-    const updatedDeck = [...matchCards];
-    updatedDeck[index].isFlipped = true;
-    setMatchCards(updatedDeck);
+    const nextDeck = matchCards.map((card, idx) =>
+      idx === index ? { ...card, isFlipped: true } : card
+    );
+    setMatchCards(nextDeck);
 
     const newFlipped = [...flippedIndices, index];
     setFlippedIndices(newFlipped);
 
     if (newFlipped.length === 2) {
       const [firstIdx, secondIdx] = newFlipped;
-      const firstCard = updatedDeck[firstIdx];
-      const secondCard = updatedDeck[secondIdx];
+      const firstCard = nextDeck[firstIdx];
+      const secondCard = nextDeck[secondIdx];
 
       if (firstCard.channel_id === secondCard.channel_id) {
-        // 짝 맞춤 성공
+        // 짝 맞춤 성공 -> 0.5초 후 isMatched와 isFlipped를 확실히 true로 세팅
         setTimeout(() => {
-          const matchedDeck = updatedDeck.map((card, cardIndex) =>
-            cardIndex === firstIdx || cardIndex === secondIdx
-              ? { ...card, isFlipped: true, isMatched: true }
-              : card
-          );
-          setMatchCards(matchedDeck);
+          setMatchCards(prevDeck => {
+            const matchedDeck = prevDeck.map((card, cardIndex) =>
+              cardIndex === firstIdx || cardIndex === secondIdx
+                ? { ...card, isFlipped: true, isMatched: true }
+                : card
+            );
+            
+            // 12장 모두 매치되었는지 확인
+            if (matchedDeck.every(c => c.isMatched)) {
+              submitResult({
+                success: true
+              });
+            }
+            return matchedDeck;
+          });
           setFlippedIndices([]);
-
-          // 12장 모두 매치되었는지 확인
-          if (matchedDeck.every(c => c.isMatched)) {
-            submitResult({
-              success: true
-            });
-          }
         }, 500);
       } else {
-        // 매치 실패 -> 0.8초 뒤에 원복
+        // 매치 실패 -> 0.8초 뒤에 두 카드의 뒤집힘 원복
         setTimeout(() => {
-          const resetDeck = updatedDeck.map((card, cardIndex) =>
-            cardIndex === firstIdx || cardIndex === secondIdx
-              ? { ...card, isFlipped: false }
-              : card
+          setMatchCards(prevDeck =>
+            prevDeck.map((card, cardIndex) =>
+              cardIndex === firstIdx || cardIndex === secondIdx
+                ? { ...card, isFlipped: false }
+                : card
+            )
           );
-          setMatchCards(resetDeck);
           setFlippedIndices([]);
         }, 800);
       }

@@ -120,7 +120,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       const shuffled = [...streamers].sort(() => 0.5 - Math.random());
       const correctStreamer = shuffled[0];
       const star = Math.floor(Math.random() * 6); // 0 ~ 5성
-      
+
       const choices = shuffled.slice(0, 4).map(s => ({
         channel_id: s.channel_id,
         name: s.name
@@ -153,7 +153,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     } else if (game_type === 'match') {
       // 카드 뒤집기: 6명 선정 (12장)
       const shuffled = [...streamers].sort(() => 0.5 - Math.random()).slice(0, 6);
-      
+
       targetData = {
         channel_ids: shuffled.map(s => s.channel_id)
       };
@@ -180,7 +180,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(500).json({ error: 'InternalServerError', message: startResult.reason || '게임 세션 시작에 실패했습니다.' });
     }
 
-    minigameRepository.expireSessions(60).catch(() => {});
+    minigameRepository.expireSessions(60).catch(() => { });
 
     return res.status(200).json({
       session_id: sessionId,
@@ -232,7 +232,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     // 게임 타입별 채점 및 치팅 검증
     if (session.game_type === 'quiz') {
       const { answer_channel_id } = payload || {};
-      
+
       // 15초 제한시간 초과 검증 (카운트다운 3초 + 15초 플레이 + RTT 2초 = 20000ms 초과 시 실패)
       if (serverElapsedMs > 20000) {
         await minigameRepository.completeSession(session_id, 0);
@@ -254,7 +254,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       if (answer_channel_id === target.correct_id) {
         isCorrect = true;
         earnedPoints = BASE_REWARD;
-        
+
         // 3초(카운트다운 3초 + 3초 플레이 + RTT 0.5초 = 6500ms) 내 해결 시 보너스 200 P
         if (serverElapsedMs <= 6500) {
           earnedPoints += BONUS_REWARD;
@@ -266,7 +266,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     } else if (session.game_type === 'puzzle') {
       const { success } = payload || {};
-      
+
       // 퍼즐 4.5초 컷은 패킷 치팅 의심 (카운트다운 3초 + 1.5초 조작)
       if (serverElapsedMs < 4500) {
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
@@ -275,7 +275,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       if (success === true) {
         isCorrect = true;
         earnedPoints = BASE_REWARD;
-        
+
         // 20초(카운트다운 3초 + 20초 플레이 + RTT 1초 = 24000ms) 내 퍼즐 완성 시 보너스 200 P
         if (serverElapsedMs <= 24000) {
           earnedPoints += BONUS_REWARD;
@@ -309,11 +309,11 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       if (success === true) {
         isCorrect = true;
         earnedPoints = BASE_REWARD;
-        
-        // 32초(카운트다운 3초 + 2초 노출 + 30초 플레이 = 35000ms) 내 완료 시 보너스 200 P
-        if (serverElapsedMs <= 35000) {
+
+        // 15초(카운트다운 3초 + 2초 노출 + 15초 플레이 = 20000ms) 내 완료 시 보너스 200 P
+        if (serverElapsedMs <= 20000) {
           earnedPoints += BONUS_REWARD;
-          message = `32초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          message = `15초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {
           message = `모든 카드의 짝을 찾으셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
         }
