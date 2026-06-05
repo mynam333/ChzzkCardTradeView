@@ -1140,11 +1140,13 @@ export const ArcadeTab: React.FC = () => {
                     <div
                       key={card.id}
                       onClick={() => handleFlipCard(idx)}
-                      className="relative w-full aspect-[4/5] cursor-pointer perspective group"
+                      className={`relative w-full aspect-[4/5] cursor-pointer perspective group transition-all duration-300 ${
+                        card.isMatched ? 'scale-95' : ''
+                      }`}
                     >
                       <div
                         className={`relative w-full h-full card-inner-transition transform-style preserve-3d ${showFront ? 'rotate-y-180' : ''
-                          } ${card.isMatched ? 'scale-95 opacity-80' : 'group-hover:scale-102'
+                          } ${card.isMatched ? '' : 'group-hover:scale-102'
                           }`}
                       >
                         {/* 카드 뒷면 (3D Backface) - 사이버 펑크 메탈 & 형광 연두 광원 테마 */}
@@ -1197,6 +1199,11 @@ export const ArcadeTab: React.FC = () => {
                               {card.name}
                             </p>
                           </div>
+
+                          {/* 짝 맞춤 성공 시 카드를 어둡게 처리하는 반투명 오버레이 */}
+                          {card.isMatched && (
+                            <div className="absolute inset-0 bg-black/55 rounded-xl z-20 pointer-events-none transition-all duration-300 animate-in fade-in" />
+                          )}
                         </div>
                       </div>
                     </div>
