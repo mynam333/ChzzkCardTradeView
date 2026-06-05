@@ -34,6 +34,11 @@ type MatchCard = MatchCardSource & {
   isMatched: boolean;
 };
 
+type PuzzlePiece = {
+  id: number;
+  rotation: number;
+};
+
 type MinigameData = {
   image_url?: string;
   choices?: QuizChoice[];
@@ -66,6 +71,44 @@ type StartGameResponse = {
   message?: string;
 };
 
+const PUZZLE_PIECE_COUNT = 12;
+
+const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
+
+const isPuzzleSolved = (pieces: PuzzlePiece[]) =>
+  pieces.length === PUZZLE_PIECE_COUNT &&
+  pieces.every((piece, index) => piece.id === index && normalizeRotation(piece.rotation) === 0);
+
+const shuffleNumbers = (values: number[]) => {
+  const shuffled = [...values];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
+const createInitialPuzzlePieces = (): PuzzlePiece[] => {
+  const shuffledIds = shuffleNumbers(Array.from({ length: PUZZLE_PIECE_COUNT }, (_, index) => index));
+
+  if (shuffledIds.every((id, index) => id === index)) {
+    [shuffledIds[0], shuffledIds[5]] = [shuffledIds[5], shuffledIds[0]];
+  }
+
+  const pieces = shuffledIds.map((id) => ({
+    id,
+    rotation: [0, 90, 180, 270][Math.floor(Math.random() * 4)]
+  }));
+
+  if (pieces.filter(piece => normalizeRotation(piece.rotation) !== 0).length < 3) {
+    pieces[0] = { ...pieces[0], rotation: 90 };
+    pieces[5] = { ...pieces[5], rotation: 180 };
+    pieces[11] = { ...pieces[11], rotation: 270 };
+  }
+
+  return pieces;
+};
+
 export const ArcadeTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
   const [loading, setLoading] = useState(true);
@@ -95,7 +138,10 @@ export const ArcadeTab: React.FC = () => {
   const [quizTimeLeft, setQuizTimeLeft] = useState<number>(15);
 
   // 2. 카드 퍼즐 전용 상태
-  const [puzzleGrid, setPuzzleGrid] = useState<number[]>([]); // 3x4 = 12조각 회전 상태 (0, 90, 180, 270)
+  const [puzzlePieces, setPuzzlePieces] = useState<PuzzlePiece[]>([]);
+  const [draggingPuzzleIndex, setDraggingPuzzleIndex] = useState<number | null>(null);
+  const [dragOverPuzzleIndex, setDragOverPuzzleIndex] = useState<number | null>(null);
+  const puzzleDragRef = React.useRef<{ index: number; startX: number; startY: number; dragging: boolean } | null>(null);
 
   // 3. 카드 뒤집기 전용 상태
   const [matchCards, setMatchCards] = useState<MatchCard[]>([]);
@@ -322,25 +368,7 @@ export const ArcadeTab: React.FC = () => {
         setQuizBlurType(chosenBlur);
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
-        // 3x4 = 12 조각 회전 초기값 설정 (최소한 3조각 이상이 회전되어 있도록 보장)
-        const initialGrid = Array.from({ length: 12 }, () => {
-          const rotations: number[] = [0, 90, 180, 270];
-          return rotations[Math.floor(Math.random() * rotations.length)];
-        }) as number[];
-        // 전부 0도가 나왔을 수도 있으므로 강제 보정
-        let allZero = true;
-        for (const val of initialGrid) {
-          if (val !== 0) {
-            allZero = false;
-            break;
-          }
-        }
-        if (allZero) {
-          initialGrid[0] = 90;
-          initialGrid[5] = 180;
-          initialGrid[11] = 270;
-        }
-        setPuzzleGrid(initialGrid);
+        setPuzzlePieces(createInitialPuzzlePieces());
       } else if (type === 'match') {
         setRevealActive(true); // 2초 선공개 활성화
 
@@ -384,18 +412,106 @@ export const ArcadeTab: React.FC = () => {
   // ==========================================
   // 2. 카드 퍼즐 회전 제어 (3x4 그리드)
   // ==========================================
-  const handleRotatePiece = (index: number) => {
-    if (gameBusy || gameResult || (countdownLeft !== null && countdownLeft > 0)) return;
-    const newGrid = [...puzzleGrid];
-    newGrid[index] = (newGrid[index] + 90) % 360;
-    setPuzzleGrid(newGrid);
-
-    // 12개 조각 모두 0도인지 판단
-    if (newGrid.every(r => r === 0)) {
+  const completePuzzleIfSolved = (pieces: PuzzlePiece[]) => {
+    if (isPuzzleSolved(pieces)) {
       submitResult({
         success: true
       });
     }
+  };
+
+  const handleRotatePiece = (index: number) => {
+    if (gameBusy || gameResult || (countdownLeft !== null && countdownLeft > 0)) return;
+    const newPieces = puzzlePieces.map((piece, pieceIndex) =>
+      pieceIndex === index ? { ...piece, rotation: piece.rotation + 90 } : piece
+    );
+    setPuzzlePieces(newPieces);
+    completePuzzleIfSolved(newPieces);
+  };
+
+  const handleSwapPuzzlePieces = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= puzzlePieces.length ||
+      toIndex >= puzzlePieces.length
+    ) {
+      return;
+    }
+
+    const newPieces = [...puzzlePieces];
+    [newPieces[fromIndex], newPieces[toIndex]] = [newPieces[toIndex], newPieces[fromIndex]];
+    setPuzzlePieces(newPieces);
+    completePuzzleIfSolved(newPieces);
+  };
+
+  const getPuzzleIndexFromPoint = (x: number, y: number) => {
+    const target = document.elementFromPoint(x, y) as HTMLElement | null;
+    const piece = target?.closest('[data-puzzle-index]') as HTMLElement | null;
+    const rawIndex = piece?.dataset.puzzleIndex;
+    if (!rawIndex) return null;
+
+    const index = Number(rawIndex);
+    return Number.isInteger(index) ? index : null;
+  };
+
+  const handlePuzzlePointerDown = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    if (gameBusy || gameResult || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (event.button !== 0) return;
+    puzzleDragRef.current = { index, startX: event.clientX, startY: event.clientY, dragging: false };
+    setDragOverPuzzleIndex(null);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the pointer has already been released.
+    }
+  };
+
+  const handlePuzzlePointerMove = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    const drag = puzzleDragRef.current;
+    if (!drag || drag.index !== index) return;
+
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance > 10) {
+      drag.dragging = true;
+      setDraggingPuzzleIndex(index);
+    }
+
+    if (!drag.dragging) return;
+    event.preventDefault();
+
+    const targetIndex = getPuzzleIndexFromPoint(event.clientX, event.clientY);
+    setDragOverPuzzleIndex(targetIndex !== null && targetIndex !== index ? targetIndex : null);
+  };
+
+  const handlePuzzlePointerUp = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    const drag = puzzleDragRef.current;
+    if (!drag || drag.index !== index) return;
+
+    if (drag.dragging) {
+      const targetIndex = getPuzzleIndexFromPoint(event.clientX, event.clientY);
+      if (targetIndex !== null) {
+        handleSwapPuzzlePieces(index, targetIndex);
+      }
+    } else {
+      handleRotatePiece(index);
+    }
+
+    puzzleDragRef.current = null;
+    setDraggingPuzzleIndex(null);
+    setDragOverPuzzleIndex(null);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // noop
+    }
+  };
+
+  const handlePuzzlePointerCancel = () => {
+    puzzleDragRef.current = null;
+    setDraggingPuzzleIndex(null);
+    setDragOverPuzzleIndex(null);
   };
 
   // ==========================================
@@ -586,7 +702,7 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <h3 className="mt-4 text-sm font-black text-foreground">3x4 회전 퍼즐</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                카드를 12개의 정사각형 조각으로 나누어 회전된 그림을 터치해 올바르게 복구하는 직소 퍼즐입니다.
+                섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하는 직소 퍼즐입니다.
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
@@ -910,14 +1026,16 @@ export const ArcadeTab: React.FC = () => {
           {activeGame === 'puzzle' && (
             <div className="space-y-5 flex flex-col items-center">
               <p className="text-xs text-muted-foreground text-center font-bold">
-                각 조각을 탭하여 회전시키세요. 3:4 비율의 그림이 올바르게 맞춰지면 퍼즐이 완성됩니다!
+                조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 위치와 회전이 모두 맞으면 완성됩니다!
               </p>
 
               {/* 가로 3칸 세로 4칸 = 총 12조각 (W 240px, H 320px) */}
-              <div className="grid grid-cols-3 gap-0.5 w-[240px] h-[320px] rounded-2xl overflow-hidden border border-border shadow-inner p-1 bg-secondary/20">
-                {puzzleGrid.map((rotation, idx) => {
-                  const col = idx % 3;
-                  const row = Math.floor(idx / 3);
+              <div className="grid grid-cols-3 gap-0.5 w-[240px] h-[320px] rounded-2xl overflow-hidden border border-border shadow-inner p-1 bg-secondary/20 touch-none select-none">
+                {puzzlePieces.map((piece, idx) => {
+                  const col = piece.id % 3;
+                  const row = Math.floor(piece.id / 3);
+                  const isDragging = draggingPuzzleIndex === idx;
+                  const isDropTarget = dragOverPuzzleIndex === idx;
 
                   // 카드 이미지 5:8 원본에서 3:4 영역 상단만 세로 찌그러짐 없이 자르는 스타일 매핑
                   // W=3, H=4.8 로 5:8비율 고정한 뒤 세로 아래 0.8칸 크롭
@@ -925,23 +1043,29 @@ export const ArcadeTab: React.FC = () => {
                   const posY = (row / 3.8) * 100; // Y축 비율: 4.8칸 중 위쪽 4칸 활용
 
                   return (
-                    <div
-                      key={idx}
-                      onClick={() => handleRotatePiece(idx)}
+                    <button
+                      type="button"
+                      key={`${piece.id}-${idx}`}
+                      data-puzzle-index={idx}
+                      onPointerDown={(event) => handlePuzzlePointerDown(event, idx)}
+                      onPointerMove={(event) => handlePuzzlePointerMove(event, idx)}
+                      onPointerUp={(event) => handlePuzzlePointerUp(event, idx)}
+                      onPointerCancel={handlePuzzlePointerCancel}
                       style={{
                         backgroundImage: `url(${gameData.image_url})`,
                         backgroundPosition: `${posX}% ${posY}%`,
                         backgroundSize: '300% 480%', // 가로 3배, 세로 4.8배 분량
-                        transform: `rotate(${rotation}deg)`,
+                        transform: `rotate(${piece.rotation}deg)`,
                       }}
-                      className="w-[78px] h-[78px] cursor-pointer transition-transform duration-200 border border-card/45 active:scale-95 aspect-square"
+                      className={`relative w-[78px] h-[78px] cursor-grab border border-card/45 transition-[transform,opacity,box-shadow,filter] duration-200 active:cursor-grabbing active:scale-95 aspect-square focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isDragging ? 'opacity-55 brightness-75 shadow-inner' : ''} ${isDropTarget ? 'z-10 ring-2 ring-primary ring-offset-1 ring-offset-background brightness-110' : ''}`}
+                      aria-label={`퍼즐 조각 ${idx + 1}: 탭하면 회전, 드래그하면 위치 교체`}
                     />
                   );
                 })}
               </div>
 
               <div className="flex items-center gap-1 rounded bg-secondary/60 px-2.5 py-1 text-[10px] text-muted-foreground font-bold font-mono">
-                <Clock className="h-3 w-3" /> 모든 조각의 회전각도가 0도가 되면 자동 완성됩니다.
+                <Clock className="h-3 w-3" /> 모든 조각이 제자리이고 정답 각도이면 자동 완성됩니다.
               </div>
             </div>
           )}
