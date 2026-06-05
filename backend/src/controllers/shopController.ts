@@ -3,6 +3,36 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import * as shop from '../services/shopService';
 
+/**
+ * CSS 코드를 압축합니다 (주석 제거, 연속 공백/줄바꿈 축소).
+ * 단, SVG data URI가 포함된 url(...) 부분은 손상되지 않도록 보호합니다.
+ */
+const minifyCss = (css: string): string => {
+  // 1. 주석 제거
+  let minified = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  
+  // 2. url() 패턴 보호 (특히 Base64 인코딩이나 SVG data URI가 포함된 곳)
+  const urls: string[] = [];
+  minified = minified.replace(/url\((['"]?)(data:[\w+\/]+;base64,[\s\S]*?|data:image\/svg\+xml[\s\S]*?)\1\)/gi, (match) => {
+    urls.push(match);
+    return `___URL_PLACEHOLDER_${urls.length - 1}___`;
+  });
+
+  // 3. url 외 영역 공백 및 줄바꿈 압축
+  minified = minified
+    .replace(/\s+/g, ' ')               // 다중 공백 -> 단일 공백
+    .replace(/\s*([\{\}:;\,])\s*/g, '$1') // 기호 주변 공백 제거
+    .trim();
+
+  // 4. 보호된 url 복원 및 url 내부 공백 제거 (SVG 내부는 연속된 공백과 줄바꿈을 공백 하나로 치환 가능)
+  minified = minified.replace(/___URL_PLACEHOLDER_(\d+)___/g, (_, index) => {
+    const originalUrl = urls[parseInt(index, 10)];
+    return originalUrl.replace(/\s+/g, ' ');
+  });
+
+  return minified;
+};
+
 const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });
 
@@ -95,10 +125,32 @@ export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Respon
   if (!['border', 'name_effect'].includes(type) || !name) {
     return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect)와 이름이 필요합니다.' });
   }
-  // style_json 유효성(파싱 가능) 검사
-  if (style_json) { try { JSON.parse(style_json); } catch { return res.status(400).json({ error: 'BadRequest', message: '스타일(JSON) 형식이 올바르지 않습니다.' }); } }
+  
+  let processedStyleJson = style_json;
+  if (style_json) {
+    try {
+      const parsed = JSON.parse(style_json);
+      if (parsed.css && typeof parsed.css === 'string') {
+        parsed.css = minifyCss(parsed.css);
+      }
+      processedStyleJson = JSON.stringify(parsed);
+    } catch {
+      return res.status(400).json({ error: 'BadRequest', message: '스타일(JSON) 형식이 올바르지 않습니다.' });
+    }
+  }
+
   try {
-    await shop.createItem({ type, name, description: description ?? null, price: Math.max(0, Number(price) || 0), style_json: style_json ?? null, font_url: font_url ?? null, font_family: font_family ?? null, active, purchase_limit: Math.max(0, Number(purchase_limit) || 0) });
+    await shop.createItem({
+      type,
+      name,
+      description: description ?? null,
+      price: Math.max(0, Number(price) || 0),
+      style_json: processedStyleJson ?? null,
+      font_url: font_url ?? null,
+      font_family: font_family ?? null,
+      active,
+      purchase_limit: Math.max(0, Number(purchase_limit) || 0)
+    });
     return res.status(201).json({ message: '아이템이 추가되었습니다.' });
   } catch (err) { return fail(res, '아이템 추가 실패', err); }
 };
@@ -116,10 +168,22 @@ export const adminResetPurchases = async (req: AuthenticatedRequest, res: Respon
 export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Response) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'BadRequest', message: '아이템 ID가 필요합니다.' });
-  const { style_json } = req.body;
-  if (style_json) { try { JSON.parse(style_json); } catch { return res.status(400).json({ error: 'BadRequest', message: '스타일(JSON) 형식이 올바르지 않습니다.' }); } }
+  
+  const updateData = { ...req.body };
+  if (updateData.style_json) {
+    try {
+      const parsed = JSON.parse(updateData.style_json);
+      if (parsed.css && typeof parsed.css === 'string') {
+        parsed.css = minifyCss(parsed.css);
+      }
+      updateData.style_json = JSON.stringify(parsed);
+    } catch {
+      return res.status(400).json({ error: 'BadRequest', message: '스타일(JSON) 형식이 올바르지 않습니다.' });
+    }
+  }
+
   try {
-    await shop.updateItem(id, req.body);
+    await shop.updateItem(id, updateData);
     return res.status(200).json({ message: '아이템이 수정되었습니다.' });
   } catch (err) { return fail(res, '아이템 수정 실패', err); }
 };
