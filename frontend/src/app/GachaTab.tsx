@@ -98,7 +98,7 @@ export const GachaTab: React.FC = () => {
   const [marketPendingCardIds, setMarketPendingCardIds] = useState<number[]>([]);
   const [myMarketListings, setMyMarketListings] = useState<any[]>([]);
   const [marketRegisterCard, setMarketRegisterCard] = useState<UserCard | null>(null);
-  const [marketPriceInput, setMarketPriceInput] = useState('100');
+  const [marketPriceInput, setMarketPriceInput] = useState('');
   const [withCosmetics, setWithCosmetics] = useState(false);
   const [marketRegisterBusy, setMarketRegisterBusy] = useState(false);
   const [marketCancelBusy, setMarketCancelBusy] = useState(false);
@@ -1524,47 +1524,6 @@ export const GachaTab: React.FC = () => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {pendingCard && (
-              <button
-                onClick={() => {
-                  handleMarketCancel(pendingCard.id);
-                  setContextMenu(prev => ({ ...prev, open: false }));
-                }}
-                disabled={marketCancelBusy}
-                className="w-full text-left px-4 py-2 text-xs font-bold text-rose-500 hover:bg-rose-500/10 flex items-center gap-2"
-              >
-                🏪 마켓 판매 취소
-              </button>
-            )}
-
-            {availableCard && (
-              <button
-                onClick={() => {
-                  setMarketRegisterCard(availableCard);
-                  setMarketPriceInput('10');
-                  setContextMenu(prev => ({ ...prev, open: false }));
-                }}
-                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
-              >
-                🏪 마켓 판매 등록
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                if (!availableCard) {
-                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
-                } else {
-                  setSellingStreamer(displayCard.streamer || null);
-                  setSellQuantity(1);
-                  setSellModalOpen(true);
-                }
-                setContextMenu(prev => ({ ...prev, open: false }));
-              }}
-              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!availableCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
-            >
-              💰 카드 판매하기
-            </button>
             <button
               onClick={() => {
                 if (displayCard.streamer) openStreamerDetail(displayCard.streamer.channel_id);
@@ -1573,6 +1532,32 @@ export const GachaTab: React.FC = () => {
               className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
             >
               📈 스트리머 시세 상세
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard.streamer) {
+                  const targetUrl = displayCard.streamer.is_active
+                    ? `https://chzzk.naver.com/live/${displayCard.streamer.channel_id}`
+                    : `https://chzzk.naver.com/${displayCard.streamer.channel_id}`;
+                  window.open(targetUrl, '_blank');
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            >
+              📺 스트리머 채널 이동
+            </button>
+            <button
+              onClick={() => {
+                if (displayCard.streamer) {
+                  setSelectionMode(true);
+                  setSelectedChannelIds([displayCard.streamer.channel_id]);
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            >
+              ✔️ 다중 선택 모드
             </button>
             <button
               onClick={() => {
@@ -1589,38 +1574,54 @@ export const GachaTab: React.FC = () => {
             </button>
             <button
               onClick={() => {
+                if (!availableCard) {
+                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
+                } else {
+                  setSellingStreamer(displayCard.streamer || null);
+                  setSellQuantity(1);
+                  setSellModalOpen(true);
+                }
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!availableCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
+            >
+              💰 카드 판매하기
+            </button>
+
+            {availableCard && (
+              <button
+                onClick={() => {
+                  setMarketRegisterCard(availableCard);
+                  setMarketPriceInput('');
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                🏪 마켓 판매 등록
+              </button>
+            )}
+
+            {pendingCard && (
+              <button
+                onClick={() => {
+                  handleMarketCancel(pendingCard.id);
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                disabled={marketCancelBusy}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-rose-500 hover:bg-rose-500/10 flex items-center gap-2"
+              >
+                🏪 마켓 판매 취소
+              </button>
+            )}
+
+            <button
+              onClick={() => {
                 if (displayCard) openReport(displayCard);
                 setContextMenu(prev => ({ ...prev, open: false }));
               }}
-              className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-2"
+              className="w-full text-left px-4 py-2 text-xs font-bold text-red-500 hover:bg-red-500/10 flex items-center gap-2 border-t border-border/50"
             >
               🚩 이미지 신고
-            </button>
-            <button
-              onClick={() => {
-                if (displayCard.streamer) {
-                  setSelectionMode(true);
-                  setSelectedChannelIds([displayCard.streamer.channel_id]);
-                }
-                setContextMenu(prev => ({ ...prev, open: false }));
-              }}
-              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
-            >
-              ✔️ 다중 선택 모드
-            </button>
-            <button
-              onClick={() => {
-                if (displayCard.streamer) {
-                  const targetUrl = displayCard.streamer.is_active
-                    ? `https://chzzk.naver.com/live/${displayCard.streamer.channel_id}`
-                    : `https://chzzk.naver.com/${displayCard.streamer.channel_id}`;
-                  window.open(targetUrl, '_blank');
-                }
-                setContextMenu(prev => ({ ...prev, open: false }));
-              }}
-              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2 border-t border-border/50"
-            >
-              📺 스트리머 채널 이동
             </button>
           </div>
         );

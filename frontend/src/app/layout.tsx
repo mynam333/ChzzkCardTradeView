@@ -18,9 +18,9 @@ export const metadata: Metadata = {
     siteName: "치지직 카드 트레이드 뷰 (CCTV)",
     images: [
       {
-        url: "/icon.png",
-        width: 1200,
-        height: 630,
+        url: "/og-image.png",
+        width: 1672,
+        height: 941,
         alt: "치지직 카드 트레이드 뷰",
       },
     ],
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "CCTV - 치지직 카드 트레이드 뷰",
     description: "매일 무료 가챠를 돌려 치지직 최애 스트리머 카드를 수집하고, 실시간 시세 변동에 맞춰 거래하며 나만의 덱을 만들어보세요!",
-    images: ["/icon.png"],
+    images: ["/og-image.png"],
   },
 };
 
