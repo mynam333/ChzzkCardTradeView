@@ -13,6 +13,7 @@ import {
   HelpCircle,
   Clock,
   ChevronLeft,
+  ChevronDown,
   CalendarClock
 } from 'lucide-react';
 
@@ -545,6 +546,7 @@ export const ArcadeTab: React.FC = () => {
   const [secondsUntilGameChange, setSecondsUntilGameChange] = useState(0);
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
   const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [isPracticeExpanded, setIsPracticeExpanded] = useState(false);
 
   // 게임 세션 관련 상태
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -1242,7 +1244,7 @@ export const ArcadeTab: React.FC = () => {
                   {formatTime(secondsUntilGameChange)}
                 </p>
                 <p className="mt-1 text-[9px] font-bold text-muted-foreground">
-                  자정에 서버가 새 게임을 지정합니다.
+                  매일 자정에 새 게임이 지정됩니다.
                 </p>
               </div>
               <button
@@ -1260,8 +1262,14 @@ export const ArcadeTab: React.FC = () => {
       {/* 동전과 포인트 지급 없이 모든 게임을 체험하는 연습 모드 */}
       {!activeGame && (
         <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/45 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/5">
-          <div className="flex flex-col gap-2 border-b border-indigo-200/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 dark:border-indigo-500/20">
-            <div>
+          <button
+            type="button"
+            aria-expanded={isPracticeExpanded}
+            aria-controls="practice-game-list"
+            onClick={() => setIsPracticeExpanded(expanded => !expanded)}
+            className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-indigo-100/45 sm:px-6 dark:hover:bg-indigo-500/10 ${isPracticeExpanded ? 'border-b border-indigo-200/70 dark:border-indigo-500/20' : ''}`}
+          >
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
                   <Gamepad2 className="h-4 w-4" />
@@ -1272,49 +1280,46 @@ export const ArcadeTab: React.FC = () => {
                 </span>
               </div>
               <p className="mt-1.5 text-[10px] font-bold text-muted-foreground">
-                오늘의 게임과 관계없이 동전 소모 없이 플레이할 수 있습니다.
+                오늘의 게임과 관계없이 무료로 플레이할 수 있습니다. (보상 X)
               </p>
             </div>
-            <div className="flex gap-1.5 text-[9px] font-black">
-              <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                동전 소모 0
-              </span>
-              <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-zinc-300">
-                포인트 보상 0
-              </span>
-            </div>
-          </div>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-white/70 text-indigo-700 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300">
+              <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isPracticeExpanded ? 'rotate-180' : ''}`} />
+            </span>
+          </button>
 
-          <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
-            {GAME_TYPES.map((gameType) => {
-              const details = DAILY_GAME_DETAILS[gameType];
-              const PracticeIcon = details.Icon;
+          {isPracticeExpanded && (
+            <div id="practice-game-list" className="grid gap-3 p-4 animate-in fade-in slide-in-from-top-2 duration-200 sm:grid-cols-3 sm:p-5">
+              {GAME_TYPES.map((gameType) => {
+                const details = DAILY_GAME_DETAILS[gameType];
+                const PracticeIcon = details.Icon;
 
-              return (
-                <article
-                  key={gameType}
-                  className="flex flex-col justify-between rounded-2xl border border-border/80 bg-card/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md dark:hover:border-indigo-500/40"
-                >
-                  <div>
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${details.iconBackground} ${details.accent}`}>
-                      <PracticeIcon className="h-4.5 w-4.5" />
-                    </div>
-                    <h4 className="mt-3 text-xs font-black text-foreground">{details.title}</h4>
-                    <p className="mt-1.5 line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">
-                      {details.description}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleStartGame(gameType, true)}
-                    disabled={gameBusy}
-                    className="mt-4 flex w-full items-center justify-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-[10px] font-black text-indigo-700 transition hover:bg-indigo-100 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+                return (
+                  <article
+                    key={gameType}
+                    className="flex flex-col justify-between rounded-2xl border border-border/80 bg-card/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md dark:hover:border-indigo-500/40"
                   >
-                    무료 연습 시작
-                  </button>
-                </article>
-              );
-            })}
-          </div>
+                    <div>
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${details.iconBackground} ${details.accent}`}>
+                        <PracticeIcon className="h-4.5 w-4.5" />
+                      </div>
+                      <h4 className="mt-3 text-xs font-black text-foreground">{details.title}</h4>
+                      <p className="mt-1.5 line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">
+                        {details.description}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleStartGame(gameType, true)}
+                      disabled={gameBusy}
+                      className="mt-4 flex w-full items-center justify-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-[10px] font-black text-indigo-700 transition hover:bg-indigo-100 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+                    >
+                      무료 연습 시작
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
@@ -1423,7 +1428,7 @@ export const ArcadeTab: React.FC = () => {
                   className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-40 transition flex items-center gap-1 shadow"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
-                  {isPracticeMode ? '다시 연습하기' : '다시 도전 (동전 소모)'}
+                  {isPracticeMode ? '다시 연습하기' : '다시 도전'}
                 </button>
               </div>
             </div>
