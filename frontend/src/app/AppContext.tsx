@@ -6,6 +6,7 @@ import { apiFetch, isAuthed, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
+import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
 
@@ -52,7 +53,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 };
 
 // -----------------------------------------------------------------------------
-// 2. Toast Context & Provider (sonner 기반 - 리렌더링 완벽 방어)
+// 2. Toast Context & Provider (sonner 기반 - 리렌더링 완벽 방어 및 좌우 스와이프 지원)
 // -----------------------------------------------------------------------------
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -67,25 +68,142 @@ export const useToast = () => {
   return context;
 };
 
+interface CustomToastProps {
+  id: string | number;
+  message: string;
+  type: ToastType;
+  theme: 'light' | 'dark';
+}
+
+const CustomToast: React.FC<CustomToastProps> = ({ id, message, type, theme }) => {
+  const [startX, setStartX] = useState<number | null>(null);
+  const [currentX, setCurrentX] = useState<number>(0);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isDismissing, setIsDismissing] = useState<boolean>(false);
+  const [dismissDirection, setDismissDirection] = useState<'left' | 'right' | null>(null);
+
+  const dragThreshold = 80;
+
+  const handleStart = (clientX: number) => {
+    setStartX(clientX);
+    setIsDragging(true);
+  };
+
+  const handleMove = (clientX: number) => {
+    if (startX === null || isDismissing) return;
+    const diff = clientX - startX;
+    setCurrentX(diff);
+  };
+
+  const handleEnd = () => {
+    if (startX === null || isDismissing) return;
+    setIsDragging(false);
+
+    if (Math.abs(currentX) > dragThreshold) {
+      setIsDismissing(true);
+      setDismissDirection(currentX > 0 ? 'right' : 'left');
+      setTimeout(() => {
+        sonnerToast.dismiss(id);
+      }, 200);
+    } else {
+      setCurrentX(0);
+    }
+    setStartX(null);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    handleStart(e.clientX);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      handleMove(moveEvent.clientX);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      handleEnd();
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const typeConfig = {
+    success: {
+      icon: <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />,
+      border: 'border-emerald-500/20 dark:border-emerald-500/30',
+      bg: 'bg-emerald-50/95 dark:bg-emerald-950/90',
+      text: 'text-emerald-900 dark:text-emerald-100',
+    },
+    error: {
+      icon: <XCircle className="h-5 w-5 text-rose-500 shrink-0" />,
+      border: 'border-rose-500/20 dark:border-rose-500/30',
+      bg: 'bg-rose-50/95 dark:bg-rose-950/90',
+      text: 'text-rose-900 dark:text-rose-100',
+    },
+    warning: {
+      icon: <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />,
+      border: 'border-amber-500/20 dark:border-amber-500/30',
+      bg: 'bg-amber-50/95 dark:bg-amber-950/90',
+      text: 'text-amber-900 dark:text-amber-100',
+    },
+    info: {
+      icon: <Info className="h-5 w-5 text-blue-500 shrink-0" />,
+      border: 'border-blue-500/20 dark:border-blue-500/30',
+      bg: 'bg-blue-50/95 dark:bg-blue-950/90',
+      text: 'text-blue-900 dark:text-blue-100',
+    },
+  };
+
+  const config = typeConfig[type];
+
+  const translateX = isDismissing 
+    ? (dismissDirection === 'right' ? '150%' : '-150%') 
+    : `${currentX}px`;
+
+  const opacity = isDismissing 
+    ? 0 
+    : Math.max(0.1, 1 - Math.abs(currentX) / 300);
+
+  const style: React.CSSProperties = {
+    transform: `translateX(${translateX})`,
+    opacity,
+    transition: isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease',
+    touchAction: 'none',
+    userSelect: 'none',
+  };
+
+  return (
+    <div
+      style={style}
+      onMouseDown={handleMouseDown}
+      onTouchStart={(e) => handleStart(e.touches[0].clientX)}
+      onTouchMove={(e) => handleMove(e.touches[0].clientX)}
+      onTouchEnd={handleEnd}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md w-[340px] max-w-sm cursor-grab active:cursor-grabbing pointer-events-auto select-none ${config.bg} ${config.border} ${config.text}`}
+    >
+      {config.icon}
+      <p className="text-sm font-medium leading-relaxed break-keep select-none">{message}</p>
+    </div>
+  );
+};
+
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { theme } = useTheme();
+  const themeRef = useRef(theme);
+
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
 
   const toast = useRef((message: string, type: ToastType = 'info') => {
-    switch (type) {
-      case 'success':
-        sonnerToast.success(message);
-        break;
-      case 'error':
-        sonnerToast.error(message);
-        break;
-      case 'warning':
-        sonnerToast.warning(message);
-        break;
-      case 'info':
-      default:
-        sonnerToast.info(message);
-        break;
-    }
+    sonnerToast.custom((t) => (
+      <CustomToast id={t} message={message} type={type} theme={themeRef.current} />
+    ), {
+      unstyled: true,
+      duration: 5000,
+    });
   }).current;
 
   return (
@@ -93,8 +211,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {children}
       <Toaster 
         position="top-center" 
-        richColors 
-        closeButton
         theme={theme}
       />
     </ToastContext.Provider>
@@ -255,6 +371,9 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  // 이벤트 핸들러 클로저에서 최신 user를 참조하기 위한 ref
+  const userRef = useRef<AppContextType['user']>(null);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   const [maintenanceActive, setMaintenanceActive] = useState<boolean | null>(null);
   const [maintenanceStartAt, setMaintenanceStartAt] = useState<string | null>(null);
@@ -346,6 +465,8 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     };
 
     const handleMaintenance = () => {
+      // 관리자는 점검 중에도 페이지 접속 및 관리가 가능해야 하므로 리다이렉트 차단
+      if (userRef.current?.role === 'ADMIN') return;
       router.replace('/maintenance');
     };
 

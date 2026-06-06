@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 
 export default function MaintenancePage() {
@@ -54,9 +54,42 @@ export default function MaintenancePage() {
     });
   };
 
+  // 화면 90%를 채우면서 내부 비율 유지하는 동적 스케일링
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [cardScale, setCardScale] = useState(1);
+
+  useEffect(() => {
+    const updateScale = () => {
+      if (!containerRef.current || !cardRef.current) return;
+      const vw = containerRef.current.clientWidth;
+      const vh = containerRef.current.clientHeight;
+      // 카드의 자연 크기(scale=1 상태) 측정
+      const cardNatW = cardRef.current.scrollWidth;
+      const cardNatH = cardRef.current.scrollHeight;
+      if (cardNatW === 0 || cardNatH === 0) return;
+      // 뷰포트의 90%에 맞추는 스케일 비율 산출 (가로·세로 중 작은 쪽)
+      const scaleX = (vw * 0.9) / cardNatW;
+      const scaleY = (vh * 0.9) / cardNatH;
+      setCardScale(Math.min(scaleX, scaleY, 2.5)); // 최대 2.5배 제한
+    };
+
+    updateScale();
+    const ro = new ResizeObserver(updateScale);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center bg-background text-foreground select-none">
-      <div className="max-w-md w-full rounded-2xl border border-border bg-card p-8 shadow-xl space-y-6 animate-in fade-in duration-300">
+    <div
+      ref={containerRef}
+      className="flex min-h-screen flex-col items-center justify-center bg-background text-foreground select-none overflow-hidden"
+    >
+      <div
+        ref={cardRef}
+        className="w-[420px] rounded-2xl border border-border bg-card p-8 shadow-xl space-y-6 animate-in fade-in duration-300 origin-center"
+        style={{ transform: `scale(${cardScale})` }}
+      >
         {/* 공사중 이미지 */}
         <div className="flex justify-center">
           <img

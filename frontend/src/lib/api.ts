@@ -66,7 +66,7 @@ export const apiFetch = async (
     }
   }
 
-  // 점검 상태 체크 인터셉터 (503 Maintenance 예외)
+  // 점검 상태 체크 인터셉터 (503 Maintenance 예외 — 어드민 우회는 AppContext에서 처리)
   if (response.status === 503) {
     try {
       const clone = response.clone();
