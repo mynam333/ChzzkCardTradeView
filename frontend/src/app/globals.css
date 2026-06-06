@@ -442,3 +442,39 @@ body {
   margin: 1rem auto;
   border-radius: 0.75rem;
 }
+
+/* ============================================================
+   마우스 추적 커스텀 툴팁 (.streamer-tooltip)
+   - 보유 카드 썸네일 호버 시 스트리머 닉네임 표시 (StreamerTooltip.tsx)
+   - 위치(left/top/transform)는 인라인으로 주입, 비주얼만 테마 변수 기반으로 정의
+   ============================================================ */
+.streamer-tooltip {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 5px 10px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--popover-foreground);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.12);
+  animation: streamerTooltipFade 0.12s ease-out;
+}
+
+/* 다크 모드: 더 깊은 그림자 + 살짝 밝은 테두리로 가시성 확보 */
+.dark .streamer-tooltip {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+@keyframes streamerTooltipFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

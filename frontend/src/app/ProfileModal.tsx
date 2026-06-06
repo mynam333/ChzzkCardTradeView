@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, proxiedImage, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
+import { StreamerTooltip } from './StreamerTooltip';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
@@ -272,7 +273,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                   <p className="mb-2 text-[10px] font-bold text-zinc-400">보유 카드</p>
                   <div className="flex flex-wrap gap-1.5">
                     {profile.collection.slice(0, 25).map((c) => (
-                      <div key={c.channel_id} className="relative">
+                      <StreamerTooltip key={c.channel_id} name={c.streamer.name} className="relative">
                         <img
                           src={proxiedImage(cardImage(c.streamer, c.maxStar))}
                           alt={c.streamer.name}
@@ -289,7 +290,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                             ★{c.maxStar}
                           </span>
                         )}
-                      </div>
+                      </StreamerTooltip>
                     ))}
                     {profile.collection.length > 25 && (
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-[9px] font-bold text-zinc-400">
