@@ -76,32 +76,41 @@ export class SqliteMinigameRepository implements IMinigameRepository {
 
   async startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }> {
     const db = this.getDb();
+    let practiceMode = false;
+    try {
+      practiceMode = JSON.parse(session.target_data)?.practice_mode === true;
+    } catch {
+      practiceMode = false;
+    }
+
     const txn = db.transaction(() => {
-      // 1. 티켓 보유 현황 확인
-      let ticket = db.prepare('SELECT current_tickets, bonus_tickets FROM user_minigame_tickets WHERE user_id = ?').get(session.user_id) as any;
-      
-      // 혹시 로우가 없다면 생성
-      if (!ticket) {
-        const nowStr = new Date().toISOString();
-        db.prepare(
-          'INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at) VALUES (?, 5, 0, ?, ?)'
-        ).run(session.user_id, nowStr, nowStr);
-        ticket = { current_tickets: 5, bonus_tickets: 0 };
-      }
+      if (!practiceMode) {
+        // 1. 일반 게임만 티켓 보유 현황을 확인하고 차감합니다.
+        let ticket = db.prepare('SELECT current_tickets, bonus_tickets FROM user_minigame_tickets WHERE user_id = ?').get(session.user_id) as any;
 
-      if ((ticket.current_tickets || 0) + (ticket.bonus_tickets || 0) <= 0) {
-        return { ok: false, reason: '사용 가능한 미니게임 티켓이 부족합니다.' };
-      }
+        // 혹시 로우가 없다면 생성
+        if (!ticket) {
+          const nowStr = new Date().toISOString();
+          db.prepare(
+            'INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at) VALUES (?, 5, 0, ?, ?)'
+          ).run(session.user_id, nowStr, nowStr);
+          ticket = { current_tickets: 5, bonus_tickets: 0 };
+        }
 
-      // 2. 쿠폰 등으로 얻은 보너스 티켓을 먼저 차감하고, 없으면 기본 충전 티켓을 차감
-      if ((ticket.bonus_tickets || 0) > 0) {
-        db.prepare(
-          "UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
-        ).run(session.user_id);
-      } else {
-        db.prepare(
-          "UPDATE user_minigame_tickets SET current_tickets = current_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
-        ).run(session.user_id);
+        if ((ticket.current_tickets || 0) + (ticket.bonus_tickets || 0) <= 0) {
+          return { ok: false, reason: '사용 가능한 미니게임 티켓이 부족합니다.' };
+        }
+
+        // 2. 쿠폰 등으로 얻은 보너스 티켓을 먼저 차감하고, 없으면 기본 충전 티켓을 차감
+        if ((ticket.bonus_tickets || 0) > 0) {
+          db.prepare(
+            "UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
+          ).run(session.user_id);
+        } else {
+          db.prepare(
+            "UPDATE user_minigame_tickets SET current_tickets = current_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
+          ).run(session.user_id);
+        }
       }
 
       // 3. 세션 기록

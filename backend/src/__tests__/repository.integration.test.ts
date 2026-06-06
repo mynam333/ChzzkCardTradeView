@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { __setSqliteDbForTest } from '../services/db';
-import { initRepositories, reportRepository, userRepository, streamerRepository } from '../repositories';
+import { initRepositories, minigameRepository, reportRepository, userRepository, streamerRepository } from '../repositories';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 
 /**
@@ -82,6 +82,40 @@ describe('findByIds 배치 조회', () => {
     seedStreamer(db, 'c2', 'B');
     const streamers = await streamerRepository.findByIds(['c2', 'c1']);
     expect(streamers.map((s) => s.channel_id).sort()).toEqual(['c1', 'c2']);
+  });
+});
+
+describe('MinigameRepository practice mode', () => {
+  it('creates a practice session without deducting tickets even when the balance is zero', async () => {
+    seedUser(db, 'practice-user');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO user_minigame_tickets
+        (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+      VALUES (?, 0, 0, ?, ?)
+    `).run('practice-user', now, now);
+
+    const result = await minigameRepository.startSession({
+      id: 'practice-session',
+      user_id: 'practice-user',
+      game_type: 'puzzle',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: true })
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(db.prepare(`
+      SELECT current_tickets, bonus_tickets
+      FROM user_minigame_tickets
+      WHERE user_id = ?
+    `).get('practice-user')).toEqual({
+      current_tickets: 0,
+      bonus_tickets: 0
+    });
+    expect(db.prepare('SELECT game_type, status FROM minigame_sessions WHERE id = ?').get('practice-session')).toEqual({
+      game_type: 'puzzle',
+      status: 'STARTED'
+    });
   });
 });
 

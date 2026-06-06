@@ -4,20 +4,30 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 
 vi.mock('../repositories', () => ({
   minigameRepository: {
+    getTicketStatus: vi.fn(),
+    updateTickets: vi.fn(),
+    startSession: vi.fn(),
+    expireSessions: vi.fn(),
     findSessionById: vi.fn(),
     completeSession: vi.fn()
   },
-  streamerRepository: {},
+  streamerRepository: {
+    findAll: vi.fn()
+  },
   userRepository: {
     findById: vi.fn()
   }
 }));
 
-import { submitMinigameResult } from '../controllers/minigameController';
-import { minigameRepository, userRepository } from '../repositories';
+import { getDailyMinigame, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+import { minigameRepository, streamerRepository, userRepository } from '../repositories';
 
+const getTicketStatus = vi.mocked(minigameRepository.getTicketStatus);
+const startSession = vi.mocked(minigameRepository.startSession);
+const expireSessions = vi.mocked(minigameRepository.expireSessions);
 const findSessionById = vi.mocked(minigameRepository.findSessionById);
 const completeSession = vi.mocked(minigameRepository.completeSession);
+const findAllStreamers = vi.mocked(streamerRepository.findAll);
 const findUserById = vi.mocked(userRepository.findById);
 
 const createResponse = () => {
@@ -30,13 +40,13 @@ const createResponse = () => {
   return response as unknown as Response;
 };
 
-const runPuzzleSubmission = async (elapsedMs: number) => {
+const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
   findSessionById.mockResolvedValue({
     id: 'puzzle-session',
     user_id: 'user-1',
     game_type: 'puzzle',
     status: 'STARTED',
-    target_data: '{}',
+    target_data: JSON.stringify({ practice_mode: practiceMode }),
     created_at: new Date(Date.now() - elapsedMs).toISOString()
   });
   findUserById.mockResolvedValue({ point: 5000 } as never);
@@ -89,6 +99,94 @@ describe('submitMinigameResult puzzle time limit', () => {
       success: true,
       correct: true,
       earned_points: 1000
+    }));
+  });
+
+  it('completes a successful practice puzzle without awarding points', async () => {
+    const response = await runPuzzleSubmission(124999, true);
+
+    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 0);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 0,
+      practice_mode: true
+    }));
+  });
+});
+
+describe('daily minigame selection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    expireSessions.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('changes the KST date boundary at midnight and returns the exact next reset time', () => {
+    const beforeMidnight = getDailyMinigame(new Date('2026-06-06T14:59:59.000Z').getTime());
+    const afterMidnight = getDailyMinigame(new Date('2026-06-06T15:00:00.000Z').getTime());
+
+    expect(beforeMidnight.kst_date).toBe('2026-06-06');
+    expect(beforeMidnight.next_game_at).toBe('2026-06-06T15:00:00.000Z');
+    expect(beforeMidnight.seconds_until_game_change).toBe(1);
+    expect(afterMidnight.kst_date).toBe('2026-06-07');
+    expect(afterMidnight.next_game_at).toBe('2026-06-07T15:00:00.000Z');
+    expect(afterMidnight.seconds_until_game_change).toBe(86400);
+  });
+
+  it('rejects a game that is not selected for today before reading or spending tickets', async () => {
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z'));
+    const todayGame = getDailyMinigame().game_type;
+    const unavailableGame = (['quiz', 'puzzle', 'match'] as const).find(game => game !== todayGame)!;
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: unavailableGame }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'DailyMinigameChanged',
+      today_game: todayGame
+    }));
+    expect(getTicketStatus).not.toHaveBeenCalled();
+  });
+
+  it('starts any game in practice mode without reading or spending tickets', async () => {
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z'));
+    const todayGame = getDailyMinigame().game_type;
+    const practiceGame = (['quiz', 'puzzle', 'match'] as const).find(game => game !== todayGame)!;
+    findAllStreamers.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        channel_id: `channel-${index}`,
+        name: `streamer-${index}`,
+        logo_url: `https://example.com/${index}.png`
+      })) as never
+    );
+    startSession.mockResolvedValue({ ok: true });
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: practiceGame, practice_mode: true }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      game_type: practiceGame,
+      practice_mode: true
+    }));
+    expect(getTicketStatus).not.toHaveBeenCalled();
+    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
+      target_data: expect.stringContaining('"practice_mode":true')
     }));
   });
 });

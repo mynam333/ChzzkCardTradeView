@@ -6,6 +6,33 @@ import { UserMinigameTicket, MinigameSession } from '../repositories/interfaces'
 
 const TICKET_CHARGE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4시간
 const MAX_TICKETS = 5;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match'] as const;
+
+type DailyMinigameType = typeof DAILY_MINIGAMES[number];
+
+export function getDailyMinigame(nowMs = Date.now()): {
+  game_type: DailyMinigameType;
+  kst_date: string;
+  next_game_at: string;
+  seconds_until_game_change: number;
+} {
+  const kstNow = new Date(nowMs + KST_OFFSET_MS);
+  const year = kstNow.getUTCFullYear();
+  const month = kstNow.getUTCMonth();
+  const date = kstNow.getUTCDate();
+  const kstDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+  const nextMidnightUtcMs = Date.UTC(year, month, date + 1) - KST_OFFSET_MS;
+  const digest = crypto.createHash('sha256').update(`cctv-daily-minigame:${kstDate}`).digest();
+  const gameType = DAILY_MINIGAMES[digest.readUInt32BE(0) % DAILY_MINIGAMES.length];
+
+  return {
+    game_type: gameType,
+    kst_date: kstDate,
+    next_game_at: new Date(nextMidnightUtcMs).toISOString(),
+    seconds_until_game_change: Math.max(0, Math.ceil((nextMidnightUtcMs - nowMs) / 1000))
+  };
+}
 
 // 티켓 계산 및 갱신 헬퍼
 function refreshUserTickets(ticket: UserMinigameTicket): { current_tickets: number; last_charged_at: string; seconds_until_next_ticket: number } {
@@ -65,6 +92,7 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
   try {
     const dbTicket = await minigameRepository.getTicketStatus(userId);
     const refreshed = refreshUserTickets(dbTicket);
+    const dailyMinigame = getDailyMinigame();
 
     // 충전으로 인해 티켓이 늘어난 경우 DB 업데이트
     if (refreshed.current_tickets !== dbTicket.current_tickets || refreshed.last_charged_at !== dbTicket.last_charged_at) {
@@ -77,7 +105,11 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
       bonus_tickets: dbTicket.bonus_tickets,
       max_tickets: MAX_TICKETS,
       seconds_until_next_ticket: refreshed.seconds_until_next_ticket,
-      last_charged_at: refreshed.last_charged_at
+      last_charged_at: refreshed.last_charged_at,
+      today_game: dailyMinigame.game_type,
+      kst_date: dailyMinigame.kst_date,
+      next_game_at: dailyMinigame.next_game_at,
+      seconds_until_game_change: dailyMinigame.seconds_until_game_change
     });
   } catch (err: any) {
     console.error('[MinigameController] status error:', err);
@@ -90,21 +122,35 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
 
-  const { game_type } = req.body;
+  const { game_type, practice_mode } = req.body;
+  const practiceMode = practice_mode === true;
   if (!['quiz', 'puzzle', 'match'].includes(game_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 게임 타입입니다.' });
   }
 
   try {
-    // 1. 티켓 정보 조회 및 dynamic 충전 반영
-    const dbTicket = await minigameRepository.getTicketStatus(userId);
-    const refreshed = refreshUserTickets(dbTicket);
-
-    if (refreshed.current_tickets + dbTicket.bonus_tickets <= 0) {
-      return res.status(403).json({ error: 'Forbidden', message: '사용 가능한 미니게임 티켓이 부족합니다.' });
+    const dailyMinigame = getDailyMinigame();
+    if (!practiceMode && game_type !== dailyMinigame.game_type) {
+      return res.status(409).json({
+        error: 'DailyMinigameChanged',
+        message: '오늘 플레이할 수 있는 미니게임이 변경되었습니다. 오늘의 미니게임을 다시 확인해 주세요.',
+        today_game: dailyMinigame.game_type,
+        kst_date: dailyMinigame.kst_date,
+        next_game_at: dailyMinigame.next_game_at
+      });
     }
 
-    await minigameRepository.updateTickets(userId, refreshed.current_tickets, refreshed.last_charged_at);
+    if (!practiceMode) {
+      // 일반 게임만 티켓 정보 조회 및 dynamic 충전을 반영합니다.
+      const dbTicket = await minigameRepository.getTicketStatus(userId);
+      const refreshed = refreshUserTickets(dbTicket);
+
+      if (refreshed.current_tickets + dbTicket.bonus_tickets <= 0) {
+        return res.status(403).json({ error: 'Forbidden', message: '사용 가능한 미니게임 티켓이 부족합니다.' });
+      }
+
+      await minigameRepository.updateTickets(userId, refreshed.current_tickets, refreshed.last_charged_at);
+    }
 
     // 2. 문제 은행 데이터 가져오기
     const streamers = await streamerRepository.findAll();
@@ -167,6 +213,8 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       };
     }
 
+    targetData.practice_mode = practiceMode;
+
     const newSession: MinigameSession = {
       id: sessionId,
       user_id: userId,
@@ -185,6 +233,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(200).json({
       session_id: sessionId,
       game_type,
+      practice_mode: practiceMode,
       game_data: gameData
     });
 
@@ -222,6 +271,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const serverElapsedMs = Date.now() - sessionCreatedMs;
 
     const target = JSON.parse(session.target_data);
+    const practiceMode = target.practice_mode === true;
     let isCorrect = false;
     let earnedPoints = 0;
     let message = '아쉽게도 정답이 아닙니다!';
@@ -242,7 +292,10 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           correct: false,
           earned_points: 0,
           new_balance: user?.point ?? 0,
-          message: '15초 시간 제한이 초과되어 실패 처리되었습니다.'
+          message: practiceMode
+            ? '연습 게임의 15초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
+            : '15초 시간 제한이 초과되어 실패 처리되었습니다.',
+          practice_mode: practiceMode
         });
       }
 
@@ -276,7 +329,10 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           correct: false,
           earned_points: 0,
           new_balance: user?.point ?? 0,
-          message: '120초 시간 제한이 초과되어 실패 처리되었습니다.'
+          message: practiceMode
+            ? '연습 게임의 120초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
+            : '120초 시간 제한이 초과되어 실패 처리되었습니다.',
+          practice_mode: practiceMode
         });
       }
 
@@ -312,7 +368,10 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           correct: false,
           earned_points: 0,
           new_balance: user?.point ?? 0,
-          message: '60초 시간 제한이 초과되어 실패 처리되었습니다.'
+          message: practiceMode
+            ? '연습 게임의 60초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
+            : '60초 시간 제한이 초과되어 실패 처리되었습니다.',
+          practice_mode: practiceMode
         });
       }
 
@@ -335,6 +394,13 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       }
     }
 
+    if (practiceMode) {
+      earnedPoints = 0;
+      message = isCorrect
+        ? '연습 게임을 성공했습니다! 연습 모드에서는 동전을 소모하지 않으며 포인트도 지급되지 않습니다.'
+        : '연습 게임을 완료했습니다. 연습 모드에서는 동전을 소모하지 않으며 포인트도 지급되지 않습니다.';
+    }
+
     // 2. 세션 완료 및 포인트 적립
     const completeResult = await minigameRepository.completeSession(session_id, earnedPoints);
     if (!completeResult.ok) {
@@ -346,7 +412,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       correct: isCorrect,
       earned_points: earnedPoints,
       new_balance: completeResult.newPoints ?? 0,
-      message
+      message,
+      practice_mode: practiceMode
     });
 
   } catch (err: any) {

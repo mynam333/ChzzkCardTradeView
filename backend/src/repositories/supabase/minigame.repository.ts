@@ -95,6 +95,31 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
   async startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }> {
     const client = this.getClient();
     try {
+      let practiceMode = false;
+      try {
+        practiceMode = JSON.parse(session.target_data)?.practice_mode === true;
+      } catch {
+        practiceMode = false;
+      }
+
+      if (practiceMode) {
+        const { error } = await client
+          .from('minigame_sessions')
+          .insert({
+            id: session.id,
+            user_id: session.user_id,
+            game_type: session.game_type,
+            status: session.status,
+            target_data: session.target_data,
+            created_at: new Date().toISOString()
+          });
+
+        return {
+          ok: !error,
+          reason: error ? '연습 게임 세션 생성 중 오류가 발생했습니다.' : undefined
+        };
+      }
+
       const { data: rpcResult, error: rpcError } = await client.rpc('start_minigame_session_atomic', {
         p_session_id: session.id,
         p_user_id: session.user_id,
