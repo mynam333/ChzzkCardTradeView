@@ -10,6 +10,8 @@ import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { fuzzySearch } from '@/lib/search';
+import type { UserTitle } from '@/lib/types';
+import { UserTitleList } from './UserTitleBadge';
 
 interface Streamer {
   channel_id: string;
@@ -21,6 +23,7 @@ interface Streamer {
   prev_value?: number;
   value_1h_ago?: number;
   is_active?: boolean;
+  titles?: UserTitle[];
 }
 
 interface UserRank {
@@ -31,6 +34,7 @@ interface UserRank {
   card_count: number;
   total_asset?: number;
   rank?: number;
+  titles: UserTitle[];
 }
 
 type SubTab = 'value' | 'change' | 'user';
@@ -217,8 +221,11 @@ export const RankingTab: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
                   <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
-                  <div>
-                    <h4 className="text-xs font-bold text-foreground">{ur.username}</h4>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <h4 className="truncate text-xs font-bold text-foreground">{ur.username}</h4>
+                      <UserTitleList titles={ur.titles} compact />
+                    </div>
                     <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
                   </div>
                 </div>
@@ -255,10 +262,13 @@ export const RankingTab: React.FC = () => {
                         <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                       )}
                     </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        {st.name}
-                      </h4>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <h4 className="truncate text-xs font-bold text-foreground">
+                          {st.name}
+                        </h4>
+                        <UserTitleList titles={st.titles} compact />
+                      </div>
                       <p className="text-[10px] text-muted-foreground">{(st.follower_count || 0).toLocaleString()} 팔로워</p>
                     </div>
                   </div>

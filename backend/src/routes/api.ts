@@ -119,7 +119,7 @@ import {
   startMinigame,
   submitMinigameResult
 } from '../controllers/minigameController';
-import { streamerRepository } from '../repositories';
+import { streamerRepository, titleRepository } from '../repositories';
 
 import { rateLimit } from '../middlewares/rateLimit';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
@@ -263,9 +263,10 @@ router.get('/streamers', async (req, res) => {
 
     const streamers = await streamerRepository.findAll();
     // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
-    const [value24hMap, value1hMap] = await Promise.all([
+    const [value24hMap, value1hMap, titlesByUser] = await Promise.all([
       streamerRepository.getValue24hAgoMap(),
-      streamerRepository.getValue1hAgoMap()
+      streamerRepository.getValue1hAgoMap(),
+      titleRepository.findByUserIds(streamers.map((streamer) => streamer.channel_id))
     ]);
     
     // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출
@@ -280,6 +281,7 @@ router.get('/streamers', async (req, res) => {
       base_value: s.base_value,
       is_active: s.is_active,
       serial_number: s.serial_number,
+      titles: (titlesByUser[s.channel_id] || []).filter((title) => title.is_equipped),
       prev_value: value24hMap[s.channel_id] ?? s.prev_value,
       value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
     }));

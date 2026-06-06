@@ -315,6 +315,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     // 100위까지 랭킹을 늘리고 검색 키워드를 리포지토리에 전달
     const rankings = await userRepository.findRankings(100, keyword);
+    const titlesByUser = await titleRepository.findByUserIds(rankings.map((user) => user.id));
     // 프론트엔드가 요구하는 구조로 매핑 (실제 보유 카드 수 및 포인트+카드가치 총자산 포함, 랭크 순위 추가)
     const mapped = rankings.map((u) => ({
       id: u.id,
@@ -323,7 +324,8 @@ export const getUserRankings = async (req: Request, res: Response) => {
       point: u.point,
       card_count: u.card_count,
       total_asset: u.total_asset,
-      rank: u.rank
+      rank: u.rank,
+      titles: (titlesByUser[u.id] || []).filter((title) => title.is_equipped)
     }));
 
     return res.status(200).json(mapped);
