@@ -18,7 +18,8 @@ import {
   RefreshCw,
   Store,
   Database,
-  Gamepad2
+  Gamepad2,
+  Edit
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
@@ -123,6 +124,7 @@ export const AdminTab: React.FC = () => {
   // 공지
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [noticeForm, setNoticeForm] = useState({ title: '', content: '', is_popup: false });
+  const [editingNoticeId, setEditingNoticeId] = useState<number | null>(null);
 
   // 푸시
   const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '' });
@@ -301,6 +303,40 @@ export const AdminTab: React.FC = () => {
         fetchAnnouncements();
       } else toast('등록 실패');
     } catch { toast('서버 통신 에러'); }
+  };
+
+  const handleUpdateAnnouncement = async () => {
+    if (!editingNoticeId) return;
+    if (!noticeForm.title.trim() || !noticeForm.content.trim()) {
+      toast('제목과 내용을 입력해 주세요.');
+      return;
+    }
+    try {
+      const res = await apiFetch(`/admin/announcements/${editingNoticeId}`, {
+        method: 'PUT',
+        body: JSON.stringify(noticeForm)
+      });
+      if (res.ok) {
+        toast('공지사항이 수정되었습니다.');
+        setNoticeForm({ title: '', content: '', is_popup: false });
+        setEditingNoticeId(null);
+        fetchAnnouncements();
+      } else toast('수정 실패');
+    } catch { toast('서버 통신 에러'); }
+  };
+
+  const handleStartEditAnnouncement = (a: Announcement) => {
+    setEditingNoticeId(a.id);
+    setNoticeForm({
+      title: a.title,
+      content: a.content,
+      is_popup: !!a.is_popup
+    });
+  };
+
+  const handleCancelEditAnnouncement = () => {
+    setEditingNoticeId(null);
+    setNoticeForm({ title: '', content: '', is_popup: false });
   };
 
   const handleTogglePopup = async (a: any) => {
@@ -1081,18 +1117,28 @@ export const AdminTab: React.FC = () => {
       {subTab === 'announcements' && (
         <section className="space-y-5">
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-            <h3 className="text-sm font-bold flex items-center gap-1.5"><Megaphone className="h-4 w-4" /> 공지/팝업 등록</h3>
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Megaphone className="h-4 w-4" /> 
+              {editingNoticeId ? '공지/팝업 수정' : '공지/팝업 등록'}
+            </h3>
             <input type="text" placeholder="공지 제목" value={noticeForm.title}
               onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })}
               className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            <textarea placeholder="공지 본문 (마크다운 지원: **굵게**, [링크텍스트](링크URL), - 글머리기호)" value={noticeForm.content}
+            <textarea placeholder="공지 본문 (마크다운 완전 지원: **굵게**, ~~취소선~~, \*이스케이프\* 등)" value={noticeForm.content}
               onChange={(e) => setNoticeForm({ ...noticeForm, content: e.target.value })}
               className="w-full h-24 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={noticeForm.is_popup}
                 onChange={(e) => setNoticeForm({ ...noticeForm, is_popup: e.target.checked })} /> 메인 화면 오버레이 팝업으로 노출
             </label>
-            <button onClick={handleCreateAnnouncement} className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">공지 등록</button>
+            {editingNoticeId ? (
+              <div className="flex gap-2">
+                <button onClick={handleUpdateAnnouncement} className="flex-1 rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">수정 완료</button>
+                <button onClick={handleCancelEditAnnouncement} className="flex-1 rounded-lg bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80">수정 취소</button>
+              </div>
+            ) : (
+              <button onClick={handleCreateAnnouncement} className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">공지 등록</button>
+            )}
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -1102,7 +1148,7 @@ export const AdminTab: React.FC = () => {
                 <p className="text-xs text-muted-foreground text-center py-6">등록된 공지가 없습니다.</p>
               ) : announcements.map((a) => (
                 <div key={a.id} className="flex items-start justify-between gap-3 rounded-lg bg-secondary/30 px-3 py-2">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold flex items-center gap-1.5">
                       {a.title}
                       {a.is_popup && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">팝업</span>}
@@ -1117,7 +1163,14 @@ export const AdminTab: React.FC = () => {
                     >
                       {a.is_popup ? '팝업 해제' : '팝업 등록'}
                     </button>
-                    <button onClick={() => handleDeleteAnnouncement(a.id)} className="rounded bg-red-500/10 p-1.5 text-red-500 hover:bg-red-500/20">
+                    <button
+                      onClick={() => handleStartEditAnnouncement(a)}
+                      className="rounded bg-secondary p-1.5 text-foreground hover:bg-secondary/80"
+                      title="공지 수정"
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => handleDeleteAnnouncement(a.id)} className="rounded bg-red-500/10 p-1.5 text-red-500 hover:bg-red-500/20" title="공지 삭제">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -1563,7 +1616,7 @@ export const AdminTab: React.FC = () => {
             {/* 커스텀 이미지 보유/차단 스트리머 별별 제어 */}
             <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 커스텀 이미지 스트리머 ({customStreamers.length})</h3>
+                <h3 className="text-sm font-bold flex items-center gap-1.5"><ImageIcon className="h-4 w-4" /> 커스텀 스트리머 이미지 관리 ({customStreamers.length})</h3>
                 <button onClick={() => fetchCouponStreamers(true)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
               </div>
               {/* 검색 */}

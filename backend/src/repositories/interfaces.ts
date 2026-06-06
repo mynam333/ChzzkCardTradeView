@@ -257,6 +257,7 @@ export interface IAnnouncementRepository {
   create(announcement: Announcement): Promise<Announcement>;
   /** 공지의 팝업 노출 여부 및 만료 시각을 갱신합니다. */
   updatePopup(id: number, isPopup: boolean, popupExpiresAt: string | null): Promise<void>;
+  update(id: number, announcement: Partial<Announcement>): Promise<Announcement>;
   delete(id: number): Promise<void>;
 }
 

@@ -67,6 +67,18 @@ export class SupabaseAnnouncementRepository implements IAnnouncementRepository {
     if (error) throw error;
   }
 
+  async update(id: number, announcement: Partial<Announcement>): Promise<Announcement> {
+    const { data, error } = await this.getClient()
+      .from('announcements')
+      .update(announcement)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as Announcement;
+  }
+
   async delete(id: number): Promise<void> {
     const { error } = await this.getClient()
       .from('announcements')

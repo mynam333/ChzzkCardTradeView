@@ -73,6 +73,34 @@ export const setAnnouncementPopup = async (req: Request, res: Response) => {
 };
 
 /**
+ * 4-2. 공지사항 수정 (ADMIN 전용)
+ */
+export const updateAnnouncement = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, content, is_popup, popup_expires_at } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ error: 'BadRequest', message: '공지사항 ID가 필요합니다.' });
+  }
+
+  if (title === undefined && content === undefined && is_popup === undefined && popup_expires_at === undefined) {
+    return res.status(400).json({ error: 'BadRequest', message: '수정할 데이터가 존재하지 않습니다.' });
+  }
+
+  try {
+    const updated = await announcementRepository.update(Number(id), {
+      ...(title !== undefined && { title }),
+      ...(content !== undefined && { content }),
+      ...(is_popup !== undefined && { is_popup: !!is_popup }),
+      ...(popup_expires_at !== undefined && { popup_expires_at: popup_expires_at || null })
+    });
+    return res.status(200).json(updated);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '공지사항 수정 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * 4. 공지사항 삭제 (ADMIN 전용)
  */
 export const deleteAnnouncement = async (req: Request, res: Response) => {

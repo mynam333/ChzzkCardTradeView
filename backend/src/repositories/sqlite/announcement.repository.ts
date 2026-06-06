@@ -75,6 +75,49 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
       .run(isPopup ? 1 : 0, popupExpiresAt, id);
   }
 
+  async update(id: number, announcement: Partial<Announcement>): Promise<Announcement> {
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (announcement.title !== undefined) {
+      sets.push('title = ?');
+      vals.push(announcement.title);
+    }
+    if (announcement.content !== undefined) {
+      sets.push('content = ?');
+      vals.push(announcement.content);
+    }
+    if (announcement.is_popup !== undefined) {
+      sets.push('is_popup = ?');
+      vals.push(announcement.is_popup ? 1 : 0);
+    }
+    if (announcement.popup_expires_at !== undefined) {
+      sets.push('popup_expires_at = ?');
+      vals.push(announcement.popup_expires_at);
+    }
+    if (sets.length === 0) {
+      const row = this.getDb().prepare('SELECT * FROM announcements WHERE id = ?').get(id) as any;
+      return {
+        id: row.id,
+        title: row.title,
+        content: row.content,
+        is_popup: row.is_popup === 1,
+        popup_expires_at: row.popup_expires_at,
+        created_at: row.created_at
+      };
+    }
+    vals.push(id);
+    this.getDb().prepare(`UPDATE announcements SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    const row = this.getDb().prepare('SELECT * FROM announcements WHERE id = ?').get(id) as any;
+    return {
+      id: row.id,
+      title: row.title,
+      content: row.content,
+      is_popup: row.is_popup === 1,
+      popup_expires_at: row.popup_expires_at,
+      created_at: row.created_at
+    };
+  }
+
   async delete(id: number): Promise<void> {
     this.getDb().prepare('DELETE FROM announcements WHERE id = ?').run(id);
   }

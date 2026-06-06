@@ -32,7 +32,8 @@ import {
   getAnnouncements,
   getActivePopups,
   deleteAnnouncement,
-  setAnnouncementPopup
+  setAnnouncementPopup,
+  updateAnnouncement
 } from '../controllers/announcementController';
 import {
   getVapidPublicKey,
@@ -261,6 +262,7 @@ router.get('/streamers', async (req, res) => {
       name: s.name,
       logo_url: s.logo_url,
       custom_image_url: s.custom_image_url,
+      custom_images: s.custom_images, // 1~5성 커스텀 이미지 배열 화이트리스트 추가
       is_image_banned: s.is_image_banned,
       follower_count: s.follower_count,
       base_value: s.base_value,
@@ -358,6 +360,9 @@ router.get('/admin/coupons', authMiddleware, adminMiddleware, getCoupons);
 
 // 공지사항 작성
 router.post('/admin/announcements', authMiddleware, adminMiddleware, createAnnouncement);
+
+// 공지사항 수정
+router.put('/admin/announcements/:id', authMiddleware, adminMiddleware, updateAnnouncement);
 
 // 공지사항 삭제
 router.delete('/admin/announcements/:id', authMiddleware, adminMiddleware, deleteAnnouncement);
