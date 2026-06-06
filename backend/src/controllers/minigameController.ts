@@ -267,6 +267,19 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     } else if (session.game_type === 'puzzle') {
       const { success } = payload || {};
 
+      // 120초 시간 제한 초과 검증 (카운트다운 3초 + 120초 플레이 + RTT 2초 = 125000ms 초과 시 실패)
+      if (serverElapsedMs > 125000) {
+        await minigameRepository.completeSession(session_id, 0);
+        const user = await userRepository.findById(userId);
+        return res.status(200).json({
+          success: false,
+          correct: false,
+          earned_points: 0,
+          new_balance: user?.point ?? 0,
+          message: '120초 시간 제한이 초과되어 실패 처리되었습니다.'
+        });
+      }
+
       // 퍼즐 4.5초 컷은 패킷 치팅 의심 (카운트다운 3초 + 1.5초 조작)
       if (serverElapsedMs < 4500) {
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
@@ -283,6 +296,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         } else {
           message = `퍼즐을 무사히 완성하셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
         }
+      } else {
+        message = '120초 시간 제한이 초과되어 실패 처리되었습니다.';
       }
 
     } else if (session.game_type === 'match') {

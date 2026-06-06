@@ -72,15 +72,53 @@ type StartGameResponse = {
 };
 
 const PUZZLE_PIECE_COUNT = 12;
+const PUZZLE_TIME_LIMIT_SECONDS = 120;
+const MATCH_TIME_LIMIT_SECONDS = 60;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
-const QUIZ_MOTION_MAX_BLUR_PX = 80 * QUIZ_DISTORTION_SCALE;
+const QUIZ_MOTION_MAX_RADIUS = 8;
+const QUIZ_MOTION_MAX_KERNEL_UNIT = 3;
 // 모자이크·회전 잔상은 원래 강도가 약한 효과이므로 DISTORTION_SCALE을 따르지 않고 독립 상수 사용
 const QUIZ_MOSAIC_MAX_BLOCK_PX = 34;
 const QUIZ_RADIAL_MAX_ROTATE_DEG = 120;   // 최대 120도 회전 잔상
 const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
 const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
 const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
+
+const createMotionBlurKernel = (angle: number, intensity: number) => {
+  const normalizedIntensity = Math.max(0, Math.min(100, intensity)) / 100;
+  const radius = Math.round(normalizedIntensity * QUIZ_MOTION_MAX_RADIUS);
+  if (radius < 1) return null;
+
+  const order = radius * 2 + 1;
+  const center = radius;
+  const radians = (angle * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const samples = new Set<string>();
+
+  // 선을 촘촘히 샘플링해 얕은 각도에서도 커널이 끊기지 않도록 합니다.
+  for (let step = -radius * 4; step <= radius * 4; step += 1) {
+    const distance = step / 4;
+    const x = Math.max(0, Math.min(order - 1, Math.round(center + cos * distance)));
+    const y = Math.max(0, Math.min(order - 1, Math.round(center + sin * distance)));
+    samples.add(`${x},${y}`);
+  }
+
+  const matrix = Array(order * order).fill(0);
+  for (const sample of samples) {
+    const [x, y] = sample.split(',').map(Number);
+    matrix[y * order + x] = 1;
+  }
+
+  return {
+    order,
+    radius,
+    divisor: samples.size,
+    matrix: matrix.join(' '),
+    kernelUnitLength: 1 + normalizedIntensity * (QUIZ_MOTION_MAX_KERNEL_UNIT - 1)
+  };
+};
 
 const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, intensity }) => {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -216,6 +254,53 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
   );
 };
 
+const GameTimeLimit: React.FC<{
+  timeLeft: number;
+  totalSeconds: number;
+  dangerSeconds: number;
+  bonusLabel: string;
+  pausedLabel?: string;
+}> = ({ timeLeft, totalSeconds, dangerSeconds, bonusLabel, pausedLabel }) => (
+  <div className="w-full max-w-md flex flex-col gap-2 px-1">
+    <div className="flex items-center justify-between">
+      {pausedLabel ? (
+        <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-full text-xs font-black shadow-sm animate-pulse">
+          <span>👀</span>
+          <span>{pausedLabel}</span>
+        </div>
+      ) : (
+        <div className={`flex items-center gap-1.5 border px-3 py-1.5 rounded-full text-xs font-black shadow-sm transition-all duration-300 ${timeLeft <= dangerSeconds
+          ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
+          : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
+          }`}>
+          {timeLeft <= dangerSeconds ? (
+            <span className="animate-pulse">🔥</span>
+          ) : (
+            <Timer className={`h-3.5 w-3.5 ${timeLeft <= dangerSeconds * 2 ? 'animate-spin' : ''} text-primary`} />
+          )}
+          <span>남은 시간: <strong className="font-mono text-sm">{timeLeft}</strong>초</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-1 bg-secondary/50 border border-border/40 px-2.5 py-1.5 rounded-full text-[10px] text-muted-foreground font-extrabold">
+        <span>⏱️ {bonusLabel}</span>
+      </div>
+    </div>
+
+    {!pausedLabel && (
+      <div className="w-full h-2 rounded-full bg-secondary/60 border border-border/20 overflow-hidden shadow-inner relative">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ease-linear ${timeLeft <= dangerSeconds
+            ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+            : 'bg-gradient-to-r from-emerald-400 to-primary shadow-[0_0_8px_rgba(16,185,129,0.4)]'
+            }`}
+          style={{ width: `${Math.max(0, Math.min(100, (timeLeft / totalSeconds) * 100))}%` }}
+        />
+      </div>
+    )}
+  </div>
+);
+
 const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
 
 const isPuzzleSolved = (pieces: PuzzlePiece[]) =>
@@ -284,13 +369,14 @@ export const ArcadeTab: React.FC = () => {
   const [puzzlePieces, setPuzzlePieces] = useState<PuzzlePiece[]>([]);
   const [draggingPuzzleIndex, setDraggingPuzzleIndex] = useState<number | null>(null);
   const [dragOverPuzzleIndex, setDragOverPuzzleIndex] = useState<number | null>(null);
+  const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_TIME_LIMIT_SECONDS);
   const puzzleDragRef = React.useRef<{ index: number; startX: number; startY: number; dragging: boolean } | null>(null);
 
   // 3. 카드 뒤집기 전용 상태
   const [matchCards, setMatchCards] = useState<MatchCard[]>([]);
   const [flippedIndices, setFlippedIndices] = useState<number[]>([]);
   const [revealActive, setRevealActive] = useState(false); // 시작 시 2초 공개 중인지 여부
-  const [gameTimeLeft, setGameTimeLeft] = useState(60); // 60초 시간 제한
+  const [gameTimeLeft, setGameTimeLeft] = useState(MATCH_TIME_LIMIT_SECONDS);
   const [isGameOver, setIsGameOver] = useState(false);
 
   // 티켓 상태 조회 API 호출
@@ -423,6 +509,22 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, revealActive, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
 
+  // 회전 퍼즐 120초 인게임 타이머 구동
+  useEffect(() => {
+    if (activeGame !== 'puzzle' || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (puzzleTimeLeft <= 0) {
+      const timeout = window.setTimeout(() => {
+        setIsGameOver(true);
+        submitResult({ success: false });
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+    const timer = window.setInterval(() => {
+      setPuzzleTimeLeft(prev => prev - 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeGame, countdownLeft, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
+
   // 인물 퀴즈 15초 제한시간 타이머 구동
   useEffect(() => {
     if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameResult || selectedQuizChoice) return;
@@ -479,7 +581,8 @@ export const ArcadeTab: React.FC = () => {
     setSelectedQuizChoice(null);
     setFlippedIndices([]);
     setIsGameOver(false);
-    setGameTimeLeft(60);
+    setGameTimeLeft(MATCH_TIME_LIMIT_SECONDS);
+    setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
 
     try {
       const res = await apiFetch('/minigames/start', {
@@ -513,6 +616,7 @@ export const ArcadeTab: React.FC = () => {
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
         setPuzzlePieces(createInitialPuzzlePieces());
+        setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
       } else if (type === 'match') {
         setRevealActive(true); // 2초 선공개 활성화
 
@@ -565,7 +669,7 @@ export const ArcadeTab: React.FC = () => {
   };
 
   const handleRotatePiece = (index: number) => {
-    if (gameBusy || gameResult || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
     const newPieces = puzzlePieces.map((piece, pieceIndex) =>
       pieceIndex === index ? { ...piece, rotation: piece.rotation + 90 } : piece
     );
@@ -575,6 +679,7 @@ export const ArcadeTab: React.FC = () => {
 
   const handleSwapPuzzlePieces = (fromIndex: number, toIndex: number) => {
     if (
+      isGameOver ||
       fromIndex === toIndex ||
       fromIndex < 0 ||
       toIndex < 0 ||
@@ -601,7 +706,7 @@ export const ArcadeTab: React.FC = () => {
   };
 
   const handlePuzzlePointerDown = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
-    if (gameBusy || gameResult || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
     if (event.button !== 0) return;
     puzzleDragRef.current = { index, startX: event.clientX, startY: event.clientY, dragging: false };
     setDragOverPuzzleIndex(null);
@@ -613,6 +718,7 @@ export const ArcadeTab: React.FC = () => {
   };
 
   const handlePuzzlePointerMove = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    if (isGameOver) return;
     const drag = puzzleDragRef.current;
     if (!drag || drag.index !== index) return;
 
@@ -630,6 +736,10 @@ export const ArcadeTab: React.FC = () => {
   };
 
   const handlePuzzlePointerUp = (event: React.PointerEvent<HTMLButtonElement>, index: number) => {
+    if (isGameOver) {
+      handlePuzzlePointerCancel();
+      return;
+    }
     const drag = puzzleDragRef.current;
     if (!drag || drag.index !== index) return;
 
@@ -854,7 +964,7 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <h3 className="mt-4 text-sm font-black text-foreground">3x4 회전 퍼즐</h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하는 직소 퍼즐입니다.
+                120초 안에 섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하는 직소 퍼즐입니다.
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-border/40 flex items-center justify-between">
@@ -999,11 +1109,7 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
           {activeGame === 'quiz' && (() => {
-            // 1. 모션 블러: 기존 강도의 1/5 수준으로 SVG feGaussianBlur 파라미터 계산
-            const rad = (quizBlurAngle * Math.PI) / 180;
-            const stdDev = (quizIntensity / 100) * QUIZ_MOTION_MAX_BLUR_PX;
-            const stdX = Math.abs(stdDev * Math.cos(rad));
-            const stdY = Math.abs(stdDev * Math.sin(rad));
+            const motionKernel = createMotionBlurKernel(quizBlurAngle, quizIntensity);
 
             return (
               <div className="space-y-5 flex flex-col items-center">
@@ -1043,8 +1149,26 @@ export const ArcadeTab: React.FC = () => {
                 {/* 모션 블러용 인라인 SVG 필터 (조건부 렌더링) */}
                 {quizBlurType === 'motion' && (
                   <svg className="absolute w-0 h-0 pointer-events-none" style={{ visibility: 'hidden' }}>
-                    <filter id="quiz-motion-blur">
-                      <feGaussianBlur stdDeviation={`${stdX} ${stdY}`} />
+                    <filter
+                      id="quiz-motion-blur"
+                      x="-30%"
+                      y="-30%"
+                      width="160%"
+                      height="160%"
+                      colorInterpolationFilters="sRGB"
+                    >
+                      {motionKernel && (
+                        <feConvolveMatrix
+                          order={`${motionKernel.order} ${motionKernel.order}`}
+                          kernelMatrix={motionKernel.matrix}
+                          divisor={motionKernel.divisor}
+                          targetX={motionKernel.radius}
+                          targetY={motionKernel.radius}
+                          edgeMode="duplicate"
+                          preserveAlpha="true"
+                          kernelUnitLength={`${motionKernel.kernelUnitLength} ${motionKernel.kernelUnitLength}`}
+                        />
+                      )}
                     </filter>
                   </svg>
                 )}
@@ -1075,9 +1199,9 @@ export const ArcadeTab: React.FC = () => {
                       src={gameData.image_url}
                       alt="Quiz card"
                       style={{
-                        filter: `url(#quiz-motion-blur) contrast(1.05)`,
+                        filter: motionKernel ? 'url(#quiz-motion-blur) contrast(1.08)' : 'contrast(1.05)',
                       }}
-                      className="h-full w-full object-cover select-none pointer-events-none"
+                      className="h-full w-full object-cover select-none pointer-events-none transition-[filter] duration-75"
                     />
                   )}
 
@@ -1157,8 +1281,15 @@ export const ArcadeTab: React.FC = () => {
           {/* ======================================================== */}
           {activeGame === 'puzzle' && (
             <div className="space-y-5 flex flex-col items-center">
+              <GameTimeLimit
+                timeLeft={puzzleTimeLeft}
+                totalSeconds={PUZZLE_TIME_LIMIT_SECONDS}
+                dangerSeconds={15}
+                bonusLabel="20초 보너스"
+              />
+
               <p className="text-xs text-muted-foreground text-center font-bold">
-                조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 위치와 회전이 모두 맞으면 완성됩니다!
+                조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 120초 안에 위치와 회전을 모두 맞춰주세요!
               </p>
 
               {/* 가로 3칸 세로 4칸 = 총 12조각 (W 240px, H 320px) */}
@@ -1208,46 +1339,13 @@ export const ArcadeTab: React.FC = () => {
           {activeGame === 'match' && (
             <div className="space-y-4 flex flex-col items-center">
 
-              {/* 귀여운 캡슐형 타이머 & 프로그레스 바 */}
-              <div className="w-full max-w-md flex flex-col gap-2 px-1">
-                <div className="flex items-center justify-between">
-                  {revealActive ? (
-                    <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-full text-xs font-black shadow-sm animate-pulse">
-                      <span>👀</span>
-                      <span>카드를 기억하세요!</span>
-                    </div>
-                  ) : (
-                    <div className={`flex items-center gap-1.5 border px-3 py-1.5 rounded-full text-xs font-black shadow-sm transition-all duration-300 ${gameTimeLeft <= 10
-                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
-                      : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
-                      }`}>
-                      {gameTimeLeft <= 10 ? (
-                        <span className="animate-pulse">🔥</span>
-                      ) : (
-                        <Timer className={`h-3.5 w-3.5 ${gameTimeLeft <= 20 ? 'animate-spin' : ''} text-primary`} />
-                      )}
-                      <span>남은 시간: <strong className="font-mono text-sm">{gameTimeLeft}</strong>초</span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1 bg-secondary/50 border border-border/40 px-2.5 py-1.5 rounded-full text-[10px] text-muted-foreground font-extrabold">
-                    <span>⏱️ 30초 보너스</span>
-                  </div>
-                </div>
-
-                {/* 프로그레스 바 게이지 */}
-                {!revealActive && (
-                  <div className="w-full h-2 rounded-full bg-secondary/60 border border-border/20 overflow-hidden shadow-inner relative">
-                    <div
-                      className={`h-full rounded-full transition-all duration-1000 ease-linear ${gameTimeLeft <= 10
-                        ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
-                        : 'bg-gradient-to-r from-emerald-400 to-primary shadow-[0_0_8px_rgba(16,185,129,0.4)]'
-                        }`}
-                      style={{ width: `${(gameTimeLeft / 60) * 100}%` }}
-                    />
-                  </div>
-                )}
-              </div>
+              <GameTimeLimit
+                timeLeft={gameTimeLeft}
+                totalSeconds={MATCH_TIME_LIMIT_SECONDS}
+                dangerSeconds={10}
+                bonusLabel="30초 보너스"
+                pausedLabel={revealActive ? '카드를 기억하세요!' : undefined}
+              />
 
               {/* 3x4 / 4x3 반응형 카드 매칭 보드 */}
               <div className="grid grid-cols-3 gap-3 w-full max-w-md sm:grid-cols-4 aspect-[4/3] p-1.5 rounded-2xl bg-secondary/20 border border-border/40">
