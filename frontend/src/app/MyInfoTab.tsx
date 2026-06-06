@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from './AppContext';
 import {
   User,
@@ -21,6 +21,7 @@ import { ProfileModal } from './ProfileModal';
 import { cardImage } from '@/lib/cosmetics';
 import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ImageCropModal } from './ImageCropModal';
 
 interface UserCard {
   id: number;
@@ -61,13 +62,18 @@ export const MyInfoTab: React.FC = () => {
 
   // 스트리머 프로필 커스텀 이미지 업로드 상태 (지연 업로드)
   const [previewBlob, setPreviewBlob] = useState<string | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
   const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
+
+  // 크롭 모달 상태
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
+  // 크롭 완료된 Blob (실제 업로드에 사용)
+  const [croppedBlob, setCroppedBlob] = useState<Blob | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -274,27 +280,47 @@ export const MyInfoTab: React.FC = () => {
     }
   };
 
-  // 이미지 선택 시 blob 생성하여 지연 렌더링 (Lazy Preview) 및 모달 오픈
+  // 이미지 선택 시 크롭 모달 먼저 오픈 (원본 ObjectURL 저장)
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, star: number) => {
     const file = e.target.files?.[0];
     if (file) {
       setUploadStar(star);
-      setImageFile(file);
-      setPreviewBlob(URL.createObjectURL(file));
-      setUploadModalOpen(true);
+      // 원본 이미지 소스를 크롭 모달에 전달
+      const objectUrl = URL.createObjectURL(file);
+      setOriginalImageSrc(objectUrl);
+      setCropModalOpen(true);
       setImageDisclaimerChecked(false);
     }
     // 같은 파일 재선택을 허용하기 위해 입력값 초기화
     e.target.value = '';
   };
 
+  // 크롭 완료 콜백: croppedBlob을 저장하고 동의 모달 오픈
+  const handleCropConfirm = useCallback((blob: Blob) => {
+    setCroppedBlob(blob);
+    // 크롭된 이미지 미리보기 URL 생성
+    setPreviewBlob(URL.createObjectURL(blob));
+    setCropModalOpen(false);
+    setUploadModalOpen(true);
+  }, []);
+
+  // 크롭 취소
+  const handleCropCancel = useCallback(() => {
+    setCropModalOpen(false);
+    if (originalImageSrc) {
+      URL.revokeObjectURL(originalImageSrc);
+      setOriginalImageSrc(null);
+    }
+  }, [originalImageSrc]);
+
   const handleUploadImage = async () => {
-    if (!imageFile) { toast('변경할 카드의 이미지를 선택해 주세요.'); return; }
+    if (!croppedBlob) { toast('변경할 카드의 이미지를 선택해 주세요.'); return; }
     if (!imageDisclaimerChecked) { toast('이미지 등록 책임 동의 체크박스를 확인해 주세요.'); return; }
 
     setUploading(true);
     const formData = new FormData();
-    formData.append('image', imageFile);
+    // 크롭된 Blob을 WebP 파일로 첨부
+    formData.append('image', croppedBlob, 'card.webp');
     formData.append('channel_id', user.id);
     formData.append('star', String(uploadStar));
 
@@ -308,8 +334,12 @@ export const MyInfoTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast(`${uploadStar}성 카드 이미지가 저장되었습니다.`, 'success');
+        // ObjectURL 메모리 해제
+        if (previewBlob) URL.revokeObjectURL(previewBlob);
+        if (originalImageSrc) URL.revokeObjectURL(originalImageSrc);
         setPreviewBlob(null);
-        setImageFile(null);
+        setCroppedBlob(null);
+        setOriginalImageSrc(null);
         setUploadModalOpen(false);
         refreshUserData();
         fetchInventory();
@@ -319,7 +349,7 @@ export const MyInfoTab: React.FC = () => {
       }
     } catch (e) {
       toast('서버 전송 중 에러가 발생했습니다.');
-      setImageFile(null);
+      setCroppedBlob(null);
     } finally {
       setUploading(false);
     }
@@ -568,29 +598,41 @@ export const MyInfoTab: React.FC = () => {
           })}
         </div>
 
-        {/* 업로드 동의 모달 */}
+        {/* 크롭 모달 — 파일 선택 직후 첫 번째로 표시 */}
+        {cropModalOpen && originalImageSrc && (
+          <ImageCropModal
+            imageSrc={originalImageSrc}
+            star={uploadStar}
+            onConfirm={handleCropConfirm}
+            onCancel={handleCropCancel}
+          />
+        )}
+
+        {/* 업로드 동의 모달 — 크롭 완료 후 두 번째로 표시 */}
         {uploadModalOpen && previewBlob && (
           <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
             <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
               <div className="flex items-center justify-between border-b border-border/60 pb-3">
                 <h3 className="text-base font-bold flex items-center gap-2"><Camera className="h-4.5 w-4.5 text-primary" /> {uploadStar === 0 ? '0성' : `${uploadStar}성`} 카드 이미지 업로드</h3>
-                <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setImageFile(null); setImageDisclaimerChecked(false); }} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+                <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setCroppedBlob(null); setImageDisclaimerChecked(false); }} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
               </div>
               <div className="mt-4 space-y-4 flex flex-col items-center">
-                <div className="relative flex h-60 w-36 flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary p-3 shadow-md">
+                {/* 크롭된 결과 미리보기 (5:8 비율 카드 형태) */}
+                <div className="relative flex h-60 w-[37.5px] flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary shadow-md" style={{ width: '150px', height: '240px' }}>
                   <div className="absolute inset-0 z-0">
-                    <img src={previewBlob} alt="Card Preview Modal" className="h-full w-full object-cover opacity-80" />
+                    <img src={previewBlob} alt="크롭된 카드 미리보기" className="h-full w-full object-cover opacity-90" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/35 z-10"></div>
                   </div>
-                  <div className="relative z-20 flex justify-between">
+                  <div className="relative z-20 flex justify-between p-2">
                     <span className="rounded bg-primary px-1.5 py-0.5 text-[8px] font-bold text-primary-foreground">LIVE</span>
                   </div>
-                  <div className="relative z-20 space-y-0.5 text-white">
+                  <div className="relative z-20 space-y-0.5 text-white p-2">
                     <div className="flex gap-0.5">{uploadStar > 0 && Array.from({ length: uploadStar }, (_, i) => <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>)}</div>
                     <h4 className="text-xs font-bold truncate drop-shadow">{user.username}</h4>
                     <p className="text-[8px] text-zinc-300">{uploadStar === 0 ? '0성 카드' : `${uploadStar}성 카드`}</p>
                   </div>
                 </div>
+                <p className="text-[11px] text-muted-foreground">위 이미지가 카드에 적용됩니다. 다시 편집하려면 취소 후 재업로드 하세요.</p>
                 <div className="rounded-lg bg-secondary/30 border border-border/50 p-3 space-y-2.5 w-full">
                   <div className="text-[0.62rem] text-muted-foreground leading-relaxed">
                     <p className="font-bold text-foreground/80 mb-1">⚠️ 이미지 등록 법적 책임 조항</p>
@@ -603,7 +645,7 @@ export const MyInfoTab: React.FC = () => {
                 </div>
               </div>
               <div className="mt-6 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
-                <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setImageFile(null); setImageDisclaimerChecked(false); }} className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80">취소</button>
+                <button onClick={() => { setUploadModalOpen(false); setPreviewBlob(null); setCroppedBlob(null); setImageDisclaimerChecked(false); }} className="rounded-lg px-4 py-2 text-xs font-bold bg-secondary text-muted-foreground hover:bg-secondary/80">취소</button>
                 <button onClick={handleUploadImage} disabled={uploading || !imageDisclaimerChecked} className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none">
                   {uploading ? '저장 중...' : '카드 이미지 최종 저장'}
                 </button>
