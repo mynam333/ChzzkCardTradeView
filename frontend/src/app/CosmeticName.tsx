@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { nameEffectClass, nameEffectStyle, ensureCosmeticCss } from '@/lib/cosmetics';
+import {
+  ensureCosmeticCss,
+  ensureFont,
+  nameEffectClass,
+  nameEffectFontStyle,
+  nameEffectStyle
+} from '@/lib/cosmetics';
 
 interface EffectLike { style_json?: string | null; font_url?: string | null; font_family?: string | null }
 
@@ -14,11 +20,12 @@ export const CosmeticName: React.FC<{ effect?: EffectLike | null; className?: st
   const cls = nameEffectClass(effect);
   useEffect(() => {
     ensureCosmeticCss(effect);
-  }, [effect?.style_json]);
+    ensureFont(effect?.font_url, effect?.font_family);
+  }, [effect?.style_json, effect?.font_url, effect?.font_family]);
   return (
     <span
       className={`${className || ''}${cls ? ` ${cls}` : ''}`}
-      style={cls ? undefined : nameEffectStyle(effect)}
+      style={cls ? nameEffectFontStyle(effect) : nameEffectStyle(effect)}
     >
       {children}
     </span>

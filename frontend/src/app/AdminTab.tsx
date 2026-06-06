@@ -1989,12 +1989,15 @@ export const AdminTab: React.FC = () => {
 
             {shopForm.type === 'name_effect' && (
               <div className="grid grid-cols-2 gap-2">
-                <input type="text" placeholder="웹폰트 URL (선택)" value={shopForm.font_url}
+                <input type="text" placeholder="웹폰트 CSS 또는 .woff2 URL (선택)" value={shopForm.font_url}
                   onChange={(e) => setShopForm({ ...shopForm, font_url: e.target.value })}
                   className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
                 <input type="text" placeholder="font-family (선택)" value={shopForm.font_family}
                   onChange={(e) => setShopForm({ ...shopForm, font_family: e.target.value })}
                   className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                <p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">
+                  직접 폰트 파일 URL을 사용할 때는 font-family도 입력하세요. 클래스 기반 효과에도 미리보기와 실제 카드 모두 동일하게 적용됩니다.
+                </p>
               </div>
             )}
 

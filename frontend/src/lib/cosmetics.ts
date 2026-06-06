@@ -23,24 +23,62 @@ export const parseStyle = (json?: string | null): React.CSSProperties => {
 };
 
 const loadedFonts = new Set<string>();
+const FONT_FILE_PATTERN = /\.(?:woff2?|ttf|otf)(?:[?#].*)?$/i;
 
-/** 이름 이펙트용 웹폰트를 1회만 <link>로 주입 */
-export const ensureFont = (url?: string | null) => {
-  if (!url || typeof document === 'undefined' || loadedFonts.has(url)) return;
-  loadedFonts.add(url);
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = url;
-  document.head.appendChild(link);
+const cssString = (value: string): string =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ');
+
+const fontFormat = (url: string): string => {
+  const pathname = url.split(/[?#]/, 1)[0].toLowerCase();
+  if (pathname.endsWith('.woff2')) return 'woff2';
+  if (pathname.endsWith('.woff')) return 'woff';
+  if (pathname.endsWith('.ttf')) return 'truetype';
+  return 'opentype';
 };
 
-/** 이름 이펙트 객체로부터 적용할 스타일(폰트 포함) 생성 — 레거시 인라인 방식 */
+/**
+ * 이름 이펙트용 웹폰트를 1회만 주입합니다.
+ * - CSS URL(Google Fonts 등): <link rel="stylesheet">
+ * - 폰트 파일 URL(.woff2/.woff/.ttf/.otf): font_family 이름으로 @font-face 생성
+ */
+export const ensureFont = (url?: string | null, family?: string | null) => {
+  const normalizedUrl = url?.trim();
+  if (!normalizedUrl || typeof document === 'undefined') return;
+
+  const normalizedFamily = family?.trim();
+  const isFontFile = FONT_FILE_PATTERN.test(normalizedUrl);
+  const key = `${isFontFile ? 'file' : 'css'}:${normalizedUrl}:${normalizedFamily || ''}`;
+  if (loadedFonts.has(key)) return;
+
+  if (isFontFile) {
+    if (!normalizedFamily) return;
+    const style = document.createElement('style');
+    style.setAttribute('data-name-effect-font', normalizedFamily);
+    style.textContent = `@font-face{font-family:"${cssString(normalizedFamily)}";src:url("${cssString(normalizedUrl)}") format("${fontFormat(normalizedUrl)}");font-display:swap;}`;
+    document.head.appendChild(style);
+  } else {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = normalizedUrl;
+    document.head.appendChild(link);
+  }
+
+  loadedFonts.add(key);
+};
+
+/** 이름 이펙트 객체로부터 적용할 폰트 스타일 생성 */
+export const nameEffectFontStyle = (
+  effect?: { font_family?: string | null } | null
+): React.CSSProperties => {
+  const family = effect?.font_family?.trim();
+  return family ? { fontFamily: family } : {};
+};
+
+/** 이름 이펙트 객체로부터 적용할 스타일(폰트 포함) 생성 - 레거시 인라인 방식 */
 export const nameEffectStyle = (effect?: { style_json?: string | null; font_url?: string | null; font_family?: string | null } | null): React.CSSProperties => {
   if (!effect) return {};
-  ensureFont(effect.font_url);
   const style = parseStyle(effect.style_json);
-  if (effect.font_family) style.fontFamily = effect.font_family;
-  return style;
+  return { ...style, ...nameEffectFontStyle(effect) };
 };
 
 /**
