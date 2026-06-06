@@ -304,7 +304,7 @@ export const MyInfoTab: React.FC = () => {
       <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
           <div className="flex items-center gap-4 flex-1">
-            <img src={user.avatarUrl} alt="Avatar" className="h-16 w-16 rounded-full border border-primary/20 bg-secondary" />
+            <img src={user.avatarUrl} alt="Avatar" className="h-16 w-16 rounded-full border border-primary/20 bg-secondary object-cover" />
             <div>
               <h2 className="text-xl font-bold flex items-center gap-2">
                 {user.username} <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{user.role}</span>

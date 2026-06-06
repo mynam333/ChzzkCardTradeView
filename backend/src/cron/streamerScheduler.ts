@@ -1,48 +1,9 @@
 import cron from 'node-cron';
-import { streamerRepository, userRepository } from '../repositories';
+import { streamerRepository } from '../repositories';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
-import { fetchChzzkChannelProfile, ChzzkProfile, refreshChzzkToken } from '../services/chzzkService';
+import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
-import { decryptToken, encryptToken } from '../services/cryptoService';
 import { acquireSchedulerLock } from '../services/schedulerLock';
-
-/**
- * 스트리머(유저)의 유효한 치지직 access_token을 반환합니다.
- * 만료 임박(5분 이내) 시 refresh_token으로 갱신 후 DB에 저장합니다.
- */
-const getValidStreamerAccessToken = async (channelId: string): Promise<string | undefined> => {
-  try {
-    const streamerUser = await userRepository.findById(channelId);
-    if (!streamerUser?.access_token) return undefined;
-
-    const accessToken = decryptToken(streamerUser.access_token) || undefined;
-    const expiresAt = streamerUser.token_expires_at ? new Date(streamerUser.token_expires_at).getTime() : 0;
-    const needsRefresh = expiresAt > 0 && Date.now() >= expiresAt - 5 * 60 * 1000;
-
-    if (needsRefresh && streamerUser.refresh_token) {
-      const refresh = decryptToken(streamerUser.refresh_token);
-      if (refresh) {
-        const refreshed = await refreshChzzkToken(refresh);
-        if (refreshed) {
-          const newExpiry = refreshed.expiresIn
-            ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString()
-            : null;
-          await userRepository.updateTokens(
-            channelId,
-            encryptToken(refreshed.accessToken),
-            encryptToken(refreshed.refreshToken),
-            newExpiry
-          );
-          console.log(`[LiveStatusScheduler] 치지직 토큰 갱신 완료 (대상: ${channelId})`);
-          return refreshed.accessToken;
-        }
-      }
-    }
-    return accessToken;
-  } catch {
-    return undefined;
-  }
-};
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
 const SCHEDULE_INTERVAL_MINUTES = 2;
@@ -251,7 +212,8 @@ const buildScheduleResult = (
       consumed_chats: polled ? consumedChats : 0,
       polled,
       is_active: openLive,
-      follower_count: followerCount
+      follower_count: followerCount,
+      logo_url: polled ? (profile?.logoUrl || null) : null
     },
     history: { channel_id: streamer.channel_id, value: finalVal }
   };
@@ -317,7 +279,7 @@ export const syncAllStreamersLiveStatus = async () => {
 
           // 채팅 수집 소켓 연결/해제 관리 (방송 켬 트랜지션은 결과의 add_broadcast_count로 일괄 반영)
           if (profile.openLive && profile.chatChannelId) {
-            const streamerAccessToken = await getValidStreamerAccessToken(streamer.channel_id);
+            const streamerAccessToken = await getValidUserAccessToken(streamer.channel_id);
             chatManager.connect(streamer.channel_id, profile.chatChannelId, streamerAccessToken);
           } else {
             chatManager.disconnect(streamer.channel_id);

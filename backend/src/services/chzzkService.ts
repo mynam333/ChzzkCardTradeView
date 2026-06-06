@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+import { decryptToken, encryptToken } from './cryptoService';
+import { userRepository } from '../repositories';
 
 dotenv.config();
 
@@ -118,5 +120,95 @@ export const fetchChzzkChannelProfile = async (
       followerCount: 150,
       openLive: false
     };
+  }
+};
+
+/**
+ * 유저의 유효한 치지직 access_token을 반환합니다.
+ * 만료 임박(5분 이내) 시 refresh_token으로 갱신 후 DB에 저장합니다.
+ */
+export const getValidUserAccessToken = async (userId: string): Promise<string | undefined> => {
+  try {
+    const user = await userRepository.findById(userId);
+    if (!user || !user.access_token) return undefined;
+
+    const accessToken = decryptToken(user.access_token) || undefined;
+    const expiresAt = user.token_expires_at ? new Date(user.token_expires_at).getTime() : 0;
+    const needsRefresh = expiresAt > 0 && Date.now() >= expiresAt - 5 * 60 * 1000;
+
+    if (needsRefresh && user.refresh_token) {
+      const refresh = decryptToken(user.refresh_token);
+      if (refresh) {
+        const refreshed = await refreshChzzkToken(refresh);
+        if (refreshed) {
+          const newExpiry = refreshed.expiresIn
+            ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString()
+            : null;
+          await userRepository.updateTokens(
+            userId,
+            encryptToken(refreshed.accessToken),
+            encryptToken(refreshed.refreshToken),
+            newExpiry
+          );
+          console.log(`[ChzzkService] 치지직 토큰 갱신 완료 (유저: ${userId})`);
+          return refreshed.accessToken;
+        }
+      }
+    }
+    return accessToken;
+  } catch (err: any) {
+    console.warn(`[ChzzkService] 토큰 갱신 중 에러 발생 (유저: ${userId}):`, err.message);
+    return undefined;
+  }
+};
+
+/**
+ * 치지직 access_token을 사용하여 최신 유저 프로필 정보를 조회합니다.
+ */
+export const fetchChzzkUserProfile = async (
+  userId: string,
+  accessToken: string
+): Promise<{ nickname: string; profileImageUrl: string | null } | null> => {
+  try {
+    const profileHeaders = {
+      'Authorization': `Bearer ${accessToken}`,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
+    };
+
+    const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {
+      headers: profileHeaders
+    });
+
+    let nickname = '';
+    if (profileResponse.ok) {
+      const profileData = (await profileResponse.json()) as any;
+      if (profileData.code === 200 && profileData.content) {
+        nickname = profileData.content.nickname || '';
+      }
+    }
+
+    if (!nickname) return null;
+
+    let profileImageUrl: string | null = null;
+    try {
+      const channelProfileResponse = await fetch(`https://api.chzzk.naver.com/service/v1/channels/${userId}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+      if (channelProfileResponse.ok) {
+        const channelData = (await channelProfileResponse.json()) as any;
+        if (channelData.code === 200 && channelData.content) {
+          profileImageUrl = channelData.content.channelImageUrl || null;
+        }
+      }
+    } catch (e) {
+      console.warn(`[ChzzkService] 유저 채널 프로필 이미지 조회 실패 (대상: ${userId}):`, e);
+    }
+
+    return { nickname, profileImageUrl };
+  } catch (e: any) {
+    console.error(`[ChzzkService] 유저 프로필 조회 실패 (대상: ${userId}):`, e.message);
+    return null;
   }
 };

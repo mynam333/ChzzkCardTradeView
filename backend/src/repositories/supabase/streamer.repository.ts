@@ -257,6 +257,9 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       if (r.polled) {
         patch.is_active = r.is_active;
         patch.follower_count = r.follower_count;
+        if (r.logo_url) {
+          patch.logo_url = r.logo_url;
+        }
       }
       await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
       if (r.add_minutes > 0) {

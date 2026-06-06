@@ -445,6 +445,8 @@ BEGIN
                                   THEN (u->>'is_active')::BOOLEAN ELSE is_active END,
       follower_count       = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
                                   THEN (u->>'follower_count')::INTEGER ELSE follower_count END,
+      logo_url             = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
+                                  THEN COALESCE(u->>'logo_url', logo_url) ELSE logo_url END,
       updated_at           = NOW()
     WHERE channel_id = u->>'channel_id';
   END LOOP;

@@ -63,6 +63,8 @@ export interface StreamerScheduleResult {
   is_active: boolean;
   /** polled === true 일 때만 반영되는 팔로워 수 */
   follower_count: number;
+  /** 치지직 API에서 불러온 프로필 이미지 URL (polled === true 일 때 다르면 업데이트) */
+  logo_url?: string | null;
 }
 
 export interface Coupon {

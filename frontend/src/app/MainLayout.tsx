@@ -118,7 +118,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         ) : user ? (
           <div className="mb-6 rounded-xl bg-secondary/50 p-4 border border-border">
             <div className="flex items-center gap-3">
-              <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card" />
+              <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card object-cover" />
               <div className="overflow-hidden">
                 <p className="truncate text-sm font-semibold">{user.username}</p>
                 <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">

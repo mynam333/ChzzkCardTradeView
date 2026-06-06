@@ -7,7 +7,7 @@ import {
   marketRepository
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
-import { fetchChzzkChannelProfile } from '../services/chzzkService';
+import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 
 /**
@@ -23,6 +23,25 @@ export const getUserMe = async (req: Request, res: Response) => {
     const user = await userRepository.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+    }
+
+    // 치지직 최신 프로필/닉네임 동기화
+    try {
+      const accessToken = await getValidUserAccessToken(userId);
+      if (accessToken) {
+        const profile = await fetchChzzkUserProfile(userId, accessToken);
+        if (profile) {
+          const { nickname, profileImageUrl } = profile;
+          if (user.username !== nickname || user.avatar_url !== profileImageUrl) {
+            await userRepository.updateProfile(userId, nickname, profileImageUrl);
+            user.username = nickname;
+            user.avatar_url = profileImageUrl;
+            console.log(`[PlayController] 유저 정보 업데이트 완료 (ID: ${userId}, 닉네임: ${nickname})`);
+          }
+        }
+      }
+    } catch (syncErr: any) {
+      console.warn(`[PlayController] 유저 정보 로그인 동기화 실패 (기존 정보 사용):`, syncErr.message);
     }
 
     // 무료 뽑기 간격 및 가챠 비용 정보 추가
