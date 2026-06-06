@@ -53,22 +53,22 @@ export const getUserMe = async (req: Request, res: Response) => {
 
     let segmentStartIso: string | null = null;
     let nextFreeDrawAt: string | null = null;
-    
+
     if (intervalHours > 0) {
       const now = new Date();
       const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-      
+
       const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
-      const kstYear  = kstDate.getUTCFullYear();
+      const kstYear = kstDate.getUTCFullYear();
       const kstMonth = kstDate.getUTCMonth();
-      const kstDay   = kstDate.getUTCDate();
-      
+      const kstDay = kstDate.getUTCDate();
+
       const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
-      
-      const diffMs     = now.getTime() - midnightKstUtcMs;
+
+      const diffMs = now.getTime() - midnightKstUtcMs;
       const intervalMs = intervalHours * 60 * 60 * 1000;
-      const count      = Math.floor(diffMs / intervalMs);
-      
+      const count = Math.floor(diffMs / intervalMs);
+
       segmentStartIso = new Date(midnightKstUtcMs + count * intervalMs).toISOString();
       nextFreeDrawAt = new Date(midnightKstUtcMs + (count + 1) * intervalMs).toISOString();
     }
@@ -90,7 +90,7 @@ export const getUserMe = async (req: Request, res: Response) => {
     return res.status(200).json({
       id: user.id,
       username: user.username,
-      avatarUrl: user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`,
+      avatarUrl: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
       role: user.role,
       titles,
       ownedTitles,
@@ -124,7 +124,7 @@ export const searchUsers = async (req: Request, res: Response) => {
       .map((u) => ({
         id: u.id,
         username: u.username,
-        avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`
+        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`
       }));
     return res.status(200).json(mapped);
   } catch (err: any) {
@@ -174,7 +174,7 @@ export const getMyBlocks = async (req: Request, res: Response) => {
     return res.status(200).json(users.map((u) => ({
       id: u.id,
       username: u.username,
-      avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`
+      avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`
     })));
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '차단 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -293,7 +293,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
       username: user.username,
       role: user.role,
       titles,
-      avatar_url: user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`,
+      avatar_url: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
       point: user.point,
       card_count: cards.length,
       unique_count: collection.length,
@@ -327,7 +327,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
       return {
         id: u.id,
         username: u.username,
-        avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`,
+        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`,
         point: u.point,
         card_count: u.card_count,
         total_asset: u.total_asset,
@@ -398,17 +398,17 @@ export const drawCard = async (req: Request, res: Response) => {
       // KST 기준 오늘 날짜의 연·월·일 추출
       // now + KST_OFFSET_MS → UTC 메서드로 읽으면 KST 날짜로 해석 가능
       const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
-      const kstYear  = kstDate.getUTCFullYear();
+      const kstYear = kstDate.getUTCFullYear();
       const kstMonth = kstDate.getUTCMonth();
-      const kstDay   = kstDate.getUTCDate();
+      const kstDay = kstDate.getUTCDate();
 
       // KST 00:00:00 → UTC 타임스탬프 (= 전날 UTC 15:00)
       const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
 
       // 자정 이후 경과 시간으로 현재 세그먼트 번호 산출
-      const diffMs     = now.getTime() - midnightKstUtcMs;
+      const diffMs = now.getTime() - midnightKstUtcMs;
       const intervalMs = intervalHours * 60 * 60 * 1000;
-      const count      = Math.floor(diffMs / intervalMs);
+      const count = Math.floor(diffMs / intervalMs);
 
       // 현재 세그먼트 시작 시각(UTC ISO)
       segmentStartIso = new Date(midnightKstUtcMs + count * intervalMs).toISOString();
@@ -748,10 +748,10 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
     const recentMarketPrice = await marketRepository.getRecentPrice(channel_id);
 
     return res.status(200).json({
-      streamer: { 
-        ...streamer, 
+      streamer: {
+        ...streamer,
         prev_value: prevValue24h,
-        recent_market_price: recentMarketPrice 
+        recent_market_price: recentMarketPrice
       },
       history
     });

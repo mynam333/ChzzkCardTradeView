@@ -37,12 +37,12 @@ const ChzzkCallbackContent: React.FC = () => {
         }
 
         const data = await response.json();
-        
+
         // 세션 및 사용자 정보 로컬스토리지 보존
         const sessionUser = {
           id: data.user.id,
           username: data.user.username,
-          avatarUrl: data.user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${data.user.id}`,
+          avatarUrl: data.user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${data.user.id}`,
           role: data.user.role,
           titles: [],
           ownedTitles: [],

@@ -42,9 +42,9 @@ export const AdminTitlesTab: React.FC = () => {
   const iconOptions = useMemo(() => suggestedIcons.filter((name) => icons[name as keyof typeof icons]), []);
   const selectableUsers = selectedTitle
     ? users.filter((user) => {
-        const ownsTitle = user.titles.some((title) => title.id === selectedTitle.id);
-        return bulkMode === 'award' ? !ownsTitle : ownsTitle;
-      })
+      const ownsTitle = user.titles.some((title) => title.id === selectedTitle.id);
+      return bulkMode === 'award' ? !ownsTitle : ownsTitle;
+    })
     : [];
   const allVisibleSelected = selectableUsers.length > 0
     && selectableUsers.every((user) => selectedUserIds.includes(user.id));
@@ -353,7 +353,7 @@ export const AdminTitlesTab: React.FC = () => {
                 />
                 {/* 외부 채널 이미지 도메인이 동적이라 Next Image 최적화 대상에 고정할 수 없습니다. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`} alt="" className="h-9 w-9 rounded-full object-cover" />
+                <img src={user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`} alt="" className="h-9 w-9 rounded-full object-cover" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-bold">{user.username}</p>
                   <p className="truncate text-[9px] text-muted-foreground">{user.id}</p>
