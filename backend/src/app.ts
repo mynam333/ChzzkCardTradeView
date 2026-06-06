@@ -39,16 +39,28 @@ app.use(helmet({
 }));
 
 // 미들웨어 설정
-// CORS: 환경변수로 지정된 오리진 화이트리스트만 허용 (origin 없는 동일출처/서버간 요청은 통과)
-// 거부 시 throw 대신 false 반환하여 500 에러 및 스택 트레이스 노출 방지
-// httpOnly 세션 쿠키 사용을 위해 credentials 허용.
-app.use(cors({
-  origin: (origin, callback) => {
-    const isAllowed = !origin || CORS_ALLOWED_ORIGINS.includes(origin);
-    callback(null, isAllowed);
-  },
-  credentials: true
-}));
+// CORS: /api/image-proxy 요청에 대해서는 자격 증명(credentials) 헤더 없이 모든 오리진(*)의 리소스 로딩을 완전 허용합니다.
+// (일반 웹사이트 이미지 임베드 및 html-to-image 캡처 시 브라우저단 CORS 충돌 및 깨짐 현상을 근본적으로 예방합니다.)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/image-proxy') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    return next();
+  }
+  // 그 외 일반 API 요청들은 환경변수로 지정된 오리진 화이트리스트만 허용하며, 쿠키 사용을 위해 credentials를 허용합니다.
+  cors({
+    origin: (origin, callback) => {
+      const isAllowed = !origin || CORS_ALLOWED_ORIGINS.includes(origin);
+      callback(null, isAllowed);
+    },
+    credentials: true
+  })(req, res, next);
+});
 
 // API 전체 경로에 기본 레이트 리밋 적용 (1분당 최대 100회)
 app.use('/api', rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' }));
