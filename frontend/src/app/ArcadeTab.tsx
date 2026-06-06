@@ -457,15 +457,15 @@ const GameTimeLimit: React.FC<{
   bonusLabel: string;
   pausedLabel?: string;
 }> = ({ timeLeft, totalSeconds, dangerSeconds, bonusLabel, pausedLabel }) => (
-  <div className="w-full max-w-md flex flex-col gap-2 px-1">
+  <div className="flex w-full max-w-2xl flex-col gap-2 px-1">
     <div className="flex items-center justify-between">
       {pausedLabel ? (
-        <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-full text-xs font-black shadow-sm animate-pulse">
+        <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-black text-emerald-400 shadow-sm animate-pulse sm:px-4 sm:py-2 sm:text-sm">
           <span>👀</span>
           <span>{pausedLabel}</span>
         </div>
       ) : (
-        <div className={`flex items-center gap-1.5 border px-3 py-1.5 rounded-full text-xs font-black shadow-sm transition-all duration-300 ${timeLeft <= dangerSeconds
+        <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black shadow-sm transition-all duration-300 sm:px-4 sm:py-2 sm:text-sm ${timeLeft <= dangerSeconds
           ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
           : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
           }`}>
@@ -474,17 +474,17 @@ const GameTimeLimit: React.FC<{
           ) : (
             <Timer className={`h-3.5 w-3.5 ${timeLeft <= dangerSeconds * 2 ? 'animate-spin' : ''} text-primary`} />
           )}
-          <span>남은 시간: <strong className="font-mono text-sm">{timeLeft}</strong>초</span>
+          <span>남은 시간: <strong className="font-mono text-sm sm:text-base">{timeLeft}</strong>초</span>
         </div>
       )}
 
-      <div className="flex items-center gap-1 bg-secondary/50 border border-border/40 px-2.5 py-1.5 rounded-full text-[10px] text-muted-foreground font-extrabold">
+      <div className="flex items-center gap-1 rounded-full border border-border/40 bg-secondary/50 px-2.5 py-1.5 text-[10px] font-extrabold text-muted-foreground sm:px-3.5 sm:py-2 sm:text-xs">
         <span>⏱️ {bonusLabel}</span>
       </div>
     </div>
 
     {!pausedLabel && (
-      <div className="w-full h-2 rounded-full bg-secondary/60 border border-border/20 overflow-hidden shadow-inner relative">
+      <div className="relative h-2 w-full overflow-hidden rounded-full border border-border/20 bg-secondary/60 shadow-inner sm:h-2.5">
         <div
           className={`h-full rounded-full transition-all duration-1000 ease-linear ${timeLeft <= dangerSeconds
             ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
@@ -1438,12 +1438,12 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
           {activeGame === 'quiz' && (
-              <div className="flex flex-1 flex-col items-center justify-center space-y-5">
+              <div className="flex flex-1 flex-col items-center justify-center space-y-5 sm:space-y-6">
 
                 {/* 퀴즈 15초 타이머 & 프로그레스 바 */}
-                <div className="w-full max-w-xs flex flex-col gap-2 px-1">
+                <div className="flex w-full max-w-2xl flex-col gap-2 px-1">
                   <div className="flex items-center justify-between">
-                    <div className={`flex items-center gap-1.5 border px-2.5 py-1 rounded-full text-[10px] font-black shadow-sm transition-all duration-300 ${quizTimeLeft <= 5
+                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm transition-all duration-300 sm:px-4 sm:py-2 sm:text-sm ${quizTimeLeft <= 5
                       ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
                       : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
                       }`}>
@@ -1452,16 +1452,16 @@ export const ArcadeTab: React.FC = () => {
                       ) : (
                         <Timer className={`h-3 w-3 ${quizTimeLeft <= 8 ? 'animate-spin' : ''} text-primary`} />
                       )}
-                      <span>남은 시간: <strong className="font-mono text-xs">{quizTimeLeft}</strong>초</span>
+                      <span>남은 시간: <strong className="font-mono text-xs sm:text-base">{quizTimeLeft}</strong>초</span>
                     </div>
 
-                    <span className="bg-secondary/80 px-2 py-0.5 rounded text-[9px] text-muted-foreground font-black">
+                    <span className="rounded bg-secondary/80 px-2 py-0.5 text-[9px] font-black text-muted-foreground sm:px-3 sm:py-1.5 sm:text-xs">
                       3초 스피드 보너스 (+200 P)
                     </span>
                   </div>
 
                   {/* 프로그레스 바 게이지 */}
-                  <div className="w-full h-1.5 rounded-full bg-secondary/60 border border-border/20 overflow-hidden shadow-inner relative">
+                  <div className="relative h-1.5 w-full overflow-hidden rounded-full border border-border/20 bg-secondary/60 shadow-inner sm:h-2.5">
                     <div
                       className={`h-full rounded-full transition-all duration-1000 ease-linear ${quizTimeLeft <= 5
                         ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
@@ -1473,7 +1473,7 @@ export const ArcadeTab: React.FC = () => {
                 </div>
 
                 {/* 카드 이미지 컨테이너 */}
-                <div className="relative aspect-[5/8] w-48 overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-md flex items-center justify-center">
+                <div className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-md">
 
                   {/* 가우시안 블러 모드 */}
                   {quizBlurType === 'gaussian' && (
@@ -1528,15 +1528,15 @@ export const ArcadeTab: React.FC = () => {
 
                   {/* 디테일 데코: 치지직 송출 에러 인터페이스 오버레이 */}
                   {quizIntensity > 0 && (
-                    <div className="absolute top-2.5 left-2.5 px-1.5 py-0.5 rounded bg-black/60 border border-zinc-800/80 text-[8px] font-black text-rose-500 tracking-wider flex items-center gap-1 select-none pointer-events-none animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-600 inline-block animate-ping" />
+                    <div className="pointer-events-none absolute left-2.5 top-2.5 flex select-none items-center gap-1 rounded border border-zinc-800/80 bg-black/60 px-1.5 py-0.5 text-[8px] font-black tracking-wider text-rose-500 animate-pulse sm:left-3.5 sm:top-3.5 sm:px-2 sm:py-1 sm:text-[10px]">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-600 animate-ping sm:h-2 sm:w-2" />
                       <span>DECRYPTING {Math.round(100 - quizIntensity)}%</span>
                     </div>
                   )}
                 </div>
 
-                <div className="text-center space-y-1.5">
-                  <p className="text-xs text-muted-foreground font-black flex items-center justify-center gap-1.5">
+                <div className="space-y-1.5 text-center">
+                  <p className="flex items-center justify-center gap-1.5 text-xs font-black text-muted-foreground sm:text-sm">
                     <span>📡</span>
                     <span>
                       {quizBlurType === 'gaussian' && '가우시안 블러 전송 방식'}
@@ -1545,12 +1545,12 @@ export const ArcadeTab: React.FC = () => {
                       {quizBlurType === 'radial' && '방사형 소용돌이 복원 방식'}
                     </span>
                   </p>
-                  <p className="text-[10px] text-muted-foreground max-w-xs leading-relaxed">
+                  <p className="max-w-lg text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
                     10초 동안 점점 선명해집니다. 누구의 카드인지 보기를 골라주세요!
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5 w-full">
+                <div className="grid w-full max-w-3xl grid-cols-2 gap-2.5 sm:gap-4">
                   {(gameData.choices ?? []).map((choice) => {
                     const isSelected = selectedQuizChoice === choice.channel_id;
                     return (
@@ -1558,7 +1558,7 @@ export const ArcadeTab: React.FC = () => {
                         key={choice.channel_id}
                         onClick={() => handleQuizAnswer(choice.channel_id)}
                         disabled={selectedQuizChoice !== null}
-                        className={`rounded-xl border p-3.5 text-xs font-extrabold transition text-center ${isSelected
+                        className={`rounded-xl border p-3.5 text-center text-xs font-extrabold transition sm:p-5 sm:text-base ${isSelected
                           ? 'border-primary bg-primary/10 text-primary shadow-sm'
                           : 'border-border bg-secondary/30 text-foreground hover:bg-secondary/70'
                           }`}
@@ -1575,7 +1575,7 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 2: 카드 퍼즐 (가로 3칸 세로 4칸 정사각형 조각 3:4 크롭) */}
           {/* ======================================================== */}
           {activeGame === 'puzzle' && (
-            <div className="flex flex-1 flex-col items-center justify-center space-y-5">
+            <div className="flex flex-1 flex-col items-center justify-center space-y-4 sm:space-y-5">
               <GameTimeLimit
                 timeLeft={puzzleTimeLeft}
                 totalSeconds={PUZZLE_TIME_LIMIT_SECONDS}
@@ -1583,13 +1583,13 @@ export const ArcadeTab: React.FC = () => {
                 bonusLabel="30초 보너스"
               />
 
-              <p className="text-xs text-muted-foreground text-center font-bold">
+              <p className="max-w-2xl text-center text-xs font-bold text-muted-foreground sm:text-sm">
                 조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 120초 안에 위치와 회전을 모두 맞춰주세요!
               </p>
 
               {/* 원본의 중앙 3:4 영역을 실제 좌표로 크롭한 뒤 정사각형 12개로 분할 */}
               <div className="rounded-2xl border border-border bg-secondary/20 p-1 shadow-inner">
-                <div className="grid h-[320px] w-[240px] grid-cols-3 grid-rows-4 overflow-hidden rounded-xl touch-none select-none">
+                <div className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-xl touch-none select-none">
                   {puzzlePieces.map((piece, idx) => {
                     const isDragging = draggingPuzzleIndex === idx;
                     const isDropTarget = dragOverPuzzleIndex === idx;
@@ -1616,8 +1616,8 @@ export const ArcadeTab: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 rounded bg-secondary/60 px-2.5 py-1 text-[10px] text-muted-foreground font-bold font-mono">
-                <Clock className="h-3 w-3" /> 모든 조각이 제자리이고 정답 각도이면 자동 완성됩니다.
+              <div className="flex items-center gap-1 rounded bg-secondary/60 px-2.5 py-1 text-[10px] font-bold text-muted-foreground sm:px-3.5 sm:py-2 sm:text-xs">
+                <Clock className="h-3 w-3 sm:h-4 sm:w-4" /> 모든 조각이 제자리이고 정답 각도이면 자동 완성됩니다.
               </div>
             </div>
           )}
@@ -1637,7 +1637,7 @@ export const ArcadeTab: React.FC = () => {
               />
 
               {/* 카드 비율 4:5를 유지하는 3x4 / 4x3 반응형 매칭 보드 */}
-              <div className="grid aspect-[3/5] w-full max-w-xl grid-cols-3 grid-rows-4 gap-2 rounded-2xl border border-border/40 bg-secondary/20 p-1.5 sm:aspect-[16/15] sm:grid-cols-4 sm:grid-rows-3 sm:gap-3">
+              <div className="arcade-match-board grid aspect-[3/5] grid-cols-3 grid-rows-4 gap-2 rounded-2xl border border-border/40 bg-secondary/20 p-1.5 sm:aspect-[16/15] sm:grid-cols-4 sm:grid-rows-3 sm:gap-3 sm:p-2">
                 {matchCards.map((card, idx) => {
                   // 선공개 중이거나 뒤집혔거나 이미 맞춘 경우 앞면 노출
                   const showFront = revealActive || card.isFlipped || card.isMatched;
@@ -1660,8 +1660,8 @@ export const ArcadeTab: React.FC = () => {
                           <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,163,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,163,0.03)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
 
                           {/* 미래형 홀로그램 회전 서클 */}
-                          <div className="absolute w-16 h-16 rounded-full border border-emerald-500/15 flex items-center justify-center animate-[spin_12s_linear_infinite] pointer-events-none">
-                            <div className="w-12 h-12 rounded-full border border-dashed border-emerald-500/35" />
+                          <div className="arcade-match-orbit pointer-events-none absolute flex items-center justify-center rounded-full border border-emerald-500/15 animate-[spin_12s_linear_infinite]">
+                            <div className="h-3/4 w-3/4 rounded-full border border-dashed border-emerald-500/35" />
                           </div>
 
                           {/* 모서리 데코 포인트 */}
@@ -1671,13 +1671,13 @@ export const ArcadeTab: React.FC = () => {
                           <div className="absolute bottom-1 right-1 w-2 h-2 border-b border-r border-emerald-500/60" />
 
                           {/* 중앙 로고 */}
-                          <div className="relative z-10 flex flex-col items-center gap-1 scale-90 sm:scale-100 select-none">
-                            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.35)] flex items-center justify-center transform group-hover/back:rotate-12 transition-transform duration-300">
+                          <div className="relative z-10 flex select-none flex-col items-center gap-1">
+                            <div className="arcade-match-back-logo flex items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.35)] transition-transform duration-300 group-hover/back:rotate-12">
                               <div className="w-full h-full rounded-[10px] bg-zinc-950 flex items-center justify-center">
-                                <Gamepad2 className="h-4.5 w-4.5 text-emerald-400" />
+                                <Gamepad2 className="h-1/2 w-1/2 text-emerald-400" />
                               </div>
                             </div>
-                            <span className="text-[8px] font-black tracking-widest text-emerald-400/80 uppercase mt-1.5">CHZZK CARD</span>
+                            <span className="arcade-match-back-label mt-1.5 font-black uppercase tracking-widest text-emerald-400/80">CHZZK CARD</span>
                           </div>
 
                           {/* 광택 반사 글레어 효과 */}
@@ -1685,7 +1685,7 @@ export const ArcadeTab: React.FC = () => {
                         </div>
 
                         {/* 카드 앞면 (3D Frontface) - 세련된 사이버 프레임 */}
-                        <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 to-zinc-950 border-2 border-zinc-700/50 rounded-xl flex flex-col items-center justify-between p-2.5 backface-hidden rotate-y-180 shadow-xl overflow-hidden">
+                        <div className="arcade-match-front absolute inset-0 flex flex-col items-center justify-between overflow-hidden rounded-xl border-2 border-zinc-700/50 bg-gradient-to-b from-zinc-900 to-zinc-950 backface-hidden rotate-y-180 shadow-xl">
                           <div className="absolute top-1 left-1 w-1.5 h-1.5 border-t border-l border-zinc-500/40" />
                           <div className="absolute top-1 right-1 w-1.5 h-1.5 border-t border-r border-zinc-500/40" />
 
@@ -1694,13 +1694,13 @@ export const ArcadeTab: React.FC = () => {
                               <img
                                 src={card.logo_url || '/icon.png'}
                                 alt={card.name}
-                                className="h-12 w-12 sm:h-14 sm:w-14 rounded-full object-cover border-2 border-zinc-900 select-none pointer-events-none"
+                                className="arcade-match-avatar pointer-events-none select-none rounded-full border-2 border-zinc-900 object-cover"
                               />
                             </div>
                           </div>
 
-                          <div className="w-full bg-zinc-800/85 border border-zinc-700/50 rounded-lg py-1 px-1.5 text-center mt-2">
-                            <p className="text-[10px] sm:text-xs font-black text-foreground truncate drop-shadow-sm select-none">
+                          <div className="arcade-match-nameplate mt-2 w-full rounded-lg border border-zinc-700/50 bg-zinc-800/85 text-center">
+                            <p className="arcade-match-name truncate font-black text-foreground drop-shadow-sm select-none">
                               {card.name}
                             </p>
                           </div>
@@ -1723,6 +1723,45 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 뒤집기 원복용/원형 원근 CSS 주입 */}
       <style jsx global>{`
+        .arcade-quiz-card {
+          width: min(clamp(12rem, 28dvh, 18rem), calc(100vw - 4rem));
+        }
+        .arcade-puzzle-board {
+          width: min(30rem, 48dvh, calc(100vw - 4rem));
+        }
+        .arcade-match-board {
+          container-type: inline-size;
+          width: min(calc(100vw - 3rem), 38dvh);
+        }
+        .arcade-match-orbit {
+          width: clamp(2.5rem, 14cqw, 7rem);
+          height: clamp(2.5rem, 14cqw, 7rem);
+        }
+        .arcade-match-back-logo {
+          width: clamp(2rem, 9cqw, 5rem);
+          height: clamp(2rem, 9cqw, 5rem);
+        }
+        .arcade-match-back-label {
+          font-size: clamp(0.45rem, 1.7cqw, 0.85rem);
+        }
+        .arcade-match-front {
+          padding: clamp(0.35rem, 2cqw, 1rem);
+        }
+        .arcade-match-avatar {
+          width: clamp(2.5rem, 12cqw, 7rem);
+          height: clamp(2.5rem, 12cqw, 7rem);
+        }
+        .arcade-match-nameplate {
+          padding: clamp(0.2rem, 0.8cqw, 0.5rem) clamp(0.3rem, 1.2cqw, 0.75rem);
+        }
+        .arcade-match-name {
+          font-size: clamp(0.55rem, 2cqw, 1rem);
+        }
+        @media (min-width: 640px) {
+          .arcade-match-board {
+            width: min(48rem, 66dvh, calc(100vw - 8rem));
+          }
+        }
         .perspective {
           perspective: 1200px;
         }
