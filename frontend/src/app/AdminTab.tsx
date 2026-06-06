@@ -142,13 +142,13 @@ export const AdminTab: React.FC = () => {
   const [editingNoticeId, setEditingNoticeId] = useState<number | null>(null);
 
   // 푸시
-  const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '' });
+  const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '', coupon_code: '' });
   const [scheduledPushes, setScheduledPushes] = useState<any[]>([]);
   const [sentPushes, setSentPushes] = useState<any[]>([]);
   const [sentPushesPage, setSentPushesPage] = useState(1);
   const [sentPushesTotalPages, setSentPushesTotalPages] = useState(1);
   const [editingPushId, setEditingPushId] = useState<number | null>(null);
-  const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '' });
+  const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '', coupon_code: '' });
 
   // 신고/밴
   const [reports, setReports] = useState<AdminReport[]>([]);
@@ -195,6 +195,7 @@ export const AdminTab: React.FC = () => {
       fetchDrawCost();
     }
     if (subTab === 'push') {
+      fetchCoupons();
       fetchScheduledPushes();
       fetchSentPushes(sentPushesPage);
     }
@@ -408,10 +409,10 @@ export const AdminTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast(data.message || '푸시가 등록되었습니다.');
-        setPushForm({ title: '', body: '', scheduled_at: '' });
+        setPushForm({ title: '', body: '', scheduled_at: '', coupon_code: '' });
         fetchScheduledPushes();
         fetchSentPushes(sentPushesPage);
-      } else toast('푸시 등록 실패');
+      } else toast(data.message || '푸시 등록 실패');
     } catch { toast('서버 통신 에러'); }
   };
 
@@ -484,7 +485,8 @@ export const AdminTab: React.FC = () => {
     setEditingForm({
       title: push.title,
       body: push.body,
-      scheduled_at: localTime
+      scheduled_at: localTime,
+      coupon_code: push.coupon_code || ''
     });
   };
 
@@ -1243,6 +1245,24 @@ export const AdminTab: React.FC = () => {
               <input type="text" placeholder="알림 본문" value={pushForm.body}
                 onChange={(e) => setPushForm({ ...pushForm, body: e.target.value })}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-muted-foreground">연결 쿠폰 (선택)</label>
+                <select
+                  value={pushForm.coupon_code}
+                  onChange={(e) => setPushForm({ ...pushForm, coupon_code: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+                >
+                  <option value="">일반 푸시 - 메인 페이지로 이동</option>
+                  {coupons.map((coupon) => (
+                    <option key={coupon.id} value={coupon.code}>
+                      {coupon.code}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground">
+                  쿠폰을 선택하면 알림 클릭 시 내 정보의 쿠폰 입력란에 코드가 자동 입력됩니다.
+                </p>
+              </div>
               <input type="datetime-local" value={pushForm.scheduled_at}
                 onChange={(e) => setPushForm({ ...pushForm, scheduled_at: e.target.value })}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
@@ -1282,6 +1302,18 @@ export const AdminTab: React.FC = () => {
                               className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
                               placeholder="수정할 본문"
                             />
+                            <select
+                              value={editingForm.coupon_code}
+                              onChange={(e) => setEditingForm({ ...editingForm, coupon_code: e.target.value })}
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
+                            >
+                              <option value="">일반 푸시 - 메인 페이지로 이동</option>
+                              {coupons.map((coupon) => (
+                                <option key={coupon.id} value={coupon.code}>
+                                  {coupon.code}
+                                </option>
+                              ))}
+                            </select>
                             <input
                               type="datetime-local"
                               value={editingForm.scheduled_at}
@@ -1301,6 +1333,11 @@ export const AdminTab: React.FC = () => {
                             </div>
                             <h4 className="text-xs font-bold text-foreground mt-1">{p.title}</h4>
                             <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-pre-wrap">{p.body}</p>
+                            {p.coupon_code && (
+                              <span className="mt-1.5 inline-flex rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
+                                쿠폰: {p.coupon_code}
+                              </span>
+                            )}
                             <div className="flex justify-end gap-1.5 mt-2 border-t border-border/20 pt-2">
                               <button onClick={() => startEditPush(p)} className="rounded bg-secondary hover:bg-secondary/80 px-2.5 py-1 text-[10px] font-bold text-foreground">수정</button>
                               <button onClick={() => handleDeletePush(p.id)} className="rounded bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 text-[10px] font-bold text-red-500">예약 취소</button>
@@ -1338,6 +1375,11 @@ export const AdminTab: React.FC = () => {
                         </div>
                         <h4 className="text-xs font-bold text-foreground mt-1.5">{p.title}</h4>
                         <p className="text-[11px] text-muted-foreground whitespace-pre-wrap">{p.body}</p>
+                        {p.coupon_code && (
+                          <span className="mt-1 inline-flex rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
+                            쿠폰: {p.coupon_code}
+                          </span>
+                        )}
                       </div>
                     );
                   })

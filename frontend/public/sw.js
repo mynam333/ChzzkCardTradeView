@@ -12,7 +12,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// 웹 푸시 수신: 백엔드(web-push)가 보낸 { title, body } 페이로드를 알림으로 표시
+// 웹 푸시 수신: 백엔드(web-push)가 보낸 { title, body, url } 페이로드를 알림으로 표시
 self.addEventListener('push', (event) => {
   let payload = { title: 'CCTV 알림', body: '' };
   try {

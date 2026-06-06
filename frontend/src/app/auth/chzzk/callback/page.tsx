@@ -4,6 +4,11 @@ import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '../../../AppContext';
 import { apiFetch, setAuthFlag } from '@/lib/api';
+import {
+  buildCouponDeepLink,
+  normalizeCouponDeepLinkCode,
+  PENDING_COUPON_STORAGE_KEY
+} from '@/lib/couponDeepLink';
 
 import { Loader2 } from 'lucide-react';
 
@@ -58,9 +63,12 @@ const ChzzkCallbackContent: React.FC = () => {
           setUser(sessionUser);
         }
 
-        // 로그인 성공 알림 및 메인 페이지 이동
+        // 로그인 성공 알림 및 쿠폰 딥링크 복원
         if (toast) toast(`${sessionUser.username}님, 치지직 인증 로그인이 완료되었습니다.`, 'success');
-        router.push('/');
+        const pendingCoupon = normalizeCouponDeepLinkCode(
+          localStorage.getItem(PENDING_COUPON_STORAGE_KEY)
+        );
+        router.push(pendingCoupon ? buildCouponDeepLink(pendingCoupon) : '/');
       } catch (err: any) {
         console.error('[ChzzkCallback] 토큰 획득 에러:', err);
         setError(err.message || '서버와의 통신 도중 에러가 발생했습니다.');

@@ -4,6 +4,9 @@ import cron from 'node-cron';
 import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import { couponRepository } from '../repositories';
+import { normalizeCouponCode } from '../utils/couponCode';
+import { buildCouponPushUrl } from '../utils/pushTarget';
 
 // VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
 const getVapidKeys = () => ({
@@ -89,13 +92,21 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
  * 3. 예약 푸시 알림 등록 API (ADMIN 전용)
  */
 export const scheduleNotification = async (req: Request, res: Response) => {
-  const { title, body, scheduled_at } = req.body;
+  const { title, body, scheduled_at, coupon_code } = req.body;
+  const couponCode = normalizeCouponCode(coupon_code);
 
   if (!title || !body) {
     return res.status(400).json({ error: 'BadRequest', message: '푸시 알림의 제목(title)과 본문(body)은 필수입니다.' });
   }
+  if (coupon_code && !couponCode) {
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 선택해주세요.' });
+  }
 
   try {
+    if (couponCode && !(await couponRepository.findByCode(couponCode))) {
+      return res.status(404).json({ error: 'NotFound', message: '푸시에 연결할 쿠폰을 찾을 수 없습니다.' });
+    }
+
     const dbMode = getDbMode();
     let scheduledTime = null;
     if (scheduled_at) {
@@ -109,6 +120,7 @@ export const scheduleNotification = async (req: Request, res: Response) => {
         .insert([{
           title,
           body,
+          coupon_code: couponCode || null,
           status: 'pending',
           scheduled_at: scheduledTime
         }]);
@@ -117,9 +129,9 @@ export const scheduleNotification = async (req: Request, res: Response) => {
     } else {
       const db = getSqliteDb();
       db.prepare(`
-        INSERT INTO push_notifications (title, body, status, scheduled_at)
-        VALUES (?, ?, 'pending', ?)
-      `).run(title, body, scheduledTime);
+        INSERT INTO push_notifications (title, body, coupon_code, status, scheduled_at)
+        VALUES (?, ?, ?, 'pending', ?)
+      `).run(title, body, couponCode || null, scheduledTime);
     }
 
     return res.status(201).json({
@@ -135,7 +147,7 @@ export const scheduleNotification = async (req: Request, res: Response) => {
 /**
  * 4. PWA 푸시 알림 실제 전송 유틸리티 함수
  */
-const sendPushToAll = async (title: string, body: string) => {
+const sendPushToAll = async (title: string, body: string, url = '/') => {
   try {
     const dbMode = getDbMode();
     let subscriptions: any[] = [];
@@ -151,7 +163,7 @@ const sendPushToAll = async (title: string, body: string) => {
       subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
     }
 
-    const payload = JSON.stringify({ title, body });
+    const payload = JSON.stringify({ title, body, url });
     const promises = subscriptions.map((sub) => {
       const pushSubscription = {
         endpoint: sub.endpoint,
@@ -264,7 +276,7 @@ export const startPushNotificationScheduler = () => {
 
       for (const notif of pendingNotifs) {
         // 즉시 전송 실행
-        await sendPushToAll(notif.title, notif.body);
+        await sendPushToAll(notif.title, notif.body, buildCouponPushUrl(notif.coupon_code));
 
         // 상태를 'sent'로 업데이트
         if (dbMode === 'SUPABASE') {
@@ -386,13 +398,21 @@ export const getSentNotifications = async (req: Request, res: Response) => {
  */
 export const updateScheduledNotification = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, body, scheduled_at } = req.body;
+  const { title, body, scheduled_at, coupon_code } = req.body;
+  const couponCode = normalizeCouponCode(coupon_code);
 
   if (!title || !body) {
     return res.status(400).json({ error: 'BadRequest', message: '제목(title)과 본문(body)은 필수입니다.' });
   }
+  if (coupon_code && !couponCode) {
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 선택해주세요.' });
+  }
 
   try {
+    if (couponCode && !(await couponRepository.findByCode(couponCode))) {
+      return res.status(404).json({ error: 'NotFound', message: '푸시에 연결할 쿠폰을 찾을 수 없습니다.' });
+    }
+
     const dbMode = getDbMode();
     let scheduledTime = null;
     if (scheduled_at) {
@@ -418,7 +438,7 @@ export const updateScheduledNotification = async (req: Request, res: Response) =
 
       const { error } = await client
         .from('push_notifications')
-        .update({ title, body, scheduled_at: scheduledTime })
+        .update({ title, body, coupon_code: couponCode || null, scheduled_at: scheduledTime })
         .eq('id', id);
 
       if (error) throw error;
@@ -434,9 +454,9 @@ export const updateScheduledNotification = async (req: Request, res: Response) =
 
       db.prepare(`
         UPDATE push_notifications 
-        SET title = ?, body = ?, scheduled_at = ? 
+        SET title = ?, body = ?, coupon_code = ?, scheduled_at = ?
         WHERE id = ?
-      `).run(title, body, scheduledTime, id);
+      `).run(title, body, couponCode || null, scheduledTime, id);
     }
 
     return res.status(200).json({ message: '예약된 푸시 알림이 성공적으로 수정되었습니다.' });

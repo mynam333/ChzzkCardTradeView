@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from './AppContext';
 import {
   User,
@@ -22,6 +22,10 @@ import { cardImage } from '@/lib/cosmetics';
 import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ImageCropModal } from './ImageCropModal';
+import {
+  normalizeCouponDeepLinkCode,
+  PENDING_COUPON_STORAGE_KEY
+} from '@/lib/couponDeepLink';
 
 interface UserCard {
   id: number;
@@ -42,6 +46,9 @@ export const MyInfoTab: React.FC = () => {
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
+  const couponSectionRef = useRef<HTMLElement>(null);
+  const couponInputRef = useRef<HTMLInputElement>(null);
+  const pendingCouponRef = useRef('');
 
   // 보유 카드 (대표 카드 선택용)
   const [inventory, setInventory] = useState<UserCard[]>([]);
@@ -81,6 +88,43 @@ export const MyInfoTab: React.FC = () => {
       checkStreamerRegistration();
       fetchBlocks();
     }
+  }, [user]);
+
+  useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const queryCoupon = normalizeCouponDeepLinkCode(currentUrl.searchParams.get('coupon'));
+    const storedCoupon = normalizeCouponDeepLinkCode(
+      localStorage.getItem(PENDING_COUPON_STORAGE_KEY)
+    );
+    const incomingCoupon = queryCoupon || storedCoupon;
+
+    if (!incomingCoupon) return;
+
+    pendingCouponRef.current = incomingCoupon;
+    setCouponCode(incomingCoupon);
+    localStorage.setItem(PENDING_COUPON_STORAGE_KEY, incomingCoupon);
+
+    if (currentUrl.searchParams.has('coupon')) {
+      currentUrl.searchParams.delete('coupon');
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user || !pendingCouponRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      couponSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      couponInputRef.current?.focus({ preventScroll: true });
+      localStorage.removeItem(PENDING_COUPON_STORAGE_KEY);
+      pendingCouponRef.current = '';
+    }, 100);
+
+    return () => window.clearTimeout(timer);
   }, [user]);
 
   const fetchBlocks = async () => {
@@ -657,11 +701,11 @@ export const MyInfoTab: React.FC = () => {
       )}
 
       {/* 쿠폰 입력 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <section ref={couponSectionRef} className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><Tag className="h-4.5 w-4.5 text-primary" /> 리딤 쿠폰 등록</h3>
         <p className="text-xs text-muted-foreground">발급된 쿠폰 코드를 입력하시면 포인트가 즉시 지급됩니다.</p>
         <div className="flex gap-2">
-          <input type="text" placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
+          <input ref={couponInputRef} type="text" placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
             onChange={(e) => setCouponCode(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none" />
           <button onClick={handleClaimCoupon} className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">등록</button>

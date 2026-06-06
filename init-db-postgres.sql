@@ -167,10 +167,13 @@ CREATE TABLE IF NOT EXISTS push_notifications (
     id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
+    coupon_code TEXT,
     status TEXT DEFAULT 'pending',               -- 'pending', 'sent'
     scheduled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE push_notifications ADD COLUMN IF NOT EXISTS coupon_code TEXT;
 
 -- 11. 카드 신고 내역 테이블
 CREATE TABLE IF NOT EXISTS card_reports (

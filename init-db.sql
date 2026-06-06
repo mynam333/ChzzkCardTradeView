@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS push_notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,                       -- 알림 제목
     body TEXT NOT NULL,                        -- 알림 본문
+    coupon_code TEXT,                          -- 클릭 시 내 정보에 자동 입력할 쿠폰 코드
     status TEXT DEFAULT 'pending',             -- 전송 상태 ('pending', 'sent')
     scheduled_at TEXT,                         -- 예약 발송 시각 (즉시 발송 시 NULL, ISO String)
     created_at TEXT DEFAULT (datetime('now'))
