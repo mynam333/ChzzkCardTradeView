@@ -76,8 +76,10 @@ const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const MATCH_TIME_LIMIT_SECONDS = 60;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
-const QUIZ_MOTION_MAX_RADIUS = 8;
-const QUIZ_MOTION_MAX_KERNEL_UNIT = 3;
+const QUIZ_MOTION_GHOST_COUNT = 31;
+const QUIZ_MOTION_MAX_TRAVEL_PX = 150;
+const QUIZ_MOTION_MAX_SCALE = 0.62;
+const QUIZ_MOTION_MAX_BASE_BLUR_PX = 10;
 // 모자이크·회전 잔상은 원래 강도가 약한 효과이므로 DISTORTION_SCALE을 따르지 않고 독립 상수 사용
 const QUIZ_MOSAIC_MAX_BLOCK_PX = 34;
 const QUIZ_RADIAL_MAX_ROTATE_DEG = 120;   // 최대 120도 회전 잔상
@@ -85,39 +87,95 @@ const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
 const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
 const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
 
-const createMotionBlurKernel = (angle: number, intensity: number) => {
+const MotionBlurQuizImage: React.FC<{ src: string; intensity: number; angle: number }> = ({
+  src,
+  intensity,
+  angle
+}) => {
   const normalizedIntensity = Math.max(0, Math.min(100, intensity)) / 100;
-  const radius = Math.round(normalizedIntensity * QUIZ_MOTION_MAX_RADIUS);
-  if (radius < 1) return null;
-
-  const order = radius * 2 + 1;
-  const center = radius;
   const radians = (angle * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const samples = new Set<string>();
+  const travel = normalizedIntensity * QUIZ_MOTION_MAX_TRAVEL_PX;
+  const travelX = Math.cos(radians) * travel;
+  const travelY = Math.sin(radians) * travel;
+  const scale = 1 + normalizedIntensity * QUIZ_MOTION_MAX_SCALE;
+  const baseBlur = normalizedIntensity * QUIZ_MOTION_MAX_BASE_BLUR_PX;
 
-  // 선을 촘촘히 샘플링해 얕은 각도에서도 커널이 끊기지 않도록 합니다.
-  for (let step = -radius * 4; step <= radius * 4; step += 1) {
-    const distance = step / 4;
-    const x = Math.max(0, Math.min(order - 1, Math.round(center + cos * distance)));
-    const y = Math.max(0, Math.min(order - 1, Math.round(center + sin * distance)));
-    samples.add(`${x},${y}`);
-  }
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-zinc-950">
+      <img
+        src={src}
+        alt="Quiz card"
+        loading="eager"
+        decoding="async"
+        fetchPriority="high"
+        draggable={false}
+        style={{
+          transform: `scale(${scale})`,
+          filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.22}) saturate(${1 - normalizedIntensity * 0.18})`,
+        }}
+        className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,transform] duration-75"
+      />
 
-  const matrix = Array(order * order).fill(0);
-  for (const sample of samples) {
-    const [x, y] = sample.split(',').map(Number);
-    matrix[y * order + x] = 1;
-  }
+      {normalizedIntensity > 0.01 && Array.from({ length: QUIZ_MOTION_GHOST_COUNT }).map((_, index) => {
+        const position = index / (QUIZ_MOTION_GHOST_COUNT - 1) - 0.5;
+        const centerWeight = 1 - Math.abs(position) * 2;
+        const opacity = normalizedIntensity * (0.035 + centerWeight * 0.035);
 
-  return {
-    order,
-    radius,
-    divisor: samples.size,
-    matrix: matrix.join(' '),
-    kernelUnitLength: 1 + normalizedIntensity * (QUIZ_MOTION_MAX_KERNEL_UNIT - 1)
-  };
+        return (
+          <img
+            key={index}
+            src={src}
+            alt=""
+            aria-hidden="true"
+            loading="eager"
+            decoding="async"
+            draggable={false}
+            style={{
+              transform: `translate3d(${travelX * position}px, ${travelY * position}px, 0) scale(${scale})`,
+              filter: `blur(${Math.max(1.5, baseBlur * 0.45)}px) contrast(1.18)`,
+              opacity,
+            }}
+            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
+          />
+        );
+      })}
+
+      {normalizedIntensity > 0.08 && (
+        <>
+          <img
+            src={src}
+            alt=""
+            aria-hidden="true"
+            loading="eager"
+            decoding="async"
+            draggable={false}
+            style={{
+              transform: `translate3d(${travelX * 0.58}px, ${travelY * 0.58}px, 0) scale(${scale})`,
+              filter: `blur(${Math.max(2, baseBlur * 0.55)}px) sepia(1) saturate(7) hue-rotate(145deg)`,
+              mixBlendMode: 'screen',
+              opacity: normalizedIntensity * 0.28,
+            }}
+            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
+          />
+          <img
+            src={src}
+            alt=""
+            aria-hidden="true"
+            loading="eager"
+            decoding="async"
+            draggable={false}
+            style={{
+              transform: `translate3d(${-travelX * 0.58}px, ${-travelY * 0.58}px, 0) scale(${scale})`,
+              filter: `blur(${Math.max(2, baseBlur * 0.55)}px) sepia(1) saturate(7) hue-rotate(255deg)`,
+              mixBlendMode: 'screen',
+              opacity: normalizedIntensity * 0.24,
+            }}
+            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
+          />
+        </>
+      )}
+    </div>
+  );
 };
 
 const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, intensity }) => {
@@ -1108,10 +1166,7 @@ export const ArcadeTab: React.FC = () => {
           {/* ======================================================== */}
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
-          {activeGame === 'quiz' && (() => {
-            const motionKernel = createMotionBlurKernel(quizBlurAngle, quizIntensity);
-
-            return (
+          {activeGame === 'quiz' && (
               <div className="space-y-5 flex flex-col items-center">
 
                 {/* 퀴즈 15초 타이머 & 프로그레스 바 */}
@@ -1146,33 +1201,6 @@ export const ArcadeTab: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 모션 블러용 인라인 SVG 필터 (조건부 렌더링) */}
-                {quizBlurType === 'motion' && (
-                  <svg className="absolute w-0 h-0 pointer-events-none" style={{ visibility: 'hidden' }}>
-                    <filter
-                      id="quiz-motion-blur"
-                      x="-30%"
-                      y="-30%"
-                      width="160%"
-                      height="160%"
-                      colorInterpolationFilters="sRGB"
-                    >
-                      {motionKernel && (
-                        <feConvolveMatrix
-                          order={`${motionKernel.order} ${motionKernel.order}`}
-                          kernelMatrix={motionKernel.matrix}
-                          divisor={motionKernel.divisor}
-                          targetX={motionKernel.radius}
-                          targetY={motionKernel.radius}
-                          edgeMode="duplicate"
-                          preserveAlpha="true"
-                          kernelUnitLength={`${motionKernel.kernelUnitLength} ${motionKernel.kernelUnitLength}`}
-                        />
-                      )}
-                    </filter>
-                  </svg>
-                )}
-
                 {/* 카드 이미지 컨테이너 */}
                 <div className="relative aspect-[5/8] w-48 overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-md flex items-center justify-center">
 
@@ -1195,13 +1223,10 @@ export const ArcadeTab: React.FC = () => {
 
                   {/* 모션 블러 모드 */}
                   {quizBlurType === 'motion' && (
-                    <img
-                      src={gameData.image_url}
-                      alt="Quiz card"
-                      style={{
-                        filter: motionKernel ? 'url(#quiz-motion-blur) contrast(1.08)' : 'contrast(1.05)',
-                      }}
-                      className="h-full w-full object-cover select-none pointer-events-none transition-[filter] duration-75"
+                    <MotionBlurQuizImage
+                      src={gameData.image_url || ''}
+                      intensity={quizIntensity}
+                      angle={quizBlurAngle}
                     />
                   )}
 
@@ -1245,7 +1270,7 @@ export const ArcadeTab: React.FC = () => {
                     <span>
                       {quizBlurType === 'gaussian' && '가우시안 블러 전송 방식'}
                       {quizBlurType === 'mosaic' && '픽셀 모자이크 전송 방식'}
-                      {quizBlurType === 'motion' && '모션 블러 왜곡 방식'}
+                      {quizBlurType === 'motion' && '강한 방향성 모션 잔상 방식'}
                       {quizBlurType === 'radial' && '방사형 소용돌이 복원 방식'}
                     </span>
                   </p>
@@ -1273,8 +1298,7 @@ export const ArcadeTab: React.FC = () => {
                   })}
                 </div>
               </div>
-            );
-          })()}
+          )}
 
           {/* ======================================================== */}
           {/* 게임 2: 카드 퍼즐 (가로 3칸 세로 4칸 정사각형 조각 3:4 크롭) */}
