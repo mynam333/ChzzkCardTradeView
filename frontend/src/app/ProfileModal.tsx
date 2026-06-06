@@ -264,7 +264,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                 <div className="mt-4">
                   <p className="mb-2 text-[10px] font-bold text-zinc-400">보유 카드</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {profile.collection.slice(0, 24).map((c) => (
+                    {profile.collection.slice(0, 25).map((c) => (
                       <div key={c.channel_id} className="relative">
                         <img
                           src={proxiedImage(cardImage(c.streamer, c.maxStar))}
@@ -284,9 +284,9 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
                         )}
                       </div>
                     ))}
-                    {profile.collection.length > 24 && (
+                    {profile.collection.length > 25 && (
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-[9px] font-bold text-zinc-400">
-                        +{profile.collection.length - 24}
+                        +{profile.collection.length - 25}
                       </div>
                     )}
                   </div>

@@ -368,6 +368,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearInterval(timer);
   }, [user?.id]);
 
+  // 초기화 진행 상태 정의 (점검 상태 미확정이거나 로그인 인증 확인 대기 중일 때)
+  const isInitializing = maintenanceActive === null || (isAuthed() && authLoading);
+
   return (
     <AppContext.Provider value={{
       theme,
@@ -391,7 +394,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       maintenanceEndAt,
       checkMaintenanceStatus
     }}>
-      {children}
+      {isInitializing ? (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-950 text-white select-none">
+          <div className="flex flex-col items-center space-y-5">
+            <div className="relative flex h-20 w-20 items-center justify-center">
+              {/* 외부 핑 애니메이션 링 */}
+              <div className="absolute h-full w-full animate-ping rounded-full bg-emerald-500/10 opacity-75 duration-1000"></div>
+              {/* 중간 스핀 로더 */}
+              <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-emerald-500/20 border-t-emerald-400"></div>
+              {/* 중앙 로고 표식 */}
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-950 font-black text-emerald-400 shadow-md shadow-emerald-500/20">
+                C
+              </div>
+            </div>
+            <div className="text-center space-y-1">
+              <h1 className="text-xl font-extrabold tracking-widest text-emerald-400 animate-pulse">CCTV</h1>
+              <p className="text-[11px] text-zinc-400">서비스 연결중입니다...</p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        children
+      )}
 
       {/* 전역 토스트 컨테이너 */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 pointer-events-none">
