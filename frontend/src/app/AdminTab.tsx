@@ -30,6 +30,16 @@ import { CosmeticName } from './CosmeticName';
 
 type AdminSubTab = 'dashboard' | 'users' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
 
+const couponExpirationFormatter = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+});
+
 export const AdminTab: React.FC = () => {
   const { user, toast, checkMaintenanceStatus } = useApp();
   const searchParams = useSearchParams();
@@ -1099,7 +1109,7 @@ export const AdminTab: React.FC = () => {
                       <p className="text-xs font-bold font-mono truncate">{c.code}</p>
                       <p className="text-[10px] text-muted-foreground">
                         {c.coupon_type === 'single' ? '일회성' : '다회성'} · {reward}
-                        {c.expires_at ? ` · ~${new Date(c.expires_at).toLocaleDateString('ko-KR')}` : ' · 무기한'}
+                        {c.expires_at ? ` · ~${couponExpirationFormatter.format(new Date(c.expires_at))}` : ' · 무기한'}
                       </p>
                     </div>
                     <span className="shrink-0 text-[11px] font-bold text-primary ml-2">
