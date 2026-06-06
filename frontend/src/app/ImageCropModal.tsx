@@ -112,15 +112,16 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             ref={cropperRef}
             src={imageSrc}
             stencilProps={{
-              // 5:8 비율 고정 (width:height = 5:8 = 0.625, 세로가 더 길쭉한 세로형)
-              // movable: false — 스텐실은 중앙 고정, 이미지만 드래그하도록 유도
+              // 5:8 비율 고정 (세로형 카드)
+              // movable: false — 스텐실 중앙 고정, 이미지만 드래그
               // resizable: true(기본값) — 비율 유지하며 스텐실 크기 조절 허용
               aspectRatio: 5 / 8,
               movable: false,
             }}
-            // fitArea: 이미지가 에디터 영역 전체에 맞게 초기화되고,
-            //          5:8 스텐실이 에디터 중앙에 오버레이됨
-            imageRestriction={ImageRestriction.fitArea}
+            // stencil: 이미지가 스텐실 영역을 완전히 벗어나지 않는 범위에서
+            //          좌우/상하 자유롭게 드래그 가능.
+            // (fitArea는 이미지가 에디터를 꽉 채워 드래그 여백이 없어지는 문제가 있었음)
+            imageRestriction={ImageRestriction.stencil}
             className="w-full"
             style={{ height: '100%' }}
           />
