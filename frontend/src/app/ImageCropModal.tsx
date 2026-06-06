@@ -19,9 +19,10 @@ interface ImageCropModalProps {
 
 /**
  * 5:8 비율 고정 카드 이미지 크롭 모달
- * - 드래그로 위치 이동, 마우스 휠/핀치로 줌 조절
- * - 테두리 밖은 반투명 어두운 오버레이
- * - 확인 시 Canvas API로 크롭 결과 Blob 추출
+ * - 스텐실(크롭 영역)이 5:8 비율 고정, 이미지만 드래그/줌하여 위치 조절
+ * - 에디터 높이 350px 고정 → flex 높이 계산 의존 없이 하단 잘림 방지
+ * - imageRestriction.fitArea → 이미지가 에디터에 맞게 초기화, 스텐실이 5:8 오버레이
+ * - 확인 시 Canvas API로 640×1024 WebP Blob 추출
  */
 export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   imageSrc,
@@ -31,13 +32,13 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 }) => {
   const cropperRef = useRef<CropperRef>(null);
 
-  // 크롭 확인: getCanvas()로 Blob 추출
+  // 크롭 확인: getCanvas()로 5:8 비율 Blob 추출
   const handleConfirm = useCallback(() => {
     const cropper = cropperRef.current;
     if (!cropper) return;
 
     const canvas = cropper.getCanvas({
-      width: 640,   // 5:8 비율 기준 최종 출력 크기 (640×1024)
+      width: 640,   // 5:8 기준 최종 출력 크기 (640×1024)
       height: 1024,
     });
 
@@ -73,9 +74,9 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     <div className="modal-backdrop z-[90] bg-black/60 backdrop-blur-sm">
       <div
         className="modal-panel modal-panel-lg rounded-2xl border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col"
-        style={{ maxHeight: '95dvh', width: 'min(600px, 96vw)' }}
+        style={{ width: 'min(560px, 96vw)' }}
       >
-        {/* 헤더 */}
+        {/* 헤더 — 기존 모달 헤더 패턴과 동일 */}
         <div className="flex items-center justify-between border-b border-border/60 px-5 py-4 shrink-0">
           <h3 className="text-sm font-bold flex items-center gap-2">
             <Crop className="h-4 w-4 text-primary" />
@@ -94,36 +95,38 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
         </div>
 
         {/* 안내 텍스트 */}
-        <p className="px-5 pt-3 pb-1 text-[11px] text-muted-foreground shrink-0">
-          밝은 테두리 안쪽 영역이 카드에 저장됩니다. 드래그로 위치를, 휠·핀치로 크기를 조절하세요.
+        <p className="px-5 pt-3 pb-2 text-[11px] text-muted-foreground shrink-0">
+          하얀 테두리 안쪽 영역이 카드에 저장됩니다. 이미지를 드래그하여 위치를, 휠·핀치로 크기를 조절하세요.
         </p>
 
-        {/* 크롭 에디터 영역 */}
+        {/* 크롭 에디터 영역
+            — 명시적 고정 높이(350px)로 flex 높이 계산 의존 없이 확실한 영역 확보.
+              라이브러리 .advanced-cropper 자체 CSS가 background:black이므로
+              라이트/다크 무관하게 에디터 내부는 항상 어두운 배경(이미지 편집 UX 표준).
+        */}
         <div
-          className="relative flex-1 min-h-0 overflow-hidden mx-5 mb-3 rounded-xl border border-border/40"
-          style={{ maxHeight: '55vh' }}
+          className="mx-5 mb-3 rounded-xl overflow-hidden border border-border/40"
+          style={{ height: '350px' }}
         >
           <Cropper
             ref={cropperRef}
             src={imageSrc}
             stencilProps={{
+              // 5:8 비율 고정 (width:height = 5:8 = 0.625, 세로가 더 길쭉한 세로형)
+              // movable: false — 스텐실은 중앙 고정, 이미지만 드래그하도록 유도
+              // resizable: true(기본값) — 비율 유지하며 스텐실 크기 조절 허용
               aspectRatio: 5 / 8,
-              // 비율 고정 시 핸들 조절보다 위치 이동 우선
-              movable: true,
-              resizable: false,
+              movable: false,
             }}
-            // 이미지가 스텐실 밖으로 나가지 않도록 제한
-            imageRestriction={ImageRestriction.stencil}
-            // 이미지 드래그/줌 허용 (스텐실 위치는 고정)
-            transformImage={{
-              adjustStencil: false,
-            }}
-            className="h-full w-full"
+            // fitArea: 이미지가 에디터 영역 전체에 맞게 초기화되고,
+            //          5:8 스텐실이 에디터 중앙에 오버레이됨
+            imageRestriction={ImageRestriction.fitArea}
+            className="w-full"
             style={{ height: '100%' }}
           />
         </div>
 
-        {/* 줌 컨트롤 */}
+        {/* 줌 컨트롤 — bg-secondary/border-border 테마 변수로 라이트/다크 자동 대응 */}
         <div className="flex items-center justify-center gap-3 px-5 pb-3 shrink-0">
           <button
             onClick={handleZoomOut}
@@ -151,7 +154,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           </button>
         </div>
 
-        {/* 하단 버튼 */}
+        {/* 하단 버튼 — 기존 모달 패턴과 동일 */}
         <div className="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-4 shrink-0">
           <button
             onClick={onCancel}
