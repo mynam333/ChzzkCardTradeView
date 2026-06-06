@@ -32,6 +32,23 @@ import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 
 type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
+type PushTargetType = 'default' | 'coupon';
+
+interface PushFormState {
+  title: string;
+  body: string;
+  scheduled_at: string;
+  target_type: PushTargetType;
+  coupon_code: string;
+}
+
+const emptyPushForm: PushFormState = {
+  title: '',
+  body: '',
+  scheduled_at: '',
+  target_type: 'default',
+  coupon_code: ''
+};
 
 const couponExpirationFormatter = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul',
@@ -142,13 +159,13 @@ export const AdminTab: React.FC = () => {
   const [editingNoticeId, setEditingNoticeId] = useState<number | null>(null);
 
   // 푸시
-  const [pushForm, setPushForm] = useState({ title: '', body: '', scheduled_at: '', coupon_code: '' });
+  const [pushForm, setPushForm] = useState<PushFormState>({ ...emptyPushForm });
   const [scheduledPushes, setScheduledPushes] = useState<any[]>([]);
   const [sentPushes, setSentPushes] = useState<any[]>([]);
   const [sentPushesPage, setSentPushesPage] = useState(1);
   const [sentPushesTotalPages, setSentPushesTotalPages] = useState(1);
   const [editingPushId, setEditingPushId] = useState<number | null>(null);
-  const [editingForm, setEditingForm] = useState({ title: '', body: '', scheduled_at: '', coupon_code: '' });
+  const [editingForm, setEditingForm] = useState<PushFormState>({ ...emptyPushForm });
 
   // 신고/밴
   const [reports, setReports] = useState<AdminReport[]>([]);
@@ -195,7 +212,6 @@ export const AdminTab: React.FC = () => {
       fetchDrawCost();
     }
     if (subTab === 'push') {
-      fetchCoupons();
       fetchScheduledPushes();
       fetchSentPushes(sentPushesPage);
     }
@@ -404,12 +420,22 @@ export const AdminTab: React.FC = () => {
       toast('알림 제목과 본문을 입력해 주세요.');
       return;
     }
+    if (pushForm.target_type === 'coupon' && !pushForm.coupon_code.trim()) {
+      toast('푸시에 사용할 쿠폰 코드를 입력해 주세요.');
+      return;
+    }
     try {
-      const res = await apiFetch('/admin/push/schedule', { method: 'POST', body: JSON.stringify(pushForm) });
+      const payload = {
+        title: pushForm.title,
+        body: pushForm.body,
+        scheduled_at: pushForm.scheduled_at,
+        coupon_code: pushForm.target_type === 'coupon' ? pushForm.coupon_code : ''
+      };
+      const res = await apiFetch('/admin/push/schedule', { method: 'POST', body: JSON.stringify(payload) });
       const data = await res.json();
       if (res.ok) {
         toast(data.message || '푸시가 등록되었습니다.');
-        setPushForm({ title: '', body: '', scheduled_at: '', coupon_code: '' });
+        setPushForm({ ...emptyPushForm });
         fetchScheduledPushes();
         fetchSentPushes(sentPushesPage);
       } else toast(data.message || '푸시 등록 실패');
@@ -439,10 +465,16 @@ export const AdminTab: React.FC = () => {
       toast('알림 제목과 본문을 입력해 주세요.');
       return;
     }
+    if (editingForm.target_type === 'coupon' && !editingForm.coupon_code.trim()) {
+      toast('푸시에 사용할 쿠폰 코드를 입력해 주세요.');
+      return;
+    }
     try {
       const payload = {
-        ...editingForm,
-        scheduled_at: editingForm.scheduled_at ? new Date(editingForm.scheduled_at).toISOString() : null
+        title: editingForm.title,
+        body: editingForm.body,
+        scheduled_at: editingForm.scheduled_at ? new Date(editingForm.scheduled_at).toISOString() : null,
+        coupon_code: editingForm.target_type === 'coupon' ? editingForm.coupon_code : ''
       };
       const res = await apiFetch(`/admin/push/${id}`, {
         method: 'PUT',
@@ -486,6 +518,7 @@ export const AdminTab: React.FC = () => {
       title: push.title,
       body: push.body,
       scheduled_at: localTime,
+      target_type: push.coupon_code ? 'coupon' : 'default',
       coupon_code: push.coupon_code || ''
     });
   };
@@ -1246,21 +1279,34 @@ export const AdminTab: React.FC = () => {
                 onChange={(e) => setPushForm({ ...pushForm, body: e.target.value })}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-muted-foreground">연결 쿠폰 (선택)</label>
+                <label className="block text-[11px] font-bold text-muted-foreground">알림 클릭 동작</label>
                 <select
-                  value={pushForm.coupon_code}
-                  onChange={(e) => setPushForm({ ...pushForm, coupon_code: e.target.value })}
+                  value={pushForm.target_type}
+                  onChange={(e) => {
+                    const targetType = e.target.value as PushTargetType;
+                    setPushForm({
+                      ...pushForm,
+                      target_type: targetType,
+                      coupon_code: targetType === 'coupon' ? pushForm.coupon_code : ''
+                    });
+                  }}
                   className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
                 >
-                  <option value="">일반 푸시 - 메인 페이지로 이동</option>
-                  {coupons.map((coupon) => (
-                    <option key={coupon.id} value={coupon.code}>
-                      {coupon.code}
-                    </option>
-                  ))}
+                  <option value="default">일반 알림 - 메인 페이지로 이동</option>
+                  <option value="coupon">쿠폰 사용 - 내 정보 쿠폰란으로 이동</option>
                 </select>
+                {pushForm.target_type === 'coupon' && (
+                  <input
+                    type="text"
+                    value={pushForm.coupon_code}
+                    onChange={(e) => setPushForm({ ...pushForm, coupon_code: e.target.value.toUpperCase() })}
+                    placeholder="사용할 쿠폰 코드 입력"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 font-mono text-xs uppercase"
+                  />
+                )}
                 <p className="text-[10px] text-muted-foreground">
-                  쿠폰을 선택하면 알림 클릭 시 내 정보의 쿠폰 입력란에 코드가 자동 입력됩니다.
+                  쿠폰 사용을 선택하면 직접 입력한 코드가 알림 클릭 후 쿠폰란에 자동 입력됩니다.
                 </p>
               </div>
               <input type="datetime-local" value={pushForm.scheduled_at}
@@ -1303,17 +1349,30 @@ export const AdminTab: React.FC = () => {
                               placeholder="수정할 본문"
                             />
                             <select
-                              value={editingForm.coupon_code}
-                              onChange={(e) => setEditingForm({ ...editingForm, coupon_code: e.target.value })}
+                              value={editingForm.target_type}
+                              onChange={(e) => {
+                                const targetType = e.target.value as PushTargetType;
+                                setEditingForm({
+                                  ...editingForm,
+                                  target_type: targetType,
+                                  coupon_code: targetType === 'coupon' ? editingForm.coupon_code : ''
+                                });
+                              }}
                               className="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs"
                             >
-                              <option value="">일반 푸시 - 메인 페이지로 이동</option>
-                              {coupons.map((coupon) => (
-                                <option key={coupon.id} value={coupon.code}>
-                                  {coupon.code}
-                                </option>
-                              ))}
+                              <option value="default">일반 알림 - 메인 페이지로 이동</option>
+                              <option value="coupon">쿠폰 사용 - 내 정보 쿠폰란으로 이동</option>
                             </select>
+                            {editingForm.target_type === 'coupon' && (
+                              <input
+                                type="text"
+                                value={editingForm.coupon_code}
+                                onChange={(e) => setEditingForm({ ...editingForm, coupon_code: e.target.value.toUpperCase() })}
+                                placeholder="사용할 쿠폰 코드 입력"
+                                autoComplete="off"
+                                className="w-full rounded-lg border border-border bg-card px-2 py-1 font-mono text-xs uppercase"
+                              />
+                            )}
                             <input
                               type="datetime-local"
                               value={editingForm.scheduled_at}

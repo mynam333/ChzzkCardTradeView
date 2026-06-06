@@ -99,7 +99,7 @@ export const scheduleNotification = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'BadRequest', message: '푸시 알림의 제목(title)과 본문(body)은 필수입니다.' });
   }
   if (coupon_code && !couponCode) {
-    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 선택해주세요.' });
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 입력해주세요.' });
   }
 
   try {
@@ -405,7 +405,7 @@ export const updateScheduledNotification = async (req: Request, res: Response) =
     return res.status(400).json({ error: 'BadRequest', message: '제목(title)과 본문(body)은 필수입니다.' });
   }
   if (coupon_code && !couponCode) {
-    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 선택해주세요.' });
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 쿠폰 코드를 입력해주세요.' });
   }
 
   try {
