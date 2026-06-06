@@ -5,7 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "ts-node src/server.ts",
     "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
     "migrate": "ts-node scripts/migrate.ts",
     "test": "vitest run"
