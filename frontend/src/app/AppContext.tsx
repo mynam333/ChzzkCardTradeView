@@ -76,7 +76,8 @@ interface CustomToastProps {
 }
 
 const CustomToast: React.FC<CustomToastProps> = ({ id, message, type, theme }) => {
-  const [startX, setStartX] = useState<number | null>(null);
+  const startXRef = useRef<number | null>(null);
+  const currentXRef = useRef<number>(0);
   const [currentX, setCurrentX] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isDismissing, setIsDismissing] = useState<boolean>(false);
@@ -85,30 +86,33 @@ const CustomToast: React.FC<CustomToastProps> = ({ id, message, type, theme }) =
   const dragThreshold = 80;
 
   const handleStart = (clientX: number) => {
-    setStartX(clientX);
+    startXRef.current = clientX;
     setIsDragging(true);
   };
 
   const handleMove = (clientX: number) => {
-    if (startX === null || isDismissing) return;
-    const diff = clientX - startX;
+    if (startXRef.current === null || isDismissing) return;
+    const diff = clientX - startXRef.current;
+    currentXRef.current = diff;
     setCurrentX(diff);
   };
 
   const handleEnd = () => {
-    if (startX === null || isDismissing) return;
+    if (startXRef.current === null || isDismissing) return;
     setIsDragging(false);
 
-    if (Math.abs(currentX) > dragThreshold) {
+    const finalX = currentXRef.current;
+    if (Math.abs(finalX) > dragThreshold) {
       setIsDismissing(true);
-      setDismissDirection(currentX > 0 ? 'right' : 'left');
+      setDismissDirection(finalX > 0 ? 'right' : 'left');
       setTimeout(() => {
         sonnerToast.dismiss(id);
       }, 200);
     } else {
+      currentXRef.current = 0;
       setCurrentX(0);
     }
-    setStartX(null);
+    startXRef.current = null;
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {

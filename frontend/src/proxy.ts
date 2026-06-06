@@ -6,7 +6,14 @@ function getJwtPayload(token: string) {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    
+    // base64 패딩 보정 (4의 배수가 되도록 '=' 추가)
+    const pad = base64.length % 4;
+    if (pad === 1) return null; // 잘못된 base64
+    if (pad === 2) base64 += '==';
+    if (pad === 3) base64 += '=';
+
     const jsonPayload = decodeURIComponent(
       atob(base64)
         .split('')
