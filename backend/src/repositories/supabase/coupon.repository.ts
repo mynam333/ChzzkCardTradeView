@@ -27,11 +27,13 @@ export class SupabaseCouponRepository implements ICouponRepository {
   }
 
   async findByCode(code: string): Promise<Coupon | null> {
+    const escapedCode = code.replace(/[\\%_]/g, '\\$&');
     const { data, error } = await this.getClient()
       .from('coupons')
       .select('*')
-      .eq('code', code)
-      .single();
+      .ilike('code', escapedCode)
+      .limit(1)
+      .maybeSingle();
 
     if (error || !data) return null;
     return data as Coupon;

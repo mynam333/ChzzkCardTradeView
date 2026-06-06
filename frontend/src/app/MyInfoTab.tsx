@@ -208,12 +208,16 @@ export const MyInfoTab: React.FC = () => {
   );
 
   const handleClaimCoupon = async () => {
-    if (!couponCode.trim()) {
+    const normalizedCouponCode = couponCode.trim().toUpperCase();
+    if (!normalizedCouponCode) {
       toast('쿠폰 코드를 입력해 주세요.');
       return;
     }
     try {
-      const res = await apiFetch('/coupons/claim', { method: 'POST', body: JSON.stringify({ code: couponCode }) });
+      const res = await apiFetch('/coupons/claim', {
+        method: 'POST',
+        body: JSON.stringify({ code: normalizedCouponCode })
+      });
       const data = await res.json();
       if (res.ok) {
         toast(data.message);

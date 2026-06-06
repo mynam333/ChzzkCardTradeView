@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { getItem as getShopItem } from '../services/shopService';
+import { normalizeCouponCode } from '../utils/couponCode';
 
 /**
  * 1. 쿠폰 생성 (ADMIN 전용)
@@ -89,7 +90,7 @@ export const createCoupon = async (req: Request, res: Response) => {
       }
     }
 
-    let finalCode = code;
+    let finalCode = normalizeCouponCode(code);
     if (!finalCode) {
       const randomPart = crypto.randomBytes(6).toString('hex').toUpperCase();
       finalCode = `C-${randomPart.slice(0, 4)}-${randomPart.slice(4, 8)}-${randomPart.slice(8, 12)}`;
@@ -128,16 +129,17 @@ export const createCoupon = async (req: Request, res: Response) => {
 export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   const { code } = req.body;
+  const normalizedCode = normalizeCouponCode(code);
 
   if (!userId) {
     return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   }
-  if (!code) {
+  if (!normalizedCode) {
     return res.status(400).json({ error: 'BadRequest', message: '쿠폰 코드를 입력해주세요.' });
   }
 
   try {
-    const coupon = await couponRepository.findByCode(code);
+    const coupon = await couponRepository.findByCode(normalizedCode);
     if (!coupon) {
       return res.status(404).json({ error: 'NotFound', message: '유효하지 않거나 존재하지 않는 쿠폰 코드입니다.' });
     }

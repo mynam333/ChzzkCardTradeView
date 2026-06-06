@@ -44,7 +44,9 @@ export class SqliteCouponRepository implements ICouponRepository {
   }
 
   async findByCode(code: string): Promise<Coupon | null> {
-    const row = this.getDb().prepare('SELECT * FROM coupons WHERE code = ?').get(code) as any;
+    const row = this.getDb()
+      .prepare('SELECT * FROM coupons WHERE code = ? COLLATE NOCASE')
+      .get(code) as any;
     return row ? this.mapCoupon(row) : null;
   }
 
