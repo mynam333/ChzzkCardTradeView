@@ -23,6 +23,7 @@ import { fuzzySearch } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { ReportCardModal } from './ReportCardModal';
+import { CometCard } from '@/components/ui/comet-card';
 
 interface Streamer {
   channel_id: string;
@@ -1539,55 +1540,65 @@ export const GachaTab: React.FC = () => {
                 height: '358.4px',
                 transform: 'scale(min(calc(82vh / 358.4px), calc(92vw / 224px)))',
                 transformOrigin: 'center',
-                containerType: 'inline-size',
-                ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
               }}
-              className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+              className="animate-in zoom-in-95 duration-200"
             >
-              {/* 프리미엄 테두리 코스메틱 오버레이 */}
-              <CosmeticFrame border={live.border} />
+              <CometCard rotateDepth={8} translateDepth={10} className="h-full w-full">
+                <div
+                  style={{
+                    width: '224px',
+                    height: '358.4px',
+                    containerType: 'inline-size',
+                    ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
+                  }}
+                  className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+                >
+                  {/* 프리미엄 테두리 코스메틱 오버레이 */}
+                  <CosmeticFrame border={live.border} />
 
-              {/* 카드 이미지 배경 */}
-              <div className="absolute inset-0 z-0">
-                <img src={cardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
-              </div>
-              
-              {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
+                  {/* 카드 이미지 배경 */}
+                  <div className="absolute inset-0 z-0">
+                    <img src={cardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
+                  </div>
+                  
+                  {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
 
-              {/* 카드 콘텐츠 패딩 랩퍼 */}
-              <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
-                {/* 상단 정보 */}
-                <div className="flex items-center justify-between w-full pointer-events-auto">
-                  {s.is_active || (s as any).isLive ? (
-                    <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
-                      <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
-                    </span>
-                  ) : (
-                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
-                  )}
-                  <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
-                    No.{String(s.serial_number ?? 0).padStart(4, '0')}
-                  </span>
-                </div>
-
-                {/* 하단 정보 */}
-                <div className="space-y-1 text-white block mt-auto pointer-events-auto">
-                  {star > 0 && (
-                    <div className="flex items-center gap-0.5 drop-shadow">
-                      {Array.from({ length: star }, (_, i) => (
-                        <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
-                      ))}
+                  {/* 카드 콘텐츠 패딩 랩퍼 */}
+                  <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
+                    {/* 상단 정보 */}
+                    <div className="flex items-center justify-between w-full pointer-events-auto">
+                      {s.is_active || (s as any).isLive ? (
+                        <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
+                          <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
+                        </span>
+                      ) : (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
+                      )}
+                      <span className="rounded bg-black/40 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                        No.{String(s.serial_number ?? 0).padStart(4, '0')}
+                      </span>
                     </div>
-                  )}
-                  <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
-                  <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
-                  <div className="flex items-center justify-between border-t border-white/10 pt-1">
-                    <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
-                    <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
+
+                    {/* 하단 정보 */}
+                    <div className="space-y-1 text-white block mt-auto pointer-events-auto">
+                      {star > 0 && (
+                        <div className="flex items-center gap-0.5 drop-shadow">
+                          {Array.from({ length: star }, (_, i) => (
+                            <span key={i} className="text-amber-300 text-[10px] leading-none">★</span>
+                          ))}
+                        </div>
+                      )}
+                      <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
+                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
+                      <div className="flex items-center justify-between border-t border-white/10 pt-1">
+                        <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
+                        <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </CometCard>
             </div>
           </div>
         );

@@ -1313,7 +1313,7 @@ export const ArcadeTab: React.FC = () => {
                       disabled={gameBusy}
                       className="mt-4 flex w-full items-center justify-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-[10px] font-black text-indigo-700 transition hover:bg-indigo-100 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
                     >
-                      무료 연습 시작
+                      연습 시작
                     </button>
                   </article>
                 );
