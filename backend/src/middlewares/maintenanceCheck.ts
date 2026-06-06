@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { systemConfigRepository } from '../repositories';
+import { systemConfigRepository, userRepository } from '../repositories';
 import { JWT_SECRET } from '../config';
 import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
 
@@ -43,14 +43,13 @@ export const maintenanceCheckMiddleware = async (req: Request, res: Response, ne
       const token = getSessionToken(req);
       if (token) {
         try {
-          // JWT 토큰 서명을 검증한 후, 디코딩된 페이로드에서 어드민 역할을 직접 식별합니다.
-          // 점검 중 데이터베이스 접근 불가(Lock) 상황에서도 안전하게 관리자가 우회할 수 있습니다.
-          const decoded = jwt.verify(token, JWT_SECRET) as { id: string; role: string };
-          if (decoded && decoded.role === 'ADMIN') {
+          const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+          const user = await userRepository.findById(decoded.id);
+          if (user?.role === 'ADMIN') {
             return next();
           }
         } catch (err) {
-          console.warn('[MaintenanceCheck] 어드민 토큰 검증 실패:', err instanceof Error ? err.message : err);
+          console.warn('[MaintenanceCheck] 어드민 세션 검증 실패:', err instanceof Error ? err.message : err);
         }
       }
 

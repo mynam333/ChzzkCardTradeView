@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { apiFetch, isAuthed, clearAuthFlag } from '@/lib/api';
+import { apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
@@ -507,11 +507,6 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   };
 
   const refreshUserData = async (showLoading = false) => {
-    if (!isAuthed()) {
-      setUser(null);
-      setAuthLoading(false);
-      return;
-    }
     if (showLoading || !user) {
       setAuthLoading(true);
     }
@@ -519,6 +514,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       const response = await apiFetch('/users/me');
       if (response.ok) {
         const data = await response.json();
+        setAuthFlag();
         setUser({
           id: data.id,
           username: data.username,
@@ -551,7 +547,19 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     });
   };
 
-  const isInitializing = maintenanceActive === null || (isAuthed() && authLoading);
+  const isMaintenanceRoute = pathname === '/maintenance';
+  const isMaintenanceBypassRoute =
+    isMaintenanceRoute ||
+    pathname === '/login' ||
+    pathname === '/auth/chzzk/callback';
+  const isMaintenanceBlocked =
+    maintenanceActive === true &&
+    user?.role !== 'ADMIN' &&
+    !isMaintenanceBypassRoute;
+  const isInitializing =
+    maintenanceActive === null ||
+    authLoading ||
+    isMaintenanceBlocked;
 
   return (
     <AppContext.Provider value={{
