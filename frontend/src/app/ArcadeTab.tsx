@@ -1012,17 +1012,19 @@ export const ArcadeTab: React.FC = () => {
           </div>
 
           {/* 아케이드 코인 충전 현황 */}
-          <div className="flex flex-col gap-2 self-start sm:self-center bg-zinc-900/45 border border-zinc-800 p-3.5 rounded-2xl shadow-inner min-w-[270px]">
+          <div className="flex min-w-[270px] flex-col gap-2 self-start rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-orange-50/70 to-yellow-50 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_14px_rgba(180,83,9,0.08)] sm:self-center dark:border-zinc-800 dark:bg-none dark:bg-zinc-900/45 dark:shadow-inner">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-amber-400 flex items-center gap-1">
+              <span className="flex items-center gap-1 text-xs font-black text-amber-800 dark:text-amber-400">
                 🪙 아케이드 동전
               </span>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">총 {tickets}개</span>
+              <span className="rounded-full border border-amber-200 bg-amber-100/80 px-2 py-0.5 text-[9px] font-black text-amber-800 dark:border-primary/20 dark:bg-primary/10 dark:text-primary">
+                총 {tickets}개
+              </span>
             </div>
 
             <div className="flex items-center justify-between mt-1 gap-4">
               {/* 5개 코인 슬롯 */}
-              <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1.5 rounded-xl border border-zinc-800/80">
+              <div className="flex items-center gap-1.5 rounded-xl border border-amber-200/90 bg-white/75 px-2.5 py-1.5 shadow-inner dark:border-zinc-800/80 dark:bg-black/40">
                 {Array.from({ length: 5 }).map((_, idx) => {
                   const hasCoin = idx < baseTickets;
                   return (
@@ -1034,8 +1036,8 @@ export const ArcadeTab: React.FC = () => {
                           </div>
                         </div>
                       ) : (
-                        <div className="relative w-5.5 h-5.5 rounded-full bg-zinc-900 border border-zinc-800 shadow-inner flex items-center justify-center">
-                          <div className="w-2 h-2 rounded-full bg-zinc-950 border border-zinc-900" />
+                        <div className="relative flex h-5.5 w-5.5 items-center justify-center rounded-full border border-slate-300 bg-slate-200 shadow-inner dark:border-zinc-800 dark:bg-zinc-900">
+                          <div className="h-2 w-2 rounded-full border border-slate-300 bg-slate-300 dark:border-zinc-900 dark:bg-zinc-950" />
                         </div>
                       )}
                     </div>
@@ -1045,25 +1047,25 @@ export const ArcadeTab: React.FC = () => {
 
               {/* 충전 대기 타이머 */}
               {baseTickets < 5 ? (
-                <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1.5 rounded-xl">
-                  <RefreshCw className="h-3 w-3 animate-spin text-amber-400" />
+                <div className="flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-100/80 px-2.5 py-1.5 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+                  <RefreshCw className="h-3 w-3 animate-spin text-amber-600 dark:text-amber-400" />
                   <span className="text-xs font-mono font-black">{formatTime(secondsUntilNext)}</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase">
+                <div className="flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-black uppercase text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
                   FULL COIN
                 </div>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-zinc-800/80 bg-black/30 px-2.5 py-1.5">
-                <p className="text-[9px] font-bold text-muted-foreground">기본 충전</p>
-                <p className="text-xs font-black text-amber-400"><span className="font-mono">{baseTickets}</span>/5</p>
+              <div className="rounded-xl border border-amber-200/80 bg-white/65 px-2.5 py-1.5 dark:border-zinc-800/80 dark:bg-black/30">
+                <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">기본 충전</p>
+                <p className="text-xs font-black text-amber-800 dark:text-amber-400"><span className="font-mono">{baseTickets}</span>/5</p>
               </div>
-              <div className={`rounded-xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-500/30 bg-sky-500/10' : 'border-zinc-800/80 bg-black/30'}`}>
-                <p className="text-[9px] font-bold text-muted-foreground">추가 티켓</p>
-                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-400' : 'text-muted-foreground'}`}>+<span className="font-mono">{bonusTickets}</span></p>
+              <div className={`rounded-xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/10' : 'border-slate-200 bg-white/65 dark:border-zinc-800/80 dark:bg-black/30'}`}>
+                <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">추가 티켓</p>
+                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-700 dark:text-sky-400' : 'text-slate-500 dark:text-muted-foreground'}`}>+<span className="font-mono">{bonusTickets}</span></p>
               </div>
             </div>
           </div>
@@ -1177,9 +1179,9 @@ export const ArcadeTab: React.FC = () => {
             </button>
 
             {/* 인게임 미니 코인 카운터 */}
-            <div className="flex items-center gap-1 bg-secondary/70 border border-border/40 px-2.5 py-1 rounded-full text-[10px] font-black text-foreground shadow-xs select-none">
-              <span className="text-amber-400">🪙</span>
-              <span>남은 코인: <strong className="text-amber-400 font-mono">{tickets}</strong></span>
+            <div className="flex select-none items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-black text-amber-950 shadow-xs dark:border-border/40 dark:bg-secondary/70 dark:text-foreground">
+              <span className="text-amber-600 dark:text-amber-400">🪙</span>
+              <span>남은 코인: <strong className="font-mono text-amber-700 dark:text-amber-400">{tickets}</strong></span>
             </div>
 
             <span className="text-xs font-black text-primary capitalize flex items-center gap-1.5">
