@@ -7,7 +7,7 @@
 
 // 프론트엔드 .env에서 NEXT_PUBLIC_API_URL 값을 읽음
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  process.env.NEXT_PUBLIC_API_URL || '/api';
 
 /**
  * 로그인 상태 플래그.
@@ -54,10 +54,11 @@ export const apiFetch = async (
       const data = await clone.json();
       if (data && data.error === 'BannedUser') {
         if (typeof window !== 'undefined') {
-          // 경고창을 띄우고 즉시 세션 플래그 폐기 및 강제 이탈(홈 화면 리다이렉트)
-          alert(data.message || '이용 정지 조치된 계정입니다.');
+          // alert()과 window.location 대신 브라우저 커스텀 이벤트를 발행하여 React 영역에서 처리하도록 위임
+          window.dispatchEvent(new CustomEvent('cctv-user-banned', { 
+            detail: { message: data.message || '이용 정지 조치된 계정입니다.' } 
+          }));
           clearAuthFlag();
-          window.location.href = '/';
         }
       }
     } catch {
@@ -75,7 +76,7 @@ export const apiFetch = async (
           const bypassRoutes = ['/maintenance', '/login', '/auth/chzzk/callback'];
           const isBypass = bypassRoutes.some(route => window.location.pathname === route);
           if (!isBypass) {
-            window.location.href = '/maintenance';
+            window.dispatchEvent(new CustomEvent('cctv-maintenance-triggered'));
           }
         }
       }

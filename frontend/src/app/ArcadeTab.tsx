@@ -72,14 +72,15 @@ type StartGameResponse = {
 };
 
 const PUZZLE_PIECE_COUNT = 12;
-const QUIZ_DISTORTION_SCALE = 0.2;
+const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 const QUIZ_MOTION_MAX_BLUR_PX = 80 * QUIZ_DISTORTION_SCALE;
-const QUIZ_MOSAIC_MIN_PERCENT = 100 - (100 - 1) * QUIZ_DISTORTION_SCALE;
-const QUIZ_RADIAL_MAX_ROTATE_DEG = 45 * QUIZ_DISTORTION_SCALE;
-const QUIZ_RADIAL_MAX_SCALE = 0.22 * QUIZ_DISTORTION_SCALE;
-const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.25 * QUIZ_DISTORTION_SCALE;
-const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.08 * QUIZ_DISTORTION_SCALE;
+// 모자이크·회전 잔상은 원래 강도가 약한 효과이므로 DISTORTION_SCALE을 따르지 않고 독립 상수 사용
+const QUIZ_MOSAIC_MIN_PERCENT = 4;       // 최대 강도 시 원본의 4%까지 다운스케일 → 강한 픽셀화
+const QUIZ_RADIAL_MAX_ROTATE_DEG = 120;   // 최대 120도 회전 잔상
+const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
+const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
+const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
 
 const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
 
@@ -966,12 +967,12 @@ export const ArcadeTab: React.FC = () => {
                   {/* 방사형 회전 잔상 블러 모드 */}
                   {quizBlurType === 'radial' && (
                     <div className="w-full h-full relative">
-                      {Array.from({ length: 13 }).map((_, i) => {
-                        const offsetFactor = i - 6; // -6, -5, ..., 0, ..., 5, 6
-                        const rotateAngle = (quizIntensity / 100) * QUIZ_RADIAL_MAX_ROTATE_DEG * (offsetFactor / 6);
-                        const scale = 1 + (quizIntensity / 100) * QUIZ_RADIAL_MAX_SCALE * Math.abs(offsetFactor / 6);
-                        // 중앙(i=6)은 원본, 외곽 잔상은 거리에 따라 점감하는 불투명도
-                        const opacity = i === 6 ? 1 : Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - Math.abs(offsetFactor) * 0.005);
+                      {Array.from({ length: 33 }).map((_, i) => {
+                        const offsetFactor = i - 16; // -16, -15, ..., 0, ..., 15, 16
+                        const rotateAngle = (quizIntensity / 100) * QUIZ_RADIAL_MAX_ROTATE_DEG * (offsetFactor / 16);
+                        const scale = 1 + (quizIntensity / 100) * QUIZ_RADIAL_MAX_SCALE * Math.abs(offsetFactor / 16);
+                        // 중앙(i=16)은 원본, 외곽 잔상은 거리에 따라 점감하는 불투명도
+                        const opacity = i === 16 ? 1 : Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - Math.abs(offsetFactor) * 0.02);
                         return (
                           <img
                             key={i}

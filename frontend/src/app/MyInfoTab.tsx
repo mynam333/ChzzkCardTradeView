@@ -352,7 +352,7 @@ export const MyInfoTab: React.FC = () => {
       </section>
 
       {/* 프로필 카드(공유용) 모달 */}
-      {profileModalOpen && <ProfileModal userId={user.id} onClose={() => setProfileModalOpen(false)} />}
+      {profileModalOpen && <ProfileModal userId={user.id} onClose={() => setProfileModalOpen(false)} isOwn />}
 
       {/* 대표 카드 선택 모달 */}
       {repModalOpen && (

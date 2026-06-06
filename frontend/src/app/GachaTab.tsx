@@ -981,9 +981,49 @@ export const GachaTab: React.FC = () => {
                     </span>
                     <span className="text-[11px] font-bold text-muted-foreground truncate">상대: {counterpartName}</span>
                   </div>
-                  <p className={`text-[10px] font-bold mb-2 ${confirmed ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                  <p className={`text-[10px] font-bold mb-1 ${confirmed ? 'text-emerald-500' : 'text-muted-foreground'}`}>
                     [{confirmed ? '2단계' : '1단계'}] {stageLabel}
                   </p>
+                  {/* Double-Lock 거래 진행 상태 타임라인 바 */}
+                  <div className="my-3.5 flex items-center justify-between relative px-4">
+                    <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-border/60 -translate-y-1/2 z-0"></div>
+                    <div 
+                      className="absolute top-1/2 left-4 h-0.5 bg-primary -translate-y-1/2 z-0 transition-all duration-300"
+                      style={{ width: confirmed ? 'calc(100% - 2rem)' : '50%' }}
+                    ></div>
+
+                    {/* 1단계: 제안 전송 */}
+                    <div className="flex flex-col items-center z-10">
+                      <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center text-[10px] font-black text-primary-foreground shadow-sm ring-4 ring-card">
+                        ✓
+                      </div>
+                      <span className="text-[9px] font-bold text-foreground mt-1 bg-card px-1">제안 전송</span>
+                    </div>
+
+                    {/* 2단계: 동의 수락 */}
+                    <div className="flex flex-col items-center z-10">
+                      <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm ring-4 ring-card transition-colors duration-200 ${
+                        confirmed 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-secondary text-muted-foreground border border-border/80'
+                      }`}>
+                        {confirmed ? '✓' : '2'}
+                      </div>
+                      <span className={`text-[9px] font-bold mt-1 bg-card px-1 ${confirmed ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        {incoming ? '내 동의' : '상대 동의'}
+                      </span>
+                    </div>
+
+                    {/* 3단계: 최종 승인 */}
+                    <div className="flex flex-col items-center z-10">
+                      <div className="h-5 w-5 rounded-full bg-secondary text-muted-foreground border border-border/80 flex items-center justify-center text-[10px] font-black shadow-sm ring-4 ring-card">
+                        3
+                      </div>
+                      <span className="text-[9px] font-bold text-muted-foreground mt-1 bg-card px-1">
+                        최종 승인
+                      </span>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2">
                       <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>

@@ -236,20 +236,25 @@ export const ShopTab: React.FC = () => {
       return;
     }
 
+    // 낙관적 포인트 차감
+    updatePoints(-price);
     setPurchasingListingId(listingId);
     try {
       const res = await apiFetch(`/market/buy/${listingId}`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         toast(`'${streamerName}' 카드 구매가 완료되었습니다.`, 'success');
-        updatePoints(-price);
         refreshUserData();
         fetchMarketListings();
         fetchMyListings();
       } else {
+        // 실패 시 롤백
+        updatePoints(price);
         toast(data.message || '구매에 실패했습니다.', 'error');
       }
     } catch {
+      // 통신 에러 시 롤백
+      updatePoints(price);
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setPurchasingListingId(null);
@@ -285,6 +290,9 @@ export const ShopTab: React.FC = () => {
       toast(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`, 'warning');
       return;
     }
+
+    // 낙관적 포인트 차감
+    if (!isFreeDraw) updatePoints(-drawCost);
     setIsDrawing(true);
     setDrawnCard(null);
     try {
@@ -297,7 +305,6 @@ export const ShopTab: React.FC = () => {
       setTimeout(() => {
         setDrawnCard(data.card.streamer);
         setIsDrawing(false);
-        if (!data.is_free) updatePoints(-drawCost);
         refreshUserData();
         // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
         import('canvas-confetti').then((module) => {
@@ -306,6 +313,8 @@ export const ShopTab: React.FC = () => {
         }).catch((err) => console.error('Confetti 로드 실패:', err));
       }, 1200);
     } catch (e: any) {
+      // 실패 시 롤백
+      if (!isFreeDraw) updatePoints(drawCost);
       setIsDrawing(false);
       toast(e.message || '서버와의 통신 오류가 발생했습니다.', 'error');
     }
@@ -313,20 +322,26 @@ export const ShopTab: React.FC = () => {
 
   const handleBuy = async (item: ShopItem) => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
+    
+    // 낙관적 포인트 차감
+    updatePoints(-item.price);
     setBuying(item.id);
     try {
       const res = await apiFetch('/shop/buy', { method: 'POST', body: JSON.stringify({ item_id: item.id }) });
       const data = await res.json();
       if (res.ok) {
         toast(`'${item.name}' 구매 완료!`, 'success');
-        updatePoints(-item.price);
         refreshUserData();
         fetchOwned();
         fetchPurchased();
       } else {
+        // 실패 시 롤백
+        updatePoints(item.price);
         toast(data.message || '구매 실패', 'error');
       }
     } catch {
+      // 에러 시 롤백
+      updatePoints(item.price);
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setBuying(null);

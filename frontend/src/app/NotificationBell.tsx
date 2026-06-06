@@ -2,10 +2,11 @@
 
 import React, { useState } from 'react';
 import { Bell, CheckCheck } from 'lucide-react';
-import { useApp } from './AppContext';
+import { useApp, useNotifications } from './AppContext';
 
 export const NotificationBell: React.FC<{ className?: string; align?: 'left' | 'right' }> = ({ className, align = 'right' }) => {
-  const { user, notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead } = useApp();
+  const { user } = useApp();
+  const { notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead } = useNotifications();
   const [open, setOpen] = useState(false);
 
   if (!user) return null;

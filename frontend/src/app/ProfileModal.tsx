@@ -47,7 +47,7 @@ interface ProfileData {
   collection: CollectionItem[];
 }
 
-export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = ({ userId, onClose }) => {
+export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn?: boolean }> = ({ userId, onClose, isOwn = false }) => {
   const { toast } = useApp();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -299,25 +299,31 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void }> = (
               </p>
             </div>
 
-            {/* 액션 버튼 */}
-            <div className="flex gap-2 border-t border-border p-4">
-              <button
-                onClick={handleSave}
-                disabled={exporting}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-secondary py-2.5 text-xs font-bold text-foreground hover:bg-secondary/80 disabled:opacity-50"
-              >
-                {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                이미지 저장
-              </button>
-              <button
-                onClick={handleShare}
-                disabled={exporting}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
-                공유하기
-              </button>
-            </div>
+            {/* 액션 버튼: 본인 프로필에서만 저장/공유 허용 */}
+            {isOwn ? (
+              <div className="flex gap-2 border-t border-border p-4">
+                <button
+                  onClick={handleSave}
+                  disabled={exporting}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-secondary py-2.5 text-xs font-bold text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                >
+                  {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  이미지 저장
+                </button>
+                <button
+                  onClick={handleShare}
+                  disabled={exporting}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
+                  공유하기
+                </button>
+              </div>
+            ) : (
+              <div className="border-t border-border px-4 py-3 text-center">
+                <p className="text-[10px] text-muted-foreground">다른 유저의 프로필은 저장 및 공유가 제한됩니다.</p>
+              </div>
+            )}
           </>
         )}
       </div>
