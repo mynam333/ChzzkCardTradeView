@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Next.js Edge Runtime에서 라이브러리 의존성 없이 JWT 페이로드를 안전하게 디코딩하는 헬퍼
+/**
+ * Next.js Edge Runtime에서 라이브러리 의존성 없이 JWT 페이로드를 안전하게 디코딩하는 헬퍼
+ */
 function getJwtPayload(token: string) {
   try {
     const parts = token.split('.');
@@ -26,6 +28,11 @@ function getJwtPayload(token: string) {
   }
 }
 
+/**
+ * Next.js 16 Proxy 미들웨어
+ * - 점검 모드 활성화 상태에서 일반 유저의 메인 및 하위 페이지 접근을 차단하고 점검 페이지로 리다이렉트합니다.
+ * - 관리자(ADMIN)는 DB 상태와 무관하게 JWT 토큰 검증만을 통해 점검 중에도 접속을 허용합니다.
+ */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -62,7 +69,7 @@ export async function proxy(request: NextRequest) {
       }
     }
   } catch (err) {
-    console.error('[Middleware] 점검 상태 프리뷰 에러:', err);
+    console.error('[Middleware/Proxy] 점검 상태 프리뷰 에러:', err);
   }
 
   return NextResponse.next();
