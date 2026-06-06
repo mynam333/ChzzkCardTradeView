@@ -315,18 +315,28 @@ export const getUserRankings = async (req: Request, res: Response) => {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     // 100위까지 랭킹을 늘리고 검색 키워드를 리포지토리에 전달
     const rankings = await userRepository.findRankings(100, keyword);
-    const titlesByUser = await titleRepository.findByUserIds(rankings.map((user) => user.id));
+    const userIds = rankings.map((user) => user.id);
+    const [titlesByUser, linkedStreamers] = await Promise.all([
+      titleRepository.findByUserIds(userIds),
+      streamerRepository.findByIds(userIds)
+    ]);
+    const streamerByChannelId = new Map(linkedStreamers.map((streamer) => [streamer.channel_id, streamer]));
     // 프론트엔드가 요구하는 구조로 매핑 (실제 보유 카드 수 및 포인트+카드가치 총자산 포함, 랭크 순위 추가)
-    const mapped = rankings.map((u) => ({
-      id: u.id,
-      username: u.username,
-      avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`,
-      point: u.point,
-      card_count: u.card_count,
-      total_asset: u.total_asset,
-      rank: u.rank,
-      titles: (titlesByUser[u.id] || []).filter((title) => title.is_equipped)
-    }));
+    const mapped = rankings.map((u) => {
+      const linkedStreamer = streamerByChannelId.get(u.id);
+      return {
+        id: u.id,
+        username: u.username,
+        avatar_url: u.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${u.id}`,
+        point: u.point,
+        card_count: u.card_count,
+        total_asset: u.total_asset,
+        rank: u.rank,
+        titles: (titlesByUser[u.id] || []).filter((title) => title.is_equipped),
+        is_streamer: !!linkedStreamer,
+        is_live: linkedStreamer?.is_active === true
+      };
+    });
 
     return res.status(200).json(mapped);
   } catch (err: any) {

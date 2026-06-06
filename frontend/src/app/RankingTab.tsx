@@ -35,6 +35,8 @@ interface UserRank {
   total_asset?: number;
   rank?: number;
   titles: UserTitle[];
+  is_streamer: boolean;
+  is_live: boolean;
 }
 
 type SubTab = 'value' | 'change' | 'user';
@@ -220,7 +222,14 @@ export const RankingTab: React.FC = () => {
               >
                 <div className="flex items-center gap-4">
                   <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
-                  <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                  <div className="relative shrink-0">
+                    <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                    {ur.is_live && (
+                      <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black leading-none text-white ring-2 ring-card">
+                        LIVE
+                      </span>
+                    )}
+                  </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h4 className="truncate text-xs font-bold text-foreground">{ur.username}</h4>
