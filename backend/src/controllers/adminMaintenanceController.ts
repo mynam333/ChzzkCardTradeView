@@ -70,20 +70,30 @@ const countTable = async (table: string): Promise<number> => {
 //  초기화 카테고리 정의
 //  (유저 가입/로그인 · 스트리머 등록 · 카드 이미지 정보는 제외)
 // ============================================================
-const CATEGORIES: { id: string; label: string; description: string; countTable: string; run: () => Promise<void> }[] = [
-  { id: 'user_cards', label: '유저 보유 카드', description: '모든 유저의 보유 카드를 삭제합니다.', countTable: 'user_cards', run: () => wipeTable('user_cards') },
-  { id: 'trades', label: '교환(진행/이력)', description: '진행 중·완료된 모든 교환 기록을 삭제합니다.', countTable: 'trades', run: () => wipeTable('trades') },
-  { id: 'coupons', label: '쿠폰·사용기록', description: '발급된 쿠폰과 사용 로그를 삭제합니다.', countTable: 'coupons', run: async () => { await wipeTable('coupon_logs'); await wipeTable('coupons'); } },
-  { id: 'cosmetics', label: '코스메틱 보유/구매', description: '유저 보유 코스메틱·구매 내역을 삭제하고 카드 장착을 해제합니다.', countTable: 'user_cosmetics', run: async () => { await clearCardCosmeticSlots(); await wipeTable('user_cosmetics'); await wipeTable('shop_purchases', 'user_id'); } },
-  { id: 'shop_items', label: '상점 아이템 카탈로그', description: '상점 아이템 전체를 삭제합니다(보유·구매 내역 포함, 카드 장착 해제).', countTable: 'shop_items', run: async () => { await clearCardCosmeticSlots(); await wipeTable('shop_items'); } },
-  { id: 'notifications', label: '인앱 알림', description: '모든 인앱 알림을 삭제합니다.', countTable: 'notifications', run: () => wipeTable('notifications') },
-  { id: 'push', label: '푸시 구독/예약', description: '웹푸시 구독과 예약 발송 내역을 삭제합니다.', countTable: 'push_subscriptions', run: async () => { await wipeTable('push_notifications'); await wipeTable('push_subscriptions'); } },
-  { id: 'announcements', label: '공지', description: '모든 공지를 삭제합니다.', countTable: 'announcements', run: () => wipeTable('announcements') },
-  { id: 'reports', label: '카드 신고', description: '카드 신고 내역을 삭제합니다.', countTable: 'card_reports', run: () => wipeTable('card_reports') },
-  { id: 'value_history', label: '시세 이력', description: '시세 이력을 삭제하고, 모든 카드 가치를 초기값(팔로워 수)으로 되돌립니다.', countTable: 'value_history', run: async () => { await wipeTable('value_history'); await resetStreamerValuesToFollowers(); } },
-  { id: 'blocks', label: '유저 차단', description: '모든 유저 차단 관계를 삭제합니다.', countTable: 'user_blocks', run: () => wipeTable('user_blocks', 'blocker_id') },
-  { id: 'points', label: '유저 포인트 초기화(0)', description: '모든 유저의 보유 포인트를 0으로 만듭니다.', countTable: 'users', run: () => resetAllPoints() },
-  { id: 'market', label: '오픈마켓(매물/이력)', description: '오픈마켓의 모든 판매 중 매물 및 거래 완료/취소 이력을 삭제합니다.', countTable: 'market_listings', run: () => wipeTable('market_listings') },
+const CATEGORIES: { id: string; label: string; description: string; countTables: string[]; run: () => Promise<void> }[] = [
+  { id: 'user_cards', label: '유저 보유 카드', description: '모든 유저의 보유 카드를 삭제합니다.', countTables: ['user_cards'], run: () => wipeTable('user_cards') },
+  { id: 'trades', label: '교환(진행/이력)', description: '진행 중·완료된 모든 교환 기록을 삭제합니다.', countTables: ['trades'], run: () => wipeTable('trades') },
+  { id: 'coupons', label: '쿠폰·사용기록', description: '발급된 쿠폰과 사용 로그를 삭제합니다.', countTables: ['coupons'], run: async () => { await wipeTable('coupon_logs'); await wipeTable('coupons'); } },
+  { id: 'cosmetics', label: '코스메틱 보유/구매', description: '유저 보유 코스메틱·구매 내역을 삭제하고 카드 장착을 해제합니다.', countTables: ['user_cosmetics'], run: async () => { await clearCardCosmeticSlots(); await wipeTable('user_cosmetics'); await wipeTable('shop_purchases', 'user_id'); } },
+  { id: 'shop_items', label: '상점 아이템 카탈로그', description: '상점 아이템 전체를 삭제합니다(보유·구매 내역 포함, 카드 장착 해제).', countTables: ['shop_items'], run: async () => { await clearCardCosmeticSlots(); await wipeTable('shop_items'); } },
+  { id: 'notifications', label: '인앱 알림', description: '모든 인앱 알림을 삭제합니다.', countTables: ['notifications'], run: () => wipeTable('notifications') },
+  { id: 'push', label: '푸시 구독/예약', description: '웹푸시 구독과 예약 발송 내역을 삭제합니다.', countTables: ['push_subscriptions'], run: async () => { await wipeTable('push_notifications'); await wipeTable('push_subscriptions'); } },
+  { id: 'announcements', label: '공지', description: '모든 공지를 삭제합니다.', countTables: ['announcements'], run: () => wipeTable('announcements') },
+  { id: 'reports', label: '카드 신고', description: '카드 신고 내역을 삭제합니다.', countTables: ['card_reports'], run: () => wipeTable('card_reports') },
+  { id: 'value_history', label: '시세 이력', description: '시세 이력을 삭제하고, 모든 카드 가치를 초기값(팔로워 수)으로 되돌립니다.', countTables: ['value_history'], run: async () => { await wipeTable('value_history'); await resetStreamerValuesToFollowers(); } },
+  { id: 'blocks', label: '유저 차단', description: '모든 유저 차단 관계를 삭제합니다.', countTables: ['user_blocks'], run: () => wipeTable('user_blocks', 'blocker_id') },
+  { id: 'points', label: '유저 포인트 초기화(0)', description: '모든 유저의 보유 포인트를 0으로 만듭니다.', countTables: ['users'], run: () => resetAllPoints() },
+  { id: 'market', label: '오픈마켓(매물/이력)', description: '오픈마켓의 모든 판매 중 매물 및 거래 완료/취소 이력을 삭제합니다.', countTables: ['market_listings'], run: () => wipeTable('market_listings') },
+  {
+    id: 'minigames',
+    label: '미니게임 티켓/플레이 기록',
+    description: '모든 유저의 기본·보너스 티켓 상태와 미니게임 플레이 기록을 삭제합니다.',
+    countTables: ['user_minigame_tickets', 'minigame_sessions'],
+    run: async () => {
+      await wipeTable('minigame_sessions');
+      await wipeTable('user_minigame_tickets', 'user_id');
+    }
+  },
 ];
 
 /** 초기화 가능한 카테고리 목록 + 현재 데이터 수량 */
@@ -91,7 +101,13 @@ export const getResetInfo = async (_req: Request, res: Response) => {
   try {
     const out = [];
     for (const c of CATEGORIES) {
-      out.push({ id: c.id, label: c.label, description: c.description, count: await countTable(c.countTable).catch(() => 0) });
+      const counts = await Promise.all(c.countTables.map((table) => countTable(table).catch(() => 0)));
+      out.push({
+        id: c.id,
+        label: c.label,
+        description: c.description,
+        count: counts.reduce((sum, count) => sum + count, 0)
+      });
     }
     return res.status(200).json(out);
   } catch (err: any) {
