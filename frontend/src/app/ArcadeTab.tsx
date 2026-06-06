@@ -1292,39 +1292,48 @@ export const ArcadeTab: React.FC = () => {
                 조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 120초 안에 위치와 회전을 모두 맞춰주세요!
               </p>
 
-              {/* 가로 3칸 세로 4칸 = 총 12조각 (W 240px, H 320px) */}
-              <div className="grid grid-cols-3 gap-0.5 w-[240px] h-[320px] rounded-2xl overflow-hidden border border-border shadow-inner p-1 bg-secondary/20 touch-none select-none">
-                {puzzlePieces.map((piece, idx) => {
-                  const col = piece.id % 3;
-                  const row = Math.floor(piece.id / 3);
-                  const isDragging = draggingPuzzleIndex === idx;
-                  const isDropTarget = dragOverPuzzleIndex === idx;
+              {/* 원본을 중앙 기준 3:4로 크롭한 뒤 80x80 정사각형 12개로 분할 */}
+              <div className="rounded-2xl border border-border bg-secondary/20 p-1 shadow-inner">
+                <div className="grid h-[320px] w-[240px] grid-cols-3 grid-rows-4 overflow-hidden rounded-xl touch-none select-none">
+                  {puzzlePieces.map((piece, idx) => {
+                    const col = piece.id % 3;
+                    const row = Math.floor(piece.id / 3);
+                    const isDragging = draggingPuzzleIndex === idx;
+                    const isDropTarget = dragOverPuzzleIndex === idx;
 
-                  // 카드 이미지 5:8 원본에서 3:4 영역 상단만 세로 찌그러짐 없이 자르는 스타일 매핑
-                  // W=3, H=4.8 로 5:8비율 고정한 뒤 세로 아래 0.8칸 크롭
-                  const posX = col * 50; // X축 비율: 0%, 50%, 100%
-                  const posY = (row / 3.8) * 100; // Y축 비율: 4.8칸 중 위쪽 4칸 활용
-
-                  return (
-                    <button
-                      type="button"
-                      key={`${piece.id}-${idx}`}
-                      data-puzzle-index={idx}
-                      onPointerDown={(event) => handlePuzzlePointerDown(event, idx)}
-                      onPointerMove={(event) => handlePuzzlePointerMove(event, idx)}
-                      onPointerUp={(event) => handlePuzzlePointerUp(event, idx)}
-                      onPointerCancel={handlePuzzlePointerCancel}
-                      style={{
-                        backgroundImage: `url(${gameData.image_url})`,
-                        backgroundPosition: `${posX}% ${posY}%`,
-                        backgroundSize: '300% 480%', // 가로 3배, 세로 4.8배 분량
-                        transform: `rotate(${piece.rotation}deg)`,
-                      }}
-                      className={`relative w-[78px] h-[78px] cursor-grab border border-card/45 transition-[transform,opacity,box-shadow,filter] duration-200 active:cursor-grabbing active:scale-95 aspect-square focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isDragging ? 'opacity-55 brightness-75 shadow-inner' : ''} ${isDropTarget ? 'z-10 ring-2 ring-primary ring-offset-1 ring-offset-background brightness-110' : ''}`}
-                      aria-label={`퍼즐 조각 ${idx + 1}: 탭하면 회전, 드래그하면 위치 교체`}
-                    />
-                  );
-                })}
+                    return (
+                      <button
+                        type="button"
+                        key={`${piece.id}-${idx}`}
+                        data-puzzle-index={idx}
+                        onPointerDown={(event) => handlePuzzlePointerDown(event, idx)}
+                        onPointerMove={(event) => handlePuzzlePointerMove(event, idx)}
+                        onPointerUp={(event) => handlePuzzlePointerUp(event, idx)}
+                        onPointerCancel={handlePuzzlePointerCancel}
+                        style={{
+                          transform: `rotate(${piece.rotation}deg)`,
+                        }}
+                        className={`relative h-full w-full min-h-0 min-w-0 cursor-grab overflow-hidden ring-1 ring-inset ring-card/45 transition-[transform,opacity,box-shadow,filter] duration-200 active:cursor-grabbing active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isDragging ? 'opacity-55 brightness-75 shadow-inner' : ''} ${isDropTarget ? 'z-10 ring-2 ring-primary ring-offset-1 ring-offset-background brightness-110' : ''}`}
+                        aria-label={`퍼즐 조각 ${idx + 1}: 탭하면 회전, 드래그하면 위치 교체`}
+                      >
+                        <img
+                          src={gameData.image_url}
+                          alt=""
+                          draggable={false}
+                          style={{
+                            width: '300%',
+                            height: '400%',
+                            left: `${-col * 100}%`,
+                            top: `${-row * 100}%`,
+                            objectFit: 'cover',
+                            objectPosition: 'center'
+                          }}
+                          className="pointer-events-none absolute max-w-none select-none"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="flex items-center gap-1 rounded bg-secondary/60 px-2.5 py-1 text-[10px] text-muted-foreground font-bold font-mono">
