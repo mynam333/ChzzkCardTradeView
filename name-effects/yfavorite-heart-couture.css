@@ -1,0 +1,109 @@
+/* ============================================================
+   최애의 심장: Heart Couture
+   Y최애체 + 로즈 다이아몬드 + 흐르는 하트 자카드 + 절제된 심장 박동
+   적용 클래스: ne-yfavorite-heart-couture
+
+   상품명 추천: 최애의 심장
+   설명 추천: 사랑을 새긴 로즈 다이아몬드 이름 효과. 작은 하트와 진주빛 광채가 이름 위를 흐릅니다.
+   ============================================================ */
+@font-face {
+  font-family: "YFavorite";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/2410-1@1.0/YOnepickTTF-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.ne-yfavorite-heart-couture {
+  color: #fff0f7;
+  font-family: "YFavorite", "Pretendard", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 0.42px rgba(103, 15, 58, 0.94);
+
+  /*
+   * 1층: 비스듬히 지나가는 다이아몬드 광택
+   * 2층: 글자 안에서 흐르는 작은 하트 자카드
+   * 3층: 로즈 쿼츠 기반색
+   */
+  background-image:
+    linear-gradient(
+      112deg,
+      transparent 0%,
+      transparent 34%,
+      rgba(255, 255, 255, 0.18) 42%,
+      rgba(255, 255, 255, 0.98) 49%,
+      rgba(255, 225, 242, 0.35) 56%,
+      transparent 64%,
+      transparent 100%
+    ),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='14' viewBox='0 0 18 14'%3E%3Cpath d='M9 12.4C7.7 11.2 2.2 7.4 2.2 3.8 2.2 1.7 3.8.5 5.5.5 7 .5 8.1 1.4 9 2.5 9.9 1.4 11 .5 12.5.5c1.7 0 3.3 1.2 3.3 3.3 0 3.6-5.5 7.4-6.8 8.6Z' fill='%23ff4f9a' fill-opacity='.46'/%3E%3Cpath d='M4.4 2.4c.8-.8 2.1-.8 2.9.1' fill='none' stroke='%23fff5fa' stroke-width='.85' stroke-linecap='round' stroke-opacity='.75'/%3E%3C/svg%3E"),
+    linear-gradient(
+      180deg,
+      #fffafd 0%,
+      #ffd8e9 22%,
+      #ff8fbd 48%,
+      #ff4f98 68%,
+      #c51f68 100%
+    );
+  background-size: 260% 100%, 14px 11px, 100% 100%;
+  background-position: 150% 50%, 0 50%, 0 0;
+  background-repeat: no-repeat, repeat-x, no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  filter:
+    drop-shadow(0 1px 0 rgba(72, 5, 38, 0.95))
+    drop-shadow(0 0 2px rgba(255, 230, 242, 0.95))
+    drop-shadow(0 0 4px rgba(255, 69, 145, 0.78))
+    drop-shadow(0 0 8px rgba(255, 35, 126, 0.36));
+
+  animation:
+    ne-yfhc-shimmer 4.8s cubic-bezier(0.42, 0, 0.35, 1) infinite,
+    ne-yfhc-heartbeat 3.6s ease-in-out infinite;
+}
+
+@keyframes ne-yfhc-shimmer {
+  0%, 14% {
+    background-position: 150% 50%, 0 50%, 0 0;
+  }
+  58% {
+    background-position: -70% 50%, 16px 50%, 0 0;
+  }
+  100% {
+    background-position: -70% 50%, 28px 50%, 0 0;
+  }
+}
+
+@keyframes ne-yfhc-heartbeat {
+  0%, 40%, 48%, 56%, 100% {
+    filter:
+      drop-shadow(0 1px 0 rgba(72, 5, 38, 0.95))
+      drop-shadow(0 0 2px rgba(255, 230, 242, 0.95))
+      drop-shadow(0 0 4px rgba(255, 69, 145, 0.72))
+      drop-shadow(0 0 8px rgba(255, 35, 126, 0.30));
+  }
+  44% {
+    filter:
+      drop-shadow(0 1px 0 rgba(72, 5, 38, 0.95))
+      drop-shadow(0 0 3px rgba(255, 245, 250, 1))
+      drop-shadow(0 0 6px rgba(255, 76, 151, 0.94))
+      drop-shadow(0 0 11px rgba(255, 35, 126, 0.48));
+  }
+  52% {
+    filter:
+      drop-shadow(0 1px 0 rgba(72, 5, 38, 0.95))
+      drop-shadow(0 0 2.5px rgba(255, 240, 247, 1))
+      drop-shadow(0 0 5px rgba(255, 76, 151, 0.86))
+      drop-shadow(0 0 10px rgba(255, 35, 126, 0.42));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ne-yfavorite-heart-couture {
+    animation: none;
+    background-position: 42% 50%, 7px 50%, 0 0;
+  }
+}

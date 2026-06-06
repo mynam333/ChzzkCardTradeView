@@ -384,10 +384,10 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
-        // 15초(카운트다운 3초 + 2초 노출 + 15초 플레이 = 20000ms) 내 완료 시 보너스 200 P
-        if (serverElapsedMs <= 20000) {
+        // 10초(카운트다운 3초 + 2초 노출 + 10초 플레이 = 15000ms) 내 완료 시 보너스 200 P
+        if (serverElapsedMs <= 15000) {
           earnedPoints += BONUS_REWARD;
-          message = `15초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          message = `10초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {
           message = `모든 카드의 짝을 찾으셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
         }

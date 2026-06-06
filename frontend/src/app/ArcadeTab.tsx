@@ -117,7 +117,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   match: {
     title: '스트리머 짝맞추기',
     description: '처음 2초간 공개되는 카드를 기억한 뒤, 60초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
-    bonus: '15초 안에 완성 시 보너스 200 P',
+    bonus: '10초 안에 완성 시 보너스 200 P',
     Icon: Trophy,
     accent: 'text-sky-700 dark:text-sky-400',
     iconBackground: 'bg-sky-100 dark:bg-sky-500/10',
@@ -1327,7 +1327,7 @@ export const ArcadeTab: React.FC = () => {
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
       {activeGame && gameData && (
-        <div className="max-w-xl mx-auto rounded-3xl border border-border bg-card p-6 shadow-xl relative overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-card p-4 shadow-xl animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]">
 
           {/* 아케이드 3초 카운트다운 오버레이 */}
           {countdownLeft !== null && countdownLeft > 0 && (
@@ -1345,7 +1345,7 @@ export const ArcadeTab: React.FC = () => {
           )}
 
           {/* 게임 상단 제어 바 */}
-          <div className="flex items-center justify-between border-b border-border/60 pb-3 mb-5">
+          <div className="mb-5 flex shrink-0 items-center justify-between border-b border-border/60 pb-3">
             <button
               onClick={handleExitGame}
               className="text-xs font-bold text-muted-foreground hover:text-foreground flex items-center gap-1 transition"
@@ -1438,7 +1438,7 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
           {activeGame === 'quiz' && (
-              <div className="space-y-5 flex flex-col items-center">
+              <div className="flex flex-1 flex-col items-center justify-center space-y-5">
 
                 {/* 퀴즈 15초 타이머 & 프로그레스 바 */}
                 <div className="w-full max-w-xs flex flex-col gap-2 px-1">
@@ -1575,7 +1575,7 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 2: 카드 퍼즐 (가로 3칸 세로 4칸 정사각형 조각 3:4 크롭) */}
           {/* ======================================================== */}
           {activeGame === 'puzzle' && (
-            <div className="space-y-5 flex flex-col items-center">
+            <div className="flex flex-1 flex-col items-center justify-center space-y-5">
               <GameTimeLimit
                 timeLeft={puzzleTimeLeft}
                 totalSeconds={PUZZLE_TIME_LIMIT_SECONDS}
@@ -1626,18 +1626,18 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 3: 짝맞추기 뒤집기 (2초 선공개, 60초 시간제한, 3D 플립 모션) */}
           {/* ======================================================== */}
           {activeGame === 'match' && (
-            <div className="space-y-4 flex flex-col items-center">
+            <div className="flex flex-1 flex-col items-center justify-center space-y-4">
 
               <GameTimeLimit
                 timeLeft={gameTimeLeft}
                 totalSeconds={MATCH_TIME_LIMIT_SECONDS}
                 dangerSeconds={10}
-                bonusLabel="30초 보너스"
+                bonusLabel="10초 보너스"
                 pausedLabel={revealActive ? '카드를 기억하세요!' : undefined}
               />
 
-              {/* 3x4 / 4x3 반응형 카드 매칭 보드 */}
-              <div className="grid grid-cols-3 gap-3 w-full max-w-md sm:grid-cols-4 aspect-[4/3] p-1.5 rounded-2xl bg-secondary/20 border border-border/40">
+              {/* 카드 비율 4:5를 유지하는 3x4 / 4x3 반응형 매칭 보드 */}
+              <div className="grid aspect-[3/5] w-full max-w-xl grid-cols-3 grid-rows-4 gap-2 rounded-2xl border border-border/40 bg-secondary/20 p-1.5 sm:aspect-[16/15] sm:grid-cols-4 sm:grid-rows-3 sm:gap-3">
                 {matchCards.map((card, idx) => {
                   // 선공개 중이거나 뒤집혔거나 이미 맞춘 경우 앞면 노출
                   const showFront = revealActive || card.isFlipped || card.isMatched;
@@ -1645,7 +1645,7 @@ export const ArcadeTab: React.FC = () => {
                     <div
                       key={card.id}
                       onClick={() => handleFlipCard(idx)}
-                      className={`relative w-full aspect-[4/5] cursor-pointer perspective group transition-all duration-300 ${
+                      className={`perspective group relative h-full min-h-0 w-full min-w-0 cursor-pointer transition-all duration-300 ${
                         card.isMatched ? 'scale-95' : ''
                       }`}
                     >
