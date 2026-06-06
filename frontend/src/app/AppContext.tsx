@@ -395,21 +395,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checkMaintenanceStatus
     }}>
       {isInitializing ? (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-950 text-white select-none">
-          <div className="flex flex-col items-center space-y-5">
-            <div className="relative flex h-20 w-20 items-center justify-center">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background text-foreground select-none">
+          {/* 은은한 탑 오로라 글로우 */}
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 h-72 w-72 rounded-full bg-primary/10 blur-[80px] pointer-events-none"></div>
+
+          <div className="flex flex-col items-center space-y-6 relative z-10">
+            <div className="relative flex h-24 w-24 items-center justify-center">
               {/* 외부 핑 애니메이션 링 */}
-              <div className="absolute h-full w-full animate-ping rounded-full bg-emerald-500/10 opacity-75 duration-1000"></div>
+              <div className="absolute h-full w-full animate-ping rounded-full bg-primary/5 opacity-75 duration-[1800ms]"></div>
               {/* 중간 스핀 로더 */}
-              <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-emerald-500/20 border-t-emerald-400"></div>
+              <div className="absolute h-18 w-18 animate-spin rounded-full border-[3px] border-primary/10 border-t-primary"></div>
               {/* 중앙 로고 표식 */}
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-950 font-black text-emerald-400 shadow-md shadow-emerald-500/20">
-                C
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-card p-1.5 shadow-md shadow-primary/20 border border-primary/20">
+                <img
+                  src="/favicon.ico"
+                  alt="CCTV"
+                  className="h-8 w-8 object-contain"
+                />
               </div>
             </div>
-            <div className="text-center space-y-1">
-              <h1 className="text-xl font-extrabold tracking-widest text-emerald-400 animate-pulse">CCTV</h1>
-              <p className="text-[11px] text-zinc-400">서비스 연결중입니다...</p>
+            <div className="text-center space-y-2">
+              <h1 className="text-2xl font-black tracking-widest bg-gradient-to-r from-blue-400 via-indigo-400 to-primary bg-clip-text text-transparent animate-pulse">
+                CCTV
+              </h1>
+              <p className="text-[11px] font-medium text-muted-foreground tracking-wide">
+                치지직 카드 트레이드 뷰를 불러오는 중입니다...
+              </p>
             </div>
           </div>
         </div>
