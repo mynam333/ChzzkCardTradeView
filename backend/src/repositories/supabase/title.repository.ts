@@ -76,12 +76,31 @@ export class SupabaseTitleRepository implements ITitleRepository {
     if (error) throw error;
   }
 
+  async awardMany(userIds: string[], titleId: number): Promise<void> {
+    if (userIds.length === 0) return;
+    const rows = userIds.map((userId) => ({ user_id: userId, title_id: titleId }));
+    const { error } = await this.getClient()
+      .from('user_titles')
+      .upsert(rows, { onConflict: 'user_id,title_id', ignoreDuplicates: true });
+    if (error) throw error;
+  }
+
   async revoke(userId: string, titleId: number): Promise<void> {
     const { error } = await this.getClient()
       .from('user_titles')
       .delete()
       .eq('user_id', userId)
       .eq('title_id', titleId);
+    if (error) throw error;
+  }
+
+  async revokeMany(userIds: string[], titleId: number): Promise<void> {
+    if (userIds.length === 0) return;
+    const { error } = await this.getClient()
+      .from('user_titles')
+      .delete()
+      .eq('title_id', titleId)
+      .in('user_id', userIds);
     if (error) throw error;
   }
 

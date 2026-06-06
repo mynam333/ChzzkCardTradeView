@@ -90,6 +90,45 @@ export const awardTitle = async (req: Request, res: Response) => {
   }
 };
 
+export const awardTitleToMany = async (req: Request, res: Response) => {
+  const id = parseTitleId(req.params.id);
+  const rawUserIds: unknown[] = Array.isArray(req.body?.user_ids) ? req.body.user_ids : [];
+  const userIds: string[] = [...new Set(rawUserIds.map((value) => String(value || '').trim()).filter(Boolean))];
+
+  if (!id) return res.status(400).json({ error: 'BadRequest', message: '칭호 ID가 올바르지 않습니다.' });
+  if (userIds.length === 0) return res.status(400).json({ error: 'BadRequest', message: '수여할 유저를 선택해 주세요.' });
+  if (userIds.length > 500) return res.status(400).json({ error: 'BadRequest', message: '한 번에 최대 500명까지 수여할 수 있습니다.' });
+
+  try {
+    const title = await titleRepository.findById(id);
+    if (!title) return res.status(404).json({ error: 'NotFound', message: '칭호를 찾을 수 없습니다.' });
+
+    const users = await userRepository.findByIds(userIds);
+    const validUserIds = users.map((user) => user.id);
+    const titlesByUser = await titleRepository.findByUserIds(validUserIds);
+    const newUserIds = validUserIds.filter((userId) => !titlesByUser[userId]?.some((owned) => owned.id === id));
+
+    await titleRepository.awardMany(newUserIds, id);
+    for (let offset = 0; offset < newUserIds.length; offset += 25) {
+      await Promise.all(newUserIds.slice(offset, offset + 25).map((userId) => notificationRepository.create({
+        user_id: userId,
+        title: '새 칭호를 획득했습니다',
+        body: `[${title.name}] 칭호가 수여되었습니다.`,
+        link: '/my-info'
+      })));
+    }
+
+    return res.status(200).json({
+      message: `${title.name} 칭호를 ${newUserIds.length}명에게 수여했습니다.`,
+      awarded_count: newUserIds.length,
+      already_owned_count: validUserIds.length - newUserIds.length,
+      invalid_count: userIds.length - validUserIds.length
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '칭호 일괄 수여 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
 export const revokeTitle = async (req: Request, res: Response) => {
   const id = parseTitleId(req.params.id);
   const userId = String(req.params.user_id || '');
@@ -100,6 +139,37 @@ export const revokeTitle = async (req: Request, res: Response) => {
     return res.status(200).json({ message: `${user.username}님의 ${title.name} 칭호를 회수했습니다.` });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '칭호 회수 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const revokeTitleFromMany = async (req: Request, res: Response) => {
+  const id = parseTitleId(req.params.id);
+  const rawUserIds: unknown[] = Array.isArray(req.body?.user_ids) ? req.body.user_ids : [];
+  const userIds: string[] = [...new Set(rawUserIds.map((value) => String(value || '').trim()).filter(Boolean))];
+
+  if (!id) return res.status(400).json({ error: 'BadRequest', message: '칭호 ID가 올바르지 않습니다.' });
+  if (userIds.length === 0) return res.status(400).json({ error: 'BadRequest', message: '회수할 유저를 선택해 주세요.' });
+  if (userIds.length > 500) return res.status(400).json({ error: 'BadRequest', message: '한 번에 최대 500명까지 회수할 수 있습니다.' });
+
+  try {
+    const title = await titleRepository.findById(id);
+    if (!title) return res.status(404).json({ error: 'NotFound', message: '칭호를 찾을 수 없습니다.' });
+
+    const users = await userRepository.findByIds(userIds);
+    const validUserIds = users.map((user) => user.id);
+    const titlesByUser = await titleRepository.findByUserIds(validUserIds);
+    const ownedUserIds = validUserIds.filter((userId) => titlesByUser[userId]?.some((owned) => owned.id === id));
+
+    await titleRepository.revokeMany(ownedUserIds, id);
+
+    return res.status(200).json({
+      message: `${title.name} 칭호를 ${ownedUserIds.length}명에게서 회수했습니다.`,
+      revoked_count: ownedUserIds.length,
+      not_owned_count: validUserIds.length - ownedUserIds.length,
+      invalid_count: userIds.length - validUserIds.length
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '칭호 일괄 회수 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

@@ -1,0 +1,95 @@
+/*
+ * Title name: 베타테스터
+ * Lucide icon: FlaskConical
+ * Icon color: #67e8f9
+ *
+ * Paste this entire file into the title CSS field.
+ * {{selector}} is replaced with the title's generated class.
+ */
+
+{{selector}} {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(103, 232, 249, 0.72);
+  background:
+    linear-gradient(
+      115deg,
+      rgba(8, 47, 73, 0.96),
+      rgba(76, 29, 149, 0.94),
+      rgba(6, 78, 59, 0.96)
+    );
+  background-size: 220% 220%;
+  color: #ecfeff;
+  letter-spacing: 0.055em;
+  text-shadow: 0 0 8px rgba(165, 243, 252, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 0 12px rgba(34, 211, 238, 0.12),
+    0 0 10px rgba(34, 211, 238, 0.24),
+    0 0 18px rgba(139, 92, 246, 0.14);
+  animation: cctv-beta-spectrum 5s ease-in-out infinite;
+}
+
+{{selector}}::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -120% auto -120% -45%;
+  width: 34%;
+  transform: rotate(16deg);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.62),
+      transparent
+    );
+  filter: blur(0.5px);
+  animation: cctv-beta-scan 3.4s ease-in-out infinite;
+}
+
+{{selector}} > * {
+  position: relative;
+  z-index: 1;
+}
+
+{{selector}} svg {
+  filter: drop-shadow(0 0 4px rgba(103, 232, 249, 0.9));
+}
+
+@keyframes cctv-beta-spectrum {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes cctv-beta-scan {
+  0%,
+  20% {
+    left: -45%;
+    opacity: 0;
+  }
+
+  35% {
+    opacity: 0.9;
+  }
+
+  65%,
+  100% {
+    left: 125%;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  {{selector}},
+  {{selector}}::before {
+    animation: none;
+  }
+}

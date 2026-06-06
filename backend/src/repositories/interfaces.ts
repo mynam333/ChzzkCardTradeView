@@ -198,7 +198,9 @@ export interface ITitleRepository {
   update(id: number, title: Partial<Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null>;
   delete(id: number): Promise<void>;
   award(userId: string, titleId: number): Promise<void>;
+  awardMany(userIds: string[], titleId: number): Promise<void>;
   revoke(userId: string, titleId: number): Promise<void>;
+  revokeMany(userIds: string[], titleId: number): Promise<void>;
   equip(userId: string, titleId: number | null): Promise<boolean>;
 }
 

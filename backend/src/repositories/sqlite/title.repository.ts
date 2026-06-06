@@ -86,8 +86,29 @@ export class SqliteTitleRepository implements ITitleRepository {
     `).run(userId, titleId);
   }
 
+  async awardMany(userIds: string[], titleId: number): Promise<void> {
+    if (userIds.length === 0) return;
+    const statement = this.getDb().prepare(`
+      INSERT INTO user_titles (user_id, title_id)
+      VALUES (?, ?)
+      ON CONFLICT(user_id, title_id) DO NOTHING
+    `);
+    this.getDb().transaction((ids: string[]) => {
+      for (const userId of ids) statement.run(userId, titleId);
+    })(userIds);
+  }
+
   async revoke(userId: string, titleId: number): Promise<void> {
     this.getDb().prepare('DELETE FROM user_titles WHERE user_id = ? AND title_id = ?').run(userId, titleId);
+  }
+
+  async revokeMany(userIds: string[], titleId: number): Promise<void> {
+    if (userIds.length === 0) return;
+    const placeholders = userIds.map(() => '?').join(', ');
+    this.getDb().prepare(`
+      DELETE FROM user_titles
+      WHERE title_id = ? AND user_id IN (${placeholders})
+    `).run(titleId, ...userIds);
   }
 
   async equip(userId: string, titleId: number | null): Promise<boolean> {

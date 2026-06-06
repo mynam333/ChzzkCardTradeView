@@ -26,6 +26,9 @@ export const AdminTitlesTab: React.FC = () => {
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [bulkAwarding, setBulkAwarding] = useState(false);
+  const [bulkMode, setBulkMode] = useState<'award' | 'revoke'>('award');
 
   const selectedTitle = titles.find((title) => title.id === selectedTitleId) || null;
   const previewTitle: UserTitle = {
@@ -37,6 +40,14 @@ export const AdminTitlesTab: React.FC = () => {
   };
   const iconExists = !form.icon_name || Boolean(icons[form.icon_name as keyof typeof icons]);
   const iconOptions = useMemo(() => suggestedIcons.filter((name) => icons[name as keyof typeof icons]), []);
+  const selectableUsers = selectedTitle
+    ? users.filter((user) => {
+        const ownsTitle = user.titles.some((title) => title.id === selectedTitle.id);
+        return bulkMode === 'award' ? !ownsTitle : ownsTitle;
+      })
+    : [];
+  const allVisibleSelected = selectableUsers.length > 0
+    && selectableUsers.every((user) => selectedUserIds.includes(user.id));
 
   const fetchTitles = async () => {
     const res = await apiFetch('/admin/titles');
@@ -110,7 +121,10 @@ export const AdminTitlesTab: React.FC = () => {
     const data = await res.json();
     toast(data.message || (res.ok ? '칭호를 삭제했습니다.' : '칭호 삭제에 실패했습니다.'));
     if (res.ok) {
-      if (selectedTitleId === title.id) setSelectedTitleId(null);
+      if (selectedTitleId === title.id) {
+        setSelectedTitleId(null);
+        setSelectedUserIds([]);
+      }
       if (form.id === title.id) setForm({ ...emptyForm });
       await fetchTitles();
       await fetchUsers();
@@ -124,7 +138,71 @@ export const AdminTitlesTab: React.FC = () => {
     });
     const data = await res.json();
     toast(data.message || (res.ok ? '처리했습니다.' : '처리에 실패했습니다.'));
-    if (res.ok) await fetchUsers();
+    if (res.ok) {
+      setSelectedUserIds((current) => current.filter((id) => id !== user.id));
+      await fetchUsers();
+    }
+  };
+
+  const selectTitleForAssignment = (titleId: number) => {
+    setSelectedTitleId(titleId);
+    setSelectedUserIds([]);
+  };
+
+  const changeBulkMode = (mode: 'award' | 'revoke') => {
+    setBulkMode(mode);
+    setSelectedUserIds([]);
+  };
+
+  const toggleUserSelection = (userId: string) => {
+    if (!selectedUserIds.includes(userId) && selectedUserIds.length >= 500) {
+      toast('한 번에 최대 500명까지 선택할 수 있습니다.');
+      return;
+    }
+    setSelectedUserIds(
+      selectedUserIds.includes(userId)
+        ? selectedUserIds.filter((id) => id !== userId)
+        : [...selectedUserIds, userId]
+    );
+  };
+
+  const toggleVisibleUsers = () => {
+    const visibleIds = selectableUsers.map((user) => user.id);
+    if (allVisibleSelected) {
+      const visibleSet = new Set(visibleIds);
+      setSelectedUserIds(selectedUserIds.filter((id) => !visibleSet.has(id)));
+      return;
+    }
+    const merged = [...new Set([...selectedUserIds, ...visibleIds])];
+    if (merged.length > 500) toast('한 번에 최대 500명까지만 선택됩니다.');
+    setSelectedUserIds(merged.slice(0, 500));
+  };
+
+  const processSelectedUsers = async () => {
+    const actionLabel = bulkMode === 'award' ? '수여' : '회수';
+    if (!selectedTitle) return toast(`${actionLabel}할 칭호를 먼저 선택해 주세요.`);
+    if (selectedUserIds.length === 0) return toast(`${actionLabel}할 유저를 선택해 주세요.`);
+
+    setBulkAwarding(true);
+    try {
+      const res = await apiFetch(`/admin/titles/${selectedTitle.id}/${bulkMode === 'award' ? 'award-many' : 'revoke-many'}`, {
+        method: 'POST',
+        body: JSON.stringify({ user_ids: selectedUserIds })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || `칭호 일괄 ${actionLabel}에 실패했습니다.`);
+        return;
+      }
+      const skipped = bulkMode === 'award'
+        ? (data.already_owned_count || 0) + (data.invalid_count || 0)
+        : (data.not_owned_count || 0) + (data.invalid_count || 0);
+      toast(`${data.message}${skipped > 0 ? ` (${skipped}명 제외)` : ''}`);
+      setSelectedUserIds([]);
+      await fetchUsers();
+    } finally {
+      setBulkAwarding(false);
+    }
   };
 
   return (
@@ -192,7 +270,7 @@ export const AdminTitlesTab: React.FC = () => {
           <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
             {titles.map((title) => (
               <div key={title.id} className={`rounded-xl border p-3 transition ${selectedTitleId === title.id ? 'border-primary bg-primary/5' : 'border-border bg-secondary/20'}`}>
-                <button className="w-full text-left" onClick={() => setSelectedTitleId(title.id)}>
+                <button className="w-full text-left" onClick={() => selectTitleForAssignment(title.id)}>
                   <UserTitleBadge title={title} />
                 </button>
                 <div className="mt-2 flex justify-end gap-1">
@@ -214,16 +292,65 @@ export const AdminTitlesTab: React.FC = () => {
           </div>
           {selectedTitle && <UserTitleBadge title={selectedTitle} />}
         </div>
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="닉네임 또는 채널 ID 검색"
-            className="w-full rounded-lg border border-border bg-secondary/40 py-2 pl-9 pr-3 text-xs" />
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+          <div className="flex shrink-0 rounded-lg bg-secondary p-1">
+            <button
+              onClick={() => changeBulkMode('award')}
+              className={`rounded-md px-3 py-1.5 text-[10px] font-bold transition ${bulkMode === 'award' ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground'}`}
+            >
+              일괄 수여
+            </button>
+            <button
+              onClick={() => changeBulkMode('revoke')}
+              className={`rounded-md px-3 py-1.5 text-[10px] font-bold transition ${bulkMode === 'revoke' ? 'bg-card text-red-500 shadow-sm' : 'text-muted-foreground'}`}
+            >
+              일괄 회수
+            </button>
+          </div>
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="닉네임 또는 채널 ID 검색"
+              className="w-full rounded-lg border border-border bg-secondary/40 py-2 pl-9 pr-3 text-xs" />
+          </div>
+          <button
+            disabled={!selectedTitle || selectableUsers.length === 0}
+            onClick={toggleVisibleUsers}
+            className="rounded-lg bg-secondary px-3 py-2 text-[10px] font-bold text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            {allVisibleSelected
+              ? '현재 검색 결과 선택 해제'
+              : `현재 ${bulkMode === 'award' ? '미보유자' : '보유자'} 전체 선택 (${selectableUsers.length})`}
+          </button>
+          <button
+            disabled={!selectedTitle || selectedUserIds.length === 0 || bulkAwarding}
+            onClick={processSelectedUsers}
+            className={`flex items-center justify-center gap-1 rounded-lg px-4 py-2 text-[10px] font-bold text-white disabled:opacity-40 ${bulkMode === 'award' ? 'bg-primary' : 'bg-red-500'}`}
+          >
+            {bulkMode === 'award' ? <UserPlus className="h-3 w-3" /> : <UserMinus className="h-3 w-3" />}
+            {bulkAwarding
+              ? `${bulkMode === 'award' ? '수여' : '회수'} 중...`
+              : `선택 ${selectedUserIds.length}명 일괄 ${bulkMode === 'award' ? '수여' : '회수'}`}
+          </button>
         </div>
+        {selectedUserIds.length > 0 && (
+          <p className="mb-3 text-[10px] font-bold text-primary">
+            검색 결과를 변경해도 선택은 유지됩니다. 현재 총 {selectedUserIds.length}명 선택됨
+          </p>
+        )}
         <div className="grid gap-2 md:grid-cols-2">
           {loadingUsers ? <p className="col-span-full py-8 text-center text-xs text-muted-foreground">불러오는 중...</p> : users.map((user) => {
             const awarded = Boolean(selectedTitle && user.titles.some((title) => title.id === selectedTitle.id));
+            const checked = selectedUserIds.includes(user.id);
             return (
-              <div key={user.id} className="flex items-center gap-3 rounded-xl border border-border bg-secondary/20 p-3">
+              <div key={user.id} className={`flex items-center gap-3 rounded-xl border p-3 transition ${checked ? 'border-primary bg-primary/5' : 'border-border bg-secondary/20'}`}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!selectedTitle || (bulkMode === 'award' ? awarded : !awarded)}
+                  onChange={() => toggleUserSelection(user.id)}
+                  aria-label={`${user.username} 선택`}
+                  className="h-4 w-4 shrink-0 accent-primary disabled:opacity-30"
+                />
                 {/* 외부 채널 이미지 도메인이 동적이라 Next Image 최적화 대상에 고정할 수 없습니다. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`} alt="" className="h-9 w-9 rounded-full object-cover" />

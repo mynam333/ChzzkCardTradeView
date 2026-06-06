@@ -92,7 +92,9 @@ import {
   updateTitle,
   deleteTitle,
   awardTitle,
+  awardTitleToMany,
   revokeTitle,
+  revokeTitleFromMany,
   equipMyTitle
 } from '../controllers/titleController';
 import {
@@ -368,6 +370,8 @@ router.get('/admin/titles', authMiddleware, adminMiddleware, listTitles);
 router.post('/admin/titles', authMiddleware, adminMiddleware, createTitle);
 router.put('/admin/titles/:id', authMiddleware, adminMiddleware, updateTitle);
 router.delete('/admin/titles/:id', authMiddleware, adminMiddleware, deleteTitle);
+router.post('/admin/titles/:id/award-many', authMiddleware, adminMiddleware, awardTitleToMany);
+router.post('/admin/titles/:id/revoke-many', authMiddleware, adminMiddleware, revokeTitleFromMany);
 router.post('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, awardTitle);
 router.delete('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, revokeTitle);
 
