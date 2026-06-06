@@ -26,30 +26,29 @@ const PORT = process.env.PORT || 5000;
 app.set('trust proxy', 1);
 
 // 보안 헤더 (X-Frame-Options·X-Content-Type-Options·HSTS 등).
-// 정적 업로드 이미지를 타 오리진(프론트)에서 로드할 수 있도록 CORP는 cross-origin 허용.
-// API 응답에 최소한의 CSP 설정 적용
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"]
-    }
-  },
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
-}));
+// 단, 이미지 프록시(/api/image-proxy) 및 업로드 정적 파일(/uploads) 요청에 대해서는
+// helmet의 Content-Security-Policy(default-src 'none')가 브라우저 내 이미지 로드를 차단하므로 미들웨어를 건너뜁니다.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/api/image-proxy') || req.path.startsWith('/uploads')) {
+    return next();
+  }
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"]
+      }
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+  })(req, res, next);
+});
 
 // 미들웨어 설정
-// CORS: /api/image-proxy 요청에 대해서는 자격 증명(credentials) 헤더 없이 모든 오리진(*)의 리소스 로딩을 완전 허용합니다.
-// (일반 웹사이트 이미지 임베드 및 html-to-image 캡처 시 브라우저단 CORS 충돌 및 깨짐 현상을 근본적으로 예방합니다.)
+// CORS: /api/image-proxy 요청에 대해서는 전역 cors 미들웨어를 완전히 우회(Skip)시킵니다.
+// 이미지 프록시 컨트롤러(imageProxyController.ts) 자체에서 Access-Control-Allow-Origin: * 및 CORP 헤더를 단독 관리하므로,
+// 이 미들웨어를 건너뜀으로써 헤더 중복 설정(ACAO: *, *) 및 자격증명(credentials) 충돌 현상을 해결하여 이미지 깨짐을 예방합니다.
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path === '/api/image-proxy') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
+  if (req.path.startsWith('/api/image-proxy')) {
     return next();
   }
   // 그 외 일반 API 요청들은 환경변수로 지정된 오리진 화이트리스트만 허용하며, 쿠키 사용을 위해 credentials를 허용합니다.

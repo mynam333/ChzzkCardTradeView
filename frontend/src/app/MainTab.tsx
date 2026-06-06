@@ -7,6 +7,7 @@ import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAle
 import { apiFetch } from '@/lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { StreamerRegisterModal } from './StreamerRegisterModal';
+import { proxiedImage } from '@/lib/cosmetics';
 
 interface Notice {
   id: number;
@@ -228,7 +229,7 @@ export const MainTab: React.FC = () => {
               <div key={st.channel_id} className="flex items-center justify-between rounded-xl bg-secondary/20 p-3 border border-border/40 hover:border-border/80 transition">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
+                    <img src={proxiedImage(st.custom_image_url || st.logo_url)} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
                     <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-black text-primary-foreground shadow-sm">
                       {index + 1}
                     </span>

@@ -17,7 +17,11 @@ const ALLOWED_HOST_SUFFIXES = [
   'navercorp.com',
   'nave.rs',
   'dicebear.com',
-  'chzzk.naver.com'
+  'chzzk.naver.com',
+  'googleusercontent.com',
+  'discordapp.com',
+  'discordapp.net',
+  'discord.com'
 ];
 
 const isAllowedHost = (hostname: string): boolean => {

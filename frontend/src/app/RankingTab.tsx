@@ -10,6 +10,7 @@ import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { fuzzySearch } from '@/lib/search';
+import { proxiedImage } from '@/lib/cosmetics';
 
 interface Streamer {
   channel_id: string;
@@ -216,7 +217,7 @@ export const RankingTab: React.FC = () => {
               >
                 <div className="flex items-center gap-4">
                   <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
-                  <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                  <img src={proxiedImage(ur.avatar_url)} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
                   <div>
                     <h4 className="text-xs font-bold text-foreground">{ur.username}</h4>
                     <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
@@ -250,7 +251,7 @@ export const RankingTab: React.FC = () => {
                   <div className="flex items-center gap-4">
                     <span className={`w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
                     <div className="relative shrink-0">
-                      <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                      <img src={proxiedImage(st.custom_image_url || st.logo_url)} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
                       {st.is_active && (
                         <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                       )}

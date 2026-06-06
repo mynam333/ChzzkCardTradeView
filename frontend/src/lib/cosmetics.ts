@@ -64,10 +64,17 @@ export const cardImage = (
     ? streamer.custom_images
     : [streamer.custom_image_url ?? null];
   const s = Math.max(0, Math.min(5, Math.floor(star || 0)));
+  let targetUrl = '';
   for (let j = s; j >= 0; j--) {
-    if (imgs[j]) return imgs[j] as string;
+    if (imgs[j]) {
+      targetUrl = imgs[j] as string;
+      break;
+    }
   }
-  return streamer.logo_url || '';
+  if (!targetUrl) {
+    targetUrl = streamer.logo_url || '';
+  }
+  return proxiedImage(targetUrl);
 };
 
 /** 테두리 코스메틱 스타일 (레거시 인라인 JSON 방식) */

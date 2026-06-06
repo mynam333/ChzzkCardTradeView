@@ -10,7 +10,8 @@ const MAINTENANCE_BYPASS_PATHS = [
   '/auth/chzzk/url',
   '/auth/chzzk/callback',
   '/users/me',
-  '/health'
+  '/health',
+  '/image-proxy'
 ];
 
 const getSessionToken = (req: Request): string | undefined => {

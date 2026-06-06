@@ -24,7 +24,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
-import { parseStyle, nameEffectStyle, cardImage, borderClass } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, cardImage, borderClass, proxiedImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 
@@ -991,7 +991,7 @@ export const AdminTab: React.FC = () => {
                       <button key={s.channel_id}
                         onClick={() => setCouponForm({ ...couponForm, reward_channel_id: s.channel_id })}
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_channel_id === s.channel_id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
-                        <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-6 w-6 rounded-full object-cover" />
+                        <img src={proxiedImage(s.custom_image_url || s.logo_url)} alt={s.name} className="h-6 w-6 rounded-full object-cover" />
                         <span className="text-[11px] font-bold truncate">{s.name}</span>
                       </button>
                     ))}
@@ -1739,7 +1739,7 @@ export const AdminTab: React.FC = () => {
                     ) : paged.map((s) => (
                       <div key={s.channel_id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-9 w-9 rounded object-cover border border-border" />
+                          <img src={proxiedImage(s.custom_image_url || s.logo_url)} alt={s.name} className="h-9 w-9 rounded object-cover border border-border" />
                           <div className="min-w-0">
                             <p className="text-xs font-bold truncate">{s.name}</p>
                             <p className="text-[10px] text-muted-foreground truncate">현재 시세 {(s.base_value || 0).toLocaleString()} P · {s.channel_id}</p>

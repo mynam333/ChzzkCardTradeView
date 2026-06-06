@@ -17,7 +17,7 @@ import {
   Coins
 } from 'lucide-react';
 import { apiFetch, isAuthed } from '@/lib/api';
-import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
+import { borderStyle, borderClass, nameEffectStyle, cardImage, proxiedImage } from '@/lib/cosmetics';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { fuzzySearch } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
@@ -1822,7 +1822,7 @@ export const GachaTab: React.FC = () => {
 
             <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
               <img
-                src={sellingStreamer.custom_image_url || sellingStreamer.logo_url}
+                src={proxiedImage(sellingStreamer.custom_image_url || sellingStreamer.logo_url)}
                 alt={sellingStreamer.name}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
               />
@@ -1951,7 +1951,7 @@ export const GachaTab: React.FC = () => {
                   <div key={channelId} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
-                        src={streamer.custom_image_url || streamer.logo_url}
+                        src={proxiedImage(streamer.custom_image_url || streamer.logo_url)}
                         alt={streamer.name}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
                       />
