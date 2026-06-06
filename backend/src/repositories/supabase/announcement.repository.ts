@@ -29,6 +29,7 @@ export class SupabaseAnnouncementRepository implements IAnnouncementRepository {
     const { data, error } = await this.getClient()
       .from('announcements')
       .select('*')
+      .order('is_pinned', { ascending: false })
       .order('id', { ascending: false });
 
     if (error) throw error;
@@ -42,6 +43,7 @@ export class SupabaseAnnouncementRepository implements IAnnouncementRepository {
       .select('*')
       .eq('is_popup', true)
       .or(`popup_expires_at.is.null,popup_expires_at.gt.${now}`)
+      .order('is_pinned', { ascending: false })
       .order('id', { ascending: false });
 
     if (error) throw error;

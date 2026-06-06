@@ -45,6 +45,22 @@ CREATE TABLE IF NOT EXISTS streamers (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 상점 아이템 (기존 13번 테이블)
+-- user_cards가 shop_items를 외래키로 참조하므로 먼저 생성합니다.
+CREATE TABLE IF NOT EXISTS shop_items (
+    id SERIAL PRIMARY KEY,
+    type TEXT NOT NULL,                          -- 'border' 또는 'name_effect'
+    name TEXT NOT NULL,
+    description TEXT,
+    price INTEGER NOT NULL DEFAULT 0,
+    style_json TEXT,                             -- React 인라인 스타일 객체(JSON 문자열)
+    font_url TEXT,                               -- 이름 이펙트용 웹폰트 URL (선택)
+    font_family TEXT,                            -- 폰트 패밀리명 (선택)
+    active BOOLEAN DEFAULT TRUE,
+    purchase_limit INTEGER DEFAULT 0,            -- 1인 최대 구매 갯수 (0 = 무제한)
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 3. 유저 보유 카드 매핑 테이블
 CREATE TABLE IF NOT EXISTS user_cards (
     id SERIAL PRIMARY KEY,                       -- 자동 증가 고유 ID
@@ -108,6 +124,7 @@ CREATE TABLE IF NOT EXISTS announcements (
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     is_popup BOOLEAN DEFAULT FALSE,
+    is_pinned BOOLEAN DEFAULT FALSE,
     popup_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -156,21 +173,6 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
-
--- 13. 상점 아이템 (테두리 / 이름 이펙트)
-CREATE TABLE IF NOT EXISTS shop_items (
-    id SERIAL PRIMARY KEY,
-    type TEXT NOT NULL,                          -- 'border' 또는 'name_effect'
-    name TEXT NOT NULL,
-    description TEXT,
-    price INTEGER NOT NULL DEFAULT 0,
-    style_json TEXT,                             -- React 인라인 스타일 객체(JSON 문자열)
-    font_url TEXT,                               -- 이름 이펙트용 웹폰트 URL (선택)
-    font_family TEXT,                            -- 폰트 패밀리명 (선택)
-    active BOOLEAN DEFAULT TRUE,
-    purchase_limit INTEGER DEFAULT 0,            -- 1인 최대 구매 갯수 (0 = 무제한)
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
 
 -- 14. 유저 보유 코스메틱 (미장착 수량)
 CREATE TABLE IF NOT EXISTS user_cosmetics (
@@ -236,6 +238,7 @@ ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT '
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS purchase_limit INTEGER DEFAULT 0;
 ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;

@@ -169,6 +169,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] card_reports 테이블에 star(신고 카드 별) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE card_reports ADD COLUMN star INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT is_pinned FROM announcements LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] announcements 테이블에 is_pinned(상단 고정) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE announcements ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;");
+      }
       // 상점 구매 횟수 테이블 (구매 제한 추적) — 신규 배포 호환
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS shop_purchases (
         user_id TEXT NOT NULL,

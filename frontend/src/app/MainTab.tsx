@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
-import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus } from 'lucide-react';
+import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, GripHorizontal, Pin, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { StreamerRegisterModal } from './StreamerRegisterModal';
@@ -13,8 +13,25 @@ interface Notice {
   title: string;
   content: string;
   is_popup: boolean;
+  is_pinned: boolean;
   created_at?: string;
 }
+
+const POPUP_DISMISSED_FOREVER = 'forever';
+const POPUP_MARGIN = 12;
+
+const getInitialPopupPosition = () => {
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0;
+  const top = viewport?.offsetTop ?? 0;
+  const width = viewport?.width ?? window.innerWidth;
+  const panelWidth = Math.min(448, width - POPUP_MARGIN * 2);
+
+  return {
+    x: Math.max(left + POPUP_MARGIN, left + width - panelWidth - 24),
+    y: top + Math.max(72, POPUP_MARGIN),
+  };
+};
 
 export const MainTab: React.FC = () => {
   const { user, updatePoints } = useApp();
@@ -22,6 +39,9 @@ export const MainTab: React.FC = () => {
   const [activePopup, setActivePopup] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const popupDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
   // 치지직 실시간 스트리머 상위 가치 3명 (메인 노출용)
   const [hotStreamers, setHotStreamers] = useState<any[]>([]);
@@ -44,15 +64,12 @@ export const MainTab: React.FC = () => {
       // 팝업은 만료(popup_expires_at)가 반영된 전용 엔드포인트에서 활성 팝업만 가져옴
       const popupRes = await apiFetch('/announcements/popups');
       if (popupRes.ok) {
-        const popups = await popupRes.json();
-        if (popups.length > 0) {
-          const latestPopupId = popups[0].id;
-          const dismissedDate = localStorage.getItem(`popup_dismissed_${latestPopupId}`);
-          // '오늘 하루 보지 않기'는 당일에만 유효 (저장된 날짜가 오늘과 다르면 다시 노출)
-          if (dismissedDate !== getTodayKey()) {
-            setActivePopup(popups[0]);
-          }
-        }
+        const popups: Notice[] = await popupRes.json();
+        const nextPopup = popups.find(
+          (popup) => localStorage.getItem(`popup_dismissed_${popup.id}`) !== POPUP_DISMISSED_FOREVER
+        );
+        if (nextPopup) setPopupPosition(getInitialPopupPosition());
+        setActivePopup(nextPopup ?? null);
       }
     } catch (e) {
       console.error('백엔드 공지사항 로드 에러:', e);
@@ -75,49 +92,143 @@ export const MainTab: React.FC = () => {
     }
   };
 
-  // 오늘 날짜 키 (KST 기준 YYYY-MM-DD)
-  const getTodayKey = () =>
-    new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-  const dismissPopup = (today = false) => {
+  const dismissPopup = (permanently = false) => {
     if (activePopup) {
-      if (today) {
-        // 오늘 하루 보지 않기: 오늘 날짜를 저장 (다음 날에는 다시 노출)
-        localStorage.setItem(`popup_dismissed_${activePopup.id}`, getTodayKey());
+      if (permanently) {
+        localStorage.setItem(`popup_dismissed_${activePopup.id}`, POPUP_DISMISSED_FOREVER);
       }
       setActivePopup(null);
     }
   };
 
+  const clampPopupPosition = (x: number, y: number) => {
+    const panel = popupRef.current;
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft ?? 0;
+    const top = viewport?.offsetTop ?? 0;
+    const width = viewport?.width ?? window.innerWidth;
+    const height = viewport?.height ?? window.innerHeight;
+    const panelWidth = panel?.offsetWidth ?? Math.min(448, width - POPUP_MARGIN * 2);
+    const panelHeight = panel?.offsetHeight ?? 320;
+
+    return {
+      x: Math.min(Math.max(x, left + POPUP_MARGIN), Math.max(left + POPUP_MARGIN, left + width - panelWidth - POPUP_MARGIN)),
+      y: Math.min(Math.max(y, top + POPUP_MARGIN), Math.max(top + POPUP_MARGIN, top + height - panelHeight - POPUP_MARGIN)),
+    };
+  };
+
+  const handlePopupPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const panel = popupRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    popupDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePopupPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = popupDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPopupPosition(clampPopupPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY));
+  };
+
+  const handlePopupPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (popupDragRef.current?.pointerId !== event.pointerId) return;
+    popupDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    if (!activePopup) return;
+
+    const keepPopupInViewport = () => {
+      setPopupPosition((position) => clampPopupPosition(position.x, position.y));
+    };
+
+    const frame = window.requestAnimationFrame(keepPopupInViewport);
+    window.addEventListener('resize', keepPopupInViewport);
+    window.visualViewport?.addEventListener('resize', keepPopupInViewport);
+    window.visualViewport?.addEventListener('scroll', keepPopupInViewport);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', keepPopupInViewport);
+      window.visualViewport?.removeEventListener('resize', keepPopupInViewport);
+      window.visualViewport?.removeEventListener('scroll', keepPopupInViewport);
+    };
+  }, [activePopup]);
+
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
 
-      {/* 팝업 오버레이 모달 (Portal 적용으로 transform 영역 제약 및 배경 흐림 잘림 방지) */}
+      {/* 배경을 막지 않는 드래그형 공지 레이어 */}
       {mounted && activePopup && createPortal(
-        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
-          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6">
-            <div className="flex items-center gap-2 text-primary">
-              <Megaphone className="h-5 w-5" />
-              <h3 className="font-bold text-foreground">공지사항</h3>
+        <div
+          ref={popupRef}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="announcement-layer-title"
+          style={{ transform: `translate3d(${popupPosition.x}px, ${popupPosition.y}px, 0)` }}
+          className="fixed left-0 top-0 z-[80] flex max-h-[calc(100dvh-1.5rem)] w-[min(28rem,calc(100dvw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-primary/20 bg-card shadow-2xl shadow-black/20 ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-200"
+        >
+          <div
+            onPointerDown={handlePopupPointerDown}
+            onPointerMove={handlePopupPointerMove}
+            onPointerUp={handlePopupPointerEnd}
+            onPointerCancel={handlePopupPointerEnd}
+            className="flex touch-none select-none items-center justify-between border-b border-border/70 bg-gradient-to-r from-primary/15 via-sky-500/10 to-transparent px-4 py-3 cursor-grab active:cursor-grabbing"
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <Megaphone className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Notice</span>
+                  {activePopup.is_pinned && <Pin className="h-3 w-3 fill-current text-sky-500" />}
+                </div>
+                <h3 id="announcement-layer-title" className="truncate text-sm font-bold text-foreground">공지사항</h3>
+              </div>
             </div>
-            <h4 className="mt-3 text-lg font-bold text-foreground">{activePopup.title}</h4>
-            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <GripHorizontal className="h-4 w-4" aria-hidden="true" />
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => dismissPopup(false)}
+                className="rounded-lg p-1.5 transition hover:bg-secondary hover:text-foreground"
+                aria-label="공지 닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 overflow-y-auto px-5 py-4 overscroll-contain">
+            <h4 className="text-lg font-black tracking-tight text-foreground">{activePopup.title}</h4>
+            <div className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
               <MarkdownRenderer content={activePopup.content} />
             </div>
-            <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
-              <button
-                onClick={() => dismissPopup(true)}
-                className="text-xs text-muted-foreground hover:underline"
-              >
-                오늘 하루 보지 않기
-              </button>
-              <button
-                onClick={() => dismissPopup(false)}
-                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/10"
-              >
-                닫기
-              </button>
-            </div>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/70 bg-secondary/20 px-5 py-3">
+            <button
+              onClick={() => dismissPopup(true)}
+              className="text-xs font-medium text-muted-foreground transition hover:text-foreground hover:underline"
+            >
+              다시 보지 않기
+            </button>
+            <button
+              onClick={() => dismissPopup(false)}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-md shadow-primary/10 transition hover:bg-primary/90"
+            >
+              닫기
+            </button>
           </div>
         </div>,
         document.body
@@ -201,12 +312,23 @@ export const MainTab: React.FC = () => {
               <p className="text-center py-8 text-xs text-muted-foreground">현재 등록된 공지사항이 없습니다.</p>
             ) : (
               notices.map((notice) => (
-                <div key={notice.id} className="group rounded-xl bg-secondary/30 p-4 border border-transparent hover:border-border hover:bg-secondary/50 transition">
+                <div
+                  key={notice.id}
+                  className={`group rounded-xl p-4 border transition ${notice.is_pinned ? 'border-sky-500/25 bg-sky-500/8 shadow-sm shadow-sky-500/5' : 'border-transparent bg-secondary/30 hover:border-border hover:bg-secondary/50'}`}
+                >
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold group-hover:text-primary transition">{notice.title}</h4>
-                    {notice.is_popup && (
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">팝업</span>
-                    )}
+                    <h4 className="flex min-w-0 items-center gap-1.5 text-sm font-bold transition group-hover:text-primary">
+                      {notice.is_pinned && <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-sky-500" />}
+                      <span className="truncate">{notice.title}</span>
+                    </h4>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {notice.is_pinned && (
+                        <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-600 dark:text-sky-400">고정</span>
+                      )}
+                      {notice.is_popup && (
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">팝업</span>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                     <MarkdownRenderer content={notice.content} />

@@ -6,7 +6,7 @@ import { IS_PRODUCTION } from '../config';
  * 1. 공지사항 및 팝업 작성 (ADMIN 전용)
  */
 export const createAnnouncement = async (req: Request, res: Response) => {
-  const { title, content, is_popup, popup_expires_at } = req.body;
+  const { title, content, is_popup, is_pinned, popup_expires_at } = req.body;
 
   if (!title || !content) {
     return res.status(400).json({ error: 'BadRequest', message: '공지사항 제목과 내용이 필요합니다.' });
@@ -17,6 +17,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       title,
       content,
       is_popup: !!is_popup,
+      is_pinned: !!is_pinned,
       popup_expires_at: popup_expires_at || null
     });
     return res.status(201).json(announcement);
@@ -77,13 +78,13 @@ export const setAnnouncementPopup = async (req: Request, res: Response) => {
  */
 export const updateAnnouncement = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, content, is_popup, popup_expires_at } = req.body;
+  const { title, content, is_popup, is_pinned, popup_expires_at } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: 'BadRequest', message: '공지사항 ID가 필요합니다.' });
   }
 
-  if (title === undefined && content === undefined && is_popup === undefined && popup_expires_at === undefined) {
+  if (title === undefined && content === undefined && is_popup === undefined && is_pinned === undefined && popup_expires_at === undefined) {
     return res.status(400).json({ error: 'BadRequest', message: '수정할 데이터가 존재하지 않습니다.' });
   }
 
@@ -92,6 +93,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
       ...(title !== undefined && { title }),
       ...(content !== undefined && { content }),
       ...(is_popup !== undefined && { is_popup: !!is_popup }),
+      ...(is_pinned !== undefined && { is_pinned: !!is_pinned }),
       ...(popup_expires_at !== undefined && { popup_expires_at: popup_expires_at || null })
     });
     return res.status(200).json(updated);

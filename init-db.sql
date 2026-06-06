@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS announcements (
     title TEXT NOT NULL,                       -- 공지 제목
     content TEXT NOT NULL,                     -- 공지 내용
     is_popup INTEGER DEFAULT 0,                -- 메인 팝업 여부 (0: false, 1: true)
+    is_pinned INTEGER DEFAULT 0,               -- 플랫폼 새소식 상단 고정 여부
     popup_expires_at TEXT,                     -- 팝업 노출 기한
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -262,5 +263,4 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     earned_points INTEGER DEFAULT 0,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-
 

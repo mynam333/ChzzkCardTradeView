@@ -82,7 +82,7 @@ const CATEGORIES: { id: string; label: string; description: string; countTables:
   { id: 'reports', label: '카드 신고', description: '카드 신고 내역을 삭제합니다.', countTables: ['card_reports'], run: () => wipeTable('card_reports') },
   { id: 'value_history', label: '시세 이력', description: '시세 이력을 삭제하고, 모든 카드 가치를 초기값(팔로워 수)으로 되돌립니다.', countTables: ['value_history'], run: async () => { await wipeTable('value_history'); await resetStreamerValuesToFollowers(); } },
   { id: 'blocks', label: '유저 차단', description: '모든 유저 차단 관계를 삭제합니다.', countTables: ['user_blocks'], run: () => wipeTable('user_blocks', 'blocker_id') },
-  { id: 'points', label: '유저 포인트 초기화(0)', description: '모든 유저의 보유 포인트를 0으로 만듭니다.', countTables: ['users'], run: () => resetAllPoints() },
+  { id: 'points', label: '유저 포인트 초기화', description: '모든 유저의 보유 포인트를 0으로 만듭니다.', countTables: ['users'], run: () => resetAllPoints() },
   { id: 'market', label: '오픈마켓(매물/이력)', description: '오픈마켓의 모든 판매 중 매물 및 거래 완료/취소 이력을 삭제합니다.', countTables: ['market_listings'], run: () => wipeTable('market_listings') },
   {
     id: 'minigames',

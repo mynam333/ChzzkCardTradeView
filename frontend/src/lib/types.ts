@@ -104,6 +104,7 @@ export interface Announcement {
   title: string;
   content: string;
   is_popup: boolean;
+  is_pinned: boolean;
   popup_expires_at: string | null;
   created_at?: string;
 }

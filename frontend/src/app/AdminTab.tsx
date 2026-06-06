@@ -19,7 +19,8 @@ import {
   Store,
   Database,
   Gamepad2,
-  Edit
+  Edit,
+  Pin
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
@@ -133,7 +134,8 @@ export const AdminTab: React.FC = () => {
 
   // 공지
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [noticeForm, setNoticeForm] = useState({ title: '', content: '', is_popup: false });
+  const emptyNoticeForm = { title: '', content: '', is_popup: false, is_pinned: false };
+  const [noticeForm, setNoticeForm] = useState({ ...emptyNoticeForm });
   const [editingNoticeId, setEditingNoticeId] = useState<number | null>(null);
 
   // 푸시
@@ -309,7 +311,7 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/announcements', { method: 'POST', body: JSON.stringify(noticeForm) });
       if (res.ok) {
         toast('공지사항이 등록되었습니다.');
-        setNoticeForm({ title: '', content: '', is_popup: false });
+        setNoticeForm({ ...emptyNoticeForm });
         fetchAnnouncements();
       } else toast('등록 실패');
     } catch { toast('서버 통신 에러'); }
@@ -328,7 +330,7 @@ export const AdminTab: React.FC = () => {
       });
       if (res.ok) {
         toast('공지사항이 수정되었습니다.');
-        setNoticeForm({ title: '', content: '', is_popup: false });
+        setNoticeForm({ ...emptyNoticeForm });
         setEditingNoticeId(null);
         fetchAnnouncements();
       } else toast('수정 실패');
@@ -340,13 +342,14 @@ export const AdminTab: React.FC = () => {
     setNoticeForm({
       title: a.title,
       content: a.content,
-      is_popup: !!a.is_popup
+      is_popup: !!a.is_popup,
+      is_pinned: !!a.is_pinned
     });
   };
 
   const handleCancelEditAnnouncement = () => {
     setEditingNoticeId(null);
-    setNoticeForm({ title: '', content: '', is_popup: false });
+    setNoticeForm({ ...emptyNoticeForm });
   };
 
   const handleTogglePopup = async (a: any) => {
@@ -361,6 +364,24 @@ export const AdminTab: React.FC = () => {
         fetchAnnouncements();
       } else toast(data.message || '변경 실패', 'error');
     } catch { toast('서버 통신 에러', 'error'); }
+  };
+
+  const handleTogglePinned = async (a: Announcement) => {
+    try {
+      const res = await apiFetch(`/admin/announcements/${a.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_pinned: !a.is_pinned })
+      });
+      if (res.ok) {
+        toast(a.is_pinned ? '공지 고정을 해제했습니다.' : '공지를 맨 위에 고정했습니다.', 'success');
+        fetchAnnouncements();
+      } else {
+        const data = await res.json();
+        toast(data.message || '고정 상태 변경 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    }
   };
 
   const handleDeleteAnnouncement = async (id: number) => {
@@ -1139,7 +1160,11 @@ export const AdminTab: React.FC = () => {
               className="w-full h-24 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={noticeForm.is_popup}
-                onChange={(e) => setNoticeForm({ ...noticeForm, is_popup: e.target.checked })} /> 메인 화면 오버레이 팝업으로 노출
+                onChange={(e) => setNoticeForm({ ...noticeForm, is_popup: e.target.checked })} /> 메인 화면 레이어 팝업으로 노출
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={noticeForm.is_pinned}
+                onChange={(e) => setNoticeForm({ ...noticeForm, is_pinned: e.target.checked })} /> 플랫폼 새소식 맨 위에 고정
             </label>
             {editingNoticeId ? (
               <div className="flex gap-2">
@@ -1157,15 +1182,23 @@ export const AdminTab: React.FC = () => {
               {announcements.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">등록된 공지가 없습니다.</p>
               ) : announcements.map((a) => (
-                <div key={a.id} className="flex items-start justify-between gap-3 rounded-lg bg-secondary/30 px-3 py-2">
+                <div key={a.id} className="flex flex-col gap-2 rounded-lg bg-secondary/30 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold flex items-center gap-1.5">
                       {a.title}
+                      {a.is_pinned && <span className="inline-flex items-center gap-0.5 rounded bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-bold text-sky-600 dark:text-sky-400"><Pin className="h-2.5 w-2.5 fill-current" />고정</span>}
                       {a.is_popup && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">팝업</span>}
                     </p>
                     <p className="text-[10px] text-muted-foreground truncate">{a.content}</p>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    <button
+                      onClick={() => handleTogglePinned(a)}
+                      className={`rounded px-2 py-1.5 text-[10px] font-bold transition ${a.is_pinned ? 'bg-sky-500/15 text-sky-600 hover:bg-sky-500/25 dark:text-sky-400' : 'bg-secondary text-muted-foreground hover:bg-secondary/80'}`}
+                      title="플랫폼 새소식 상단 고정 토글"
+                    >
+                      {a.is_pinned ? '고정 해제' : '맨 위 고정'}
+                    </button>
                     <button
                       onClick={() => handleTogglePopup(a)}
                       className={`rounded px-2 py-1.5 text-[10px] font-bold transition ${a.is_popup ? 'bg-amber-500/15 text-amber-500 hover:bg-amber-500/25' : 'bg-secondary text-muted-foreground hover:bg-secondary/80'}`}

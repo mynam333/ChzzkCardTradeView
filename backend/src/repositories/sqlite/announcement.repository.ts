@@ -26,12 +26,13 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
   }
 
   async findAll(): Promise<Announcement[]> {
-    const rows = this.getDb().prepare('SELECT * FROM announcements ORDER BY id DESC').all();
+    const rows = this.getDb().prepare('SELECT * FROM announcements ORDER BY is_pinned DESC, id DESC').all();
     return rows.map((row: any) => ({
       id: row.id,
       title: row.title,
       content: row.content,
       is_popup: row.is_popup === 1,
+      is_pinned: row.is_pinned === 1,
       popup_expires_at: row.popup_expires_at,
       created_at: row.created_at
     }));
@@ -43,7 +44,7 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
       SELECT * FROM announcements 
       WHERE is_popup = 1 
         AND (popup_expires_at IS NULL OR datetime(popup_expires_at) > datetime('now')) 
-      ORDER BY id DESC
+      ORDER BY is_pinned DESC, id DESC
     `).all();
 
     return rows.map((row: any) => ({
@@ -51,6 +52,7 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
       title: row.title,
       content: row.content,
       is_popup: true,
+      is_pinned: row.is_pinned === 1,
       popup_expires_at: row.popup_expires_at,
       created_at: row.created_at
     }));
@@ -58,11 +60,12 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
 
   async create(announcement: Announcement): Promise<Announcement> {
     const result = this.getDb().prepare(
-      'INSERT INTO announcements (title, content, is_popup, popup_expires_at) VALUES (?, ?, ?, ?)'
+      'INSERT INTO announcements (title, content, is_popup, is_pinned, popup_expires_at) VALUES (?, ?, ?, ?, ?)'
     ).run(
       announcement.title, 
       announcement.content, 
       announcement.is_popup ? 1 : 0, 
+      announcement.is_pinned ? 1 : 0,
       announcement.popup_expires_at
     );
 
@@ -90,6 +93,10 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
       sets.push('is_popup = ?');
       vals.push(announcement.is_popup ? 1 : 0);
     }
+    if (announcement.is_pinned !== undefined) {
+      sets.push('is_pinned = ?');
+      vals.push(announcement.is_pinned ? 1 : 0);
+    }
     if (announcement.popup_expires_at !== undefined) {
       sets.push('popup_expires_at = ?');
       vals.push(announcement.popup_expires_at);
@@ -101,6 +108,7 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
         title: row.title,
         content: row.content,
         is_popup: row.is_popup === 1,
+        is_pinned: row.is_pinned === 1,
         popup_expires_at: row.popup_expires_at,
         created_at: row.created_at
       };
@@ -113,6 +121,7 @@ export class SqliteAnnouncementRepository implements IAnnouncementRepository {
       title: row.title,
       content: row.content,
       is_popup: row.is_popup === 1,
+      is_pinned: row.is_pinned === 1,
       popup_expires_at: row.popup_expires_at,
       created_at: row.created_at
     };
