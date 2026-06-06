@@ -1194,7 +1194,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 백엔드가 KST 날짜 기준으로 지정한 오늘의 미니게임 */}
       {!activeGame && (
-        <section className="relative mx-auto max-w-3xl overflow-hidden rounded-3xl border border-border bg-card shadow-lg">
+        <section className="relative overflow-hidden rounded-3xl border border-border bg-card shadow-lg">
           <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${dailyGameDetails.glow}`} />
           <div className="relative border-b border-border/60 px-5 py-4 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1261,7 +1261,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 동전과 포인트 지급 없이 모든 게임을 체험하는 연습 모드 */}
       {!activeGame && (
-        <section className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/45 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/5">
+        <section className="overflow-hidden rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/45 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/5">
           <button
             type="button"
             aria-expanded={isPracticeExpanded}
