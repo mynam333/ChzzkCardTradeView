@@ -76,11 +76,145 @@ const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 const QUIZ_MOTION_MAX_BLUR_PX = 80 * QUIZ_DISTORTION_SCALE;
 // 모자이크·회전 잔상은 원래 강도가 약한 효과이므로 DISTORTION_SCALE을 따르지 않고 독립 상수 사용
-const QUIZ_MOSAIC_MIN_PERCENT = 4;       // 최대 강도 시 원본의 4%까지 다운스케일 → 강한 픽셀화
+const QUIZ_MOSAIC_MAX_BLOCK_PX = 34;
 const QUIZ_RADIAL_MAX_ROTATE_DEG = 120;   // 최대 120도 회전 잔상
 const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
 const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
 const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
+
+const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, intensity }) => {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const imageRef = React.useRef<HTMLImageElement | null>(null);
+  const intensityRef = React.useRef(intensity);
+
+  const drawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image || !image.naturalWidth || !image.naturalHeight) return;
+
+    const width = Math.max(1, Math.round(canvas.clientWidth));
+    const height = Math.max(1, Math.round(canvas.clientHeight));
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const backingWidth = Math.round(width * pixelRatio);
+    const backingHeight = Math.round(height * pixelRatio);
+
+    if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+
+    // object-cover와 동일하게 중앙을 기준으로 원본의 표시 영역을 계산합니다.
+    const sourceRatio = image.naturalWidth / image.naturalHeight;
+    const targetRatio = width / height;
+    let sourceWidth = image.naturalWidth;
+    let sourceHeight = image.naturalHeight;
+    let sourceX = 0;
+    let sourceY = 0;
+
+    if (sourceRatio > targetRatio) {
+      sourceWidth = image.naturalHeight * targetRatio;
+      sourceX = (image.naturalWidth - sourceWidth) / 2;
+    } else {
+      sourceHeight = image.naturalWidth / targetRatio;
+      sourceY = (image.naturalHeight - sourceHeight) / 2;
+    }
+
+    const normalizedIntensity = Math.max(0, Math.min(100, intensityRef.current)) / 100;
+    if (normalizedIntensity <= 0.01) {
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        width,
+        height
+      );
+      return;
+    }
+
+    const blockSize = Math.max(
+      2,
+      Math.round(2 + normalizedIntensity * (QUIZ_MOSAIC_MAX_BLOCK_PX - 2))
+    );
+    context.imageSmoothingEnabled = false;
+
+    for (let y = 0; y < height; y += blockSize) {
+      const tileHeight = Math.min(blockSize, height - y);
+      for (let x = 0; x < width; x += blockSize) {
+        const tileWidth = Math.min(blockSize, width - x);
+        const sampleX = sourceX + ((x + tileWidth / 2) / width) * sourceWidth;
+        const sampleY = sourceY + ((y + tileHeight / 2) / height) * sourceHeight;
+
+        // 원본의 한 지점을 각 블록 전체에 그려 실제 블록형 모자이크를 만듭니다.
+        context.drawImage(
+          image,
+          Math.max(0, Math.min(image.naturalWidth - 1, Math.floor(sampleX))),
+          Math.max(0, Math.min(image.naturalHeight - 1, Math.floor(sampleY))),
+          1,
+          1,
+          x,
+          y,
+          tileWidth + 0.5,
+          tileHeight + 0.5
+        );
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    intensityRef.current = intensity;
+    drawCanvas();
+  }, [drawCanvas, intensity]);
+
+  useEffect(() => {
+    imageRef.current = null;
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d');
+    if (canvas && context) {
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => {
+      imageRef.current = image;
+      drawCanvas();
+    };
+    image.src = src;
+
+    return () => {
+      image.onload = null;
+      if (imageRef.current === image) imageRef.current = null;
+    };
+  }, [drawCanvas, src]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(drawCanvas);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [drawCanvas]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      role="img"
+      aria-label="모자이크 처리된 퀴즈 카드"
+      className="h-full w-full bg-zinc-950 select-none pointer-events-none"
+    />
+  );
+};
 
 const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
 
@@ -871,10 +1005,6 @@ export const ArcadeTab: React.FC = () => {
             const stdX = Math.abs(stdDev * Math.cos(rad));
             const stdY = Math.abs(stdDev * Math.sin(rad));
 
-            // 2. 모자이크: 원본을 약하게 다운스케일한 뒤 업스케일하여 픽셀화
-            const mosaicPercent = 100 - (quizIntensity / 100) * (100 - QUIZ_MOSAIC_MIN_PERCENT);
-            const mosaicScale = 100 / mosaicPercent;
-
             return (
               <div className="space-y-5 flex flex-col items-center">
 
@@ -936,20 +1066,7 @@ export const ArcadeTab: React.FC = () => {
 
                   {/* 모자이크 블러 모드 */}
                   {quizBlurType === 'mosaic' && (
-                    <div className="w-full h-full relative overflow-hidden">
-                      <img
-                        src={gameData.image_url}
-                        alt="Quiz card"
-                        style={{
-                          width: `${mosaicPercent}%`,
-                          height: `${mosaicPercent}%`,
-                          transform: `scale(${mosaicScale})`,
-                          transformOrigin: 'top left',
-                          imageRendering: 'pixelated',
-                        }}
-                        className="absolute top-0 left-0 object-cover select-none pointer-events-none"
-                      />
-                    </div>
+                    <MosaicQuizImage src={gameData.image_url || ''} intensity={quizIntensity} />
                   )}
 
                   {/* 모션 블러 모드 */}
