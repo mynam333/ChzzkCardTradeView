@@ -1,47 +1,26 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
-import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, GripHorizontal, Pin, X } from 'lucide-react';
+import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, Pin, ChevronRight } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import type { Announcement } from '@/lib/types';
+import { formatAnnouncementDate, getAnnouncementPreview } from '@/lib/announcement';
 import { StreamerRegisterModal } from './StreamerRegisterModal';
-
-interface Notice {
-  id: number;
-  title: string;
-  content: string;
-  is_popup: boolean;
-  is_pinned: boolean;
-  created_at?: string;
-}
+import { AnnouncementBoardModal } from './AnnouncementBoardModal';
+import { DraggableAnnouncementPopups } from './DraggableAnnouncementPopups';
 
 const POPUP_DISMISSED_FOREVER = 'forever';
-const POPUP_MARGIN = 12;
-
-const getInitialPopupPosition = () => {
-  const viewport = window.visualViewport;
-  const left = viewport?.offsetLeft ?? 0;
-  const top = viewport?.offsetTop ?? 0;
-  const width = viewport?.width ?? window.innerWidth;
-  const panelWidth = Math.min(448, width - POPUP_MARGIN * 2);
-
-  return {
-    x: Math.max(left + POPUP_MARGIN, left + width - panelWidth - 24),
-    y: top + Math.max(72, POPUP_MARGIN),
-  };
-};
 
 export const MainTab: React.FC = () => {
   const { user, updatePoints } = useApp();
-  const [notices, setNotices] = useState<Notice[]>([]);
-  const [activePopup, setActivePopup] = useState<Notice | null>(null);
+  const [notices, setNotices] = useState<Announcement[]>([]);
+  const [activePopups, setActivePopups] = useState<Announcement[]>([]);
+  const [announcementBoardOpen, setAnnouncementBoardOpen] = useState(false);
+  const [selectedNotice, setSelectedNotice] = useState<Announcement | null>(null);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
-  const popupRef = useRef<HTMLDivElement | null>(null);
-  const popupDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
   // 치지직 실시간 스트리머 상위 가치 3명 (메인 노출용)
   const [hotStreamers, setHotStreamers] = useState<any[]>([]);
@@ -59,17 +38,19 @@ export const MainTab: React.FC = () => {
     try {
       // 게시판 목록 (전체 공지)
       const res = await apiFetch('/announcements');
-      if (res.ok) setNotices(await res.json());
+      if (res.ok) {
+        const allNotices: Announcement[] = await res.json();
+        setNotices(allNotices);
+      }
 
       // 팝업은 만료(popup_expires_at)가 반영된 전용 엔드포인트에서 활성 팝업만 가져옴
       const popupRes = await apiFetch('/announcements/popups');
       if (popupRes.ok) {
-        const popups: Notice[] = await popupRes.json();
-        const nextPopup = popups.find(
+        const popups: Announcement[] = await popupRes.json();
+        const visiblePopups = popups.filter(
           (popup) => localStorage.getItem(`popup_dismissed_${popup.id}`) !== POPUP_DISMISSED_FOREVER
         );
-        if (nextPopup) setPopupPosition(getInitialPopupPosition());
-        setActivePopup(nextPopup ?? null);
+        setActivePopups(visiblePopups);
       }
     } catch (e) {
       console.error('백엔드 공지사항 로드 에러:', e);
@@ -92,145 +73,51 @@ export const MainTab: React.FC = () => {
     }
   };
 
-  const dismissPopup = (permanently = false) => {
-    if (activePopup) {
-      if (permanently) {
-        localStorage.setItem(`popup_dismissed_${activePopup.id}`, POPUP_DISMISSED_FOREVER);
-      }
-      setActivePopup(null);
+  const dismissPopup = (popupId: number, permanently = false) => {
+    if (permanently) {
+      localStorage.setItem(`popup_dismissed_${popupId}`, POPUP_DISMISSED_FOREVER);
     }
+    setActivePopups((current) => current.filter((popup) => popup.id !== popupId));
   };
 
-  const clampPopupPosition = (x: number, y: number) => {
-    const panel = popupRef.current;
-    const viewport = window.visualViewport;
-    const left = viewport?.offsetLeft ?? 0;
-    const top = viewport?.offsetTop ?? 0;
-    const width = viewport?.width ?? window.innerWidth;
-    const height = viewport?.height ?? window.innerHeight;
-    const panelWidth = panel?.offsetWidth ?? Math.min(448, width - POPUP_MARGIN * 2);
-    const panelHeight = panel?.offsetHeight ?? 320;
-
-    return {
-      x: Math.min(Math.max(x, left + POPUP_MARGIN), Math.max(left + POPUP_MARGIN, left + width - panelWidth - POPUP_MARGIN)),
-      y: Math.min(Math.max(y, top + POPUP_MARGIN), Math.max(top + POPUP_MARGIN, top + height - panelHeight - POPUP_MARGIN)),
-    };
+  const openAnnouncementBoard = () => {
+    setActivePopups([]);
+    setSelectedNotice(null);
+    setAnnouncementBoardOpen(true);
   };
 
-  const handlePopupPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const panel = popupRef.current;
-    if (!panel) return;
-
-    const rect = panel.getBoundingClientRect();
-    popupDragRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
+  const openAnnouncementDetail = (notice: Announcement) => {
+    setActivePopups([]);
+    setSelectedNotice(notice);
+    setAnnouncementBoardOpen(true);
   };
 
-  const handlePopupPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = popupDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    setPopupPosition(clampPopupPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY));
+  const closeAnnouncementBoard = () => {
+    setAnnouncementBoardOpen(false);
+    setSelectedNotice(null);
   };
-
-  const handlePopupPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (popupDragRef.current?.pointerId !== event.pointerId) return;
-    popupDragRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  useEffect(() => {
-    if (!activePopup) return;
-
-    const keepPopupInViewport = () => {
-      setPopupPosition((position) => clampPopupPosition(position.x, position.y));
-    };
-
-    const frame = window.requestAnimationFrame(keepPopupInViewport);
-    window.addEventListener('resize', keepPopupInViewport);
-    window.visualViewport?.addEventListener('resize', keepPopupInViewport);
-    window.visualViewport?.addEventListener('scroll', keepPopupInViewport);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('resize', keepPopupInViewport);
-      window.visualViewport?.removeEventListener('resize', keepPopupInViewport);
-      window.visualViewport?.removeEventListener('scroll', keepPopupInViewport);
-    };
-  }, [activePopup]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
 
-      {/* 배경을 막지 않는 드래그형 공지 레이어 */}
-      {mounted && activePopup && createPortal(
-        <div
-          ref={popupRef}
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="announcement-layer-title"
-          style={{ transform: `translate3d(${popupPosition.x}px, ${popupPosition.y}px, 0)` }}
-          className="fixed left-0 top-0 z-[80] flex max-h-[calc(100dvh-1.5rem)] w-[min(28rem,calc(100dvw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-primary/20 bg-card shadow-2xl shadow-black/20 ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-200"
-        >
-          <div
-            onPointerDown={handlePopupPointerDown}
-            onPointerMove={handlePopupPointerMove}
-            onPointerUp={handlePopupPointerEnd}
-            onPointerCancel={handlePopupPointerEnd}
-            className="flex touch-none select-none items-center justify-between border-b border-border/70 bg-gradient-to-r from-primary/15 via-sky-500/10 to-transparent px-4 py-3 cursor-grab active:cursor-grabbing"
-          >
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                <Megaphone className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Notice</span>
-                  {activePopup.is_pinned && <Pin className="h-3 w-3 fill-current text-sky-500" />}
-                </div>
-                <h3 id="announcement-layer-title" className="truncate text-sm font-bold text-foreground">공지사항</h3>
-              </div>
-            </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <GripHorizontal className="h-4 w-4" aria-hidden="true" />
-              <button
-                type="button"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={() => dismissPopup(false)}
-                className="rounded-lg p-1.5 transition hover:bg-secondary hover:text-foreground"
-                aria-label="공지 닫기"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-          <div className="min-h-0 overflow-y-auto px-5 py-4 overscroll-contain">
-            <h4 className="text-lg font-black tracking-tight text-foreground">{activePopup.title}</h4>
-            <div className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-              <MarkdownRenderer content={activePopup.content} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between border-t border-border/70 bg-secondary/20 px-5 py-3">
-            <button
-              onClick={() => dismissPopup(true)}
-              className="text-xs font-medium text-muted-foreground transition hover:text-foreground hover:underline"
-            >
-              다시 보지 않기
-            </button>
-            <button
-              onClick={() => dismissPopup(false)}
-              className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-md shadow-primary/10 transition hover:bg-primary/90"
-            >
-              닫기
-            </button>
-          </div>
-        </div>,
+      {mounted && announcementBoardOpen && createPortal(
+        <AnnouncementBoardModal
+          notices={notices}
+          selectedNotice={selectedNotice}
+          onSelectNotice={setSelectedNotice}
+          onShowList={() => setSelectedNotice(null)}
+          onClose={closeAnnouncementBoard}
+        />,
+        document.body
+      )}
+
+      {/* 배경을 막지 않는 다중 드래그형 공지 레이어 */}
+      {mounted && activePopups.length > 0 && createPortal(
+        <DraggableAnnouncementPopups
+          popups={activePopups}
+          onDismiss={dismissPopup}
+          onOpenDetail={openAnnouncementDetail}
+        />,
         document.body
       )}
 
@@ -297,24 +184,41 @@ export const MainTab: React.FC = () => {
         {/* 공지사항 롤링 보드 */}
         <div className="md:col-span-2 rounded-2xl border border-border bg-card p-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
-            <h3 className="text-base font-bold flex items-center gap-2">
-              <Megaphone className="h-4.5 w-4.5 text-primary" /> 플랫폼 새소식
-            </h3>
-            <button onClick={fetchNotices} className="text-muted-foreground hover:text-foreground">
-              <RefreshCw className="h-3.5 w-3.5" />
+            <button
+              type="button"
+              onClick={openAnnouncementBoard}
+              className="group flex items-center gap-2 text-left"
+            >
+              <Megaphone className="h-4.5 w-4.5 text-primary" />
+              <span className="text-base font-bold transition group-hover:text-primary">플랫폼 새소식</span>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
             </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openAnnouncementBoard}
+                className="rounded-lg px-2 py-1 text-[10px] font-bold text-primary transition hover:bg-primary/10"
+              >
+                전체보기
+              </button>
+              <button onClick={fetchNotices} className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground" aria-label="공지 새로고침">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="mt-4 space-y-4 max-h-[280px] overflow-y-auto pr-1">
+          <div className="mt-4 space-y-2.5">
             {loading ? (
               <p className="text-center py-8 text-xs text-muted-foreground">소식을 가져오는 중입니다...</p>
             ) : notices.length === 0 ? (
               <p className="text-center py-8 text-xs text-muted-foreground">현재 등록된 공지사항이 없습니다.</p>
             ) : (
-              notices.map((notice) => (
-                <div
+              notices.slice(0, 3).map((notice) => (
+                <button
                   key={notice.id}
-                  className={`group rounded-xl p-4 border transition ${notice.is_pinned ? 'border-sky-500/25 bg-sky-500/8 shadow-sm shadow-sky-500/5' : 'border-transparent bg-secondary/30 hover:border-border hover:bg-secondary/50'}`}
+                  type="button"
+                  onClick={() => openAnnouncementDetail(notice)}
+                  className={`group block w-full rounded-xl border p-3.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${notice.is_pinned ? 'border-sky-500/25 bg-sky-500/8 shadow-sm shadow-sky-500/5' : 'border-transparent bg-secondary/30 hover:border-border hover:bg-secondary/50'}`}
                 >
                   <div className="flex items-center justify-between">
                     <h4 className="flex min-w-0 items-center gap-1.5 text-sm font-bold transition group-hover:text-primary">
@@ -330,10 +234,16 @@ export const MainTab: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    <MarkdownRenderer content={notice.content} />
+                  <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                    {getAnnouncementPreview(notice.content, 110)}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/80">
+                    <span>{formatAnnouncementDate(notice.created_at)}</span>
+                    <span className="inline-flex items-center gap-0.5 font-bold text-primary opacity-0 transition group-hover:opacity-100">
+                      자세히 보기 <ChevronRight className="h-3 w-3" />
+                    </span>
                   </div>
-                </div>
+                </button>
               ))
             )}
           </div>
