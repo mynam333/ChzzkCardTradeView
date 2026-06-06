@@ -39,7 +39,7 @@ interface AppContextType {
   fetchNotifications: () => Promise<void>;
   openNotification: (n: AppNotificationItem) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
-  maintenanceActive: boolean;
+  maintenanceActive: boolean | null;
   maintenanceStartAt: string | null;
   maintenanceEndAt: string | null;
   checkMaintenanceStatus: () => Promise<void>;
@@ -152,7 +152,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true); // 초기 인증 검증 완료 상태 대기
 
-  const [maintenanceActive, setMaintenanceActive] = useState<boolean>(false);
+  const [maintenanceActive, setMaintenanceActive] = useState<boolean | null>(null);
   const [maintenanceStartAt, setMaintenanceStartAt] = useState<string | null>(null);
   const [maintenanceEndAt, setMaintenanceEndAt] = useState<string | null>(null);
 
@@ -164,9 +164,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setMaintenanceActive(!!data.active);
         setMaintenanceStartAt(data.startAt || null);
         setMaintenanceEndAt(data.endAt || null);
+      } else {
+        if (maintenanceActive === null) {
+          setMaintenanceActive(false);
+        }
       }
     } catch (err) {
       console.error('[AppContext] 점검 상태 조회 실패:', err);
+      if (maintenanceActive === null) {
+        setMaintenanceActive(false);
+      }
     }
   };
 
@@ -179,7 +186,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 미어드민 유저 점검 강제 리디렉션 가드
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || maintenanceActive === null) return;
 
     const isMaintenanceRoute = pathname === '/maintenance';
     const isLoginRoute = pathname === '/login';
