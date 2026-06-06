@@ -18,6 +18,7 @@ import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 import { ProfileModal } from './ProfileModal';
 import { cardImage } from '@/lib/cosmetics';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface UserCard {
   id: number;
@@ -63,6 +64,7 @@ export const MyInfoTab: React.FC = () => {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
   const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
+  const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -582,8 +584,15 @@ export const MyInfoTab: React.FC = () => {
         계정 세션 로그아웃
       </button>
 
-      {/* 개발자 SNS (새 창) — 일반 링크라 팝업 차단에 걸리지 않음 */}
-      <div className="pt-1 text-right">
+      {/* 개발자 SNS & 개인정보 처리방침 버튼 영역 */}
+      <div className="pt-1 flex justify-end gap-2">
+        <button
+          onClick={() => setPrivacyModalOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-1.5 text-[11px] font-bold text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+        >
+          <span>🛡️</span>
+          개인정보 처리방침
+        </button>
         <a
           href="https://x.com/Chzzk_YuAru"
           target="_blank"
@@ -594,6 +603,101 @@ export const MyInfoTab: React.FC = () => {
           개발자 SNS
         </a>
       </div>
+
+      {/* 개인정보 처리방침 모달 */}
+      {privacyModalOpen && (
+        <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm">
+          <div className="modal-panel modal-panel-md modal-panel-scroll rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6 max-w-lg w-full">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-base font-bold flex items-center gap-2">🛡️ 개인정보 처리방침</h3>
+              <button 
+                onClick={() => setPrivacyModalOpen(false)} 
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-4 overflow-y-auto max-h-[60vh] pr-1">
+              <MarkdownRenderer content={PRIVACY_POLICY_CONTENT} />
+            </div>
+            <div className="mt-6 flex justify-end border-t border-border/60 pt-4">
+              <button
+                onClick={() => setPrivacyModalOpen(false)}
+                className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/10"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+const PRIVACY_POLICY_CONTENT = `
+# 개인정보 처리방침
+
+본 서비스(이하 "서비스")는 이용자의 개인정보를 중요시하며, "개인정보 보호법" 등 대한민국의 개인정보 보호 법령을 준수합니다. 본 방침은 서비스를 이용하는 모든 이용자에게 적용됩니다.
+
+## 1. 개인정보의 수집 및 이용 목적
+서비스는 네이버 치지직 간편 로그인 연동 기능을 통하여 원활한 게임 환경을 제공하기 위해 필요한 최소한의 개인정보를 수집 및 이용합니다.
+* **이용자 식별 및 로그인 연동**: 치지직 닉네임, 프로필 이미지, 고유 채널 ID를 통한 본인 인증 및 로그인 세션 유지
+* **게임 콘텐츠 서비스 제공**: 게임 내 획득 포인트 관리, 보유 카드 목록, 가챠(뽑기) 결과 저장, 카드 거래(트레이드) 이력 관리 및 유저 간 교환 성사 판정
+* **서비스 안전성 및 부정 이용 방지**: 불량 이용자 차단(Block), 악의적 트래픽 모니터링, 어뷰징 거래 제어
+
+## 2. 수집하는 개인정보 항목
+서비스가 수집 및 저장하는 개인정보 항목은 다음과 같습니다.
+* **네이버 치지직 연동 필수 항목**: 채널 ID, 닉네임, 프로필 이미지 URL
+* **게임 플레이 관련 정보**: 포인트 현황, 카드 보유 내역, 카드 교환 제안 및 거래 승인/거절 로그, 유저 차단 목록
+
+## 3. 개인정보의 보유 및 이용 기간
+이용자의 개인정보 및 게임 데이터는 서비스 이용 기간 동안 원칙적으로 안전하게 보관됩니다.
+* **이용 유지 기간**: 원활한 카드 마켓 운영 및 거래 무결성 확인을 위해 이용자가 명시적으로 탈퇴(데이터 삭제)를 요구하지 않는 한, 로그아웃 혹은 세션 종료 이후에도 데이터베이스에 유지됩니다.
+* **즉시 파기**: 이용자가 개발자 채널을 통해 본인 확인 및 연동 데이터의 삭제(회원 탈퇴)를 명시적으로 요청하는 경우, 수집된 모든 관련 개인정보를 지체 없이 영구 파기합니다.
+
+## 4. 개인정보의 제3자 제공
+서비스는 이용자의 개인정보를 제3자에게 제공하지 않습니다. 다만, 법령의 규정에 의거하거나 수사 목적으로 법령에 정해진 절차와 방법에 따라 수사기관의 요구가 있는 경우 등 예외적인 상황에 한하여 제공할 수 있습니다.
+
+## 5. 개인정보의 처리 위탁 및 국외 이전
+서비스는 안전한 서버 인프라 호스팅 및 원활한 데이터 관리를 위해 다음과 같이 개인정보 처리를 위탁하고 있으며, 시스템 호스팅의 구조상 국외 이전이 수반됩니다.
+
+**[클라우드 인프라 제공]**
+* **위탁 대상자 (수탁자)**: Oracle America, Inc. (Oracle Cloud Infrastructure)
+* **위탁 업무 내용**: 어플리케이션 호스팅 서버 운영 및 백엔드 인프라 제공
+* **이전되는 개인정보 항목**: 치지직 연동 정보(채널 ID, 닉네임, 프로필 이미지 URL) 및 게임 내 서비스 이용 데이터 일체
+* **이전 국가**: 서버 리전 소재 국가
+* **개인정보 보유 및 이용 기간**: 위탁 계약 종료 시 또는 이용자의 서비스 탈퇴 시까지
+
+**[데이터베이스 데이터 보관 및 관리]**
+* **위탁 대상자 (수탁자)**: Supabase, Inc.
+* **위탁 업무 내용**: 클라우드 데이터베이스(PostgreSQL) 호스팅 및 회원/게임 데이터 보관
+* **이전되는 개인정보 항목**: 치지직 연동 정보(채널 ID, 닉네임, 프로필 이미지 URL) 및 게임 내 서비스 이용 데이터 일체
+* **이전 국가**: 서버 리전 소재 국가
+* **개인정보 보유 및 이용 기간**: 위탁 계약 종료 시 또는 이용자의 서비스 탈퇴 시까지
+
+## 6. 개인정보의 파기절차 및 파기방법
+* **파기절차**: 수집 목적이 달성되었거나 이용자의 파기 요청이 접수된 경우, 내부 방침 및 법령에 따라 지체 없이 파기 절차를 밟습니다.
+* **파기방법**: 전자적 파일 형태로 저장된 개인정보는 기록을 재생할 수 없는 기술적 방법(데이터베이스 레코드 영구 삭제)을 사용하여 파기합니다.
+
+## 7. 개인정보의 기술적·관리적 보호대책
+서비스는 이용자의 개인정보를 취급함에 있어 분실, 도난, 유출, 변조 또는 훼손되지 않도록 안전성 확보를 위해 다음과 같은 기술적·관리적 대책을 강구하고 있습니다.
+* **전송 구간 암호화**: 모든 통신 및 데이터 전송은 SSL/TLS 보안 프로토콜을 통하여 암호화되어 전송됩니다.
+* **접근 통제**: 데이터베이스 및 백엔드 서버 인프라에 대한 접근은 인가된 관리자 계정으로만 제한되며, 접근 통제 보안 시스템을 통해 엄격하게 보호됩니다.
+* **네트워크 보안**: 비정상적인 트래픽 및 해킹 시도를 탐지 및 차단하기 위한 보안 모니터링을 상시 운영합니다.
+
+## 8. 이용자의 권리 및 그 행사방법
+이용자는 언제든지 본인의 개인정보 조회, 수정, 혹은 삭제(탈퇴)를 요청할 권리가 있습니다.
+* 권리 행사는 개발자 SNS(𝕏 DM)를 통해 본인 확인 증명(네이버 치지직 로그인 상태 등) 후 요청하실 수 있으며, 접수 즉시 지체 없이 처리해 드립니다.
+
+## 9. 개인정보 처리방침의 변경
+본 개인정보 처리방침은 서비스 기능의 추가, 법령 및 보안 기술의 변경에 따라 개정될 수 있습니다.
+* **변경 고지**: 처리방침이 변경되는 경우 서비스 내 공지사항을 통하여 시행 최소 7일 전부터 사전 고지합니다.
+* **이전 방침 확인**: 이용자는 시행일자를 기준으로 이전의 처리방침 이력 및 변경 사항을 공지사항 탭 등에서 상시 대조할 수 있습니다.
+
+## 10. 개인정보 보호 책임자 및 문의처
+* **담당자**: 유아루
+* **문의 채널 (𝕏)**: @Chzzk_YuAru (https://x.com/Chzzk_YuAru)
+* **시행일자**: 2026년 6월 7일
+`;
+
