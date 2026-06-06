@@ -80,7 +80,8 @@ export class SupabaseMarketRepository implements IMarketRepository {
           follower_count: streamer.follower_count,
           is_image_banned: !!streamer.is_image_banned,
           activity_score: 0,
-          is_active: !!streamer.is_active
+          is_active: !!streamer.is_active,
+          serial_number: streamer.serial_number ?? undefined
         }
       } : undefined
     };

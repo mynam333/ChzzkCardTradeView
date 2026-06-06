@@ -21,6 +21,11 @@ interface ShopItem {
   purchase_limit: number;
 }
 
+const formatStreamerSerial = (streamer: { serial_number?: number | null } | null | undefined): string =>
+  streamer?.serial_number == null
+    ? '----'
+    : String(streamer.serial_number).padStart(4, '0');
+
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
 
@@ -678,7 +683,7 @@ export const ShopTab: React.FC = () => {
                               ) : (
                                 <span className="rounded bg-zinc-800 px-1 py-0.5 text-[7px] font-bold text-zinc-400">OFFLINE</span>
                               )}
-                              <span className="rounded bg-black/50 px-1 py-0.5 text-[8px] font-black text-white/90">No.{String(listing.card?.serial_number || 1).padStart(4, '0')}</span>
+                              <span className="rounded bg-black/50 px-1 py-0.5 text-[8px] font-black text-white/90">No.{formatStreamerSerial(streamer)}</span>
                             </div>
                             <div className="mt-auto space-y-0.5">
                               <h4 className="text-[11px] font-black truncate drop-shadow-md">
@@ -798,7 +803,7 @@ export const ShopTab: React.FC = () => {
                                   <span className="text-[9px] text-yellow-500">
                                     {star > 0 ? Array.from({ length: star }).map(() => '★').join('') : '일반'}
                                   </span>
-                                  <span className="text-[9px] text-muted-foreground">No.{String(l.card?.serial_number || 1).padStart(4, '0')}</span>
+                                  <span className="text-[9px] text-muted-foreground">No.{formatStreamerSerial(streamer)}</span>
                                 </div>
                               </div>
                             </td>
@@ -931,7 +936,7 @@ export const ShopTab: React.FC = () => {
                                     <span className="text-[9px] text-yellow-500">
                                       {star > 0 ? Array.from({ length: star }).map(() => '★').join('') : '일반'}
                                     </span>
-                                    <span className="text-[9px] text-muted-foreground">No.{String(l.card?.serial_number || 1).padStart(4, '0')}</span>
+                                    <span className="text-[9px] text-muted-foreground">No.{formatStreamerSerial(streamer)}</span>
                                     {l.with_cosmetics && (
                                       <span className="rounded bg-primary/10 border border-primary/20 px-1 py-0.2 text-[8px] font-black text-primary">
                                         코스메틱 포함

@@ -81,7 +81,7 @@ export class SqliteMarketRepository implements IMarketRepository {
           is_image_banned: row.streamer_is_image_banned === 1,
           activity_score: 0,
           is_active: row.streamer_is_active === 1,
-          serial_number: row.streamer_serial || undefined
+          serial_number: row.streamer_serial ?? undefined
         }
       } : undefined
     };
