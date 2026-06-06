@@ -289,10 +289,10 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
-        // 20초(카운트다운 3초 + 20초 플레이 + RTT 1초 = 24000ms) 내 퍼즐 완성 시 보너스 200 P
-        if (serverElapsedMs <= 24000) {
+        // 30초(카운트다운 3초 + 30초 플레이 + RTT 1초 = 34000ms) 내 퍼즐 완성 시 보너스 200 P
+        if (serverElapsedMs <= 34000) {
           earnedPoints += BONUS_REWARD;
-          message = `20초 내로 퍼즐을 완성하셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          message = `30초 내로 퍼즐을 완성하셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {
           message = `퍼즐을 무사히 완성하셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
         }

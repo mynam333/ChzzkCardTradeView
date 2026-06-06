@@ -1392,7 +1392,7 @@ export const ArcadeTab: React.FC = () => {
                 timeLeft={puzzleTimeLeft}
                 totalSeconds={PUZZLE_TIME_LIMIT_SECONDS}
                 dangerSeconds={15}
-                bonusLabel="20초 보너스"
+                bonusLabel="30초 보너스"
               />
 
               <p className="text-xs text-muted-foreground text-center font-bold">
