@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage, proxiedImage } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers } from 'lucide-react';
@@ -417,7 +417,7 @@ export const ShopTab: React.FC = () => {
                 <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공 (보관함에서 확인)</span>
                 <div className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl border border-border/80">
                   <div className="absolute inset-0 z-0">
-                    <img src={proxiedImage(drawnCard.custom_image_url || drawnCard.logo_url)} alt={drawnCard.name} className="h-full w-full object-cover opacity-80" />
+                    <img src={drawnCard.custom_image_url || drawnCard.logo_url} alt={drawnCard.name} className="h-full w-full object-cover opacity-80" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>
                   </div>
                   <div className="relative z-20 flex items-center justify-between w-full">
@@ -778,7 +778,7 @@ export const ShopTab: React.FC = () => {
                     return (
                       <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
                         <td className="py-3 flex items-center gap-2">
-                          <img src={proxiedImage(streamer?.logo_url) || ''} className="h-7 w-7 rounded-md object-cover border border-border/60" />
+                          <img src={streamer?.logo_url || ''} className="h-7 w-7 rounded-md object-cover border border-border/60" />
                           <div className="flex flex-col">
                             <span className="font-bold text-[11px] text-foreground">{streamer?.name || '스트리머'}</span>
                             <div className="flex items-center gap-1">
@@ -911,7 +911,7 @@ export const ShopTab: React.FC = () => {
                             </span>
                           </td>
                           <td className="py-3 flex items-center gap-2">
-                            <img src={proxiedImage(streamer?.logo_url) || ''} className="h-7 w-7 rounded-md object-cover border border-border/60" />
+                            <img src={streamer?.logo_url || ''} className="h-7 w-7 rounded-md object-cover border border-border/60" />
                             <div className="flex flex-col">
                               <span className="font-bold text-[11px] text-foreground">{streamer?.name || '스트리머'}</span>
                               <div className="flex items-center gap-1.5 flex-wrap">

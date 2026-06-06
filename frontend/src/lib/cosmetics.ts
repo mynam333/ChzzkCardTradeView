@@ -74,7 +74,7 @@ export const cardImage = (
   if (!targetUrl) {
     targetUrl = streamer.logo_url || '';
   }
-  return proxiedImage(targetUrl);
+  return targetUrl;
 };
 
 /** 테두리 코스메틱 스타일 (레거시 인라인 JSON 방식) */

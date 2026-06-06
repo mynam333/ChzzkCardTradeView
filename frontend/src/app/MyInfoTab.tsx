@@ -17,7 +17,7 @@ import {
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 import { ProfileModal } from './ProfileModal';
-import { cardImage, proxiedImage } from '@/lib/cosmetics';
+import { cardImage } from '@/lib/cosmetics';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface UserCard {
@@ -319,7 +319,7 @@ export const MyInfoTab: React.FC = () => {
             {representativeCard?.streamer ? (
               <div className="relative h-24 w-16 overflow-hidden rounded-xl border-2 border-amber-500 shadow">
                 <img
-                  src={proxiedImage(representativeCard.streamer.custom_image_url || representativeCard.streamer.logo_url)}
+                  src={representativeCard.streamer.custom_image_url || representativeCard.streamer.logo_url}
                   alt={representativeCard.streamer.name}
                   className="h-full w-full object-cover"
                 />
@@ -377,7 +377,7 @@ export const MyInfoTab: React.FC = () => {
                         onClick={() => handleSetRepresentative(card.channel_id)}
                         className={`relative cursor-pointer flex flex-col items-center rounded-xl border p-2 transition ${selected ? 'border-amber-500 ring-2 ring-amber-500/30' : 'border-border/60 hover:bg-secondary/50'}`}
                       >
-                        <img src={proxiedImage(s.custom_image_url || s.logo_url)} alt={s.name} className="h-12 w-12 rounded-full object-cover border border-border/80" />
+                        <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-12 w-12 rounded-full object-cover border border-border/80" />
                         <span className="mt-1.5 text-[10px] font-bold truncate max-w-full">{s.name}</span>
                         {selected && <Check className="absolute right-1 top-1 h-3.5 w-3.5 text-amber-500" />}
                       </div>
