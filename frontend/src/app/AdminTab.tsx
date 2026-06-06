@@ -20,7 +20,8 @@ import {
   Database,
   Gamepad2,
   Edit,
-  Pin
+  Pin,
+  Award
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
@@ -28,8 +29,9 @@ import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
+import { AdminTitlesTab } from './AdminTitlesTab';
 
-type AdminSubTab = 'dashboard' | 'users' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
 
 const couponExpirationFormatter = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul',
@@ -51,6 +53,7 @@ export const AdminTab: React.FC = () => {
   const initialSubTab: AdminSubTab = (
     tabParam === 'dashboard' ||
     tabParam === 'users' ||
+    tabParam === 'titles' ||
     tabParam === 'coupons' ||
     tabParam === 'announcements' ||
     tabParam === 'push' ||
@@ -66,7 +69,7 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
-      'dashboard', 'users', 'coupons', 'announcements', 
+      'dashboard', 'users', 'titles', 'coupons', 'announcements',
       'push', 'reports', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
@@ -893,6 +896,7 @@ export const AdminTab: React.FC = () => {
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     { id: 'users', label: '유저', icon: Users },
+    { id: 'titles', label: '칭호', icon: Award },
     { id: 'coupons', label: '쿠폰', icon: Tag },
     { id: 'announcements', label: '공지', icon: Megaphone },
     { id: 'push', label: '푸시', icon: BellRing },
@@ -961,6 +965,7 @@ export const AdminTab: React.FC = () => {
 
       {/* 유저 목록 (자기완결형 컴포넌트로 분리) */}
       {subTab === 'users' && <AdminUsersTab />}
+      {subTab === 'titles' && <AdminTitlesTab />}
 
       {/* 쿠폰 */}
       {subTab === 'coupons' && (

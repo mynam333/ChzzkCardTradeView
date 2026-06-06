@@ -4,7 +4,8 @@ import {
   streamerRepository,
   userCardRepository,
   systemConfigRepository,
-  marketRepository
+  marketRepository,
+  titleRepository
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
@@ -83,11 +84,16 @@ export const getUserMe = async (req: Request, res: Response) => {
       }
     }
 
+    const ownedTitles = await titleRepository.findByUserId(userId);
+    const titles = ownedTitles.filter((title) => title.is_equipped);
+
     return res.status(200).json({
       id: user.id,
       username: user.username,
       avatarUrl: user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`,
       role: user.role,
+      titles,
+      ownedTitles,
       point: user.point,
       lastFreeDraw: user.last_free_draw,
       representativeCardChannelId: user.representative_card_channel_id || null,
@@ -280,9 +286,13 @@ export const getUserProfile = async (req: Request, res: Response) => {
       };
     }
 
+    const titles = (await titleRepository.findByUserId(user_id)).filter((title) => title.is_equipped);
+
     return res.status(200).json({
       id: user.id,
       username: user.username,
+      role: user.role,
+      titles,
       avatar_url: user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.id}`,
       point: user.point,
       card_count: cards.length,

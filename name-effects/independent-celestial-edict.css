@@ -1,0 +1,113 @@
+/* ============================================================
+   천명묵서: Celestial Edict
+   독립체 + 황실 먹빛 + 금니 균열 + 주홍 낙관의 기운
+   적용 클래스: ne-independent-celestial-edict
+
+   상품명 추천: 천명묵서
+   설명 추천: 하늘의 명을 붓끝에 새긴 황실 묵서. 먹빛 획을 따라 금니와 주홍빛 인장이 살아납니다.
+   ============================================================ */
+@font-face {
+  font-family: "Independent";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_twelve@1.1/Dokrip.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.ne-independent-celestial-edict {
+  color: #f6dda0;
+  font-family: "Independent", "Noto Serif KR", serif;
+  font-size-adjust: 0.54;
+  font-weight: 400;
+  font-style: normal;
+  font-synthesis: none;
+  letter-spacing: 0.035em;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 0.5px rgba(27, 12, 8, 0.98);
+
+  /*
+   * 1층: 한 번씩 획을 훑는 금빛 칼날광
+   * 2층: 금니로 메운 가는 균열
+   * 3층: 상아색 금분과 먹빛이 섞인 붓 획
+   */
+  background-image:
+    linear-gradient(
+      108deg,
+      transparent 0%,
+      transparent 38%,
+      rgba(255, 238, 174, 0.12) 44%,
+      rgba(255, 252, 225, 1) 49%,
+      rgba(239, 190, 76, 0.42) 55%,
+      transparent 62%,
+      transparent 100%
+    ),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='18' viewBox='0 0 34 18'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M-2 15 7 8l4 2 7-8 4 6 7-4 7 6' stroke='%23ffe8a3' stroke-width='.65' stroke-opacity='.55'/%3E%3Cpath d='m8 8 1-5m9-1 1 5m10-3-2 6' stroke='%23c88b2c' stroke-width='.45' stroke-opacity='.58'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(
+      180deg,
+      #fff8dc 0%,
+      #f6dda0 18%,
+      #dcae50 43%,
+      #fff0b5 52%,
+      #a86b25 78%,
+      #5d2b18 100%
+    );
+  background-size: 280% 100%, 30px 16px, 100% 100%;
+  background-position: 150% 50%, 0 50%, 0 0;
+  background-repeat: no-repeat, repeat-x, no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  filter:
+    drop-shadow(0 1px 0 rgba(12, 5, 3, 1))
+    drop-shadow(0 0 2px rgba(255, 235, 174, 0.9))
+    drop-shadow(0 0 5px rgba(213, 155, 52, 0.56))
+    drop-shadow(1px 1px 5px rgba(143, 25, 15, 0.34));
+
+  animation:
+    ne-ice-edict-sweep 6.4s cubic-bezier(0.42, 0, 0.28, 1) infinite,
+    ne-ice-seal-breath 4.8s ease-in-out infinite;
+}
+
+@keyframes ne-ice-edict-sweep {
+  0%, 18% {
+    background-position: 150% 50%, 0 50%, 0 0;
+  }
+  62% {
+    background-position: -65% 50%, 15px 50%, 0 0;
+  }
+  100% {
+    background-position: -65% 50%, 30px 50%, 0 0;
+  }
+}
+
+@keyframes ne-ice-seal-breath {
+  0%, 72%, 100% {
+    filter:
+      drop-shadow(0 1px 0 rgba(12, 5, 3, 1))
+      drop-shadow(0 0 2px rgba(255, 235, 174, 0.9))
+      drop-shadow(0 0 5px rgba(213, 155, 52, 0.52))
+      drop-shadow(1px 1px 5px rgba(143, 25, 15, 0.28));
+  }
+  80% {
+    filter:
+      drop-shadow(0 1px 0 rgba(12, 5, 3, 1))
+      drop-shadow(0 0 3px rgba(255, 244, 204, 1))
+      drop-shadow(0 0 7px rgba(230, 178, 71, 0.76))
+      drop-shadow(1px 1px 9px rgba(190, 38, 22, 0.58));
+  }
+  87% {
+    filter:
+      drop-shadow(0 1px 0 rgba(12, 5, 3, 1))
+      drop-shadow(0 0 2.5px rgba(255, 239, 184, 0.95))
+      drop-shadow(0 0 6px rgba(213, 155, 52, 0.62))
+      drop-shadow(1px 1px 7px rgba(164, 29, 18, 0.42));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ne-independent-celestial-edict {
+    animation: none;
+    background-position: 45% 50%, 8px 50%, 0 0;
+  }
+}

@@ -17,6 +17,7 @@ import {
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
 import { NotificationBell } from './NotificationBell';
+import { UserTitleList } from './UserTitleBadge';
 
 interface NavigationProps {
   onNotifyClick?: () => void;
@@ -121,9 +122,12 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card object-cover" />
               <div className="overflow-hidden">
                 <p className="truncate text-sm font-semibold">{user.username}</p>
-                <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  {user.role}
-                </span>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                  <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {user.role}
+                  </span>
+                  <UserTitleList titles={user.titles} compact />
+                </div>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">

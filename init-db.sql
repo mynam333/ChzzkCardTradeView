@@ -17,6 +17,28 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 
+CREATE TABLE IF NOT EXISTS titles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    css TEXT NOT NULL DEFAULT '',
+    icon_name TEXT,
+    icon_color TEXT NOT NULL DEFAULT '#ffffff',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_titles (
+    user_id TEXT NOT NULL,
+    title_id INTEGER NOT NULL,
+    awarded_at TEXT DEFAULT (datetime('now')),
+    is_equipped INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, title_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (title_id) REFERENCES titles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id);
+
 -- 2. 스트리머 테이블
 CREATE TABLE IF NOT EXISTS streamers (
     channel_id TEXT PRIMARY KEY,               -- 치지직 채널 고유 ID
@@ -263,4 +285,3 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     earned_points INTEGER DEFAULT 0,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-

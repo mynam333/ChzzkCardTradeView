@@ -12,12 +12,14 @@ import {
   Star,
   Check,
   Share2,
-  Ban
+  Ban,
+  Crown
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 import { ProfileModal } from './ProfileModal';
 import { cardImage } from '@/lib/cosmetics';
+import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface UserCard {
@@ -65,6 +67,7 @@ export const MyInfoTab: React.FC = () => {
   const [imageDisclaimerChecked, setImageDisclaimerChecked] = useState(false);
   const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
+  const [titleSaving, setTitleSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -79,6 +82,27 @@ export const MyInfoTab: React.FC = () => {
       const res = await apiFetch('/users/me/blocks');
       if (res.ok) setBlockedUsers(await res.json());
     } catch { /* noop */ }
+  };
+
+  const handleEquipTitle = async (titleId: number | null) => {
+    setTitleSaving(true);
+    try {
+      const res = await apiFetch('/users/me/title', {
+        method: 'PUT',
+        body: JSON.stringify({ title_id: titleId })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '칭호 장착 변경에 실패했습니다.', 'error');
+        return;
+      }
+      await refreshUserData(false);
+      toast(data.message || '칭호 장착 상태를 변경했습니다.', 'success');
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setTitleSaving(false);
+    }
   };
 
   const handleBlock = async () => {
@@ -306,8 +330,10 @@ export const MyInfoTab: React.FC = () => {
           <div className="flex items-center gap-4 flex-1">
             <img src={user.avatarUrl} alt="Avatar" className="h-16 w-16 rounded-full border border-primary/20 bg-secondary object-cover" />
             <div>
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                {user.username} <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{user.role}</span>
+              <h2 className="text-xl font-bold flex flex-wrap items-center gap-2">
+                {user.username}
+                <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{user.role}</span>
+                <UserTitleList titles={user.titles} />
               </h2>
               <p className="text-xs text-muted-foreground mt-1">계정 고유 식별코드: {user.id}</p>
               <p className="text-xs text-yellow-500 font-bold mt-1">{user.point.toLocaleString()} P 보유</p>
@@ -349,6 +375,73 @@ export const MyInfoTab: React.FC = () => {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* 보유 칭호 및 대표 칭호 장착 */}
+      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-black">
+              <Crown className="h-4 w-4 text-amber-500" /> 보유 칭호
+            </h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              장착한 칭호 1개가 프로필, 내 정보와 메인 사이드바에 표시됩니다.
+            </p>
+          </div>
+          {user.titles.length > 0 && (
+            <button
+              disabled={titleSaving}
+              onClick={() => handleEquipTitle(null)}
+              className="rounded-lg bg-secondary px-3 py-2 text-[10px] font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              장착 해제
+            </button>
+          )}
+        </div>
+
+        {user.ownedTitles.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center">
+            <Crown className="mx-auto h-7 w-7 text-muted-foreground/40" />
+            <p className="mt-2 text-xs font-bold text-muted-foreground">아직 보유한 칭호가 없습니다.</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">이벤트와 운영 보상으로 특별한 칭호를 획득할 수 있습니다.</p>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {user.ownedTitles.map((title) => {
+              const equipped = user.titles.some((item) => item.id === title.id);
+              return (
+                <div
+                  key={title.id}
+                  className={`relative flex min-h-24 flex-col justify-between rounded-2xl border p-4 transition ${
+                    equipped
+                      ? 'border-amber-400/70 bg-amber-400/5 shadow-[0_0_18px_rgba(251,191,36,0.12)]'
+                      : 'border-border bg-secondary/20 hover:border-primary/40'
+                  }`}
+                >
+                  {equipped && (
+                    <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-1 text-[9px] font-black text-amber-500">
+                      <Check className="h-2.5 w-2.5" /> 장착 중
+                    </span>
+                  )}
+                  <div className="flex min-h-8 items-center pr-16">
+                    <UserTitleBadge title={title} />
+                  </div>
+                  <button
+                    disabled={titleSaving || equipped}
+                    onClick={() => handleEquipTitle(title.id)}
+                    className={`mt-4 w-full rounded-lg py-2 text-[10px] font-bold transition disabled:cursor-default ${
+                      equipped
+                        ? 'bg-amber-400/10 text-amber-500'
+                        : 'bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground disabled:opacity-50'
+                    }`}
+                  >
+                    {equipped ? '현재 장착됨' : '이 칭호 장착'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* 프로필 카드(공유용) 모달 */}
@@ -700,4 +793,3 @@ const PRIVACY_POLICY_CONTENT = `
 * **문의 채널 (𝕏)**: @Chzzk_YuAru (https://x.com/Chzzk_YuAru)
 * **시행일자**: 2026년 6월 7일
 `;
-

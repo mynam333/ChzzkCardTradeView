@@ -7,7 +7,8 @@ import {
   userCardRepository,
   tradeRepository,
   notificationRepository,
-  systemConfigRepository
+  systemConfigRepository,
+  titleRepository
 } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
@@ -444,6 +445,7 @@ export const listUsers = async (req: Request, res: Response) => {
     const offset = (page - 1) * limit;
 
     const { users, total } = await userRepository.listUsers(keyword, limit, offset);
+    const titlesByUser = await titleRepository.findByUserIds(users.map((u) => u.id));
     const items = users.map((u) => ({
       id: u.id,
       username: u.username,
@@ -452,7 +454,8 @@ export const listUsers = async (req: Request, res: Response) => {
       point: u.point,
       banned_until: u.banned_until ?? null,
       ban_reason: u.ban_reason ?? null,
-      created_at: u.created_at ?? null
+      created_at: u.created_at ?? null,
+      titles: titlesByUser[u.id] || []
     }));
 
     return res.status(200).json({

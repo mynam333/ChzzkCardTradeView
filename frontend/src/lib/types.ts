@@ -5,6 +5,18 @@
 
 export type CosmeticType = 'border' | 'name_effect';
 
+export interface UserTitle {
+  id: number;
+  name: string;
+  css: string;
+  icon_name: string | null;
+  icon_color: string;
+  created_at?: string;
+  updated_at?: string;
+  awarded_at?: string;
+  is_equipped?: boolean;
+}
+
 export interface CosmeticRef {
   class?: string;
   css?: string;
@@ -66,6 +78,7 @@ export interface AdminUser {
   point: number;
   banned_until: string | null;
   created_at: string | null;
+  titles: UserTitle[];
 }
 
 /** 관리자 신고 목록 항목 (reporter_username/streamer_name 보강 포함) */

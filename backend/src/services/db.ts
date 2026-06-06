@@ -164,6 +164,13 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN purchase_limit INTEGER DEFAULT 0;");
       }
       try {
+        sqliteDb.prepare("SELECT is_equipped FROM user_titles LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_titles 테이블에 is_equipped 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_titles ADD COLUMN is_equipped INTEGER NOT NULL DEFAULT 0;");
+      }
+      sqliteDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = 1;");
+      try {
         sqliteDb.prepare("SELECT star FROM card_reports LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] card_reports 테이블에 star(신고 카드 별) 컬럼이 없어 추가합니다.');

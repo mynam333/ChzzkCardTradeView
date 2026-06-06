@@ -44,6 +44,8 @@ const ChzzkCallbackContent: React.FC = () => {
           username: data.user.username,
           avatarUrl: data.user.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${data.user.id}`,
           role: data.user.role,
+          titles: [],
+          ownedTitles: [],
           point: data.user.point,
           lastFreeDraw: null,
           representativeCardChannelId: null

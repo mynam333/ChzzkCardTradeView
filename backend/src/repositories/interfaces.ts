@@ -16,6 +16,18 @@ export interface User {
   created_at?: string;
 }
 
+export interface UserTitle {
+  id: number;
+  name: string;
+  css: string;
+  icon_name: string | null;
+  icon_color: string;
+  created_at?: string;
+  updated_at?: string;
+  awarded_at?: string;
+  is_equipped?: boolean;
+}
+
 export interface Streamer {
   channel_id: string;
   name: string;
@@ -175,6 +187,19 @@ export interface IUserRepository {
   getBlockedUsers(blockerId: string): Promise<User[]>;
   /** blockerId가 blockedId를 차단했는지 여부. */
   isBlocked(blockerId: string, blockedId: string): Promise<boolean>;
+}
+
+export interface ITitleRepository {
+  findAll(): Promise<UserTitle[]>;
+  findById(id: number): Promise<UserTitle | null>;
+  findByUserId(userId: string): Promise<UserTitle[]>;
+  findByUserIds(userIds: string[]): Promise<Record<string, UserTitle[]>>;
+  create(title: Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle>;
+  update(id: number, title: Partial<Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null>;
+  delete(id: number): Promise<void>;
+  award(userId: string, titleId: number): Promise<void>;
+  revoke(userId: string, titleId: number): Promise<void>;
+  equip(userId: string, titleId: number | null): Promise<boolean>;
 }
 
 // 유저 랭킹 응답용 확장 타입 (보유 카드 수 및 자산 합산 포함)

@@ -10,7 +10,8 @@ import {
   INotificationRepository,
   ISystemConfigRepository,
   IMarketRepository,
-  IMinigameRepository
+  IMinigameRepository,
+  ITitleRepository
 } from './interfaces';
 import {
   SqliteUserRepository,
@@ -23,7 +24,8 @@ import {
   SqliteNotificationRepository,
   SqliteSystemConfigRepository,
   SqliteMarketRepository,
-  SqliteMinigameRepository
+  SqliteMinigameRepository,
+  SqliteTitleRepository
 } from './sqliteRepository';
 import {
   SupabaseUserRepository,
@@ -36,7 +38,8 @@ import {
   SupabaseNotificationRepository,
   SupabaseSystemConfigRepository,
   SupabaseMarketRepository,
-  SupabaseMinigameRepository
+  SupabaseMinigameRepository,
+  SupabaseTitleRepository
 } from './supabaseRepository';
 
 // 전역 싱글톤 리포지토리 변수 선언
@@ -51,6 +54,7 @@ export let notificationRepository: INotificationRepository;
 export let systemConfigRepository: ISystemConfigRepository;
 export let marketRepository: IMarketRepository;
 export let minigameRepository: IMinigameRepository;
+export let titleRepository: ITitleRepository;
 
 /**
  * 데이터베이스 커넥션이 확립된 후, 모드에 적합한 레포지토리 인스턴스를 초기화합니다.
@@ -70,6 +74,7 @@ export const initRepositories = (): void => {
     systemConfigRepository = new SupabaseSystemConfigRepository();
     marketRepository = new SupabaseMarketRepository();
     minigameRepository = new SupabaseMinigameRepository();
+    titleRepository = new SupabaseTitleRepository();
     console.log('[Repository] Supabase 리포지토리 레이어가 활성화되었습니다.');
   } else {
     userRepository = new SqliteUserRepository();
@@ -83,6 +88,7 @@ export const initRepositories = (): void => {
     systemConfigRepository = new SqliteSystemConfigRepository();
     marketRepository = new SqliteMarketRepository();
     minigameRepository = new SqliteMinigameRepository();
+    titleRepository = new SqliteTitleRepository();
     console.log('[Repository] 로컬 SQLite 리포지토리 레이어가 활성화되었습니다.');
   }
 };

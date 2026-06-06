@@ -8,6 +8,8 @@ import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
+import type { UserTitle } from '@/lib/types';
+import { UserTitleList } from './UserTitleBadge';
 
 interface CosmeticRef { id: number; style_json?: string | null; font_url?: string | null; font_family?: string | null; }
 interface StreamerLite {
@@ -38,6 +40,8 @@ interface CollectionItem {
 interface ProfileData {
   id: string;
   username: string;
+  role: 'USER' | 'ADMIN';
+  titles: UserTitle[];
   avatar_url: string;
   point: number;
   card_count: number;
@@ -170,7 +174,10 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                   className="h-14 w-14 rounded-full border-2 border-primary/50 bg-zinc-800 object-cover"
                 />
                 <div className="min-w-0">
-                  <h3 className="text-lg font-black tracking-tight truncate">{profile.username}</h3>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <h3 className="text-lg font-black tracking-tight truncate">{profile.username}</h3>
+                    <UserTitleList titles={profile.titles} compact />
+                  </div>
                   <p className="text-[10px] text-zinc-400 truncate">@{profile.id}</p>
                 </div>
                 <div className="ml-auto text-right">

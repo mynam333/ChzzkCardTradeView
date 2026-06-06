@@ -87,6 +87,15 @@ import {
   listUsers
 } from '../controllers/adminController';
 import {
+  listTitles,
+  createTitle,
+  updateTitle,
+  deleteTitle,
+  awardTitle,
+  revokeTitle,
+  equipMyTitle
+} from '../controllers/titleController';
+import {
   getNotifications,
   markNotificationRead,
   markAllNotificationsRead
@@ -170,6 +179,7 @@ router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 router.post('/auth/logout', logout);
 router.get('/image-proxy', proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
+router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
 router.get('/users/ranking', getUserRankings);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
@@ -353,6 +363,13 @@ router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
 
 // 관리자 유저 목록 (닉네임/채널ID 검색 + 페이지네이션)
 router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);
+
+router.get('/admin/titles', authMiddleware, adminMiddleware, listTitles);
+router.post('/admin/titles', authMiddleware, adminMiddleware, createTitle);
+router.put('/admin/titles/:id', authMiddleware, adminMiddleware, updateTitle);
+router.delete('/admin/titles/:id', authMiddleware, adminMiddleware, deleteTitle);
+router.post('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, awardTitle);
+router.delete('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, revokeTitle);
 
 // 쿠폰 발급 및 목록/사용현황 조회
 router.post('/admin/coupons', authMiddleware, adminMiddleware, createCoupon);

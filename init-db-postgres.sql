@@ -20,6 +20,28 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS titles (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    css TEXT NOT NULL DEFAULT '',
+    icon_name TEXT,
+    icon_color TEXT NOT NULL DEFAULT '#ffffff',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_titles (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    awarded_at TIMESTAMPTZ DEFAULT NOW(),
+    is_equipped BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (user_id, title_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id);
+ALTER TABLE user_titles ADD COLUMN IF NOT EXISTS is_equipped BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = TRUE;
+
 -- 2. 스트리머 테이블
 CREATE TABLE IF NOT EXISTS streamers (
     channel_id TEXT PRIMARY KEY,                 -- 치지직 채널 고유 ID

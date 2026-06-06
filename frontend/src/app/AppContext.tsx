@@ -7,6 +7,7 @@ import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/p
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
 import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
+import type { UserTitle } from '@/lib/types';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
 
@@ -330,6 +331,8 @@ interface AppContextType {
     username: string;
     avatarUrl: string;
     role: 'USER' | 'ADMIN';
+    titles: UserTitle[];
+    ownedTitles: UserTitle[];
     point: number;
     lastFreeDraw: string | null;
     representativeCardChannelId: string | null;
@@ -520,6 +523,8 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
           username: data.username,
           avatarUrl: data.avatarUrl,
           role: data.role,
+          titles: data.titles || [],
+          ownedTitles: data.ownedTitles || data.titles || [],
           point: data.point,
           lastFreeDraw: data.lastFreeDraw,
           representativeCardChannelId: data.representativeCardChannelId ?? null,
