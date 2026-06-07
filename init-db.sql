@@ -1,4 +1,4 @@
--- ChzzkCardTradeView 로컬 SQLite 초기 스키마 구성 스크립트
+-- 치카포 로컬 SQLite 초기 스키마 구성 스크립트
 
 -- 1. 유저 테이블
 CREATE TABLE IF NOT EXISTS users (

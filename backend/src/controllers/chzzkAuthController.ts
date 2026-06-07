@@ -9,7 +9,7 @@ import {
   clearSessionCookie,
   setOAuthStateCookie,
   clearOAuthStateCookie,
-  OAUTH_STATE_COOKIE_NAME
+  OAUTH_STATE_COOKIE_NAMES
 } from '../services/sessionCookie';
 
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
@@ -71,7 +71,10 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'BadRequest', message: 'code(Authorization Code)가 필요합니다.' });
   }
 
-  const expectedState = (req as any).cookies?.[OAUTH_STATE_COOKIE_NAME];
+  const cookies = (req as any).cookies || {};
+  const expectedState = OAUTH_STATE_COOKIE_NAMES
+    .map(cookieName => cookies[cookieName])
+    .find(Boolean);
   if (!state || !expectedState || state !== expectedState) {
     clearOAuthStateCookie(res);
     return res.status(400).json({
@@ -95,7 +98,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
         clientId: CHZZK_CLIENT_ID,
         clientSecret: CHZZK_CLIENT_SECRET,
         code,
-        state: state || 'cctv_state'
+        state: state || 'chikapo_state'
       })
     });
 
@@ -129,7 +132,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     try {
       const profileHeaders = {
         'Authorization': `Bearer ${finalAccessToken}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chikapo-App/1.0'
       };
 
       const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {

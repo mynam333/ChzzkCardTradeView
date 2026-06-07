@@ -14,7 +14,10 @@ vi.mock('../repositories', () => ({
 import { JWT_SECRET } from '../config';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
 import { systemConfigRepository, userRepository } from '../repositories';
-import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
+import {
+  LEGACY_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAME
+} from '../services/sessionCookie';
 
 const systemConfigGet = vi.mocked(systemConfigRepository.get);
 const findUserById = vi.mocked(userRepository.findById);
@@ -58,6 +61,24 @@ describe('maintenanceCheckMiddleware', () => {
       path: '/admin/stats',
       headers: {},
       cookies: { [SESSION_COOKIE_NAME]: token }
+    } as Partial<Request> & { cookies: Record<string, string> });
+
+    expect(findUserById).toHaveBeenCalledWith('admin-id');
+    expect(next).toHaveBeenCalledOnce();
+    expect(response.status).not.toHaveBeenCalled();
+  });
+
+  it('accepts the legacy session cookie during the project-name migration', async () => {
+    const token = jwt.sign({ id: 'admin-id', role: 'ADMIN' }, JWT_SECRET);
+    findUserById.mockResolvedValue({
+      id: 'admin-id',
+      role: 'ADMIN'
+    } as never);
+
+    const { response, next } = await runMiddleware({
+      path: '/admin/stats',
+      headers: {},
+      cookies: { [LEGACY_SESSION_COOKIE_NAME]: token }
     } as Partial<Request> & { cookies: Record<string, string> });
 
     expect(findUserById).toHaveBeenCalledWith('admin-id');

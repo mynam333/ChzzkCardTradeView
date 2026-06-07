@@ -167,7 +167,7 @@ const uploadSingleImage = (req: any, res: any, next: any) => {
 router.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
-    message: '치지직 카드 트레이드 뷰 백엔드 API가 정상 작동 중입니다.',
+    message: '치카포 백엔드 API가 정상 작동 중입니다.',
     timestamp: new Date().toISOString()
   });
 });
@@ -253,6 +253,27 @@ router.post('/minigames/submit', authMiddleware, banCheckMiddleware, submitMinig
 let streamersCache: { data: any[]; expiresAt: number } | null = null;
 const STREAMERS_CACHE_TTL = 15_000; // 15초
 
+const loadStreamerValueMap = async (
+  label: string,
+  loader: () => Promise<Record<string, number>>
+): Promise<Record<string, number>> => {
+  try {
+    return await loader();
+  } catch (err: any) {
+    console.error(`[Streamers] ${label} 시세 이력 조회 실패, 현재 시세 기준으로 폴백합니다:`, err?.message || err);
+    return {};
+  }
+};
+
+const loadStreamerTitles = async (channelIds: string[]) => {
+  try {
+    return await titleRepository.findByUserIds(channelIds);
+  } catch (err: any) {
+    console.error('[Streamers] 스트리머 칭호 조회 실패, 칭호 없이 응답합니다:', err?.message || err);
+    return {} as Record<string, any[]>;
+  }
+};
+
 router.get('/streamers', async (req, res) => {
   try {
     const now = Date.now();
@@ -264,9 +285,9 @@ router.get('/streamers', async (req, res) => {
     const streamers = await streamerRepository.findAll();
     // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
     const [value24hMap, value1hMap, titlesByUser] = await Promise.all([
-      streamerRepository.getValue24hAgoMap(),
-      streamerRepository.getValue1hAgoMap(),
-      titleRepository.findByUserIds(streamers.map((streamer) => streamer.channel_id))
+      loadStreamerValueMap('24시간 전', () => streamerRepository.getValue24hAgoMap()),
+      loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
+      loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
     ]);
     
     // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출

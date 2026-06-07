@@ -945,7 +945,7 @@ export const AdminTab: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex items-center gap-2 text-red-500">
         <ShieldAlert className="h-6 w-6" />
-        <h2 className="text-xl font-black text-foreground">CCTV 관리자 통제 센터</h2>
+        <h2 className="text-xl font-black text-foreground">치카포 관리자 통제 센터</h2>
       </div>
 
       {/* 하위 탭 네비 */}

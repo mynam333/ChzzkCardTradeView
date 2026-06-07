@@ -5,7 +5,7 @@ import { MainLayout } from '../MainLayout';
 import { RankingTab } from '../RankingTab';
 
 /**
- * CCTV 실시간 랭킹 페이지 (/ranking)
+ * 치카포 실시간 랭킹 페이지 (/ranking)
  */
 export default function RankingPage() {
   return (

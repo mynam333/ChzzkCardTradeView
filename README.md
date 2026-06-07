@@ -1,4 +1,4 @@
-# 🎮 ChzzkCardTradeView (치지직 스트리머 카드 수집 및 거래 플랫폼)
+# 🎮 치카포 : 치지직 카드 포럼
 
 치지직 스트리머들의 정보를 카드화하여 수집, 거래, 강화하는 실시간 웹 애플리케이션 서비스 기획 및 개발 명세서입니다. 본 프로젝트는 치지직 OpenAPI를 활용하여 스트리머의 실제 방송 활동량(팔로워, 방송 시간, 채팅량 등)이 카드의 가치와 시세에 동적으로 반영되는 독창적인 시스템을 제공합니다.
 
@@ -17,7 +17,7 @@
 ---
 
 ## 1. 📝 프로젝트 소개
-**ChzzkCardTradeView**는 스트리머와 팬덤을 잇는 새로운 형태의 게이미피케이션(Gamification) 플랫폼입니다.
+**치카포**는 스트리머와 팬덤을 잇는 치지직 카드 포럼이자 게이미피케이션(Gamification) 플랫폼입니다.
 치지직에서 활동하는 150명 이상의 팔로워를 보유한 스트리머들의 활성 데이터를 기반으로 고유한 등급의 디지털 카드를 생성하며, 유저들은 획득한 카드를 인벤토리에 수집하거나 실시간 마켓 및 P2P 거래를 통해 다른 유저와 교환할 수 있습니다.
 
 ### 핵심 가치 및 차별점
@@ -174,7 +174,7 @@
 프로젝트는 관심사의 분리(Separation of Concerns)를 극대화하기 위해 프론트엔드와 백엔드가 분리된 모노레포 또는 멀티레포 구조로 설계됩니다.
 
 ```
-ChzzkCardTradeView/
+chikapo/
 ├── frontend/               # Next.js 프론트엔드 애플리케이션
 │   ├── public/             # PWA 매니페스트(manifest.json), 아이콘, 서비스 워커
 │   ├── src/
@@ -378,8 +378,8 @@ erDiagram
 
 ### 7.2 리포지토리 클론 및 설치
 ```bash
-git clone https://github.com/your-username/ChzzkCardTradeView.git
-cd ChzzkCardTradeView
+git clone https://github.com/your-username/chikapo.git
+cd chikapo
 ```
 
 ### 7.3 환경 변수 설정

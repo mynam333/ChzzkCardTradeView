@@ -1,4 +1,4 @@
-/* CCTV - 치지직 카드 트레이드 뷰 PWA 서비스 워커
+/* 치카포 - 치지직 카드 포럼 PWA 서비스 워커
  * 웹 푸시 알림 수신/표시 및 클릭 처리, 기본 설치/활성화 라이프사이클을 담당합니다.
  */
 
@@ -14,7 +14,7 @@ self.addEventListener('activate', (event) => {
 
 // 웹 푸시 수신: 백엔드(web-push)가 보낸 { title, body, url } 페이로드를 알림으로 표시
 self.addEventListener('push', (event) => {
-  let payload = { title: 'CCTV 알림', body: '' };
+  let payload = { title: '치카포 알림', body: '' };
   try {
     if (event.data) {
       payload = { ...payload, ...event.data.json() };
@@ -26,7 +26,7 @@ self.addEventListener('push', (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'CCTV 알림', {
+    self.registration.showNotification(payload.title || '치카포 알림', {
       body: payload.body || '',
       icon: '/icon.png',
       badge: '/badge.png',

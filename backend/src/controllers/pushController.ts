@@ -21,7 +21,7 @@ export const initVapid = () => {
   const { publicKey, privateKey } = getVapidKeys();
   if (publicKey && privateKey) {
     webpush.setVapidDetails(
-      'mailto:admin@chzzkcardtrade.com',
+      process.env.VAPID_SUBJECT || 'mailto:admin@yuaru.com',
       publicKey,
       privateKey
     );

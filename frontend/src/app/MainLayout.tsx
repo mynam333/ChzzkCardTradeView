@@ -93,14 +93,14 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         <div className="mb-8 flex items-center gap-3 px-2">
           <Image
             src="/icon.png"
-            alt="CCTV Logo"
+            alt="치카포 로고"
             width={36}
             height={36}
             className="rounded-lg shadow-md object-contain"
           />
           <div className="flex-1">
-            <h1 className="text-lg font-bold tracking-tight text-foreground">CCTV</h1>
-            <p className="text-xs text-muted-foreground">치지직 카드 트레이드 뷰</p>
+            <h1 className="text-lg font-bold tracking-tight text-foreground">치카포</h1>
+            <p className="text-xs text-muted-foreground">치지직 카드 포럼</p>
           </div>
           {user && <NotificationBell align="left" />}
         </div>
@@ -190,13 +190,13 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         <div className="flex items-center gap-2">
           <Image 
             src="/icon.png" 
-            alt="CCTV Logo" 
+            alt="치카포 로고"
             width={28} 
             height={28} 
             className="rounded"
           />
-          <span className="font-bold text-foreground">CCTV</span>
-          <span className="text-[0.65rem] text-muted-foreground self-end mb-[0.1rem]">치지직 카드 트레이드 뷰</span>
+          <span className="font-bold text-foreground">치카포</span>
+          <span className="text-[0.65rem] text-muted-foreground self-end mb-[0.1rem]">치지직 카드 포럼</span>
         </div>
 
         <div className="flex items-center gap-2">

@@ -12,7 +12,8 @@ vi.mock('../repositories', () => ({
     completeSession: vi.fn()
   },
   streamerRepository: {
-    findAll: vi.fn()
+    findAll: vi.fn(),
+    findById: vi.fn()
   },
   userRepository: {
     findById: vi.fn()
@@ -46,7 +47,13 @@ const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
     user_id: 'user-1',
     game_type: 'puzzle',
     status: 'STARTED',
-    target_data: JSON.stringify({ practice_mode: practiceMode }),
+    target_data: JSON.stringify({
+      practice_mode: practiceMode,
+      correct_id: 'channel-answer',
+      correct_name: '정답 스트리머',
+      image_url: 'https://example.com/answer.png',
+      star: 3
+    }),
     created_at: new Date(Date.now() - elapsedMs).toISOString()
   });
   findUserById.mockResolvedValue({ point: 5000 } as never);
@@ -56,6 +63,32 @@ const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
     user: { id: 'user-1' },
     body: {
       session_id: 'puzzle-session',
+      payload: { success: true }
+    }
+  } as AuthenticatedRequest;
+  const response = createResponse();
+
+  await submitMinigameResult(request, response);
+
+  return response;
+};
+
+const runMatchSubmission = async (elapsedMs: number, practiceMode = false) => {
+  findSessionById.mockResolvedValue({
+    id: 'match-session',
+    user_id: 'user-1',
+    game_type: 'match',
+    status: 'STARTED',
+    target_data: JSON.stringify({ practice_mode: practiceMode }),
+    created_at: new Date(Date.now() - elapsedMs).toISOString()
+  });
+  findUserById.mockResolvedValue({ point: 5000 } as never);
+  completeSession.mockResolvedValue({ ok: true, newPoints: 5000 });
+
+  const request = {
+    user: { id: 'user-1' },
+    body: {
+      session_id: 'match-session',
       payload: { success: true }
     }
   } as AuthenticatedRequest;
@@ -86,7 +119,12 @@ describe('submitMinigameResult puzzle time limit', () => {
       success: false,
       correct: false,
       earned_points: 0,
-      message: '120초 시간 제한이 초과되어 실패 처리되었습니다.'
+      message: '120초 시간 제한이 초과되어 실패 처리되었습니다.',
+      answer: {
+        channel_id: 'channel-answer',
+        name: '정답 스트리머',
+        image_url: 'https://example.com/answer.png'
+      }
     }));
   });
 
@@ -98,7 +136,11 @@ describe('submitMinigameResult puzzle time limit', () => {
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       correct: true,
-      earned_points: 1000
+      earned_points: 1000,
+      answer: expect.objectContaining({
+        name: '정답 스트리머',
+        image_url: 'https://example.com/answer.png'
+      })
     }));
   });
 
@@ -112,6 +154,43 @@ describe('submitMinigameResult puzzle time limit', () => {
       correct: true,
       earned_points: 0,
       practice_mode: true
+    }));
+  });
+});
+
+describe('submitMinigameResult match time limit', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-06T00:00:00.000Z'));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fails and closes the session when match submission exceeds 37 seconds', async () => {
+    const response = await runMatchSubmission(37001);
+
+    expect(completeSession).toHaveBeenCalledWith('match-session', 0);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: false,
+      correct: false,
+      earned_points: 0,
+      message: '30초 시간 제한이 초과되어 실패 처리되었습니다.'
+    }));
+  });
+
+  it('accepts a solved match game within the server time allowance', async () => {
+    const response = await runMatchSubmission(36999);
+
+    expect(completeSession).toHaveBeenCalledWith('match-session', 1000);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 1000
     }));
   });
 });
@@ -187,6 +266,38 @@ describe('daily minigame selection', () => {
     expect(getTicketStatus).not.toHaveBeenCalled();
     expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
       target_data: expect.stringContaining('"practice_mode":true')
+    }));
+  });
+
+  it('keeps the puzzle answer private until the game is submitted', async () => {
+    findAllStreamers.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        channel_id: `channel-${index}`,
+        name: `streamer-${index}`,
+        logo_url: `https://example.com/${index}.png`
+      })) as never
+    );
+    startSession.mockResolvedValue({ ok: true });
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: 'puzzle', practice_mode: true }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(responseBody.game_data).toEqual({
+      image_url: expect.stringMatching(/^https:\/\/example\.com\/\d+\.png$/)
+    });
+    expect(responseBody.game_data).not.toHaveProperty('name');
+
+    const session = startSession.mock.calls[0][0];
+    const target = JSON.parse(session.target_data);
+    expect(target).toEqual(expect.objectContaining({
+      correct_id: expect.stringMatching(/^channel-\d+$/),
+      correct_name: expect.stringMatching(/^streamer-\d+$/),
+      image_url: expect.stringMatching(/^https:\/\/example\.com\/\d+\.png$/)
     }));
   });
 });

@@ -8,6 +8,11 @@ const TICKET_CHARGE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4시간
 const MAX_TICKETS = 5;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match'] as const;
+const COUNTDOWN_MS = 3_000;
+const SUBMISSION_GRACE_MS = 2_000;
+const PUZZLE_TIME_LIMIT_MS = 120_000;
+const MATCH_REVEAL_MS = 2_000;
+const MATCH_TIME_LIMIT_MS = 30_000;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
 
@@ -23,7 +28,7 @@ export function getDailyMinigame(nowMs = Date.now()): {
   const date = kstNow.getUTCDate();
   const kstDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
   const nextMidnightUtcMs = Date.UTC(year, month, date + 1) - KST_OFFSET_MS;
-  const digest = crypto.createHash('sha256').update(`cctv-daily-minigame:${kstDate}`).digest();
+  const digest = crypto.createHash('sha256').update(`chikapo-daily-minigame:${kstDate}`).digest();
   const gameType = DAILY_MINIGAMES[digest.readUInt32BE(0) % DAILY_MINIGAMES.length];
 
   return {
@@ -82,6 +87,36 @@ function getCardImageUrl(streamer: any, star: number): string {
     return streamer.custom_image_url;
   }
   return streamer.logo_url || '';
+}
+
+type MinigameAnswerReveal = {
+  channel_id: string;
+  name: string;
+  image_url: string;
+};
+
+async function getAnswerReveal(
+  gameType: string,
+  target: any
+): Promise<MinigameAnswerReveal | undefined> {
+  if (!['quiz', 'puzzle'].includes(gameType) || !target.correct_id) return undefined;
+
+  if (target.correct_name && target.image_url) {
+    return {
+      channel_id: target.correct_id,
+      name: target.correct_name,
+      image_url: target.image_url
+    };
+  }
+
+  const streamer = await streamerRepository.findById(target.correct_id);
+  if (!streamer) return undefined;
+
+  return {
+    channel_id: streamer.channel_id,
+    name: streamer.name,
+    image_url: getCardImageUrl(streamer, Number(target.star) || 0)
+  };
 }
 
 // 1. GET /api/minigames/status
@@ -166,6 +201,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       const shuffled = [...streamers].sort(() => 0.5 - Math.random());
       const correctStreamer = shuffled[0];
       const star = Math.floor(Math.random() * 6); // 0 ~ 5성
+      const imageUrl = getCardImageUrl(correctStreamer, star);
 
       const choices = shuffled.slice(0, 4).map(s => ({
         channel_id: s.channel_id,
@@ -174,11 +210,13 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
       targetData = {
         correct_id: correctStreamer.channel_id,
+        correct_name: correctStreamer.name,
+        image_url: imageUrl,
         star: star
       };
 
       gameData = {
-        image_url: getCardImageUrl(correctStreamer, star),
+        image_url: imageUrl,
         choices
       };
 
@@ -186,14 +224,17 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       // 카드 퍼즐: 가로 3칸 세로 4칸 (정사각형 조각)
       const correctStreamer = streamers[Math.floor(Math.random() * streamers.length)];
       const star = Math.floor(Math.random() * 6);
+      const imageUrl = getCardImageUrl(correctStreamer, star);
 
       targetData = {
         correct_id: correctStreamer.channel_id,
+        correct_name: correctStreamer.name,
+        image_url: imageUrl,
         star: star
       };
 
       gameData = {
-        image_url: getCardImageUrl(correctStreamer, star)
+        image_url: imageUrl
       };
 
     } else if (game_type === 'match') {
@@ -272,6 +313,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     const target = JSON.parse(session.target_data);
     const practiceMode = target.practice_mode === true;
+    const answer = await getAnswerReveal(session.game_type, target);
     let isCorrect = false;
     let earnedPoints = 0;
     let message = '아쉽게도 정답이 아닙니다!';
@@ -295,7 +337,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           message: practiceMode
             ? '연습 게임의 15초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
             : '15초 시간 제한이 초과되어 실패 처리되었습니다.',
-          practice_mode: practiceMode
+          practice_mode: practiceMode,
+          answer
         });
       }
 
@@ -321,7 +364,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       const { success } = payload || {};
 
       // 120초 시간 제한 초과 검증 (카운트다운 3초 + 120초 플레이 + RTT 2초 = 125000ms 초과 시 실패)
-      if (serverElapsedMs > 125000) {
+      if (serverElapsedMs > COUNTDOWN_MS + PUZZLE_TIME_LIMIT_MS + SUBMISSION_GRACE_MS) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -332,7 +375,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           message: practiceMode
             ? '연습 게임의 120초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
             : '120초 시간 제한이 초과되어 실패 처리되었습니다.',
-          practice_mode: practiceMode
+          practice_mode: practiceMode,
+          answer
         });
       }
 
@@ -359,8 +403,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     } else if (session.game_type === 'match') {
       const { success } = payload || {};
 
-      // 60초 시간 제한 초과 검증 (카운트다운 3초 + 60초 + 2초 딜레이 = 65000ms 초과 시 실패)
-      if (serverElapsedMs > 65000) {
+      // 30초 시간 제한 초과 검증 (카운트다운 3초 + 2초 선공개 + 30초 플레이 + RTT 2초 = 37000ms 초과 시 실패)
+      if (serverElapsedMs > COUNTDOWN_MS + MATCH_REVEAL_MS + MATCH_TIME_LIMIT_MS + SUBMISSION_GRACE_MS) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -369,8 +413,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           earned_points: 0,
           new_balance: user?.point ?? 0,
           message: practiceMode
-            ? '연습 게임의 60초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
-            : '60초 시간 제한이 초과되어 실패 처리되었습니다.',
+            ? '연습 게임의 30초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
+            : '30초 시간 제한이 초과되어 실패 처리되었습니다.',
           practice_mode: practiceMode
         });
       }
@@ -413,7 +457,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       earned_points: earnedPoints,
       new_balance: completeResult.newPoints ?? 0,
       message,
-      practice_mode: practiceMode
+      practice_mode: practiceMode,
+      answer
     });
 
   } catch (err: any) {

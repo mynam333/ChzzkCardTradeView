@@ -478,12 +478,12 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       router.replace('/maintenance');
     };
 
-    window.addEventListener('cctv-user-banned', handleBanned);
-    window.addEventListener('cctv-maintenance-triggered', handleMaintenance);
+    window.addEventListener('chikapo-user-banned', handleBanned);
+    window.addEventListener('chikapo-maintenance-triggered', handleMaintenance);
 
     return () => {
-      window.removeEventListener('cctv-user-banned', handleBanned);
-      window.removeEventListener('cctv-maintenance-triggered', handleMaintenance);
+      window.removeEventListener('chikapo-user-banned', handleBanned);
+      window.removeEventListener('chikapo-maintenance-triggered', handleMaintenance);
     };
   }, [router]);
 
@@ -595,15 +595,15 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
                 <div className="absolute h-full w-full animate-ping rounded-full bg-primary/5 opacity-75 duration-[1800ms]"></div>
                 <div className="absolute h-18 w-18 animate-spin rounded-full border-[3px] border-primary/10 border-t-primary"></div>
                 <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-card p-1.5 shadow-md shadow-primary/20 border border-primary/20">
-                  <img src="/favicon.ico" alt="CCTV" className="h-8 w-8 object-contain" />
+                  <img src="/favicon.ico" alt="치카포" className="h-8 w-8 object-contain" />
                 </div>
               </div>
               <div className="text-center space-y-2">
                 <h1 className="text-2xl font-black tracking-widest bg-gradient-to-r from-blue-400 via-indigo-400 to-primary bg-clip-text text-transparent animate-pulse">
-                  CCTV
+                  치카포
                 </h1>
                 <p className="text-[11px] font-medium text-muted-foreground tracking-wide">
-                  치지직 카드 트레이드 뷰를 불러오는 중입니다...
+                  치지직 카드 포럼을 불러오는 중입니다...
                 </p>
               </div>
             </div>

@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { systemConfigRepository, userRepository } from '../repositories';
 import { JWT_SECRET } from '../config';
-import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
+import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 // 점검 예외 허용 API 경로 목록 (Prefix 매칭 또는 Exact 매칭)
 const MAINTENANCE_BYPASS_PATHS = [
@@ -15,7 +15,10 @@ const MAINTENANCE_BYPASS_PATHS = [
 ];
 
 const getSessionToken = (req: Request): string | undefined => {
-  const cookieToken = (req as any).cookies?.[SESSION_COOKIE_NAME];
+  const cookies = (req as any).cookies || {};
+  const cookieToken = SESSION_COOKIE_NAMES
+    .map(cookieName => cookies[cookieName])
+    .find(Boolean);
   if (cookieToken) return cookieToken;
 
   const authHeader = req.headers.authorization;

@@ -5,8 +5,13 @@ import { IS_PRODUCTION } from '../config';
  * 세션 JWT를 담는 httpOnly 쿠키 이름.
  * JS(document.cookie)에서 접근 불가능하여 XSS로 인한 토큰 탈취를 방지합니다.
  */
-export const SESSION_COOKIE_NAME = 'cctv_session';
-export const OAUTH_STATE_COOKIE_NAME = 'cctv_oauth_state';
+export const SESSION_COOKIE_NAME = 'chikapo_session';
+export const LEGACY_SESSION_COOKIE_NAME = 'cctv_session';
+export const SESSION_COOKIE_NAMES = [SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME] as const;
+
+export const OAUTH_STATE_COOKIE_NAME = 'chikapo_oauth_state';
+export const LEGACY_OAUTH_STATE_COOKIE_NAME = 'cctv_oauth_state';
+export const OAUTH_STATE_COOKIE_NAMES = [OAUTH_STATE_COOKIE_NAME, LEGACY_OAUTH_STATE_COOKIE_NAME] as const;
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // JWT 만료(7d)와 동일
 
@@ -27,7 +32,9 @@ export const setSessionCookie = (res: Response, token: string): void => {
 
 /** 로그아웃 시 세션 쿠키를 제거합니다. */
 export const clearSessionCookie = (res: Response): void => {
-  res.clearCookie(SESSION_COOKIE_NAME, cookieBaseOptions());
+  SESSION_COOKIE_NAMES.forEach(cookieName => {
+    res.clearCookie(cookieName, cookieBaseOptions());
+  });
 };
 
 /** OAuth 로그인 CSRF 방어용 state 값을 httpOnly 쿠키로 저장합니다. */
@@ -37,5 +44,7 @@ export const setOAuthStateCookie = (res: Response, state: string): void => {
 
 /** OAuth 콜백 검증 완료/실패 시 state 쿠키를 제거합니다. */
 export const clearOAuthStateCookie = (res: Response): void => {
-  res.clearCookie(OAUTH_STATE_COOKIE_NAME, cookieBaseOptions());
+  OAUTH_STATE_COOKIE_NAMES.forEach(cookieName => {
+    res.clearCookie(cookieName, cookieBaseOptions());
+  });
 };

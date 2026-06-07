@@ -172,7 +172,7 @@ export const fetchChzzkUserProfile = async (
   try {
     const profileHeaders = {
       'Authorization': `Bearer ${accessToken}`,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-App/1.0'
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chikapo-App/1.0'
     };
 
     const profileResponse = await fetch('https://openapi.chzzk.naver.com/open/v1/users/me', {

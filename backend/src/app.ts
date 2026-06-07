@@ -99,7 +99,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
-    message: '치지직 카드 트레이드 뷰 백엔드 서버가 정상 작동 중입니다.',
+    message: '치카포 백엔드 서버가 정상 작동 중입니다.',
     timestamp: new Date().toISOString()
   });
 });

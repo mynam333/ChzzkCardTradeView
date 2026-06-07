@@ -92,7 +92,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
       if (!dataUrl) return;
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = `cctv-profile-${profile?.username || userId}.png`;
+      a.download = `chikapo-profile-${profile?.username || userId}.png`;
       a.click();
       toast('프로필 이미지를 저장했습니다.', 'success');
     } catch (e) {
@@ -109,12 +109,12 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
       const dataUrl = await renderToPng();
       if (!dataUrl) return;
       const blob = await (await fetch(dataUrl)).blob();
-      const file = new File([blob], `cctv-profile-${profile?.username || userId}.png`, { type: 'image/png' });
+      const file = new File([blob], `chikapo-profile-${profile?.username || userId}.png`, { type: 'image/png' });
       const nav = navigator as any;
       if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
         await nav.share({
           files: [file],
-          title: `${profile?.username}님의 CCTV 프로필`,
+          title: `${profile?.username}님의 치카포 프로필`,
           text: `${profile?.username}님의 치지직 카드 컬렉션`
         });
         toast('공유를 시작했습니다.', 'success');
@@ -303,7 +303,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
 
               {/* 워터마크 */}
               <p className="mt-5 text-center text-[8px] font-bold tracking-widest text-zinc-500">
-                CCTV · 치지직 카드 트레이드 뷰
+                치카포 · 치지직 카드 포럼
               </p>
             </div>
 

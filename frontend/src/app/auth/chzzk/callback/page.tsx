@@ -6,6 +6,7 @@ import { useApp } from '../../../AppContext';
 import { apiFetch, setAuthFlag } from '@/lib/api';
 import {
   buildCouponDeepLink,
+  LEGACY_PENDING_COUPON_STORAGE_KEY,
   normalizeCouponDeepLinkCode,
   PENDING_COUPON_STORAGE_KEY
 } from '@/lib/couponDeepLink';
@@ -68,6 +69,7 @@ const ChzzkCallbackContent: React.FC = () => {
         if (toast) toast(`${sessionUser.username}님, 치지직 인증 로그인이 완료되었습니다.`, 'success');
         const pendingCoupon = normalizeCouponDeepLinkCode(
           localStorage.getItem(PENDING_COUPON_STORAGE_KEY)
+            || localStorage.getItem(LEGACY_PENDING_COUPON_STORAGE_KEY)
         );
         router.push(pendingCoupon ? buildCouponDeepLink(pendingCoupon) : '/');
       } catch (err: any) {

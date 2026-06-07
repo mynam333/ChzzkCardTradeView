@@ -137,7 +137,7 @@ export const proxyImage = async (req: Request, res: Response) => {
       signal: controller.signal,
       headers: {
         // 치지직 CDN은 일부 경우 referer/UA 검사를 하므로 기본값 부여
-        'User-Agent': 'Mozilla/5.0 (compatible; CCTV-ImageProxy/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; Chikapo-ImageProxy/1.0)',
         'Accept': 'image/*'
       }
     }).finally(() => clearTimeout(timeout));

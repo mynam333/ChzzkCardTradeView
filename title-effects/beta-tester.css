@@ -28,7 +28,7 @@
     inset 0 0 12px rgba(34, 211, 238, 0.12),
     0 0 10px rgba(34, 211, 238, 0.24),
     0 0 18px rgba(139, 92, 246, 0.14);
-  animation: cctv-beta-spectrum 5s ease-in-out infinite;
+  animation: chikapo-beta-spectrum 5s ease-in-out infinite;
 }
 
 {{selector}}::before {
@@ -46,7 +46,7 @@
       transparent
     );
   filter: blur(0.5px);
-  animation: cctv-beta-scan 3.4s ease-in-out infinite;
+  animation: chikapo-beta-scan 3.4s ease-in-out infinite;
 }
 
 {{selector}} > * {
@@ -58,7 +58,7 @@
   filter: drop-shadow(0 0 4px rgba(103, 232, 249, 0.9));
 }
 
-@keyframes cctv-beta-spectrum {
+@keyframes chikapo-beta-spectrum {
   0%,
   100% {
     background-position: 0% 50%;
@@ -69,7 +69,7 @@
   }
 }
 
-@keyframes cctv-beta-scan {
+@keyframes chikapo-beta-scan {
   0%,
   20% {
     left: -45%;

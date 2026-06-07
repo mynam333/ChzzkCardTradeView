@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import {
@@ -14,7 +15,9 @@ import {
   Clock,
   ChevronLeft,
   ChevronDown,
-  CalendarClock
+  CalendarClock,
+  Eye,
+  UserRound
 } from 'lucide-react';
 
 // 미니게임 타입 정의 (하이로우 제거)
@@ -53,6 +56,11 @@ type MinigameResult = {
   earned_points: number;
   new_balance: number;
   practice_mode?: boolean;
+  answer?: {
+    channel_id: string;
+    name: string;
+    image_url: string;
+  };
 };
 
 type SubmitPayload = {
@@ -116,7 +124,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   },
   match: {
     title: '스트리머 짝맞추기',
-    description: '처음 2초간 공개되는 카드를 기억한 뒤, 60초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
+    description: '처음 2초간 공개되는 카드를 기억한 뒤, 30초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
     bonus: '10초 안에 완성 시 보너스 200 P',
     Icon: Trophy,
     accent: 'text-sky-700 dark:text-sky-400',
@@ -130,7 +138,7 @@ const PUZZLE_COLUMNS = 3;
 const PUZZLE_ROWS = 4;
 const PUZZLE_PIECE_COUNT = PUZZLE_COLUMNS * PUZZLE_ROWS;
 const PUZZLE_TIME_LIMIT_SECONDS = 120;
-const MATCH_TIME_LIMIT_SECONDS = 60;
+const MATCH_TIME_LIMIT_SECONDS = 30;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 const QUIZ_MOTION_GHOST_COUNT = 31;
@@ -556,6 +564,15 @@ export const ArcadeTab: React.FC = () => {
   // 공통 결과 화면 상태
   const [gameResult, setGameResult] = useState<MinigameResult | null>(null);
 
+  useEffect(() => {
+    if (!gameResult) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [gameResult]);
+
   // 공통 카운트다운 및 시간 제어 상태
   const [countdownLeft, setCountdownLeft] = useState<number | null>(null);
 
@@ -743,7 +760,7 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [countdownLeft, activeGame]);
 
-  // 짝맞추기 60초 인게임 타이머 구동
+  // 짝맞추기 30초 인게임 타이머 구동
   useEffect(() => {
     if (activeGame !== 'match' || revealActive || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
     if (gameTimeLeft <= 0) {
@@ -1111,9 +1128,164 @@ export const ArcadeTab: React.FC = () => {
 
   const dailyGameDetails = DAILY_GAME_DETAILS[todayGame];
   const DailyGameIcon = dailyGameDetails.Icon;
+  const showAnswerReveal = Boolean(
+    gameResult && gameData && (activeGame === 'quiz' || activeGame === 'puzzle')
+  );
+  const revealedImageUrl = gameResult?.answer?.image_url || gameData?.image_url || '';
+  const revealedName = gameResult?.answer?.name
+    || (
+      activeGame === 'quiz' && gameResult?.correct
+        ? gameData?.choices?.find(choice => choice.channel_id === selectedQuizChoice)?.name
+        : undefined
+    )
+    || '정답 정보를 불러오지 못했습니다.';
 
   return (
     <div className="space-y-6">
+      {gameResult && activeGame && gameData && typeof document !== 'undefined' && createPortal(
+        <div className="modal-backdrop modal-backdrop-center z-[120] bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="arcade-result-title"
+            className={`modal-panel modal-panel-scroll rounded-[1.75rem] border border-border/80 bg-card shadow-[0_28px_90px_rgba(2,6,23,0.48)] sm:rounded-[2rem] ${showAnswerReveal ? 'modal-panel-xl' : 'modal-panel-md'}`}
+          >
+            <header className={`relative overflow-hidden border-b border-border/70 px-5 py-5 sm:px-7 sm:py-6 ${gameResult.correct
+              ? 'bg-gradient-to-br from-emerald-50 via-card to-sky-50 dark:from-emerald-500/15 dark:via-card dark:to-sky-500/10'
+              : 'bg-gradient-to-br from-rose-50 via-card to-amber-50 dark:from-rose-500/15 dark:via-card dark:to-amber-500/10'
+              }`}>
+              <div className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-sm sm:h-13 sm:w-13 ${gameResult.correct
+                    ? 'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/15 dark:text-emerald-300'
+                    : 'border-rose-200 bg-rose-100 text-rose-700 dark:border-rose-500/25 dark:bg-rose-500/15 dark:text-rose-300'
+                    }`}>
+                    {gameResult.correct ? <Trophy className="h-5 w-5 sm:h-6 sm:w-6" /> : <X className="h-5 w-5 sm:h-6 sm:w-6" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-[10px] font-black uppercase tracking-[0.2em] ${gameResult.correct
+                      ? 'text-emerald-700 dark:text-emerald-300'
+                      : 'text-rose-700 dark:text-rose-300'
+                      }`}>
+                      {gameResult.correct ? 'Mission Complete' : 'Game Over'}
+                    </p>
+                    <h3 id="arcade-result-title" className="mt-1 text-lg font-black text-foreground sm:text-xl">
+                      {isPracticeMode
+                        ? (gameResult.correct ? '연습 게임 성공!' : '연습 게임 종료')
+                        : (gameResult.correct ? '미니게임 성공!' : '미션 실패!')}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExitGame}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/80 bg-background/75 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                  aria-label="결과 창 닫고 로비로 돌아가기"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </header>
+
+            <div className={`grid min-h-0 ${showAnswerReveal ? 'md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]' : ''}`}>
+              {showAnswerReveal && (
+                <div className="border-b border-border/70 bg-secondary/20 p-4 sm:p-6 md:border-b-0 md:border-r">
+                  <div className="mx-auto w-full max-w-[17rem] sm:max-w-[19rem]">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+                        <Eye className="h-3.5 w-3.5 text-primary" />
+                        Original Image
+                      </span>
+                      <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">
+                        정답 공개
+                      </span>
+                    </div>
+                    <div className="relative aspect-[3/4] max-h-[42dvh] w-full overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-[0_16px_40px_rgba(2,6,23,0.28)] sm:max-h-[52dvh]">
+                      {revealedImageUrl ? (
+                        <img
+                          src={revealedImageUrl}
+                          alt={`${revealedName} 원본 이미지`}
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center px-6 text-center text-xs font-bold text-zinc-400">
+                          원본 이미지를 불러올 수 없습니다.
+                        </div>
+                      )}
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent" />
+                    </div>
+
+                    <div className="relative -mt-5 mx-3 flex items-center gap-3 rounded-2xl border border-border/90 bg-card/95 px-4 py-3 shadow-xl backdrop-blur-md">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <UserRound className="h-4.5 w-4.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-muted-foreground">Streamer</p>
+                        <p className="break-words text-sm font-black text-foreground sm:text-base">{revealedName}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
+                <div className={`rounded-2xl border px-4 py-3.5 ${gameResult.correct
+                  ? 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/20 dark:bg-emerald-500/10'
+                  : 'border-rose-200 bg-rose-50/80 dark:border-rose-500/20 dark:bg-rose-500/10'
+                  }`}>
+                  <p className="text-xs leading-relaxed text-foreground/85 sm:text-sm">
+                    {gameResult.message}
+                  </p>
+                </div>
+
+                {gameResult.earned_points > 0 ? (
+                  <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-2xl border border-border bg-secondary/25">
+                    <div className="p-4">
+                      <p className="text-[10px] font-bold text-muted-foreground">획득 재화</p>
+                      <p className="mt-1 text-lg font-black text-emerald-600 dark:text-emerald-400">
+                        +{gameResult.earned_points.toLocaleString()} P
+                      </p>
+                    </div>
+                    <div className="border-l border-border p-4 text-right">
+                      <p className="text-[10px] font-bold text-muted-foreground">현재 잔액</p>
+                      <p className="mt-1 text-sm font-extrabold text-foreground">
+                        {gameResult.new_balance.toLocaleString()} P
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-border/80 bg-secondary/20 px-4 py-3 text-center">
+                    <p className="text-[10px] font-bold text-muted-foreground">
+                      {isPracticeMode ? '연습 모드에서는 포인트가 지급되지 않습니다.' : '이번 게임에서 획득한 포인트가 없습니다.'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={handleExitGame}
+                    className="rounded-xl border border-border bg-secondary px-5 py-2.5 text-xs font-bold text-muted-foreground transition hover:text-foreground"
+                  >
+                    로비로 돌아가기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)}
+                    disabled={!isPracticeMode && tickets <= 0}
+                    className="flex items-center justify-center gap-1 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    {isPracticeMode ? '다시 연습하기' : '다시 도전'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>,
+        document.body
+      )}
 
       {/* 아케이드 대시보드 헤더 */}
       {!activeGame && (
@@ -1383,57 +1555,6 @@ export const ArcadeTab: React.FC = () => {
             </div>
           )}
 
-          {/* 공통 결과 출력 오버레이 */}
-          {gameResult && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/95 p-6 text-center animate-in fade-in duration-300">
-              <div className="rounded-full bg-primary/10 p-4 mb-4">
-                {gameResult.correct ? (
-                  <Trophy className="h-10 w-10 text-primary animate-bounce" />
-                ) : (
-                  <X className="h-10 w-10 text-rose-500" />
-                )}
-              </div>
-              <h3 className="text-lg font-black text-foreground">
-                {isPracticeMode
-                  ? (gameResult.correct ? '연습 게임 성공!' : '연습 게임 종료')
-                  : (gameResult.correct ? '🎉 미니게임 성공!' : '😅 미션 실패!')}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-2 max-w-sm leading-relaxed">
-                {gameResult.message}
-              </p>
-
-              {gameResult.earned_points > 0 && (
-                <div className="mt-5 rounded-2xl bg-secondary/40 border border-border px-5 py-3.5 flex items-center justify-between gap-6">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground font-semibold">획득 재화</p>
-                    <p className="text-lg font-black text-emerald-400">+{gameResult.earned_points.toLocaleString()} P</p>
-                  </div>
-                  <div className="border-l border-border/80 pl-6 text-right">
-                    <p className="text-[10px] text-muted-foreground font-semibold">현재 잔액</p>
-                    <p className="text-sm font-extrabold text-foreground">{gameResult.new_balance.toLocaleString()} P</p>
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-6 flex items-center gap-2.5">
-                <button
-                  onClick={handleExitGame}
-                  className="rounded-xl bg-secondary px-5 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground transition"
-                >
-                  로비로 돌아가기
-                </button>
-                <button
-                  onClick={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)}
-                  disabled={!isPracticeMode && tickets <= 0}
-                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/95 disabled:opacity-40 transition flex items-center gap-1 shadow"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  {isPracticeMode ? '다시 연습하기' : '다시 도전'}
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* ======================================================== */}
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
@@ -1623,7 +1744,7 @@ export const ArcadeTab: React.FC = () => {
           )}
 
           {/* ======================================================== */}
-          {/* 게임 3: 짝맞추기 뒤집기 (2초 선공개, 60초 시간제한, 3D 플립 모션) */}
+          {/* 게임 3: 짝맞추기 뒤집기 (2초 선공개, 30초 시간제한, 3D 플립 모션) */}
           {/* ======================================================== */}
           {activeGame === 'match' && (
             <div className="flex flex-1 flex-col items-center justify-center space-y-4">

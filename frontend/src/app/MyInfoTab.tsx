@@ -23,6 +23,7 @@ import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ImageCropModal } from './ImageCropModal';
 import {
+  LEGACY_PENDING_COUPON_STORAGE_KEY,
   normalizeCouponDeepLinkCode,
   PENDING_COUPON_STORAGE_KEY
 } from '@/lib/couponDeepLink';
@@ -96,6 +97,7 @@ export const MyInfoTab: React.FC = () => {
     const queryCoupon = normalizeCouponDeepLinkCode(currentUrl.searchParams.get('coupon'));
     const storedCoupon = normalizeCouponDeepLinkCode(
       localStorage.getItem(PENDING_COUPON_STORAGE_KEY)
+        || localStorage.getItem(LEGACY_PENDING_COUPON_STORAGE_KEY)
     );
     const incomingCoupon = queryCoupon || storedCoupon;
 
@@ -104,6 +106,7 @@ export const MyInfoTab: React.FC = () => {
     pendingCouponRef.current = incomingCoupon;
     setCouponCode(incomingCoupon);
     localStorage.setItem(PENDING_COUPON_STORAGE_KEY, incomingCoupon);
+    localStorage.removeItem(LEGACY_PENDING_COUPON_STORAGE_KEY);
 
     if (currentUrl.searchParams.has('coupon')) {
       currentUrl.searchParams.delete('coupon');
@@ -122,6 +125,7 @@ export const MyInfoTab: React.FC = () => {
       couponSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       couponInputRef.current?.focus({ preventScroll: true });
       localStorage.removeItem(PENDING_COUPON_STORAGE_KEY);
+      localStorage.removeItem(LEGACY_PENDING_COUPON_STORAGE_KEY);
       pendingCouponRef.current = '';
     }, 100);
 

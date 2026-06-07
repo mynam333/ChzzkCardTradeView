@@ -5,7 +5,7 @@ import { MainLayout } from '../MainLayout';
 import { MyInfoTab } from '../MyInfoTab';
 
 /**
- * CCTV 내 정보 페이지 (/my-info)
+ * 치카포 내 정보 페이지 (/my-info)
  */
 export default function MyInfoPage() {
   return (

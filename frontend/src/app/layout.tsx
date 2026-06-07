@@ -4,7 +4,7 @@ import { AppProvider } from "./AppContext";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
-  title: "CCTV - 치지직 카드 트레이드 뷰",
+  title: "치카포 : 치지직 카드 포럼",
   description: "매일 무료 가챠를 돌려 치지직 최애 스트리머 카드를 수집하고, 실시간 시세 변동에 맞춰 거래하며 나만의 덱을 만들어보세요!",
   manifest: "/manifest.json",
   icons: {
@@ -13,21 +13,21 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    title: "CCTV - 치지직 카드 트레이드 뷰",
+    title: "치카포 : 치지직 카드 포럼",
     description: "매일 무료 가챠를 돌려 치지직 최애 스트리머 카드를 수집하고, 실시간 시세 변동에 맞춰 거래하며 나만의 덱을 만들어보세요!",
-    siteName: "치지직 카드 트레이드 뷰 (CCTV)",
+    siteName: "치카포 : 치지직 카드 포럼",
     images: [
       {
         url: "/og-image.png",
         width: 1672,
         height: 941,
-        alt: "치지직 카드 트레이드 뷰",
+        alt: "치카포 : 치지직 카드 포럼",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "CCTV - 치지직 카드 트레이드 뷰",
+    title: "치카포 : 치지직 카드 포럼",
     description: "매일 무료 가챠를 돌려 치지직 최애 스트리머 카드를 수집하고, 실시간 시세 변동에 맞춰 거래하며 나만의 덱을 만들어보세요!",
     images: ["/og-image.png"],
   },

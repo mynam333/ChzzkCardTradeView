@@ -5,7 +5,7 @@ import { MainLayout } from '../MainLayout';
 import { ShopTab } from '../ShopTab';
 
 /**
- * CCTV 상점 페이지 (/shop)
+ * 치카포 상점 페이지 (/shop)
  * useSearchParams() 정적 베일아웃 에러를 차단하기 위해 Suspense 경계로 감싸 렌더링합니다.
  */
 export default function ShopPage() {

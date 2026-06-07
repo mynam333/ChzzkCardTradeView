@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
 import { AuthenticatedRequest } from './admin';
 import { JWT_SECRET, IS_PRODUCTION } from '../config';
-import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
+import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 /**
  * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어.
@@ -11,7 +11,10 @@ import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
  */
 export const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   // 1) httpOnly 세션 쿠키 우선
-  let token: string | undefined = (req as any).cookies?.[SESSION_COOKIE_NAME];
+  const cookies = (req as any).cookies || {};
+  let token: string | undefined = SESSION_COOKIE_NAMES
+    .map(cookieName => cookies[cookieName])
+    .find(Boolean);
 
   // 2) 없으면 Authorization: Bearer 헤더 폴백
   if (!token) {

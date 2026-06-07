@@ -1,5 +1,5 @@
 -- ============================================================
--- ChzzkCardTradeView - Supabase(PostgreSQL) 초기 스키마 구성
+-- 치카포 - Supabase(PostgreSQL) 초기 스키마 구성
 -- SQLite 문법과 다른 부분: SERIAL, TIMESTAMP, BOOLEAN 타입 등
 -- ============================================================
 

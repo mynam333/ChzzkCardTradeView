@@ -14,15 +14,31 @@ export const API_BASE_URL =
  * 실제 인증은 httpOnly 세션 쿠키(JS 접근 불가)로 처리되며, 여기에는 민감한 JWT를
  * 저장하지 않습니다. UI에서 "로그인했는가"만 빠르게 판별하기 위한 비민감 플래그입니다.
  */
-const AUTH_FLAG_KEY = 'cctv_auth';
+const AUTH_FLAG_KEY = 'chikapo_auth';
+const LEGACY_AUTH_FLAG_KEY = 'cctv_auth';
 export const setAuthFlag = (): void => {
-  if (typeof window !== 'undefined') localStorage.setItem(AUTH_FLAG_KEY, '1');
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(AUTH_FLAG_KEY, '1');
+    localStorage.removeItem(LEGACY_AUTH_FLAG_KEY);
+  }
 };
 export const clearAuthFlag = (): void => {
-  if (typeof window !== 'undefined') localStorage.removeItem(AUTH_FLAG_KEY);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(AUTH_FLAG_KEY);
+    localStorage.removeItem(LEGACY_AUTH_FLAG_KEY);
+  }
 };
-export const isAuthed = (): boolean =>
-  typeof window !== 'undefined' && !!localStorage.getItem(AUTH_FLAG_KEY);
+export const isAuthed = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const isAuthenticated = Boolean(
+    localStorage.getItem(AUTH_FLAG_KEY) || localStorage.getItem(LEGACY_AUTH_FLAG_KEY)
+  );
+  if (isAuthenticated && !localStorage.getItem(AUTH_FLAG_KEY)) {
+    localStorage.setItem(AUTH_FLAG_KEY, '1');
+    localStorage.removeItem(LEGACY_AUTH_FLAG_KEY);
+  }
+  return isAuthenticated;
+};
 
 /**
  * 백엔드 API fetch 래퍼.
@@ -55,7 +71,7 @@ export const apiFetch = async (
       if (data && data.error === 'BannedUser') {
         if (typeof window !== 'undefined') {
           // alert()과 window.location 대신 브라우저 커스텀 이벤트를 발행하여 React 영역에서 처리하도록 위임
-          window.dispatchEvent(new CustomEvent('cctv-user-banned', { 
+          window.dispatchEvent(new CustomEvent('chikapo-user-banned', {
             detail: { message: data.message || '이용 정지 조치된 계정입니다.' } 
           }));
           clearAuthFlag();
@@ -76,7 +92,7 @@ export const apiFetch = async (
           const bypassRoutes = ['/maintenance', '/login', '/auth/chzzk/callback'];
           const isBypass = bypassRoutes.some(route => window.location.pathname === route);
           if (!isBypass) {
-            window.dispatchEvent(new CustomEvent('cctv-maintenance-triggered'));
+            window.dispatchEvent(new CustomEvent('chikapo-maintenance-triggered'));
           }
         }
       }

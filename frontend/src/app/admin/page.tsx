@@ -7,7 +7,7 @@ import { MainLayout } from '../MainLayout';
 import { AdminTab } from '../AdminTab';
 
 /**
- * CCTV 관리자 탭 컨텐츠 컴포넌트
+ * 치카포 관리자 탭 컨텐츠 컴포넌트
  */
 function AdminPageContent() {
   const { user, authLoading, toast } = useApp();
@@ -36,7 +36,7 @@ function AdminPageContent() {
 }
 
 /**
- * CCTV 관리자 전용 페이지 (/admin)
+ * 치카포 관리자 전용 페이지 (/admin)
  * useSearchParams() 정적 베일아웃 에러 방지를 위해 Suspense 경계로 래핑하여 렌더링합니다.
  */
 export default function AdminPage() {

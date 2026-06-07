@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { CORS_ALLOWED_ORIGINS } from '../config';
-import { SESSION_COOKIE_NAME } from '../services/sessionCookie';
+import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -30,7 +30,8 @@ const isAllowedOrigin = (origin: string, req: Request): boolean => {
 export const csrfOriginGuard = (req: Request, res: Response, next: NextFunction) => {
   if (SAFE_METHODS.has(req.method)) return next();
 
-  const hasSessionCookie = Boolean((req as any).cookies?.[SESSION_COOKIE_NAME]);
+  const cookies = (req as any).cookies || {};
+  const hasSessionCookie = SESSION_COOKIE_NAMES.some(cookieName => Boolean(cookies[cookieName]));
   if (!hasSessionCookie) return next();
 
   const origin = req.get('origin');
