@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
     ban_reason TEXT,                             -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
+    representative_card_star INTEGER,            -- 대표 카드 별 등급 (nullable, 레거시는 미지정)
     access_token TEXT,                           -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                          -- 치지직 OAuth refresh_token (암호화 저장)
     token_expires_at TIMESTAMPTZ,                -- 치지직 access_token 만료 시각
@@ -248,6 +249,7 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_star INTEGER;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
@@ -561,6 +563,7 @@ RETURNS INTEGER AS $$
 DECLARE
   a JSONB;
   cid TEXT;
+  card_star INTEGER;
   cnt INTEGER;
   base_value INTEGER;
   picked_ids INTEGER[];
@@ -573,6 +576,7 @@ BEGIN
   FOR a IN SELECT * FROM jsonb_array_elements(p_actions)
   LOOP
     cid := a->>'channel_id';
+    card_star := COALESCE((a->>'star')::INTEGER, 0);
     cnt := (a->>'count')::INTEGER;
     base_value := (a->>'base_value')::INTEGER;
     IF cid IS NULL OR cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
@@ -585,7 +589,15 @@ BEGIN
     FROM (
       SELECT id, star
         FROM user_cards
-       WHERE user_id = p_user_id AND channel_id = cid
+       WHERE user_id = p_user_id
+         AND channel_id = cid
+         AND COALESCE(star, 0) = card_star
+         AND NOT EXISTS (
+           SELECT 1
+             FROM market_listings ml
+            WHERE ml.user_card_id = user_cards.id
+              AND ml.status = 'PENDING'
+         )
        ORDER BY id ASC
        LIMIT cnt
        FOR UPDATE
@@ -620,6 +632,10 @@ BEGIN
   SELECT id INTO target_id
     FROM user_cards
    WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = p_star
+     AND NOT EXISTS (
+       SELECT 1 FROM market_listings ml
+        WHERE ml.user_card_id = user_cards.id AND ml.status = 'PENDING'
+     )
    ORDER BY id ASC
    LIMIT 1
    FOR UPDATE;
@@ -628,6 +644,10 @@ BEGIN
   SELECT id INTO fodder_id
     FROM user_cards
    WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = 0 AND id <> target_id
+     AND NOT EXISTS (
+       SELECT 1 FROM market_listings ml
+        WHERE ml.user_card_id = user_cards.id AND ml.status = 'PENDING'
+     )
    ORDER BY id ASC
    LIMIT 1
    FOR UPDATE;

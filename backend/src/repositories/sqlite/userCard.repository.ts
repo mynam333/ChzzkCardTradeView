@@ -86,19 +86,35 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return txn();
   }
 
-  // 같은 스트리머·같은 별 카드 2장 → 1장(별+1). better-sqlite3 트랜잭션으로 원자 처리
+  // 대상 카드 별 상승 + 같은 스트리머의 0성 재료 1장 소모. better-sqlite3 트랜잭션으로 원자 처리
   async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const db = this.getDb();
     const txn = db.transaction(() => {
       // 1) 업그레이드 대상: 현재 star인 카드 1장
       const target = db.prepare(
-        'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = ? ORDER BY id ASC LIMIT 1'
+        `SELECT uc.id
+           FROM user_cards uc
+          WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM market_listings ml
+               WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+            )
+          ORDER BY uc.id ASC
+          LIMIT 1`
       ).get(userId, channelId, star) as any;
       if (!target) throw new Error('NO_TARGET');
       // 2) 한계돌파 재료: 같은 스트리머의 0성 카드 1장 (대상과 다른 카드)
       const fodder = db.prepare(
-        'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star,0) = 0 AND id <> ? ORDER BY id ASC LIMIT 1'
+        `SELECT uc.id
+           FROM user_cards uc
+          WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = 0 AND uc.id <> ?
+            AND NOT EXISTS (
+              SELECT 1 FROM market_listings ml
+               WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+            )
+          ORDER BY uc.id ASC
+          LIMIT 1`
       ).get(userId, channelId, target.id) as any;
       if (!fodder) throw new Error('NO_FODDER');
       // 대상 카드의 별을 1 올리고, 재료 0성 카드는 소모(삭제)
@@ -213,15 +229,23 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return result.changes;
   }
 
-  async sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number> {
+  async sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number> {
     const db = this.getDb();
     const txn = db.transaction(() => {
       let total = 0;
 
       for (const action of actions) {
         const rows = db.prepare(
-          'SELECT id, COALESCE(star, 0) AS star FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
-        ).all(userId, action.channelId, action.count) as { id: number; star: number }[];
+          `SELECT uc.id, COALESCE(uc.star, 0) AS star
+             FROM user_cards uc
+            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM market_listings ml
+                 WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+              )
+            ORDER BY uc.id ASC
+            LIMIT ?`
+        ).all(userId, action.channelId, action.star, action.count) as { id: number; star: number }[];
 
         if (rows.length < action.count) {
           throw new Error('CARD_SHORTAGE');

@@ -36,6 +36,7 @@ export class SqliteUserRepository implements IUserRepository {
       banned_until: row.banned_until,
       ban_reason: row.ban_reason ?? null,
       representative_card_channel_id: row.representative_card_channel_id ?? null,
+      representative_card_star: row.representative_card_star ?? null,
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       token_expires_at: row.token_expires_at ?? null,
@@ -164,8 +165,10 @@ export class SqliteUserRepository implements IUserRepository {
       .run(accessToken, refreshToken, tokenExpiresAt, id);
   }
 
-  async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {
-    this.getDb().prepare('UPDATE users SET representative_card_channel_id = ? WHERE id = ?').run(channelId, id);
+  async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
+    this.getDb().prepare(
+      'UPDATE users SET representative_card_channel_id = ?, representative_card_star = ? WHERE id = ?'
+    ).run(channelId, star, id);
   }
 
   async count(): Promise<number> {

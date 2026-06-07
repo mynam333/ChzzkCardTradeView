@@ -35,7 +35,7 @@ interface RepCard {
 interface CollectionItem {
   channel_id: string;
   count: number;
-  maxStar: number;
+  star: number;
   streamer: StreamerLite;
 }
 interface ProfileData {
@@ -273,9 +273,9 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                   <p className="mb-2 text-[10px] font-bold text-zinc-400">보유 카드</p>
                   <div className="flex flex-wrap gap-1.5">
                     {profile.collection.slice(0, 25).map((c) => (
-                      <StreamerTooltip key={c.channel_id} name={c.streamer.name} className="relative">
+                      <StreamerTooltip key={`${c.channel_id}#${c.star}`} name={c.streamer.name} className="relative">
                         <img
-                          src={proxiedImage(cardImage(c.streamer, c.maxStar))}
+                          src={proxiedImage(cardImage(c.streamer, c.star))}
                           alt={c.streamer.name}
                           crossOrigin="anonymous"
                           className="h-9 w-9 rounded-lg border border-white/10 object-cover"
@@ -285,9 +285,9 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                             {c.count}
                           </span>
                         )}
-                        {c.maxStar >= 1 && (
+                        {c.star >= 1 && (
                           <span className="absolute -top-1 -left-1 rounded-full bg-yellow-400 px-1 text-[7px] font-black text-black">
-                            ★{c.maxStar}
+                            ★{c.star}
                           </span>
                         )}
                       </StreamerTooltip>

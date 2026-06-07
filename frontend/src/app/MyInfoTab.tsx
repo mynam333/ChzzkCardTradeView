@@ -31,6 +31,7 @@ interface UserCard {
   id: number;
   channel_id: string;
   serial_number: number;
+  star?: number;
   acquired_at: string;
   streamer?: {
     channel_id: string;
@@ -250,11 +251,13 @@ export const MyInfoTab: React.FC = () => {
     );
   }
 
-  // 대표 카드 채널 ID로 카드 데이터 찾기 (중복 보유 시 첫 장)
-  const representativeCard = inventory.find(c => c.channel_id === user.representativeCardChannelId);
-  // 보유 채널별 대표 후보 (중복 제거)
-  const uniqueByChannel = Array.from(
-    new Map(inventory.map(c => [c.channel_id, c])).values()
+  // 대표 카드는 채널과 별 등급을 함께 식별합니다.
+  const representativeCard = inventory.find(c =>
+    c.channel_id === user.representativeCardChannelId
+    && (user.representativeCardStar == null || (c.star || 0) === user.representativeCardStar)
+  );
+  const uniqueCards = Array.from(
+    new Map(inventory.map(c => [`${c.channel_id}#${c.star || 0}`, c])).values()
   );
 
   const handleClaimCoupon = async () => {
@@ -292,9 +295,12 @@ export const MyInfoTab: React.FC = () => {
     toast(result.ok ? '실시간 푸시 알림 구독이 완료되었습니다!' : result.message);
   };
 
-  const handleSetRepresentative = async (channelId: string | null) => {
+  const handleSetRepresentative = async (channelId: string | null, star: number | null = null) => {
     try {
-      const res = await apiFetch('/users/me/representative', { method: 'POST', body: JSON.stringify({ channel_id: channelId }) });
+      const res = await apiFetch('/users/me/representative', {
+        method: 'POST',
+        body: JSON.stringify({ channel_id: channelId, star })
+      });
       const data = await res.json();
       if (res.ok) {
         await refreshUserData();
@@ -423,14 +429,16 @@ export const MyInfoTab: React.FC = () => {
             {representativeCard?.streamer ? (
               <div className="relative h-24 w-16 overflow-hidden rounded-xl border-2 border-amber-500 shadow">
                 <img
-                  src={representativeCard.streamer.custom_image_url || representativeCard.streamer.logo_url}
+                  src={cardImage(representativeCard.streamer, representativeCard.star || 0)}
                   alt={representativeCard.streamer.name}
                   className="h-full w-full object-cover"
                 />
                 <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
                   <p className="text-[8px] font-bold text-white truncate">{representativeCard.streamer.name}</p>
                 </div>
-                <Star className="absolute right-0.5 top-0.5 h-3 w-3 fill-amber-400 text-amber-400" />
+                <span className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[8px] font-black text-amber-300">
+                  {representativeCard.star || 0}★
+                </span>
               </div>
             ) : (
               <div className="flex h-24 w-16 items-center justify-center rounded-xl border-2 border-dashed border-border text-[9px] text-muted-foreground text-center px-1">
@@ -534,22 +542,25 @@ export const MyInfoTab: React.FC = () => {
               <button onClick={() => setRepModalOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
             </div>
             <div className="mt-4">
-              {uniqueByChannel.length === 0 ? (
+              {uniqueCards.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-8">보유한 카드가 없습니다.</p>
               ) : (
                 <div className="grid grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
-                  {uniqueByChannel.map((card) => {
+                  {uniqueCards.map((card) => {
                     const s = card.streamer;
                     if (!s) return null;
-                    const selected = user.representativeCardChannelId === card.channel_id;
+                    const star = card.star || 0;
+                    const selected = user.representativeCardChannelId === card.channel_id
+                      && user.representativeCardStar === star;
                     return (
                       <div
-                        key={card.channel_id}
-                        onClick={() => handleSetRepresentative(card.channel_id)}
+                        key={`${card.channel_id}#${star}`}
+                        onClick={() => handleSetRepresentative(card.channel_id, star)}
                         className={`relative cursor-pointer flex flex-col items-center rounded-xl border p-2 transition ${selected ? 'border-amber-500 ring-2 ring-amber-500/30' : 'border-border/60 hover:bg-secondary/50'}`}
                       >
-                        <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-12 w-12 rounded-full object-cover border border-border/80" />
+                        <img src={cardImage(s, star)} alt={s.name} className="h-12 w-12 rounded-full object-cover border border-border/80" />
                         <span className="mt-1.5 text-[10px] font-bold truncate max-w-full">{s.name}</span>
+                        <span className="text-[9px] font-black text-amber-500">{star}★</span>
                         {selected && <Check className="absolute right-1 top-1 h-3.5 w-3.5 text-amber-500" />}
                       </div>
                     );

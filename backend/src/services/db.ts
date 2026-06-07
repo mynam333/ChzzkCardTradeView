@@ -107,6 +107,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_channel_id TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT representative_card_star FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 representative_card_star 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_star INTEGER;");
+      }
+      try {
         sqliteDb.prepare("SELECT ban_reason FROM users LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] users 테이블에 ban_reason 컬럼이 없어 추가합니다.');

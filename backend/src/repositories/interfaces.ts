@@ -10,6 +10,7 @@ export interface User {
   banned_until: string | null;
   ban_reason?: string | null;
   representative_card_channel_id?: string | null;
+  representative_card_star?: number | null;
   access_token?: string | null;
   refresh_token?: string | null;
   token_expires_at?: string | null; // 치지직 access_token 만료 시각(ISO)
@@ -172,7 +173,7 @@ export interface IUserRepository {
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
   updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void>;
-  updateRepresentativeCard(id: string, channelId: string | null): Promise<void>;
+  updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void>;
   findRankings(limit: number, keyword?: string): Promise<UserRanking[]>;
   count(): Promise<number>;
   /** 관리자용 유저 목록(닉네임/ID 부분검색 + 페이지네이션). keyword 비면 전체. */
@@ -364,14 +365,14 @@ export interface IUserCardRepository {
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
   deleteCards(userId: string, channelId: string, count: number): Promise<number>;
   count(): Promise<number>;
-  /** 같은 스트리머·같은 별 카드 2장을 합성하여 1장(별+1)으로 만듭니다. */
+  /** 대상 카드의 별을 올리고 같은 스트리머의 0성 카드 1장을 재료로 소모합니다. */
   fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }>;
   /** 특정 스트리머 카드의 보유자·별 목록(보상 계산용). */
   findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
   deleteByChannel(channelId: string): Promise<number>;
   /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */
-  sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number>;
+  sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number>;
 }
 
 // 8. 시스템 설정 리포지토리 인터페이스

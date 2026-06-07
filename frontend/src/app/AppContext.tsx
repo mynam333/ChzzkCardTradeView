@@ -336,6 +336,7 @@ interface AppContextType {
     point: number;
     lastFreeDraw: string | null;
     representativeCardChannelId: string | null;
+    representativeCardStar: number | null;
     drawCost: number;
     freeDrawInterval: number;
     isFreeDrawEligible: boolean;
@@ -528,6 +529,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
           point: data.point,
           lastFreeDraw: data.lastFreeDraw,
           representativeCardChannelId: data.representativeCardChannelId ?? null,
+          representativeCardStar: data.representativeCardStar ?? null,
           drawCost: data.drawCost ?? 10000,
           freeDrawInterval: data.freeDrawInterval ?? 24,
           isFreeDrawEligible: !!data.isFreeDrawEligible,

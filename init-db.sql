@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
     ban_reason TEXT,                           -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
+    representative_card_star INTEGER,          -- 대표 카드 별 등급 (nullable, 레거시는 미지정)
     access_token TEXT,                         -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                        -- 치지직 OAuth refresh_token (암호화 저장)
     token_expires_at TEXT,                     -- 치지직 access_token 만료 시각 (ISO String)

@@ -97,6 +97,7 @@ export const getUserMe = async (req: Request, res: Response) => {
       point: user.point,
       lastFreeDraw: user.last_free_draw,
       representativeCardChannelId: user.representative_card_channel_id || null,
+      representativeCardStar: user.representative_card_star ?? null,
       drawCost,
       freeDrawInterval: intervalHours,
       isFreeDrawEligible,
@@ -243,31 +244,40 @@ export const getUserProfile = async (req: Request, res: Response) => {
     }
     const cards = await userCardRepository.findByUserId(user_id);
 
-    // 채널별 묶음 + 총 자산(별 배수 반영) 계산
-    const map: { [cid: string]: any } = {};
+    // 채널+별 등급별 묶음 + 총 자산 계산
+    const map: { [key: string]: any } = {};
     let cardAsset = 0;
     for (const c of cards) {
+      const star = c.star || 0;
+      const key = `${c.channel_id}#${star}`;
       const baseValue = c.streamer?.base_value || 0;
-      cardAsset += Math.round(baseValue * starValueMultiplier(c.star || 0));
-      if (!map[c.channel_id]) {
-        map[c.channel_id] = {
+      cardAsset += Math.round(baseValue * starValueMultiplier(star));
+      if (!map[key]) {
+        map[key] = {
           channel_id: c.channel_id,
+          star,
           count: 0,
-          maxStar: c.star || 0,
           streamer: c.streamer
         };
       }
-      map[c.channel_id].count += 1;
-      if ((c.star || 0) > map[c.channel_id].maxStar) map[c.channel_id].maxStar = c.star || 0;
+      map[key].count += 1;
     }
     const collection = Object.values(map).sort(
-      (a: any, b: any) => (b.streamer?.base_value || 0) - (a.streamer?.base_value || 0)
+      (a: any, b: any) =>
+        (b.streamer?.base_value || 0) * starValueMultiplier(b.star)
+        - (a.streamer?.base_value || 0) * starValueMultiplier(a.star)
     );
 
-    // 대표 카드: 지정된 채널의 카드 중 별이 가장 높은 카드, 없으면 가장 가치 높은 카드
+    // 대표 카드: 채널+별을 함께 식별. 레거시 데이터는 지정 채널 중 가장 높은 별을 사용.
     let repCard: any = null;
     const repChannel = user.representative_card_channel_id;
-    const pool = repChannel ? cards.filter((c) => c.channel_id === repChannel) : cards;
+    const repStar = user.representative_card_star;
+    const pool = repChannel
+      ? cards.filter((c) =>
+          c.channel_id === repChannel
+          && (repStar == null || (c.star || 0) === repStar)
+        )
+      : cards;
     const candidates = (pool.length ? pool : cards).slice();
     candidates.sort((a, b) => {
       const sa = a.star || 0, sb = b.star || 0;
@@ -585,7 +595,7 @@ export const registerStreamer = async (req: Request, res: Response) => {
 /**
  * 7. 카드 판매 및 일괄 판매 처리 API
  * POST /api/cards/sell
- * Body: { items: Array<{ channelId: string, count: number }> }
+ * Body: { items: Array<{ channelId: string, star: number, count: number }> }
  */
 export const sellCards = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
@@ -608,35 +618,40 @@ export const sellCards = async (req: Request, res: Response) => {
     // B. 유저 보유 카드 데이터 조회
     const userCards = await userCardRepository.findByUserId(userId);
 
-    // channelId별 유저 보유 카드 매핑
-    const userCardsByChannel: { [key: string]: any[] } = {};
+    const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
+
+    // channelId+star별 유저 보유 카드 매핑
+    const userCardsByKey: { [key: string]: any[] } = {};
     userCards.forEach(uc => {
-      const cid = uc.channel_id;
-      if (!userCardsByChannel[cid]) {
-        userCardsByChannel[cid] = [];
+      const key = `${uc.channel_id}#${uc.star || 0}`;
+      if (!userCardsByKey[key]) {
+        userCardsByKey[key] = [];
       }
-      userCardsByChannel[cid].push(uc);
+      userCardsByKey[key].push(uc);
     });
 
     // 진행 중인 거래에 묶인(에스크로) 카드는 판매 불가하도록 예약량 차감
     const reservations = await getUserReservations(userId);
 
-    const sellActions: { channelId: string, count: number, baseValue: number }[] = [];
+    const sellActions: { channelId: string, star: number, count: number, baseValue: number }[] = [];
 
     // C. 판매 항목 수량 및 시세 검증
     for (const item of items) {
       const { channelId, count } = item;
-      if (!channelId || !count || count <= 0) {
-        return res.status(400).json({ error: 'BadRequest', message: '올바른 channelId와 0보다 큰 수량이 필요합니다.' });
+      const star = Number(item.star);
+      if (!channelId || !Number.isInteger(star) || star < 0 || star > 5 || !Number.isInteger(count) || count <= 0) {
+        return res.status(400).json({ error: 'BadRequest', message: '올바른 channelId, 별 등급(0~5), 수량이 필요합니다.' });
       }
 
-      const owned = userCardsByChannel[channelId] || [];
-      const reserved = reservations.cards[channelId] || 0;
-      const sellable = owned.length - reserved;
+      const key = `${channelId}#${star}`;
+      const owned = userCardsByKey[key] || [];
+      const reserved = reservations.cardsByStar[key] || 0;
+      const pendingMarket = owned.filter((card) => pendingMarketIds.has(card.id)).length;
+      const sellable = owned.length - reserved - pendingMarket;
       if (sellable < count) {
         return res.status(400).json({
           error: 'InsufficientCards',
-          message: `판매 가능한 카드 수량이 부족합니다. (보유 ${owned.length}장 중 거래 중 ${reserved}장, 판매 요청 ${count}장)`
+          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 교환 중 ${reserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
         });
       }
 
@@ -647,7 +662,7 @@ export const sellCards = async (req: Request, res: Response) => {
       }
 
       const baseValue = streamer.base_value || 0;
-      sellActions.push({ channelId, count, baseValue });
+      sellActions.push({ channelId, star, count, baseValue });
     }
 
     // D. 판매 처리: 카드 삭제와 포인트 가산을 단일 트랜잭션/RPC로 처리
@@ -670,7 +685,7 @@ export const sellCards = async (req: Request, res: Response) => {
 export const starValueMultiplier = (star: number): number => 1 + (star || 0) * 0.8;
 
 /**
- * 카드 합성: 같은 스트리머·같은 별 카드 2장 → 1장(별+1)
+ * 카드 한계돌파: 대상 카드 별 상승 + 같은 스트리머의 0성 카드 1장 소모
  * POST /api/cards/fuse  Body: { channel_id, star }
  */
 export const fuseCards = async (req: Request, res: Response) => {
@@ -686,9 +701,15 @@ export const fuseCards = async (req: Request, res: Response) => {
     // 진행 중 거래에 예약된 카드는 합성 재료로 사용할 수 없도록 차단
     const cards = await userCardRepository.findByUserId(userId);
     const reservations = await getUserReservations(userId);
+    const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
     const key = (st: number) => `${channel_id}#${st}`;
     const available = (st: number) =>
-      cards.filter((c) => c.channel_id === channel_id && (c.star || 0) === st).length
+      cards.filter((c) =>
+        c.channel_id === channel_id
+        && (c.star || 0) === st
+        && c.id != null
+        && !pendingMarketIds.has(c.id)
+      ).length
       - (reservations.cardsByStar[key(st)] || 0);
     const targetAvailable = available(starNum);
     const fodderAvailable = available(0) - (starNum === 0 ? 1 : 0);
@@ -763,7 +784,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
 
 /**
  * 9. 대표 카드 설정/해제
- * POST /api/users/me/representative  Body: { channel_id: string | null }
+ * POST /api/users/me/representative  Body: { channel_id: string | null, star: number | null }
  */
 export const setRepresentativeCard = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
@@ -772,24 +793,29 @@ export const setRepresentativeCard = async (req: Request, res: Response) => {
   }
 
   const { channel_id } = req.body;
+  const star = channel_id ? Number(req.body.star) : null;
 
   try {
     if (channel_id) {
-      // 본인이 해당 스트리머 카드를 1장 이상 보유하고 있는지 검증
+      if (!Number.isInteger(star) || star! < 0 || star! > 5) {
+        return res.status(400).json({ error: 'BadRequest', message: '대표 카드의 별 등급(0~5)이 필요합니다.' });
+      }
+      // 본인이 해당 스트리머의 해당 별 카드를 1장 이상 보유하고 있는지 검증
       const cards = await userCardRepository.findByUserId(userId);
-      const owns = cards.some((c) => c.channel_id === channel_id);
+      const owns = cards.some((c) => c.channel_id === channel_id && (c.star || 0) === star);
       if (!owns) {
         return res.status(400).json({ error: 'BadRequest', message: '보유하지 않은 카드는 대표 카드로 설정할 수 없습니다.' });
       }
-      await userRepository.updateRepresentativeCard(userId, channel_id);
+      await userRepository.updateRepresentativeCard(userId, channel_id, star);
     } else {
       // null 전달 시 대표 카드 해제
-      await userRepository.updateRepresentativeCard(userId, null);
+      await userRepository.updateRepresentativeCard(userId, null, null);
     }
 
     return res.status(200).json({
       message: channel_id ? '대표 카드가 설정되었습니다.' : '대표 카드가 해제되었습니다.',
-      representative_card_channel_id: channel_id || null
+      representative_card_channel_id: channel_id || null,
+      representative_card_star: star
     });
   } catch (err: any) {
     console.error('[PlayController] setRepresentativeCard 에러:', err);

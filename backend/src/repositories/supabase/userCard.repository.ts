@@ -232,9 +232,10 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return count || 0;
   }
 
-  async sellCardsAtomic(userId: string, actions: { channelId: string; count: number; baseValue: number }[]): Promise<number> {
+  async sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number> {
     const payload = actions.map((a) => ({
       channel_id: a.channelId,
+      star: a.star,
       count: a.count,
       base_value: a.baseValue
     }));

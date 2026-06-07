@@ -51,6 +51,14 @@ interface UserCard {
 
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.8;
+const cardKey = (channelId: string, star: number) => `${channelId}#${star}`;
+const parseCardKey = (key: string) => {
+  const separator = key.lastIndexOf('#');
+  return {
+    channelId: key.slice(0, separator),
+    star: Number(key.slice(separator + 1)) || 0
+  };
+};
 
 const CONTEXT_MENU_MARGIN = 8;
 const CONTEXT_MENU_FALLBACK_SIZE = { width: 208, height: 320 };
@@ -154,20 +162,21 @@ export const GachaTab: React.FC = () => {
   }>({ x: 0, y: 0, open: false, channel_id: '', star: 0, card: null });
   const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 
-  // 카드 선택 모드 및 선택된 채널 ID 목록 (수집 갯수 단위로 묶여있으므로 channel_id 기반 일괄 선택 지원)
+  // 카드 선택 모드 및 선택된 채널+별 키 목록
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  const [selectedCardKeys, setSelectedCardKeys] = useState<string[]>([]);
 
   // 단일 판매 모달 및 확인 모달 상태
   const [sellModalOpen, setSellModalOpen] = useState(false);
   const [sellConfirmOpen, setSellConfirmOpen] = useState(false);
   const [sellQuantity, setSellQuantity] = useState(1);
   const [sellingStreamer, setSellingStreamer] = useState<Streamer | null>(null);
+  const [sellingStar, setSellingStar] = useState(0);
 
   // 일괄 판매 모달 및 확인 모달 상태
   const [bulkSellModalOpen, setBulkSellModalOpen] = useState(false);
   const [bulkSellConfirmOpen, setBulkSellConfirmOpen] = useState(false);
-  // 일괄 판매 항목 설정: { [channelId]: count }
+  // 일괄 판매 항목 설정: { [channelId#star]: count }
   const [bulkSellQuantities, setBulkSellQuantities] = useState<{ [key: string]: number }>({});
 
   // 모바일 롱프레스 타이머 레프
@@ -641,7 +650,7 @@ export const GachaTab: React.FC = () => {
       const res = await apiFetch('/cards/sell', {
         method: 'POST',
         body: JSON.stringify({
-          items: [{ channelId: sellingStreamer.channel_id, count: sellQuantity }]
+          items: [{ channelId: sellingStreamer.channel_id, star: sellingStar, count: sellQuantity }]
         })
       });
 
@@ -656,6 +665,7 @@ export const GachaTab: React.FC = () => {
         setSellConfirmOpen(false);
         setSellModalOpen(false);
         setSellingStreamer(null);
+        setSellingStar(0);
         fetchInventory();
         refreshUserData();
       } else {
@@ -675,7 +685,7 @@ export const GachaTab: React.FC = () => {
   // 일괄 카드 판매 실행
   const executeBulkSell = async () => {
     const items = Object.entries(bulkSellQuantities)
-      .map(([channelId, count]) => ({ channelId, count }))
+      .map(([key, count]) => ({ ...parseCardKey(key), count }))
       .filter(item => item.count > 0);
 
     if (items.length === 0) {
@@ -699,7 +709,7 @@ export const GachaTab: React.FC = () => {
         });
         setBulkSellConfirmOpen(false);
         setBulkSellModalOpen(false);
-        setSelectedChannelIds([]);
+        setSelectedCardKeys([]);
         setSelectionMode(false);
         fetchInventory();
         refreshUserData();
@@ -718,13 +728,13 @@ export const GachaTab: React.FC = () => {
   };
 
   // 카드 수량 계산 헬퍼
-  const getCardCountInInventory = (channelId: string) => {
-    return inventory.filter(c => c.channel_id === channelId).length;
+  const getCardCountInInventory = (channelId: string, star: number) => {
+    return getAvailableCount(channelId, star);
   };
 
-  // 카드 객체 찾기 헬퍼
-  const getStreamerByChannelId = (channelId: string) => {
-    return inventory.find(c => c.channel_id === channelId)?.streamer || null;
+  const getCardByKey = (key: string) => {
+    const { channelId, star } = parseCardKey(key);
+    return inventory.find(c => c.channel_id === channelId && (c.star || 0) === star) || null;
   };
 
   // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
@@ -1261,14 +1271,6 @@ export const GachaTab: React.FC = () => {
             }
           });
 
-          // 채널별 0성 카드 보유량 (한계돌파 재료 가용성 판단용) — 검색 필터와 무관하게 전체 보관함 기준
-          const zeroStarByChannel: Record<string, number> = {};
-          inventory.forEach(c => {
-            if ((c.star || 0) === 0) {
-              zeroStarByChannel[c.channel_id] = (zeroStarByChannel[c.channel_id] || 0) + 1;
-            }
-          });
-
           return (
             <div className="relative">
               {/* 선택 모드 안내 바 */}
@@ -1277,20 +1279,21 @@ export const GachaTab: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-primary animate-ping"></span>
                     <span className="text-[0.75rem] font-bold text-foreground">
-                      카드를 다중 선택 중입니다 ({selectedChannelIds.length}개 선택됨)
+                      카드를 다중 선택 중입니다 ({selectedCardKeys.length}개 선택됨)
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        if (selectedChannelIds.length === 0) {
+                        if (selectedCardKeys.length === 0) {
                           toast('선택된 카드가 없습니다.');
                           return;
                         }
                         // 선택된 카드 정보 기반으로 일괄 판매 초기화
                         const quantities: { [key: string]: number } = {};
-                        selectedChannelIds.forEach(cid => {
-                          quantities[cid] = getCardCountInInventory(cid);
+                        selectedCardKeys.forEach(key => {
+                          const { channelId, star } = parseCardKey(key);
+                          quantities[key] = getCardCountInInventory(channelId, star);
                         });
                         setBulkSellQuantities(quantities);
                         setBulkSellModalOpen(true);
@@ -1301,7 +1304,7 @@ export const GachaTab: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
-                        setSelectedChannelIds([]);
+                        setSelectedCardKeys([]);
                         setSelectionMode(false);
                       }}
                       className="rounded-lg bg-secondary px-3 py-1.5 text-[0.7rem] font-bold text-muted-foreground hover:bg-secondary/80 transition"
@@ -1317,7 +1320,8 @@ export const GachaTab: React.FC = () => {
                   const streamer = card.streamer;
                   if (!streamer) return null;
 
-                  const isSelected = selectedChannelIds.includes(streamer.channel_id);
+                  const key = cardKey(streamer.channel_id, star);
+                  const isSelected = selectedCardKeys.includes(key);
                   const cardValue = Math.round((streamer.base_value || 0) * starMult(star));
                   const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
                   const avail = getAvailableCount(streamer.channel_id, star);
@@ -1329,8 +1333,9 @@ export const GachaTab: React.FC = () => {
                     if (selectionMode) {
                       // 다중 선택 상태일 때의 우클릭 액션: 일괄 판매 모달 바로 트리거
                       const quantities: { [key: string]: number } = {};
-                      selectedChannelIds.forEach(cid => {
-                        quantities[cid] = getCardCountInInventory(cid);
+                      selectedCardKeys.forEach(selectedKey => {
+                        const parsed = parseCardKey(selectedKey);
+                        quantities[selectedKey] = getCardCountInInventory(parsed.channelId, parsed.star);
                       });
                       setBulkSellQuantities(quantities);
                       setBulkSellModalOpen(true);
@@ -1359,9 +1364,9 @@ export const GachaTab: React.FC = () => {
                     if (selectionMode) {
                       e.preventDefault();
                       if (isSelected) {
-                        setSelectedChannelIds(selectedChannelIds.filter(cid => cid !== streamer.channel_id));
+                        setSelectedCardKeys(selectedCardKeys.filter(selectedKey => selectedKey !== key));
                       } else {
-                        setSelectedChannelIds([...selectedChannelIds, streamer.channel_id]);
+                        setSelectedCardKeys([...selectedCardKeys, key]);
                       }
                     } else {
                       // 롱프레스로 메뉴가 떴다면 직후의 클릭은 무시 (확대 모달이 뜨지 않도록)
@@ -1497,9 +1502,9 @@ export const GachaTab: React.FC = () => {
                           {/* 한계돌파 버튼 (같은 스트리머 0성 카드를 재료로 소모해 별 +1) */}
                           {(() => {
                             if (selectionMode || star >= 5) return null;
-                            const zeroCount = zeroStarByChannel[streamer.channel_id] || 0;
+                            const zeroCount = getAvailableCount(streamer.channel_id, 0);
                             // 0성 카드를 올릴 땐 대상+재료로 2장 필요, 1성 이상은 재료 0성 1장 필요
-                            const canFuse = star === 0 ? zeroCount >= 2 : zeroCount >= 1;
+                            const canFuse = star === 0 ? zeroCount >= 2 : avail >= 1 && zeroCount >= 1;
                             if (!canFuse) return null;
                             return (
                               <button
@@ -1658,7 +1663,7 @@ export const GachaTab: React.FC = () => {
               onClick={() => {
                 if (displayCard.streamer) {
                   setSelectionMode(true);
-                  setSelectedChannelIds([displayCard.streamer.channel_id]);
+                  setSelectedCardKeys([cardKey(displayCard.streamer.channel_id, displayCard.star || 0)]);
                 }
                 setContextMenu(prev => ({ ...prev, open: false }));
               }}
@@ -1685,6 +1690,7 @@ export const GachaTab: React.FC = () => {
                   showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
                 } else {
                   setSellingStreamer(displayCard.streamer || null);
+                  setSellingStar(displayCard.star || 0);
                   setSellQuantity(1);
                   setSellModalOpen(true);
                 }
@@ -1873,17 +1879,17 @@ export const GachaTab: React.FC = () => {
 
             <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
               <img
-                src={sellingStreamer.custom_image_url || sellingStreamer.logo_url}
+                src={cardImage(sellingStreamer, sellingStar)}
                 alt={sellingStreamer.name}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
               />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-black text-foreground truncate">{sellingStreamer.name}</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  보유량: <span className="font-bold text-foreground">{getCardCountInInventory(sellingStreamer.channel_id)}</span>장
+                  {sellingStar}성 보유량: <span className="font-bold text-foreground">{getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}</span>장
                 </p>
                 <p className="text-[10px] text-emerald-500 font-bold mt-0.5">
-                  개당 시세: {sellingStreamer.base_value.toLocaleString()} P
+                  개당 시세: {Math.round(sellingStreamer.base_value * starMult(sellingStar)).toLocaleString()} P
                 </p>
               </div>
             </div>
@@ -1901,23 +1907,23 @@ export const GachaTab: React.FC = () => {
                 <input
                   type="number"
                   min="1"
-                  max={getCardCountInInventory(sellingStreamer.channel_id)}
+                  max={getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}
                   value={sellQuantity}
                   onChange={(e) => {
-                    const val = Math.max(1, Math.min(getCardCountInInventory(sellingStreamer.channel_id), Number(e.target.value) || 1));
+                    const val = Math.max(1, Math.min(getCardCountInInventory(sellingStreamer.channel_id, sellingStar), Number(e.target.value) || 1));
                     setSellQuantity(val);
                   }}
                   className="w-16 text-center rounded-lg border border-border bg-secondary/50 px-2 py-1 text-xs font-bold focus:outline-none"
                 />
                 <button
-                  disabled={sellQuantity >= getCardCountInInventory(sellingStreamer.channel_id)}
+                  disabled={sellQuantity >= getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}
                   onClick={() => setSellQuantity(prev => prev + 1)}
                   className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-foreground disabled:opacity-40"
                 >
                   +
                 </button>
                 <button
-                  onClick={() => setSellQuantity(getCardCountInInventory(sellingStreamer.channel_id))}
+                  onClick={() => setSellQuantity(getCardCountInInventory(sellingStreamer.channel_id, sellingStar))}
                   className="ml-auto rounded-lg bg-secondary border border-border px-2.5 py-1.5 text-[9.5px] font-bold text-foreground hover:bg-secondary/80"
                 >
                   최대
@@ -1928,7 +1934,7 @@ export const GachaTab: React.FC = () => {
             <div className="mt-4 border-t border-border/50 pt-3 flex items-center justify-between text-xs">
               <span className="font-bold text-muted-foreground">예상 획득 포인트</span>
               <span className="font-black text-emerald-500 text-sm">
-                {(sellingStreamer.base_value * sellQuantity).toLocaleString()} P
+                {(Math.round(sellingStreamer.base_value * starMult(sellingStar)) * sellQuantity).toLocaleString()} P
               </span>
             </div>
 
@@ -1937,6 +1943,7 @@ export const GachaTab: React.FC = () => {
                 onClick={() => {
                   setSellModalOpen(false);
                   setSellingStreamer(null);
+                  setSellingStar(0);
                 }}
                 className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
               >
@@ -1960,9 +1967,9 @@ export const GachaTab: React.FC = () => {
             <h4 className="text-sm font-black text-foreground mb-3">⚠️ 판매 최종 확인</h4>
             <div className="text-xs text-muted-foreground leading-relaxed py-2">
               정말로 <strong className="text-foreground">{sellingStreamer.name}</strong> 카드{' '}
-              <strong className="text-primary font-bold">{sellQuantity}장</strong>을 판매하시겠습니까?
+              <strong className="text-primary font-bold">{sellingStar}성 {sellQuantity}장</strong>을 판매하시겠습니까?
               <p className="mt-2 text-foreground font-semibold">
-                획득 예정 포인트: <span className="text-emerald-500 font-extrabold">{(sellingStreamer.base_value * sellQuantity).toLocaleString()} P</span>
+                획득 예정 포인트: <span className="text-emerald-500 font-extrabold">{(Math.round(sellingStreamer.base_value * starMult(sellingStar)) * sellQuantity).toLocaleString()} P</span>
               </p>
               <p className="text-[10px] text-red-500/80 mt-1">※ 판매 완료된 카드는 되돌릴 수 없습니다.</p>
             </div>
@@ -1993,22 +2000,24 @@ export const GachaTab: React.FC = () => {
             </h3>
 
             <div className="mt-4 space-y-3.5 max-h-60 overflow-y-auto pr-1">
-              {Object.entries(bulkSellQuantities).map(([channelId, count]) => {
-                const streamer = getStreamerByChannelId(channelId);
-                const maxCount = getCardCountInInventory(channelId);
-                if (!streamer) return null;
+              {Object.entries(bulkSellQuantities).map(([key, count]) => {
+                const card = getCardByKey(key);
+                if (!card?.streamer) return null;
+                const { channelId, star } = parseCardKey(key);
+                const streamer = card.streamer;
+                const maxCount = getCardCountInInventory(channelId, star);
 
                 return (
-                  <div key={channelId} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
+                  <div key={key} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
-                        src={streamer.custom_image_url || streamer.logo_url}
+                        src={cardImage(streamer, star)}
                         alt={streamer.name}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
                       />
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold text-foreground truncate">{streamer.name}</p>
-                        <p className="text-[9px] text-muted-foreground">보유: {maxCount}장</p>
+                        <p className="text-[9px] text-muted-foreground">{star}성 보유: {maxCount}장</p>
                       </div>
                     </div>
 
@@ -2016,7 +2025,7 @@ export const GachaTab: React.FC = () => {
                       <button
                         disabled={count <= 0}
                         onClick={() => {
-                          setBulkSellQuantities(prev => ({ ...prev, [channelId]: Math.max(0, count - 1) }));
+                          setBulkSellQuantities(prev => ({ ...prev, [key]: Math.max(0, count - 1) }));
                         }}
                         className="h-6 w-6 rounded bg-secondary flex items-center justify-center text-xs font-bold disabled:opacity-40"
                       >
@@ -2028,7 +2037,7 @@ export const GachaTab: React.FC = () => {
                       <button
                         disabled={count >= maxCount}
                         onClick={() => {
-                          setBulkSellQuantities(prev => ({ ...prev, [channelId]: Math.min(maxCount, count + 1) }));
+                          setBulkSellQuantities(prev => ({ ...prev, [key]: Math.min(maxCount, count + 1) }));
                         }}
                         className="h-6 w-6 rounded bg-secondary flex items-center justify-center text-xs font-bold disabled:opacity-40"
                       >
@@ -2043,9 +2052,10 @@ export const GachaTab: React.FC = () => {
             <div className="mt-4 border-t border-border/50 pt-3 flex items-center justify-between text-xs">
               <span className="font-bold text-muted-foreground">총 예상 획득 포인트</span>
               <span className="font-black text-emerald-500 text-sm">
-                {Object.entries(bulkSellQuantities).reduce((acc, [channelId, count]) => {
-                  const streamer = getStreamerByChannelId(channelId);
-                  return acc + (streamer ? streamer.base_value * count : 0);
+                {Object.entries(bulkSellQuantities).reduce((acc, [key, count]) => {
+                  const card = getCardByKey(key);
+                  const star = parseCardKey(key).star;
+                  return acc + (card?.streamer ? Math.round(card.streamer.base_value * starMult(star)) * count : 0);
                 }, 0).toLocaleString()} P
               </span>
             </div>
@@ -2086,9 +2096,10 @@ export const GachaTab: React.FC = () => {
               </strong>을 일괄 판매하시겠습니까?
               <p className="mt-2 text-foreground font-semibold">
                 총 획득 예정 포인트: <span className="text-emerald-500 font-extrabold">
-                  {Object.entries(bulkSellQuantities).reduce((acc, [channelId, count]) => {
-                    const streamer = getStreamerByChannelId(channelId);
-                    return acc + (streamer ? streamer.base_value * count : 0);
+                  {Object.entries(bulkSellQuantities).reduce((acc, [key, count]) => {
+                    const card = getCardByKey(key);
+                    const star = parseCardKey(key).star;
+                    return acc + (card?.streamer ? Math.round(card.streamer.base_value * starMult(star)) * count : 0);
                   }, 0).toLocaleString()} P
                 </span>
               </p>

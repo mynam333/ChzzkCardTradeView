@@ -213,10 +213,10 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
-  async updateRepresentativeCard(id: string, channelId: string | null): Promise<void> {
+  async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
     const { error } = await this.getClient()
       .from('users')
-      .update({ representative_card_channel_id: channelId })
+      .update({ representative_card_channel_id: channelId, representative_card_star: star })
       .eq('id', id);
     if (error) throw error;
   }

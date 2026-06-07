@@ -3,7 +3,14 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { __setSqliteDbForTest } from '../services/db';
-import { initRepositories, minigameRepository, reportRepository, userRepository, streamerRepository } from '../repositories';
+import {
+  initRepositories,
+  minigameRepository,
+  reportRepository,
+  streamerRepository,
+  userCardRepository,
+  userRepository
+} from '../repositories';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 
 /**
@@ -116,6 +123,54 @@ describe('MinigameRepository practice mode', () => {
       game_type: 'puzzle',
       status: 'STARTED'
     });
+  });
+});
+
+describe('UserCardRepository 별 등급 분리', () => {
+  it('시스템 판매는 요청한 별 등급의 카드만 삭제하고 해당 배율로 지급한다', async () => {
+    seedUser(db, 'seller');
+    seedStreamer(db, 'card-channel', '카드 스트리머');
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('seller', 'card-channel', 1, 0),
+             ('seller', 'card-channel', 2, 2)
+    `).run();
+
+    const gained = await userCardRepository.sellCardsAtomic('seller', [{
+      channelId: 'card-channel',
+      star: 2,
+      count: 1,
+      baseValue: 1000
+    }]);
+
+    expect(gained).toBe(2600);
+    expect(db.prepare(
+      'SELECT serial_number, star FROM user_cards WHERE user_id = ? ORDER BY serial_number'
+    ).all('seller')).toEqual([{ serial_number: 1, star: 0 }]);
+    expect((await userRepository.findById('seller'))?.point).toBe(2600);
+  });
+
+  it('한계돌파는 대상과 같은 별 카드가 아니라 0성 카드만 재료로 소모한다', async () => {
+    seedUser(db, 'fuser');
+    seedStreamer(db, 'fuse-channel', '한계돌파 스트리머');
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('fuser', 'fuse-channel', 1, 3),
+             ('fuser', 'fuse-channel', 2, 3),
+             ('fuser', 'fuse-channel', 3, 0)
+    `).run();
+
+    expect(await userCardRepository.fuse('fuser', 'fuse-channel', 3)).toEqual({
+      ok: true,
+      reason: 'OK',
+      newStar: 4
+    });
+    expect(db.prepare(
+      'SELECT serial_number, star FROM user_cards WHERE user_id = ? ORDER BY serial_number'
+    ).all('fuser')).toEqual([
+      { serial_number: 1, star: 4 },
+      { serial_number: 2, star: 3 }
+    ]);
   });
 });
 

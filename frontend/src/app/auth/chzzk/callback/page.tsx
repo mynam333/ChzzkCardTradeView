@@ -53,7 +53,8 @@ const ChzzkCallbackContent: React.FC = () => {
           ownedTitles: [],
           point: data.user.point,
           lastFreeDraw: null,
-          representativeCardChannelId: null
+          representativeCardChannelId: null,
+          representativeCardStar: null
         };
 
         // 인증은 백엔드가 발급한 httpOnly 세션 쿠키로 유지됨. JS에는 민감 토큰 대신 비민감 플래그만 저장.
