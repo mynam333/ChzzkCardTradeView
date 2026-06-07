@@ -1390,12 +1390,12 @@ export const ArcadeTab: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-2xl border border-primary/15 bg-white/70 px-2.5 py-1.5 dark:bg-card/60">
-                <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">기본 충전</p>
+                <p className="text-[9px] font-bold text-muted-foreground">기본 충전</p>
                 <p className="text-xs font-black text-primary"><span className="cute-number-font">{baseTickets}</span>/5</p>
               </div>
               <div className={`rounded-2xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/10' : 'border-primary/12 bg-white/65 dark:bg-card/55'}`}>
-                <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">추가 티켓</p>
-                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-700 dark:text-sky-400' : 'text-slate-500 dark:text-muted-foreground'}`}>+<span className="cute-number-font">{bonusTickets}</span></p>
+                <p className="text-[9px] font-bold text-muted-foreground">추가 티켓</p>
+                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-700 dark:text-sky-400' : 'text-muted-foreground'}`}>+<span className="cute-number-font">{bonusTickets}</span></p>
               </div>
             </div>
           </div>

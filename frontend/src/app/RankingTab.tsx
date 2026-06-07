@@ -140,7 +140,7 @@ export const RankingTab: React.FC = () => {
   const pagedUsers = rankedUsers.slice(sliceStart, sliceStart + PER_PAGE);
 
   const rankColor = (rank: number) =>
-    rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
+    rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-500 dark:text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
 
   const subTabs: { id: SubTab; label: string }[] = [
     { id: 'value', label: '스트리머 시세' },

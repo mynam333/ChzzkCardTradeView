@@ -45,7 +45,7 @@ export const UserTitleBadge: React.FC<{ title: UserTitle; compact?: boolean }> =
   return (
     <span
       className={[
-        'inline-flex shrink-0 items-center rounded-full border border-white/10 bg-zinc-800 px-2 py-0.5 font-bold leading-none text-white shadow-sm',
+        'inline-flex shrink-0 items-center rounded-full border border-border/40 bg-secondary px-2 py-0.5 font-bold leading-none text-secondary-foreground shadow-sm dark:border-white/10 dark:bg-zinc-800 dark:text-white',
         compact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]',
         generatedClass(title.id),
         customClass

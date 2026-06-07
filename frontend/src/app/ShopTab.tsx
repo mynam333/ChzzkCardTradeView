@@ -714,7 +714,7 @@ export const ShopTab: React.FC = () => {
                           {user && user.id === listing.seller_id ? (
                             <button
                               disabled
-                              className="w-full rounded-lg bg-zinc-800 py-1.5 text-[10px] font-bold text-zinc-500 cursor-not-allowed text-center"
+                              className="w-full rounded-lg bg-secondary py-1.5 text-[10px] font-bold text-muted-foreground cursor-not-allowed text-center dark:bg-zinc-800 dark:text-zinc-500"
                             >
                               내 등록 매물
                             </button>

@@ -1,0 +1,198 @@
+# ==========================================================
+# 치카포 (chikapo.yuaru.com) - robots.txt
+# 목적: 정상 검색엔진은 허용, AI 학습봇 및 스크래퍼는 차단
+# 최종 업데이트: 2026-06
+# ==========================================================
+
+# ----------------------------------------------------------
+# ✅ 허용: Google 검색 크롤러
+# ----------------------------------------------------------
+User-agent: Googlebot
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /auth/
+Disallow: /maintenance/
+Crawl-delay: 2
+
+# 구글 이미지 검색
+User-agent: Googlebot-Image
+Allow: /
+Disallow: /api/
+Crawl-delay: 5
+
+# 구글 모바일 크롤러
+User-agent: Googlebot-Mobile
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Crawl-delay: 2
+
+# ----------------------------------------------------------
+# ✅ 허용: Naver 검색 크롤러
+# ----------------------------------------------------------
+User-agent: Yeti
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /auth/
+Disallow: /maintenance/
+Crawl-delay: 2
+
+# ----------------------------------------------------------
+# ✅ 허용: Bing 검색 크롤러
+# ----------------------------------------------------------
+User-agent: Bingbot
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /auth/
+Disallow: /maintenance/
+Crawl-delay: 3
+
+# ----------------------------------------------------------
+# ✅ 허용: DuckDuckGo
+# ----------------------------------------------------------
+User-agent: DuckDuckBot
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Crawl-delay: 3
+
+# ----------------------------------------------------------
+# ✅ 허용: 카카오 검색 크롤러
+# ----------------------------------------------------------
+User-agent: Kakaotalk-scrap
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Crawl-delay: 5
+
+User-agent: Kakao
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Crawl-delay: 5
+
+# ----------------------------------------------------------
+# 🚫 차단: OpenAI / ChatGPT AI 학습 봇
+# ----------------------------------------------------------
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Anthropic / Claude AI 학습 봇
+# ----------------------------------------------------------
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Google AI (Gemini) 학습 봇
+# ----------------------------------------------------------
+User-agent: Google-Extended
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Meta AI 학습 봇
+# ----------------------------------------------------------
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: meta-externalagent
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Apple AI 학습 봇
+# ----------------------------------------------------------
+User-agent: Applebot-Extended
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Cohere AI 학습 봇
+# ----------------------------------------------------------
+User-agent: cohere-ai
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: ByteDance / TikTok AI
+# ----------------------------------------------------------
+User-agent: Bytespider
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: Perplexity AI
+# ----------------------------------------------------------
+User-agent: PerplexityBot
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 차단: 기타 주요 스크래핑/데이터수집 봇
+# ----------------------------------------------------------
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+User-agent: DataForSeoBot
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: ia_archiver
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: omgili
+Disallow: /
+
+User-agent: omgilibot
+Disallow: /
+
+User-agent: Scrapy
+Disallow: /
+
+# ----------------------------------------------------------
+# 🚫 기본값: 위에 명시되지 않은 모든 봇은 차단
+# ----------------------------------------------------------
+User-agent: *
+Disallow: /admin
+Disallow: /api/
+Disallow: /auth/
+Disallow: /maintenance/
+Crawl-delay: 10
+
+# ----------------------------------------------------------
+# 사이트맵
+# ----------------------------------------------------------
+Sitemap: https://chikapo.yuaru.com/sitemap.xml
