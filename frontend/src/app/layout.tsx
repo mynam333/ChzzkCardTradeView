@@ -46,7 +46,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className="h-full antialiased dark" style={{ fontSize: "16px" }}>
+    <html lang="ko" className="h-full antialiased" style={{ fontSize: "16px" }}>
       <body className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
         <AppProvider>
           {children}

@@ -261,6 +261,7 @@ ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_3 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_4 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_5 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS registered_by TEXT;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS serial_number INTEGER;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT 'point';
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
@@ -1053,12 +1054,11 @@ INSERT INTO system_configs (key, value) VALUES ('maintenance_end_at', '') ON CON
 CREATE TABLE IF NOT EXISTS market_listings (
   id BIGSERIAL PRIMARY KEY,
   seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE UNIQUE,
+  user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE,
   price INTEGER NOT NULL CHECK (price >= 10),
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED')),
   buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   fee INTEGER DEFAULT 0,
-  settled_amount INTEGER DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -1066,6 +1066,10 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at DESC);
+ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
+  ON market_listings(user_card_id)
+  WHERE status = 'PENDING';
 
 -- ============================================================
 -- 오픈마켓 원자적 구매를 위한 RPC 함수
@@ -1161,5 +1165,4 @@ EXCEPTION
     RETURN 'FAILED:' || SQLERRM;
 END;
 $$ LANGUAGE plpgsql;
-
 

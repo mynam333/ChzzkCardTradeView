@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
     broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
     prev_value INTEGER DEFAULT 1000,            -- 이전 환산 시세 (등락률 계산용)
+    serial_number INTEGER,                      -- 스트리머 카드 발행 일련번호
     registered_by TEXT,                         -- 카드를 등록한 유저의 ID (nullable)
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -249,7 +250,7 @@ INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000');
 CREATE TABLE IF NOT EXISTS market_listings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     seller_id TEXT NOT NULL,
-    user_card_id INTEGER NOT NULL UNIQUE,
+    user_card_id INTEGER NOT NULL,
     price INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'PENDING',
     buyer_id TEXT,
@@ -265,6 +266,9 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
+    ON market_listings(user_card_id)
+    WHERE status = 'PENDING';
 
 -- 17. 미니게임 티켓 및 세션 테이블
 CREATE TABLE IF NOT EXISTS user_minigame_tickets (

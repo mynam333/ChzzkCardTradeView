@@ -93,6 +93,7 @@ type MinigameAnswerReveal = {
   channel_id: string;
   name: string;
   image_url: string;
+  star: number;
 };
 
 async function getAnswerReveal(
@@ -105,7 +106,8 @@ async function getAnswerReveal(
     return {
       channel_id: target.correct_id,
       name: target.correct_name,
-      image_url: target.image_url
+      image_url: target.image_url,
+      star: Number(target.star) || 0
     };
   }
 
@@ -115,7 +117,8 @@ async function getAnswerReveal(
   return {
     channel_id: streamer.channel_id,
     name: streamer.name,
-    image_url: getCardImageUrl(streamer, Number(target.star) || 0)
+    image_url: getCardImageUrl(streamer, Number(target.star) || 0),
+    star: Number(target.star) || 0
   };
 }
 

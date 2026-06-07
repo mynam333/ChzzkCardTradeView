@@ -5,6 +5,7 @@ import path from 'path';
 import { __setSqliteDbForTest } from '../services/db';
 import {
   initRepositories,
+  marketRepository,
   minigameRepository,
   reportRepository,
   streamerRepository,
@@ -171,6 +172,68 @@ describe('UserCardRepository 별 등급 분리', () => {
       { serial_number: 1, star: 4 },
       { serial_number: 2, star: 3 }
     ]);
+  });
+});
+
+describe('MarketRepository 재등록 제약', () => {
+  it('취소된 매물 이력이 있어도 같은 카드를 다시 등록할 수 있다', async () => {
+    seedUser(db, 'market-seller');
+    seedStreamer(db, 'market-channel', '마켓 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('market-seller', 'market-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const first = await marketRepository.create({
+      seller_id: 'market-seller',
+      user_card_id: cardId,
+      price: 1000
+    });
+    await marketRepository.updateStatus(first.id as number, 'CANCELLED');
+
+    const second = await marketRepository.create({
+      seller_id: 'market-seller',
+      user_card_id: cardId,
+      price: 1200
+    });
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.status).toBe('PENDING');
+    expect(db.prepare(`
+      SELECT COUNT(*) AS c
+        FROM market_listings
+       WHERE user_card_id = ? AND status = 'PENDING'
+    `).get(cardId)).toEqual({ c: 1 });
+  });
+
+  it('마켓에서 구매한 카드도 구매자가 다시 판매 등록할 수 있다', async () => {
+    seedUser(db, 'old-seller');
+    seedUser(db, 'new-buyer', 10000);
+    seedStreamer(db, 'sold-channel', '구매 카드 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('old-seller', 'sold-channel', 1, 1)
+    `).run().lastInsertRowid);
+
+    const first = await marketRepository.create({
+      seller_id: 'old-seller',
+      user_card_id: cardId,
+      price: 1000
+    });
+    expect(await marketRepository.buyAtomic(first.id as number, 'new-buyer')).toMatchObject({
+      ok: true,
+      reason: 'OK'
+    });
+
+    const relisted = await marketRepository.create({
+      seller_id: 'new-buyer',
+      user_card_id: cardId,
+      price: 1500
+    });
+
+    expect(relisted.status).toBe('PENDING');
+    expect(relisted.seller_id).toBe('new-buyer');
+    expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'new-buyer' });
   });
 });
 

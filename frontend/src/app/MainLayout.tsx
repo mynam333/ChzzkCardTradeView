@@ -86,28 +86,32 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-background text-foreground md:flex-row">
+    <div className="relative flex min-h-screen w-full flex-col text-foreground md:flex-row">
+      <div className="pointer-events-none fixed left-4 top-6 z-0 hidden h-24 w-24 rounded-full bg-white/55 blur-2xl md:block dark:bg-primary/10" />
+      <div className="pointer-events-none fixed bottom-10 right-8 z-0 hidden h-40 w-40 rounded-full bg-primary/12 blur-3xl md:block dark:bg-primary/10" />
       
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
-      <aside className="hidden w-64 flex-col border-r border-border bg-card px-4 py-6 md:flex">
+      <aside className="cute-surface sticky top-0 z-20 hidden h-screen w-72 flex-col rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
-          <Image
-            src="/icon.png"
-            alt="치카포 로고"
-            width={36}
-            height={36}
-            className="rounded-lg shadow-md object-contain"
-          />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10">
+            <Image
+              src="/icon.png"
+              alt="치카포 로고"
+              width={38}
+              height={38}
+              className="object-contain"
+            />
+          </div>
           <div className="flex-1">
-            <h1 className="text-lg font-bold tracking-tight text-foreground">치카포</h1>
-            <p className="text-xs text-muted-foreground">치지직 카드 포럼</p>
+            <h1 className="cute-display-font cute-outline-soft text-2xl font-black tracking-tight text-foreground">치카포</h1>
+            <p className="text-[11px] font-bold text-primary">치지직 카드 포럼</p>
           </div>
           {user && <NotificationBell align="left" />}
         </div>
 
         {/* 유저 상태 카드 또는 로그인 버튼 */}
         {authLoading ? (
-          <div className="mb-6 rounded-xl bg-secondary/20 p-4 border border-border animate-pulse flex flex-col gap-3">
+          <div className="mb-6 flex flex-col gap-3 rounded-3xl border border-border bg-secondary/40 p-4 animate-pulse">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-secondary" />
               <div className="flex-1 space-y-2 py-1">
@@ -117,13 +121,13 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             </div>
           </div>
         ) : user ? (
-          <div className="mb-6 rounded-xl bg-secondary/50 p-4 border border-border">
+          <div className="cute-card-pop mb-6 rounded-3xl border border-primary/15 bg-gradient-to-br from-white/85 via-secondary/70 to-accent/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:from-white/10 dark:via-secondary/70 dark:to-primary/10">
             <div className="flex items-center gap-3">
-              <img src={user.avatarUrl} alt="Avatar" className="h-10 w-10 rounded-full border border-primary/20 bg-card object-cover" />
+              <img src={user.avatarUrl} alt="Avatar" className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
               <div className="overflow-hidden">
-                <p className="truncate text-sm font-semibold">{user.username}</p>
+                <p className="truncate text-sm font-black">{user.username}</p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                  <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  <span className="cute-pill inline-block rounded-full px-2 py-0.5 text-[10px] font-black">
                     {user.role}
                   </span>
                   <UserTitleList titles={user.titles} compact />
@@ -131,18 +135,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Coins className="h-3 w-3 text-yellow-500" /> 보유 자산
+              <span className="flex items-center gap-1 text-xs font-bold text-muted-foreground">
+                <Coins className="h-3.5 w-3.5 text-primary" /> 보유 자산
               </span>
-              <span className="text-sm font-bold text-foreground">{user.point.toLocaleString()} P</span>
+              <span className="text-sm font-black text-foreground">{user.point.toLocaleString()} P</span>
             </div>
           </div>
         ) : (
-          <div className="mb-6 rounded-xl bg-secondary/30 p-4 border border-dashed border-border text-center">
-            <p className="text-xs text-muted-foreground mb-3">간편하게 로그인하고<br />나만의 카드를 소집하세요!</p>
+          <div className="mb-6 rounded-3xl border border-dashed border-primary/30 bg-secondary/55 p-4 text-center">
+            <p className="mb-3 text-xs font-bold leading-relaxed text-muted-foreground">간편하게 로그인하고<br />나만의 카드를 소집하세요!</p>
             <button
               onClick={handleLogin}
-              className="w-full rounded-lg bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition shadow-sm"
+              className="cute-wiggle-hover w-full rounded-2xl bg-primary py-2.5 text-xs font-black text-primary-foreground shadow-md shadow-primary/20 hover:-translate-y-0.5 hover:bg-primary/95"
             >
               치지직 연동 로그인
             </button>
@@ -157,10 +161,10 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                className={`cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-200 ${
                   isActive
-                    ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20 -translate-y-0.5'
+                    : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground hover:translate-x-0.5'
                 }`}
               >
                 <Icon className="h-4.5 w-4.5" />
@@ -173,10 +177,10 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         {/* 테마 스위치 */}
         <div className="mt-auto pt-4 border-t border-border">
           <div className="flex items-center justify-between px-2">
-            <span className="text-xs text-muted-foreground">화면 테마</span>
+            <span className="text-xs font-bold text-muted-foreground">화면 테마</span>
             <button
               onClick={toggleTheme}
-              className="rounded-lg p-2 hover:bg-secondary text-muted-foreground hover:text-foreground transition"
+              className="rounded-2xl border border-border bg-secondary/70 p-2 text-muted-foreground hover:-translate-y-0.5 hover:text-foreground"
               title="테마 전환"
             >
               {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
@@ -186,29 +190,33 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       </aside>
 
       {/* 모바일 상단 바 (Mobile Top Bar) */}
-      <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3 md:hidden">
-        <div className="flex items-center gap-2">
-          <Image 
-            src="/icon.png" 
-            alt="치카포 로고"
-            width={28} 
-            height={28} 
-            className="rounded"
-          />
-          <span className="font-bold text-foreground">치카포</span>
-          <span className="text-[0.65rem] text-muted-foreground self-end mb-[0.1rem]">치지직 카드 포럼</span>
+      <header className="cute-surface sticky top-0 z-40 mx-3 mt-3 flex items-center justify-between rounded-3xl px-4 py-3.5 md:hidden">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/80 p-1 shadow-sm dark:bg-white/10">
+            <Image
+              src="/icon.png"
+              alt="치카포 로고"
+              width={32}
+              height={32}
+              className="object-contain"
+            />
+          </span>
+          <div className="flex min-w-0 flex-col justify-center leading-none">
+            <span className="cute-loading-logo truncate text-[1.62rem] font-black tracking-tight">치카포</span>
+            <span className="mt-1 truncate text-[0.68rem] font-bold text-muted-foreground">치지직 카드 포럼</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           {user ? (
-            <div className="flex items-center gap-1 rounded-full bg-secondary/80 px-3 py-1 text-xs font-bold">
-              <Coins className="h-3.5 w-3.5 text-yellow-500" />
+            <div className="cute-pill flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black">
+              <Coins className="h-3.5 w-3.5" />
               <span>{user.point.toLocaleString()}</span>
             </div>
           ) : (
             <button
               onClick={handleLogin}
-              className="rounded-full bg-primary px-3 py-1 text-[11px] font-bold text-primary-foreground hover:bg-primary/95 transition shadow-sm"
+              className="cute-wiggle-hover rounded-full bg-primary px-3 py-1 text-[11px] font-black text-primary-foreground shadow-sm hover:bg-primary/95"
             >
               로그인
             </button>
@@ -218,7 +226,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
           <button
             onClick={toggleTheme}
-            className="rounded-full p-1.5 hover:bg-secondary text-muted-foreground"
+            className="rounded-full border border-border bg-secondary/70 p-1.5 text-muted-foreground hover:text-foreground"
           >
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </button>
@@ -227,15 +235,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       {/* Main Content Area */}
       <main
-        className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8 pb-24 md:pb-8 max-w-7xl mx-auto w-full"
+        className="relative z-10 mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-24 pt-6 md:px-8 md:py-8"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
         {children}
+        <p className="mx-auto mt-8 max-w-3xl text-center text-[10px] font-bold leading-relaxed text-muted-foreground/80">
+          치카포는 비공식 서드파티 서비스이며 네이버/치지직과 제휴 또는 공식 서비스가 아님을 밝힙니다.
+        </p>
       </main>
 
       {/* 모바일 하단 탭 내비게이션 바 (Mobile Bottom Navigation) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-center border-t border-border bg-card/90 backdrop-blur-md py-2 md:hidden">
+      <nav className="cute-surface fixed bottom-3 left-3 right-3 z-50 flex items-center justify-center rounded-[2rem] px-1.5 py-2 backdrop-blur-md md:hidden">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -243,8 +254,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`flex flex-1 flex-col items-center justify-center gap-1 py-1 transition-all min-w-0 ${
-                isActive ? 'text-primary' : 'text-muted-foreground'
+              className={`cute-wiggle-hover flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition-all ${
+                isActive ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' : 'text-muted-foreground'
               }`}
             >
               <Icon className="h-5 w-5" />

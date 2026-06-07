@@ -17,8 +17,10 @@ import {
   ChevronDown,
   CalendarClock,
   Eye,
+  Flag,
   UserRound
 } from 'lucide-react';
+import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 
 // 미니게임 타입 정의 (하이로우 제거)
 type GameType = 'quiz' | 'puzzle' | 'match';
@@ -60,6 +62,7 @@ type MinigameResult = {
     channel_id: string;
     name: string;
     image_url: string;
+    star: number;
   };
 };
 
@@ -117,20 +120,20 @@ const DAILY_GAME_DETAILS: Record<GameType, {
     description: '120초 안에 섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하세요.',
     bonus: '30초 안에 완성 시 보너스 200 P',
     Icon: Sparkles,
-    accent: 'text-amber-700 dark:text-amber-400',
-    iconBackground: 'bg-amber-100 dark:bg-amber-500/10',
-    badge: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400',
-    glow: 'from-amber-500/15 via-transparent to-transparent'
+    accent: 'text-teal-700 dark:text-teal-300',
+    iconBackground: 'bg-teal-100 dark:bg-teal-500/10',
+    badge: 'border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-300',
+    glow: 'from-teal-500/18 via-transparent to-transparent'
   },
   match: {
     title: '스트리머 짝맞추기',
     description: '처음 2초간 공개되는 카드를 기억한 뒤, 30초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
     bonus: '10초 안에 완성 시 보너스 200 P',
     Icon: Trophy,
-    accent: 'text-sky-700 dark:text-sky-400',
+    accent: 'text-sky-700 dark:text-sky-300',
     iconBackground: 'bg-sky-100 dark:bg-sky-500/10',
-    badge: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400',
-    glow: 'from-sky-500/15 via-transparent to-transparent'
+    badge: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300',
+    glow: 'from-sky-500/18 via-transparent to-transparent'
   }
 };
 
@@ -475,14 +478,14 @@ const GameTimeLimit: React.FC<{
       ) : (
         <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black shadow-sm transition-all duration-300 sm:px-4 sm:py-2 sm:text-sm ${timeLeft <= dangerSeconds
           ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
-          : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
+          : 'bg-secondary/80 text-foreground border-border/70'
           }`}>
           {timeLeft <= dangerSeconds ? (
             <span className="animate-pulse">🔥</span>
           ) : (
             <Timer className={`h-3.5 w-3.5 ${timeLeft <= dangerSeconds * 2 ? 'animate-spin' : ''} text-primary`} />
           )}
-          <span>남은 시간: <strong className="font-mono text-sm sm:text-base">{timeLeft}</strong>초</span>
+          <span>남은 시간: <strong className="cute-number-font text-sm sm:text-base">{timeLeft}</strong>초</span>
         </div>
       )}
 
@@ -563,6 +566,7 @@ export const ArcadeTab: React.FC = () => {
 
   // 공통 결과 화면 상태
   const [gameResult, setGameResult] = useState<MinigameResult | null>(null);
+  const [reportCard, setReportCard] = useState<ReportTargetCard | null>(null);
 
   useEffect(() => {
     if (!gameResult) return;
@@ -1104,7 +1108,7 @@ export const ArcadeTab: React.FC = () => {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
-        <div className="max-w-md rounded-3xl border border-border bg-card p-8 shadow-lg">
+        <div className="cute-surface max-w-md rounded-[2rem] p-8">
           <Gamepad2 className="mx-auto h-12 w-12 text-primary animate-pulse mb-4" />
           <h2 className="text-xl font-black text-foreground">로그인이 필요한 기능입니다</h2>
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
@@ -1118,7 +1122,7 @@ export const ArcadeTab: React.FC = () => {
   if (loading || !todayGame) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
-        <div className="rounded-3xl border border-border bg-card p-8 shadow-lg">
+        <div className="cute-surface rounded-[2rem] p-8">
           <RefreshCw className="mx-auto h-9 w-9 animate-spin text-primary mb-3" />
           <p className="text-xs font-bold text-muted-foreground">오늘의 미니게임을 불러오는 중입니다.</p>
         </div>
@@ -1139,6 +1143,21 @@ export const ArcadeTab: React.FC = () => {
         : undefined
     )
     || '정답 정보를 불러오지 못했습니다.';
+  const answerReportCard: ReportTargetCard | null = gameResult?.answer
+    ? {
+        star: gameResult.answer.star || 0,
+        streamer: {
+          channel_id: gameResult.answer.channel_id,
+          name: gameResult.answer.name,
+          logo_url: gameResult.answer.image_url,
+          custom_image_url: null,
+          custom_images: null
+        }
+      }
+    : null;
+  const handleReportResult = (title: string, message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    toast(`${title}: ${message}`, type);
+  };
 
   return (
     <div className="space-y-6">
@@ -1214,6 +1233,17 @@ export const ArcadeTab: React.FC = () => {
                         </div>
                       )}
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent" />
+                      {answerReportCard && (
+                        <button
+                          type="button"
+                          onClick={() => setReportCard(answerReportCard)}
+                          className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full border border-white/25 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-sm transition hover:bg-red-500/85"
+                          aria-label="정답 이미지 신고"
+                        >
+                          <Flag className="h-3 w-3" />
+                          신고
+                        </button>
+                      )}
                     </div>
 
                     <div className="relative -mt-5 mx-3 flex items-center gap-3 rounded-2xl border border-border/90 bg-card/95 px-4 py-3 shadow-xl backdrop-blur-md">
@@ -1266,7 +1296,7 @@ export const ArcadeTab: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleExitGame}
-                    className="rounded-xl border border-border bg-secondary px-5 py-2.5 text-xs font-bold text-muted-foreground transition hover:text-foreground"
+                    className="rounded-2xl border border-border bg-secondary px-5 py-2.5 text-xs font-bold text-muted-foreground transition hover:text-foreground"
                   >
                     로비로 돌아가기
                   </button>
@@ -1274,7 +1304,7 @@ export const ArcadeTab: React.FC = () => {
                     type="button"
                     onClick={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)}
                     disabled={!isPracticeMode && tickets <= 0}
-                    className="flex items-center justify-center gap-1 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+                    className="cute-wiggle-hover flex items-center justify-center gap-1 rounded-2xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     {isPracticeMode ? '다시 연습하기' : '다시 도전'}
@@ -1287,49 +1317,57 @@ export const ArcadeTab: React.FC = () => {
         document.body
       )}
 
+      {reportCard && (
+        <ReportCardModal
+          card={reportCard}
+          onClose={() => setReportCard(null)}
+          onResult={handleReportResult}
+        />
+      )}
+
       {/* 아케이드 대시보드 헤더 */}
       {!activeGame && (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl bg-card border border-border p-5 shadow-sm">
+        <div className="cute-surface flex flex-col gap-4 rounded-[2rem] p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-primary/10 p-2.5">
+            <div className="cute-pill rounded-2xl p-2.5">
               <Gamepad2 className="h-6 w-6 text-primary" />
             </div>
             <div>
               <h2 className="text-lg font-extrabold text-foreground flex items-center gap-1.5">
                 미니게임 아케이드
-                <span className="text-xs font-bold text-muted-foreground bg-secondary/80 px-2 py-0.5 rounded-full"> Arcade </span>
+                <span className="cute-pill rounded-full px-2 py-0.5 text-xs font-black"> Arcade </span>
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">포인트를 두고 벌이는 재미있는 카드 미니게임!</p>
             </div>
           </div>
 
           {/* 아케이드 코인 충전 현황 */}
-          <div className="flex min-w-[270px] flex-col gap-2 self-start rounded-2xl border border-blue-200/80 bg-gradient-to-br from-blue-50 via-sky-50/70 to-slate-50 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_14px_rgba(37,99,235,0.08)] sm:self-center dark:border-zinc-800 dark:bg-none dark:bg-zinc-900/45 dark:shadow-inner">
+          <div className="flex min-w-[270px] flex-col gap-2 self-start rounded-[1.75rem] border border-primary/20 bg-gradient-to-br from-white via-secondary/75 to-accent/35 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(22,136,240,0.12)] sm:self-center dark:from-card dark:via-secondary/65 dark:to-primary/10">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1 text-xs font-black text-blue-800 dark:text-amber-400">
+              <span className="flex items-center gap-1 text-xs font-black text-primary">
                 🪙 아케이드 동전
               </span>
-              <span className="rounded-full border border-blue-200 bg-blue-100/80 px-2 py-0.5 text-[9px] font-black text-blue-800 dark:border-primary/20 dark:bg-primary/10 dark:text-primary">
+              <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">
                 총 {tickets}개
               </span>
             </div>
 
             <div className="flex items-center justify-between mt-1 gap-4">
               {/* 5개 코인 슬롯 */}
-              <div className="flex items-center gap-1.5 rounded-xl border border-blue-200/90 bg-white/80 px-2.5 py-1.5 shadow-inner dark:border-zinc-800/80 dark:bg-black/40">
+              <div className="flex items-center gap-1.5 rounded-2xl border border-primary/15 bg-white/80 px-2.5 py-1.5 shadow-inner dark:bg-card/70">
                 {Array.from({ length: 5 }).map((_, idx) => {
                   const hasCoin = idx < baseTickets;
                   return (
                     <div key={idx} className="relative">
                       {hasCoin ? (
-                        <div className="relative w-5.5 h-5.5 rounded-full bg-gradient-to-b from-yellow-300 via-amber-400 to-amber-500 border border-amber-200 shadow-[0_2px_4px_rgba(245,158,11,0.6),inset_0_1px_0_rgba(255,255,255,0.4)] flex items-center justify-center animate-[pulse_1.5s_infinite_ease-in-out]">
-                          <div className="w-3.5 h-3.5 rounded-full border border-dashed border-yellow-100/50 flex items-center justify-center">
-                            <span className="text-[9px] font-black text-amber-950/80 leading-none select-none">C</span>
+                        <div className="relative flex h-5.5 w-5.5 animate-[pulse_1.5s_infinite_ease-in-out] items-center justify-center rounded-full border border-sky-100 bg-gradient-to-b from-sky-200 via-primary to-teal-400 shadow-[0_2px_8px_rgba(22,136,240,0.4),inset_0_1px_0_rgba(255,255,255,0.55)]">
+                          <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-dashed border-white/65">
+                            <span className="select-none text-[9px] font-black leading-none text-white">C</span>
                           </div>
                         </div>
                       ) : (
-                        <div className="relative flex h-5.5 w-5.5 items-center justify-center rounded-full border border-blue-200 bg-blue-100 shadow-inner dark:border-zinc-800 dark:bg-zinc-900">
-                          <div className="h-2 w-2 rounded-full border border-blue-200 bg-blue-200 dark:border-zinc-900 dark:bg-zinc-950" />
+                        <div className="relative flex h-5.5 w-5.5 items-center justify-center rounded-full border border-primary/18 bg-secondary/70 shadow-inner dark:bg-secondary/50">
+                          <div className="h-2 w-2 rounded-full border border-primary/15 bg-primary/20" />
                         </div>
                       )}
                     </div>
@@ -1339,25 +1377,25 @@ export const ArcadeTab: React.FC = () => {
 
               {/* 충전 대기 타이머 */}
               {baseTickets < 5 ? (
-                <div className="flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-100/80 px-2.5 py-1.5 text-blue-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
-                  <RefreshCw className="h-3 w-3 animate-spin text-blue-600 dark:text-amber-400" />
-                  <span className="text-xs font-mono font-black">{formatTime(secondsUntilNext)}</span>
+                <div className="flex items-center gap-1 rounded-2xl border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-primary">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  <span className="cute-number-font text-xs font-black">{formatTime(secondsUntilNext)}</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1 rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[10px] font-black uppercase text-sky-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                <div className="flex items-center gap-1 rounded-2xl border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[10px] font-black uppercase text-teal-700 dark:border-teal-500/20 dark:bg-teal-500/10 dark:text-teal-300">
                   FULL COIN
                 </div>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-blue-200/80 bg-white/70 px-2.5 py-1.5 dark:border-zinc-800/80 dark:bg-black/30">
+              <div className="rounded-2xl border border-primary/15 bg-white/70 px-2.5 py-1.5 dark:bg-card/60">
                 <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">기본 충전</p>
-                <p className="text-xs font-black text-blue-800 dark:text-amber-400"><span className="font-mono">{baseTickets}</span>/5</p>
+                <p className="text-xs font-black text-primary"><span className="cute-number-font">{baseTickets}</span>/5</p>
               </div>
-              <div className={`rounded-xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/10' : 'border-slate-200 bg-white/65 dark:border-zinc-800/80 dark:bg-black/30'}`}>
+              <div className={`rounded-2xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/10' : 'border-primary/12 bg-white/65 dark:bg-card/55'}`}>
                 <p className="text-[9px] font-bold text-slate-500 dark:text-muted-foreground">추가 티켓</p>
-                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-700 dark:text-sky-400' : 'text-slate-500 dark:text-muted-foreground'}`}>+<span className="font-mono">{bonusTickets}</span></p>
+                <p className={`text-xs font-black ${bonusTickets > 0 ? 'text-sky-700 dark:text-sky-400' : 'text-slate-500 dark:text-muted-foreground'}`}>+<span className="cute-number-font">{bonusTickets}</span></p>
               </div>
             </div>
           </div>
@@ -1366,7 +1404,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 백엔드가 KST 날짜 기준으로 지정한 오늘의 미니게임 */}
       {!activeGame && (
-        <section className="relative overflow-hidden rounded-3xl border border-border bg-card shadow-lg">
+        <section className="cute-surface relative overflow-hidden rounded-[2rem]">
           <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${dailyGameDetails.glow}`} />
           <div className="relative border-b border-border/60 px-5 py-4 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1406,13 +1444,13 @@ export const ArcadeTab: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-2xl border border-border/70 bg-background/65 p-4 shadow-inner">
+            <div className="flex flex-col justify-between gap-3 rounded-[1.75rem] border border-border/70 bg-background/65 p-4 shadow-inner">
               <div>
                 <div className="flex items-center gap-1.5 text-[10px] font-black text-muted-foreground">
                   <CalendarClock className="h-3.5 w-3.5 text-primary" />
                   다음 게임까지
                 </div>
-                <p className="mt-1 font-mono text-xl font-black tracking-tight text-foreground">
+                <p className="cute-number-font mt-1 text-xl font-black tracking-tight text-foreground">
                   {formatTime(secondsUntilGameChange)}
                 </p>
                 <p className="mt-1 text-[9px] font-bold text-muted-foreground">
@@ -1422,7 +1460,7 @@ export const ArcadeTab: React.FC = () => {
               <button
                 onClick={() => handleStartGame(todayGame)}
                 disabled={gameBusy || tickets <= 0}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground shadow-sm transition hover:bg-primary/90 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+                className="cute-wiggle-hover flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground transition active:scale-95 disabled:pointer-events-none disabled:opacity-40"
               >
                 🪙 1개 소모 · 도전
               </button>
@@ -1433,21 +1471,21 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 동전과 포인트 지급 없이 모든 게임을 체험하는 연습 모드 */}
       {!activeGame && (
-        <section className="overflow-hidden rounded-3xl border border-dashed border-indigo-200 bg-indigo-50/45 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/5">
+        <section className="overflow-hidden rounded-[2rem] border border-dashed border-primary/25 bg-primary/5 shadow-sm dark:bg-primary/10">
           <button
             type="button"
             aria-expanded={isPracticeExpanded}
             aria-controls="practice-game-list"
             onClick={() => setIsPracticeExpanded(expanded => !expanded)}
-            className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-indigo-100/45 sm:px-6 dark:hover:bg-indigo-500/10 ${isPracticeExpanded ? 'border-b border-indigo-200/70 dark:border-indigo-500/20' : ''}`}
+            className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-primary/8 sm:px-6 ${isPracticeExpanded ? 'border-b border-primary/18' : ''}`}
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
+                <span className="cute-pill flex h-7 w-7 items-center justify-center rounded-2xl">
                   <Gamepad2 className="h-4 w-4" />
                 </span>
                 <h3 className="text-sm font-black text-foreground">연습 게임</h3>
-                <span className="rounded-full border border-indigo-200 bg-white/70 px-2 py-0.5 text-[9px] font-black text-indigo-700 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300">
+                <span className="rounded-full border border-primary/20 bg-white/70 px-2 py-0.5 text-[9px] font-black text-primary dark:bg-primary/10">
                   FREE PLAY
                 </span>
               </div>
@@ -1455,7 +1493,7 @@ export const ArcadeTab: React.FC = () => {
                 오늘의 게임과 관계없이 무료로 플레이할 수 있습니다. (보상 X)
               </p>
             </div>
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-white/70 text-indigo-700 shadow-sm dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300">
+            <span className="cute-pill flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm">
               <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isPracticeExpanded ? 'rotate-180' : ''}`} />
             </span>
           </button>
@@ -1469,7 +1507,7 @@ export const ArcadeTab: React.FC = () => {
                 return (
                   <article
                     key={gameType}
-                    className="flex flex-col justify-between rounded-2xl border border-border/80 bg-card/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md dark:hover:border-indigo-500/40"
+                    className="cute-card-pop flex flex-col justify-between rounded-[1.75rem] border border-border/80 bg-card/90 p-4 shadow-sm hover:border-primary/35 hover:shadow-md"
                   >
                     <div>
                       <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${details.iconBackground} ${details.accent}`}>
@@ -1483,7 +1521,7 @@ export const ArcadeTab: React.FC = () => {
                     <button
                       onClick={() => handleStartGame(gameType, true)}
                       disabled={gameBusy}
-                      className="mt-4 flex w-full items-center justify-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 py-2 text-[10px] font-black text-indigo-700 transition hover:bg-indigo-100 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+                      className="cute-wiggle-hover mt-4 flex w-full items-center justify-center gap-1 rounded-2xl border border-primary/20 bg-primary/10 px-2.5 py-2 text-[10px] font-black text-primary transition hover:bg-primary/15 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
                     >
                       연습 시작
                     </button>
@@ -1499,16 +1537,16 @@ export const ArcadeTab: React.FC = () => {
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
       {activeGame && gameData && (
-        <div className="relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-card p-4 shadow-xl animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]">
+        <div className="cute-surface relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[2rem] p-4 animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]">
 
           {/* 아케이드 3초 카운트다운 오버레이 */}
           {countdownLeft !== null && countdownLeft > 0 && (
-            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 backdrop-blur-xs select-none pointer-events-auto">
+            <div className="absolute inset-0 z-40 flex select-none flex-col items-center justify-center bg-sky-950/88 backdrop-blur-xs pointer-events-auto">
               <div className="text-center space-y-3 animate-in zoom-in-90 duration-200">
                 <span className="text-[10px] font-black tracking-widest text-primary bg-primary/10 border border-primary/20 px-3.5 py-1 rounded-full animate-pulse">
                   READY?
                 </span>
-                <div className="text-7xl font-black text-amber-400 drop-shadow-[0_0_20px_rgba(245,158,11,0.75)] font-mono animate-ping scale-110">
+                <div className="cute-number-font text-7xl font-black text-primary drop-shadow-[0_0_24px_rgba(67,228,210,0.65)] animate-ping scale-110">
                   {countdownLeft}
                 </div>
                 <p className="text-[10px] text-muted-foreground font-extrabold uppercase tracking-wide">Get Ready for Action</p>
@@ -1526,14 +1564,14 @@ export const ArcadeTab: React.FC = () => {
             </button>
 
             {isPracticeMode ? (
-              <div className="flex select-none items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-black text-indigo-700 shadow-xs dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300">
+              <div className="flex select-none items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-black text-primary shadow-xs">
                 <Gamepad2 className="h-3 w-3" />
                 연습 모드 · 동전 미소모
               </div>
             ) : (
               <div className="flex select-none items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-950 shadow-xs dark:border-border/40 dark:bg-secondary/70 dark:text-foreground">
-                <span className="text-amber-600 dark:text-amber-400">🪙</span>
-                <span>남은 코인: <strong className="font-mono text-blue-700 dark:text-amber-400">{tickets}</strong></span>
+                <span className="text-primary">🪙</span>
+                <span>남은 코인: <strong className="cute-number-font text-primary">{tickets}</strong></span>
               </div>
             )}
 
@@ -1566,17 +1604,17 @@ export const ArcadeTab: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm transition-all duration-300 sm:px-4 sm:py-2 sm:text-sm ${quizTimeLeft <= 5
                       ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
-                      : 'bg-zinc-800/80 text-foreground border-zinc-700/60'
+                      : 'bg-secondary/80 text-foreground border-border/70'
                       }`}>
                       {quizTimeLeft <= 5 ? (
                         <span className="animate-pulse">🔥</span>
                       ) : (
                         <Timer className={`h-3 w-3 ${quizTimeLeft <= 8 ? 'animate-spin' : ''} text-primary`} />
                       )}
-                      <span>남은 시간: <strong className="font-mono text-xs sm:text-base">{quizTimeLeft}</strong>초</span>
+                      <span>남은 시간: <strong className="cute-number-font text-xs sm:text-base">{quizTimeLeft}</strong>초</span>
                     </div>
 
-                    <span className="rounded bg-secondary/80 px-2 py-0.5 text-[9px] font-black text-muted-foreground sm:px-3 sm:py-1.5 sm:text-xs">
+                    <span className="rounded-full border border-border/70 bg-secondary/80 px-2 py-0.5 text-[9px] font-black text-muted-foreground sm:px-3 sm:py-1.5 sm:text-xs">
                       3초 스피드 보너스 (+200 P)
                     </span>
                   </div>
@@ -1594,7 +1632,7 @@ export const ArcadeTab: React.FC = () => {
                 </div>
 
                 {/* 카드 이미지 컨테이너 */}
-                <div className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-md">
+                <div className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-[1.75rem] border border-border/80 bg-sky-950 shadow-[0_18px_44px_rgba(7,89,133,0.26)]">
 
                   {/* 가우시안 블러 모드 */}
                   {quizBlurType === 'gaussian' && (
@@ -1649,7 +1687,7 @@ export const ArcadeTab: React.FC = () => {
 
                   {/* 디테일 데코: 치지직 송출 에러 인터페이스 오버레이 */}
                   {quizIntensity > 0 && (
-                    <div className="pointer-events-none absolute left-2.5 top-2.5 flex select-none items-center gap-1 rounded border border-zinc-800/80 bg-black/60 px-1.5 py-0.5 text-[8px] font-black tracking-wider text-rose-500 animate-pulse sm:left-3.5 sm:top-3.5 sm:px-2 sm:py-1 sm:text-[10px]">
+                    <div className="pointer-events-none absolute left-2.5 top-2.5 flex select-none items-center gap-1 rounded-full border border-white/20 bg-sky-950/72 px-1.5 py-0.5 text-[8px] font-black tracking-wider text-rose-300 animate-pulse sm:left-3.5 sm:top-3.5 sm:px-2 sm:py-1 sm:text-[10px]">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-600 animate-ping sm:h-2 sm:w-2" />
                       <span>DECRYPTING {Math.round(100 - quizIntensity)}%</span>
                     </div>
@@ -1679,9 +1717,9 @@ export const ArcadeTab: React.FC = () => {
                         key={choice.channel_id}
                         onClick={() => handleQuizAnswer(choice.channel_id)}
                         disabled={selectedQuizChoice !== null}
-                        className={`rounded-xl border p-3.5 text-center text-xs font-extrabold transition sm:p-5 sm:text-base ${isSelected
+                        className={`cute-card-pop rounded-2xl border p-3.5 text-center text-xs font-extrabold sm:p-5 sm:text-base ${isSelected
                           ? 'border-primary bg-primary/10 text-primary shadow-sm'
-                          : 'border-border bg-secondary/30 text-foreground hover:bg-secondary/70'
+                          : 'border-border bg-secondary/35 text-foreground hover:-translate-y-0.5 hover:bg-secondary/70'
                           }`}
                       >
                         {choice.name}
@@ -1709,8 +1747,8 @@ export const ArcadeTab: React.FC = () => {
               </p>
 
               {/* 원본의 중앙 3:4 영역을 실제 좌표로 크롭한 뒤 정사각형 12개로 분할 */}
-              <div className="rounded-2xl border border-border bg-secondary/20 p-1 shadow-inner">
-                <div className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-xl touch-none select-none">
+              <div className="rounded-[1.75rem] border border-border bg-secondary/30 p-1.5 shadow-inner">
+                <div className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-2xl touch-none select-none">
                   {puzzlePieces.map((piece, idx) => {
                     const isDragging = draggingPuzzleIndex === idx;
                     const isDropTarget = dragOverPuzzleIndex === idx;
@@ -1737,7 +1775,7 @@ export const ArcadeTab: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 rounded bg-secondary/60 px-2.5 py-1 text-[10px] font-bold text-muted-foreground sm:px-3.5 sm:py-2 sm:text-xs">
+              <div className="flex items-center gap-1 rounded-full border border-border/70 bg-secondary/60 px-2.5 py-1 text-[10px] font-bold text-muted-foreground sm:px-3.5 sm:py-2 sm:text-xs">
                 <Clock className="h-3 w-3 sm:h-4 sm:w-4" /> 모든 조각이 제자리이고 정답 각도이면 자동 완성됩니다.
               </div>
             </div>
@@ -1758,7 +1796,7 @@ export const ArcadeTab: React.FC = () => {
               />
 
               {/* 카드 비율 4:5를 유지하는 3x4 / 4x3 반응형 매칭 보드 */}
-              <div className="arcade-match-board grid aspect-[3/5] grid-cols-3 grid-rows-4 gap-2 rounded-2xl border border-border/40 bg-secondary/20 p-1.5 sm:aspect-[16/15] sm:grid-cols-4 sm:grid-rows-3 sm:gap-3 sm:p-2">
+              <div className="arcade-match-board grid aspect-[3/5] grid-cols-3 grid-rows-4 gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/30 p-1.5 shadow-inner sm:aspect-[16/15] sm:grid-cols-4 sm:grid-rows-3 sm:gap-3 sm:p-2">
                 {matchCards.map((card, idx) => {
                   // 선공개 중이거나 뒤집혔거나 이미 맞춘 경우 앞면 노출
                   const showFront = revealActive || card.isFlipped || card.isMatched;
@@ -1775,52 +1813,51 @@ export const ArcadeTab: React.FC = () => {
                           } ${card.isMatched ? '' : 'group-hover:scale-102'
                           }`}
                       >
-                        {/* 카드 뒷면 (3D Backface) - 사이버 펑크 메탈 & 형광 연두 광원 테마 */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-black to-zinc-900 border-2 border-emerald-500/20 rounded-xl flex flex-col items-center justify-center backface-hidden shadow-lg overflow-hidden group/back z-10">
-                          {/* 사이버 테크 가이드라인 격자 무늬 배경 */}
-                          <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,163,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,163,0.03)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
+                        {/* 카드 뒷면 (3D Backface) */}
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-white/55 bg-gradient-to-br from-sky-300 via-primary to-teal-400 shadow-lg backface-hidden group/back">
+                          <div className="absolute inset-0 bg-[radial-gradient(circle,rgba(255,255,255,0.22)_1px,transparent_1.6px)] bg-[size:12px_12px] pointer-events-none" />
 
                           {/* 미래형 홀로그램 회전 서클 */}
-                          <div className="arcade-match-orbit pointer-events-none absolute flex items-center justify-center rounded-full border border-emerald-500/15 animate-[spin_12s_linear_infinite]">
-                            <div className="h-3/4 w-3/4 rounded-full border border-dashed border-emerald-500/35" />
+                          <div className="arcade-match-orbit pointer-events-none absolute flex items-center justify-center rounded-full border border-white/30 animate-[spin_12s_linear_infinite]">
+                            <div className="h-3/4 w-3/4 rounded-full border border-dashed border-white/55" />
                           </div>
 
                           {/* 모서리 데코 포인트 */}
-                          <div className="absolute top-1 left-1 w-2 h-2 border-t border-l border-emerald-500/60" />
-                          <div className="absolute top-1 right-1 w-2 h-2 border-t border-r border-emerald-500/60" />
-                          <div className="absolute bottom-1 left-1 w-2 h-2 border-b border-l border-emerald-500/60" />
-                          <div className="absolute bottom-1 right-1 w-2 h-2 border-b border-r border-emerald-500/60" />
+                          <div className="absolute left-1 top-1 h-2 w-2 rounded-tl-lg border-l border-t border-white/70" />
+                          <div className="absolute right-1 top-1 h-2 w-2 rounded-tr-lg border-r border-t border-white/70" />
+                          <div className="absolute bottom-1 left-1 h-2 w-2 rounded-bl-lg border-b border-l border-white/70" />
+                          <div className="absolute bottom-1 right-1 h-2 w-2 rounded-br-lg border-b border-r border-white/70" />
 
                           {/* 중앙 로고 */}
                           <div className="relative z-10 flex select-none flex-col items-center gap-1">
-                            <div className="arcade-match-back-logo flex items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.35)] transition-transform duration-300 group-hover/back:rotate-12">
-                              <div className="w-full h-full rounded-[10px] bg-zinc-950 flex items-center justify-center">
-                                <Gamepad2 className="h-1/2 w-1/2 text-emerald-400" />
+                            <div className="arcade-match-back-logo flex items-center justify-center rounded-2xl bg-white/28 p-0.5 shadow-[0_0_18px_rgba(255,255,255,0.34)] transition-transform duration-300 group-hover/back:rotate-12">
+                              <div className="flex h-full w-full items-center justify-center rounded-[14px] bg-white/22">
+                                <Gamepad2 className="h-1/2 w-1/2 text-white" />
                               </div>
                             </div>
-                            <span className="arcade-match-back-label mt-1.5 font-black uppercase tracking-widest text-emerald-400/80">CHZZK CARD</span>
+                            <span className="arcade-match-back-label mt-1.5 font-black uppercase tracking-widest text-white drop-shadow">CHZZK CARD</span>
                           </div>
 
                           {/* 광택 반사 글레어 효과 */}
                           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
                         </div>
 
-                        {/* 카드 앞면 (3D Frontface) - 세련된 사이버 프레임 */}
-                        <div className="arcade-match-front absolute inset-0 flex flex-col items-center justify-between overflow-hidden rounded-xl border-2 border-zinc-700/50 bg-gradient-to-b from-zinc-900 to-zinc-950 backface-hidden rotate-y-180 shadow-xl">
-                          <div className="absolute top-1 left-1 w-1.5 h-1.5 border-t border-l border-zinc-500/40" />
-                          <div className="absolute top-1 right-1 w-1.5 h-1.5 border-t border-r border-zinc-500/40" />
+                        {/* 카드 앞면 (3D Frontface) */}
+                        <div className="arcade-match-front absolute inset-0 flex flex-col items-center justify-between overflow-hidden rounded-2xl border-2 border-white bg-gradient-to-b from-white to-secondary backface-hidden rotate-y-180 shadow-xl dark:border-border dark:from-card dark:to-secondary">
+                          <div className="absolute left-1 top-1 h-1.5 w-1.5 rounded-tl border-l border-t border-primary/30" />
+                          <div className="absolute right-1 top-1 h-1.5 w-1.5 rounded-tr border-r border-t border-primary/30" />
 
                           <div className="w-full flex-1 flex flex-col items-center justify-center mt-1">
-                            <div className="relative p-0.5 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 shadow-md">
+                            <div className="relative rounded-full bg-gradient-to-tr from-primary to-teal-400 p-0.5 shadow-md">
                               <img
                                 src={card.logo_url || '/icon.png'}
                                 alt={card.name}
-                                className="arcade-match-avatar pointer-events-none select-none rounded-full border-2 border-zinc-900 object-cover"
+                                className="arcade-match-avatar pointer-events-none select-none rounded-full border-2 border-white object-cover dark:border-card"
                               />
                             </div>
                           </div>
 
-                          <div className="arcade-match-nameplate mt-2 w-full rounded-lg border border-zinc-700/50 bg-zinc-800/85 text-center">
+                          <div className="arcade-match-nameplate mt-2 w-full rounded-xl border border-border/70 bg-white/82 text-center shadow-sm dark:bg-card/82">
                             <p className="arcade-match-name truncate font-black text-foreground drop-shadow-sm select-none">
                               {card.name}
                             </p>
@@ -1828,7 +1865,7 @@ export const ArcadeTab: React.FC = () => {
 
                           {/* 짝 맞춤 성공 시 카드를 어둡게 처리하는 반투명 오버레이 */}
                           {card.isMatched && (
-                            <div className="absolute inset-0 bg-black/55 rounded-xl z-20 pointer-events-none transition-all duration-300 animate-in fade-in" />
+                            <div className="absolute inset-0 z-20 rounded-2xl bg-primary/20 pointer-events-none transition-all duration-300 animate-in fade-in" />
                           )}
                         </div>
                       </div>

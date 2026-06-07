@@ -374,7 +374,7 @@ export const ShopTab: React.FC = () => {
             <button
               key={tabId}
               onClick={() => setSubTab(tabId)}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition-all duration-200 cursor-pointer ${isActive
+              className={`cute-wiggle-hover flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition-all duration-200 ${isActive
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-105'
                   : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
                 }`}
@@ -389,7 +389,7 @@ export const ShopTab: React.FC = () => {
       {subTab === 'gacha_shop' ? (
         <div className="space-y-8 animate-in fade-in duration-200">
           {/* 가챠 보드 (상점 최상단) */}
-          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+          <section className="cute-surface rounded-[2rem] p-6">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="space-y-2 text-center md:text-left">
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
@@ -409,7 +409,7 @@ export const ShopTab: React.FC = () => {
                 <button
                   onClick={handleDraw}
                   disabled={isDrawing}
-                  className="group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 dark:from-primary dark:via-emerald-500 dark:to-teal-600 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 dark:shadow-lg dark:shadow-primary/20 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none"
+                  className="cute-wiggle-hover group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none dark:from-primary dark:via-emerald-500 dark:to-teal-600 dark:shadow-lg dark:shadow-primary/20"
                 >
                   <Sparkles className="h-8 w-8 animate-pulse text-white" />
                   <div className="text-center">
@@ -417,7 +417,7 @@ export const ShopTab: React.FC = () => {
                     {isFreeDraw ? (
                       <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 뽑기 가능</p>
                     ) : (
-                      <p className="text-[10px] text-emerald-100 flex items-center justify-center gap-1"><Coins className="h-3 w-3" /> {(user?.drawCost ?? 10000).toLocaleString()} P</p>
+                      <p className="cute-number-font flex items-center justify-center gap-1 text-[10px] text-emerald-100"><Coins className="h-3 w-3" /> {(user?.drawCost ?? 10000).toLocaleString()} P</p>
                     )}
                   </div>
                 </button>
@@ -434,7 +434,7 @@ export const ShopTab: React.FC = () => {
                 ) : drawnCard ? (
                   <div className="flex flex-col items-center">
                     <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공 (보관함에서 확인)</span>
-                    <div className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-2xl bg-card p-4 shadow-xl border border-border/80">
+                    <div className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl">
                       <div className="absolute inset-0 z-0">
                         <img src={drawnCard.custom_image_url || drawnCard.logo_url} alt={drawnCard.name} className="h-full w-full object-cover opacity-80" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>
@@ -452,7 +452,7 @@ export const ShopTab: React.FC = () => {
                         <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
                         <div className="flex items-center justify-between border-t border-white/20 pt-2">
                           <span className="text-[9px] text-zinc-400">시세 가치</span>
-                          <span className="text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
+                          <span className="cute-number-font text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
                         </div>
                       </div>
                     </div>
@@ -464,10 +464,10 @@ export const ShopTab: React.FC = () => {
           </section>
 
           {/* 상점 */}
-          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-5">
+          <section className="cute-surface rounded-[2rem] p-6 space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-black flex items-center gap-2"><Store className="h-5.5 w-5.5 text-primary" /> 코스메틱 상점</h2>
-              {user && <span className="text-xs font-bold text-yellow-500 flex items-center gap-1"><Coins className="h-3.5 w-3.5" /> {user.point.toLocaleString()} P</span>}
+              <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black"><Store className="h-5.5 w-5.5 text-primary" /> 코스메틱 상점</h2>
+              {user && <span className="cute-number-font flex items-center gap-1 text-xs font-bold text-primary"><Coins className="h-3.5 w-3.5" /> {user.point.toLocaleString()} P</span>}
             </div>
             <p className="text-xs text-muted-foreground">포인트로 카드 테두리와 이름 이펙트를 구매하세요. 구매한 코스메틱은 보관함에서 카드에 장착할 수 있습니다.</p>
 
@@ -480,7 +480,7 @@ export const ShopTab: React.FC = () => {
                 <button
                   key={t}
                   onClick={() => handleShopTypeChange(t)}
-                  className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition-all duration-150 ${shopType === t
+                  className={`cute-wiggle-hover flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition-all duration-150 ${shopType === t
                       ? 'bg-card text-foreground shadow-sm font-extrabold'
                       : 'text-muted-foreground hover:text-foreground'
                     }`}
@@ -501,7 +501,7 @@ export const ShopTab: React.FC = () => {
                     const bought = purchased[item.id] || 0;
                     const soldOut = limited && bought >= item.purchase_limit;
                     return (
-                      <div key={item.id} className="rounded-2xl border border-border bg-secondary/20 p-4 flex flex-col items-center gap-3">
+                      <div key={item.id} className="cute-card-pop flex flex-col items-center gap-3 rounded-[1.75rem] border border-border bg-secondary/25 p-4 hover:border-primary/30">
                         {/* 미리보기 */}
                         {item.type === 'border' ? (
                           <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '64px', height: '102.4px' }}>
@@ -529,7 +529,7 @@ export const ShopTab: React.FC = () => {
                           <p className="text-xs font-bold truncate max-w-[8rem]">{item.name}</p>
                           {item.description && <p className="text-[10px] text-muted-foreground line-clamp-2">{item.description}</p>}
                         </div>
-                        <div className="flex items-center gap-1 text-xs font-black text-yellow-500"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
+                        <div className="cute-number-font flex items-center gap-1 text-xs font-black text-primary"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
                         <div className="flex items-center gap-2">
                           {owned[item.id] ? (
                             <span className="text-[10px] font-bold text-emerald-500">보유 {owned[item.id]}개</span>
@@ -541,7 +541,7 @@ export const ShopTab: React.FC = () => {
                         <button
                           onClick={() => handleBuy(item)}
                           disabled={buying === item.id || soldOut}
-                          className="w-full rounded-lg bg-primary py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1"
+                          className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                         >
                           <ShoppingBag className="h-3.5 w-3.5" /> {soldOut ? '구매 완료' : buying === item.id ? '구매 중...' : '구매'}
                         </button>
@@ -584,7 +584,7 @@ export const ShopTab: React.FC = () => {
               </div>
             )}
 
-            <button onClick={() => setActiveTab('inventory')} className="w-full rounded-xl bg-secondary py-2.5 text-xs font-bold text-muted-foreground hover:bg-secondary/80 transition">
+            <button onClick={() => setActiveTab('inventory')} className="w-full rounded-2xl bg-secondary py-2.5 text-xs font-bold text-muted-foreground transition hover:bg-secondary/80">
               보관함으로 이동하여 카드에 장착하기 →
             </button>
           </section>
@@ -592,16 +592,16 @@ export const ShopTab: React.FC = () => {
       ) : subTab === 'market' ? (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* 오픈마켓 영역 */}
-          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-5">
+          <section className="cute-surface rounded-[2rem] p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
-                <h2 className="text-xl font-black flex items-center gap-2">
+                <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black">
                   <Store className="h-5.5 w-5.5 text-primary" /> 오픈마켓 장터
                 </h2>
                 <p className="text-xs text-muted-foreground">다른 유저들이 올린 카드를 구매하거나 내 카드를 판매하세요.<br />판매 등록은 보관함의 우클릭 메뉴에서 가능합니다. (거래 완료 시 5%의 수수료 차감)</p>
               </div>
               {user && (
-                <span className="text-xs font-bold text-yellow-500 flex items-center gap-1 self-start sm:self-auto">
+                <span className="cute-number-font flex items-center gap-1 self-start text-xs font-bold text-primary sm:self-auto">
                   <Coins className="h-3.5 w-3.5" /> {user.point.toLocaleString()} P
                 </span>
               )}
@@ -654,7 +654,7 @@ export const ShopTab: React.FC = () => {
                     const border = listing.card?.border;
 
                     return (
-                      <div key={listing.id} className="flex flex-col gap-2 p-2 bg-secondary/10 border border-border/60 rounded-2xl shadow-sm hover:shadow-md transition">
+                      <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
                         {/* 카드 프레임 */}
                         <div
                           style={{
@@ -706,7 +706,7 @@ export const ShopTab: React.FC = () => {
                         <div className="px-1 py-0.5 space-y-1.5">
                           <div className="flex items-center justify-between gap-1 text-[10px]">
                             <span className="text-muted-foreground truncate" title={listing.seller_username}>판매: {listing.seller_username}</span>
-                            <span className="font-black text-yellow-500 flex items-center shrink-0">
+                            <span className="cute-number-font flex shrink-0 items-center font-black text-primary">
                               <Coins className="h-3 w-3 mr-0.5" /> {listing.price.toLocaleString()}
                             </span>
                           </div>
@@ -722,7 +722,7 @@ export const ShopTab: React.FC = () => {
                             <button
                               onClick={() => handleBuyMarketItem(listing.id, listing.price, streamer?.name || '스트리머')}
                               disabled={purchasingListingId === listing.id}
-                              className="w-full rounded-lg bg-primary py-1.5 text-[10px] font-bold text-primary-foreground hover:bg-primary/95 transition flex items-center justify-center gap-1 shadow-sm active:scale-95 disabled:opacity-50"
+                              className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-[10px] font-bold text-primary-foreground shadow-sm transition hover:bg-primary/95 active:scale-95 disabled:opacity-50"
                             >
                               <ShoppingBag className="h-3 w-3" />
                               {purchasingListingId === listing.id ? '구매 중...' : '구매하기'}
@@ -771,7 +771,7 @@ export const ShopTab: React.FC = () => {
 
           {/* 내가 등록한 판매 카드 관리 내역 */}
           {user && (
-            <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+          <section className="cute-surface rounded-[2rem] p-6 space-y-4">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 내 등록 매물 관리 ({myListings.length}건)
               </h3>
@@ -846,7 +846,7 @@ export const ShopTab: React.FC = () => {
       ) : (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* 거래 이력 (영수증) 영역 */}
-          <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-5">
+          <section className="cute-surface rounded-[2rem] p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-black flex items-center gap-2">

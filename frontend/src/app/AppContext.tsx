@@ -6,7 +6,7 @@ import { apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
-import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
@@ -27,7 +27,7 @@ export const useTheme = () => {
 };
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -35,7 +35,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setTheme(savedTheme);
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
     } else {
-      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('dark');
     }
   }, []);
 
@@ -136,28 +136,32 @@ const CustomToast: React.FC<CustomToastProps> = ({ id, message, type, theme }) =
 
   const typeConfig = {
     success: {
-      icon: <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />,
-      border: 'border-emerald-500/20 dark:border-emerald-500/30',
-      bg: 'bg-emerald-50/95 dark:bg-emerald-950/90',
-      text: 'text-emerald-900 dark:text-emerald-100',
+      icon: <CheckCircle className="h-5 w-5" />,
+      label: '완료',
+      accent: 'text-teal-600 dark:text-teal-200',
+      iconWrap: 'border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-400/20 dark:bg-teal-400/10 dark:text-teal-200',
+      bar: 'from-teal-300 via-primary to-sky-300',
     },
     error: {
-      icon: <XCircle className="h-5 w-5 text-rose-500 shrink-0" />,
-      border: 'border-rose-500/20 dark:border-rose-500/30',
-      bg: 'bg-rose-50/95 dark:bg-rose-950/90',
-      text: 'text-rose-900 dark:text-rose-100',
+      icon: <XCircle className="h-5 w-5" />,
+      label: '오류',
+      accent: 'text-rose-600 dark:text-rose-200',
+      iconWrap: 'border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-200',
+      bar: 'from-rose-300 via-rose-500 to-pink-300',
     },
     warning: {
-      icon: <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />,
-      border: 'border-amber-500/20 dark:border-amber-500/30',
-      bg: 'bg-amber-50/95 dark:bg-amber-950/90',
-      text: 'text-amber-900 dark:text-amber-100',
+      icon: <AlertTriangle className="h-5 w-5" />,
+      label: '확인 필요',
+      accent: 'text-sky-700 dark:text-sky-200',
+      iconWrap: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-200',
+      bar: 'from-sky-300 via-primary to-teal-300',
     },
     info: {
-      icon: <Info className="h-5 w-5 text-blue-500 shrink-0" />,
-      border: 'border-blue-500/20 dark:border-blue-500/30',
-      bg: 'bg-blue-50/95 dark:bg-blue-950/90',
-      text: 'text-blue-900 dark:text-blue-100',
+      icon: <Info className="h-5 w-5" />,
+      label: '알림',
+      accent: 'text-primary',
+      iconWrap: 'border-primary/20 bg-primary/10 text-primary',
+      bar: 'from-primary via-sky-300 to-teal-300',
     },
   };
 
@@ -186,10 +190,20 @@ const CustomToast: React.FC<CustomToastProps> = ({ id, message, type, theme }) =
       onTouchStart={(e) => handleStart(e.touches[0].clientX)}
       onTouchMove={(e) => handleMove(e.touches[0].clientX)}
       onTouchEnd={handleEnd}
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md w-[340px] max-w-sm cursor-grab active:cursor-grabbing pointer-events-auto select-none ${config.bg} ${config.border} ${config.text}`}
+      className="pointer-events-auto relative flex w-[min(23rem,calc(100vw-1.5rem))] cursor-grab select-none overflow-hidden rounded-[1.55rem] border border-white/70 bg-white/88 px-3.5 py-3.5 text-foreground shadow-[0_18px_48px_rgba(7,89,133,0.18),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-xl active:cursor-grabbing dark:border-white/12 dark:bg-card/92 dark:shadow-[0_18px_48px_rgba(0,0,0,0.34)]"
+      role="status"
+      aria-live="polite"
     >
-      {config.icon}
-      <p className="text-sm font-medium leading-relaxed break-keep select-none">{message}</p>
+      <div className={`absolute inset-x-5 top-0 h-1 rounded-b-full bg-gradient-to-r ${config.bar}`} />
+      <div className={`mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border shadow-sm ${config.iconWrap}`}>
+        {config.icon}
+      </div>
+      <div className="min-w-0 flex-1 pr-1">
+        <p className={`text-[10px] font-black uppercase tracking-[0.14em] ${config.accent}`}>{config.label}</p>
+        <p className="mt-0.5 whitespace-pre-line break-keep text-sm font-bold leading-relaxed text-foreground/90 dark:text-foreground">
+          {message}
+        </p>
+      </div>
     </div>
   );
 };
@@ -217,6 +231,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       <Toaster 
         position="top-center" 
         theme={theme}
+        gap={10}
+        offset={18}
       />
     </ToastContext.Provider>
   );
@@ -588,21 +604,23 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     }}>
       <NotificationProvider user={user} setActiveTab={setActiveTab}>
         {isInitializing ? (
-          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background text-foreground select-none">
-            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 h-72 w-72 rounded-full bg-primary/10 blur-[80px] pointer-events-none"></div>
+          <div className="fixed inset-0 z-50 flex select-none flex-col items-center justify-center overflow-hidden bg-background text-foreground">
+            <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-white/70 blur-2xl pointer-events-none dark:bg-primary/10"></div>
+            <div className="absolute right-[-4rem] top-16 h-80 w-80 rounded-full bg-primary/18 blur-[80px] pointer-events-none"></div>
+            <div className="absolute bottom-[-5rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-accent/45 blur-[90px] pointer-events-none"></div>
             <div className="flex flex-col items-center space-y-6 relative z-10">
               <div className="relative flex h-24 w-24 items-center justify-center">
-                <div className="absolute h-full w-full animate-ping rounded-full bg-primary/5 opacity-75 duration-[1800ms]"></div>
-                <div className="absolute h-18 w-18 animate-spin rounded-full border-[3px] border-primary/10 border-t-primary"></div>
-                <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-card p-1.5 shadow-md shadow-primary/20 border border-primary/20">
+                <div className="absolute h-full w-full animate-ping rounded-[2rem] bg-primary/10 opacity-75 duration-[1800ms]"></div>
+                <div className="absolute h-18 w-18 animate-spin rounded-[1.75rem] border-[3px] border-primary/12 border-t-primary"></div>
+                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-white/90 p-2 shadow-xl shadow-primary/20 dark:bg-card/90">
                   <img src="/favicon.ico" alt="치카포" className="h-8 w-8 object-contain" />
                 </div>
               </div>
               <div className="text-center space-y-2">
-                <h1 className="text-2xl font-black tracking-widest bg-gradient-to-r from-blue-400 via-indigo-400 to-primary bg-clip-text text-transparent animate-pulse">
+                <h1 className="cute-loading-logo text-4xl font-black animate-pulse">
                   치카포
                 </h1>
-                <p className="text-[11px] font-medium text-muted-foreground tracking-wide">
+                <p className="rounded-full border border-primary/15 bg-card/70 px-4 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground shadow-sm backdrop-blur">
                   치지직 카드 포럼을 불러오는 중입니다...
                 </p>
               </div>

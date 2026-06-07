@@ -91,6 +91,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] streamers 테이블에 registered_by 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN registered_by TEXT;");
       }
+      try {
+        sqliteDb.prepare("SELECT serial_number FROM streamers LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] streamers 테이블에 serial_number 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE streamers ADD COLUMN serial_number INTEGER;");
+      }
       // 별(1~5성)별 커스텀 카드 이미지 컬럼 (0성은 기존 custom_image_url 사용)
       for (let st = 1; st <= 5; st++) {
         try {
@@ -206,7 +212,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_listings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         seller_id TEXT NOT NULL,
-        user_card_id INTEGER NOT NULL UNIQUE,
+        user_card_id INTEGER NOT NULL,
         price INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'PENDING',
         buyer_id TEXT,
@@ -221,6 +227,54 @@ export const initDatabaseConnection = async (): Promise<void> => {
       );`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
+      try {
+        const db = sqliteDb;
+        if (!db) throw new Error('SQLITE_DB_NOT_READY');
+        const indexes = db.prepare("PRAGMA index_list('market_listings')").all() as any[];
+        const hasGlobalCardUnique = indexes.some((idx) => {
+          if (!idx.unique) return false;
+          const cols = db.prepare(`PRAGMA index_info(${JSON.stringify(idx.name)})`).all() as any[];
+          return cols.length === 1 && cols[0]?.name === 'user_card_id';
+        });
+        if (hasGlobalCardUnique) {
+          console.log('[DB Migration] market_listings.user_card_id 전역 UNIQUE 제약을 PENDING 부분 UNIQUE 인덱스로 변경합니다.');
+          const fk = db.pragma('foreign_keys', { simple: true }) as number;
+          db.pragma('foreign_keys = OFF');
+          try {
+            db.exec(`
+              DROP TABLE IF EXISTS market_listings_new;
+              CREATE TABLE IF NOT EXISTS market_listings_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_id TEXT NOT NULL,
+                user_card_id INTEGER NOT NULL,
+                price INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                buyer_id TEXT,
+                fee INTEGER DEFAULT 0,
+                settled_amount INTEGER DEFAULT 0,
+                with_cosmetics INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+                FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
+              );
+              INSERT INTO market_listings_new
+                (id, seller_id, user_card_id, price, status, buyer_id, fee, settled_amount, with_cosmetics, created_at, updated_at)
+              SELECT id, seller_id, user_card_id, price, status, buyer_id, fee, settled_amount,
+                     COALESCE(with_cosmetics, 0), created_at, updated_at
+                FROM market_listings;
+              DROP TABLE market_listings;
+              ALTER TABLE market_listings_new RENAME TO market_listings;
+            `);
+          } finally {
+            db.pragma(`foreign_keys = ${fk ? 'ON' : 'OFF'}`);
+          }
+        }
+      } catch (e) {
+        console.error('[DB Migration] market_listings UNIQUE 제약 변경 실패:', e);
+      }
+      sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings(user_card_id) WHERE status = 'PENDING';`);
 
       // 미니게임 티켓 및 세션 테이블 생성
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS user_minigame_tickets (

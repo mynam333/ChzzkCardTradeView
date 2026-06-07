@@ -77,6 +77,7 @@ export const MyInfoTab: React.FC = () => {
   const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
+  const [deleteRequesting, setDeleteRequesting] = useState(false);
 
   // 크롭 모달 상태
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -238,15 +239,15 @@ export const MyInfoTab: React.FC = () => {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-300">
-        <div className="max-w-md rounded-3xl border border-border bg-card p-8 shadow-lg">
+        <div className="cute-surface max-w-md rounded-[2rem] p-8">
           <User className="mx-auto h-12 w-12 text-primary animate-pulse mb-4" />
-          <h2 className="text-xl font-black text-foreground">로그인이 필요한 기능입니다</h2>
+          <h2 className="cute-outline-soft text-2xl font-black text-foreground">로그인이 필요한 기능입니다</h2>
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
             나의 프로필 정보 조회, 대표 카드 설정, 스트리머 카드 이미지 커스텀 관리, 쿠폰 리딤을 이용하시려면 치지직 간편 로그인을 진행해 주세요.
           </p>
           <button
             onClick={handleLogin}
-            className="mt-6 w-full rounded-xl bg-primary py-3 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition shadow-md shadow-primary/25"
+            className="cute-wiggle-hover mt-6 w-full rounded-2xl bg-primary py-3 text-xs font-black text-primary-foreground transition"
           >
             치지직 연동 로그인 시작하기
           </button>
@@ -334,6 +335,32 @@ export const MyInfoTab: React.FC = () => {
     }
   };
 
+  const handleRequestOwnCardDeletion = async () => {
+    if (!user || deleteRequesting) return;
+    if (!window.confirm('본인 스트리머 카드 삭제 요청을 관리자에게 접수할까요? 접수 후 관리자가 확인하고 조치합니다.')) return;
+
+    setDeleteRequesting(true);
+    try {
+      const res = await apiFetch(`/cards/${user.id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({
+          star: 0,
+          reason: '[본인 카드 삭제 요청] 스트리머 본인이 카드 및 관련 이미지 삭제를 요청했습니다.'
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast('본인 카드 삭제 요청이 관리자에게 접수되었습니다.', 'success');
+      } else {
+        toast(data.message || '삭제 요청 접수에 실패했습니다.', res.status === 409 ? 'warning' : 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setDeleteRequesting(false);
+    }
+  };
+
   // 이미지 선택 시 크롭 모달 먼저 오픈 (원본 ObjectURL 저장)
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, star: number) => {
     const file = e.target.files?.[0];
@@ -413,52 +440,52 @@ export const MyInfoTab: React.FC = () => {
     <div className="space-y-8 animate-in fade-in duration-300">
 
       {/* 프로필 + 대표 카드 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+      <section className="cute-surface rounded-[2rem] p-6">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
           <div className="flex items-center gap-4 flex-1">
             <img src={user.avatarUrl} alt="Avatar" className="h-16 w-16 rounded-full border border-primary/20 bg-secondary object-cover" />
             <div>
               <h2 className="text-xl font-bold flex flex-wrap items-center gap-2">
                 {user.username}
-                <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{user.role}</span>
+                <span className="cute-pill rounded-full px-2 py-0.5 text-[10px] font-black">{user.role}</span>
                 <UserTitleList titles={user.titles} />
               </h2>
               <p className="text-xs text-muted-foreground mt-1">계정 고유 식별코드: {user.id}</p>
-              <p className="text-xs text-yellow-500 font-bold mt-1">{user.point.toLocaleString()} P 보유</p>
+              <p className="cute-number-font mt-1 text-xs font-black text-primary">{user.point.toLocaleString()} P 보유</p>
             </div>
           </div>
 
           {/* 대표 카드 */}
           <div className="flex items-center gap-3">
             {representativeCard?.streamer ? (
-              <div className="relative h-24 w-16 overflow-hidden rounded-xl border-2 border-amber-500 shadow">
+              <div className="relative h-24 w-16 overflow-hidden rounded-2xl border-2 border-primary/55 shadow">
                 <img
                   src={cardImage(representativeCard.streamer, representativeCard.star || 0)}
                   alt={representativeCard.streamer.name}
                   className="h-full w-full object-cover"
                 />
-                <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5">
+                <div className="absolute inset-x-0 bottom-0 bg-sky-950/70 px-1 py-0.5">
                   <p className="text-[8px] font-bold text-white truncate">{representativeCard.streamer.name}</p>
                 </div>
-                <span className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[8px] font-black text-amber-300">
+                <span className="absolute right-0.5 top-0.5 rounded-full bg-white/82 px-1 text-[8px] font-black text-primary dark:bg-sky-950/70">
                   {representativeCard.star || 0}★
                 </span>
               </div>
             ) : (
-              <div className="flex h-24 w-16 items-center justify-center rounded-xl border-2 border-dashed border-border text-[9px] text-muted-foreground text-center px-1">
+              <div className="flex h-24 w-16 items-center justify-center rounded-2xl border-2 border-dashed border-border px-1 text-center text-[9px] text-muted-foreground">
                 대표 카드<br />미설정
               </div>
             )}
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => setRepModalOpen(true)}
-                className="rounded-lg bg-secondary px-3 py-2 text-[11px] font-bold text-foreground hover:bg-secondary/80"
+                className="cute-wiggle-hover rounded-2xl bg-secondary px-3 py-2 text-[11px] font-black text-foreground hover:bg-secondary/80"
               >
                 대표 카드 설정
               </button>
               <button
                 onClick={() => setProfileModalOpen(true)}
-                className="flex items-center justify-center gap-1 rounded-lg bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground hover:bg-primary/90"
+                className="cute-wiggle-hover flex items-center justify-center gap-1 rounded-2xl bg-primary px-3 py-2 text-[11px] font-black text-primary-foreground"
               >
                 <Share2 className="h-3 w-3" /> 프로필 공유
               </button>
@@ -468,11 +495,11 @@ export const MyInfoTab: React.FC = () => {
       </section>
 
       {/* 보유 칭호 및 대표 칭호 장착 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+      <section className="cute-surface rounded-[2rem] p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-black">
-              <Crown className="h-4 w-4 text-amber-500" /> 보유 칭호
+              <Crown className="h-4 w-4 text-primary" /> 보유 칭호
             </h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
               장착한 칭호 1개가 프로필, 내 정보와 메인 사이드바에 표시됩니다.
@@ -482,7 +509,7 @@ export const MyInfoTab: React.FC = () => {
             <button
               disabled={titleSaving}
               onClick={() => handleEquipTitle(null)}
-              className="rounded-lg bg-secondary px-3 py-2 text-[10px] font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+              className="cute-wiggle-hover rounded-2xl bg-secondary px-3 py-2 text-[10px] font-black text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               장착 해제
             </button>
@@ -490,7 +517,7 @@ export const MyInfoTab: React.FC = () => {
         </div>
 
         {user.ownedTitles.length === 0 ? (
-          <div className="mt-4 rounded-2xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center">
+          <div className="mt-4 rounded-[1.75rem] border border-dashed border-border bg-secondary/25 px-4 py-8 text-center">
             <Crown className="mx-auto h-7 w-7 text-muted-foreground/40" />
             <p className="mt-2 text-xs font-bold text-muted-foreground">아직 보유한 칭호가 없습니다.</p>
             <p className="mt-1 text-[10px] text-muted-foreground">이벤트와 운영 보상으로 특별한 칭호를 획득할 수 있습니다.</p>
@@ -502,14 +529,14 @@ export const MyInfoTab: React.FC = () => {
               return (
                 <div
                   key={title.id}
-                  className={`relative flex min-h-24 flex-col justify-between rounded-2xl border p-4 transition ${
+                  className={`cute-card-pop relative flex min-h-24 flex-col justify-between rounded-2xl border p-4 ${
                     equipped
-                      ? 'border-amber-400/70 bg-amber-400/5 shadow-[0_0_18px_rgba(251,191,36,0.12)]'
-                      : 'border-border bg-secondary/20 hover:border-primary/40'
+                      ? 'border-primary/55 bg-primary/8 shadow-[0_0_20px_rgba(22,136,240,0.14)]'
+                      : 'border-border bg-secondary/25 hover:border-primary/40'
                   }`}
                 >
                   {equipped && (
-                    <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-1 text-[9px] font-black text-amber-500">
+                    <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-primary/12 px-2 py-1 text-[9px] font-black text-primary">
                       <Check className="h-2.5 w-2.5" /> 장착 중
                     </span>
                   )}
@@ -519,9 +546,9 @@ export const MyInfoTab: React.FC = () => {
                   <button
                     disabled={titleSaving || equipped}
                     onClick={() => handleEquipTitle(title.id)}
-                    className={`mt-4 w-full rounded-lg py-2 text-[10px] font-bold transition disabled:cursor-default ${
+                    className={`cute-wiggle-hover mt-4 w-full rounded-2xl py-2 text-[10px] font-black transition disabled:cursor-default ${
                       equipped
-                        ? 'bg-amber-400/10 text-amber-500'
+                        ? 'bg-primary/10 text-primary'
                         : 'bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground disabled:opacity-50'
                     }`}
                   >
@@ -560,12 +587,12 @@ export const MyInfoTab: React.FC = () => {
                       <div
                         key={`${card.channel_id}#${star}`}
                         onClick={() => handleSetRepresentative(card.channel_id, star)}
-                        className={`relative cursor-pointer flex flex-col items-center rounded-xl border p-2 transition ${selected ? 'border-amber-500 ring-2 ring-amber-500/30' : 'border-border/60 hover:bg-secondary/50'}`}
+                        className={`cute-card-pop relative flex cursor-pointer flex-col items-center rounded-2xl border p-2 ${selected ? 'border-primary ring-2 ring-primary/25' : 'border-border/60 hover:bg-secondary/50'}`}
                       >
                         <img src={cardImage(s, star)} alt={s.name} className="h-12 w-12 rounded-full object-cover border border-border/80" />
                         <span className="mt-1.5 text-[10px] font-bold truncate max-w-full">{s.name}</span>
-                        <span className="text-[9px] font-black text-amber-500">{star}★</span>
-                        {selected && <Check className="absolute right-1 top-1 h-3.5 w-3.5 text-amber-500" />}
+                        <span className="text-[9px] font-black text-primary">{star}★</span>
+                        {selected && <Check className="absolute right-1 top-1 h-3.5 w-3.5 text-primary" />}
                       </div>
                     );
                   })}
@@ -574,7 +601,7 @@ export const MyInfoTab: React.FC = () => {
               {user.representativeCardChannelId && (
                 <button
                   onClick={() => handleSetRepresentative(null)}
-                  className="mt-4 w-full rounded-lg bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+                  className="mt-4 w-full rounded-2xl bg-secondary py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
                 >
                   대표 카드 해제
                 </button>
@@ -586,7 +613,7 @@ export const MyInfoTab: React.FC = () => {
 
       {/* 스트리머 본인 전용 카드 이미지 편집 (카드로 등록된 스트리머 계정에서만 노출) */}
       {isStreamer && (
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <section className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2">
           <Camera className="h-4.5 w-4.5 text-primary" /> 스트리머 고유 카드 이미지 관리
         </h3>
@@ -594,6 +621,24 @@ export const MyInfoTab: React.FC = () => {
           0성부터 5성까지 별 등급별 카드 이미지를 각각 등록할 수 있습니다. (WebP 최대 1280px 자동 변환, 5:8 비율)<br />
           특정 성에 이미지를 등록하지 않으면 <strong className="text-foreground/80">바로 아래 등급의 이미지</strong>가 자동 적용되며, 더 낮은 등급도 없으면 기본 치지직 프로필이 노출됩니다.
         </p>
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-black text-red-500">본인 카드 삭제 요청</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                본인 카드가 서비스에 노출되는 것을 원하지 않으면 관리자에게 삭제 검토를 요청할 수 있습니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRequestOwnCardDeletion}
+              disabled={deleteRequesting}
+              className="shrink-0 rounded-2xl bg-red-500 px-4 py-2 text-[11px] font-black text-white transition hover:bg-red-600 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {deleteRequesting ? '요청 접수 중...' : '삭제 요청 보내기'}
+            </button>
+          </div>
+        </div>
 
         {/* 0~5성 슬롯 그리드 */}
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 pt-1">
@@ -613,7 +658,7 @@ export const MyInfoTab: React.FC = () => {
                     fileInput?.click();
                   }
                 }}
-                className="group relative flex aspect-[5/8] cursor-pointer flex-col justify-between overflow-hidden rounded-xl border border-border bg-secondary shadow-sm transition hover:border-primary"
+                className="cute-card-pop group relative flex aspect-[5/8] cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border border-border bg-secondary shadow-sm hover:border-primary"
               >
                 <div className="absolute inset-0 z-0">
                   {resolved ? (
@@ -625,7 +670,7 @@ export const MyInfoTab: React.FC = () => {
                 </div>
                 {/* 상단 별 표시 + 상태 칩 */}
                 <div className="relative z-20 flex items-start justify-between p-1.5">
-                  <span className="rounded bg-black/45 px-1.5 py-0.5 text-[9px] font-black text-amber-300">
+                  <span className="rounded-full bg-sky-950/60 px-1.5 py-0.5 text-[9px] font-black text-white">
                     {st === 0 ? '0성' : '★'.repeat(st)}
                   </span>
                   <div className="flex items-center gap-1">
@@ -634,7 +679,7 @@ export const MyInfoTab: React.FC = () => {
                     ) : inherited ? (
                       <span className="rounded bg-sky-500/90 px-1 py-0.5 text-[7px] font-black text-white">상속</span>
                     ) : (
-                      <span className="rounded bg-zinc-700/90 px-1 py-0.5 text-[7px] font-black text-zinc-300">기본</span>
+                      <span className="rounded-full bg-primary/12 px-1 py-0.5 text-[7px] font-black text-primary">기본</span>
                     )}
                     {ownImage && (
                       <button
@@ -716,28 +761,28 @@ export const MyInfoTab: React.FC = () => {
       )}
 
       {/* 쿠폰 입력 */}
-      <section ref={couponSectionRef} className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <section ref={couponSectionRef} className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><Tag className="h-4.5 w-4.5 text-primary" /> 리딤 쿠폰 등록</h3>
         <p className="text-xs text-muted-foreground">발급된 쿠폰 코드를 입력하시면 포인트가 즉시 지급됩니다.</p>
         <div className="flex gap-2">
           <input ref={couponInputRef} type="text" placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
             onChange={(e) => setCouponCode(e.target.value)}
-            className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none" />
-          <button onClick={handleClaimCoupon} className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90">등록</button>
+            className="flex-1 rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none" />
+          <button onClick={handleClaimCoupon} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2 text-xs font-black text-primary-foreground">등록</button>
         </div>
       </section>
 
       {/* 알림 & 앱 설치 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <section className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><BellRing className="h-4.5 w-4.5 text-primary" /> 실시간 푸시 알림</h3>
         <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트 소식을 푸시로 받아볼 수 있습니다. (PWA 설치 시 백그라운드 수신)</p>
-        <button onClick={handleEnablePush} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition shadow-sm">
+        <button onClick={handleEnablePush} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2.5 text-xs font-black text-primary-foreground transition">
           알림 받기 (구독하기)
         </button>
       </section>
 
       {/* 유저 차단 관리 */}
-      <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-4">
+      <section className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><Ban className="h-4.5 w-4.5 text-rose-500" /> 유저 차단 관리</h3>
         <p className="text-xs text-muted-foreground">차단한 유저는 회원님에게 <strong className="text-foreground/80">교환을 제안할 수 없습니다.</strong></p>
         <div className="flex gap-2">
@@ -747,7 +792,7 @@ export const MyInfoTab: React.FC = () => {
             value={blockSearch}
             onChange={(e) => setBlockSearch(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleBlock(); }}
-            className="flex-1 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+            className="flex-1 rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none"
           />
           <button onClick={handleBlock} disabled={blocking} className="rounded-lg bg-rose-500 px-5 py-2 text-xs font-bold text-white hover:bg-rose-600 disabled:opacity-50">
             {blocking ? '처리 중...' : '차단'}
@@ -758,7 +803,7 @@ export const MyInfoTab: React.FC = () => {
           <div className="space-y-2">
             <p className="text-[11px] font-bold text-muted-foreground">차단 목록 ({blockedUsers.length})</p>
             {blockedUsers.map((b) => (
-              <div key={b.id} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-3 py-2">
+              <div key={b.id} className="flex items-center justify-between gap-2 rounded-2xl bg-secondary/35 px-3 py-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img src={b.avatar_url} alt={b.username} className="h-8 w-8 rounded-full border border-border object-cover" />
                   <div className="min-w-0">
@@ -766,7 +811,7 @@ export const MyInfoTab: React.FC = () => {
                     <p className="text-[10px] text-muted-foreground truncate">{b.id}</p>
                   </div>
                 </div>
-                <button onClick={() => handleUnblock(b.id)} className="shrink-0 rounded bg-secondary px-2.5 py-1 text-[10px] font-bold text-foreground hover:bg-secondary/80">
+                <button onClick={() => handleUnblock(b.id)} className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-[10px] font-bold text-foreground hover:bg-secondary/80">
                   차단 해제
                 </button>
               </div>
@@ -778,7 +823,7 @@ export const MyInfoTab: React.FC = () => {
       </section>
 
       {/* 로그아웃 */}
-      <button onClick={logout} className="w-full rounded-xl bg-secondary py-3 text-center text-xs font-bold text-muted-foreground hover:bg-secondary/80 transition">
+      <button onClick={logout} className="w-full rounded-2xl bg-secondary py-3 text-center text-xs font-bold text-muted-foreground hover:bg-secondary/80 transition">
         계정 세션 로그아웃
       </button>
 

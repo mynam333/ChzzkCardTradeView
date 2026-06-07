@@ -249,7 +249,7 @@ export class SqliteMarketRepository implements IMarketRepository {
   async buyAtomic(listingId: number, buyerId: string): Promise<{ ok: boolean; reason: string; settled_amount?: number; seller_id?: string; price?: number }> {
     const db = this.getDb();
     const txn = db.transaction(() => {
-      const listing = db.prepare('SELECT * FROM market_listings WHERE id = ? AND status = "PENDING"').get(listingId) as any;
+      const listing = db.prepare("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING'").get(listingId) as any;
       if (!listing) throw new Error('NOT_FOUND_OR_NOT_PENDING');
       if (listing.seller_id === buyerId) throw new Error('CANNOT_BUY_OWN_ITEM');
 

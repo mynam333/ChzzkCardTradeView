@@ -154,7 +154,7 @@ export const RankingTab: React.FC = () => {
       {/* 랭킹 탭 대제목 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-black flex items-center gap-2">
+          <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black">
             <TrendingUp className="h-5.5 w-5.5 text-primary" /> 실시간 랭킹 시스템
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -166,12 +166,12 @@ export const RankingTab: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {/* 슬라이드 서브 탭 */}
-          <div className="flex rounded-lg bg-secondary p-1">
+          <div className="flex rounded-2xl border border-border bg-secondary/70 p-1">
             {subTabs.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setSubTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${subTab === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                className={`cute-wiggle-hover rounded-xl px-3 py-1.5 text-xs font-bold transition ${subTab === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}
               >
                 {t.label}
@@ -181,7 +181,7 @@ export const RankingTab: React.FC = () => {
 
           <button
             onClick={() => fetchRankings()}
-            className="rounded-lg p-2 bg-secondary text-muted-foreground hover:text-foreground transition"
+            className="cute-wiggle-hover rounded-2xl border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"
             title="새로고침"
           >
             <RefreshCw className="h-4 w-4" />
@@ -190,7 +190,7 @@ export const RankingTab: React.FC = () => {
       </div>
 
       {/* 랭킹 메인 */}
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+      <div className="cute-surface rounded-[2rem] p-6">
 
         {/* 검색바 (모든 탭 공통, 검색해도 실제 순위 유지) */}
         <div className="relative mb-5">
@@ -200,7 +200,7 @@ export const RankingTab: React.FC = () => {
             placeholder={subTab === 'user' ? '컬렉터(유저) 검색' : '스트리머 검색'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-xl border border-border bg-secondary/30 pl-10 pr-4 py-2.5 text-xs focus:border-primary focus:outline-none"
+            className="w-full rounded-2xl border border-border bg-secondary/45 py-2.5 pl-10 pr-4 text-xs font-semibold focus:border-primary focus:outline-none"
           />
         </div>
 
@@ -218,12 +218,12 @@ export const RankingTab: React.FC = () => {
               <div
                 key={ur.id}
                 onClick={() => setProfileUserId(ur.id)}
-                className="flex cursor-pointer items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-primary/60 hover:bg-secondary/30 transition"
+                className="cute-card-pop flex cursor-pointer items-center justify-between rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45"
               >
                 <div className="flex items-center gap-4">
-                  <span className={`w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
+                  <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
                   <div className="relative shrink-0">
-                    <img src={ur.avatar_url} alt={ur.username} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                    <img src={ur.avatar_url} alt={ur.username} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
                     {ur.is_live && (
                       <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black leading-none text-white ring-2 ring-card">
                         LIVE
@@ -239,7 +239,7 @@ export const RankingTab: React.FC = () => {
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="text-xs font-black text-primary">{((ur.total_asset ?? ur.point) || 0).toLocaleString()} P</span>
+                  <span className="cute-number-font text-xs font-black text-primary">{((ur.total_asset ?? ur.point) || 0).toLocaleString()} P</span>
                   <p className="text-[9px] text-muted-foreground">총 자산 (포인트+카드가치)</p>
                 </div>
               </div>
@@ -261,12 +261,12 @@ export const RankingTab: React.FC = () => {
                 <div
                   key={st.channel_id}
                   onClick={() => setDetailChannelId(st.channel_id)}
-                  className="flex cursor-pointer items-center justify-between rounded-xl bg-secondary/15 p-4 border border-border/50 hover:border-primary/60 hover:bg-secondary/30 transition"
+                  className="cute-card-pop flex cursor-pointer items-center justify-between rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45"
                 >
                   <div className="flex items-center gap-4">
-                    <span className={`w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
+                    <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
                     <div className="relative shrink-0">
-                      <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border/80 bg-card object-cover" />
+                      <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
                       {st.is_active && (
                         <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                       )}
@@ -285,7 +285,7 @@ export const RankingTab: React.FC = () => {
                   {subTab === 'change' ? (
                     // 등락률 탭: 1시간 등락 '퍼센트' 강조 (정렬 기준)
                     <div className="text-right flex flex-col items-end justify-center">
-                      <span className={`text-sm font-black flex items-center gap-0.5 ${rate1h > 0 ? 'text-rose-500' : rate1h < 0 ? 'text-blue-500' : 'text-muted-foreground'}`}>
+                      <span className={`cute-number-font flex items-center gap-0.5 text-sm font-black ${rate1h > 0 ? 'text-rose-500' : rate1h < 0 ? 'text-blue-500' : 'text-muted-foreground'}`}>
                         {rate1h > 0 ? '▲' : rate1h < 0 ? '▼' : '-'} {rate1h > 0 ? '+' : ''}{rate1h.toFixed(2)}%
                       </span>
                       <p className="text-[10px] text-muted-foreground">
@@ -296,7 +296,7 @@ export const RankingTab: React.FC = () => {
                     // 시세 탭: 현재 시세 + 24h 등락률
                     <div className="text-right flex flex-col items-end justify-center">
                       <div className="flex items-center gap-1.5 justify-end">
-                        <span className="text-xs font-black text-primary">{(st.base_value || 0).toLocaleString()} P</span>
+                        <span className="cute-number-font text-xs font-black text-primary">{(st.base_value || 0).toLocaleString()} P</span>
                         {diff24h > 0 ? (
                           <span className="text-[10px] font-black text-rose-500" title={`24시간 전: ${prev24h.toLocaleString()} P`}>▲ +{rate24h.toFixed(1)}%</span>
                         ) : diff24h < 0 ? (
@@ -320,7 +320,7 @@ export const RankingTab: React.FC = () => {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={pageClamped <= 1}
-              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+              className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
             >
               이전
             </button>
@@ -336,7 +336,7 @@ export const RankingTab: React.FC = () => {
                   <button
                     key={i}
                     onClick={() => setPage(p)}
-                    className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${p === pageClamped ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    className={`min-w-8 rounded-2xl px-2.5 py-1.5 text-xs font-bold transition ${p === pageClamped ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
                   >
                     {p}
                   </button>
@@ -347,7 +347,7 @@ export const RankingTab: React.FC = () => {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={pageClamped >= totalPages}
-              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+              className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
             >
               다음
             </button>

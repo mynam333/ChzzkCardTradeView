@@ -122,36 +122,48 @@ export const MainTab: React.FC = () => {
       )}
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500 dark:from-blue-600 dark:via-sky-700 dark:to-indigo-900 p-6 text-white shadow-lg dark:shadow-xl md:p-10">
-        <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
-        <div className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-sky-400/20 blur-2xl"></div>
+      <section className="cute-gradient relative overflow-hidden rounded-[2.25rem] border border-white/70 p-6 text-white shadow-[0_24px_70px_rgba(45,157,240,0.24)] dark:border-white/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.32)] md:p-10">
+        <div className="absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/28 blur-2xl"></div>
+        <div className="absolute -bottom-14 -left-10 h-48 w-48 rounded-full bg-teal-300/30 blur-2xl"></div>
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-sky-950/24 via-sky-900/8 to-transparent"></div>
+        <div className="cute-floaty absolute left-8 top-8 h-3 w-3 rounded-full bg-white/85 shadow-[0_0_22px_rgba(255,255,255,0.85)]"></div>
+        <div className="cute-floaty absolute right-24 bottom-12 h-4 w-4 rotate-45 rounded-sm bg-white/70 shadow-[0_0_22px_rgba(255,255,255,0.65)]"></div>
+        <div className="absolute right-8 top-8 hidden rotate-3 rounded-[1.25rem] border border-white/55 bg-white/30 px-4 py-2 text-[11px] font-black text-white shadow-lg shadow-sky-900/10 backdrop-blur-md md:block">
+          CHIKAPO CARD FORUM
+        </div>
 
         {/* 
           메인 레이아웃: PC에서는 가로 분할(justify-between, items-center),
           모바일에서는 세로 분할(flex-col, gap-6) 구조로 텍스트와 버튼이 겹치지 않고 온전한 영역을 확보함.
         */}
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          
+        <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+
           {/* 왼쪽 텍스트 블록 */}
-          <div className="max-w-xl">
-            <span className="inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wider backdrop-blur-md">
+          <div className="max-w-2xl">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-sky-950/28 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-white shadow-sm backdrop-blur-md dark:border-white/25 dark:bg-white/14">
+              <span className="h-2 w-2 rounded-full bg-teal-200 shadow-[0_0_12px_rgba(153,246,228,0.85)]"></span>
               치지직 스트리머 카드 수집 게임
             </span>
-            <h2 className="mt-4 text-3xl font-black tracking-tight md:text-4xl leading-tight">
-              최애 스트리머 카드를 뽑고<br />최고의 수집가가 되어보세요!
+            <h2 className="cute-landing-title mt-4 text-[2.15rem] leading-[1.08] sm:text-5xl md:text-[3.35rem]">
+              최애 스트리머 카드를 뽑고<br />
+              <span className="relative inline-block">
+                최고의 수집가가 되어보세요!
+                <span className="pointer-events-none absolute -bottom-2 left-1 h-2 w-[96%] rounded-full bg-teal-200/70 shadow-[0_0_18px_rgba(153,246,228,0.45)]"></span>
+              </span>
             </h2>
-            <p className="mt-3 text-sm text-sky-100/90 leading-relaxed">
-              치지직 로그인 하나로 바로 시작!<br />매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
+            <p className="mt-4 max-w-xl rounded-[1.35rem] border border-white/55 bg-white/86 px-4 py-3 text-sm font-extrabold leading-relaxed text-[#0b3b66] shadow-[0_10px_24px_rgba(7,89,133,0.14)] backdrop-blur-md dark:border-white/18 dark:bg-sky-950/38 dark:text-white/90">
+              치지직 로그인 하나로 바로 시작! 매일 무료 가챠를 돌리고, 희귀 카드를 모아 랭킹에 도전하세요.<br />
+              스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-                <Flame className="h-3.5 w-3.5 text-orange-400 fill-orange-400" /> 매일 무료 가챠 제공
+              <div className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white">
+                <Flame className="h-3.5 w-3.5 fill-primary text-primary dark:fill-white dark:text-white" /> 매일 무료 가챠
               </div>
-              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-                <Award className="h-3.5 w-3.5 text-yellow-300" /> 컬렉터 랭킹 경쟁
+              <div className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white">
+                <Award className="h-3.5 w-3.5 text-primary dark:text-white" /> 컬렉터 랭킹 경쟁
               </div>
-              <div className="flex items-center gap-1.5 rounded-full bg-black/30 px-4 py-1.5 text-xs font-semibold backdrop-blur-sm">
-                <RefreshCw className="h-3.5 w-3.5 text-teal-300 animate-spin-slow" /> 스트리머 인기 반영 시세
+              <div className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin-slow text-primary dark:text-white" /> 인기 반영 시세
               </div>
             </div>
           </div>
@@ -162,12 +174,12 @@ export const MainTab: React.FC = () => {
             - 모바일(md 이하)에서는 w-full로 채우고 그라디언트 박스의 가장 아랫부분에 화면 너비에 맞춰 납작하고 조화롭게 고정됨.
           */}
           {user && (
-            <div className="w-full md:w-auto shrink-0 flex justify-center pt-2 md:pt-0">
+            <div className="flex w-full shrink-0 justify-center pt-2 md:w-auto md:pt-0">
               <StreamerRegisterModal
                 onRegistered={fetchHotStreamers}
-                className="group w-full md:w-auto inline-flex items-center justify-center gap-3 rounded-2xl border border-white/30 bg-white/15 px-5 py-4 text-sm font-black text-white shadow-lg shadow-black/10 ring-1 ring-inset ring-white/10 backdrop-blur-md transition-all hover:border-white/50 hover:bg-white/25 hover:shadow-xl active:scale-95 md:px-7 md:py-6 md:text-base"
+                className="cute-wiggle-hover group inline-flex w-full items-center justify-center gap-3 rounded-[1.75rem] border border-white/70 bg-sky-950/22 px-5 py-4 text-sm font-black text-white shadow-xl shadow-sky-900/10 ring-1 ring-inset ring-white/18 backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-white hover:bg-sky-950/30 active:scale-95 dark:border-white/45 dark:bg-white/18 dark:ring-white/20 dark:hover:border-white/65 dark:hover:bg-white/28 md:w-auto md:px-7 md:py-6 md:text-base"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/25 transition group-hover:rotate-90 group-hover:bg-white/40 md:h-8 md:w-8">
+                <span className="flex h-7 w-7 items-center justify-center rounded-2xl bg-white/24 text-white transition group-hover:rotate-90 group-hover:bg-white/34 md:h-8 md:w-8">
                   <Plus className="h-4.5 w-4.5 md:h-5 md:w-5" />
                 </span>
                 <span>스트리머 추가</span>
@@ -182,15 +194,17 @@ export const MainTab: React.FC = () => {
       <div className="grid gap-6 md:grid-cols-3">
 
         {/* 공지사항 롤링 보드 */}
-        <div className="md:col-span-2 rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <div className="cute-surface md:col-span-2 rounded-[2rem] p-6">
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
             <button
               type="button"
               onClick={openAnnouncementBoard}
-              className="group flex items-center gap-2 text-left"
+              className="cute-wiggle-hover group flex items-center gap-2 text-left"
             >
-              <Megaphone className="h-4.5 w-4.5 text-primary" />
-              <span className="text-base font-bold transition group-hover:text-primary">플랫폼 새소식</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Megaphone className="h-4.5 w-4.5" />
+              </span>
+              <span className="text-base font-black transition group-hover:text-primary">플랫폼 새소식</span>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
             </button>
             <div className="flex items-center gap-2">
@@ -218,7 +232,7 @@ export const MainTab: React.FC = () => {
                   key={notice.id}
                   type="button"
                   onClick={() => openAnnouncementDetail(notice)}
-                  className={`group block w-full rounded-xl border p-3.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${notice.is_pinned ? 'border-sky-500/25 bg-sky-500/8 shadow-sm shadow-sky-500/5' : 'border-transparent bg-secondary/30 hover:border-border hover:bg-secondary/50'}`}
+                  className={`cute-card-pop group block w-full rounded-2xl border p-3.5 text-left ${notice.is_pinned ? 'border-primary/25 bg-primary/10 shadow-sm shadow-primary/5' : 'border-transparent bg-secondary/35 hover:border-border hover:bg-secondary/60'}`}
                 >
                   <div className="flex items-center justify-between">
                     <h4 className="flex min-w-0 items-center gap-1.5 text-sm font-bold transition group-hover:text-primary">
@@ -250,14 +264,17 @@ export const MainTab: React.FC = () => {
         </div>
 
         {/* 핫 스트리머 카드 리스트 (시세 리딩) */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm flex flex-col">
+        <div className="cute-surface flex flex-col rounded-[2rem] p-6">
           <h3 className="text-base font-bold flex items-center gap-2 border-b border-border/60 pb-3">
-            <Flame className="h-4.5 w-4.5 text-orange-500 fill-orange-500" /> 실시간 최고 가치 Top 3
+            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Flame className="h-4.5 w-4.5 fill-current" />
+            </span>
+            실시간 최고 가치 Top 3
           </h3>
 
           <div className="mt-4 space-y-3.5 flex-1">
             {hotStreamers.map((st, index) => (
-              <div key={st.channel_id} className="flex items-center justify-between rounded-xl bg-secondary/20 p-3 border border-border/40 hover:border-border/80 transition">
+              <div key={st.channel_id} className="cute-card-pop flex items-center justify-between rounded-2xl border border-border/50 bg-secondary/35 p-3 hover:border-primary/35 hover:bg-secondary/55">
                 <div className="flex items-center gap-3">
                   <div className="relative">
                     <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
@@ -285,26 +302,26 @@ export const MainTab: React.FC = () => {
       </div>
 
       {/* 이용 방법 안내 */}
-      <section className="rounded-2xl border border-border bg-secondary/40 p-6">
+      <section className="cute-surface rounded-[2rem] p-6">
         <h3 className="text-sm font-bold flex items-center gap-2 text-foreground mb-4">
           <HelpCircle className="h-4 w-4 text-muted-foreground" /> 이렇게 즐기세요!
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 text-xs text-muted-foreground leading-relaxed">
-          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+          <div className="cute-card-pop rounded-2xl border border-border/50 bg-card p-4 hover:border-primary/40">
             <div className="flex items-center gap-2 mb-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">1</span>
               <h4 className="font-bold text-foreground">치지직 계정으로 바로 로그인</h4>
             </div>
             <p>별도 회원가입 없이 치지직 계정 하나로 즉시 시작할 수 있어요. 로그인하면 매일 무료 뽑기가 지급됩니다.</p>
           </div>
-          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+          <div className="cute-card-pop rounded-2xl border border-border/50 bg-card p-4 hover:border-primary/40">
             <div className="flex items-center gap-2 mb-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">2</span>
               <h4 className="font-bold text-foreground">가챠로 스트리머 카드 수집</h4>
             </div>
             <p>상점에서 포인트를 사용해 가챠를 돌리고 다양한 스트리머 카드를 뽑아보세요. 어떤 카드가 나올지 두근두근한 순간을 매일 즐길 수 있어요!</p>
           </div>
-          <div className="p-4 bg-card rounded-xl border border-border/50 hover:border-primary/40 transition">
+          <div className="cute-card-pop rounded-2xl border border-border/50 bg-card p-4 hover:border-primary/40">
             <div className="flex items-center gap-2 mb-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-black text-[11px]">3</span>
               <h4 className="font-bold text-foreground">시세로 랭킹 정상 노려보기</h4>

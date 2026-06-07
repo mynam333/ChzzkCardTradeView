@@ -533,6 +533,54 @@ export const AdminTab: React.FC = () => {
     } catch { toast('서버 통신 에러'); }
   };
 
+  const isSelfDeletionReport = (report: AdminReport) => report.reason.startsWith('[본인 카드 삭제 요청]');
+
+  const handleDeleteStreamerFromReport = async (report: AdminReport) => {
+    if (!window.confirm(`[${report.streamer_name || report.channel_id}] 카드를 삭제하고 보유자에게 보상 지급 후 신고를 처리할까요?`)) return;
+    try {
+      const res = await apiFetch(`/admin/streamers/${report.channel_id}/delete`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: report.channel_id })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '카드 삭제 처리에 실패했습니다.', 'error');
+        return;
+      }
+      toast(data.message || '카드 삭제 요청을 처리했습니다.', 'success');
+      await handleResolveReport(report.id, 'resolved');
+      fetchCouponStreamers(true);
+      fetchStats();
+    } catch {
+      toast('서버 통신 에러', 'error');
+    }
+  };
+
+  const handleReportedImageAction = async (report: AdminReport, action: 'reset' | 'ban') => {
+    const label = action === 'reset'
+      ? `${report.star || 0}성 신고 이미지를 기본 이미지로 초기화`
+      : '해당 스트리머의 이미지 업로드 권한 차단 및 전체 이미지 초기화';
+    if (!window.confirm(`[${report.streamer_name || report.channel_id}] ${label}할까요?`)) return;
+
+    try {
+      const body = action === 'reset' ? JSON.stringify({ star: report.star || 0 }) : undefined;
+      const res = await apiFetch(`/admin/streamers/${report.channel_id}/image/${action}`, {
+        method: 'POST',
+        ...(body ? { body } : {})
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '이미지 조치에 실패했습니다.', 'error');
+        return;
+      }
+      toast(data.message || '이미지 조치를 완료했습니다.', 'success');
+      await handleResolveReport(report.id, 'resolved');
+      fetchCouponStreamers(true);
+    } catch {
+      toast('서버 통신 에러', 'error');
+    }
+  };
+
   const handleBanUser = async (userId: string, duration: string, reason: string = '') => {
     if (!userId.trim()) { toast('대상 유저 ID가 필요합니다.'); return; }
     try {
@@ -1500,7 +1548,16 @@ export const AdminTab: React.FC = () => {
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5 border-t border-border/40 pt-2">
                     <button onClick={() => handleBanUser(rep.reporter_id, '7d', '허위/악성 신고 누적으로 인한 제재')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">신고자 7일 밴</button>
-                    <button onClick={() => handleResolveReport(rep.id, 'resolved')} className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20">신고 승인</button>
+                    {rep.status === 'pending' && isSelfDeletionReport(rep) ? (
+                      <button onClick={() => handleDeleteStreamerFromReport(rep)} className="rounded bg-red-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-red-600">카드 삭제 처리</button>
+                    ) : null}
+                    {rep.status === 'pending' && !isSelfDeletionReport(rep) ? (
+                      <>
+                        <button onClick={() => handleReportedImageAction(rep, 'reset')} className="rounded bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600 hover:bg-amber-500/20">{rep.star || 0}성 이미지 초기화</button>
+                        <button onClick={() => handleReportedImageAction(rep, 'ban')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">이미지 차단</button>
+                      </>
+                    ) : null}
+                    <button onClick={() => handleResolveReport(rep.id, 'resolved')} className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20">검토 완료</button>
                     <button onClick={() => handleResolveReport(rep.id, 'rejected')} className="rounded bg-secondary px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary/80">기각</button>
                   </div>
                 </div>

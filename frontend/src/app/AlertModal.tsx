@@ -14,11 +14,36 @@ interface Props {
   onClose: () => void;
 }
 
-const TYPE_META: Record<AlertType, { Icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
-  success: { Icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  error: { Icon: XCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
-  warning: { Icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-  info: { Icon: Info, color: 'text-primary', bg: 'bg-primary/10' },
+const TYPE_META: Record<AlertType, {
+  Icon: React.ComponentType<{ className?: string }>;
+  color: string;
+  bg: string;
+  ring: string;
+}> = {
+  success: {
+    Icon: CheckCircle2,
+    color: 'text-teal-600 dark:text-teal-200',
+    bg: 'bg-teal-50 dark:bg-teal-400/10',
+    ring: 'border-teal-200 dark:border-teal-400/20',
+  },
+  error: {
+    Icon: XCircle,
+    color: 'text-rose-600 dark:text-rose-200',
+    bg: 'bg-rose-50 dark:bg-rose-400/10',
+    ring: 'border-rose-200 dark:border-rose-400/20',
+  },
+  warning: {
+    Icon: AlertTriangle,
+    color: 'text-sky-700 dark:text-sky-200',
+    bg: 'bg-sky-50 dark:bg-sky-400/10',
+    ring: 'border-sky-200 dark:border-sky-400/20',
+  },
+  info: {
+    Icon: Info,
+    color: 'text-primary',
+    bg: 'bg-primary/10',
+    ring: 'border-primary/20',
+  },
 };
 
 /**
@@ -27,22 +52,23 @@ const TYPE_META: Record<AlertType, { Icon: React.ComponentType<{ className?: str
  */
 export const AlertModal: React.FC<Props> = ({ open, title, message, type = 'info', onClose }) => {
   if (!open) return null;
-  const { Icon, color, bg } = TYPE_META[type];
+  const { Icon, color, bg, ring } = TYPE_META[type];
 
   const modal = (
-    <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="modal-backdrop modal-backdrop-center z-[90] bg-sky-950/35 backdrop-blur-sm dark:bg-black/60" onClick={onClose}>
       <div
-        className="modal-panel modal-panel-xs modal-panel-scroll rounded-2xl border border-border bg-card p-6 text-center shadow-2xl animate-in zoom-in-95 duration-200"
+        className="modal-panel modal-panel-xs modal-panel-scroll cute-surface overflow-hidden rounded-[2rem] p-6 text-center animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full ${bg}`}>
+        <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-primary/12 blur-2xl" />
+        <div className={`relative mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border shadow-sm ${bg} ${ring}`}>
           <Icon className={`h-6 w-6 ${color}`} />
         </div>
-        {title && <h4 className="text-sm font-bold text-foreground">{title}</h4>}
-        <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{message}</p>
+        {title && <h4 className="relative text-base font-black text-foreground">{title}</h4>}
+        <p className="relative mt-2 whitespace-pre-line break-keep text-sm font-bold leading-relaxed text-muted-foreground">{message}</p>
         <button
           onClick={onClose}
-          className="mt-5 w-full rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition hover:bg-primary/90"
+          className="cute-wiggle-hover relative mt-5 w-full rounded-2xl bg-primary px-4 py-3 text-xs font-black text-primary-foreground transition active:scale-95"
         >
           확인
         </button>
