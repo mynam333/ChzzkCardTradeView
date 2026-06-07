@@ -87,8 +87,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
   return (
     <div className="relative flex min-h-screen w-full flex-col text-foreground md:flex-row">
-      <div className="pointer-events-none fixed left-4 top-6 z-0 hidden h-24 w-24 rounded-full bg-white/55 blur-2xl md:block dark:bg-primary/10" />
-      <div className="pointer-events-none fixed bottom-10 right-8 z-0 hidden h-40 w-40 rounded-full bg-primary/12 blur-3xl md:block dark:bg-primary/10" />
+      <div className="pointer-events-none fixed left-4 top-6 -z-10 hidden h-24 w-24 rounded-full bg-white/55 blur-2xl md:block dark:bg-primary/10" />
+      <div className="pointer-events-none fixed bottom-10 right-8 -z-10 hidden h-40 w-40 rounded-full bg-primary/12 blur-3xl md:block dark:bg-primary/10" />
       
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
       <aside className="cute-surface sticky top-0 z-20 hidden h-screen w-72 flex-col rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
@@ -235,7 +235,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       {/* Main Content Area */}
       <main
-        className="relative z-10 mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-24 pt-6 md:px-8 md:py-8"
+        className="relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-24 pt-6 md:px-8 md:py-8"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >

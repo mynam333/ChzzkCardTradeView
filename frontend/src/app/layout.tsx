@@ -79,6 +79,7 @@ export default function RootLayout({
       <head>
         {/* Google Search Console 소유권 인증 */}
         <meta name="google-site-verification" content="KQ4i9w640cJZF6iM9Tw5k5XthFvOwq78L8QOoQHWdxk" />
+        <meta name="naver-site-verification" content="2ae2adc8f5ddb0ba930545664fdb3f8ecb81a0e7" />
         {/* 구글 리치 결과 및 AI 검색 이해도 향상을 위한 JSON-LD 구조화 데이터 */}
         <WebsiteJsonLd />
         <WebAppJsonLd />
