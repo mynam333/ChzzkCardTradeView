@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -577,6 +577,8 @@ export const TutorialGuide: React.FC = () => {
   const [actionStatus, setActionStatus] = useState('');
   const [gachaRewardClaiming, setGachaRewardClaiming] = useState(false);
   const [uaruImageUrl, setUaruImageUrl] = useState(`https://api.dicebear.com/10.x/fun-emoji/svg?seed=${UARU_CHANNEL_ID}`);
+  // 티켓 지급을 스텝당 1회만 시도하기 위한 가드 (effect 재실행에 따른 중복 호출·로딩 고착 방지)
+  const claimedTicketStepRef = useRef<string | null>(null);
 
   const step = tutorialSteps[stepIndex];
   const sectionStepNumbers = useMemo(() => {
@@ -602,6 +604,7 @@ export const TutorialGuide: React.FC = () => {
     setWaitingSatisfied(false);
     setActionStatus('');
     setCollapsed(false);
+    claimedTicketStepRef.current = null; // 재시작 시 티켓 지급 가드 초기화
     setOpen(true);
   };
 
@@ -684,6 +687,10 @@ export const TutorialGuide: React.FC = () => {
 
   useEffect(() => {
     if (!open || collapsed || !user?.id || !step.grantGachaTicket) return;
+    // 이 스텝에서는 한 번만 지급을 시도합니다. refreshUserData가 매 렌더마다 새 함수라
+    // effect가 재실행되어도 중복 호출/로딩 문구 고착이 발생하지 않도록 막습니다.
+    if (claimedTicketStepRef.current === step.id) return;
+    claimedTicketStepRef.current = step.id;
 
     let cancelled = false;
     const claimTicket = async () => {
@@ -702,7 +709,8 @@ export const TutorialGuide: React.FC = () => {
       } catch {
         if (!cancelled) setActionStatus('티켓 지급 요청 중 오류가 발생했습니다. 체험을 건너뛰고 계속 진행할 수 있어요.');
       } finally {
-        if (!cancelled) setGachaRewardClaiming(false);
+        // 로딩 문구는 effect 재실행/취소 여부와 무관하게 항상 해제합니다.
+        setGachaRewardClaiming(false);
       }
     };
 

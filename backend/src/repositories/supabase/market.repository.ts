@@ -416,7 +416,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return (data as any).price;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number }> {
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }> {
     const listing = await this.findById(listingId);
     if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
       return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
@@ -444,14 +444,25 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .insert([{ listing_id: listingId, bidder_id: bidderId, amount, created_at: nowIso }]);
     if (bidError) throw bidError;
 
+    // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
+    const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
+    const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;  // 3분 연장
+    const nowMs = Date.now();
+    const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
+    const extendedEndsAt = endsAtMs && endsAtMs - nowMs < ANTI_SNIPE_THRESHOLD_MS
+      ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
+      : null;
+
+    const updatePayload: any = { current_bid: amount, current_bidder_id: bidderId, updated_at: nowIso };
+    if (extendedEndsAt) updatePayload.auction_ends_at = extendedEndsAt;
     const { error: updateError } = await this.getClient()
       .from('market_listings')
-      .update({ current_bid: amount, current_bidder_id: bidderId, updated_at: nowIso })
+      .update(updatePayload)
       .eq('id', listingId)
       .eq('status', 'PENDING');
     if (updateError) throw updateError;
 
-    return { ok: true, reason: 'OK', current_bid: amount };
+    return { ok: true, reason: 'OK', current_bid: amount, auction_ends_at: extendedEndsAt ?? listing.auction_ends_at };
   }
 
   async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {

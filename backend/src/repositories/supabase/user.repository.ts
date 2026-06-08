@@ -380,10 +380,16 @@ export class SupabaseUserRepository implements IUserRepository {
   async findRankings(limit: number, keyword: string = '', options?: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null }): Promise<UserRanking[]> {
     // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용 (keyword 및 rank 포함)
     const mode = options?.mode || 'total';
-    const hasCardFilter = !!options?.channelId;
-    const { data, error } = !hasCardFilter
-      ? await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword })
-      : { data: null, error: { message: 'card filter requires fallback' } as any };
+    const channelId = (options?.channelId || '').trim();
+    const star = options?.star ?? null;
+
+    // 특정 카드(채널[+별]) 보유자 랭킹은 RPC가 지원하지 않으므로 전용 경로로 처리합니다.
+    // (정상적인 설계상 분기이며 N+1 없이 일괄 조회합니다 — 'RPC 실패' 경고 대상이 아님)
+    if (channelId) {
+      return this.findCardHolderRankings(limit, keyword, mode, channelId, star);
+    }
+
+    const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword });
     if (!error && Array.isArray(data)) {
       const mapped = data.map((row: any) => ({
         id: row.id,
@@ -409,9 +415,9 @@ export class SupabaseUserRepository implements IUserRepository {
       return mapped;
     }
 
-    // 폴백: 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 총자산 기준 정렬
-    console.warn('[Supabase] get_user_rankings RPC 실패, 폴백 사용:', error?.message);
-    const candidateLimit = hasCardFilter || mode === 'cards' ? 500 : Math.min(Math.max(limit * 5, 50), 200);
+    // 폴백: RPC가 실제로 실패한 경우에만 도달. 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 정렬.
+    console.warn('[Supabase] get_user_rankings RPC 실패, 포인트 기준 폴백 사용:', error?.message);
+    const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
     let userQuery = this.getClient()
       .from('users')
       .select('*')
@@ -423,41 +429,101 @@ export class SupabaseUserRepository implements IUserRepository {
     }
     const { data: users, error: uErr } = await userQuery;
     if (uErr) throw uErr;
+    const candidates = (users || []) as User[];
+    if (candidates.length === 0) return [];
 
-    const enriched: UserRanking[] = [];
-    for (const u of users || []) {
-      let cardsQuery = this.getClient()
-        .from('user_cards')
-        .select('star, streamer:streamers(base_value)')
-        .eq('user_id', u.id)
-        .or('is_hidden.is.null,is_hidden.eq.false');
-      if (options?.channelId) cardsQuery = cardsQuery.eq('channel_id', options.channelId);
-      if (options?.star !== undefined && options.star !== null) cardsQuery = cardsQuery.eq('star', options.star);
-      const { data: cards } = await cardsQuery;
-      if (hasCardFilter && (!cards || cards.length === 0)) continue;
-      // 카드 가치는 별(0~5성) 배수(1 + star*0.8)를 반영하여 합산
-      const cardsValue = (cards || []).reduce(
-        (sum: number, c: any) => sum + (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8), 0
-      );
-      enriched.push({
-        ...(u as User),
-        card_count: (cards || []).length,
-        cards_value: Math.round(cardsValue),
-        total_asset: u.point + Math.round(cardsValue)
-      });
-    }
+    // 후보 유저들의 보유 카드를 한 번에 조회해 N+1을 제거합니다.
+    const enriched = await this.enrichWithCardValues(candidates);
     enriched.sort((a, b) => mode === 'cards'
       ? (b.cards_value || 0) - (a.cards_value || 0)
       : b.total_asset - a.total_asset
     );
-    
-    // 전체 목록 기준 순위를 매겨서 반환
-    const mapped = enriched.map((item, idx) => ({
-      ...item,
-      rank: idx + 1
-    }));
+    return enriched.map((item, idx) => ({ ...item, rank: idx + 1 })).slice(0, limit);
+  }
 
-    return mapped.slice(0, limit);
+  /**
+   * 특정 카드(채널[+별]) 보유자 랭킹. RPC 미지원 케이스를 N+1 없이 일괄 조회로 처리합니다.
+   * 보유한 해당 카드들의 합산 가치 기준으로 순위를 매깁니다.
+   */
+  private async findCardHolderRankings(
+    limit: number,
+    keyword: string,
+    mode: 'total' | 'cards',
+    channelId: string,
+    star: number | null
+  ): Promise<UserRanking[]> {
+    const client = this.getClient();
+    // 1) 해당 카드(채널[+별]) 보유 카드들을 한 번에 조회
+    let cardQuery = client
+      .from('user_cards')
+      .select('user_id, star, streamer:streamers(base_value)')
+      .eq('channel_id', channelId)
+      .or('is_hidden.is.null,is_hidden.eq.false');
+    if (star !== null) cardQuery = cardQuery.eq('star', star);
+    const { data: cards, error: cErr } = await cardQuery;
+    if (cErr) throw cErr;
+    if (!cards || cards.length === 0) return [];
+
+    // 2) 보유자별 매칭 카드 가치/수 집계
+    const agg = new Map<string, { value: number; count: number }>();
+    for (const c of cards as any[]) {
+      const value = (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8);
+      const cur = agg.get(c.user_id) || { value: 0, count: 0 };
+      cur.value += value;
+      cur.count += 1;
+      agg.set(c.user_id, cur);
+    }
+    // 상위 후보만 유저 정보를 조회하도록 매칭 카드 가치 기준으로 정렬·상한 적용 (in() URL 길이 보호)
+    const CANDIDATE_CAP = 200;
+    const ownerIds = Array.from(agg.entries())
+      .sort((a, b) => b[1].value - a[1].value)
+      .slice(0, CANDIDATE_CAP)
+      .map(([id]) => id);
+
+    // 3) 보유자 유저 정보 일괄 조회
+    const { data: users, error: uErr } = await client.from('users').select('*').in('id', ownerIds);
+    if (uErr) throw uErr;
+
+    const kw = (keyword || '').trim();
+    const enriched: UserRanking[] = (users || [])
+      .filter((u: any) => !kw || fuzzyScore(u.username || '', kw) !== null)
+      .map((u: any) => {
+        const a = agg.get(u.id)!;
+        const cardsValue = Math.round(a.value);
+        return { ...(u as User), card_count: a.count, cards_value: cardsValue, total_asset: u.point + cardsValue };
+      });
+
+    enriched.sort((a, b) => mode === 'cards'
+      ? (b.cards_value || 0) - (a.cards_value || 0)
+      : b.total_asset - a.total_asset
+    );
+    return enriched.map((item, idx) => ({ ...item, rank: idx + 1 })).slice(0, limit);
+  }
+
+  /**
+   * 후보 유저 목록의 보유 카드 가치를 한 번의 조회로 합산해 부여합니다(N+1 제거).
+   */
+  private async enrichWithCardValues(candidates: User[]): Promise<UserRanking[]> {
+    const ids = candidates.map((u) => u.id);
+    const { data: cards } = await this.getClient()
+      .from('user_cards')
+      .select('user_id, star, streamer:streamers(base_value)')
+      .in('user_id', ids)
+      .or('is_hidden.is.null,is_hidden.eq.false');
+
+    const agg = new Map<string, { value: number; count: number }>();
+    for (const c of (cards || []) as any[]) {
+      const value = (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8);
+      const cur = agg.get(c.user_id) || { value: 0, count: 0 };
+      cur.value += value;
+      cur.count += 1;
+      agg.set(c.user_id, cur);
+    }
+    return candidates.map((u) => {
+      const a = agg.get(u.id) || { value: 0, count: 0 };
+      const cardsValue = Math.round(a.value);
+      return { ...u, card_count: a.count, cards_value: cardsValue, total_asset: u.point + cardsValue };
+    });
   }
 }
 

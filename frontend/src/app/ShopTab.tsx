@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
+import { fuzzySearch } from '@/lib/search';
 import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
@@ -41,6 +42,45 @@ const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
     duration: 1.3 + (i % 5) * 0.16
   };
 });
+
+// 백그라운드 폴링 시 변경된 매물만 갱신하기 위한 비교/머지 헬퍼.
+// 동일 내용의 매물은 기존 객체 참조를 유지해 불필요한 카드 리렌더(및 입장 애니메이션 재생)를 막습니다.
+const MARKET_LISTING_VOLATILE_KEYS = [
+  'price', 'status', 'current_bid', 'current_bidder_id', 'current_bidder_username',
+  'buy_now_price', 'auction_ends_at', 'updated_at'
+];
+const marketListingsEqual = (a: any, b: any): boolean =>
+  MARKET_LISTING_VOLATILE_KEYS.every((key) => a?.[key] === b?.[key]);
+
+const mergeMarketListings = (prev: any[], next: any[]): any[] => {
+  const prevById = new Map(prev.map((listing) => [listing.id, listing]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((incoming, index) => {
+    const existing = prevById.get(incoming.id);
+    if (existing && marketListingsEqual(existing, incoming)) {
+      if (prev[index] !== existing) changed = true; // 순서만 바뀐 경우
+      return existing; // 내용 동일 → 기존 참조 유지
+    }
+    changed = true;
+    return incoming;
+  });
+  // 아무 변화가 없으면 동일 배열 참조를 반환해 리렌더 자체를 건너뜁니다.
+  return changed ? merged : prev;
+};
+
+// 경매 남은 시간(ms)을 한눈에 보기 좋은 문자열로 변환합니다.
+const formatRemaining = (ms: number): string => {
+  if (ms <= 0) return '마감';
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (days > 0) return `${days}일 ${hours}시간`;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  if (minutes > 0) return `${minutes}분 ${String(seconds).padStart(2, '0')}초`;
+  return `${seconds}초`;
+};
 
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
@@ -79,6 +119,12 @@ export const ShopTab: React.FC = () => {
   const [watchStar, setWatchStar] = useState('');
   const [watchMaxPrice, setWatchMaxPrice] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
+  // 관심 매물 알림: 스트리머 이름 검색(유연 매칭) 자동완성용 상태
+  const [streamerOptions, setStreamerOptions] = useState<any[]>([]);
+  const [watchStreamerQuery, setWatchStreamerQuery] = useState('');
+  const [watchStreamerOpen, setWatchStreamerOpen] = useState(false);
+  // 경매 남은 시간 실시간 카운트다운용 1초 틱
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
@@ -174,8 +220,10 @@ export const ShopTab: React.FC = () => {
     } catch { /* noop */ }
   };
 
-  const fetchMarketListings = async () => {
-    setIsLoadingMarket(true);
+  // silent=true(백그라운드 폴링)일 때는 로딩 스켈레톤을 띄우지 않고 변경분만 조용히 반영합니다.
+  // → 경매 정보(입찰가·남은 시간 등) 갱신은 받아오되, 10초마다 리스트가 통째로 새로고침되는 현상 방지.
+  const fetchMarketListings = async (silent = false) => {
+    if (!silent) setIsLoadingMarket(true);
     try {
       const query = new URLSearchParams({
         page: String(marketPage),
@@ -191,13 +239,16 @@ export const ShopTab: React.FC = () => {
       const res = await apiFetch(`/market/listings?${query.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setMarketListings(data.listings || []);
+        const incoming = data.listings || [];
+        // 폴링(silent)은 변경된 매물만 머지해 카드 리렌더/애니메이션 재생을 막고,
+        // 명시적 로드는 그대로 교체합니다.
+        setMarketListings((prev) => (silent ? mergeMarketListings(prev, incoming) : incoming));
         setMarketTotal(data.total || 0);
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setIsLoadingMarket(false);
+      if (!silent) setIsLoadingMarket(false);
     }
   };
 
@@ -243,10 +294,26 @@ export const ShopTab: React.FC = () => {
     }
   }, [subTab, marketPage, marketSort, marketType]);
 
+  // 경매 남은 시간을 위한 1초 카운트다운 (마켓 탭에서만 작동)
+  useEffect(() => {
+    if (subTab !== 'market') return;
+    const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [subTab]);
+
+  // 관심 매물 알림의 스트리머 이름 검색용 목록 로드 (마켓 탭 진입 시 1회)
+  useEffect(() => {
+    if (subTab !== 'market' || !user || streamerOptions.length > 0) return;
+    apiFetch('/streamers')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setStreamerOptions(Array.isArray(data) ? data : []))
+      .catch(() => { /* 검색 목록 로드 실패는 무시 */ });
+  }, [subTab, user, streamerOptions.length]);
+
   useEffect(() => {
     if (subTab !== 'market') return;
     const timer = window.setInterval(() => {
-      fetchMarketListings();
+      fetchMarketListings(true); // 백그라운드 폴링: 로딩 표시 없이 변경분만 반영
       if (user) {
         fetchMyListings();
         fetchMarketWatches();
@@ -392,9 +459,14 @@ export const ShopTab: React.FC = () => {
       toast('로그인이 필요합니다.', 'warning');
       return;
     }
-    const channelId = payload?.channel_id || watchChannelId.trim();
+    // 우선순위: 명시 payload → 자동완성에서 선택된 channel_id → 검색어 유연 매칭으로 추정
+    let channelId = payload?.channel_id || watchChannelId.trim();
+    if (!channelId && watchStreamerQuery.trim()) {
+      const matched = streamerOptions.find((s) => fuzzySearch(s.name || '', watchStreamerQuery));
+      if (matched) channelId = matched.channel_id;
+    }
     if (!channelId) {
-      toast('알림 받을 스트리머 채널 ID를 입력해주세요.', 'warning');
+      toast('알림 받을 스트리머를 검색해 선택해주세요.', 'warning');
       return;
     }
     const star = payload?.star ?? (watchStar === '' ? null : Number(watchStar));
@@ -413,6 +485,8 @@ export const ShopTab: React.FC = () => {
       if (res.ok) {
         toast('관심 매물 알림을 등록했습니다.', 'success');
         setWatchChannelId('');
+        setWatchStreamerQuery('');
+        setWatchStreamerOpen(false);
         setWatchStar('');
         setWatchMaxPrice('');
         fetchMarketWatches();
@@ -941,12 +1015,50 @@ export const ShopTab: React.FC = () => {
                     </p>
                   </div>
                   <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[1fr_110px_130px_auto] lg:max-w-2xl">
-                    <input
-                      value={watchChannelId}
-                      onChange={(event) => setWatchChannelId(event.target.value)}
-                      placeholder="스트리머 채널 ID"
-                      className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-xs font-bold text-sky-950 placeholder:text-sky-700/45 focus:border-sky-400 focus:outline-none dark:border-sky-300/20 dark:bg-sky-950/30 dark:text-sky-50"
-                    />
+                    <div className="relative">
+                      <input
+                        value={watchStreamerQuery}
+                        onChange={(event) => {
+                          setWatchStreamerQuery(event.target.value);
+                          setWatchChannelId(''); // 검색어가 바뀌면 이전 선택 해제
+                          setWatchStreamerOpen(true);
+                        }}
+                        onFocus={() => setWatchStreamerOpen(true)}
+                        placeholder="스트리머 이름 검색 (초성·띄어쓰기 무시)"
+                        className={`w-full rounded-2xl border bg-white/80 px-3 py-2 text-xs font-bold text-sky-950 placeholder:text-sky-700/45 focus:outline-none dark:bg-sky-950/30 dark:text-sky-50 ${watchChannelId ? 'border-sky-400 dark:border-sky-300/40' : 'border-sky-200 focus:border-sky-400 dark:border-sky-300/20'}`}
+                      />
+                      {watchStreamerOpen && watchStreamerQuery.trim() && (
+                        <>
+                          {/* 바깥 클릭 시 닫기 */}
+                          <div className="fixed inset-0 z-20" onClick={() => setWatchStreamerOpen(false)} />
+                          <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-2xl border border-sky-200 bg-white p-1 shadow-xl dark:border-sky-300/20 dark:bg-sky-950">
+                            {(() => {
+                              const suggestions = streamerOptions
+                                .filter((s) => fuzzySearch(s.name || '', watchStreamerQuery))
+                                .slice(0, 8);
+                              if (suggestions.length === 0) {
+                                return <p className="px-3 py-3 text-center text-[11px] font-bold text-sky-700/60 dark:text-sky-100/50">검색 결과가 없습니다.</p>;
+                              }
+                              return suggestions.map((s) => (
+                                <button
+                                  key={s.channel_id}
+                                  type="button"
+                                  onClick={() => {
+                                    setWatchChannelId(s.channel_id);
+                                    setWatchStreamerQuery(s.name);
+                                    setWatchStreamerOpen(false);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-bold text-sky-950 transition hover:bg-sky-100 dark:text-sky-50 dark:hover:bg-sky-400/15"
+                                >
+                                  <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-6 w-6 shrink-0 rounded-full border border-sky-200 object-cover dark:border-sky-300/20" />
+                                  <span className="truncate">{s.name}</span>
+                                </button>
+                              ));
+                            })()}
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <select
                       value={watchStar}
                       onChange={(event) => setWatchStar(event.target.value)}
@@ -1013,7 +1125,10 @@ export const ShopTab: React.FC = () => {
                     const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
                     const minBid = currentBid + 100;
                     const endsAt = listing.auction_ends_at ? new Date(listing.auction_ends_at) : null;
-                    const isEnded = !!endsAt && endsAt.getTime() <= Date.now();
+                    const remainingMs = endsAt ? endsAt.getTime() - nowTs : 0;
+                    const isEnded = !!endsAt && remainingMs <= 0;
+                    const isUrgent = isAuction && !isEnded && remainingMs < 60_000;     // 1분 미만
+                    const isSoon = isAuction && !isEnded && remainingMs < 5 * 60_000;   // 5분 미만
 
                     return (
                       <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
@@ -1074,14 +1189,34 @@ export const ShopTab: React.FC = () => {
                             </span>
                           </div>
                           {isAuction && (
-                            <div className="rounded-xl border border-violet-200/70 bg-violet-50/80 p-2 text-[10px] font-bold text-violet-700 dark:border-violet-300/15 dark:bg-violet-400/10 dark:text-violet-200">
-                              <div className="flex items-center justify-between">
-                                <span>현재가</span>
-                                <span>{currentBid.toLocaleString()} P</span>
+                            <div className="space-y-1.5 rounded-xl border border-violet-200/70 bg-violet-50/80 p-2 dark:border-violet-300/15 dark:bg-violet-400/10">
+                              {/* 남은 시간 — 가장 눈에 띄게(긴급도별 색상/펄스) */}
+                              <div
+                                className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-black tabular-nums ${
+                                  isEnded
+                                    ? 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300'
+                                    : isUrgent
+                                      ? 'animate-pulse bg-red-500 text-white shadow-sm shadow-red-500/30'
+                                      : isSoon
+                                        ? 'bg-amber-400 text-amber-950'
+                                        : 'bg-violet-500/15 text-violet-700 dark:bg-violet-400/15 dark:text-violet-100'
+                                }`}
+                                title={endsAt ? endsAt.toLocaleString('ko-KR') : ''}
+                              >
+                                <Clock className="h-3 w-3 shrink-0" />
+                                {isEnded ? '마감 처리 중' : `${formatRemaining(remainingMs)} 남음`}
                               </div>
-                              <div className="mt-0.5 flex items-center justify-between text-violet-700/70 dark:text-violet-100/65">
-                                <span>{listing.current_bidder_username ? `최고 입찰: ${listing.current_bidder_username}` : '아직 입찰 없음'}</span>
-                                <span>{endsAt ? `${isEnded ? '마감 처리 중' : endsAt.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '-'}</span>
+                              {/* 현재가 */}
+                              <div className="flex items-center justify-between text-[10px] font-bold text-violet-700 dark:text-violet-200">
+                                <span>현재가</span>
+                                <span className="cute-number-font">{currentBid.toLocaleString()} P</span>
+                              </div>
+                              {/* 최고 입찰자 / 마감 임박 안내 */}
+                              <div className="flex items-center justify-between gap-1 text-[9px] font-semibold text-violet-700/70 dark:text-violet-100/60">
+                                <span className="truncate">
+                                  {listing.current_bidder_username ? `🏆 ${listing.current_bidder_username}` : '아직 입찰 없음'}
+                                </span>
+                                {isUrgent && <span className="shrink-0 font-black text-red-500">입찰 시 +3분 연장</span>}
                               </div>
                             </div>
                           )}
@@ -1231,7 +1366,17 @@ export const ShopTab: React.FC = () => {
                             </td>
                             <td className="py-3">
                               {l.status === 'PENDING' && (
-                                <span className="rounded bg-sky-500/10 px-2 py-0.5 font-bold text-sky-500 text-[10px]">판매 중</span>
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <span className="rounded bg-sky-500/10 px-2 py-0.5 font-bold text-sky-500 text-[10px]">판매 중</span>
+                                  {isAuction && l.auction_ends_at && (() => {
+                                    const rem = new Date(l.auction_ends_at).getTime() - nowTs;
+                                    return (
+                                      <span className={`text-[9px] font-black tabular-nums ${rem <= 0 ? 'text-zinc-400' : rem < 60_000 ? 'text-red-500' : 'text-violet-500'}`}>
+                                        {rem <= 0 ? '마감 처리 중' : `${formatRemaining(rem)} 남음`}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
                               )}
                               {l.status === 'SOLD' && (
                                 <span className="rounded bg-emerald-500/10 px-2 py-0.5 font-bold text-emerald-500 text-[10px]">판매 완료</span>

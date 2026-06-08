@@ -384,7 +384,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     return row ? row.price : null;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number }> {
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }> {
     const db = this.getDb();
     const txn = db.transaction(() => {
       const listing = db.prepare("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction'").get(listingId) as any;
@@ -399,9 +399,24 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (Number(bidder.point || 0) < amount) throw new Error('INSUFFICIENT_POINT');
 
       db.prepare('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)').run(listingId, bidderId, amount);
-      db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(amount, bidderId, listingId);
-      return { ok: true, reason: 'OK', current_bid: amount };
+
+      // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
+      const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
+      const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;  // 3분 연장
+      const nowMs = Date.now();
+      const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
+      const extendedEndsAt = endsAtMs && endsAtMs - nowMs < ANTI_SNIPE_THRESHOLD_MS
+        ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
+        : null;
+
+      if (extendedEndsAt) {
+        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, auction_ends_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(amount, bidderId, extendedEndsAt, listingId);
+      } else {
+        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(amount, bidderId, listingId);
+      }
+      return { ok: true, reason: 'OK', current_bid: amount, auction_ends_at: extendedEndsAt ?? listing.auction_ends_at };
     });
 
     try {

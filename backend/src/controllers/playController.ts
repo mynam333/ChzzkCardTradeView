@@ -363,6 +363,32 @@ export const getUserProfile = async (req: Request, res: Response) => {
   }
 };
 
+// 랭킹은 모든 유저×보유카드를 매번 집계·정렬하는 무거운 쿼리이고, 프론트가 25초마다
+// 폴링하며 동시 접속도 많습니다. 실시간일 필요가 없으므로(시세는 2분 주기 갱신) 동일 파라미터
+// 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
+const RANKINGS_CACHE_TTL = 20_000; // 20초
+const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
+
+// 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
+// (검색은 키워드별 결과 + 동일한 전체 풀이 필요하므로, 풀을 캐싱하면 무거운 집계가 반복되지 않음)
+const rankingPoolCache = new Map<string, { data: any[]; expiresAt: number }>();
+const loadRankingPool = async (
+  mode: 'total' | 'cards',
+  channelId: string,
+  star: number | null
+) => {
+  const key = `${mode}|${channelId}|${star ?? ''}`;
+  const now = Date.now();
+  const hit = rankingPoolCache.get(key);
+  if (hit && hit.expiresAt > now) return hit.data;
+  const data = await userRepository.findRankings(100, '', { mode, channelId, star });
+  rankingPoolCache.set(key, { data, expiresAt: now + RANKINGS_CACHE_TTL });
+  if (rankingPoolCache.size > 100) {
+    for (const [k, v] of rankingPoolCache) if (v.expiresAt <= now) rankingPoolCache.delete(k);
+  }
+  return data;
+};
+
 /**
  * 2. 자산 랭킹 상위 유저 목록 조회
  */
@@ -373,6 +399,14 @@ export const getUserRankings = async (req: Request, res: Response) => {
     const channelId = typeof req.query.channel_id === 'string' ? req.query.channel_id.trim() : '';
     const starRaw = typeof req.query.star === 'string' && req.query.star !== '' ? Number(req.query.star) : null;
     const star = starRaw == null || Number.isNaN(starRaw) ? null : Math.max(0, Math.min(5, Math.floor(starRaw)));
+
+    const cacheKey = `${mode}|${channelId}|${star ?? ''}|${keyword}`;
+    const now = Date.now();
+    const cached = rankingsCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=20');
+      return res.status(200).json(cached.data);
+    }
     // 검색어가 있으면 초성/띄어쓰기 무시 유사도 검색까지 지원합니다.
     // - 부분일치 결과: 리포지토리 keyword 필터로 순위 무관하게 정확히 포착(기존 동작 유지)
     // - 초성/띄어쓰기 유사 매칭: 상위 랭킹 풀을 따로 받아 유사도로 보강(랭킹 노출 범위 내)
@@ -380,7 +414,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
     if (keyword) {
       const [matched, topPool] = await Promise.all([
         userRepository.findRankings(100, keyword, { mode, channelId, star }),
-        userRepository.findRankings(100, '', { mode, channelId, star })
+        loadRankingPool(mode, channelId, star)
       ]);
       const byId = new Map<string, typeof matched[number]>();
       for (const u of matched) byId.set(u.id, u);
@@ -393,7 +427,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
         .slice(0, 100)
         .map((x) => x.u);
     } else {
-      rankings = await userRepository.findRankings(100, '', { mode, channelId, star });
+      rankings = await loadRankingPool(mode, channelId, star);
     }
     const userIds = rankings.map((user) => user.id);
     const [titlesByUser, linkedStreamers] = await Promise.all([
@@ -420,6 +454,14 @@ export const getUserRankings = async (req: Request, res: Response) => {
       };
     });
 
+    rankingsCache.set(cacheKey, { data: mapped, expiresAt: now + RANKINGS_CACHE_TTL });
+    // 메모리 보호: 캐시가 커지면 만료된 항목을 정리합니다(검색어 키 누적 방지).
+    if (rankingsCache.size > 200) {
+      for (const [key, value] of rankingsCache) {
+        if (value.expiresAt <= now) rankingsCache.delete(key);
+      }
+    }
+    res.set('Cache-Control', 'public, max-age=20');
     return res.status(200).json(mapped);
   } catch (err: any) {
     console.error('[PlayController] getUserRankings 에러:', err);
@@ -758,13 +800,16 @@ export const sellCards = async (req: Request, res: Response) => {
 
       const key = `${channelId}#${star}`;
       const owned = userCardsByKey[key] || [];
-      const reserved = reservations.cardsByStar[key] || 0;
+      // reservations.cardsByStar 는 교환 에스크로 + 오픈마켓 PENDING 매물을 모두 포함합니다.
+      // 여기서 마켓 매물을 또 빼면 이중 차감이 되어 정상 판매가 막히므로 reservedTotal만 차감합니다.
+      const reservedTotal = reservations.cardsByStar[key] || 0;
       const pendingMarket = owned.filter((card) => pendingMarketIds.has(card.id)).length;
-      const sellable = owned.length - reserved - pendingMarket;
+      const escrowReserved = Math.max(0, reservedTotal - pendingMarket); // 안내 메시지용 교환 에스크로 추정치
+      const sellable = owned.length - reservedTotal;
       if (sellable < count) {
         return res.status(400).json({
           error: 'InsufficientCards',
-          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 교환 중 ${reserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
+          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 교환 중 ${escrowReserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
         });
       }
 
@@ -789,6 +834,14 @@ export const sellCards = async (req: Request, res: Response) => {
       new_points: nextPoint
     });
   } catch (err: any) {
+    // 검증 통과 후에도 보유 현황이 변경(경합/오래된 화면)되어 RPC가 CARD_SHORTAGE를 던질 수 있습니다.
+    // 이 경우 500 대신 명확한 409로 안내합니다.
+    if (err?.message === 'CARD_SHORTAGE') {
+      return res.status(409).json({
+        error: 'InsufficientCards',
+        message: '판매하려는 카드의 수량이 부족합니다. 보유 현황이 변경되었을 수 있으니 새로고침 후 다시 시도해 주세요.'
+      });
+    }
     console.error('[PlayController] sellCards 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }

@@ -485,7 +485,7 @@ export interface IMarketRepository {
   listHistory(userId: string): Promise<MarketListing[]>;
   /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
   getRecentPrice(channelId: string): Promise<number | null>;
-  placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number }>;
+  placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }>;
   finishExpiredAuctions(nowIso: string): Promise<MarketListing[]>;
   upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch>;
   deleteWatch(userId: string, id: number): Promise<boolean>;
