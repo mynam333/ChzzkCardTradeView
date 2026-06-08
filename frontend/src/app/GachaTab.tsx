@@ -181,8 +181,18 @@ export const GachaTab: React.FC = () => {
 
   // 모바일 롱프레스 타이머 레프
   const longPressTimer = React.useRef<any>(null);
+  const longPressStartPoint = React.useRef<{ x: number; y: number; scrollX: number; scrollY: number } | null>(null);
   // 롱프레스로 메뉴가 떠서 직후의 클릭(확대 모달)을 무시해야 하는지 여부
   const longPressFired = React.useRef<boolean>(false);
+  const LONG_PRESS_CANCEL_DISTANCE = 12;
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressStartPoint.current = null;
+  };
 
   // 전역 클릭 시 컨텍스트 메뉴 닫기
   useEffect(() => {
@@ -1379,14 +1389,35 @@ export const GachaTab: React.FC = () => {
 
                   // 마우스 및 터치 롱프레스 핸들링 (모바일에서 길게 누르면 우클릭 메뉴 표시)
                   const startPress = (e: React.MouseEvent | React.TouchEvent) => {
+                    if ('button' in e && e.button !== 0) return;
+                    cancelLongPress();
                     longPressFired.current = false;
                     // 터치/마우스 좌표 추출 (메뉴 위치용)
                     const point = 'touches' in e ? e.touches[0] : (e as React.MouseEvent);
+                    if (!point) return;
                     const x = point?.clientX ?? 0;
                     const y = point?.clientY ?? 0;
+                    longPressStartPoint.current = {
+                      x,
+                      y,
+                      scrollX: window.scrollX,
+                      scrollY: window.scrollY
+                    };
                     longPressTimer.current = setTimeout(() => {
-                      if (selectionMode) return;
+                      const startPoint = longPressStartPoint.current;
+                      const scrollDistance = startPoint
+                        ? Math.hypot(window.scrollX - startPoint.scrollX, window.scrollY - startPoint.scrollY)
+                        : 0;
+                      if (!startPoint || scrollDistance > LONG_PRESS_CANCEL_DISTANCE) {
+                        cancelLongPress();
+                        return;
+                      }
+                      if (selectionMode) {
+                        cancelLongPress();
+                        return;
+                      }
                       longPressFired.current = true;
+                      longPressTimer.current = null;
                       const menuPosition = clampContextMenuPosition(x, y);
                       const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
                       const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
@@ -1406,10 +1437,20 @@ export const GachaTab: React.FC = () => {
                     }, 500);
                   };
 
-                  const endPress = () => {
-                    if (longPressTimer.current) {
-                      clearTimeout(longPressTimer.current);
+                  const movePress = (e: React.TouchEvent) => {
+                    const startPoint = longPressStartPoint.current;
+                    const point = e.touches[0];
+                    if (!startPoint || !point) return;
+
+                    const touchDistance = Math.hypot(point.clientX - startPoint.x, point.clientY - startPoint.y);
+                    const scrollDistance = Math.hypot(window.scrollX - startPoint.scrollX, window.scrollY - startPoint.scrollY);
+                    if (touchDistance > LONG_PRESS_CANCEL_DISTANCE || scrollDistance > LONG_PRESS_CANCEL_DISTANCE) {
+                      cancelLongPress();
                     }
+                  };
+
+                  const endPress = () => {
+                    cancelLongPress();
                   };
 
                   return (
@@ -1419,8 +1460,11 @@ export const GachaTab: React.FC = () => {
                       onClick={handleCardClick}
                       onMouseDown={startPress}
                       onMouseUp={endPress}
+                      onMouseLeave={endPress}
                       onTouchStart={startPress}
+                      onTouchMove={movePress}
                       onTouchEnd={endPress}
+                      onTouchCancel={endPress}
                       style={{
                         containerType: 'inline-size',
                         ...(borderClass(card.border) ? {} : (borderStyle(card.border) || {}))
