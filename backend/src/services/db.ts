@@ -14,7 +14,8 @@ let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
  * 오류에 한해 짧은 백오프로 재시도하여 간헐적 조회 실패를 흡수합니다.
  * (HTTP 4xx/5xx 응답은 throw가 아니라 정상 반환되므로 재시도 대상이 아닙니다.)
  */
-const SUPABASE_FETCH_MAX_RETRIES = 2;
+const SUPABASE_FETCH_MAX_RETRIES = 3;
+const SUPABASE_FETCH_BACKOFF_MS = [250, 600, 1200];
 const fetchWithRetry: typeof fetch = async (input, init) => {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= SUPABASE_FETCH_MAX_RETRIES; attempt++) {
@@ -25,7 +26,8 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
       // 네트워크 계층 오류(TypeError: fetch failed)만 재시도. 그 외(abort 등)는 즉시 전파.
       const isNetworkError = err instanceof TypeError;
       if (!isNetworkError || attempt === SUPABASE_FETCH_MAX_RETRIES) break;
-      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+      // 지수 백오프로 일시적 끊김이 회복될 시간을 줍니다.
+      await new Promise((resolve) => setTimeout(resolve, SUPABASE_FETCH_BACKOFF_MS[attempt] ?? 1200));
     }
   }
   throw lastErr;

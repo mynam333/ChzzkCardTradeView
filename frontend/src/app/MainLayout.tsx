@@ -18,7 +18,6 @@ import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
 import { NotificationBell } from './NotificationBell';
 import { UserTitleList } from './UserTitleBadge';
-import { TutorialGuide } from './TutorialGuide';
 
 interface NavigationProps {
   onNotifyClick?: () => void;
@@ -265,8 +264,6 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           );
         })}
       </nav>
-
-      <TutorialGuide />
 
     </div>
   );

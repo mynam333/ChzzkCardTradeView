@@ -568,7 +568,7 @@ const completedStorageKey = (userId: string | number) => `chikapo_tutorial_compl
 const sessionStorageKey = (userId: string | number) => `chikapo_tutorial_session_seen:${TUTORIAL_VERSION}:${userId}`;
 
 export const TutorialGuide: React.FC = () => {
-  const { user, activeTab, setActiveTab, refreshUserData, toast } = useApp();
+  const { user, activeTab, setActiveTab, refreshUserData, toast, theme } = useApp();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
@@ -793,11 +793,19 @@ export const TutorialGuide: React.FC = () => {
   return (
     <>
       {highlightRect && (
-        <div className="pointer-events-none fixed inset-0 z-[70]" aria-hidden="true">
-          <div className="absolute left-0 right-0 top-0 bg-slate-950/45 backdrop-blur-[1.5px] dark:bg-black/58" style={{ height: highlightRect.top }} />
-          <div className="absolute left-0 bg-slate-950/45 backdrop-blur-[1.5px] dark:bg-black/58" style={{ top: highlightRect.top, width: highlightRect.left, height: highlightRect.height }} />
-          <div className="absolute right-0 bg-slate-950/45 backdrop-blur-[1.5px] dark:bg-black/58" style={{ top: highlightRect.top, left: highlightRect.left + highlightRect.width, height: highlightRect.height }} />
-          <div className="absolute bottom-0 left-0 right-0 bg-slate-950/45 backdrop-blur-[1.5px] dark:bg-black/58" style={{ top: highlightRect.top + highlightRect.height }} />
+        <div className="pointer-events-none fixed inset-0 z-[70] overflow-hidden" aria-hidden="true">
+          {/* 둥근 모서리를 유지한 채 바깥 영역만 어둡게 처리.
+              box-shadow 스프레드를 사용해 구멍(밝은 부분)이 둥근 모서리 밖으로 새지 않음. */}
+          <div
+            className="absolute rounded-[1.65rem]"
+            style={{
+              top: highlightRect.top,
+              left: highlightRect.left,
+              width: highlightRect.width,
+              height: highlightRect.height,
+              boxShadow: `0 0 0 9999px ${theme === 'dark' ? 'rgba(2, 6, 23, 0.62)' : 'rgba(15, 23, 42, 0.5)'}`
+            }}
+          />
           <div
             className="absolute rounded-[1.65rem] border-2 border-sky-300 shadow-[0_0_0_6px_rgba(14,165,233,0.22),0_0_36px_rgba(14,165,233,0.58)] ring-2 ring-white/80 dark:border-cyan-200 dark:ring-white/35"
             style={{

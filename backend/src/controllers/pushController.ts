@@ -185,7 +185,11 @@ const sendPushToAll = async (title: string, body: string, url = '/') => {
         if (err.statusCode === 410 || err.statusCode === 404) {
           console.log(`[Push] 만료된 구독 엔드포인트 정리: ${sub.endpoint}`);
           if (dbMode === 'SUPABASE') {
-            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then();
+            // 만료 구독 정리. 네트워크 오류로 실패해도 무시(미처리 거부 방지).
+            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then(
+              () => undefined,
+              () => undefined
+            );
           } else {
             getSqliteDb().prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
           }
@@ -227,7 +231,11 @@ export const sendPushToUser = async (userId: string, title: string, body: string
       return webpush.sendNotification(pushSubscription, payload).catch((err: any) => {
         if (err.statusCode === 410 || err.statusCode === 404) {
           if (dbMode === 'SUPABASE') {
-            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then();
+            // 만료 구독 정리. 네트워크 오류로 실패해도 무시(미처리 거부 방지).
+            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then(
+              () => undefined,
+              () => undefined
+            );
           } else {
             getSqliteDb().prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
           }

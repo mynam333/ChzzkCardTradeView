@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppProvider } from "./AppContext";
+import { TutorialGuide } from "./TutorialGuide";
 import { WebsiteJsonLd, WebAppJsonLd } from "./JsonLd";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://chikapo.yuaru.com";
@@ -87,6 +88,8 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
         <AppProvider>
           {children}
+          {/* 튜토리얼은 라우트(탭) 전환 시에도 유지되도록 루트 레이아웃에 마운트 */}
+          <TutorialGuide />
         </AppProvider>
       </body>
     </html>

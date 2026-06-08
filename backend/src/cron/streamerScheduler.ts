@@ -268,14 +268,16 @@ export const syncAllStreamersLiveStatus = async () => {
     return;
   }
   isSyncRunning = true;
-  const releaseLock = await acquireSchedulerLock('scheduler:streamer-live-status', 4 * 60 * 1000);
-  if (!releaseLock) {
-    console.warn('[LiveStatusScheduler] 다른 인스턴스가 동기화를 수행 중이라 이번 틱을 건너뜁니다.');
-    isSyncRunning = false;
-    return;
-  }
-  const cycle = scheduleCycle++;
+  // 락 획득(Supabase RPC)도 try 안에서 처리합니다. 네트워크 오류로 reject되더라도
+  // 미처리 Promise 거부로 프로세스가 죽거나 isSyncRunning이 영구히 묶이지 않도록 보호합니다.
+  let releaseLock: (() => Promise<void>) | null = null;
   try {
+    releaseLock = await acquireSchedulerLock('scheduler:streamer-live-status', 4 * 60 * 1000);
+    if (!releaseLock) {
+      console.warn('[LiveStatusScheduler] 다른 인스턴스가 동기화를 수행 중이라 이번 틱을 건너뜁니다.');
+      return;
+    }
+    const cycle = scheduleCycle++;
     const streamers = await streamerRepository.findAll();
     if (streamers.length === 0) {
       console.log('[LiveStatusScheduler] 등록된 스트리머가 없어 동기화를 건너뜁니다.');
@@ -365,9 +367,10 @@ export const syncAllStreamersLiveStatus = async () => {
       `(폴링 ${pollTargets.length} / 라이브 ${liveCount} / 계산전용 ${computeOnly.length} / 삭제대상 ${pruneTargets.length} / 실패 ${failCount}, 동시성 ${CONCURRENCY})`
     );
   } catch (error: any) {
-    console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error.message);
+    console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error?.message || error);
+    if (error?.cause) console.error('[LiveStatusScheduler] 상세 원인(cause):', error.cause);
   } finally {
-    await releaseLock().catch(() => undefined);
+    if (releaseLock) await releaseLock().catch(() => undefined);
     isSyncRunning = false;
   }
 };

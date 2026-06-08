@@ -285,11 +285,28 @@ const loadStreamerValueMap = async (
   }
 };
 
+// 칭호는 거의 변하지 않으므로 별도 캐시로 Supabase 조회 빈도를 크게 낮추고,
+// 일시적 조회 실패(fetch failed) 시에는 마지막 성공 결과(stale)로 응답해 사용자 영향을 없앱니다.
+let titlesCache: { data: Record<string, any[]>; expiresAt: number } | null = null;
+const STREAMER_TITLES_CACHE_TTL = 5 * 60_000; // 5분
+
 const loadStreamerTitles = async (channelIds: string[]) => {
+  const now = Date.now();
+  if (titlesCache && titlesCache.expiresAt > now) {
+    return titlesCache.data;
+  }
   try {
-    return await titleRepository.findByUserIds(channelIds);
+    const data = await titleRepository.findByUserIds(channelIds);
+    titlesCache = { data, expiresAt: now + STREAMER_TITLES_CACHE_TTL };
+    return data;
   } catch (err: any) {
-    console.error('[Streamers] 스트리머 칭호 조회 실패, 칭호 없이 응답합니다:', err?.message || err);
+    console.error('[Streamers] 스트리머 칭호 조회 실패:', err?.message || err);
+    if (err?.cause) console.error('[Streamers] 상세 원인(cause):', err.cause);
+    // 직전 성공 캐시가 있으면 그대로 사용(없으면 칭호 없이) 하고, 곧 재시도하도록 짧게 캐싱합니다.
+    if (titlesCache) {
+      titlesCache.expiresAt = now + 30_000;
+      return titlesCache.data;
+    }
     return {} as Record<string, any[]>;
   }
 };
