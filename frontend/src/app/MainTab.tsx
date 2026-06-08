@@ -122,7 +122,7 @@ export const MainTab: React.FC = () => {
       )}
 
       {/* Hero Section */}
-      <section className="cute-gradient relative overflow-hidden rounded-[2.25rem] border border-white/70 p-6 text-white shadow-[0_24px_70px_rgba(45,157,240,0.24)] dark:border-white/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.32)] md:p-10">
+      <section data-tour="main-landing" className="cute-gradient relative overflow-hidden rounded-[2.25rem] border border-white/70 p-6 text-white shadow-[0_24px_70px_rgba(45,157,240,0.24)] dark:border-white/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.32)] md:p-10">
         <div className="absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/28 blur-2xl"></div>
         <div className="absolute -bottom-14 -left-10 h-48 w-48 rounded-full bg-teal-300/30 blur-2xl"></div>
         <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-sky-950/24 via-sky-900/8 to-transparent"></div>
@@ -194,7 +194,7 @@ export const MainTab: React.FC = () => {
       <div className="grid gap-6 md:grid-cols-3">
 
         {/* 공지사항 롤링 보드 */}
-        <div className="cute-surface md:col-span-2 rounded-[2rem] p-6">
+        <div data-tour="main-news" className="cute-surface md:col-span-2 rounded-[2rem] p-6">
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
             <button
               type="button"

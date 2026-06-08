@@ -1,35 +1,7 @@
 import { getSupabaseClient } from "../../services/db";
-import { IMarketRepository, MarketListing } from "../interfaces";
+import { IMarketRepository, MarketListing, MarketWatch } from "../interfaces";
 import { formatUploadUrl } from "../../services/imageService";
-
-// 초성 추출 헬퍼
-function getChosung(str: string): string {
-  const CHOSUNG = [
-    'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
-  ];
-  let result = '';
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i) - 0xac00;
-    if (code >= 0 && code <= 11172) {
-      result += CHOSUNG[Math.floor(code / 588)];
-    } else {
-      result += str.charAt(i);
-    }
-  }
-  return result;
-}
-
-// 유사도 비교 (초성 매칭 및 띄어쓰기 제거)
-function fuzzyMatch(target: string, query: string): boolean {
-  const cleanTarget = target.replace(/\s+/g, '').toLowerCase();
-  const cleanQuery = query.replace(/\s+/g, '').toLowerCase();
-  
-  if (cleanTarget.includes(cleanQuery)) return true;
-  
-  const targetChosung = getChosung(cleanTarget);
-  const queryChosung = getChosung(cleanQuery);
-  return targetChosung.includes(queryChosung);
-}
+import { fuzzyMatch } from "../../utils/search";
 
 export class SupabaseMarketRepository implements IMarketRepository {
   private getClient() {
@@ -45,6 +17,12 @@ export class SupabaseMarketRepository implements IMarketRepository {
       price: row.price,
       status: row.status as MarketListing['status'],
       buyer_id: row.buyer_id ?? null,
+      listing_type: row.listing_type || 'fixed',
+      buy_now_price: row.buy_now_price ?? null,
+      starting_bid: row.starting_bid ?? null,
+      current_bid: row.current_bid ?? null,
+      current_bidder_id: row.current_bidder_id ?? null,
+      auction_ends_at: row.auction_ends_at ?? null,
       fee: row.fee ?? 0,
       settled_amount: row.settled_amount ?? 0,
       with_cosmetics: !!row.with_cosmetics,
@@ -52,6 +30,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       updated_at: row.updated_at,
       seller_username: row.seller?.username || row.seller_username,
       buyer_username: row.buyer?.username || row.buyer_username,
+      current_bidder_username: row.current_bidder?.username || row.current_bidder_username,
       card: (card && streamer) ? {
         id: card.id,
         user_id: card.user_id,
@@ -118,8 +97,20 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return card;
   }
 
-  async create(listing: { seller_id: string; user_card_id: number; price: number; with_cosmetics?: boolean }): Promise<MarketListing> {
-    if (listing.price < 100) {
+  async create(listing: {
+    seller_id: string;
+    user_card_id: number;
+    price: number;
+    with_cosmetics?: boolean;
+    listing_type?: 'fixed' | 'auction';
+    buy_now_price?: number | null;
+    starting_bid?: number | null;
+    auction_ends_at?: string | null;
+  }): Promise<MarketListing> {
+    const listingType = listing.listing_type || 'fixed';
+    const startingBid = Math.floor(Number(listing.starting_bid ?? listing.price));
+    const buyNowPrice = listing.buy_now_price == null ? null : Math.floor(Number(listing.buy_now_price));
+    if ((listingType === 'auction' ? startingBid : listing.price) < 100) {
       throw new Error('MIN_PRICE_LIMIT');
     }
     const { data, error } = await this.getClient()
@@ -127,7 +118,12 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .insert([{
         seller_id: listing.seller_id,
         user_card_id: listing.user_card_id,
-        price: listing.price,
+        price: listingType === 'auction' ? (buyNowPrice || startingBid) : listing.price,
+        listing_type: listingType,
+        buy_now_price: listingType === 'auction' ? buyNowPrice : listing.price,
+        starting_bid: listingType === 'auction' ? startingBid : null,
+        current_bid: listingType === 'auction' ? startingBid : null,
+        auction_ends_at: listingType === 'auction' ? listing.auction_ends_at : null,
         with_cosmetics: !!listing.with_cosmetics,
         status: 'PENDING'
       }])
@@ -146,7 +142,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
   async findById(id: number): Promise<MarketListing | null> {
     const { data, error } = await this.getClient()
       .from('market_listings')
-      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username)')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('id', id)
       .maybeSingle();
 
@@ -171,12 +167,17 @@ export class SupabaseMarketRepository implements IMarketRepository {
     page: number;
     limit: number;
     search?: string;
-    sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc';
+    sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
+    type?: 'all' | 'fixed' | 'auction';
   }): Promise<{ listings: MarketListing[]; total: number }> {
-    const { data: listingsData, error } = await this.getClient()
+    let query = this.getClient()
       .from('market_listings')
-      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username)')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('status', 'PENDING');
+    if (options.type && options.type !== 'all') {
+      query = query.eq('listing_type', options.type);
+    }
+    const { data: listingsData, error } = await query;
 
     if (error || !listingsData) {
       return { listings: [], total: 0 };
@@ -239,6 +240,10 @@ export class SupabaseMarketRepository implements IMarketRepository {
         return b.price - a.price;
       } else if (options.sort === 'price_asc') {
         return a.price - b.price;
+      } else if (options.sort === 'ending_soon') {
+        return new Date(a.auction_ends_at || '9999-12-31').getTime() - new Date(b.auction_ends_at || '9999-12-31').getTime();
+      } else if (options.sort === 'bid_desc') {
+        return Number(b.current_bid || b.price || 0) - Number(a.current_bid || a.price || 0);
       }
       return 0;
     });
@@ -256,7 +261,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
   async listByUser(userId: string): Promise<MarketListing[]> {
     const { data: listingsData, error } = await this.getClient()
       .from('market_listings')
-      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username)')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('seller_id', userId)
       .order('id', { ascending: false });
 
@@ -350,9 +355,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
   async listHistory(userId: string): Promise<MarketListing[]> {
     const { data: listingsData, error } = await this.getClient()
       .from('market_listings')
-      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username)')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .or(`seller_id.eq.${userId},buyer_id.eq.${userId}`)
-      .in('status', ['SOLD', 'CANCELLED'])
+      .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])
       .order('updated_at', { ascending: false });
 
     if (error || !listingsData) {
@@ -409,5 +414,177 @@ export class SupabaseMarketRepository implements IMarketRepository {
 
     if (error || !data) return null;
     return (data as any).price;
+  }
+
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number }> {
+    const listing = await this.findById(listingId);
+    if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
+      return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
+    }
+    if (listing.seller_id === bidderId) return { ok: false, reason: 'CANNOT_BID_OWN_ITEM' };
+    if (listing.auction_ends_at && new Date(listing.auction_ends_at).getTime() <= Date.now()) {
+      return { ok: false, reason: 'AUCTION_ENDED' };
+    }
+
+    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
+    if (amount < currentBid + 100) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
+
+    const { data: bidder, error: bidderError } = await this.getClient()
+      .from('users')
+      .select('point')
+      .eq('id', bidderId)
+      .maybeSingle();
+    if (bidderError || !bidder || Number(bidder.point || 0) < amount) {
+      return { ok: false, reason: 'INSUFFICIENT_POINT', current_bid: currentBid };
+    }
+
+    const nowIso = new Date().toISOString();
+    const { error: bidError } = await this.getClient()
+      .from('market_bids')
+      .insert([{ listing_id: listingId, bidder_id: bidderId, amount, created_at: nowIso }]);
+    if (bidError) throw bidError;
+
+    const { error: updateError } = await this.getClient()
+      .from('market_listings')
+      .update({ current_bid: amount, current_bidder_id: bidderId, updated_at: nowIso })
+      .eq('id', listingId)
+      .eq('status', 'PENDING');
+    if (updateError) throw updateError;
+
+    return { ok: true, reason: 'OK', current_bid: amount };
+  }
+
+  async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {
+    const { data: rows, error } = await this.getClient()
+      .from('market_listings')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
+      .eq('status', 'PENDING')
+      .eq('listing_type', 'auction')
+      .lte('auction_ends_at', nowIso)
+      .limit(50);
+    if (error || !rows?.length) return [];
+
+    const settled: MarketListing[] = [];
+    for (const row of rows) {
+      const amount = Number(row.current_bid || row.starting_bid || row.price || 0);
+      const bidderId = row.current_bidder_id as string | null;
+      if (!bidderId || amount <= 0) {
+        await this.updateStatus(row.id, 'AUCTION_ENDED');
+        continue;
+      }
+
+      const { data: bidder } = await this.getClient()
+        .from('users')
+        .select('point')
+        .eq('id', bidderId)
+        .maybeSingle();
+      if (!bidder || Number(bidder.point || 0) < amount) {
+        await this.updateStatus(row.id, 'AUCTION_ENDED');
+        continue;
+      }
+
+      const fee = Math.floor(amount * 0.05);
+      const settledAmount = amount - fee;
+      const client = this.getClient();
+      const { error: buyerError } = await client
+        .from('users')
+        .update({ point: Number(bidder.point || 0) - amount })
+        .eq('id', bidderId)
+        .gte('point', amount);
+      if (buyerError) throw buyerError;
+
+      const { data: seller } = await client.from('users').select('point').eq('id', row.seller_id).maybeSingle();
+      await client.from('users').update({ point: Number(seller?.point || 0) + settledAmount }).eq('id', row.seller_id);
+      await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
+      const { error: listingError } = await client
+        .from('market_listings')
+        .update({
+          status: 'SOLD',
+          buyer_id: bidderId,
+          price: amount,
+          fee,
+          settled_amount: settledAmount,
+          updated_at: nowIso
+        })
+        .eq('id', row.id)
+        .eq('status', 'PENDING');
+      if (listingError) throw listingError;
+
+      const cardData = await this.getCardDetail(row.user_card_id);
+      settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, settled_amount: settledAmount }, cardData));
+    }
+    return settled;
+  }
+
+  async upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch> {
+    const { data: existing } = await this.getClient()
+      .from('market_watches')
+      .select('*')
+      .eq('user_id', watch.user_id)
+      .eq('channel_id', watch.channel_id);
+    const row = existing?.find((item: any) => (item.star ?? null) === watch.star);
+
+    if (row?.id) {
+      const { data, error } = await this.getClient()
+        .from('market_watches')
+        .update({ max_price: watch.max_price })
+        .eq('id', row.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      return data as MarketWatch;
+    }
+
+    const { data, error } = await this.getClient()
+      .from('market_watches')
+      .insert([watch])
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data as MarketWatch;
+  }
+
+  async deleteWatch(userId: string, id: number): Promise<boolean> {
+    const { count, error } = await this.getClient()
+      .from('market_watches')
+      .delete({ count: 'exact' })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return (count || 0) > 0;
+  }
+
+  async listWatches(userId: string): Promise<MarketWatch[]> {
+    const { data, error } = await this.getClient()
+      .from('market_watches')
+      .select('*, streamer:streamers(*)')
+      .eq('user_id', userId)
+      .order('id', { ascending: false });
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      ...row,
+      streamer: row.streamer ? {
+        ...row.streamer,
+        logo_url: formatUploadUrl(row.streamer.logo_url),
+        custom_image_url: formatUploadUrl(row.streamer.custom_image_url)
+      } : null
+    }));
+  }
+
+  async findMatchingWatches(listing: MarketListing): Promise<MarketWatch[]> {
+    const channelId = listing.card?.channel_id || listing.card?.streamer?.channel_id;
+    if (!channelId) return [];
+    const star = listing.card?.star ?? 0;
+    const price = Number(listing.buy_now_price || listing.current_bid || listing.price || 0);
+    const { data, error } = await this.getClient()
+      .from('market_watches')
+      .select('*, streamer:streamers(*)')
+      .eq('channel_id', channelId);
+    if (error || !data) return [];
+    return data
+      .filter((watch: any) => (watch.star === null || watch.star === undefined || Number(watch.star) === star))
+      .filter((watch: any) => !watch.max_price || price <= Number(watch.max_price))
+      .filter((watch: any) => watch.user_id !== listing.seller_id)
+      .map((watch: any) => ({ ...watch, streamer: watch.streamer || null }));
   }
 }

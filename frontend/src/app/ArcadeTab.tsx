@@ -146,16 +146,26 @@ const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const MATCH_TIME_LIMIT_SECONDS = 30;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
-const QUIZ_MOTION_GHOST_COUNT = 31;
-const QUIZ_MOTION_MAX_TRAVEL_PX = 150;
-const QUIZ_MOTION_MAX_SCALE = 0.62;
-const QUIZ_MOTION_MAX_BASE_BLUR_PX = 10;
-// 모자이크·회전 잔상은 원래 강도가 약한 효과이므로 DISTORTION_SCALE을 따르지 않고 독립 상수 사용
+// 방향형(모션) 블러: 한 방향으로 강하게 밀린 듯한 선형 모션 스미어.
+// N장의 평행 이동 사본을 누적 평균(alpha=1/(i+1))하여 진짜 모션 블러를 만든다.
+const QUIZ_MOTION_SAMPLES = 56;
+const QUIZ_MOTION_TRAVEL_RATIO = 1.15; // 캔버스 긴 변 대비 최대 이동 비율(원본 식별 불가 수준)
+// 모자이크 블러: 픽셀 블록 크기 (독립 상수)
 const QUIZ_MOSAIC_MAX_BLOCK_PX = 34;
-const QUIZ_RADIAL_MAX_ROTATE_DEG = 120;   // 최대 120도 회전 잔상
-const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
-const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
-const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
+// 회전형 블러: 둥글게 뒤틀린 듯한 강한 회전 스핀 스미어.
+// N장의 회전 사본을 누적 평균 + 바깥일수록 확대해 소용돌이처럼 휘말리게 한다.
+const QUIZ_RADIAL_SAMPLES = 56;
+const QUIZ_RADIAL_MAX_SPIN_DEG = 150;     // 최대 회전 스프레드(±75°)
+const QUIZ_RADIAL_MAX_SWIRL_SCALE = 0.3;  // 외곽 잔상 최대 30% 확대(소용돌이)
+
+// [-0.5, 0.5] 구간을 균등 분할하되 중앙(0)에서 바깥 순서로 정렬한 위치 배열.
+// 첫(불투명) 사본이 중앙 정렬본이 되어 누적 평균 시 스미어가 한쪽으로 쏠리지 않게 한다.
+const buildCenterOutOrder = (count: number): number[] => {
+  if (count <= 1) return [0];
+  const positions: number[] = [];
+  for (let i = 0; i < count; i += 1) positions.push(i / (count - 1) - 0.5);
+  return positions.sort((a, b) => Math.abs(a) - Math.abs(b));
+};
 
 const getObjectCoverSourceRect = (
   image: HTMLImageElement,
@@ -259,72 +269,51 @@ const CanvasBlurQuizImage: React.FC<{
       context.restore();
     };
 
+    // 동일 이미지를 캔버스에 가득 채워 여러 번 누적 평균(alpha=1/(i+1))하여
+    // '평균 기반' 강한 블러를 만든다. 마지막에 선명한 원본을 덮지 않으므로
+    // 강도가 높을수록 원본을 알아볼 수 없을 만큼 강하게 뭉개진다.
+    const longSide = Math.max(width, height);
+    const contrast = 1 + normalizedIntensity * 0.15;
+
     if (mode === 'motion') {
-      const travel = normalizedIntensity * QUIZ_MOTION_MAX_TRAVEL_PX;
-      const travelX = Math.cos(radians) * travel;
-      const travelY = Math.sin(radians) * travel;
-      const scale = 1 + normalizedIntensity * Math.min(QUIZ_MOTION_MAX_SCALE, 0.42);
-      const baseBlur = normalizedIntensity * QUIZ_MOTION_MAX_BASE_BLUR_PX;
+      // 방향형: angle 방향으로 강하게 밀린 선형 모션 블러
+      const travel = normalizedIntensity * longSide * QUIZ_MOTION_TRAVEL_RATIO;
+      const dirX = Math.cos(radians);
+      const dirY = Math.sin(radians);
+      const samples = QUIZ_MOTION_SAMPLES;
+      // 인접 사본 사이 간극을 메워 줄무늬(밴딩)를 방지하는 소량 블러
+      const sampleBlur = Math.min(8, (travel / samples) * 0.9);
+      const filter = `blur(${Math.max(0.4, sampleBlur)}px) contrast(${contrast})`;
 
-      if (normalizedIntensity > 0.01) {
-        for (let index = 0; index < QUIZ_MOTION_GHOST_COUNT; index += 1) {
-          const position = index / (QUIZ_MOTION_GHOST_COUNT - 1) - 0.5;
-          const centerWeight = 1 - Math.abs(position) * 2;
-          drawLayer({
-            offsetX: travelX * position,
-            offsetY: travelY * position,
-            scale,
-            opacity: normalizedIntensity * (0.028 + centerWeight * 0.038),
-            filter: `blur(${Math.max(1.2, baseBlur * 0.55)}px) contrast(1.18) saturate(0.9)`
-          });
-        }
-
+      const positions = buildCenterOutOrder(samples); // 중앙→바깥 순서
+      for (let i = 0; i < samples; i += 1) {
+        const t = positions[i];
         drawLayer({
-          offsetX: travelX * 0.48,
-          offsetY: travelY * 0.48,
-          scale,
-          opacity: normalizedIntensity * 0.24,
-          filter: `blur(${Math.max(2, baseBlur * 0.75)}px) sepia(1) saturate(7) hue-rotate(145deg)`,
-          blendMode: 'screen'
-        });
-        drawLayer({
-          offsetX: -travelX * 0.48,
-          offsetY: -travelY * 0.48,
-          scale,
-          opacity: normalizedIntensity * 0.2,
-          filter: `blur(${Math.max(2, baseBlur * 0.75)}px) sepia(1) saturate(7) hue-rotate(255deg)`,
-          blendMode: 'screen'
+          offsetX: dirX * t * travel,
+          offsetY: dirY * t * travel,
+          opacity: 1 / (i + 1),
+          filter
         });
       }
-
-      drawLayer({
-        scale,
-        opacity: 1,
-        filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.2}) saturate(${1 - normalizedIntensity * 0.14})`
-      });
     } else {
-      const ghostCount = 29;
-      const maxRotate = normalizedIntensity * QUIZ_RADIAL_MAX_ROTATE_DEG;
-      const baseBlur = Math.max(0, normalizedIntensity * 3.5);
+      // 회전형: 중심을 기준으로 둥글게 뒤틀린 강한 회전 스핀 블러
+      const spin = (normalizedIntensity * QUIZ_RADIAL_MAX_SPIN_DEG * Math.PI) / 180;
+      const samples = QUIZ_RADIAL_SAMPLES;
+      const sampleBlur = Math.min(7, normalizedIntensity * 4);
+      const filter = `blur(${Math.max(0.4, sampleBlur)}px) contrast(${contrast})`;
 
-      for (let index = 0; index < ghostCount; index += 1) {
-        const offsetFactor = index - Math.floor(ghostCount / 2);
-        if (offsetFactor === 0) continue;
-        const distance = Math.abs(offsetFactor) / Math.floor(ghostCount / 2);
+      const positions = buildCenterOutOrder(samples);
+      for (let i = 0; i < samples; i += 1) {
+        const t = positions[i];
+        // 바깥쪽(|t| 큰) 사본일수록 더 회전·확대 → 소용돌이처럼 휘말리는 느낌
+        const swirlScale = 1 + normalizedIntensity * QUIZ_RADIAL_MAX_SWIRL_SCALE * Math.abs(t) * 2;
         drawLayer({
-          rotation: (maxRotate * offsetFactor / Math.floor(ghostCount / 2)) * Math.PI / 180,
-          scale: 1 + normalizedIntensity * QUIZ_RADIAL_MAX_SCALE * distance,
-          opacity: normalizedIntensity * Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - distance * 0.36),
-          filter: `blur(${1.5 + normalizedIntensity * 3.5}px) contrast(1.08)`,
-          blendMode: distance > 0.65 ? 'screen' : 'source-over'
+          rotation: t * spin,
+          scale: swirlScale,
+          opacity: 1 / (i + 1),
+          filter
         });
       }
-
-      drawLayer({
-        scale: 1 + normalizedIntensity * 0.02,
-        opacity: 1,
-        filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.12})`
-      });
     }
 
     context.filter = 'none';
@@ -800,6 +789,11 @@ export const ArcadeTab: React.FC = () => {
   // 게임 결과 제출 처리 (치팅 방지를 위해 백엔드에서 서버 시간 2중 검증함)
   const submitResult = useCallback(async (payload: SubmitPayload) => {
     if (!sessionId) return;
+    const clientRemainingMs =
+      activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
+        : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
+          : activeGame === 'match' ? Math.max(0, gameTimeLeft * 1000)
+            : 0;
     setGameBusy(true);
     try {
       const res = await apiFetch('/minigames/submit', {
@@ -807,7 +801,11 @@ export const ArcadeTab: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
-          payload
+          payload: {
+            ...payload,
+            client_remaining_ms: clientRemainingMs,
+            client_submitted_at: new Date().toISOString()
+          }
         })
       });
       const data = await res.json();
@@ -826,7 +824,7 @@ export const ArcadeTab: React.FC = () => {
     } finally {
       setGameBusy(false);
     }
-  }, [activeGame, handleExitGame, refreshUserData, sessionId, toast]);
+  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, sessionId, toast]);
 
   useEffect(() => {
     if (user) {
@@ -1496,7 +1494,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 아케이드 대시보드 헤더 */}
       {!activeGame && (
-        <div className="cute-surface flex flex-col gap-4 rounded-[2rem] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div data-tour="arcade-header" className="cute-surface flex flex-col gap-4 rounded-[2rem] p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="cute-pill rounded-2xl p-2.5">
               <Gamepad2 className="h-6 w-6 text-primary" />
@@ -1511,7 +1509,7 @@ export const ArcadeTab: React.FC = () => {
           </div>
 
           {/* 아케이드 코인 충전 현황 */}
-          <div className="flex min-w-[270px] flex-col gap-2 self-start rounded-[1.75rem] border border-primary/20 bg-gradient-to-br from-white via-secondary/75 to-accent/35 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(22,136,240,0.12)] sm:self-center dark:from-card dark:via-secondary/65 dark:to-primary/10">
+          <div data-tour="arcade-tickets" className="flex min-w-[270px] flex-col gap-2 self-start rounded-[1.75rem] border border-primary/20 bg-gradient-to-br from-white via-secondary/75 to-accent/35 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(22,136,240,0.12)] sm:self-center dark:from-card dark:via-secondary/65 dark:to-primary/10">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-xs font-black text-primary">
                 🪙 아케이드 동전
@@ -1573,7 +1571,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 백엔드가 KST 날짜 기준으로 지정한 오늘의 미니게임 */}
       {!activeGame && (
-        <section className="cute-surface relative overflow-hidden rounded-[2rem]">
+        <section data-tour="arcade-daily-game" className="cute-surface relative overflow-hidden rounded-[2rem]">
           <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${dailyGameDetails.glow}`} />
           <div className="relative border-b border-border/60 px-5 py-4 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1640,7 +1638,7 @@ export const ArcadeTab: React.FC = () => {
 
       {/* 동전과 포인트 지급 없이 모든 게임을 체험하는 연습 모드 */}
       {!activeGame && (
-        <section className="overflow-hidden rounded-[2rem] border border-dashed border-primary/25 bg-primary/5 shadow-sm dark:bg-primary/10">
+        <section data-tour="arcade-practice" className="overflow-hidden rounded-[2rem] border border-dashed border-primary/25 bg-primary/5 shadow-sm dark:bg-primary/10">
           <button
             type="button"
             aria-expanded={isPracticeExpanded}
@@ -1706,7 +1704,13 @@ export const ArcadeTab: React.FC = () => {
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
       {activeGame && gameData && (
-        <div className="cute-surface relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[2rem] p-4 animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]">
+        <div
+          className="cute-surface relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden overscroll-x-contain rounded-[2rem] p-4 animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]"
+          style={{ overscrollBehaviorX: 'contain' }}
+          onTouchStart={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+          onTouchEnd={(event) => event.stopPropagation()}
+        >
 
           {/* 아케이드 3초 카운트다운 오버레이 */}
           {countdownLeft !== null && countdownLeft > 0 && (

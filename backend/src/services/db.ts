@@ -8,6 +8,30 @@ let supabaseClient: SupabaseClient | null = null;
 let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
 
 /**
+ * Supabase(PostgREST) 호출용 fetch 래퍼.
+ * Node(undici)의 keep-alive 소켓이 서버측에서 끊기거나 일시적 네트워크
+ * 오류가 발생하면 fetch가 'TypeError: fetch failed'로 거부됩니다. 이런 일시
+ * 오류에 한해 짧은 백오프로 재시도하여 간헐적 조회 실패를 흡수합니다.
+ * (HTTP 4xx/5xx 응답은 throw가 아니라 정상 반환되므로 재시도 대상이 아닙니다.)
+ */
+const SUPABASE_FETCH_MAX_RETRIES = 2;
+const fetchWithRetry: typeof fetch = async (input, init) => {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= SUPABASE_FETCH_MAX_RETRIES; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (err: any) {
+      lastErr = err;
+      // 네트워크 계층 오류(TypeError: fetch failed)만 재시도. 그 외(abort 등)는 즉시 전파.
+      const isNetworkError = err instanceof TypeError;
+      if (!isNetworkError || attempt === SUPABASE_FETCH_MAX_RETRIES) break;
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+};
+
+/**
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
 export const initDatabaseConnection = async (): Promise<void> => {
@@ -16,8 +40,10 @@ export const initDatabaseConnection = async (): Promise<void> => {
 
   if (supabaseUrl && supabaseKey) {
     try {
-      // Supabase 클라이언트 인스턴스화
-      supabaseClient = createClient(supabaseUrl, supabaseKey);
+      // Supabase 클라이언트 인스턴스화 (일시 네트워크 오류 재시도 fetch 주입)
+      supabaseClient = createClient(supabaseUrl, supabaseKey, {
+        global: { fetch: fetchWithRetry }
+      });
       
       // 실제 원격 서버 연결이 유효한지 1건 조회 시도 (연결 감지)
       const { error } = await supabaseClient.from('users').select('id').limit(1);
@@ -125,6 +151,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE users ADD COLUMN representative_card_star INTEGER;");
       }
       try {
+        sqliteDb.prepare("SELECT status_message FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 status_message 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN status_message TEXT;");
+      }
+      try {
         sqliteDb.prepare("SELECT ban_reason FROM users LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] users 테이블에 ban_reason 컬럼이 없어 추가합니다.');
@@ -160,6 +192,15 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] users 테이블에 bonus_free_draw_tickets 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE users ADD COLUMN bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0;");
       }
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS tutorial_rewards (
+        user_id TEXT NOT NULL,
+        reward_key TEXT NOT NULL,
+        reward_type TEXT NOT NULL,
+        reward_amount INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY(user_id, reward_key),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );`);
       try {
         sqliteDb.prepare("SELECT star FROM user_cards LIMIT 1").get();
       } catch (e) {
@@ -172,6 +213,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] user_cards 테이블에 코스메틱 장착 컬럼을 추가합니다.');
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN border_item_id INTEGER;");
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN name_effect_item_id INTEGER;");
+      }
+      try {
+        sqliteDb.prepare("SELECT is_hidden FROM user_cards LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_cards 테이블에 숨김/즐겨찾기 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;");
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_order INTEGER;");
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_at TEXT;");
       }
       try {
         sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();
@@ -356,6 +405,43 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] market_listings 테이블에 with_cosmetics 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE market_listings ADD COLUMN with_cosmetics INTEGER DEFAULT 0;");
       }
+      for (const [column, ddl] of [
+        ['listing_type', "ALTER TABLE market_listings ADD COLUMN listing_type TEXT NOT NULL DEFAULT 'fixed';"],
+        ['buy_now_price', 'ALTER TABLE market_listings ADD COLUMN buy_now_price INTEGER;'],
+        ['starting_bid', 'ALTER TABLE market_listings ADD COLUMN starting_bid INTEGER;'],
+        ['current_bid', 'ALTER TABLE market_listings ADD COLUMN current_bid INTEGER;'],
+        ['current_bidder_id', 'ALTER TABLE market_listings ADD COLUMN current_bidder_id TEXT;'],
+        ['auction_ends_at', 'ALTER TABLE market_listings ADD COLUMN auction_ends_at TEXT;']
+      ] as const) {
+        try {
+          sqliteDb.prepare(`SELECT ${column} FROM market_listings LIMIT 1`).get();
+        } catch (e) {
+          console.log(`[DB Migration] market_listings 테이블에 ${column} 컬럼이 없어 추가합니다.`);
+          sqliteDb.exec(ddl);
+        }
+      }
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_bids (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        listing_id INTEGER NOT NULL,
+        bidder_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(listing_id) REFERENCES market_listings(id) ON DELETE CASCADE,
+        FOREIGN KEY(bidder_id) REFERENCES users(id) ON DELETE CASCADE
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_watches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        star INTEGER,
+        max_price INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, channel_id, star),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_watches_card ON market_watches(channel_id, star);`);
 
       // 시스템 설정 테이블 (무료 뽑기 간격 등)
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS system_configs (

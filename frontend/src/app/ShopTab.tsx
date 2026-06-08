@@ -8,7 +8,7 @@ import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
-import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket } from 'lucide-react';
+import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel } from 'lucide-react';
 
 interface ShopItem {
   id: number;
@@ -65,12 +65,20 @@ export const ShopTab: React.FC = () => {
   const [marketListings, setMarketListings] = useState<any[]>([]);
   const [marketTotal, setMarketTotal] = useState(0);
   const [marketSearch, setMarketSearch] = useState('');
-  const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc'>('latest');
+  const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc'>('latest');
+  const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction'>('all');
   const [marketPage, setMarketPage] = useState(1);
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
   const [purchasingListingId, setPurchasingListingId] = useState<number | null>(null);
+  const [biddingListingId, setBiddingListingId] = useState<number | null>(null);
+  const [bidInputs, setBidInputs] = useState<Record<number, string>>({});
   const [cancellingListingId, setCancellingListingId] = useState<number | null>(null);
+  const [marketWatches, setMarketWatches] = useState<any[]>([]);
+  const [watchChannelId, setWatchChannelId] = useState('');
+  const [watchStar, setWatchStar] = useState('');
+  const [watchMaxPrice, setWatchMaxPrice] = useState('');
+  const [watchBusy, setWatchBusy] = useState(false);
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
@@ -84,6 +92,8 @@ export const ShopTab: React.FC = () => {
     : 'border';
 
   const [shopType, setShopType] = useState<'border' | 'name_effect'>(initialShopType);
+  const [shopSearch, setShopSearch] = useState('');
+  const [shopSort, setShopSort] = useState<'latest' | 'price_asc' | 'price_desc' | 'name_asc'>('latest');
   const [buying, setBuying] = useState<number | null>(null);
 
   // 외부(뒤로가기 등)에서 URL 파라미터가 바뀔 때 상태 동기화
@@ -172,6 +182,9 @@ export const ShopTab: React.FC = () => {
         limit: '12',
         sort: marketSort,
       });
+      if (marketType !== 'all') {
+        query.append('type', marketType);
+      }
       if (marketSearch.trim()) {
         query.append('search', marketSearch.trim());
       }
@@ -199,6 +212,16 @@ export const ShopTab: React.FC = () => {
     }
   };
 
+  const fetchMarketWatches = async () => {
+    if (!user) return;
+    try {
+      const res = await apiFetch('/market/watches');
+      if (res.ok) setMarketWatches(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchMarketHistory = async () => {
     if (!user) return;
     setIsLoadingHistory(true);
@@ -218,7 +241,19 @@ export const ShopTab: React.FC = () => {
     if (subTab === 'market') {
       fetchMarketListings();
     }
-  }, [subTab, marketPage, marketSort]);
+  }, [subTab, marketPage, marketSort, marketType]);
+
+  useEffect(() => {
+    if (subTab !== 'market') return;
+    const timer = window.setInterval(() => {
+      fetchMarketListings();
+      if (user) {
+        fetchMyListings();
+        fetchMarketWatches();
+      }
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [subTab, marketPage, marketSort, marketType, marketSearch, user?.id]);
 
   useEffect(() => {
     if (subTab === 'market') {
@@ -233,6 +268,7 @@ export const ShopTab: React.FC = () => {
   useEffect(() => {
     if (subTab === 'market' && user) {
       fetchMyListings();
+      fetchMarketWatches();
     }
   }, [subTab, user]);
 
@@ -245,7 +281,19 @@ export const ShopTab: React.FC = () => {
 
   useEffect(() => {
     setCosmeticPage(1);
-  }, [shopType, items]);
+  }, [shopType, items, shopSearch, shopSort]);
+
+  useEffect(() => {
+    const handleTutorialSubTab = (event: Event) => {
+      const subTabId = (event as CustomEvent<{ subTab?: 'gacha_shop' | 'market' | 'history' }>).detail?.subTab;
+      if (subTabId === 'gacha_shop' || subTabId === 'market' || subTabId === 'history') {
+        setSubTab(subTabId);
+      }
+    };
+
+    window.addEventListener('chikapo:tutorial-shop-subtab', handleTutorialSubTab);
+    return () => window.removeEventListener('chikapo:tutorial-shop-subtab', handleTutorialSubTab);
+  }, []);
 
   const handleBuyMarketItem = async (listingId: number, price: number, streamerName: string) => {
     if (!user) {
@@ -302,6 +350,97 @@ export const ShopTab: React.FC = () => {
     }
   };
 
+  const handlePlaceBid = async (listing: any) => {
+    if (!user) {
+      toast('로그인이 필요합니다.', 'warning');
+      return;
+    }
+    const amount = Math.floor(Number(bidInputs[listing.id]));
+    const minBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0) + 100;
+    if (!Number.isFinite(amount) || amount < minBid) {
+      toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
+      return;
+    }
+    if (user.point < amount) {
+      toast('입찰 가능한 포인트가 부족합니다.', 'warning');
+      return;
+    }
+
+    setBiddingListingId(listing.id);
+    try {
+      const res = await apiFetch(`/market/bid/${listing.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ amount })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast('입찰이 등록되었습니다.', 'success');
+        setBidInputs(prev => ({ ...prev, [listing.id]: '' }));
+        fetchMarketListings();
+      } else {
+        toast(data.message || '입찰에 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setBiddingListingId(null);
+    }
+  };
+
+  const handleCreateWatch = async (payload?: { channel_id?: string; star?: number; max_price?: number }) => {
+    if (!user) {
+      toast('로그인이 필요합니다.', 'warning');
+      return;
+    }
+    const channelId = payload?.channel_id || watchChannelId.trim();
+    if (!channelId) {
+      toast('알림 받을 스트리머 채널 ID를 입력해주세요.', 'warning');
+      return;
+    }
+    const star = payload?.star ?? (watchStar === '' ? null : Number(watchStar));
+    const maxPrice = payload?.max_price ?? (watchMaxPrice.trim() ? Math.floor(Number(watchMaxPrice)) : null);
+    setWatchBusy(true);
+    try {
+      const res = await apiFetch('/market/watches', {
+        method: 'POST',
+        body: JSON.stringify({
+          channel_id: channelId,
+          star,
+          max_price: maxPrice && maxPrice > 0 ? maxPrice : null
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast('관심 매물 알림을 등록했습니다.', 'success');
+        setWatchChannelId('');
+        setWatchStar('');
+        setWatchMaxPrice('');
+        fetchMarketWatches();
+      } else {
+        toast(data.message || '알림 등록에 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setWatchBusy(false);
+    }
+  };
+
+  const handleDeleteWatch = async (watchId: number) => {
+    try {
+      const res = await apiFetch(`/market/watches/${watchId}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast('관심 매물 알림을 삭제했습니다.', 'success');
+        fetchMarketWatches();
+      } else {
+        const data = await res.json();
+        toast(data.message || '삭제에 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    }
+  };
+
   const isFreeDraw = user?.isFreeDrawEligible ?? false;
   const resetFreeTickets = user?.freeDrawTickets ?? 0;
   const bonusFreeTickets = user?.bonusFreeDrawTickets ?? 0;
@@ -327,9 +466,13 @@ export const ShopTab: React.FC = () => {
       }
       const data = await res.json();
       setTimeout(() => {
-        setDrawnCard({ ...data.card.streamer, free_draw_source: data.free_draw_source, is_free: data.is_free });
+        const nextDrawnCard = { ...data.card.streamer, free_draw_source: data.free_draw_source, is_free: data.is_free };
+        setDrawnCard(nextDrawnCard);
         setIsDrawing(false);
         refreshUserData();
+        window.dispatchEvent(new CustomEvent('chikapo:gacha-result', {
+          detail: { card: nextDrawnCard }
+        }));
         // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
         import('canvas-confetti').then((module) => {
           const confetti = module.default;
@@ -375,7 +518,19 @@ export const ShopTab: React.FC = () => {
     }
   };
 
-  const filtered = items.filter((i) => i.type === shopType);
+  const filtered = items
+    .filter((i) => i.type === shopType)
+    .filter((item) => {
+      const query = shopSearch.trim().toLowerCase();
+      if (!query) return true;
+      return item.name.toLowerCase().includes(query) || (item.description || '').toLowerCase().includes(query);
+    })
+    .sort((a, b) => {
+      if (shopSort === 'price_asc') return a.price - b.price;
+      if (shopSort === 'price_desc') return b.price - a.price;
+      if (shopSort === 'name_asc') return a.name.localeCompare(b.name);
+      return b.id - a.id;
+    });
   const cosmeticTotal = filtered.length;
   const cosmeticTotalPages = Math.ceil(cosmeticTotal / 8);
   const paginatedCosmetics = filtered.slice((cosmeticPage - 1) * 8, cosmeticPage * 8);
@@ -411,7 +566,7 @@ export const ShopTab: React.FC = () => {
       {subTab === 'gacha_shop' ? (
         <div className="space-y-8 animate-in fade-in duration-200">
           {/* 가챠 보드 (상점 최상단) */}
-          <section className="cute-surface rounded-[2rem] p-6">
+          <section data-tour="shop-gacha-board" className="cute-surface rounded-[2rem] p-6">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="space-y-2 text-center md:text-left">
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
@@ -439,6 +594,7 @@ export const ShopTab: React.FC = () => {
               </div>
               <div className="flex flex-col items-center gap-2">
                 <button
+                  data-tour="shop-gacha-button"
                   onClick={handleDraw}
                   disabled={isDrawing}
                   className="cute-wiggle-hover group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none dark:from-primary dark:via-emerald-500 dark:to-teal-600 dark:shadow-lg dark:shadow-primary/20"
@@ -529,6 +685,7 @@ export const ShopTab: React.FC = () => {
                         {drawnCard.is_free ? '무료 소환 성공!' : '소환 성공!'} 보관함에서 확인할 수 있어요
                       </motion.span>
                     <motion.div
+                      data-tour="shop-gacha-result-card"
                       className="gacha-result-card relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl"
                       initial={{ rotateY: -28, rotateX: 12, scale: 0.82, y: 24 }}
                       animate={{ rotateY: 0, rotateX: 0, scale: 1, y: 0 }}
@@ -566,7 +723,7 @@ export const ShopTab: React.FC = () => {
           </section>
 
           {/* 상점 */}
-          <section className="cute-surface rounded-[2rem] p-6 space-y-5">
+          <section data-tour="shop-cosmetics" className="cute-surface rounded-[2rem] p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black"><Store className="h-5.5 w-5.5 text-primary" /> 코스메틱 상점</h2>
               {user && <span className="cute-number-font flex items-center gap-1 text-xs font-bold text-primary"><Coins className="h-3.5 w-3.5" /> {user.point.toLocaleString()} P</span>}
@@ -574,23 +731,46 @@ export const ShopTab: React.FC = () => {
             <p className="text-xs text-muted-foreground">포인트로 카드 테두리와 이름 이펙트를 구매하세요. 구매한 코스메틱은 보관함에서 카드에 장착할 수 있습니다.</p>
 
             {/* 종류 탭 (아이콘 추가로 시각적 조화성 증대) */}
-            <div className="flex rounded-lg bg-secondary p-1 w-fit border border-border/40">
-              {([
-                ['border', '테두리', Layers],
-                ['name_effect', '이름 이펙트', Sparkles]
-              ] as const).map(([t, label, Icon]) => (
-                <button
-                  key={t}
-                  onClick={() => handleShopTypeChange(t)}
-                  className={`cute-wiggle-hover flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition-all duration-150 ${shopType === t
-                      ? 'bg-card text-foreground shadow-sm font-extrabold'
-                      : 'text-muted-foreground hover:text-foreground'
-                    }`}
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex rounded-lg bg-secondary p-1 w-fit border border-border/40">
+                {([
+                  ['border', '테두리', Layers],
+                  ['name_effect', '이름 이펙트', Sparkles]
+                ] as const).map(([t, label, Icon]) => (
+                  <button
+                    key={t}
+                    onClick={() => handleShopTypeChange(t)}
+                    className={`cute-wiggle-hover flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition-all duration-150 ${shopType === t
+                        ? 'bg-card text-foreground shadow-sm font-extrabold'
+                        : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <input
+                    value={shopSearch}
+                    onChange={(event) => setShopSearch(event.target.value)}
+                    placeholder="상품 검색"
+                    className="w-full rounded-2xl border border-border bg-secondary/45 py-2 pl-9 pr-3 text-xs font-bold focus:border-primary focus:outline-none sm:w-52"
+                  />
+                </div>
+                <select
+                  value={shopSort}
+                  onChange={(event) => setShopSort(event.target.value as typeof shopSort)}
+                  className="rounded-2xl border border-border bg-secondary/45 px-3 py-2 text-xs font-bold text-foreground focus:border-primary focus:outline-none"
                 >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
+                  <option value="latest">최신 등록순</option>
+                  <option value="price_asc">낮은 가격순</option>
+                  <option value="price_desc">높은 가격순</option>
+                  <option value="name_asc">이름순</option>
+                </select>
+              </div>
             </div>
 
             {paginatedCosmetics.length === 0 ? (
@@ -694,7 +874,7 @@ export const ShopTab: React.FC = () => {
       ) : subTab === 'market' ? (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* 오픈마켓 영역 */}
-          <section className="cute-surface rounded-[2rem] p-6 space-y-5">
+          <section data-tour="shop-market" className="cute-surface rounded-[2rem] p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
                 <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black">
@@ -735,8 +915,82 @@ export const ShopTab: React.FC = () => {
                 <option value="oldest">오래된 순</option>
                 <option value="price_desc">높은 가격순</option>
                 <option value="price_asc">낮은 가격순</option>
+                <option value="ending_soon">마감 임박순</option>
+                <option value="bid_desc">현재 입찰가순</option>
+              </select>
+              <select
+                value={marketType}
+                onChange={(e: any) => { setMarketPage(1); setMarketType(e.target.value); }}
+                className="w-full sm:w-36 rounded-lg border border-border bg-card px-3 py-2 text-xs focus:border-primary focus:outline-none"
+              >
+                <option value="all">전체 매물</option>
+                <option value="fixed">즉시 판매</option>
+                <option value="auction">경매</option>
               </select>
             </div>
+
+            {user && (
+              <div className="rounded-[1.5rem] border border-sky-200/70 bg-sky-50/70 p-4 dark:border-sky-400/15 dark:bg-sky-400/10">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-black text-sky-700 dark:text-sky-200">
+                      <Bell className="h-4 w-4" /> 관심 매물 알림
+                    </h3>
+                    <p className="mt-1 text-[11px] font-medium text-sky-700/70 dark:text-sky-100/65">
+                      지정한 카드가 장터에 올라오면 사이트 알림과 푸시 알림으로 알려드려요.
+                    </p>
+                  </div>
+                  <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[1fr_110px_130px_auto] lg:max-w-2xl">
+                    <input
+                      value={watchChannelId}
+                      onChange={(event) => setWatchChannelId(event.target.value)}
+                      placeholder="스트리머 채널 ID"
+                      className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-xs font-bold text-sky-950 placeholder:text-sky-700/45 focus:border-sky-400 focus:outline-none dark:border-sky-300/20 dark:bg-sky-950/30 dark:text-sky-50"
+                    />
+                    <select
+                      value={watchStar}
+                      onChange={(event) => setWatchStar(event.target.value)}
+                      className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-xs font-bold text-sky-950 focus:border-sky-400 focus:outline-none dark:border-sky-300/20 dark:bg-sky-950/30 dark:text-sky-50"
+                    >
+                      <option value="">모든 등급</option>
+                      {[0, 1, 2, 3, 4, 5].map((star) => (
+                        <option key={star} value={star}>{star === 0 ? '일반' : `${star}성`}</option>
+                      ))}
+                    </select>
+                    <input
+                      value={watchMaxPrice}
+                      onChange={(event) => setWatchMaxPrice(event.target.value)}
+                      type="number"
+                      min="0"
+                      placeholder="최대 가격"
+                      className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-xs font-bold text-sky-950 placeholder:text-sky-700/45 focus:border-sky-400 focus:outline-none dark:border-sky-300/20 dark:bg-sky-950/30 dark:text-sky-50"
+                    />
+                    <button
+                      onClick={() => handleCreateWatch()}
+                      disabled={watchBusy}
+                      className="cute-wiggle-hover rounded-2xl bg-sky-500 px-4 py-2 text-xs font-black text-white shadow-sm shadow-sky-400/20 transition hover:bg-sky-600 disabled:opacity-50"
+                    >
+                      등록
+                    </button>
+                  </div>
+                </div>
+                {marketWatches.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {marketWatches.map((watch) => (
+                      <button
+                        key={watch.id}
+                        onClick={() => handleDeleteWatch(watch.id)}
+                        className="rounded-full border border-sky-200 bg-white/75 px-3 py-1 text-[10px] font-black text-sky-700 transition hover:bg-rose-50 hover:text-rose-500 dark:border-sky-300/15 dark:bg-sky-950/25 dark:text-sky-100"
+                        title="클릭하면 삭제됩니다"
+                      >
+                        {watch.streamer?.name || watch.channel_id} · {watch.star == null ? '모든 등급' : watch.star === 0 ? '일반' : `${watch.star}성`}
+                        {watch.max_price ? ` · ${Number(watch.max_price).toLocaleString()}P 이하` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {isLoadingMarket ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -754,6 +1008,12 @@ export const ShopTab: React.FC = () => {
                     const streamer = listing.card?.streamer;
                     const star = listing.card?.star ?? 0;
                     const border = listing.card?.border;
+                    const isAuction = listing.listing_type === 'auction';
+                    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
+                    const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
+                    const minBid = currentBid + 100;
+                    const endsAt = listing.auction_ends_at ? new Date(listing.auction_ends_at) : null;
+                    const isEnded = !!endsAt && endsAt.getTime() <= Date.now();
 
                     return (
                       <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
@@ -808,10 +1068,23 @@ export const ShopTab: React.FC = () => {
                         <div className="px-1 py-0.5 space-y-1.5">
                           <div className="flex items-center justify-between gap-1 text-[10px]">
                             <span className="text-muted-foreground truncate" title={listing.seller_username}>판매: {listing.seller_username}</span>
-                            <span className="cute-number-font flex shrink-0 items-center font-black text-primary">
-                              <Coins className="h-3 w-3 mr-0.5" /> {listing.price.toLocaleString()}
+                            <span className={`cute-number-font flex shrink-0 items-center font-black ${isAuction ? 'text-violet-500' : 'text-primary'}`}>
+                              {isAuction ? <Gavel className="h-3 w-3 mr-0.5" /> : <Coins className="h-3 w-3 mr-0.5" />}
+                              {(isAuction ? currentBid : listing.price).toLocaleString()}
                             </span>
                           </div>
+                          {isAuction && (
+                            <div className="rounded-xl border border-violet-200/70 bg-violet-50/80 p-2 text-[10px] font-bold text-violet-700 dark:border-violet-300/15 dark:bg-violet-400/10 dark:text-violet-200">
+                              <div className="flex items-center justify-between">
+                                <span>현재가</span>
+                                <span>{currentBid.toLocaleString()} P</span>
+                              </div>
+                              <div className="mt-0.5 flex items-center justify-between text-violet-700/70 dark:text-violet-100/65">
+                                <span>{listing.current_bidder_username ? `최고 입찰: ${listing.current_bidder_username}` : '아직 입찰 없음'}</span>
+                                <span>{endsAt ? `${isEnded ? '마감 처리 중' : endsAt.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '-'}</span>
+                              </div>
+                            </div>
+                          )}
 
                           {user && user.id === listing.seller_id ? (
                             <button
@@ -821,14 +1094,46 @@ export const ShopTab: React.FC = () => {
                               내 등록 매물
                             </button>
                           ) : (
-                            <button
-                              onClick={() => handleBuyMarketItem(listing.id, listing.price, streamer?.name || '스트리머')}
-                              disabled={purchasingListingId === listing.id}
-                              className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-[10px] font-bold text-primary-foreground shadow-sm transition hover:bg-primary/95 active:scale-95 disabled:opacity-50"
-                            >
-                              <ShoppingBag className="h-3 w-3" />
-                              {purchasingListingId === listing.id ? '구매 중...' : '구매하기'}
-                            </button>
+                            <div className="space-y-1.5">
+                              {isAuction && !isEnded && (
+                                <div className="flex gap-1">
+                                  <input
+                                    type="number"
+                                    min={minBid}
+                                    value={bidInputs[listing.id] || ''}
+                                    onChange={(event) => setBidInputs(prev => ({ ...prev, [listing.id]: event.target.value }))}
+                                    placeholder={`${minBid.toLocaleString()}P`}
+                                    className="min-w-0 flex-1 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px] font-bold focus:border-primary focus:outline-none"
+                                  />
+                                  <button
+                                    onClick={() => handlePlaceBid(listing)}
+                                    disabled={biddingListingId === listing.id}
+                                    className="cute-wiggle-hover rounded-xl bg-violet-500 px-2 py-1.5 text-[10px] font-black text-white shadow-sm transition hover:bg-violet-600 disabled:opacity-50"
+                                  >
+                                    입찰
+                                  </button>
+                                </div>
+                              )}
+                              {(!isAuction || buyNowPrice > 0) && (
+                                <button
+                                  onClick={() => handleBuyMarketItem(listing.id, isAuction ? buyNowPrice : listing.price, streamer?.name || '스트리머')}
+                                  disabled={purchasingListingId === listing.id || (isAuction && buyNowPrice <= 0)}
+                                  className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-[10px] font-bold text-primary-foreground shadow-sm transition hover:bg-primary/95 active:scale-95 disabled:opacity-50"
+                                >
+                                  <ShoppingBag className="h-3 w-3" />
+                                  {purchasingListingId === listing.id ? '처리 중...' : isAuction ? `${buyNowPrice.toLocaleString()}P 즉시구매` : '구매하기'}
+                                </button>
+                              )}
+                              {streamer?.channel_id && (
+                                <button
+                                  onClick={() => handleCreateWatch({ channel_id: streamer.channel_id, star, max_price: isAuction ? buyNowPrice || currentBid : listing.price })}
+                                  disabled={watchBusy}
+                                  className="flex w-full items-center justify-center gap-1 rounded-2xl border border-sky-200 bg-sky-50 py-1.5 text-[10px] font-black text-sky-600 transition hover:bg-sky-100 disabled:opacity-50 dark:border-sky-300/15 dark:bg-sky-400/10 dark:text-sky-200"
+                                >
+                                  <Bell className="h-3 w-3" /> 이 카드 알림
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -873,7 +1178,7 @@ export const ShopTab: React.FC = () => {
 
           {/* 내가 등록한 판매 카드 관리 내역 */}
           {user && (
-          <section className="cute-surface rounded-[2rem] p-6 space-y-4">
+          <section data-tour="shop-my-listings" className="cute-surface rounded-[2rem] p-6 space-y-4">
               <h3 className="text-base font-bold flex items-center gap-2">
                 <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 내 등록 매물 관리 ({myListings.length}건)
               </h3>
@@ -885,7 +1190,7 @@ export const ShopTab: React.FC = () => {
                     <thead>
                       <tr className="border-b border-border/80 text-muted-foreground">
                         <th className="py-2.5">카드 정보</th>
-                        <th className="py-2.5">판매가</th>
+                        <th className="py-2.5">가격/입찰</th>
                         <th className="py-2.5">정산액 (수수료 5% 제함)</th>
                         <th className="py-2.5">상태</th>
                         <th className="py-2.5 text-right">관리</th>
@@ -895,6 +1200,8 @@ export const ShopTab: React.FC = () => {
                       {myListings.map((l) => {
                         const streamer = l.card?.streamer;
                         const star = l.card?.star ?? 0;
+                        const isAuction = l.listing_type === 'auction';
+                        const currentBid = Number(l.current_bid || l.starting_bid || l.price || 0);
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
                             <td className="py-3 flex items-center gap-2">
@@ -909,7 +1216,16 @@ export const ShopTab: React.FC = () => {
                                 </div>
                               </div>
                             </td>
-                            <td className="py-3 font-bold text-yellow-500">{l.price.toLocaleString()} P</td>
+                            <td className="py-3">
+                              <div className={`font-black ${isAuction ? 'text-violet-500' : 'text-yellow-500'}`}>
+                                {isAuction ? `${currentBid.toLocaleString()} P 입찰` : `${l.price.toLocaleString()} P`}
+                              </div>
+                              {isAuction && (
+                                <div className="mt-0.5 text-[9px] font-bold text-muted-foreground">
+                                  {l.buy_now_price ? `즉시 ${Number(l.buy_now_price).toLocaleString()} P` : '입찰 전용'}
+                                </div>
+                              )}
+                            </td>
                             <td className="py-3 text-muted-foreground font-semibold">
                               {l.status === 'SOLD' ? `${l.settled_amount.toLocaleString()} P` : '-'}
                             </td>
@@ -922,6 +1238,9 @@ export const ShopTab: React.FC = () => {
                               )}
                               {l.status === 'CANCELLED' && (
                                 <span className="rounded bg-zinc-500/10 px-2 py-0.5 font-bold text-zinc-500 text-[10px]">등록 취소됨</span>
+                              )}
+                              {l.status === 'AUCTION_ENDED' && (
+                                <span className="rounded bg-violet-500/10 px-2 py-0.5 font-bold text-violet-500 text-[10px]">경매 종료</span>
                               )}
                             </td>
                             <td className="py-3 text-right">

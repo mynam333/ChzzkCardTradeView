@@ -1,6 +1,7 @@
 import { getSqliteDb } from "../../services/db";
-import { 
-  IUserRepository, 
+import { fuzzyScore } from "../../utils/search";
+import {
+  IUserRepository,
   IStreamerRepository, 
   ICouponRepository, 
   IReportRepository,
@@ -39,6 +40,7 @@ export class SqliteUserRepository implements IUserRepository {
       ban_reason: row.ban_reason ?? null,
       representative_card_channel_id: row.representative_card_channel_id ?? null,
       representative_card_star: row.representative_card_star ?? null,
+      status_message: row.status_message ?? null,
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       token_expires_at: row.token_expires_at ?? null,
@@ -64,10 +66,17 @@ export class SqliteUserRepository implements IUserRepository {
   }
 
   async searchByUsername(keyword: string, limit: number): Promise<User[]> {
-    const rows = this.getDb().prepare(
-      'SELECT * FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT ?'
-    ).all(`%${keyword}%`, limit) as any[];
-    return rows.map((r) => this.mapUser(r));
+    const kw = (keyword || '').trim();
+    if (!kw) return [];
+    // 초성/띄어쓰기 무시 유사도 검색: 전체 유저를 스캔해 점수순으로 상위 N명 반환
+    // (정확한 부분일치를 초성 일치보다 우선 노출)
+    const rows = this.getDb().prepare('SELECT * FROM users').all() as any[];
+    return rows
+      .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
+      .filter((x): x is { r: any; score: number } => x.score !== null)
+      .sort((a, b) => a.score - b.score || String(a.r.username).localeCompare(String(b.r.username)))
+      .slice(0, limit)
+      .map((x) => this.mapUser(x.r));
   }
 
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
@@ -238,6 +247,11 @@ export class SqliteUserRepository implements IUserRepository {
     ).run(channelId, star, id);
   }
 
+  async updateStatusMessage(id: string, message: string | null): Promise<void> {
+    const normalized = message && message.trim() ? message.trim().slice(0, 80) : null;
+    this.getDb().prepare('UPDATE users SET status_message = ? WHERE id = ?').run(normalized, id);
+  }
+
   async count(): Promise<number> {
     const row = this.getDb().prepare('SELECT COUNT(*) AS c FROM users').get() as any;
     return row?.c || 0;
@@ -276,25 +290,43 @@ export class SqliteUserRepository implements IUserRepository {
     }
   }
 
-  async findRankings(limit: number, keyword: string = ''): Promise<UserRanking[]> {
+  async findRankings(
+    limit: number,
+    keyword: string = '',
+    options: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null } = {}
+  ): Promise<UserRanking[]> {
     // 윈도우 함수 ROW_NUMBER()를 사용하여 전체 유저에 대한 순위(rank)를 우선 매긴 후 검색어로 필터링
+    const mode = options.mode === 'cards' ? 'cards' : 'total';
+    const channelId = (options.channelId || '').trim();
+    const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
+    const cardFilterSql = channelId
+      ? 'AND uc.channel_id = ? AND (? IS NULL OR COALESCE(uc.star, 0) = ?)'
+      : '';
+    const orderExpr = mode === 'cards' ? 'cards_value' : '(point + cards_value)';
+    const params: any[] = [];
+    if (channelId) params.push(channelId, star, star);
+    params.push(keyword, `%${keyword}%`, limit);
+
     const rows = this.getDb().prepare(`
-      WITH RankedUsers AS (
-        SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.created_at,
+      WITH UserCardValues AS (
+        SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+               u.status_message, u.created_at,
                COUNT(uc.id) AS card_count,
-               COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value,
-               ROW_NUMBER() OVER (
-                 ORDER BY (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0)) DESC
-               ) AS rank
+               COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
         FROM users u
-        LEFT JOIN user_cards uc ON uc.user_id = u.id
+        LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0 ${cardFilterSql}
         LEFT JOIN streamers s ON s.channel_id = uc.channel_id
         GROUP BY u.id
+      ),
+      RankedUsers AS (
+        SELECT *,
+               ROW_NUMBER() OVER (ORDER BY ${orderExpr} DESC, id ASC) AS rank
+        FROM UserCardValues
       )
       SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
       WHERE (? = '' OR username LIKE ?)
       LIMIT ?
-    `).all(keyword, `%${keyword}%`, limit);
+    `).all(...params);
 
     return rows.map((row: any) => ({
       id: row.id,
@@ -305,8 +337,10 @@ export class SqliteUserRepository implements IUserRepository {
       last_free_draw: row.last_free_draw,
       banned_until: row.banned_until,
       ban_reason: row.ban_reason ?? null,
+      status_message: row.status_message ?? null,
       created_at: row.created_at,
       card_count: row.card_count,
+      cards_value: Math.round(row.cards_value),
       total_asset: row.point + Math.round(row.cards_value),
       rank: row.rank
     }));

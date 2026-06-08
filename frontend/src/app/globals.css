@@ -109,6 +109,10 @@
   --radius-sm: calc(var(--radius) - 4px);
 }
 
+html {
+  overscroll-behavior-x: none;
+}
+
 body {
   background:
     radial-gradient(circle at 7% 4%, rgba(255, 255, 255, 0.92) 0 7rem, transparent 7.2rem),
@@ -120,6 +124,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-ui);
   overflow-x: hidden;
+  overscroll-behavior-x: none;
   word-break: keep-all;
 }
 

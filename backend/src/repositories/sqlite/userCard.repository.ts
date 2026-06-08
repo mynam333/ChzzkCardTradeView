@@ -182,7 +182,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
       LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
       WHERE uc.user_id = ?
-      ORDER BY uc.id DESC
+      ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END, uc.favorite_order ASC, uc.id DESC
     `).all(userId);
 
     return rows.map((row: any) => ({
@@ -193,6 +193,9 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       star: row.star ?? 0,
       border_item_id: row.border_item_id ?? null,
       name_effect_item_id: row.name_effect_item_id ?? null,
+      is_hidden: row.is_hidden === 1,
+      favorite_order: row.favorite_order ?? null,
+      favorite_at: row.favorite_at ?? null,
       border: row.border_id ? { id: row.border_id, style_json: row.border_style } : null,
       name_effect: row.name_id ? { id: row.name_id, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
       acquired_at: row.acquired_at,
@@ -231,6 +234,31 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       'SELECT serial_number FROM user_cards WHERE channel_id = ? ORDER BY serial_number ASC'
     ).all(channelId) as any[];
     return rows.map(r => r.serial_number);
+  }
+
+  async updateVisibility(userId: string, cardId: number, hidden: boolean): Promise<boolean> {
+    const result = this.getDb().prepare(
+      'UPDATE user_cards SET is_hidden = ? WHERE id = ? AND user_id = ?'
+    ).run(hidden ? 1 : 0, cardId, userId);
+    return result.changes > 0;
+  }
+
+  async setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean> {
+    const db = this.getDb();
+    if (!favorite) {
+      const result = db.prepare(
+        'UPDATE user_cards SET favorite_order = NULL, favorite_at = NULL WHERE id = ? AND user_id = ?'
+      ).run(cardId, userId);
+      return result.changes > 0;
+    }
+
+    const maxRow = db.prepare(
+      'SELECT COALESCE(MAX(favorite_order), 0) AS max_order FROM user_cards WHERE user_id = ?'
+    ).get(userId) as any;
+    const result = db.prepare(
+      "UPDATE user_cards SET favorite_order = ?, favorite_at = datetime('now') WHERE id = ? AND user_id = ?"
+    ).run(Number(maxRow?.max_order || 0) + 1, cardId, userId);
+    return result.changes > 0;
   }
 
   async deleteCards(userId: string, channelId: string, count: number): Promise<number> {

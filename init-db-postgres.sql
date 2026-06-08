@@ -17,10 +17,20 @@ CREATE TABLE IF NOT EXISTS users (
     ban_reason TEXT,                             -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     representative_card_star INTEGER,            -- 대표 카드 별 등급 (nullable, 레거시는 미지정)
+    status_message TEXT,                         -- 프로필 상태 메시지
     access_token TEXT,                           -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                          -- 치지직 OAuth refresh_token (암호화 저장)
     token_expires_at TIMESTAMPTZ,                -- 치지직 access_token 만료 시각
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tutorial_rewards (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reward_key TEXT NOT NULL,
+    reward_type TEXT NOT NULL,
+    reward_amount INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY(user_id, reward_key)
 );
 
 CREATE TABLE IF NOT EXISTS titles (
@@ -96,6 +106,9 @@ CREATE TABLE IF NOT EXISTS user_cards (
     star INTEGER DEFAULT 0,                       -- 합성 별 등급 (0~5)
     border_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
     name_effect_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
+    is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    favorite_order INTEGER,
+    favorite_at TIMESTAMPTZ,
     acquired_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -267,6 +280,7 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_channel_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS representative_card_star INTEGER;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_message TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
@@ -292,6 +306,9 @@ ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_order INTEGER;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_at TIMESTAMPTZ;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS ticket_spent_type TEXT DEFAULT 'NONE';
 
@@ -1187,7 +1204,13 @@ CREATE TABLE IF NOT EXISTS market_listings (
   seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE,
   price INTEGER NOT NULL CHECK (price >= 10),
-  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED')),
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED')),
+  listing_type TEXT NOT NULL DEFAULT 'fixed',
+  buy_now_price INTEGER,
+  starting_bid INTEGER,
+  current_bid INTEGER,
+  current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  auction_ends_at TIMESTAMPTZ,
   buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   fee INTEGER DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
@@ -1197,10 +1220,40 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at DESC);
+ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_status_check;
+ALTER TABLE market_listings
+  ADD CONSTRAINT market_listings_status_check CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED'));
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS listing_type TEXT NOT NULL DEFAULT 'fixed';
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS buy_now_price INTEGER;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid INTEGER;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid INTEGER;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
   ON market_listings(user_card_id)
   WHERE status = 'PENDING';
+
+CREATE TABLE IF NOT EXISTS market_bids (
+  id BIGSERIAL PRIMARY KEY,
+  listing_id INTEGER NOT NULL REFERENCES market_listings(id) ON DELETE CASCADE,
+  bidder_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);
+
+CREATE TABLE IF NOT EXISTS market_watches (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
+  star INTEGER,
+  max_price INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, channel_id, star)
+);
+CREATE INDEX IF NOT EXISTS idx_market_watches_card ON market_watches(channel_id, star);
 
 -- ============================================================
 -- 오픈마켓 원자적 구매를 위한 RPC 함수

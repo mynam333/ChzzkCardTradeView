@@ -14,10 +14,21 @@ CREATE TABLE IF NOT EXISTS users (
     ban_reason TEXT,                           -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
     representative_card_star INTEGER,          -- 대표 카드 별 등급 (nullable, 레거시는 미지정)
+    status_message TEXT,                       -- 프로필 상태 메시지
     access_token TEXT,                         -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                        -- 치지직 OAuth refresh_token (암호화 저장)
     token_expires_at TEXT,                     -- 치지직 access_token 만료 시각 (ISO String)
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
+);
+
+CREATE TABLE IF NOT EXISTS tutorial_rewards (
+    user_id TEXT NOT NULL,
+    reward_key TEXT NOT NULL,
+    reward_type TEXT NOT NULL,
+    reward_amount INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(user_id, reward_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS titles (
@@ -78,6 +89,9 @@ CREATE TABLE IF NOT EXISTS user_cards (
     star INTEGER DEFAULT 0,                     -- 합성 별 등급 (0~5)
     border_item_id INTEGER,                    -- 장착된 테두리 코스메틱 ID
     name_effect_item_id INTEGER,               -- 장착된 이름 이펙트 코스메틱 ID
+    is_hidden INTEGER NOT NULL DEFAULT 0,       -- 외부 보유 카드 노출 숨김
+    favorite_order INTEGER,                    -- 즐겨찾기 고정 정렬 순서
+    favorite_at TEXT,                          -- 즐겨찾기 설정 일시
     acquired_at TEXT DEFAULT (datetime('now')),-- 획득 일시
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE,
@@ -273,6 +287,12 @@ CREATE TABLE IF NOT EXISTS market_listings (
     user_card_id INTEGER NOT NULL,
     price INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'PENDING',
+    listing_type TEXT NOT NULL DEFAULT 'fixed',
+    buy_now_price INTEGER,
+    starting_bid INTEGER,
+    current_bid INTEGER,
+    current_bidder_id TEXT,
+    auction_ends_at TEXT,
     buyer_id TEXT,
     fee INTEGER DEFAULT 0,
     settled_amount INTEGER DEFAULT 0,
@@ -281,6 +301,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+    FOREIGN KEY(current_bidder_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -289,6 +310,28 @@ CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(create
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
     ON market_listings(user_card_id)
     WHERE status = 'PENDING';
+
+CREATE TABLE IF NOT EXISTS market_bids (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL,
+    bidder_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(listing_id) REFERENCES market_listings(id) ON DELETE CASCADE,
+    FOREIGN KEY(bidder_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS market_watches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    star INTEGER,
+    max_price INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, channel_id, star),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+);
 
 -- 17. 미니게임 티켓 및 세션 테이블
 CREATE TABLE IF NOT EXISTS user_minigame_tickets (

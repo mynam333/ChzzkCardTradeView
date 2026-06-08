@@ -316,12 +316,25 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     if (error) throw error;
   }
 
+  // 경계 시각 직전 좁은 구간만 조회하기 위한 룩백 윈도우(시간).
+  // 시세 이력은 2분마다 1행씩 쌓이므로 3시간 윈도우면 채널당 약 90행 이내로
+  // 경계에 가장 근접한 값을 충분히 확보할 수 있습니다.
+  // (과거에는 cutoff 이전 '전체' 행을 가져와 JS에서 dedup → 이력 누적에 따라
+  //  채널당 수천 행 × 채널 수만큼 전송되어 응답 지연·소켓 타임아웃의 주원인이었습니다.)
+  private static readonly VALUE_AGO_LOOKBACK_HOURS = 3;
+
   private async valueAgoMap(hours: number): Promise<Record<string, number>> {
     // 경계 시각 이전에 기록된 이력 중 채널별 가장 최근 값을 선택
-    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+    const cutoff = new Date(cutoffMs).toISOString();
+    // 경계 직전 좁은 구간만 조회 (recorded_at 인덱스 활용, 전송량 대폭 절감)
+    const windowStart = new Date(
+      cutoffMs - SupabaseStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000
+    ).toISOString();
     const { data, error } = await this.getClient()
       .from('value_history')
       .select('channel_id, value, recorded_at')
+      .gte('recorded_at', windowStart)
       .lte('recorded_at', cutoff)
       .order('recorded_at', { ascending: false });
     if (error || !data) return {};

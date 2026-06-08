@@ -14,7 +14,9 @@ import {
   X,
   Layers,
   Store,
-  Coins
+  Coins,
+  Star,
+  EyeOff
 } from 'lucide-react';
 import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
@@ -45,6 +47,9 @@ interface UserCard {
   star?: number;
   border?: CosmeticRef | null;
   name_effect?: CosmeticRef | null;
+  is_hidden?: boolean;
+  favorite_order?: number | null;
+  favorite_at?: string | null;
   acquired_at: string;
   streamer?: Streamer;
 }
@@ -130,6 +135,9 @@ export const GachaTab: React.FC = () => {
   const [myMarketListings, setMyMarketListings] = useState<any[]>([]);
   const [marketRegisterCard, setMarketRegisterCard] = useState<UserCard | null>(null);
   const [marketPriceInput, setMarketPriceInput] = useState('');
+  const [marketListingType, setMarketListingType] = useState<'fixed' | 'auction'>('fixed');
+  const [marketStartingBidInput, setMarketStartingBidInput] = useState('');
+  const [marketAuctionHours, setMarketAuctionHours] = useState(24);
   const [withCosmetics, setWithCosmetics] = useState(false);
   const [marketRegisterBusy, setMarketRegisterBusy] = useState(false);
   const [marketCancelBusy, setMarketCancelBusy] = useState(false);
@@ -399,9 +407,18 @@ export const GachaTab: React.FC = () => {
   const handleMarketRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!marketRegisterCard) return;
-    const price = Math.floor(Number(marketPriceInput));
-    if (isNaN(price) || price < 100) {
-      showAlert('등록 실패', '최소 등록 가격은 100 P 이상입니다.', 'warning');
+    const buyNowPrice = Math.floor(Number(marketPriceInput)) || 0;
+    const startingBid = Math.floor(Number(marketStartingBidInput)) || 0;
+    if (marketListingType === 'fixed' && buyNowPrice < 100) {
+      showAlert('등록 실패', '최소 판매 가격은 100 P 이상입니다.', 'warning');
+      return;
+    }
+    if (marketListingType === 'auction' && startingBid < 100) {
+      showAlert('등록 실패', '경매 시작가는 100 P 이상이어야 합니다.', 'warning');
+      return;
+    }
+    if (marketListingType === 'auction' && buyNowPrice > 0 && buyNowPrice < startingBid) {
+      showAlert('등록 실패', '즉시 구매가는 경매 시작가보다 낮을 수 없습니다.', 'warning');
       return;
     }
 
@@ -411,14 +428,22 @@ export const GachaTab: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({
           user_card_id: marketRegisterCard.id,
-          price: price,
+          listing_type: marketListingType,
+          price: marketListingType === 'fixed' ? buyNowPrice : startingBid,
+          buy_now_price: marketListingType === 'auction' && buyNowPrice > 0 ? buyNowPrice : undefined,
+          starting_bid: marketListingType === 'auction' ? startingBid : undefined,
+          auction_hours: marketListingType === 'auction' ? marketAuctionHours : undefined,
           with_cosmetics: withCosmetics
         })
       });
       const data = await res.json();
       if (res.ok) {
-        showAlert('등록 성공', '카드가 오픈마켓에 판매 등록되었습니다.', 'success');
+        showAlert('등록 성공', marketListingType === 'auction' ? '카드가 경매 매물로 등록되었습니다.' : '카드가 오픈마켓에 판매 등록되었습니다.', 'success');
         setMarketRegisterCard(null);
+        setMarketListingType('fixed');
+        setMarketStartingBidInput('');
+        setMarketPriceInput('');
+        setMarketAuctionHours(24);
         setWithCosmetics(false);
         refreshUserData();
         fetchInventory();
@@ -742,6 +767,34 @@ export const GachaTab: React.FC = () => {
     return getAvailableCount(channelId, star);
   };
 
+  const handleToggleHidden = async (card: UserCard) => {
+    try {
+      const res = await apiFetch(`/cards/${card.id}/visibility`, {
+        method: 'PATCH',
+        body: JSON.stringify({ hidden: !card.is_hidden })
+      });
+      const data = await res.json();
+      showAlert(res.ok ? '설정 완료' : '설정 실패', data.message || '', res.ok ? 'success' : 'error');
+      if (res.ok) fetchInventory();
+    } catch {
+      showAlert('통신 오류', '카드 숨김 설정 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  const handleToggleFavorite = async (card: UserCard) => {
+    try {
+      const res = await apiFetch(`/cards/${card.id}/favorite`, {
+        method: 'PATCH',
+        body: JSON.stringify({ favorite: card.favorite_order == null })
+      });
+      const data = await res.json();
+      showAlert(res.ok ? '설정 완료' : '설정 실패', data.message || '', res.ok ? 'success' : 'error');
+      if (res.ok) fetchInventory();
+    } catch {
+      showAlert('통신 오류', '즐겨찾기 설정 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
   const getCardByKey = (key: string) => {
     const { channelId, star } = parseCardKey(key);
     return inventory.find(c => c.channel_id === channelId && (c.star || 0) === star) || null;
@@ -769,6 +822,10 @@ export const GachaTab: React.FC = () => {
 
     // 2. 정렬 정렬
     return [...result].sort((a, b) => {
+      const favA = a.favorite_order ?? Number.POSITIVE_INFINITY;
+      const favB = b.favorite_order ?? Number.POSITIVE_INFINITY;
+      if (favA !== favB) return favA - favB;
+
       const nameA = a.streamer?.name || '';
       const nameB = b.streamer?.name || '';
       const valA = a.streamer?.base_value || 0;
@@ -1164,7 +1221,7 @@ export const GachaTab: React.FC = () => {
       })()}
 
       {/* 인벤토리 (보관함) 영역 */}
-      <section className="space-y-4">
+      <section data-tour="inventory-list" className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h3 className="text-base font-bold flex items-center gap-2">
@@ -1186,7 +1243,7 @@ export const GachaTab: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto mt-2 sm:mt-0">
+          <div data-tour="inventory-filters" className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto mt-2 sm:mt-0">
             {/* 라이브 상태 필터링 */}
             <select
               value={liveFilter}
@@ -1224,6 +1281,7 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <button
+              data-tour="inventory-trade-actions"
               onClick={handleOpenTrade}
               className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
             >
@@ -1285,7 +1343,7 @@ export const GachaTab: React.FC = () => {
             <div className="relative">
               {/* 선택 모드 안내 바 */}
               {selectionMode && (
-                <div className="mb-4 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 p-3.5 animate-in slide-in-from-top-3 duration-200">
+                <div data-tour="inventory-bulk-actions" className="mb-4 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 p-3.5 animate-in slide-in-from-top-3 duration-200">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-primary animate-ping"></span>
                     <span className="text-[0.75rem] font-bold text-foreground">
@@ -1479,6 +1537,31 @@ export const GachaTab: React.FC = () => {
                         <div className="absolute top-2.5 left-2.5 z-30 flex h-5 w-5 items-center justify-center rounded-md border border-primary bg-background shadow transition">
                           {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
                         </div>
+                      )}
+
+                      <button
+                        type="button"
+                        title={card.favorite_order == null ? '즐겨찾기 고정' : '즐겨찾기 해제'}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleToggleFavorite(card);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        className={`absolute right-2 top-10 z-30 flex h-8 w-8 items-center justify-center rounded-full border border-white/35 shadow-lg backdrop-blur-md transition-all ${
+                          card.favorite_order == null
+                            ? 'bg-black/20 text-white/70 opacity-0 hover:scale-110 hover:bg-amber-400/90 hover:text-white group-hover:opacity-100'
+                            : 'bg-amber-400 text-white opacity-100 ring-2 ring-white/80'
+                        }`}
+                      >
+                        <Star className={`h-4 w-4 ${card.favorite_order == null ? '' : 'fill-current'}`} />
+                      </button>
+
+                      {card.is_hidden && (
+                        <span className="absolute left-2 top-10 z-30 inline-flex items-center gap-1 rounded-full border border-white/25 bg-slate-950/55 px-2 py-1 text-[9px] font-black text-white shadow-md backdrop-blur-md">
+                          <EyeOff className="h-3 w-3" /> 숨김
+                        </span>
                       )}
 
                       {/* 카드 이미지 배경 */}
@@ -1712,8 +1795,26 @@ export const GachaTab: React.FC = () => {
                 setContextMenu(prev => ({ ...prev, open: false }));
               }}
               className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                ✔️ 다중 선택 모드
+              </button>
+            <button
+              onClick={() => {
+                handleToggleFavorite(displayCard);
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
             >
-              ✔️ 다중 선택 모드
+              {displayCard.favorite_order == null ? '⭐ 즐겨찾기 고정' : '☆ 즐겨찾기 해제'}
+            </button>
+            <button
+              onClick={() => {
+                handleToggleHidden(displayCard);
+                setContextMenu(prev => ({ ...prev, open: false }));
+              }}
+              className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+            >
+              {displayCard.is_hidden ? '👁️ 외부 공개 켜기' : '🙈 외부 공개 숨기기'}
             </button>
             <button
               onClick={() => {
@@ -1750,6 +1851,10 @@ export const GachaTab: React.FC = () => {
                 onClick={() => {
                   setMarketRegisterCard(availableCard);
                   setMarketPriceInput('');
+                  setMarketListingType('fixed');
+                  setMarketStartingBidInput('');
+                  setMarketAuctionHours(24);
+                  setWithCosmetics(false);
                   setContextMenu(prev => ({ ...prev, open: false }));
                 }}
                 className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
@@ -2174,9 +2279,11 @@ export const GachaTab: React.FC = () => {
         const star = marketRegisterCard.star || 0;
         const baseVal = streamer.base_value || 0;
         const cardVal = Math.round(baseVal * starMult(star));
-        const price = Math.floor(Number(marketPriceInput)) || 0;
-        const fee = Math.floor(price * 0.05);
-        const settlement = Math.max(0, price - fee);
+        const buyNowPrice = Math.floor(Number(marketPriceInput)) || 0;
+        const startingBid = Math.floor(Number(marketStartingBidInput)) || 0;
+        const settlementBase = marketListingType === 'auction' ? Math.max(startingBid, buyNowPrice || startingBid) : buyNowPrice;
+        const fee = Math.floor(settlementBase * 0.05);
+        const settlement = Math.max(0, settlementBase - fee);
 
         return (
           <div className="modal-backdrop modal-backdrop-center z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setMarketRegisterCard(null)}>
@@ -2226,17 +2333,71 @@ export const GachaTab: React.FC = () => {
               </div>
 
               <form onSubmit={handleMarketRegisterSubmit} className="mt-4 space-y-4">
+                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary/30 p-1.5">
+                  {([
+                    ['fixed', '즉시 판매'],
+                    ['auction', '경매 판매']
+                  ] as const).map(([type, label]) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setMarketListingType(type)}
+                      className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                        marketListingType === type
+                          ? 'bg-card text-primary shadow-sm ring-1 ring-primary/20'
+                          : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {marketListingType === 'auction' && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground">경매 시작가 (최소 100 P)</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="100"
+                          value={marketStartingBidInput}
+                          onChange={(e) => setMarketStartingBidInput(e.target.value)}
+                          className="w-full rounded-lg border border-border bg-secondary/50 pl-3 pr-8 py-2 text-xs font-bold focus:border-primary focus:outline-none"
+                          placeholder="시작가"
+                          required
+                        />
+                        <span className="absolute right-3 top-2.5 text-xs font-bold text-muted-foreground">P</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-muted-foreground">진행 시간</label>
+                      <select
+                        value={marketAuctionHours}
+                        onChange={(e) => setMarketAuctionHours(Number(e.target.value))}
+                        className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-bold focus:border-primary focus:outline-none"
+                      >
+                        {[1, 2, 3, 6, 12, 24, 48, 72].map((hour) => (
+                          <option key={hour} value={hour}>{hour}시간</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground">판매 희망 가격 (최소 100 P)</label>
+                  <label className="text-[10px] font-bold text-muted-foreground">
+                    {marketListingType === 'auction' ? '즉시 구매가 (선택, 비우면 입찰만 가능)' : '판매 희망 가격 (최소 100 P)'}
+                  </label>
                   <div className="relative">
                     <input
                       type="number"
-                      min="100"
+                      min={marketListingType === 'auction' ? 0 : 100}
                       value={marketPriceInput}
                       onChange={(e) => setMarketPriceInput(e.target.value)}
                       className="w-full rounded-lg border border-border bg-secondary/50 pl-3 pr-8 py-2 text-xs font-bold focus:border-primary focus:outline-none"
-                      placeholder="가격을 입력하세요"
-                      required
+                      placeholder={marketListingType === 'auction' ? '즉시 구매가' : '가격을 입력하세요'}
+                      required={marketListingType === 'fixed'}
                     />
                     <span className="absolute right-3 top-2.5 text-xs font-bold text-muted-foreground">P</span>
                   </div>
@@ -2266,12 +2427,18 @@ export const GachaTab: React.FC = () => {
                 })()}
 
                 <div className="rounded-xl bg-secondary/20 border border-border/40 p-3 space-y-1.5 text-xs">
+                  {marketListingType === 'auction' && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">경매 시작가</span>
+                      <span className="font-bold text-foreground">{startingBid.toLocaleString()} P</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">수수료 (5%)</span>
                     <span className="text-rose-500 font-bold">-{fee.toLocaleString()} P</span>
                   </div>
                   <div className="flex justify-between border-t border-border/40 pt-1.5 font-bold">
-                    <span>정산 예정 금액</span>
+                    <span>{marketListingType === 'auction' ? '즉시 구매 시 정산 예상' : '정산 예정 금액'}</span>
                     <span className="text-emerald-500 font-black">{settlement.toLocaleString()} P</span>
                   </div>
                 </div>
@@ -2290,7 +2457,7 @@ export const GachaTab: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    disabled={marketRegisterBusy || price < 100}
+                    disabled={marketRegisterBusy || (marketListingType === 'fixed' ? buyNowPrice < 100 : startingBid < 100)}
                     className="rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50"
                   >
                     {marketRegisterBusy ? '등록 중...' : '마켓에 등록'}

@@ -75,7 +75,9 @@ export const fetchChzzkChannelProfile = async (
     ]);
 
     if (!profileRes.ok) {
-      throw new Error(`치지직 API 응답 실패 (HTTP 상태 코드: ${profileRes.status})`);
+      const error = new Error(`치지직 API 응답 실패 (HTTP 상태 코드: ${profileRes.status})`) as Error & { statusCode?: number };
+      error.statusCode = profileRes.status;
+      throw error;
     }
 
     const profileBody = (await profileRes.json()) as any;

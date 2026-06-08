@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../../services/db";
-import { 
-  IUserRepository, 
+import { fuzzyScore } from "../../utils/search";
+import {
+  IUserRepository,
   IStreamerRepository, 
   ICouponRepository, 
   IReportRepository,
@@ -57,14 +58,28 @@ export class SupabaseUserRepository implements IUserRepository {
   }
 
   async searchByUsername(keyword: string, limit: number): Promise<User[]> {
-    const { data, error } = await this.getClient()
-      .from('users')
-      .select('*')
-      .ilike('username', `%${keyword}%`)
-      .order('username', { ascending: true })
-      .limit(limit);
-    if (error || !data) return [];
-    return data as User[];
+    const kw = (keyword || '').trim();
+    if (!kw) return [];
+    // 초성/띄어쓰기 무시 유사도 검색.
+    // 1) 직접 부분일치(ilike) — 후보 풀 밖(오래된) 유저도 포착
+    // 2) 최근 유저 후보 풀 — 초성/띄어쓰기 유사 매칭용 (PostgREST max-rows 보호 위해 캡)
+    const POOL_CAP = 2000;
+    const safeLike = kw.replace(/[,()%]/g, ' ');
+    const [likeRes, poolRes] = await Promise.all([
+      this.getClient().from('users').select('*').ilike('username', `%${safeLike}%`).limit(limit),
+      this.getClient().from('users').select('*').order('created_at', { ascending: false }).limit(POOL_CAP)
+    ]);
+
+    const byId = new Map<string, any>();
+    for (const u of (likeRes.data || [])) byId.set(u.id, u);
+    for (const u of (poolRes.data || [])) if (!byId.has(u.id)) byId.set(u.id, u);
+
+    return Array.from(byId.values())
+      .map((u) => ({ u, score: fuzzyScore(u.username || '', kw) }))
+      .filter((x): x is { u: any; score: number } => x.score !== null)
+      .sort((a, b) => a.score - b.score || String(a.u.username).localeCompare(String(b.u.username)))
+      .slice(0, limit)
+      .map((x) => x.u as User);
   }
 
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
@@ -311,6 +326,14 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
+  async updateStatusMessage(id: string, message: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('users')
+      .update({ status_message: message })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
   async count(): Promise<number> {
     const { count, error } = await this.getClient()
       .from('users')
@@ -354,11 +377,15 @@ export class SupabaseUserRepository implements IUserRepository {
     return data.length > 0;
   }
 
-  async findRankings(limit: number, keyword: string = ''): Promise<UserRanking[]> {
+  async findRankings(limit: number, keyword: string = '', options?: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null }): Promise<UserRanking[]> {
     // 카드 시세 합산 정렬은 RPC(get_user_rankings) 우선 사용 (keyword 및 rank 포함)
-    const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword });
+    const mode = options?.mode || 'total';
+    const hasCardFilter = !!options?.channelId;
+    const { data, error } = !hasCardFilter
+      ? await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword })
+      : { data: null, error: { message: 'card filter requires fallback' } as any };
     if (!error && Array.isArray(data)) {
-      return data.map((row: any) => ({
+      const mapped = data.map((row: any) => ({
         id: row.id,
         username: row.username,
         avatar_url: row.avatar_url,
@@ -366,29 +393,48 @@ export class SupabaseUserRepository implements IUserRepository {
         point: row.point,
         last_free_draw: row.last_free_draw,
         banned_until: row.banned_until,
+        status_message: row.status_message ?? null,
         created_at: row.created_at,
         card_count: Number(row.card_count) || 0,
+        cards_value: Number(row.cards_value) || Math.max(0, Number(row.total_asset || 0) - Number(row.point || 0)),
         total_asset: Number(row.total_asset) || row.point,
         rank: Number(row.rank)
       }));
+      if (mode === 'cards') {
+        return mapped
+          .sort((a: UserRanking, b: UserRanking) => (b.cards_value || 0) - (a.cards_value || 0))
+          .map((item: UserRanking, idx: number) => ({ ...item, rank: idx + 1 }))
+          .slice(0, limit);
+      }
+      return mapped;
     }
 
     // 폴백: 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 총자산 기준 정렬
     console.warn('[Supabase] get_user_rankings RPC 실패, 폴백 사용:', error?.message);
-    const candidateLimit = Math.min(Math.max(limit * 5, 50), 200);
-    const { data: users, error: uErr } = await this.getClient()
+    const candidateLimit = hasCardFilter || mode === 'cards' ? 500 : Math.min(Math.max(limit * 5, 50), 200);
+    let userQuery = this.getClient()
       .from('users')
       .select('*')
-      .order('point', { ascending: false })
       .limit(candidateLimit);
+    if (keyword.trim()) {
+      userQuery = userQuery.ilike('username', `%${keyword.trim()}%`);
+    } else {
+      userQuery = userQuery.order('point', { ascending: false });
+    }
+    const { data: users, error: uErr } = await userQuery;
     if (uErr) throw uErr;
 
     const enriched: UserRanking[] = [];
     for (const u of users || []) {
-      const { data: cards } = await this.getClient()
+      let cardsQuery = this.getClient()
         .from('user_cards')
         .select('star, streamer:streamers(base_value)')
-        .eq('user_id', u.id);
+        .eq('user_id', u.id)
+        .or('is_hidden.is.null,is_hidden.eq.false');
+      if (options?.channelId) cardsQuery = cardsQuery.eq('channel_id', options.channelId);
+      if (options?.star !== undefined && options.star !== null) cardsQuery = cardsQuery.eq('star', options.star);
+      const { data: cards } = await cardsQuery;
+      if (hasCardFilter && (!cards || cards.length === 0)) continue;
       // 카드 가치는 별(0~5성) 배수(1 + star*0.8)를 반영하여 합산
       const cardsValue = (cards || []).reduce(
         (sum: number, c: any) => sum + (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8), 0
@@ -396,10 +442,14 @@ export class SupabaseUserRepository implements IUserRepository {
       enriched.push({
         ...(u as User),
         card_count: (cards || []).length,
+        cards_value: Math.round(cardsValue),
         total_asset: u.point + Math.round(cardsValue)
       });
     }
-    enriched.sort((a, b) => b.total_asset - a.total_asset);
+    enriched.sort((a, b) => mode === 'cards'
+      ? (b.cards_value || 0) - (a.cards_value || 0)
+      : b.total_asset - a.total_asset
+    );
     
     // 전체 목록 기준 순위를 매겨서 반환
     const mapped = enriched.map((item, idx) => ({
@@ -407,12 +457,7 @@ export class SupabaseUserRepository implements IUserRepository {
       rank: idx + 1
     }));
 
-    // 검색어가 있다면 필터링
-    const filtered = keyword.trim()
-      ? mapped.filter((u) => u.username.toLowerCase().includes(keyword.toLowerCase()))
-      : mapped;
-
-    return filtered.slice(0, limit);
+    return mapped.slice(0, limit);
   }
 }
 

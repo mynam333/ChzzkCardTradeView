@@ -8,6 +8,7 @@ import {
   titleRepository
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
+import { fuzzyScore } from '../utils/search';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
@@ -98,6 +99,7 @@ export const getUserMe = async (req: Request, res: Response) => {
       username: user.username,
       avatarUrl: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
       role: user.role,
+      statusMessage: user.status_message || null,
       titles,
       ownedTitles,
       point: user.point,
@@ -182,9 +184,11 @@ export const getUserCollection = async (req: Request, res: Response) => {
   }
   try {
     const cards = await userCardRepository.findByUserId(user_id);
+    const requesterId = (req as any).user?.id;
+    const visibleCards = requesterId === user_id ? cards : cards.filter((card: any) => !card.is_hidden);
     // 같은 스트리머라도 별(0~5성)별로 분리해 묶음
     const map: { [key: string]: any } = {};
-    for (const c of cards) {
+    for (const c of visibleCards) {
       const star = c.star || 0;
       const key = `${c.channel_id}#${star}`;
       if (!map[key]) {
@@ -281,7 +285,9 @@ export const getUserProfile = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
-    const cards = await userCardRepository.findByUserId(user_id);
+    const requesterId = (req as any).user?.id;
+    const allCards = await userCardRepository.findByUserId(user_id);
+    const cards = requesterId === user_id ? allCards : allCards.filter((card: any) => !card.is_hidden);
 
     // 채널+별 등급별 묶음 + 총 자산 계산
     const map: { [key: string]: any } = {};
@@ -341,6 +347,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
       id: user.id,
       username: user.username,
       role: user.role,
+      status_message: user.status_message || null,
       titles,
       avatar_url: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
       point: user.point,
@@ -362,8 +369,32 @@ export const getUserProfile = async (req: Request, res: Response) => {
 export const getUserRankings = async (req: Request, res: Response) => {
   try {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    // 100위까지 랭킹을 늘리고 검색 키워드를 리포지토리에 전달
-    const rankings = await userRepository.findRankings(100, keyword);
+    const mode = req.query.mode === 'cards' ? 'cards' : 'total';
+    const channelId = typeof req.query.channel_id === 'string' ? req.query.channel_id.trim() : '';
+    const starRaw = typeof req.query.star === 'string' && req.query.star !== '' ? Number(req.query.star) : null;
+    const star = starRaw == null || Number.isNaN(starRaw) ? null : Math.max(0, Math.min(5, Math.floor(starRaw)));
+    // 검색어가 있으면 초성/띄어쓰기 무시 유사도 검색까지 지원합니다.
+    // - 부분일치 결과: 리포지토리 keyword 필터로 순위 무관하게 정확히 포착(기존 동작 유지)
+    // - 초성/띄어쓰기 유사 매칭: 상위 랭킹 풀을 따로 받아 유사도로 보강(랭킹 노출 범위 내)
+    let rankings;
+    if (keyword) {
+      const [matched, topPool] = await Promise.all([
+        userRepository.findRankings(100, keyword, { mode, channelId, star }),
+        userRepository.findRankings(100, '', { mode, channelId, star })
+      ]);
+      const byId = new Map<string, typeof matched[number]>();
+      for (const u of matched) byId.set(u.id, u);
+      for (const u of topPool) {
+        if (!byId.has(u.id) && fuzzyScore(u.username || '', keyword) !== null) byId.set(u.id, u);
+      }
+      rankings = Array.from(byId.values())
+        .map((u) => ({ u, score: fuzzyScore(u.username || '', keyword) ?? Number.MAX_SAFE_INTEGER }))
+        .sort((a, b) => a.score - b.score || (a.u.rank ?? 0) - (b.u.rank ?? 0))
+        .slice(0, 100)
+        .map((x) => x.u);
+    } else {
+      rankings = await userRepository.findRankings(100, '', { mode, channelId, star });
+    }
     const userIds = rankings.map((user) => user.id);
     const [titlesByUser, linkedStreamers] = await Promise.all([
       titleRepository.findByUserIds(userIds),
@@ -379,8 +410,10 @@ export const getUserRankings = async (req: Request, res: Response) => {
         avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`,
         point: u.point,
         card_count: u.card_count,
+        cards_value: u.cards_value,
         total_asset: u.total_asset,
         rank: u.rank,
+        status_message: u.status_message || null,
         titles: (titlesByUser[u.id] || []).filter((title) => title.is_equipped),
         is_streamer: !!linkedStreamer,
         is_live: linkedStreamer?.is_active === true
@@ -409,6 +442,49 @@ export const getUserCards = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[PlayController] getUserCards 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const updateMyStatusMessage = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const message = typeof req.body?.status_message === 'string' ? req.body.status_message : '';
+  if (message.length > 80) {
+    return res.status(400).json({ error: 'BadRequest', message: '상태 메시지는 80자 이하로 입력해 주세요.' });
+  }
+  try {
+    await userRepository.updateStatusMessage(userId, message);
+    return res.status(200).json({ message: '상태 메시지를 저장했습니다.', status_message: message.trim() || null });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '상태 메시지 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const updateMyCardVisibility = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const cardId = Number(req.params.card_id);
+  if (!Number.isFinite(cardId)) return res.status(400).json({ error: 'BadRequest', message: '카드 ID가 올바르지 않습니다.' });
+  try {
+    const ok = await userCardRepository.updateVisibility(userId, cardId, !!req.body?.hidden);
+    if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    return res.status(200).json({ message: req.body?.hidden ? '카드를 외부 공개에서 숨겼습니다.' : '카드 공개 숨김을 해제했습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '카드 숨김 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const updateMyCardFavorite = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const cardId = Number(req.params.card_id);
+  if (!Number.isFinite(cardId)) return res.status(400).json({ error: 'BadRequest', message: '카드 ID가 올바르지 않습니다.' });
+  try {
+    const ok = await userCardRepository.setFavorite(userId, cardId, !!req.body?.favorite);
+    if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    return res.status(200).json({ message: req.body?.favorite ? '즐겨찾기에 고정했습니다.' : '즐겨찾기 고정을 해제했습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '즐겨찾기 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

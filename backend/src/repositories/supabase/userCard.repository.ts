@@ -103,6 +103,9 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
         star,
         border_item_id,
         name_effect_item_id,
+        is_hidden,
+        favorite_order,
+        favorite_at,
         acquired_at,
         streamer:streamers (
           channel_id,
@@ -122,6 +125,7 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
         )
       `)
       .eq('user_id', userId)
+      .order('favorite_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: false });
 
     if (error) throw error;
@@ -261,6 +265,62 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     });
     if (error) throw error;
     return Number(data) || 0;
+  }
+
+  async updateVisibility(userId: string, cardId: number, hidden: boolean): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .update({ is_hidden: hidden })
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  async setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean> {
+    if (!favorite) {
+      const { data, error } = await this.getClient()
+        .from('user_cards')
+        .update({ favorite_order: null, favorite_at: null })
+        .eq('id', cardId)
+        .eq('user_id', userId)
+        .select('id')
+        .maybeSingle();
+      if (error) throw error;
+      return !!data;
+    }
+
+    const { data: existing, error: existingError } = await this.getClient()
+      .from('user_cards')
+      .select('favorite_order')
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existing) return false;
+    if (existing.favorite_order !== null && existing.favorite_order !== undefined) return true;
+
+    const { data: maxRows, error: maxError } = await this.getClient()
+      .from('user_cards')
+      .select('favorite_order')
+      .eq('user_id', userId)
+      .not('favorite_order', 'is', null)
+      .order('favorite_order', { ascending: false })
+      .limit(1);
+    if (maxError) throw maxError;
+
+    const nextOrder = Number(maxRows?.[0]?.favorite_order || 0) + 1;
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .update({ favorite_order: nextOrder, favorite_at: new Date().toISOString() })
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
   }
 }
 

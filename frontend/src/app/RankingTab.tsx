@@ -32,14 +32,16 @@ interface UserRank {
   avatar_url: string;
   point: number;
   card_count: number;
+  cards_value?: number;
   total_asset?: number;
+  status_message?: string | null;
   rank?: number;
   titles: UserTitle[];
   is_streamer: boolean;
   is_live: boolean;
 }
 
-type SubTab = 'value' | 'change' | 'user';
+type SubTab = 'value' | 'change' | 'user' | 'cards';
 
 export const RankingTab: React.FC = () => {
   const [subTab, setSubTab] = useState<SubTab>('value');
@@ -53,6 +55,9 @@ export const RankingTab: React.FC = () => {
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [cardFilterName, setCardFilterName] = useState('');
+  const [cardFilterChannelId, setCardFilterChannelId] = useState('');
+  const [cardFilterStar, setCardFilterStar] = useState('');
 
   // 검색어 디바운스 (타이핑 성능 최적화)
   useEffect(() => {
@@ -67,18 +72,27 @@ export const RankingTab: React.FC = () => {
     // 시세를 준실시간으로 반영하기 위해 25초마다 조용히 갱신 (로딩 스피너 없이)
     const timer = setInterval(() => fetchRankings(true), 25_000);
     return () => clearInterval(timer);
-  }, [subTab, debouncedSearchQuery]);
+  }, [subTab, debouncedSearchQuery, cardFilterChannelId, cardFilterStar]);
 
   // 탭 전환·검색 시 1페이지로 초기화
-  useEffect(() => { setPage(1); }, [subTab, searchQuery]);
+  useEffect(() => { setPage(1); }, [subTab, searchQuery, cardFilterChannelId, cardFilterStar]);
 
   const fetchRankings = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      if (subTab === 'user') {
-        const qParam = debouncedSearchQuery.trim() ? `?q=${encodeURIComponent(debouncedSearchQuery.trim())}` : '';
-        const res = await apiFetch(`/users/ranking${qParam}`);
+      if (subTab === 'user' || subTab === 'cards') {
+        const params = new URLSearchParams();
+        if (debouncedSearchQuery.trim()) params.set('q', debouncedSearchQuery.trim());
+        if (subTab === 'cards') params.set('mode', 'cards');
+        if (cardFilterChannelId) params.set('channel_id', cardFilterChannelId);
+        if (cardFilterStar !== '') params.set('star', cardFilterStar);
+        const query = params.toString();
+        const res = await apiFetch(`/users/ranking${query ? `?${query}` : ''}`);
         if (res.ok) setUserRankings(await res.json());
+        if (subTab === 'cards' && streamers.length === 0) {
+          const streamerRes = await apiFetch('/streamers');
+          if (streamerRes.ok) setStreamers(await streamerRes.json());
+        }
       } else {
         const res = await apiFetch('/streamers');
         if (res.ok) setStreamers(await res.json());
@@ -86,7 +100,7 @@ export const RankingTab: React.FC = () => {
     } catch (e) {
       console.error('랭킹 데이터 획득 실패:', e);
       if (!silent) {
-        if (subTab === 'user') setUserRankings([]);
+        if (subTab === 'user' || subTab === 'cards') setUserRankings([]);
         else setStreamers([]);
       }
     } finally {
@@ -132,7 +146,7 @@ export const RankingTab: React.FC = () => {
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
-  const activeLength = subTab === 'user' ? rankedUsers.length : rankedStreamers.length;
+  const activeLength = (subTab === 'user' || subTab === 'cards') ? rankedUsers.length : rankedStreamers.length;
   const totalPages = Math.max(1, Math.ceil(activeLength / PER_PAGE));
   const pageClamped = Math.min(page, totalPages);
   const sliceStart = (pageClamped - 1) * PER_PAGE;
@@ -145,14 +159,15 @@ export const RankingTab: React.FC = () => {
   const subTabs: { id: SubTab; label: string }[] = [
     { id: 'value', label: '스트리머 시세' },
     { id: 'change', label: '스트리머 등락률' },
-    { id: 'user', label: '수집가 자산' }
+    { id: 'user', label: '수집가 자산' },
+    { id: 'cards', label: '카드 가치 랭킹' }
   ];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
 
       {/* 랭킹 탭 대제목 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div data-tour="ranking-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black">
             <TrendingUp className="h-5.5 w-5.5 text-primary" /> 실시간 랭킹 시스템
@@ -161,12 +176,13 @@ export const RankingTab: React.FC = () => {
             {subTab === 'value' && '카드 가치(시세)가 높은 순으로 정렬됩니다.'}
             {subTab === 'change' && '최근 1시간 동안 시세가 가장 많이 오른 순으로 정렬됩니다.'}
             {subTab === 'user' && '포인트와 보유 카드 가치를 합산한 총자산 순위입니다.'}
+            {subTab === 'cards' && '포인트를 제외하고 보유 카드 가치만 합산한 순위입니다. 특정 카드를 가진 사람만 필터링할 수 있습니다.'}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           {/* 슬라이드 서브 탭 */}
-          <div className="flex rounded-2xl border border-border bg-secondary/70 p-1">
+          <div data-tour="ranking-tabs" className="flex rounded-2xl border border-border bg-secondary/70 p-1">
             {subTabs.map((t) => (
               <button
                 key={t.id}
@@ -190,19 +206,50 @@ export const RankingTab: React.FC = () => {
       </div>
 
       {/* 랭킹 메인 */}
-      <div className="cute-surface rounded-[2rem] p-6">
+      <div data-tour="ranking-list" className="cute-surface rounded-[2rem] p-6">
 
         {/* 검색바 (모든 탭 공통, 검색해도 실제 순위 유지) */}
         <div className="relative mb-5">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder={subTab === 'user' ? '컬렉터(유저) 검색' : '스트리머 검색'}
+            placeholder={(subTab === 'user' || subTab === 'cards') ? '컬렉터(유저) 검색' : '스트리머 검색'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-2xl border border-border bg-secondary/45 py-2.5 pl-10 pr-4 text-xs font-semibold focus:border-primary focus:outline-none"
           />
         </div>
+
+        {subTab === 'cards' && (
+          <div className="mb-5 grid gap-2 rounded-2xl border border-primary/15 bg-primary/5 p-3 sm:grid-cols-[1fr_110px_auto] dark:bg-primary/10">
+            <input
+              value={cardFilterName}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCardFilterName(value);
+                const match = streamers.find((streamer) => fuzzySearch(streamer.name, value));
+                setCardFilterChannelId(match && value.trim() ? match.channel_id : '');
+              }}
+              placeholder="특정 카드를 가진 사람 필터 (스트리머 이름)"
+              className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold focus:border-primary focus:outline-none"
+            />
+            <select
+              value={cardFilterStar}
+              onChange={(event) => setCardFilterStar(event.target.value)}
+              className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold focus:border-primary focus:outline-none"
+            >
+              <option value="">전체 별</option>
+              {[0, 1, 2, 3, 4, 5].map((star) => <option key={star} value={star}>{star}성</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={() => { setCardFilterName(''); setCardFilterChannelId(''); setCardFilterStar(''); }}
+              className="rounded-xl bg-secondary px-3 py-2 text-xs font-black text-muted-foreground hover:text-foreground"
+            >
+              필터 초기화
+            </button>
+          </div>
+        )}
 
         {/* 랭킹 테이블 리스트 */}
         <div className="space-y-3.5">
@@ -210,7 +257,7 @@ export const RankingTab: React.FC = () => {
             <div className="flex items-center justify-center py-16">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
             </div>
-          ) : subTab === 'user' ? (
+          ) : (subTab === 'user' || subTab === 'cards') ? (
             // 컬렉터(유저) 자산 랭킹 (검색해도 실제 순위 유지)
             rankedUsers.length === 0 ? (
               <p className="text-center text-xs text-muted-foreground py-12">표시할 컬렉터가 없습니다.</p>
@@ -236,11 +283,14 @@ export const RankingTab: React.FC = () => {
                       <UserTitleList titles={ur.titles} compact />
                     </div>
                     <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
+                    {ur.status_message && (
+                      <p className="mt-0.5 max-w-[13rem] truncate text-[10px] font-bold text-primary/85">{ur.status_message}</p>
+                    )}
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="cute-number-font text-xs font-black text-primary">{((ur.total_asset ?? ur.point) || 0).toLocaleString()} P</span>
-                  <p className="text-[9px] text-muted-foreground">총 자산 (포인트+카드가치)</p>
+                  <span className="cute-number-font text-xs font-black text-primary">{(subTab === 'cards' ? (ur.cards_value || 0) : ((ur.total_asset ?? ur.point) || 0)).toLocaleString()} P</span>
+                  <p className="text-[9px] text-muted-foreground">{subTab === 'cards' ? '카드 가치만' : '총 자산 (포인트+카드가치)'}</p>
                 </div>
               </div>
             ))

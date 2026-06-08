@@ -10,6 +10,7 @@ const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match'] as const;
 const COUNTDOWN_MS = 3_000;
 const SUBMISSION_GRACE_MS = 2_000;
+const CLIENT_REPORTED_GRACE_MS = 8_000;
 const PUZZLE_TIME_LIMIT_MS = 120_000;
 const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
@@ -439,6 +440,11 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     // 서버 사이드 시간 경과 체크 (치팅 패킷 변조 차단)
     const sessionCreatedMs = new Date(session.created_at || '').getTime();
     const serverElapsedMs = Date.now() - sessionCreatedMs;
+    const clientRemainingMs = Math.max(0, Math.floor(Number(payload?.client_remaining_ms || 0)));
+    const exceededTimeLimit = (allowedMs: number) => {
+      if (serverElapsedMs <= allowedMs + SUBMISSION_GRACE_MS) return false;
+      return !(clientRemainingMs > 0 && serverElapsedMs <= allowedMs + CLIENT_REPORTED_GRACE_MS);
+    };
 
     let isCorrect = false;
     let earnedPoints = 0;
@@ -490,7 +496,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       const { success } = payload || {};
 
       // 120초 시간 제한 초과 검증 (카운트다운 3초 + 120초 플레이 + RTT 2초 = 125000ms 초과 시 실패)
-      if (serverElapsedMs > COUNTDOWN_MS + PUZZLE_TIME_LIMIT_MS + SUBMISSION_GRACE_MS) {
+      if (exceededTimeLimit(COUNTDOWN_MS + PUZZLE_TIME_LIMIT_MS)) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -530,7 +536,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       const { success } = payload || {};
 
       // 30초 시간 제한 초과 검증 (카운트다운 3초 + 2초 선공개 + 30초 플레이 + RTT 2초 = 37000ms 초과 시 실패)
-      if (serverElapsedMs > COUNTDOWN_MS + MATCH_REVEAL_MS + MATCH_TIME_LIMIT_MS + SUBMISSION_GRACE_MS) {
+      if (exceededTimeLimit(COUNTDOWN_MS + MATCH_REVEAL_MS + MATCH_TIME_LIMIT_MS)) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({

@@ -229,14 +229,16 @@ const isThreeMonthsInactive = (lastLiveAt?: string | null): boolean => {
   return lastLiveMs <= Date.now() - INACTIVE_STREAMER_PRUNE_DAYS * 24 * 60 * 60 * 1000;
 };
 
-const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, lastLiveAt: string) => {
+const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inactive' | 'not_found', lastLiveAt?: string) => {
   const holders = await userCardRepository.findByChannel(streamer.channel_id);
   const userIds = Array.from(new Set(holders.map((card) => card.user_id)));
 
   for (const userId of userIds) {
     await userRepository.addBonusFreeDrawTickets(userId, 1);
     const title = '보유 카드 삭제 및 보상 지급';
-    const body = `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
+    const body = reason === 'not_found'
+      ? `'${streamer.name}' 카드 정보를 더 이상 불러올 수 없어 카드가 정리되고 추가 무료 소환 티켓 1장이 지급되었습니다.`
+      : `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
     sendPushToUser(userId, title, body, '/shop');
     notificationRepository.create({
       user_id: userId,
@@ -248,8 +250,8 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, lastLiveAt: st
 
   await streamerRepository.delete(streamer.channel_id);
   console.log(
-    `[LiveStatusScheduler] 장기 미방송 스트리머 삭제: ${streamer.name}(${streamer.channel_id}), ` +
-    `lastLiveAt=${lastLiveAt}, 보상 ${userIds.length}명`
+    `[LiveStatusScheduler] 스트리머 삭제: ${streamer.name}(${streamer.channel_id}), ` +
+    `reason=${reason}, lastLiveAt=${lastLiveAt || '-'}, 보상 ${userIds.length}명`
   );
 };
 
@@ -282,7 +284,7 @@ export const syncAllStreamersLiveStatus = async () => {
 
     const results: StreamerScheduleResult[] = [];
     const historyPoints: { channel_id: string; value: number }[] = [];
-    const pruneTargets: { streamer: Streamer; lastLiveAt: string }[] = [];
+    const pruneTargets: { streamer: Streamer; lastLiveAt: string; reason?: 'inactive' | 'not_found' }[] = [];
 
     // 1) 폴링 대상(라이브 + 이번 샤드의 오프라인)과 계산 전용(나머지 오프라인) 분리
     const pollTargets: Streamer[] = [];
@@ -330,6 +332,10 @@ export const syncAllStreamersLiveStatus = async () => {
           historyPoints.push(r.history);
           if (r.update.is_active) liveCount++;
         } catch (err: any) {
+          if (err?.statusCode === 404 || err?.statusCode === 410 || /\b(404|410)\b/.test(String(err?.message || ''))) {
+            pruneTargets.push({ streamer, lastLiveAt: new Date().toISOString(), reason: 'not_found' });
+            continue;
+          }
           failCount++;
           console.error(`[LiveStatusScheduler] 스트리머 폴링 실패 (ID: ${streamer.channel_id}):`, err.message);
         }
@@ -345,7 +351,7 @@ export const syncAllStreamersLiveStatus = async () => {
     await streamerRepository.bulkApplyScheduleResults(results);
     await streamerRepository.bulkRecordValueHistory(historyPoints);
     for (const target of pruneTargets) {
-      await rewardHoldersAndDeleteStreamer(target.streamer, target.lastLiveAt).catch((err: any) => {
+      await rewardHoldersAndDeleteStreamer(target.streamer, target.reason || 'inactive', target.lastLiveAt).catch((err: any) => {
         console.error(`[LiveStatusScheduler] 장기 미방송 스트리머 정리 실패 (${target.streamer.channel_id}):`, err.message);
       });
     }

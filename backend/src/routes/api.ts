@@ -46,12 +46,16 @@ import {
   updateScheduledNotification,
   deleteScheduledNotification
 } from '../controllers/pushController';
+import { claimTutorialGachaTicket } from '../controllers/tutorialController';
 
 import {
   getUserMe,
   deleteMyAccount,
   getUserRankings,
   getUserCards,
+  updateMyStatusMessage,
+  updateMyCardVisibility,
+  updateMyCardFavorite,
   drawCard,
   searchChzzkStreamer,
   registerStreamer,
@@ -71,6 +75,10 @@ import {
   createListing,
   cancelListing,
   purchaseListing,
+  placeBid,
+  listMarketWatches,
+  upsertMarketWatch,
+  deleteMarketWatch,
   listMarketHistory
 } from '../controllers/marketController';
 import {
@@ -184,6 +192,7 @@ router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 router.post('/auth/logout', logout);
 router.get('/image-proxy', proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
+router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
 router.delete('/users/me', authMiddleware, deleteMyAccount);
 router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
 router.get('/users/ranking', getUserRankings);
@@ -191,11 +200,14 @@ router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, s
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);
 router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);
+router.post('/tutorial/rewards/gacha-ticket', authMiddleware, banCheckMiddleware, claimTutorialGachaTicket);
 // 유저 차단 관리
 router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
 router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
 router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
+router.patch('/cards/:card_id/visibility', authMiddleware, banCheckMiddleware, updateMyCardVisibility);
+router.patch('/cards/:card_id/favorite', authMiddleware, banCheckMiddleware, updateMyCardFavorite);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
 router.post('/cards/fuse', authMiddleware, banCheckMiddleware, fuseCards);
 
@@ -236,9 +248,13 @@ router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, reje
 router.get('/market/listings', authMiddleware, listActiveListings);
 router.get('/market/my', authMiddleware, listMyListings);
 router.get('/market/history', authMiddleware, listMarketHistory);
+router.get('/market/watches', authMiddleware, banCheckMiddleware, listMarketWatches);
+router.post('/market/watches', authMiddleware, banCheckMiddleware, upsertMarketWatch);
+router.delete('/market/watches/:id', authMiddleware, banCheckMiddleware, deleteMarketWatch);
 router.post('/market/list', authMiddleware, banCheckMiddleware, createListing);
 router.post('/market/cancel/:id', authMiddleware, banCheckMiddleware, cancelListing);
 router.post('/market/buy/:id', authMiddleware, banCheckMiddleware, purchaseListing);
+router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, placeBid);
 
 // ==========================================
 // 미니게임 API (티켓 충전식 포인트 획득 기능)

@@ -7,8 +7,9 @@ import { sendPushToUser } from './pushController';
 
 /** 푸시 + 인앱 알림함 동시 기록 (실패해도 무시) */
 const notify = (userId: string, title: string, body: string) => {
-  sendPushToUser(userId, title, body, '/');
-  notificationRepository.create({ user_id: userId, title, body, link: 'gacha' }).catch(() => { /* 무시 */ });
+  // 교환 신청/수락/거절 알림은 교환을 관리하는 보관함으로 이동시킵니다.
+  sendPushToUser(userId, title, body, '/inventory');
+  notificationRepository.create({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
 };
 
 /**

@@ -13,6 +13,7 @@ export interface User {
   ban_reason?: string | null;
   representative_card_channel_id?: string | null;
   representative_card_star?: number | null;
+  status_message?: string | null;
   access_token?: string | null;
   refresh_token?: string | null;
   token_expires_at?: string | null; // 치지직 access_token 만료 시각(ISO)
@@ -152,6 +153,9 @@ export interface UserCard {
   // 장착된 코스메틱(조회 시 임베드)
   border_item_id?: number | null;
   name_effect_item_id?: number | null;
+  is_hidden?: boolean;
+  favorite_order?: number | null;
+  favorite_at?: string | null;
   border?: CosmeticRef | null;
   name_effect?: CosmeticRef | null;
 }
@@ -185,7 +189,8 @@ export interface IUserRepository {
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
   updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void>;
   updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void>;
-  findRankings(limit: number, keyword?: string): Promise<UserRanking[]>;
+  updateStatusMessage(id: string, message: string | null): Promise<void>;
+  findRankings(limit: number, keyword?: string, options?: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null }): Promise<UserRanking[]>;
   count(): Promise<number>;
   /** 관리자용 유저 목록(닉네임/ID 부분검색 + 페이지네이션). keyword 비면 전체. */
   listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }>;
@@ -219,6 +224,7 @@ export interface ITitleRepository {
 // 유저 랭킹 응답용 확장 타입 (보유 카드 수 및 자산 합산 포함)
 export interface UserRanking extends User {
   card_count: number;
+  cards_value: number;
   total_asset: number;
   rank?: number;
 }
@@ -399,6 +405,8 @@ export interface IUserCardRepository {
   deleteByChannel(channelId: string): Promise<number>;
   /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */
   sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number>;
+  updateVisibility(userId: string, cardId: number, hidden: boolean): Promise<boolean>;
+  setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean>;
 }
 
 // 8. 시스템 설정 리포지토리 인터페이스
@@ -413,8 +421,14 @@ export interface MarketListing {
   seller_id: string;
   user_card_id: number;
   price: number;
-  status: 'PENDING' | 'SOLD' | 'CANCELLED';
+  status: 'PENDING' | 'SOLD' | 'CANCELLED' | 'AUCTION_ENDED';
   buyer_id: string | null;
+  listing_type?: 'fixed' | 'auction';
+  buy_now_price?: number | null;
+  starting_bid?: number | null;
+  current_bid?: number | null;
+  current_bidder_id?: string | null;
+  auction_ends_at?: string | null;
   fee: number;
   settled_amount: number;
   with_cosmetics?: boolean;
@@ -423,11 +437,31 @@ export interface MarketListing {
   // 비정규화 조인 정보
   seller_username?: string;
   buyer_username?: string;
+  current_bidder_username?: string;
   card?: UserCard & { streamer: Streamer };
 }
 
+export interface MarketWatch {
+  id?: number;
+  user_id: string;
+  channel_id: string;
+  star: number | null;
+  max_price: number | null;
+  created_at?: string;
+  streamer?: Streamer | null;
+}
+
 export interface IMarketRepository {
-  create(listing: { seller_id: string; user_card_id: number; price: number; with_cosmetics?: boolean }): Promise<MarketListing>;
+  create(listing: {
+    seller_id: string;
+    user_card_id: number;
+    price: number;
+    with_cosmetics?: boolean;
+    listing_type?: 'fixed' | 'auction';
+    buy_now_price?: number | null;
+    starting_bid?: number | null;
+    auction_ends_at?: string | null;
+  }): Promise<MarketListing>;
   findById(id: number): Promise<MarketListing | null>;
   /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */
   findPendingCardIdsByUser(userId: string): Promise<number[]>;
@@ -436,7 +470,8 @@ export interface IMarketRepository {
     page: number;
     limit: number;
     search?: string;
-    sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc';
+    sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
+    type?: 'all' | 'fixed' | 'auction';
   }): Promise<{ listings: MarketListing[]; total: number }>;
   /** 내 판매 목록 관리 */
   listByUser(userId: string): Promise<MarketListing[]>;
@@ -450,6 +485,12 @@ export interface IMarketRepository {
   listHistory(userId: string): Promise<MarketListing[]>;
   /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
   getRecentPrice(channelId: string): Promise<number | null>;
+  placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number }>;
+  finishExpiredAuctions(nowIso: string): Promise<MarketListing[]>;
+  upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch>;
+  deleteWatch(userId: string, id: number): Promise<boolean>;
+  listWatches(userId: string): Promise<MarketWatch[]>;
+  findMatchingWatches(listing: MarketListing): Promise<MarketWatch[]>;
 }
 
 // 10. 미니게임 티켓 및 세션 데이터 인터페이스

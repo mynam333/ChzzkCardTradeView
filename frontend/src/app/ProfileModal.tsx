@@ -42,6 +42,7 @@ interface ProfileData {
   id: string;
   username: string;
   role: 'USER' | 'ADMIN';
+  status_message?: string | null;
   titles: UserTitle[];
   avatar_url: string;
   point: number;
@@ -180,6 +181,11 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                     <UserTitleList titles={profile.titles} compact />
                   </div>
                   <p className="text-[10px] text-zinc-400 truncate">@{profile.id}</p>
+                  {profile.status_message && (
+                    <p className="mt-1 max-w-[13rem] truncate rounded-full bg-sky-400/15 px-2.5 py-1 text-[10px] font-black text-sky-100">
+                      {profile.status_message}
+                    </p>
+                  )}
                 </div>
                 <div className="ml-auto text-right">
                   <p className="text-[9px] text-zinc-400">총 자산</p>

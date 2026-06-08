@@ -299,8 +299,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       setUnreadCount((c) => Math.max(0, c - 1));
       try { await apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }); } catch { /* 무시 */ }
     }
-    if (n.link && ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin'].includes(n.link)) {
-      setActiveTab(n.link as TabId);
+    // 알림의 link를 탭으로 변환해 해당 위치로 이동시킵니다.
+    // 백엔드는 탭 id('inventory') 또는 경로('/inventory') 형태로 보낼 수 있어 앞 슬래시를 정규화합니다.
+    const rawLink = (n.link || '').replace(/^\//, '').trim();
+    const target = rawLink === '' ? 'main' : rawLink;
+    const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin', 'arcade'];
+    if (n.link && VALID_TABS.includes(target as TabId)) {
+      setActiveTab(target as TabId);
     }
   };
 
@@ -346,7 +351,8 @@ interface AppContextType {
     id: string;
     username: string;
     avatarUrl: string;
-    role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN';
+  statusMessage?: string | null;
     titles: UserTitle[];
     ownedTitles: UserTitle[];
     point: number;
@@ -543,6 +549,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
           username: data.username,
           avatarUrl: data.avatarUrl,
           role: data.role,
+          statusMessage: data.statusMessage ?? null,
           titles: data.titles || [],
           ownedTitles: data.ownedTitles || data.titles || [],
           point: data.point,
