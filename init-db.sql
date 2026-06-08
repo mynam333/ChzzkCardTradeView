@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS users (
     avatar_url TEXT,                           -- 프로필 이미지 URL
     role TEXT DEFAULT 'USER',                  -- 권한 구분 ('USER' 또는 'ADMIN')
     point INTEGER DEFAULT 0,                   -- 보유 재화 (기본값: 0)
-    last_free_draw TEXT,                       -- 마지막 무료 뽑기 일시 (ISO String)
+    last_free_draw TEXT,                       -- 마지막 무료 뽑기 충전 구간 (ISO String)
+    free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 주기 충전 무료 소환 기회
+    bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 쿠폰/보상 추가 무료 소환 티켓
     banned_until TEXT,                         -- 유저 차단 만료 일시 (ISO String, 기본값: NULL)
     ban_reason TEXT,                           -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,       -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     chat_count INTEGER DEFAULT 0,               -- 실시간 채팅 누적 갯수
     broadcast_multiplier REAL DEFAULT 1.0,      -- 실시간 방송 감가 배율 (0.2 ~ 1.0)
     prev_value INTEGER DEFAULT 1000,            -- 이전 환산 시세 (등락률 계산용)
+    last_broadcast_at TEXT,                     -- 마지막 방송 감지 일시
     serial_number INTEGER,                      -- 스트리머 카드 발행 일련번호
     registered_by TEXT,                         -- 카드를 등록한 유저의 ID (nullable)
     updated_at TEXT DEFAULT (datetime('now'))
@@ -110,11 +113,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,                 -- 쿠폰 코드 (수동 입력 또는 랜덤)
     coupon_type TEXT NOT NULL,                 -- 쿠폰 유형 ('single' 또는 'multi')
-    reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point', 'card', 'cosmetic', 'minigame_ticket')
+    reward_type TEXT NOT NULL DEFAULT 'point', -- 보상 종류 ('point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket')
     points INTEGER NOT NULL DEFAULT 0,         -- 지급 재화 크기 (reward_type='point')
     reward_channel_id TEXT,                    -- 지급 스트리머 채널 ID (reward_type='card')
     reward_item_id INTEGER,                    -- 지급 상점 아이템 ID (reward_type='cosmetic')
-    reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic/minigame_ticket)
+    reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic/minigame_ticket/free_draw_ticket)
     max_uses INTEGER DEFAULT 1,                -- 발급 갯수 (single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,              -- 현재 사용 횟수
     expires_at TEXT,                           -- 유효 만료 기한 (ISO String)
@@ -244,6 +247,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
     value TEXT NOT NULL
 );
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1');
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000'); -- 뽑기 1회 기본 비용
 
 -- 16. 오픈마켓 매물 테이블

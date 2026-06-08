@@ -33,6 +33,8 @@ export class SqliteUserRepository implements IUserRepository {
       role: row.role as 'USER' | 'ADMIN',
       point: row.point,
       last_free_draw: row.last_free_draw,
+      free_draw_tickets: row.free_draw_tickets ?? 0,
+      bonus_free_draw_tickets: row.bonus_free_draw_tickets ?? 0,
       banned_until: row.banned_until,
       ban_reason: row.ban_reason ?? null,
       representative_card_channel_id: row.representative_card_channel_id ?? null,
@@ -154,6 +156,47 @@ export class SqliteUserRepository implements IUserRepository {
       )
       .run(nowIso, id, segmentStartIso);
     return result.changes > 0;
+  }
+
+  async syncFreeDrawTickets(id: string, segmentStartIso: string | null, maxStack: number, intervalHours: number): Promise<User | null> {
+    const db = this.getDb();
+    const safeMaxStack = Math.max(1, Math.floor(maxStack || 1));
+    const txn = db.transaction(() => {
+      const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
+      if (!row) return null;
+
+      if (segmentStartIso === null) {
+        return this.mapUser(row);
+      }
+
+      const shouldGrant = !row.last_free_draw || new Date(row.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+      if (!shouldGrant) return this.mapUser(row);
+
+      const currentTickets = Number(row.free_draw_tickets || 0);
+      const diffMs = row.last_free_draw
+        ? new Date(segmentStartIso).getTime() - new Date(row.last_free_draw).getTime()
+        : 0;
+      const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
+      const grantCount = row.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
+      const nextTickets = Math.min(safeMaxStack, currentTickets + grantCount);
+      db.prepare('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?')
+        .run(nextTickets, segmentStartIso, id);
+      return this.mapUser({
+        ...row,
+        free_draw_tickets: nextTickets,
+        last_free_draw: segmentStartIso
+      });
+    });
+
+    return txn();
+  }
+
+  async addBonusFreeDrawTickets(id: string, amount: number): Promise<void> {
+    const qty = Math.max(0, Math.floor(amount || 0));
+    if (qty <= 0) return;
+    this.getDb()
+      .prepare('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?')
+      .run(qty, id);
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {

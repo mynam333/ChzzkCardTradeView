@@ -21,7 +21,8 @@ import {
   Gamepad2,
   Edit,
   Pin,
-  Award
+  Award,
+  Ticket
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
@@ -130,6 +131,7 @@ export const AdminTab: React.FC = () => {
   const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
+  const [freeDrawMaxStack, setFreeDrawMaxStack] = useState('1');
   const [isSavingInterval, setIsSavingInterval] = useState(false);
   const [drawCost, setDrawCost] = useState('10000');           // 뽑기 1회 비용 (P)
   const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
@@ -141,7 +143,7 @@ export const AdminTab: React.FC = () => {
   const [couponForm, setCouponForm] = useState({
     code: '',
     coupon_type: 'single' as 'single' | 'multi',
-    reward_type: 'point' as 'point' | 'card' | 'cosmetic' | 'minigame_ticket',
+    reward_type: 'point' as 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket',
     points: 1000,
     reward_channel_id: '',
     reward_item_id: 0,
@@ -299,8 +301,8 @@ export const AdminTab: React.FC = () => {
       toast('지급할 코스메틱 아이템을 선택해 주세요.');
       return;
     }
-    if (couponForm.reward_type === 'minigame_ticket' && (!couponForm.reward_quantity || couponForm.reward_quantity <= 0)) {
-      toast('지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
+    if ((couponForm.reward_type === 'minigame_ticket' || couponForm.reward_type === 'free_draw_ticket') && (!couponForm.reward_quantity || couponForm.reward_quantity <= 0)) {
+      toast(couponForm.reward_type === 'free_draw_ticket' ? '지급할 추가 무료 소환 티켓 수량을 입력해 주세요.' : '지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
       return;
     }
     // 만료 일시는 datetime-local → ISO 변환
@@ -687,6 +689,7 @@ export const AdminTab: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setFreeDrawInterval(String(data.interval ?? '24'));
+        setFreeDrawMaxStack(String(data.maxStack ?? '1'));
       }
     } catch { /* noop */ }
   };
@@ -697,11 +700,16 @@ export const AdminTab: React.FC = () => {
       toast('올바른 0 이상의 숫자를 지정해야 합니다.', 'error');
       return;
     }
+    const maxStack = parseInt(freeDrawMaxStack, 10);
+    if (isNaN(maxStack) || maxStack < 1) {
+      toast('최대 중첩 횟수는 1 이상의 정수여야 합니다.', 'error');
+      return;
+    }
     setIsSavingInterval(true);
     try {
       const res = await apiFetch('/admin/config/free-draw', {
         method: 'POST',
-        body: JSON.stringify({ interval: num })
+        body: JSON.stringify({ interval: num, maxStack })
       });
       const data = await res.json();
       if (res.ok) {
@@ -1088,6 +1096,7 @@ export const AdminTab: React.FC = () => {
                 <option value="card">스트리머 카드</option>
                 <option value="cosmetic">코스메틱 아이템</option>
                 <option value="minigame_ticket">추가 미니게임 티켓</option>
+                <option value="free_draw_ticket">추가 무료 소환 티켓</option>
               </select>
             </div>
 
@@ -1185,6 +1194,29 @@ export const AdminTab: React.FC = () => {
               </div>
             )}
 
+            {couponForm.reward_type === 'free_draw_ticket' && (
+              <div className="overflow-hidden rounded-xl border border-violet-500/25 bg-gradient-to-br from-violet-500/10 via-secondary/20 to-sky-500/10 p-3">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-violet-500/15 p-2 text-violet-400 ring-1 ring-violet-500/25">
+                    <Ticket className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-foreground">추가 무료 소환 티켓</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                      리셋 주기 충전분과 별도로 누적됩니다. 스트리머 소환 시 주기 충전분을 먼저 쓰고, 남은 추가 티켓을 이어서 사용합니다.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 bg-card/70 px-3 py-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">지급 수량</span>
+                  <input type="number" min={1} value={couponForm.reward_quantity}
+                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                    className="ml-auto w-24 rounded-lg border border-border bg-secondary/40 px-2 py-1.5 text-xs font-bold" />
+                  <span className="text-[10px] font-black text-violet-400">tickets</span>
+                </div>
+              </div>
+            )}
+
             {/* 사용 가능 기간 (만료 일시) */}
             <div>
               <label className="text-[11px] font-bold text-muted-foreground block mb-1">사용 가능 만료 일시 (비우면 무기한)</label>
@@ -1211,6 +1243,8 @@ export const AdminTab: React.FC = () => {
                   ? `🎨 ${couponCosmetics.find((it) => it.id === c.reward_item_id)?.name || `아이템#${c.reward_item_id}`} ×${c.reward_quantity}`
                   : c.reward_type === 'minigame_ticket'
                   ? `🎮 추가 미니게임 티켓 ×${c.reward_quantity}`
+                  : c.reward_type === 'free_draw_ticket'
+                  ? `🎟️ 추가 무료 소환 티켓 ×${c.reward_quantity}`
                   : `💰 ${(c.points || 0).toLocaleString()}P`;
                 return (
                   <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
@@ -2005,9 +2039,10 @@ export const AdminTab: React.FC = () => {
               KST 자정(00:00)을 기준으로 n시간마다 정각에 무료 뽑기를 리셋합니다.<br />
               예) <b>1</b>시간 → 00:00, 01:00, 02:00 ... KST 매 정각 리셋<br />
               예) <b>6</b>시간 → 00:00, 06:00, 12:00, 18:00 KST 리셋<br />
-              <b>0</b>으로 설정 시 대기 없이 무제한 무료 뽑기가 가능합니다.
+              <b>0</b>으로 설정 시 대기 없이 무제한 무료 뽑기가 가능합니다.<br />
+              최대 중첩 횟수는 주기 충전 무료 소환 기회가 쌓일 수 있는 상한입니다.
             </p>
-            <div className="flex items-center gap-2">
+            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
               <div className="relative flex-1">
                 <input
                   type="number"
@@ -2019,6 +2054,18 @@ export const AdminTab: React.FC = () => {
                   placeholder="예: 24 (시간 단위)"
                 />
                 <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">시간</span>
+              </div>
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={freeDrawMaxStack}
+                  onChange={(e) => setFreeDrawMaxStack(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                  placeholder="예: 3"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">최대 중첩</span>
               </div>
               <button
                 onClick={handleSaveFreeDrawInterval}

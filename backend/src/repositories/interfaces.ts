@@ -7,6 +7,8 @@ export interface User {
   role: 'USER' | 'ADMIN';
   point: number;
   last_free_draw: string | null;
+  free_draw_tickets?: number;
+  bonus_free_draw_tickets?: number;
   banned_until: string | null;
   ban_reason?: string | null;
   representative_card_channel_id?: string | null;
@@ -47,6 +49,7 @@ export interface Streamer {
   chat_count?: number;
   broadcast_multiplier?: number;
   prev_value?: number;
+  last_broadcast_at?: string | null;
   updated_at?: string;
   registered_by?: string | null;
 }
@@ -78,6 +81,8 @@ export interface StreamerScheduleResult {
   follower_count: number;
   /** 치지직 API에서 불러온 프로필 이미지 URL (polled === true 일 때 다르면 업데이트) */
   logo_url?: string | null;
+  /** 마지막 방송 감지 일시. polled === true 일 때만 반영합니다. */
+  last_broadcast_at?: string | null;
 }
 
 export interface Coupon {
@@ -85,12 +90,12 @@ export interface Coupon {
   code: string;
   // single: 선착순 발급 갯수(max_uses) 제한, multi: 기간 내 1인 1회 · 총량 무제한
   coupon_type: 'single' | 'multi';
-  // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템) | minigame_ticket(추가 미니게임 티켓)
-  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket';
+  // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템) | minigame_ticket(추가 미니게임 티켓) | free_draw_ticket(추가 무료 소환 티켓)
+  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
   points: number;                     // reward_type === 'point' 일 때 지급 재화량
   reward_channel_id: string | null;   // reward_type === 'card' 일 때 지급 스트리머 채널 ID
   reward_item_id?: number | null;     // reward_type === 'cosmetic' 일 때 지급 상점 아이템 ID
-  reward_quantity: number;            // card/cosmetic/minigame_ticket 일 때 지급 수량
+  reward_quantity: number;            // card/cosmetic/minigame_ticket/free_draw_ticket 일 때 지급 수량
   max_uses: number;                   // single: 발급 갯수, multi: 0(무제한)
   used_count: number;
   expires_at: string | null;
@@ -100,7 +105,7 @@ export interface Coupon {
 export interface CouponRedeemResult {
   ok: boolean;
   reason: string;
-  reward_type?: 'point' | 'card' | 'cosmetic' | 'minigame_ticket';
+  reward_type?: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
   points_added?: number;
   new_points?: number;
   reward_channel_id?: string | null;
@@ -169,6 +174,10 @@ export interface IUserRepository {
   updateBanStatus(id: string, bannedUntil: string | null, reason?: string | null): Promise<void>;
   /** 세그먼트 시작 시간보다 마지막 무료뽑기 시각이 이전일 때만 갱신합니다. 갱신 성공 시 true. segmentStartIso가 null이면 무제한. */
   claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean>;
+  /** 현재 무료 소환 구간까지 충전분을 반영하고 최신 유저 정보를 반환합니다. */
+  syncFreeDrawTickets(id: string, segmentStartIso: string | null, maxStack: number, intervalHours: number): Promise<User | null>;
+  /** 쿠폰/보상용 추가 무료 소환 티켓을 누적 지급합니다. */
+  addBonusFreeDrawTickets(id: string, amount: number): Promise<void>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
@@ -358,8 +367,19 @@ export interface IUserCardRepository {
     channelId: string,
     drawCost: number,
     nowIso: string,
-    segmentStartIso: string | null
-  ): Promise<{ ok: boolean; reason: string; card?: UserCard; is_free?: boolean; points_left?: number }>;
+    segmentStartIso: string | null,
+    maxFreeTickets: number,
+    intervalHours: number
+  ): Promise<{
+    ok: boolean;
+    reason: string;
+    card?: UserCard;
+    is_free?: boolean;
+    free_draw_source?: 'unlimited' | 'reset' | 'bonus' | 'point';
+    points_left?: number;
+    free_draw_tickets_left?: number;
+    bonus_free_draw_tickets_left?: number;
+  }>;
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
   findLatestSerialNumber(channelId: string): Promise<number>;
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;

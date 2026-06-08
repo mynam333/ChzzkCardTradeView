@@ -257,6 +257,7 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       if (r.polled) {
         patch.is_active = r.is_active;
         patch.follower_count = r.follower_count;
+        patch.last_broadcast_at = r.last_broadcast_at ?? null;
         if (r.logo_url) {
           patch.logo_url = r.logo_url;
         }

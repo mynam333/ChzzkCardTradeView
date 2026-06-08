@@ -11,6 +11,35 @@ import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 
+const computeFreeDrawSegment = (intervalHours: number): { segmentStartIso: string | null; nextFreeDrawAt: string | null } => {
+  if (intervalHours <= 0) {
+    return { segmentStartIso: null, nextFreeDrawAt: null };
+  }
+
+  const now = new Date();
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
+  const kstYear = kstDate.getUTCFullYear();
+  const kstMonth = kstDate.getUTCMonth();
+  const kstDay = kstDate.getUTCDate();
+  const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
+  const diffMs = now.getTime() - midnightKstUtcMs;
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  const count = Math.floor(diffMs / intervalMs);
+
+  return {
+    segmentStartIso: new Date(midnightKstUtcMs + count * intervalMs).toISOString(),
+    nextFreeDrawAt: new Date(midnightKstUtcMs + (count + 1) * intervalMs).toISOString()
+  };
+};
+
+const isInactiveForThreeMonths = (lastLiveAt?: string | null): boolean => {
+  if (!lastLiveAt) return false;
+  const lastLiveMs = new Date(lastLiveAt).getTime();
+  if (Number.isNaN(lastLiveMs)) return false;
+  return lastLiveMs <= Date.now() - 90 * 24 * 60 * 60 * 1000;
+};
+
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
  */
@@ -48,41 +77,17 @@ export const getUserMe = async (req: Request, res: Response) => {
     // 무료 뽑기 간격 및 가챠 비용 정보 추가
     const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
     const intervalHours = parseFloat(intervalStr);
+    const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
+    const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
     const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
     const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
 
-    let segmentStartIso: string | null = null;
-    let nextFreeDrawAt: string | null = null;
-
-    if (intervalHours > 0) {
-      const now = new Date();
-      const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-      const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
-      const kstYear = kstDate.getUTCFullYear();
-      const kstMonth = kstDate.getUTCMonth();
-      const kstDay = kstDate.getUTCDate();
-
-      const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
-
-      const diffMs = now.getTime() - midnightKstUtcMs;
-      const intervalMs = intervalHours * 60 * 60 * 1000;
-      const count = Math.floor(diffMs / intervalMs);
-
-      segmentStartIso = new Date(midnightKstUtcMs + count * intervalMs).toISOString();
-      nextFreeDrawAt = new Date(midnightKstUtcMs + (count + 1) * intervalMs).toISOString();
-    }
-
-    let isFreeDrawEligible = false;
-    if (segmentStartIso === null) {
-      isFreeDrawEligible = true; // 0시간마다 = 무제한 무료
-    } else {
-      if (!user.last_free_draw) {
-        isFreeDrawEligible = true;
-      } else {
-        isFreeDrawEligible = new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
-      }
-    }
+    const { segmentStartIso, nextFreeDrawAt } = computeFreeDrawSegment(intervalHours);
+    const syncedUser = await userRepository.syncFreeDrawTickets(user.id, segmentStartIso, freeDrawMaxStack, intervalHours);
+    const effectiveUser = syncedUser || user;
+    const freeDrawTickets = Number(effectiveUser.free_draw_tickets || 0);
+    const bonusFreeDrawTickets = Number(effectiveUser.bonus_free_draw_tickets || 0);
+    const isFreeDrawEligible = segmentStartIso === null || freeDrawTickets + bonusFreeDrawTickets > 0;
 
     const ownedTitles = await titleRepository.findByUserId(userId);
     const titles = ownedTitles.filter((title) => title.is_equipped);
@@ -95,7 +100,10 @@ export const getUserMe = async (req: Request, res: Response) => {
       titles,
       ownedTitles,
       point: user.point,
-      lastFreeDraw: user.last_free_draw,
+      lastFreeDraw: effectiveUser.last_free_draw,
+      freeDrawTickets,
+      bonusFreeDrawTickets,
+      freeDrawMaxStack,
       representativeCardChannelId: user.representative_card_channel_id || null,
       representativeCardStar: user.representative_card_star ?? null,
       drawCost,
@@ -399,30 +407,9 @@ export const drawCard = async (req: Request, res: Response) => {
     const nowIso = new Date().toISOString();
     const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
     const intervalHours = parseFloat(intervalStr);
-
-    let segmentStartIso: string | null = null;
-    if (intervalHours > 0) {
-      const now = new Date();
-      const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-      // KST 기준 오늘 날짜의 연·월·일 추출
-      // now + KST_OFFSET_MS → UTC 메서드로 읽으면 KST 날짜로 해석 가능
-      const kstDate = new Date(now.getTime() + KST_OFFSET_MS);
-      const kstYear = kstDate.getUTCFullYear();
-      const kstMonth = kstDate.getUTCMonth();
-      const kstDay = kstDate.getUTCDate();
-
-      // KST 00:00:00 → UTC 타임스탬프 (= 전날 UTC 15:00)
-      const midnightKstUtcMs = Date.UTC(kstYear, kstMonth, kstDay, 0, 0, 0) - KST_OFFSET_MS;
-
-      // 자정 이후 경과 시간으로 현재 세그먼트 번호 산출
-      const diffMs = now.getTime() - midnightKstUtcMs;
-      const intervalMs = intervalHours * 60 * 60 * 1000;
-      const count = Math.floor(diffMs / intervalMs);
-
-      // 현재 세그먼트 시작 시각(UTC ISO)
-      segmentStartIso = new Date(midnightKstUtcMs + count * intervalMs).toISOString();
-    }
+    const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
+    const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
+    const { segmentStartIso } = computeFreeDrawSegment(intervalHours);
     // intervalHours === 0 이면 segmentStartIso = null → 무제한 무료뽑기
 
     // C. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 높을수록 확률 하락, 낮을수록 확률 상승)
@@ -441,7 +428,7 @@ export const drawCard = async (req: Request, res: Response) => {
     }
 
     // D. 무료권/포인트 차감 + 시리얼 채번 + 카드 생성을 단일 트랜잭션/RPC로 처리
-    const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, DRAW_COST, nowIso, segmentStartIso);
+    const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, DRAW_COST, nowIso, segmentStartIso, freeDrawMaxStack, intervalHours);
     if (!draw.ok) {
       if (draw.reason === 'USER_NOT_FOUND') {
         return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
@@ -454,10 +441,13 @@ export const drawCard = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       message: draw.is_free
-        ? `일일 무료 뽑기로 ${luckyStreamer.name} 카드를 획득하였습니다!`
+        ? `무료 소환으로 ${luckyStreamer.name} 카드를 획득하였습니다!`
         : `${luckyStreamer.name} 카드를 획득하였습니다!`,
       points_left: draw.points_left,
       is_free: draw.is_free,
+      free_draw_source: draw.free_draw_source,
+      free_draw_tickets_left: draw.free_draw_tickets_left ?? 0,
+      bonus_free_draw_tickets_left: draw.bonus_free_draw_tickets_left ?? 0,
       card: {
         id: draw.card?.id,
         channel_id: luckyStreamer.channel_id,
@@ -546,6 +536,13 @@ export const registerStreamer = async (req: Request, res: Response) => {
     const verifiedFollowerCount = profile.followerCount;
     const verifiedLogoUrl = profile.logoUrl;
 
+    if (!profile.openLive && isInactiveForThreeMonths(profile.lastLiveAt)) {
+      return res.status(400).json({
+        error: 'InactiveStreamer',
+        message: '마지막 방송일이 3개월 이상 지난 스트리머는 카드로 등록할 수 없습니다.'
+      });
+    }
+
     // README 명세 기준 팔로워 150명 이상의 스트리머만 등록 가능하도록 서버 검증값으로 차단 필터 적용
     if (verifiedFollowerCount < 150) {
       return res.status(400).json({
@@ -577,6 +574,7 @@ export const registerStreamer = async (req: Request, res: Response) => {
       activity_score: 50, // 기본 활동점수
       base_value: baseValue,
       is_active: profile.openLive,
+      last_broadcast_at: profile.openLive ? new Date().toISOString() : (profile.lastLiveAt || null),
       serial_number: serialNumber,
       registered_by: (req as any).user?.id || null // 등록한 유저 ID 기록 (Null 가능)
     };

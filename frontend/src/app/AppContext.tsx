@@ -351,6 +351,9 @@ interface AppContextType {
     ownedTitles: UserTitle[];
     point: number;
     lastFreeDraw: string | null;
+    freeDrawTickets: number;
+    bonusFreeDrawTickets: number;
+    freeDrawMaxStack: number;
     representativeCardChannelId: string | null;
     representativeCardStar: number | null;
     drawCost: number;
@@ -544,6 +547,9 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
           ownedTitles: data.ownedTitles || data.titles || [],
           point: data.point,
           lastFreeDraw: data.lastFreeDraw,
+          freeDrawTickets: data.freeDrawTickets ?? 0,
+          bonusFreeDrawTickets: data.bonusFreeDrawTickets ?? 0,
+          freeDrawMaxStack: data.freeDrawMaxStack ?? 1,
           representativeCardChannelId: data.representativeCardChannelId ?? null,
           representativeCardStar: data.representativeCardStar ?? null,
           drawCost: data.drawCost ?? 10000,

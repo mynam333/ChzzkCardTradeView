@@ -12,7 +12,7 @@ import { normalizeCouponCode } from '../utils/couponCode';
  * 지원 옵션:
  *  - code: 미입력 시 랜덤 생성
  *  - coupon_type: 'single'(선착순 발급 갯수 제한) | 'multi'(기간 내 1인 1회·총량 무제한)
- *  - reward_type: 'point'(재화) | 'card'(스트리머 카드) | 'cosmetic'(코스메틱) | 'minigame_ticket'(추가 미니게임 티켓)
+ *  - reward_type: 'point'(재화) | 'card'(스트리머 카드) | 'cosmetic'(코스메틱) | 'minigame_ticket'(추가 미니게임 티켓) | 'free_draw_ticket'(추가 무료 소환 티켓)
  *  - points: reward_type='point' 지급 재화량
  *  - reward_channel_id / reward_quantity: reward_type='card' 스트리머 채널과 수량
  *  - max_uses: single 발급 갯수 (multi는 0=무제한)
@@ -34,8 +34,8 @@ export const createCoupon = async (req: Request, res: Response) => {
   if (!['single', 'multi'].includes(coupon_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '쿠폰 타입은 single 또는 multi만 가능합니다.' });
   }
-  if (!['point', 'card', 'cosmetic', 'minigame_ticket'].includes(reward_type)) {
-    return res.status(400).json({ error: 'BadRequest', message: '보상 종류는 point · card · cosmetic · minigame_ticket만 가능합니다.' });
+  if (!['point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket'].includes(reward_type)) {
+    return res.status(400).json({ error: 'BadRequest', message: '보상 종류는 point · card · cosmetic · minigame_ticket · free_draw_ticket만 가능합니다.' });
   }
 
   // 보상 종류별 필수값 검증
@@ -70,7 +70,7 @@ export const createCoupon = async (req: Request, res: Response) => {
   } else {
     rewardQuantity = Number(reward_quantity);
     if (!rewardQuantity || rewardQuantity <= 0) {
-      return res.status(400).json({ error: 'BadRequest', message: '미니게임 티켓 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
+      return res.status(400).json({ error: 'BadRequest', message: reward_type === 'free_draw_ticket' ? '무료 소환 티켓 쿠폰은 0보다 큰 지급 수량이 필요합니다.' : '미니게임 티켓 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
     }
   }
 
@@ -221,6 +221,15 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(200).json({
         message: `쿠폰이 등록되어 추가 미니게임 티켓 ${coupon.reward_quantity}장이 지급되었습니다!`,
         reward_type: 'minigame_ticket',
+        reward_quantity: coupon.reward_quantity,
+        points_added: 0
+      });
+    }
+
+    if (coupon.reward_type === 'free_draw_ticket') {
+      return res.status(200).json({
+        message: `쿠폰이 등록되어 추가 무료 소환 티켓 ${coupon.reward_quantity}장이 지급되었습니다!`,
+        reward_type: 'free_draw_ticket',
         reward_quantity: coupon.reward_quantity,
         points_added: 0
       });

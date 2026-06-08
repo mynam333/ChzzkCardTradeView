@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
-import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers } from 'lucide-react';
+import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket } from 'lucide-react';
 
 interface ShopItem {
   id: number;
@@ -287,6 +287,9 @@ export const ShopTab: React.FC = () => {
   };
 
   const isFreeDraw = user?.isFreeDrawEligible ?? false;
+  const resetFreeTickets = user?.freeDrawTickets ?? 0;
+  const bonusFreeTickets = user?.bonusFreeDrawTickets ?? 0;
+  const totalFreeTickets = user?.freeDrawInterval === 0 ? Infinity : resetFreeTickets + bonusFreeTickets;
 
   const handleDraw = async () => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
@@ -308,7 +311,7 @@ export const ShopTab: React.FC = () => {
       }
       const data = await res.json();
       setTimeout(() => {
-        setDrawnCard(data.card.streamer);
+        setDrawnCard({ ...data.card.streamer, free_draw_source: data.free_draw_source, is_free: data.is_free });
         setIsDrawing(false);
         refreshUserData();
         // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
@@ -400,10 +403,20 @@ export const ShopTab: React.FC = () => {
                   {user?.freeDrawInterval === 0 ? (
                     <>쿨타임 없는 <strong className="text-primary font-bold">무제한 무료 소환</strong> 기회를 제공합니다.</>
                   ) : (
-                    <>매 자정 기준 <strong className="text-primary font-bold">{user?.freeDrawInterval ?? 24}시간마다</strong> 초기화되는 <strong className="text-primary font-bold">1회 무료 소환</strong> 기회를 제공합니다.</>
+                    <>매 자정 기준 <strong className="text-primary font-bold">{user?.freeDrawInterval ?? 24}시간마다</strong> 무료 소환 기회가 1회 충전되며 <strong className="text-primary font-bold">최대 {user?.freeDrawMaxStack ?? 1}회</strong>까지 중첩됩니다.</>
                   )}
                   <br />무료 기회 소진 이후 1회 소환 비용은 <strong className="text-foreground font-bold">{(user?.drawCost ?? 10000).toLocaleString()} 포인트</strong>입니다.
                 </p>
+                {user && user.freeDrawInterval !== 0 && (
+                  <div className="mt-3 flex flex-wrap justify-center gap-2 md:justify-start">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-black text-primary">
+                      <Sparkles className="h-3.5 w-3.5" /> 충전 기회 {resetFreeTickets}/{user.freeDrawMaxStack ?? 1}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/25 bg-violet-400/10 px-3 py-1 text-[11px] font-black text-violet-500 dark:text-violet-200">
+                      <Ticket className="h-3.5 w-3.5" /> 추가 티켓 {bonusFreeTickets}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex flex-col items-center gap-2">
                 <button
@@ -414,8 +427,10 @@ export const ShopTab: React.FC = () => {
                   <Sparkles className="h-8 w-8 animate-pulse text-white" />
                   <div className="text-center">
                     <span className="text-sm tracking-wide text-white/90">스트리머 소환</span>
-                    {isFreeDraw ? (
-                      <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 뽑기 가능</p>
+                    {user?.freeDrawInterval === 0 ? (
+                      <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무제한 무료</p>
+                    ) : isFreeDraw ? (
+                      <p className="text-[10px] text-yellow-300 font-black flex items-center justify-center gap-1">✨ 무료 티켓 {Number.isFinite(totalFreeTickets) ? totalFreeTickets : '∞'}장</p>
                     ) : (
                       <p className="cute-number-font flex items-center justify-center gap-1 text-[10px] text-emerald-100"><Coins className="h-3 w-3" /> {(user?.drawCost ?? 10000).toLocaleString()} P</p>
                     )}
@@ -427,14 +442,20 @@ export const ShopTab: React.FC = () => {
             {(isDrawing || drawnCard) && (
               <div className="mt-8 flex flex-col items-center justify-center border-t border-border/50 pt-8 animate-in fade-in duration-200">
                 {isDrawing ? (
-                  <div className="flex flex-col items-center gap-3 py-12">
-                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-                    <p className="text-xs font-semibold text-muted-foreground">치지직 스트리머 카드 팩 개봉 중...</p>
+                  <div className="gacha-stage flex flex-col items-center gap-4 py-12">
+                    <div className="gacha-burst" />
+                    <div className="gacha-pack">
+                      <Sparkles className="h-9 w-9 text-white drop-shadow-lg" />
+                      <span>CHIKAPO</span>
+                    </div>
+                    <p className="text-xs font-black text-primary">치지직 스트리머 카드 팩 개봉 중...</p>
                   </div>
                 ) : drawnCard ? (
                   <div className="flex flex-col items-center">
-                    <span className="text-xs font-bold text-primary mb-3">축하합니다! 소환 성공 (보관함에서 확인)</span>
-                    <div className="relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl">
+                    <span className="text-xs font-bold text-primary mb-3">
+                      {drawnCard.is_free ? '무료 소환 성공!' : '소환 성공!'} 보관함에서 확인할 수 있어요
+                    </span>
+                    <div className="gacha-result-card relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl">
                       <div className="absolute inset-0 z-0">
                         <img src={drawnCard.custom_image_url || drawnCard.logo_url} alt={drawnCard.name} className="h-full w-full object-cover opacity-80" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>

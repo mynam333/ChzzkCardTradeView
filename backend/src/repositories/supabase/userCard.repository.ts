@@ -43,14 +43,27 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     channelId: string,
     drawCost: number,
     nowIso: string,
-    segmentStartIso: string | null
-  ): Promise<{ ok: boolean; reason: string; card?: any; is_free?: boolean; points_left?: number }> {
+    segmentStartIso: string | null,
+    maxFreeTickets: number,
+    intervalHours: number
+  ): Promise<{
+    ok: boolean;
+    reason: string;
+    card?: any;
+    is_free?: boolean;
+    free_draw_source?: 'unlimited' | 'reset' | 'bonus' | 'point';
+    points_left?: number;
+    free_draw_tickets_left?: number;
+    bonus_free_draw_tickets_left?: number;
+  }> {
     const { data, error } = await this.getClient().rpc('draw_card_atomic', {
       p_user_id: userId,
       p_channel_id: channelId,
       p_draw_cost: drawCost,
       p_now: nowIso,
-      p_segment_start: segmentStartIso
+      p_segment_start: segmentStartIso,
+      p_max_free_tickets: Math.max(1, Math.floor(maxFreeTickets || 1)),
+      p_interval_hours: Math.max(0, Number(intervalHours || 0))
     });
 
     if (error) {
@@ -64,7 +77,10 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       ok: true,
       reason: 'OK',
       is_free: !!row.is_free,
+      free_draw_source: row.free_draw_source || (row.is_free ? 'reset' : 'point'),
       points_left: Number(row.points_left) || 0,
+      free_draw_tickets_left: Number(row.free_draw_tickets_left) || 0,
+      bonus_free_draw_tickets_left: Number(row.bonus_free_draw_tickets_left) || 0,
       card: {
         id: Number(row.card_id),
         user_id: userId,

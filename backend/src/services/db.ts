@@ -97,6 +97,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] streamers 테이블에 serial_number 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN serial_number INTEGER;");
       }
+      try {
+        sqliteDb.prepare("SELECT last_broadcast_at FROM streamers LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] streamers 테이블에 last_broadcast_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE streamers ADD COLUMN last_broadcast_at TEXT;");
+      }
       // 별(1~5성)별 커스텀 카드 이미지 컬럼 (0성은 기존 custom_image_url 사용)
       for (let st = 1; st <= 5; st++) {
         try {
@@ -141,6 +147,18 @@ export const initDatabaseConnection = async (): Promise<void> => {
       } catch (e) {
         console.log('[DB Migration] users 테이블에 token_expires_at 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE users ADD COLUMN token_expires_at TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT free_draw_tickets FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 free_draw_tickets 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN free_draw_tickets INTEGER NOT NULL DEFAULT 0;");
+      }
+      try {
+        sqliteDb.prepare("SELECT bonus_free_draw_tickets FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 bonus_free_draw_tickets 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0;");
       }
       try {
         sqliteDb.prepare("SELECT star FROM user_cards LIMIT 1").get();
@@ -318,6 +336,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         value TEXT NOT NULL
       );`);
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24')").run();
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1')").run();
       // 뽑기 비용 기본값 (하드코딩 제거, DB 관리)
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();

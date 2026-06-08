@@ -40,20 +40,55 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     channelId: string,
     drawCost: number,
     nowIso: string,
-    segmentStartIso: string | null
-  ): Promise<{ ok: boolean; reason: string; card?: any; is_free?: boolean; points_left?: number }> {
+    segmentStartIso: string | null,
+    maxFreeTickets: number,
+    intervalHours: number
+  ): Promise<{
+    ok: boolean;
+    reason: string;
+    card?: any;
+    is_free?: boolean;
+    free_draw_source?: 'unlimited' | 'reset' | 'bonus' | 'point';
+    points_left?: number;
+    free_draw_tickets_left?: number;
+    bonus_free_draw_tickets_left?: number;
+  }> {
     const db = this.getDb();
+    const safeMaxFreeTickets = Math.max(1, Math.floor(maxFreeTickets || 1));
     const txn = db.transaction(() => {
-      const user = db.prepare('SELECT id, point, last_free_draw FROM users WHERE id = ?').get(userId) as any;
+      const user = db.prepare('SELECT id, point, last_free_draw, free_draw_tickets, bonus_free_draw_tickets FROM users WHERE id = ?').get(userId) as any;
       if (!user) return { ok: false, reason: 'USER_NOT_FOUND' };
 
-      const isFree = segmentStartIso === null
-        || !user.last_free_draw
-        || new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
-
       let nextPoint = Number(user.point || 0);
-      if (isFree) {
-        db.prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(nowIso, userId);
+      let nextFreeTickets = Number(user.free_draw_tickets || 0);
+      let nextBonusTickets = Number(user.bonus_free_draw_tickets || 0);
+      let freeDrawSource: 'unlimited' | 'reset' | 'bonus' | 'point' = 'point';
+
+      if (segmentStartIso !== null) {
+        const shouldGrant = !user.last_free_draw
+          || new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+        if (shouldGrant) {
+          const diffMs = user.last_free_draw
+            ? new Date(segmentStartIso).getTime() - new Date(user.last_free_draw).getTime()
+            : 0;
+          const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
+          const grantCount = user.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
+          nextFreeTickets = Math.min(safeMaxFreeTickets, nextFreeTickets + grantCount);
+          db.prepare('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?')
+            .run(nextFreeTickets, segmentStartIso, userId);
+        }
+      }
+
+      if (segmentStartIso === null) {
+        freeDrawSource = 'unlimited';
+      } else if (nextFreeTickets > 0) {
+        nextFreeTickets -= 1;
+        freeDrawSource = 'reset';
+        db.prepare('UPDATE users SET free_draw_tickets = ? WHERE id = ?').run(nextFreeTickets, userId);
+      } else if (nextBonusTickets > 0) {
+        nextBonusTickets -= 1;
+        freeDrawSource = 'bonus';
+        db.prepare('UPDATE users SET bonus_free_draw_tickets = ? WHERE id = ?').run(nextBonusTickets, userId);
       } else {
         const deducted = db.prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
           .run(drawCost, userId, drawCost);
@@ -71,8 +106,11 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       return {
         ok: true,
         reason: 'OK',
-        is_free: isFree,
+        is_free: freeDrawSource !== 'point',
+        free_draw_source: freeDrawSource,
         points_left: nextPoint,
+        free_draw_tickets_left: nextFreeTickets,
+        bonus_free_draw_tickets_left: nextBonusTickets,
         card: {
           id: Number(result.lastInsertRowid),
           user_id: userId,

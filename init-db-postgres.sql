@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
     avatar_url TEXT,                             -- 프로필 이미지 URL
     role TEXT DEFAULT 'USER',                    -- 권한 구분 ('USER' 또는 'ADMIN')
     point INTEGER DEFAULT 0,                     -- 보유 재화
-    last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 일시
+    last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 충전 구간
+    free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 주기 충전 무료 소환 기회
+    bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 쿠폰/보상 추가 무료 소환 티켓
     banned_until TIMESTAMPTZ,                    -- 유저 차단 만료 일시 (NULL = 차단 없음)
     ban_reason TEXT,                             -- 유저 차단 사유 (nullable)
     representative_card_channel_id TEXT,         -- 대표 카드로 지정한 스트리머 채널 ID (nullable)
@@ -64,6 +66,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     chat_count INTEGER DEFAULT 0,                 -- 실시간 채팅 누적 갯수
     broadcast_multiplier DOUBLE PRECISION DEFAULT 1.0, -- 실시간 방송 감가 배율 (0.2 ~ 1.2)
     prev_value INTEGER DEFAULT 1000,              -- 이전 환산 시세 (등락률 계산용)
+    last_broadcast_at TIMESTAMPTZ,                -- 마지막 방송 감지 일시
     registered_by TEXT,                           -- 카드를 등록한 유저의 ID (nullable)
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -121,11 +124,11 @@ CREATE TABLE IF NOT EXISTS coupons (
     id SERIAL PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
     coupon_type TEXT NOT NULL,                   -- 'single' 또는 'multi'
-    reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화), 'card'(스트리머 카드), 'cosmetic'(코스메틱), 'minigame_ticket'(추가 미니게임 티켓)
+    reward_type TEXT NOT NULL DEFAULT 'point',   -- 'point'(재화), 'card'(스트리머 카드), 'cosmetic'(코스메틱), 'minigame_ticket'(추가 미니게임 티켓), 'free_draw_ticket'(추가 무료 소환 티켓)
     points INTEGER NOT NULL DEFAULT 0,           -- reward_type='point' 지급 재화
     reward_channel_id TEXT,                      -- reward_type='card' 지급 스트리머 채널 ID
     reward_item_id INTEGER,                      -- reward_type='cosmetic' 지급 상점 아이템 ID
-    reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic/minigame_ticket 지급 수량
+    reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic/minigame_ticket/free_draw_ticket 지급 수량
     max_uses INTEGER DEFAULT 1,                  -- 발급 갯수(single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,
@@ -254,7 +257,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS free_draw_tickets INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
+ALTER TABLE streamers ADD COLUMN IF NOT EXISTS last_broadcast_at TIMESTAMPTZ;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_1 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_2 TEXT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_3 TEXT;
@@ -420,6 +426,46 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION sync_free_draw_tickets(p_id TEXT, p_segment_start TIMESTAMPTZ, p_max_stack INTEGER, p_interval_hours DOUBLE PRECISION)
+RETURNS users AS $$
+DECLARE
+  u users%ROWTYPE;
+  max_stack INTEGER;
+  grant_count INTEGER := 0;
+  interval_seconds DOUBLE PRECISION;
+BEGIN
+  max_stack := GREATEST(COALESCE(p_max_stack, 1), 1);
+  interval_seconds := GREATEST(COALESCE(p_interval_hours, 1), 0.0001) * 3600;
+  SELECT * INTO u FROM users WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_segment_start IS NOT NULL AND (u.last_free_draw IS NULL OR u.last_free_draw < p_segment_start) THEN
+    grant_count := CASE
+      WHEN u.last_free_draw IS NULL THEN 1
+      ELSE GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (p_segment_start - u.last_free_draw)) / interval_seconds)::INTEGER)
+    END;
+    UPDATE users
+       SET free_draw_tickets = LEAST(max_stack, COALESCE(free_draw_tickets, 0) + grant_count),
+           last_free_draw = p_segment_start
+     WHERE id = p_id
+     RETURNING * INTO u;
+  END IF;
+
+  RETURN u;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION add_bonus_free_draw_tickets(p_user_id TEXT, p_amount INTEGER)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE users
+     SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + GREATEST(COALESCE(p_amount, 0), 0)
+   WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 스트리머 방송 횟수 원자적 증가
 CREATE OR REPLACE FUNCTION increment_streamer_broadcast(p_channel_id TEXT)
 RETURNS VOID AS $$
@@ -475,6 +521,8 @@ BEGIN
                                   THEN (u->>'follower_count')::INTEGER ELSE follower_count END,
       logo_url             = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
                                   THEN COALESCE(u->>'logo_url', logo_url) ELSE logo_url END,
+      last_broadcast_at    = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
+                                  THEN COALESCE(NULLIF(u->>'last_broadcast_at', '')::TIMESTAMPTZ, last_broadcast_at) ELSE last_broadcast_at END,
       updated_at           = NOW()
     WHERE channel_id = u->>'channel_id';
   END LOOP;
@@ -867,7 +915,9 @@ CREATE OR REPLACE FUNCTION draw_card_atomic(
   p_channel_id TEXT,
   p_draw_cost INTEGER,
   p_now TIMESTAMPTZ,
-  p_segment_start TIMESTAMPTZ
+  p_segment_start TIMESTAMPTZ,
+  p_max_free_tickets INTEGER DEFAULT 1,
+  p_interval_hours DOUBLE PRECISION DEFAULT 24
 )
 RETURNS TABLE (
   ok BOOLEAN,
@@ -875,30 +925,62 @@ RETURNS TABLE (
   card_id INTEGER,
   serial_number INTEGER,
   is_free BOOLEAN,
-  points_left INTEGER
+  points_left INTEGER,
+  free_draw_tickets_left INTEGER,
+  bonus_free_draw_tickets_left INTEGER,
+  free_draw_source TEXT
 ) AS $$
 DECLARE
   u users%ROWTYPE;
-  free_draw BOOLEAN;
   next_serial INTEGER;
   new_card_id INTEGER;
+  max_free_tickets INTEGER;
+  grant_count INTEGER := 0;
+  interval_seconds DOUBLE PRECISION;
+  source TEXT := 'point';
 BEGIN
+  max_free_tickets := GREATEST(COALESCE(p_max_free_tickets, 1), 1);
+  interval_seconds := GREATEST(COALESCE(p_interval_hours, 1), 0.0001) * 3600;
+
   SELECT * INTO u FROM users WHERE id = p_user_id FOR UPDATE;
   IF NOT FOUND THEN
-    RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND', NULL::INTEGER, NULL::INTEGER, FALSE, NULL::INTEGER;
+    RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND', NULL::INTEGER, NULL::INTEGER, FALSE, NULL::INTEGER, NULL::INTEGER, NULL::INTEGER, NULL::TEXT;
     RETURN;
   END IF;
 
-  free_draw := p_segment_start IS NULL OR u.last_free_draw IS NULL OR u.last_free_draw < p_segment_start;
-  IF free_draw THEN
-    UPDATE users SET last_free_draw = p_now WHERE id = p_user_id;
+  IF p_segment_start IS NOT NULL AND (u.last_free_draw IS NULL OR u.last_free_draw < p_segment_start) THEN
+    grant_count := CASE
+      WHEN u.last_free_draw IS NULL THEN 1
+      ELSE GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (p_segment_start - u.last_free_draw)) / interval_seconds)::INTEGER)
+    END;
+    UPDATE users
+       SET free_draw_tickets = LEAST(max_free_tickets, COALESCE(free_draw_tickets, 0) + grant_count),
+           last_free_draw = p_segment_start
+     WHERE id = p_user_id
+     RETURNING * INTO u;
+  END IF;
+
+  IF p_segment_start IS NULL THEN
+    source := 'unlimited';
+  ELSIF COALESCE(u.free_draw_tickets, 0) > 0 THEN
+    UPDATE users
+       SET free_draw_tickets = free_draw_tickets - 1
+     WHERE id = p_user_id
+     RETURNING * INTO u;
+    source := 'reset';
+  ELSIF COALESCE(u.bonus_free_draw_tickets, 0) > 0 THEN
+    UPDATE users
+       SET bonus_free_draw_tickets = bonus_free_draw_tickets - 1
+     WHERE id = p_user_id
+     RETURNING * INTO u;
+    source := 'bonus';
   ELSE
     IF u.point < p_draw_cost THEN
-      RETURN QUERY SELECT FALSE, 'INSUFFICIENT_POINT', NULL::INTEGER, NULL::INTEGER, FALSE, u.point;
+      RETURN QUERY SELECT FALSE, 'INSUFFICIENT_POINT', NULL::INTEGER, NULL::INTEGER, FALSE, u.point, COALESCE(u.free_draw_tickets, 0), COALESCE(u.bonus_free_draw_tickets, 0), NULL::TEXT;
       RETURN;
     END IF;
-    UPDATE users SET point = point - p_draw_cost WHERE id = p_user_id;
-    u.point := u.point - p_draw_cost;
+    UPDATE users SET point = point - p_draw_cost WHERE id = p_user_id RETURNING * INTO u;
+    source := 'point';
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtext('user_card_serial:' || p_channel_id));
@@ -910,7 +992,7 @@ BEGIN
   VALUES (p_user_id, p_channel_id, next_serial, 0)
   RETURNING id INTO new_card_id;
 
-  RETURN QUERY SELECT TRUE, 'OK', new_card_id, next_serial, free_draw, u.point;
+  RETURN QUERY SELECT TRUE, 'OK', new_card_id, next_serial, source <> 'point', u.point, COALESCE(u.free_draw_tickets, 0), COALESCE(u.bonus_free_draw_tickets, 0), source;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -958,7 +1040,7 @@ BEGIN
     RETURN;
   END IF;
 
-  IF c.reward_type = 'minigame_ticket' AND COALESCE(c.reward_quantity, 0) <= 0 THEN
+  IF c.reward_type IN ('minigame_ticket', 'free_draw_ticket') AND COALESCE(c.reward_quantity, 0) <= 0 THEN
     RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
     RETURN;
   END IF;
@@ -1003,6 +1085,12 @@ BEGIN
     RETURN;
   END IF;
 
+  IF c.reward_type = 'free_draw_ticket' THEN
+    PERFORM add_bonus_free_draw_tickets(p_user_id, c.reward_quantity);
+    RETURN QUERY SELECT TRUE, 'OK', 'free_draw_ticket', 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, c.reward_quantity;
+    RETURN;
+  END IF;
+
   UPDATE users SET point = point + c.points WHERE id = p_user_id RETURNING point INTO updated_point;
   RETURN QUERY SELECT TRUE, 'OK', 'point', c.points, updated_point, NULL::TEXT, NULL::INTEGER, 0;
 END;
@@ -1043,6 +1131,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
     value TEXT NOT NULL
 );
 INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
 INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;

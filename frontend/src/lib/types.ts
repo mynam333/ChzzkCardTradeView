@@ -100,7 +100,7 @@ export interface Coupon {
   id: number;
   code: string;
   coupon_type: 'single' | 'multi';
-  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket';
+  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
   points: number;
   reward_channel_id: string | null;
   reward_item_id?: number | null;

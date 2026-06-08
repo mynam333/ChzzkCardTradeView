@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { streamerRepository } from '../repositories';
+import { notificationRepository, streamerRepository, userCardRepository, userRepository } from '../repositories';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
 import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
@@ -135,6 +135,7 @@ const OFFLINE_POLL_SHARDS = 3;          // 3주기(약 6분)에 걸쳐 오프라
 const PRUNE_EVERY_CYCLES = 30;          // 약 1시간마다 시세 이력 정리
 const VALUE_HISTORY_RETENTION_DAYS = 7; // 7일 초과 시세 이력 삭제
 const POLL_JITTER_MS = 30;              // 호출 버스트 완화용 소량 지터(ms)
+const INACTIVE_STREAMER_PRUNE_DAYS = 90;
 
 // 이전 주기가 끝나기 전 다음 크론이 겹쳐 실행되는 것을 막는 가드(오버랩 방지)
 let isSyncRunning = false;
@@ -213,10 +214,39 @@ const buildScheduleResult = (
       polled,
       is_active: openLive,
       follower_count: followerCount,
-      logo_url: polled ? (profile?.logoUrl || null) : null
+      logo_url: polled ? (profile?.logoUrl || null) : null,
+      last_broadcast_at: polled ? (profile?.lastLiveAt || streamer.last_broadcast_at || null) : null
     },
     history: { channel_id: streamer.channel_id, value: finalVal }
   };
+};
+
+const isThreeMonthsInactive = (lastLiveAt?: string | null): boolean => {
+  if (!lastLiveAt) return false;
+  const lastLiveMs = new Date(lastLiveAt).getTime();
+  if (Number.isNaN(lastLiveMs)) return false;
+  return lastLiveMs <= Date.now() - INACTIVE_STREAMER_PRUNE_DAYS * 24 * 60 * 60 * 1000;
+};
+
+const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, lastLiveAt: string) => {
+  const holders = await userCardRepository.findByChannel(streamer.channel_id);
+  const userIds = Array.from(new Set(holders.map((card) => card.user_id)));
+
+  for (const userId of userIds) {
+    await userRepository.addBonusFreeDrawTickets(userId, 1);
+    notificationRepository.create({
+      user_id: userId,
+      title: '무료 소환 티켓 지급',
+      body: `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`,
+      link: 'shop'
+    }).catch(() => { /* 알림 실패는 정리 작업을 막지 않음 */ });
+  }
+
+  await streamerRepository.delete(streamer.channel_id);
+  console.log(
+    `[LiveStatusScheduler] 장기 미방송 스트리머 삭제: ${streamer.name}(${streamer.channel_id}), ` +
+    `lastLiveAt=${lastLiveAt}, 보상 ${userIds.length}명`
+  );
 };
 
 /**
@@ -248,6 +278,7 @@ export const syncAllStreamersLiveStatus = async () => {
 
     const results: StreamerScheduleResult[] = [];
     const historyPoints: { channel_id: string; value: number }[] = [];
+    const pruneTargets: { streamer: Streamer; lastLiveAt: string }[] = [];
 
     // 1) 폴링 대상(라이브 + 이번 샤드의 오프라인)과 계산 전용(나머지 오프라인) 분리
     const pollTargets: Streamer[] = [];
@@ -285,6 +316,11 @@ export const syncAllStreamersLiveStatus = async () => {
             chatManager.disconnect(streamer.channel_id);
           }
 
+          if (!profile.openLive && isThreeMonthsInactive(profile.lastLiveAt || streamer.last_broadcast_at || null)) {
+            pruneTargets.push({ streamer, lastLiveAt: profile.lastLiveAt || streamer.last_broadcast_at! });
+            continue;
+          }
+
           const r = buildScheduleResult(streamer, profile);
           results.push(r.update);
           historyPoints.push(r.history);
@@ -304,6 +340,11 @@ export const syncAllStreamersLiveStatus = async () => {
     // 4) DB 일괄 반영 (단일 트랜잭션/RPC로 왕복 최소화)
     await streamerRepository.bulkApplyScheduleResults(results);
     await streamerRepository.bulkRecordValueHistory(historyPoints);
+    for (const target of pruneTargets) {
+      await rewardHoldersAndDeleteStreamer(target.streamer, target.lastLiveAt).catch((err: any) => {
+        console.error(`[LiveStatusScheduler] 장기 미방송 스트리머 정리 실패 (${target.streamer.channel_id}):`, err.message);
+      });
+    }
     // 5) 주기적으로 오래된 시세 이력 정리 (7일 초과분)
     if (cycle % PRUNE_EVERY_CYCLES === 0) {
       await streamerRepository.pruneValueHistory(VALUE_HISTORY_RETENTION_DAYS);
@@ -311,7 +352,7 @@ export const syncAllStreamersLiveStatus = async () => {
 
     console.log(
       `[LiveStatusScheduler] 동기화 완료: 총 ${streamers.length}명 ` +
-      `(폴링 ${pollTargets.length} / 라이브 ${liveCount} / 계산전용 ${computeOnly.length} / 실패 ${failCount}, 동시성 ${CONCURRENCY})`
+      `(폴링 ${pollTargets.length} / 라이브 ${liveCount} / 계산전용 ${computeOnly.length} / 삭제대상 ${pruneTargets.length} / 실패 ${failCount}, 동시성 ${CONCURRENCY})`
     );
   } catch (error: any) {
     console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error.message);

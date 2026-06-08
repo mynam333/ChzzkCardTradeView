@@ -46,6 +46,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
+      last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
       updated_at: row.updated_at
     }));
@@ -70,6 +71,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
+      last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
       updated_at: row.updated_at
     };
@@ -96,6 +98,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       chat_count: row.chat_count || 0,
       broadcast_multiplier: row.broadcast_multiplier !== undefined ? row.broadcast_multiplier : 1.0,
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
+      last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
       updated_at: row.updated_at
     }));
@@ -103,8 +106,8 @@ export class SqliteStreamerRepository implements IStreamerRepository {
 
   async save(streamer: Streamer): Promise<void> {
     this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value, registered_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value, last_broadcast_at, registered_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(channel_id) DO UPDATE SET
         name = excluded.name,
         logo_url = excluded.logo_url,
@@ -117,6 +120,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
         chat_count = COALESCE(excluded.chat_count, streamers.chat_count),
         broadcast_multiplier = COALESCE(excluded.broadcast_multiplier, streamers.broadcast_multiplier),
         prev_value = COALESCE(excluded.prev_value, streamers.prev_value),
+        last_broadcast_at = COALESCE(excluded.last_broadcast_at, streamers.last_broadcast_at),
         registered_by = COALESCE(excluded.registered_by, streamers.registered_by),
         updated_at = datetime('now')
     `).run(
@@ -132,6 +136,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       streamer.chat_count || 0,
       streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0,
       streamer.prev_value !== undefined ? streamer.prev_value : 1000,
+      streamer.last_broadcast_at || null,
       streamer.registered_by || null
     );
   }
@@ -173,8 +178,8 @@ export class SqliteStreamerRepository implements IStreamerRepository {
   }
 
   async updateLiveStatus(channelId: string, isActive: boolean, followerCount: number): Promise<void> {
-    this.getDb().prepare('UPDATE streamers SET is_active = ?, follower_count = ?, updated_at = datetime(\'now\') WHERE channel_id = ?')
-      .run(isActive ? 1 : 0, followerCount, channelId);
+    this.getDb().prepare('UPDATE streamers SET is_active = ?, follower_count = ?, last_broadcast_at = CASE WHEN ? = 1 THEN datetime(\'now\') ELSE last_broadcast_at END, updated_at = datetime(\'now\') WHERE channel_id = ?')
+      .run(isActive ? 1 : 0, followerCount, isActive ? 1 : 0, channelId);
   }
 
   async incrementBroadcastCount(channelId: string): Promise<void> {
@@ -243,6 +248,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
          chat_count = MAX(chat_count - ?, 0),
          is_active = ?, follower_count = ?,
          logo_url = ?,
+         last_broadcast_at = ?,
          updated_at = datetime('now')
        WHERE channel_id = ?`
     );
@@ -261,7 +267,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
           updPolled.run(
             r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
             r.add_minutes, r.add_broadcast_count, r.consumed_chats,
-            r.is_active ? 1 : 0, r.follower_count, r.logo_url ?? null, r.channel_id
+            r.is_active ? 1 : 0, r.follower_count, r.logo_url ?? null, r.last_broadcast_at ?? null, r.channel_id
           );
         } else {
           updCompute.run(

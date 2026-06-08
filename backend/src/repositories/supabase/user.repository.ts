@@ -183,6 +183,65 @@ export class SupabaseUserRepository implements IUserRepository {
     return data === true;
   }
 
+  async syncFreeDrawTickets(id: string, segmentStartIso: string | null, maxStack: number, intervalHours: number): Promise<User | null> {
+    const safeMaxStack = Math.max(1, Math.floor(maxStack || 1));
+    const { data, error } = await this.getClient().rpc('sync_free_draw_tickets', {
+      p_id: id,
+      p_segment_start: segmentStartIso,
+      p_max_stack: safeMaxStack,
+      p_interval_hours: Math.max(0, Number(intervalHours || 0))
+    });
+
+    if (error) {
+      console.warn('[Supabase] sync_free_draw_tickets RPC 실패, 폴백 사용:', error.message);
+      const current = await this.findById(id);
+      if (!current) return null;
+
+      if (segmentStartIso !== null) {
+        const currentTickets = Number(current.free_draw_tickets || 0);
+        const shouldGrant = !current.last_free_draw || new Date(current.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+        if (shouldGrant) {
+          const diffMs = current.last_free_draw
+            ? new Date(segmentStartIso).getTime() - new Date(current.last_free_draw).getTime()
+            : 0;
+          const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
+          const grantCount = current.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
+          const nextTickets = Math.min(safeMaxStack, currentTickets + grantCount);
+          const { error: updErr } = await this.getClient()
+            .from('users')
+            .update({ free_draw_tickets: nextTickets, last_free_draw: segmentStartIso })
+            .eq('id', id);
+          if (updErr) throw updErr;
+          return { ...current, free_draw_tickets: nextTickets, last_free_draw: segmentStartIso };
+        }
+      }
+      return current;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ? row as User : null;
+  }
+
+  async addBonusFreeDrawTickets(id: string, amount: number): Promise<void> {
+    const qty = Math.max(0, Math.floor(amount || 0));
+    if (qty <= 0) return;
+
+    const { error } = await this.getClient().rpc('add_bonus_free_draw_tickets', {
+      p_user_id: id,
+      p_amount: qty
+    });
+    if (error) {
+      console.warn('[Supabase] add_bonus_free_draw_tickets RPC 실패, 폴백 사용:', error.message);
+      const current = await this.findById(id);
+      if (!current) throw new Error('무료 소환 티켓을 지급할 사용자를 찾을 수 없습니다.');
+      const { error: updErr } = await this.getClient()
+        .from('users')
+        .update({ bonus_free_draw_tickets: Number(current.bonus_free_draw_tickets || 0) + qty })
+        .eq('id', id);
+      if (updErr) throw updErr;
+    }
+  }
+
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     const { error } = await this.getClient()
       .from('users')

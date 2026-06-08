@@ -31,7 +31,7 @@ export class SqliteCouponRepository implements ICouponRepository {
       id: row.id,
       code: row.code,
       coupon_type: row.coupon_type as 'single' | 'multi',
-      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic' | 'minigame_ticket',
+      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket',
       points: row.points,
       reward_channel_id: row.reward_channel_id ?? null,
       reward_item_id: row.reward_item_id ?? null,
@@ -117,7 +117,7 @@ export class SqliteCouponRepository implements ICouponRepository {
       if (coupon.reward_type === 'cosmetic' && !coupon.reward_item_id) {
         return { ok: false, reason: 'INVALID_REWARD' };
       }
-      if (coupon.reward_type === 'minigame_ticket' && coupon.reward_quantity <= 0) {
+      if ((coupon.reward_type === 'minigame_ticket' || coupon.reward_type === 'free_draw_ticket') && coupon.reward_quantity <= 0) {
         return { ok: false, reason: 'INVALID_REWARD' };
       }
 
@@ -178,6 +178,21 @@ export class SqliteCouponRepository implements ICouponRepository {
           ok: true,
           reason: 'OK',
           reward_type: 'minigame_ticket',
+          reward_quantity: coupon.reward_quantity,
+          points_added: 0
+        };
+      }
+
+      if (coupon.reward_type === 'free_draw_ticket') {
+        db.prepare(`
+          UPDATE users
+             SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ?
+           WHERE id = ?
+        `).run(coupon.reward_quantity, userId);
+        return {
+          ok: true,
+          reason: 'OK',
+          reward_type: 'free_draw_ticket',
           reward_quantity: coupon.reward_quantity,
           points_added: 0
         };

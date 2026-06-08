@@ -488,7 +488,8 @@ export const getCoupons = async (req: Request, res: Response) => {
 export const getFreeDrawInterval = async (req: Request, res: Response) => {
   try {
     const val = await systemConfigRepository.get('free_draw_interval', '24');
-    return res.status(200).json({ interval: parseFloat(val) });
+    const maxStack = await systemConfigRepository.get('free_draw_max_stack', '1');
+    return res.status(200).json({ interval: parseFloat(val), maxStack: parseInt(maxStack, 10) || 1 });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '설정 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
@@ -498,15 +499,23 @@ export const getFreeDrawInterval = async (req: Request, res: Response) => {
  * 11. 무료 뽑기 초기화 간격 저장 (시간 단위)
  */
 export const setFreeDrawInterval = async (req: Request, res: Response) => {
-  const { interval } = req.body;
+  const { interval, maxStack } = req.body;
   const num = parseFloat(String(interval));
   if (isNaN(num) || num < 0) {
     return res.status(400).json({ error: 'BadRequest', message: '올바른 0 이상의 숫자를 지정해야 합니다.' });
   }
+  const stackNum = maxStack === undefined ? null : parseInt(String(maxStack), 10);
+  if (stackNum !== null && (isNaN(stackNum) || stackNum < 1)) {
+    return res.status(400).json({ error: 'BadRequest', message: '최대 중첩 횟수는 1 이상의 정수여야 합니다.' });
+  }
 
   try {
     await systemConfigRepository.set('free_draw_interval', String(num));
-    return res.status(200).json({ message: `무료 뽑기 초기화 간격이 ${num}시간으로 변경되었습니다.`, interval: num });
+    if (stackNum !== null) {
+      await systemConfigRepository.set('free_draw_max_stack', String(stackNum));
+    }
+    const savedStack = stackNum ?? (parseInt(await systemConfigRepository.get('free_draw_max_stack', '1'), 10) || 1);
+    return res.status(200).json({ message: `무료 뽑기 초기화 간격이 ${num}시간, 최대 중첩 ${savedStack}회로 변경되었습니다.`, interval: num, maxStack: savedStack });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
   }

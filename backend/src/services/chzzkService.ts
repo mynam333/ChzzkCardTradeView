@@ -9,6 +9,7 @@ export interface ChzzkProfile {
   logoUrl: string;
   followerCount: number;
   openLive: boolean;
+  lastLiveAt?: string | null;
   chatChannelId?: string | null;
   concurrentUserCount?: number;
 }
@@ -78,9 +79,36 @@ export const fetchChzzkChannelProfile = async (
     }
 
     const profileBody = (await profileRes.json()) as any;
+    const findDateCandidate = (value: any, depth = 0): string | null => {
+      if (!value || depth > 3) return null;
+      if (typeof value !== 'object') return null;
+      const keys = [
+        'lastLiveAt',
+        'lastLiveDate',
+        'lastBroadcastAt',
+        'lastBroadcastDate',
+        'latestLiveAt',
+        'latestLiveDate',
+        'closeDate',
+        'openDate'
+      ];
+      for (const key of keys) {
+        const raw = value[key];
+        if (typeof raw === 'string' && !Number.isNaN(new Date(raw).getTime())) {
+          return new Date(raw).toISOString();
+        }
+      }
+      for (const child of Object.values(value)) {
+        const found = findDateCandidate(child, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+
     let openLive = false;
     let chatChannelId: string | null = null;
     let concurrentUserCount = 0;
+    let lastLiveAt: string | null = null;
 
     if (liveRes && liveRes.ok) {
       try {
@@ -89,6 +117,7 @@ export const fetchChzzkChannelProfile = async (
           openLive = liveBody.content.status === 'OPEN';
           chatChannelId = liveBody.content.chatChannelId || null;
           concurrentUserCount = liveBody.content.concurrentUserCount || 0;
+          lastLiveAt = openLive ? new Date().toISOString() : findDateCandidate(liveBody.content);
         }
       } catch (e) {
         console.warn(`[ChzzkService] 방송 상태 파싱 실패 (대상: ${channelId})`);
@@ -102,6 +131,7 @@ export const fetchChzzkChannelProfile = async (
         logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
         followerCount: followerCount || 0,
         openLive,
+        lastLiveAt: lastLiveAt || findDateCandidate(profileBody.content),
         chatChannelId,
         concurrentUserCount
       };
@@ -118,7 +148,8 @@ export const fetchChzzkChannelProfile = async (
       name: `스트리머_${channelId.substring(0, 5)}`,
       logoUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${channelId}`,
       followerCount: 150,
-      openLive: false
+      openLive: false,
+      lastLiveAt: null
     };
   }
 };
