@@ -194,6 +194,19 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE push_notifications ADD COLUMN coupon_code TEXT;");
       }
       try {
+        sqliteDb.exec(`
+          DELETE FROM push_subscriptions
+           WHERE id NOT IN (
+             SELECT MAX(id)
+               FROM push_subscriptions
+              GROUP BY endpoint
+           );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
+        `);
+      } catch (e) {
+        console.warn('[DB Migration] push_subscriptions endpoint 중복 정리/인덱스 생성 경고:', e);
+      }
+      try {
         sqliteDb.prepare("SELECT purchase_limit FROM shop_items LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] shop_items 테이블에 purchase_limit(1인 구매 제한) 컬럼이 없어 추가합니다.');
@@ -212,6 +225,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] card_reports 테이블에 star(신고 카드 별) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE card_reports ADD COLUMN star INTEGER DEFAULT 0;");
       }
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS streamer_registration_blocks (
+        channel_id TEXT PRIMARY KEY,
+        reason TEXT NOT NULL,
+        blocked_by TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );`);
       try {
         sqliteDb.prepare("SELECT is_pinned FROM announcements LIMIT 1").get();
       } catch (e) {
@@ -317,11 +336,19 @@ export const initDatabaseConnection = async (): Promise<void> => {
         game_type TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'STARTED',
         target_data TEXT,
+        ticket_spent_type TEXT DEFAULT 'NONE',
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         completed_at TEXT,
         earned_points INTEGER DEFAULT 0,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
+
+      try {
+        sqliteDb.prepare("SELECT ticket_spent_type FROM minigame_sessions LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] minigame_sessions 테이블에 ticket_spent_type 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE minigame_sessions ADD COLUMN ticket_spent_type TEXT DEFAULT 'NONE';");
+      }
 
       try {
         sqliteDb.prepare("SELECT with_cosmetics FROM market_listings LIMIT 1").get();
@@ -339,6 +366,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1')").run();
       // 뽑기 비용 기본값 (하드코딩 제거, DB 관리)
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000')").run();
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();

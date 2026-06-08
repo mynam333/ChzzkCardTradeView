@@ -178,6 +178,8 @@ export interface IUserRepository {
   syncFreeDrawTickets(id: string, segmentStartIso: string | null, maxStack: number, intervalHours: number): Promise<User | null>;
   /** 쿠폰/보상용 추가 무료 소환 티켓을 누적 지급합니다. */
   addBonusFreeDrawTickets(id: string, amount: number): Promise<void>;
+  /** 회원 탈퇴: 계정과 계정에 종속된 개인 데이터를 삭제/비식별 처리합니다. */
+  deleteAccount(id: string): Promise<void>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
@@ -233,6 +235,10 @@ export interface IStreamerRepository {
   /** 모든 별 슬롯(0~5성)의 커스텀 카드 이미지를 초기화합니다. */
   resetAllCustomImages(channelId: string): Promise<void>;
   updateImageBanStatus(channelId: string, isBanned: boolean): Promise<void>;
+  /** 본인 카드 삭제 요청 등으로 재등록이 금지된 채널인지 확인합니다. */
+  isRegistrationBlocked(channelId: string): Promise<boolean>;
+  /** 삭제된 스트리머 채널을 재등록 금지 목록에 기록합니다. */
+  blockRegistration(channelId: string, reason: string, blockedBy?: string | null): Promise<void>;
   findStreamerIndex(channelId: string): Promise<number>;
   findMaxSerialNumber(): Promise<number>;
   findAllocatedStreamerSerialNumbers(): Promise<number[]>;
@@ -463,6 +469,7 @@ export interface MinigameSession {
   game_type: 'quiz' | 'puzzle' | 'match';
   status: 'STARTED' | 'COMPLETED' | 'EXPIRED';
   target_data: string; // JSON string
+  ticket_spent_type?: 'BASE' | 'BONUS' | 'NONE' | null;
   created_at?: string;
   completed_at?: string | null;
   earned_points?: number;
@@ -475,5 +482,6 @@ export interface IMinigameRepository {
   startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }>;
   completeSession(sessionId: string, earnedPoints: number): Promise<{ ok: boolean; reason?: string; newPoints?: number }>;
   findSessionById(id: string): Promise<MinigameSession | null>;
+  findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null>;
   expireSessions(olderThanMinutes: number): Promise<void>;
 }

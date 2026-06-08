@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { streamerRepository, reportRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import { sendPushToAdmins } from './pushController';
 
 /**
  * 특정 스트리머 카드를 신고하는 핸들러 (신고 시점 이미지 스냅샷 포함)
@@ -67,6 +68,14 @@ export const reportStreamerCard = async (req: AuthenticatedRequest, res: Respons
     };
 
     const newReport = await reportRepository.create(reportData);
+    const isSelfDeletionRequest = reason.startsWith('[본인 카드 삭제 요청]');
+    const pushTitle = isSelfDeletionRequest ? '본인 카드 삭제 요청 접수' : '새 카드 신고 접수';
+    const safeReason = reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
+    sendPushToAdmins(
+      pushTitle,
+      `${streamer.name} ${star}성 신고: ${safeReason}`,
+      '/admin?tab=reports'
+    ).catch(() => { /* 푸시 실패는 신고 접수를 막지 않습니다. */ });
 
     return res.status(201).json({
       message: '신고가 접수되었습니다. 신고 시점의 이미지 스냅샷이 안전하게 기록되었습니다.',

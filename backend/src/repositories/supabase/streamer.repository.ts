@@ -98,6 +98,31 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
   }
+
+  async isRegistrationBlocked(channelId: string): Promise<boolean> {
+    const { count, error } = await this.getClient()
+      .from('streamer_registration_blocks')
+      .select('*', { count: 'exact', head: true })
+      .eq('channel_id', channelId);
+    if (error) {
+      console.warn('[Supabase Streamer Repo] registration block check failed:', error.message);
+      return false;
+    }
+    return (count || 0) > 0;
+  }
+
+  async blockRegistration(channelId: string, reason: string, blockedBy?: string | null): Promise<void> {
+    const { error } = await this.getClient()
+      .from('streamer_registration_blocks')
+      .upsert({
+        channel_id: channelId,
+        reason,
+        blocked_by: blockedBy || null,
+        created_at: new Date().toISOString()
+      }, { onConflict: 'channel_id' });
+    if (error) throw error;
+  }
+
   async findStreamerIndex(channelId: string): Promise<number> {
     const { data, error } = await this.getClient()
       .from('streamers')

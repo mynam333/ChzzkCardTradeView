@@ -23,6 +23,8 @@ import {
   setFreeDrawInterval,
   getDrawCost,
   setDrawCost,
+  getMinigameTicketChargeInterval,
+  setMinigameTicketChargeInterval,
   getMaintenanceStatus,
   setMaintenanceStatus
 } from '../controllers/adminController';
@@ -47,6 +49,7 @@ import {
 
 import {
   getUserMe,
+  deleteMyAccount,
   getUserRankings,
   getUserCards,
   drawCard,
@@ -181,6 +184,7 @@ router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 router.post('/auth/logout', logout);
 router.get('/image-proxy', proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
+router.delete('/users/me', authMiddleware, deleteMyAccount);
 router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
 router.get('/users/ranking', getUserRankings);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
@@ -421,11 +425,13 @@ router.get('/admin/push/sent', authMiddleware, adminMiddleware, getSentNotificat
 router.put('/admin/push/:id', authMiddleware, adminMiddleware, updateScheduledNotification);
 router.delete('/admin/push/:id', authMiddleware, adminMiddleware, deleteScheduledNotification);
 
-// 시스템 설정 (무료 뽑기 간격, 뽑기 비용)
+// 시스템 설정 (무료 뽑기 간격, 뽑기 비용, 미니게임 동전 충전 간격)
 router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDrawInterval);
 router.post('/admin/config/free-draw', authMiddleware, adminMiddleware, setFreeDrawInterval);
 router.get('/admin/config/draw-cost', authMiddleware, adminMiddleware, getDrawCost);
 router.post('/admin/config/draw-cost', authMiddleware, adminMiddleware, setDrawCost);
+router.get('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, getMinigameTicketChargeInterval);
+router.post('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, setMinigameTicketChargeInterval);
 
 // 점검 시스템 API
 router.get('/maintenance/status', getMaintenanceStatus);

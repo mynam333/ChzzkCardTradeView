@@ -242,6 +242,37 @@ export class SupabaseUserRepository implements IUserRepository {
     }
   }
 
+  async deleteAccount(id: string): Promise<void> {
+    const { error } = await this.getClient().rpc('delete_user_account', { p_user_id: id });
+    if (!error) return;
+
+    console.warn('[Supabase] delete_user_account RPC 실패, 폴백 사용:', error.message);
+    const client = this.getClient();
+    const deleteEq = async (table: string, column: string) => {
+      const { error: deleteError } = await client.from(table).delete().eq(column, id);
+      if (deleteError) throw deleteError;
+    };
+
+    await client.from('market_listings').update({ buyer_id: null }).eq('buyer_id', id);
+    await deleteEq('market_listings', 'seller_id');
+    await client.from('trades').delete().or(`sender_id.eq.${id},receiver_id.eq.${id}`);
+    await client.from('user_blocks').delete().or(`blocker_id.eq.${id},blocked_id.eq.${id}`);
+    await deleteEq('notifications', 'user_id');
+    await deleteEq('push_subscriptions', 'user_id');
+    await deleteEq('coupon_logs', 'user_id');
+    await deleteEq('card_reports', 'reporter_id');
+    await deleteEq('user_titles', 'user_id');
+    await deleteEq('user_cosmetics', 'user_id');
+    await deleteEq('shop_purchases', 'user_id');
+    await deleteEq('user_minigame_tickets', 'user_id');
+    await deleteEq('minigame_sessions', 'user_id');
+    await deleteEq('user_cards', 'user_id');
+    await client.from('streamers').update({ registered_by: null }).eq('registered_by', id);
+
+    const { error: userDeleteError } = await client.from('users').delete().eq('id', id);
+    if (userDeleteError) throw userDeleteError;
+  }
+
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     const { error } = await this.getClient()
       .from('users')

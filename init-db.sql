@@ -156,6 +156,13 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+DELETE FROM push_subscriptions
+ WHERE id NOT IN (
+   SELECT MAX(id)
+     FROM push_subscriptions
+    GROUP BY endpoint
+ );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 
 -- 10. 예약 푸시 알림 테이블
 CREATE TABLE IF NOT EXISTS push_notifications (
@@ -180,6 +187,14 @@ CREATE TABLE IF NOT EXISTS card_reports (
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(reporter_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+);
+
+-- 스트리머 카드 재등록 금지 목록
+CREATE TABLE IF NOT EXISTS streamer_registration_blocks (
+    channel_id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    blocked_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- 12. 인앱 알림함 테이블
@@ -249,6 +264,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', '24');
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1');
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000'); -- 뽑기 1회 기본 비용
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240'); -- 미니게임 동전 충전 간격(분)
 
 -- 16. 오픈마켓 매물 테이블
 CREATE TABLE IF NOT EXISTS market_listings (
@@ -290,6 +306,7 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     game_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'STARTED',
     target_data TEXT,
+    ticket_spent_type TEXT DEFAULT 'NONE',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
     earned_points INTEGER DEFAULT 0,

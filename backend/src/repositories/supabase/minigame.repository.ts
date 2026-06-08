@@ -1,6 +1,8 @@
 import { getSupabaseClient } from "../../services/db";
 import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../interfaces";
 
+const MAX_AUTO_TICKETS = 5;
+
 export class SupabaseMinigameRepository implements IMinigameRepository {
   private getClient() {
     return getSupabaseClient();
@@ -111,6 +113,7 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
             game_type: session.game_type,
             status: session.status,
             target_data: session.target_data,
+            ticket_spent_type: 'NONE',
             created_at: new Date().toISOString()
           });
 
@@ -141,6 +144,7 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
       // 1. 티켓 차감
       const now = new Date().toISOString();
       const useBonus = (ticket.bonus_tickets || 0) > 0;
+      const ticketSpentType = useBonus ? 'BONUS' : 'BASE';
       const { error: ticketError } = await client
         .from('user_minigame_tickets')
         .update({
@@ -164,6 +168,7 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
           game_type: session.game_type,
           status: session.status,
           target_data: session.target_data,
+          ticket_spent_type: ticketSpentType,
           created_at: now
         });
 
@@ -265,18 +270,75 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
     return data as MinigameSession;
   }
 
+  async findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null> {
+    const { data, error } = await this.getClient()
+      .from('minigame_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('game_type', gameType)
+      .eq('status', 'STARTED')
+      .neq('ticket_spent_type', 'NONE')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as MinigameSession;
+  }
+
   async expireSessions(olderThanMinutes: number): Promise<void> {
     const client = this.getClient();
     const limitDate = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString();
-    
-    // STARTED인 상태에서 일정 시간 경과된 세션들을 EXPIRED로 변경
-    await client
+
+    const { data: sessions, error: selectError } = await client
       .from('minigame_sessions')
-      .update({
-        status: 'EXPIRED',
-        completed_at: new Date().toISOString()
-      })
+      .select('*')
       .eq('status', 'STARTED')
       .lt('created_at', limitDate);
+
+    if (selectError || !sessions?.length) return;
+
+    for (const session of sessions as any[]) {
+      const { data: expired, error: updateError } = await client
+        .from('minigame_sessions')
+        .update({
+          status: 'EXPIRED',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', session.id)
+        .eq('status', 'STARTED')
+        .select('*')
+        .maybeSingle();
+
+      if (updateError || !expired) continue;
+
+      let practiceMode = false;
+      try {
+        practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true;
+      } catch {
+        practiceMode = false;
+      }
+      if (practiceMode || session.ticket_spent_type === 'NONE') continue;
+
+      const spentType = session.ticket_spent_type === 'BONUS' ? 'BONUS' : 'BASE';
+      if (spentType === 'BONUS') {
+        await this.addBonusTickets(session.user_id, 1);
+        continue;
+      }
+
+      const ticket = await this.getTicketStatus(session.user_id);
+      const now = new Date().toISOString();
+      if ((ticket.current_tickets || 0) < MAX_AUTO_TICKETS) {
+        await client
+          .from('user_minigame_tickets')
+          .update({
+            current_tickets: (ticket.current_tickets || 0) + 1,
+            updated_at: now
+          })
+          .eq('user_id', session.user_id);
+      } else {
+        await this.addBonusTickets(session.user_id, 1);
+      }
+    }
   }
 }

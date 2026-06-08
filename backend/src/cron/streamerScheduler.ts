@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { notificationRepository, streamerRepository, userCardRepository, userRepository } from '../repositories';
+import { sendPushToUser } from '../controllers/pushController';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
 import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
@@ -234,10 +235,13 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, lastLiveAt: st
 
   for (const userId of userIds) {
     await userRepository.addBonusFreeDrawTickets(userId, 1);
+    const title = '보유 카드 삭제 및 보상 지급';
+    const body = `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
+    sendPushToUser(userId, title, body, '/shop');
     notificationRepository.create({
       user_id: userId,
-      title: '무료 소환 티켓 지급',
-      body: `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`,
+      title,
+      body,
       link: 'shop'
     }).catch(() => { /* 알림 실패는 정리 작업을 막지 않음 */ });
   }

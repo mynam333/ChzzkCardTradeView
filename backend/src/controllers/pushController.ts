@@ -49,37 +49,40 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(400).json({ error: 'BadRequest', message: '올바른 구독 정보 및 인증이 필요합니다.' });
   }
 
-  const endpoint = subscription.endpoint;
+  const endpoint = String(subscription.endpoint || '').trim();
   const authKey = subscription.keys?.auth || '';
   const p256dhKey = subscription.keys?.p256dh || '';
+
+  if (!endpoint || !authKey || !p256dhKey) {
+    return res.status(400).json({ error: 'BadRequest', message: '푸시 구독 endpoint/auth/p256dh 정보가 필요합니다.' });
+  }
 
   try {
     const dbMode = getDbMode();
 
     if (dbMode === 'SUPABASE') {
       const client = getSupabaseClient();
-      // 기존 구독 정보가 있으면 갱신, 없으면 삽입 (upsert)
+      // 같은 브라우저 endpoint는 하나의 유저에만 귀속되도록 기존 중복을 먼저 정리합니다.
+      await client.from('push_subscriptions').delete().eq('endpoint', endpoint);
       const { error } = await client
         .from('push_subscriptions')
-        .upsert({
+        .insert({
           user_id: userId,
           endpoint,
           auth_key: authKey,
           p256dh_key: p256dhKey
-        }, { onConflict: 'user_id,endpoint' });
+        });
 
       if (error) throw error;
     } else {
       const db = getSqliteDb();
-      // SQLite: 중복 시 UPDATE 처리
-      db.prepare(`
-        INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, endpoint) DO UPDATE SET
-          auth_key = excluded.auth_key,
-          p256dh_key = excluded.p256dh_key,
-          created_at = datetime('now')
-      `).run(userId, endpoint, authKey, p256dhKey);
+      db.transaction(() => {
+        db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+        db.prepare(`
+          INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `).run(userId, endpoint, authKey, p256dhKey);
+      })();
     }
 
     return res.status(201).json({ message: '푸시 알림 구독 등록이 완료되었습니다.' });
@@ -163,8 +166,12 @@ const sendPushToAll = async (title: string, body: string, url = '/') => {
       subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
     }
 
+    const uniqueSubscriptions = Array.from(
+      new Map(subscriptions.map((sub) => [sub.endpoint, sub])).values()
+    );
+
     const payload = JSON.stringify({ title, body, url });
-    const promises = subscriptions.map((sub) => {
+    const promises = uniqueSubscriptions.map((sub) => {
       const pushSubscription = {
         endpoint: sub.endpoint,
         keys: {
@@ -210,6 +217,9 @@ export const sendPushToUser = async (userId: string, title: string, body: string
     }
 
     if (subscriptions.length === 0) return;
+    subscriptions = Array.from(
+      new Map(subscriptions.map((sub) => [sub.endpoint, sub])).values()
+    );
 
     const payload = JSON.stringify({ title, body, url: url || '/' });
     await Promise.all(subscriptions.map((sub) => {
@@ -226,6 +236,31 @@ export const sendPushToUser = async (userId: string, title: string, body: string
     }));
   } catch (err) {
     console.error('[Push] 개별 푸시 전송 중 에러:', err);
+  }
+};
+
+/**
+ * 모든 관리자에게 푸시 알림을 전송합니다. 신고 접수처럼 즉시 확인이 필요한 운영 이벤트에 사용합니다.
+ */
+export const sendPushToAdmins = async (title: string, body: string, url = '/admin') => {
+  try {
+    const dbMode = getDbMode();
+    let adminIds: string[] = [];
+
+    if (dbMode === 'SUPABASE') {
+      const { data, error } = await getSupabaseClient()
+        .from('users')
+        .select('id')
+        .eq('role', 'ADMIN');
+      if (!error && data) adminIds = data.map((row: any) => row.id);
+    } else {
+      const rows = getSqliteDb().prepare("SELECT id FROM users WHERE role = 'ADMIN'").all() as { id: string }[];
+      adminIds = rows.map((row) => row.id);
+    }
+
+    await Promise.all(adminIds.map((adminId) => sendPushToUser(adminId, title, body, url)));
+  } catch (err) {
+    console.error('[Push] 관리자 푸시 전송 중 에러:', err);
   }
 };
 

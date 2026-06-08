@@ -1,6 +1,8 @@
 import { getSqliteDb } from "../../services/db";
 import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../interfaces";
 
+const MAX_AUTO_TICKETS = 5;
+
 export class SqliteMinigameRepository implements IMinigameRepository {
   private getDb() {
     return getSqliteDb();
@@ -77,6 +79,7 @@ export class SqliteMinigameRepository implements IMinigameRepository {
   async startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }> {
     const db = this.getDb();
     let practiceMode = false;
+    let ticketSpentType: 'BASE' | 'BONUS' | 'NONE' = 'NONE';
     try {
       practiceMode = JSON.parse(session.target_data)?.practice_mode === true;
     } catch {
@@ -106,17 +109,19 @@ export class SqliteMinigameRepository implements IMinigameRepository {
           db.prepare(
             "UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
           ).run(session.user_id);
+          ticketSpentType = 'BONUS';
         } else {
           db.prepare(
             "UPDATE user_minigame_tickets SET current_tickets = current_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
           ).run(session.user_id);
+          ticketSpentType = 'BASE';
         }
       }
 
       // 3. 세션 기록
       db.prepare(
-        "INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
-      ).run(session.id, session.user_id, session.game_type, session.status, session.target_data);
+        "INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))"
+      ).run(session.id, session.user_id, session.game_type, session.status, session.target_data, ticketSpentType);
 
       return { ok: true };
     });
@@ -164,6 +169,32 @@ export class SqliteMinigameRepository implements IMinigameRepository {
       game_type: row.game_type as any,
       status: row.status as any,
       target_data: row.target_data,
+      ticket_spent_type: row.ticket_spent_type ?? null,
+      created_at: row.created_at,
+      completed_at: row.completed_at,
+      earned_points: row.earned_points
+    };
+  }
+
+  async findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null> {
+    const row = this.getDb().prepare(`
+      SELECT *
+      FROM minigame_sessions
+      WHERE user_id = ?
+        AND game_type = ?
+        AND status = 'STARTED'
+        AND COALESCE(ticket_spent_type, 'NONE') <> 'NONE'
+      ORDER BY datetime(created_at) DESC
+      LIMIT 1
+    `).get(userId, gameType) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      game_type: row.game_type as any,
+      status: row.status as any,
+      target_data: row.target_data,
+      ticket_spent_type: row.ticket_spent_type ?? null,
       created_at: row.created_at,
       completed_at: row.completed_at,
       earned_points: row.earned_points
@@ -172,12 +203,72 @@ export class SqliteMinigameRepository implements IMinigameRepository {
 
   async expireSessions(olderThanMinutes: number): Promise<void> {
     const db = this.getDb();
-    // 지정 분보다 오래된 STARTED 세션들을 EXPIRED로 변경
-    db.prepare(
-      `UPDATE minigame_sessions 
-       SET status = 'EXPIRED', completed_at = datetime('now') 
-       WHERE status = 'STARTED' 
-         AND strftime('%s', 'now') - strftime('%s', created_at) > ?`
-    ).run(olderThanMinutes * 60);
+    const txn = db.transaction(() => {
+      const expired = db.prepare(`
+        SELECT *
+        FROM minigame_sessions
+        WHERE status = 'STARTED'
+          AND strftime('%s', 'now') - strftime('%s', created_at) > ?
+      `).all(olderThanMinutes * 60) as any[];
+
+      for (const session of expired) {
+        const update = db.prepare(`
+          UPDATE minigame_sessions
+          SET status = 'EXPIRED', completed_at = datetime('now')
+          WHERE id = ? AND status = 'STARTED'
+        `).run(session.id);
+
+        if (update.changes <= 0) continue;
+
+        let practiceMode = false;
+        try {
+          practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true;
+        } catch {
+          practiceMode = false;
+        }
+        if (practiceMode || session.ticket_spent_type === 'NONE') continue;
+
+        const spentType = session.ticket_spent_type === 'BONUS' ? 'BONUS' : 'BASE';
+        const now = new Date().toISOString();
+        db.prepare(`
+          INSERT OR IGNORE INTO user_minigame_tickets
+            (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+          VALUES (?, ${MAX_AUTO_TICKETS}, 0, ?, ?)
+        `).run(session.user_id, now, now);
+
+        if (spentType === 'BONUS') {
+          db.prepare(`
+            UPDATE user_minigame_tickets
+            SET bonus_tickets = bonus_tickets + 1,
+                updated_at = datetime('now')
+            WHERE user_id = ?
+          `).run(session.user_id);
+          continue;
+        }
+
+        const ticket = db.prepare(`
+          SELECT current_tickets
+          FROM user_minigame_tickets
+          WHERE user_id = ?
+        `).get(session.user_id) as any;
+
+        if ((ticket?.current_tickets ?? 0) < MAX_AUTO_TICKETS) {
+          db.prepare(`
+            UPDATE user_minigame_tickets
+            SET current_tickets = current_tickets + 1,
+                updated_at = datetime('now')
+            WHERE user_id = ?
+          `).run(session.user_id);
+        } else {
+          db.prepare(`
+            UPDATE user_minigame_tickets
+            SET bonus_tickets = bonus_tickets + 1,
+                updated_at = datetime('now')
+            WHERE user_id = ?
+          `).run(session.user_id);
+        }
+      }
+    });
+    txn();
   }
 }

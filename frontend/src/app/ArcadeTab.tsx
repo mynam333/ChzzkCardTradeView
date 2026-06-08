@@ -77,6 +77,7 @@ type TicketStatusResponse = {
   base_tickets?: number;
   bonus_tickets?: number;
   seconds_until_next_ticket: number;
+  ticket_charge_interval_minutes?: number;
   today_game: GameType;
   kst_date: string;
   next_game_at: string;
@@ -88,6 +89,7 @@ type StartGameResponse = {
   game_data: MinigameData;
   message?: string;
   practice_mode?: boolean;
+  resumed?: boolean;
   today_game?: GameType;
   kst_date?: string;
   next_game_at?: string;
@@ -155,96 +157,257 @@ const QUIZ_RADIAL_MAX_SCALE = 0.20;      // 외곽 잔상 20% 확대
 const QUIZ_RADIAL_MAX_GHOST_OPACITY = 0.52;  // 잔상 최대 불투명도 52%
 const QUIZ_RADIAL_MIN_GHOST_OPACITY = 0.16;  // 잔상 최소 불투명도 16%
 
-const MotionBlurQuizImage: React.FC<{ src: string; intensity: number; angle: number }> = ({
-  src,
-  intensity,
-  angle
-}) => {
-  const normalizedIntensity = Math.max(0, Math.min(100, intensity)) / 100;
-  const radians = (angle * Math.PI) / 180;
-  const travel = normalizedIntensity * QUIZ_MOTION_MAX_TRAVEL_PX;
-  const travelX = Math.cos(radians) * travel;
-  const travelY = Math.sin(radians) * travel;
-  const scale = 1 + normalizedIntensity * QUIZ_MOTION_MAX_SCALE;
-  const baseBlur = normalizedIntensity * QUIZ_MOTION_MAX_BASE_BLUR_PX;
+const getObjectCoverSourceRect = (
+  image: HTMLImageElement,
+  targetWidth: number,
+  targetHeight: number
+) => {
+  const sourceRatio = image.naturalWidth / image.naturalHeight;
+  const targetRatio = targetWidth / targetHeight;
+  let sourceWidth = image.naturalWidth;
+  let sourceHeight = image.naturalHeight;
+  let sourceX = 0;
+  let sourceY = 0;
+
+  if (sourceRatio > targetRatio) {
+    sourceWidth = image.naturalHeight * targetRatio;
+    sourceX = (image.naturalWidth - sourceWidth) / 2;
+  } else {
+    sourceHeight = image.naturalWidth / targetRatio;
+    sourceY = (image.naturalHeight - sourceHeight) / 2;
+  }
+
+  return { sourceX, sourceY, sourceWidth, sourceHeight };
+};
+
+const CanvasBlurQuizImage: React.FC<{
+  src: string;
+  intensity: number;
+  angle: number;
+  mode: 'motion' | 'radial';
+}> = ({ src, intensity, angle, mode }) => {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const imageRef = React.useRef<HTMLImageElement | null>(null);
+  const rafRef = React.useRef<number | null>(null);
+  const intensityRef = React.useRef(intensity);
+  const angleRef = React.useRef(angle);
+  const [ready, setReady] = useState(false);
+
+  const drawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image || !image.naturalWidth || !image.naturalHeight) return;
+
+    const width = Math.max(1, Math.round(canvas.clientWidth));
+    const height = Math.max(1, Math.round(canvas.clientHeight));
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const backingWidth = Math.round(width * pixelRatio);
+    const backingHeight = Math.round(height * pixelRatio);
+
+    if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    const { sourceX, sourceY, sourceWidth, sourceHeight } = getObjectCoverSourceRect(image, width, height);
+    const normalizedIntensity = Math.max(0, Math.min(100, intensityRef.current)) / 100;
+    const radians = (angleRef.current * Math.PI) / 180;
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+
+    const drawLayer = ({
+      offsetX = 0,
+      offsetY = 0,
+      rotation = 0,
+      scale = 1,
+      opacity = 1,
+      filter = 'none',
+      blendMode = 'source-over'
+    }: {
+      offsetX?: number;
+      offsetY?: number;
+      rotation?: number;
+      scale?: number;
+      opacity?: number;
+      filter?: string;
+      blendMode?: GlobalCompositeOperation;
+    }) => {
+      context.save();
+      context.globalAlpha = opacity;
+      context.globalCompositeOperation = blendMode;
+      context.filter = filter;
+      context.translate(width / 2 + offsetX, height / 2 + offsetY);
+      context.rotate(rotation);
+      context.scale(scale, scale);
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        -width / 2,
+        -height / 2,
+        width,
+        height
+      );
+      context.restore();
+    };
+
+    if (mode === 'motion') {
+      const travel = normalizedIntensity * QUIZ_MOTION_MAX_TRAVEL_PX;
+      const travelX = Math.cos(radians) * travel;
+      const travelY = Math.sin(radians) * travel;
+      const scale = 1 + normalizedIntensity * Math.min(QUIZ_MOTION_MAX_SCALE, 0.42);
+      const baseBlur = normalizedIntensity * QUIZ_MOTION_MAX_BASE_BLUR_PX;
+
+      if (normalizedIntensity > 0.01) {
+        for (let index = 0; index < QUIZ_MOTION_GHOST_COUNT; index += 1) {
+          const position = index / (QUIZ_MOTION_GHOST_COUNT - 1) - 0.5;
+          const centerWeight = 1 - Math.abs(position) * 2;
+          drawLayer({
+            offsetX: travelX * position,
+            offsetY: travelY * position,
+            scale,
+            opacity: normalizedIntensity * (0.028 + centerWeight * 0.038),
+            filter: `blur(${Math.max(1.2, baseBlur * 0.55)}px) contrast(1.18) saturate(0.9)`
+          });
+        }
+
+        drawLayer({
+          offsetX: travelX * 0.48,
+          offsetY: travelY * 0.48,
+          scale,
+          opacity: normalizedIntensity * 0.24,
+          filter: `blur(${Math.max(2, baseBlur * 0.75)}px) sepia(1) saturate(7) hue-rotate(145deg)`,
+          blendMode: 'screen'
+        });
+        drawLayer({
+          offsetX: -travelX * 0.48,
+          offsetY: -travelY * 0.48,
+          scale,
+          opacity: normalizedIntensity * 0.2,
+          filter: `blur(${Math.max(2, baseBlur * 0.75)}px) sepia(1) saturate(7) hue-rotate(255deg)`,
+          blendMode: 'screen'
+        });
+      }
+
+      drawLayer({
+        scale,
+        opacity: 1,
+        filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.2}) saturate(${1 - normalizedIntensity * 0.14})`
+      });
+    } else {
+      const ghostCount = 29;
+      const maxRotate = normalizedIntensity * QUIZ_RADIAL_MAX_ROTATE_DEG;
+      const baseBlur = Math.max(0, normalizedIntensity * 3.5);
+
+      for (let index = 0; index < ghostCount; index += 1) {
+        const offsetFactor = index - Math.floor(ghostCount / 2);
+        if (offsetFactor === 0) continue;
+        const distance = Math.abs(offsetFactor) / Math.floor(ghostCount / 2);
+        drawLayer({
+          rotation: (maxRotate * offsetFactor / Math.floor(ghostCount / 2)) * Math.PI / 180,
+          scale: 1 + normalizedIntensity * QUIZ_RADIAL_MAX_SCALE * distance,
+          opacity: normalizedIntensity * Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - distance * 0.36),
+          filter: `blur(${1.5 + normalizedIntensity * 3.5}px) contrast(1.08)`,
+          blendMode: distance > 0.65 ? 'screen' : 'source-over'
+        });
+      }
+
+      drawLayer({
+        scale: 1 + normalizedIntensity * 0.02,
+        opacity: 1,
+        filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.12})`
+      });
+    }
+
+    context.filter = 'none';
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = 'source-over';
+    setReady(true);
+  }, [mode]);
+
+  const scheduleDraw = useCallback(() => {
+    if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = null;
+      drawCanvas();
+    });
+  }, [drawCanvas]);
+
+  useEffect(() => {
+    intensityRef.current = intensity;
+    angleRef.current = angle;
+    scheduleDraw();
+  }, [angle, intensity, scheduleDraw]);
+
+  useEffect(() => {
+    setReady(false);
+    imageRef.current = null;
+    const image = new Image();
+    image.decoding = 'async';
+    image.fetchPriority = 'high';
+    image.onload = () => {
+      imageRef.current = image;
+      scheduleDraw();
+    };
+    image.src = src;
+    if (image.complete) {
+      imageRef.current = image;
+      scheduleDraw();
+    }
+
+    return () => {
+      image.onload = null;
+      if (imageRef.current === image) imageRef.current = null;
+    };
+  }, [scheduleDraw, src]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(scheduleDraw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [scheduleDraw]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-zinc-950">
-      <img
-        src={src}
-        alt="Quiz card"
-        loading="eager"
-        decoding="async"
-        fetchPriority="high"
-        draggable={false}
-        style={{
-          transform: `scale(${scale})`,
-          filter: `blur(${baseBlur}px) contrast(${1 + normalizedIntensity * 0.22}) saturate(${1 - normalizedIntensity * 0.18})`,
-        }}
-        className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,transform] duration-75"
-      />
-
-      {normalizedIntensity > 0.01 && Array.from({ length: QUIZ_MOTION_GHOST_COUNT }).map((_, index) => {
-        const position = index / (QUIZ_MOTION_GHOST_COUNT - 1) - 0.5;
-        const centerWeight = 1 - Math.abs(position) * 2;
-        const opacity = normalizedIntensity * (0.035 + centerWeight * 0.035);
-
-        return (
-          <img
-            key={index}
-            src={src}
-            alt=""
-            aria-hidden="true"
-            loading="eager"
-            decoding="async"
-            draggable={false}
-            style={{
-              transform: `translate3d(${travelX * position}px, ${travelY * position}px, 0) scale(${scale})`,
-              filter: `blur(${Math.max(1.5, baseBlur * 0.45)}px) contrast(1.18)`,
-              opacity,
-            }}
-            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
-          />
-        );
-      })}
-
-      {normalizedIntensity > 0.08 && (
-        <>
-          <img
-            src={src}
-            alt=""
-            aria-hidden="true"
-            loading="eager"
-            decoding="async"
-            draggable={false}
-            style={{
-              transform: `translate3d(${travelX * 0.58}px, ${travelY * 0.58}px, 0) scale(${scale})`,
-              filter: `blur(${Math.max(2, baseBlur * 0.55)}px) sepia(1) saturate(7) hue-rotate(145deg)`,
-              mixBlendMode: 'screen',
-              opacity: normalizedIntensity * 0.28,
-            }}
-            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
-          />
-          <img
-            src={src}
-            alt=""
-            aria-hidden="true"
-            loading="eager"
-            decoding="async"
-            draggable={false}
-            style={{
-              transform: `translate3d(${-travelX * 0.58}px, ${-travelY * 0.58}px, 0) scale(${scale})`,
-              filter: `blur(${Math.max(2, baseBlur * 0.55)}px) sepia(1) saturate(7) hue-rotate(255deg)`,
-              mixBlendMode: 'screen',
-              opacity: normalizedIntensity * 0.24,
-            }}
-            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-[filter,opacity,transform] duration-75"
-          />
-        </>
+    <div className="relative h-full w-full overflow-hidden bg-zinc-950 contain-paint">
+      {!ready && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_42%,rgba(14,165,233,0.28),rgba(2,6,23,0.96)_62%)] text-[10px] font-black tracking-[0.24em] text-cyan-100/80">
+          <RefreshCw className="h-5 w-5 animate-spin text-cyan-200" />
+          SIGNAL BUFFERING
+        </div>
       )}
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={mode === 'motion' ? '방향형 모션 블러 처리된 퀴즈 카드' : '회전형 블러 처리된 퀴즈 카드'}
+        className={`h-full w-full select-none pointer-events-none transition-opacity duration-150 ${ready ? 'opacity-100' : 'opacity-0'}`}
+      />
     </div>
   );
 };
+
+const MotionBlurQuizImage: React.FC<{ src: string; intensity: number; angle: number }> = (props) => (
+  <CanvasBlurQuizImage {...props} mode="motion" />
+);
+
+const RadialBlurQuizImage: React.FC<{ src: string; intensity: number; angle: number }> = (props) => (
+  <CanvasBlurQuizImage {...props} mode="radial" />
+);
 
 const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, intensity }) => {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -656,11 +819,14 @@ export const ArcadeTab: React.FC = () => {
         handleExitGame();
       }
     } catch {
-      toast('결과 전송에 실패했습니다.', 'error');
+      toast('결과 전송에 실패했습니다. 연결이 복구되면 다시 시도해 주세요.', 'warning');
+      if (activeGame === 'quiz') {
+        setSelectedQuizChoice(null);
+      }
     } finally {
       setGameBusy(false);
     }
-  }, [handleExitGame, refreshUserData, sessionId, toast]);
+  }, [activeGame, handleExitGame, refreshUserData, sessionId, toast]);
 
   useEffect(() => {
     if (user) {
@@ -880,6 +1046,9 @@ export const ArcadeTab: React.FC = () => {
       setGameData(data.game_data);
       setActiveGame(type);
       setIsPracticeMode(data.practice_mode === true);
+      if (data.resumed) {
+        toast(data.message || '끊긴 미니게임 세션을 이어서 시작합니다.', 'info');
+      }
 
       // 게임별 초기 세팅값 설정
       if (type === 'quiz') {
@@ -1662,27 +1831,11 @@ export const ArcadeTab: React.FC = () => {
 
                   {/* 방사형 회전 잔상 블러 모드 */}
                   {quizBlurType === 'radial' && (
-                    <div className="w-full h-full relative">
-                      {Array.from({ length: 33 }).map((_, i) => {
-                        const offsetFactor = i - 16; // -16, -15, ..., 0, ..., 15, 16
-                        const rotateAngle = (quizIntensity / 100) * QUIZ_RADIAL_MAX_ROTATE_DEG * (offsetFactor / 16);
-                        const scale = 1 + (quizIntensity / 100) * QUIZ_RADIAL_MAX_SCALE * Math.abs(offsetFactor / 16);
-                        // 중앙(i=16)은 원본, 외곽 잔상은 거리에 따라 점감하는 불투명도
-                        const opacity = i === 16 ? 1 : Math.max(QUIZ_RADIAL_MIN_GHOST_OPACITY, QUIZ_RADIAL_MAX_GHOST_OPACITY - Math.abs(offsetFactor) * 0.02);
-                        return (
-                          <img
-                            key={i}
-                            src={gameData.image_url}
-                            alt="Quiz card"
-                            style={{
-                              transform: `rotate(${rotateAngle}deg) scale(${scale})`,
-                              opacity: opacity,
-                            }}
-                            className="absolute inset-0 h-full w-full object-cover select-none pointer-events-none transition-transform duration-75"
-                          />
-                        );
-                      })}
-                    </div>
+                    <RadialBlurQuizImage
+                      src={gameData.image_url || ''}
+                      intensity={quizIntensity}
+                      angle={quizBlurAngle}
+                    />
                   )}
 
                   {/* 디테일 데코: 치지직 송출 에러 인터페이스 오버레이 */}

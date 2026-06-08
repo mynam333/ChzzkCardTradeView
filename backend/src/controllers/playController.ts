@@ -10,6 +10,7 @@ import {
 import { IS_PRODUCTION } from '../config';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
+import { clearSessionCookie } from '../services/sessionCookie';
 
 const computeFreeDrawSegment = (intervalHours: number): { segmentStartIso: string | null; nextFreeDrawAt: string | null } => {
   if (intervalHours <= 0) {
@@ -114,6 +115,36 @@ export const getUserMe = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[PlayController] getUserMe 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const deleteMyAccount = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  }
+
+  const user = await userRepository.findById(userId);
+  if (!user) {
+    clearSessionCookie(res);
+    return res.status(404).json({ error: 'NotFound', message: '이미 삭제되었거나 존재하지 않는 계정입니다.' });
+  }
+
+  const { confirmationText, userIdConfirm, irreversible } = req.body || {};
+  if (confirmationText !== '회원 탈퇴' || userIdConfirm !== user.id || irreversible !== true) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: '탈퇴 확인 문구, 계정 ID, 복구 불가 동의를 모두 정확히 입력해야 합니다.'
+    });
+  }
+
+  try {
+    await userRepository.deleteAccount(user.id);
+    clearSessionCookie(res);
+    return res.status(200).json({ message: '회원 탈퇴가 완료되었습니다. 계정 데이터가 삭제되었습니다.' });
+  } catch (err: any) {
+    console.error('[PlayController] deleteMyAccount 에러:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '회원 탈퇴 처리 중 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -519,6 +550,14 @@ export const registerStreamer = async (req: Request, res: Response) => {
     const exists = await streamerRepository.findById(channelId);
     if (exists) {
       return res.status(400).json({ error: 'Conflict', message: '이미 카드로 등록되어 있는 스트리머입니다.' });
+    }
+
+    const registrationBlocked = await streamerRepository.isRegistrationBlocked(channelId);
+    if (registrationBlocked) {
+      return res.status(403).json({
+        error: 'RegistrationBlocked',
+        message: '본인 카드 삭제 요청에 따라 재등록이 제한된 스트리머입니다.'
+      });
     }
 
     // 치지직 API로 권위 있는 프로필을 서버측에서 직접 조회 (실패 시 throw)

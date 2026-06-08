@@ -16,12 +16,13 @@ import { sendPushToUser } from './pushController';
 import { deleteLocalUploadByUrl } from '../services/imageService';
 
 /**
- * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 삭제 시점 시세만큼 보상 지급
- * - 보유 카드 1장당 base_value × (1 + star*0.8) 포인트를 보유자에게 지급
+ * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 추가 무료 소환 티켓 보상 지급
+ * - 삭제 대상 카드를 1장 이상 보유한 유저당 추가 무료 소환 티켓 1장을 지급
  * - 이후 해당 스트리머의 카드를 모두 삭제하고 스트리머 레코드도 제거(시세이력/신고 CASCADE)
  */
 export const deleteStreamerCards = async (req: Request, res: Response) => {
   const { channel_id } = req.params;
+  const preventReregistration = req.body?.prevent_reregistration === true;
   if (!channel_id) {
     return res.status(400).json({ error: 'BadRequest', message: '대상 스트리머 채널 ID가 유효하지 않습니다.' });
   }
@@ -34,37 +35,45 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
     }
 
-    const baseValue = streamer.base_value || 0;
     const cards = await userCardRepository.findByChannel(channel_id);
 
-    // 보유자별 보상 합산 (별 등급 배율 반영)
-    const payout: Record<string, number> = {};
+    // 보유자별 삭제 카드 수 집계. 보상은 유저당 추가 무료 소환 티켓 1장입니다.
+    const cardsByUser: Record<string, number> = {};
     for (const c of cards) {
-      payout[c.user_id] = (payout[c.user_id] || 0) + Math.round(baseValue * (1 + (c.star || 0) * 0.8));
+      cardsByUser[c.user_id] = (cardsByUser[c.user_id] || 0) + 1;
     }
 
-    // 포인트 지급 + 알림
-    let totalPaid = 0;
-    for (const [userId, amount] of Object.entries(payout)) {
-      if (amount <= 0) continue;
-      await userRepository.incrementPoint(userId, amount);
-      totalPaid += amount;
-      const title = '카드 보상 지급';
-      const body = `'${streamer.name}' 카드가 삭제되어 ${amount.toLocaleString()} P가 지급되었습니다.`;
-      sendPushToUser(userId, title, body, '/');
-      notificationRepository.create({ user_id: userId, title, body, link: 'gacha' }).catch(() => { /* 무시 */ });
+    // 추가 무료 소환 티켓 지급 + 알림
+    let totalFreeDrawTicketsGranted = 0;
+    for (const [userId, deletedCount] of Object.entries(cardsByUser)) {
+      if (deletedCount <= 0) continue;
+      await userRepository.addBonusFreeDrawTickets(userId, 1);
+      totalFreeDrawTicketsGranted += 1;
+      const title = '보유 카드 삭제 및 보상 지급';
+      const body = `'${streamer.name}' 카드 ${deletedCount.toLocaleString()}장이 삭제되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
+      sendPushToUser(userId, title, body, '/shop');
+      notificationRepository.create({ user_id: userId, title, body, link: 'shop' }).catch(() => { /* 무시 */ });
     }
 
     // 카드 전량 삭제 후 스트리머 제거
     const removed = await userCardRepository.deleteByChannel(channel_id);
+    if (preventReregistration) {
+      await streamerRepository.blockRegistration(
+        channel_id,
+        '[본인 카드 삭제 요청] 권리자 요청에 따라 카드 재등록 금지',
+        (req as AuthenticatedRequest).user?.id || null
+      );
+    }
     await streamerRepository.delete(channel_id);
 
     return res.status(200).json({
-      message: `'${streamer.name}' 스트리머 카드를 삭제했습니다. 보유자 ${Object.keys(payout).length}명에게 총 ${totalPaid.toLocaleString()} P를 지급했습니다. (삭제 카드 ${removed}장)`,
+      message: `'${streamer.name}' 스트리머 카드를 삭제했습니다. 보유자 ${Object.keys(cardsByUser).length}명에게 추가 무료 소환 티켓 1장씩 지급했습니다. (삭제 카드 ${removed}장)${preventReregistration ? ' 재등록 금지도 적용했습니다.' : ''}`,
       channel_id,
-      affected_users: Object.keys(payout).length,
+      affected_users: Object.keys(cardsByUser).length,
       cards_removed: removed,
-      total_points_paid: totalPaid
+      compensation_type: 'free_draw_ticket',
+      total_free_draw_tickets_granted: totalFreeDrawTicketsGranted,
+      registration_blocked: preventReregistration
     });
   } catch (err: any) {
     console.error('[AdminController] deleteStreamerCards 에러:', err);
@@ -552,7 +561,41 @@ export const setDrawCost = async (req: Request, res: Response) => {
 };
 
 /**
- * 14. 점검 상태 조회 (모든 유저 가능)
+ * 14. 미니게임 동전 충전 간격 조회 (분 단위)
+ */
+export const getMinigameTicketChargeInterval = async (req: Request, res: Response) => {
+  try {
+    const val = await systemConfigRepository.get('minigame_ticket_charge_interval_minutes', '240');
+    const minutes = parseInt(val, 10);
+    return res.status(200).json({ intervalMinutes: Number.isFinite(minutes) && minutes >= 1 ? minutes : 240 });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '미니게임 동전 충전 설정 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 15. 미니게임 동전 충전 간격 저장 (분 단위)
+ */
+export const setMinigameTicketChargeInterval = async (req: Request, res: Response) => {
+  const { intervalMinutes } = req.body;
+  const num = parseInt(String(intervalMinutes), 10);
+  if (!Number.isFinite(num) || num < 1) {
+    return res.status(400).json({ error: 'BadRequest', message: '미니게임 동전 충전 간격은 1분 이상의 정수여야 합니다.' });
+  }
+
+  try {
+    await systemConfigRepository.set('minigame_ticket_charge_interval_minutes', String(num));
+    return res.status(200).json({
+      message: `미니게임 동전 충전 간격이 ${num.toLocaleString()}분으로 변경되었습니다. 진행 중인 유저 타이머는 다음 조회 시 새 설정으로 재계산됩니다.`,
+      intervalMinutes: num
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '미니게임 동전 충전 설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 16. 점검 상태 조회 (모든 유저 가능)
  */
 export const getMaintenanceStatus = async (req: Request, res: Response) => {
   try {
@@ -571,7 +614,7 @@ export const getMaintenanceStatus = async (req: Request, res: Response) => {
 };
 
 /**
- * 15. 점검 상태 설정 (ADMIN 전용)
+ * 17. 점검 상태 설정 (ADMIN 전용)
  */
 export const setMaintenanceStatus = async (req: Request, res: Response) => {
   const { active, startAt, endAt } = req.body;

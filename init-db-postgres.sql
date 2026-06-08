@@ -165,6 +165,11 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, endpoint)
 );
+DELETE FROM push_subscriptions ps
+USING push_subscriptions newer
+WHERE ps.endpoint = newer.endpoint
+  AND ps.id < newer.id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 
 -- 10. 예약 푸시 알림 테이블
 CREATE TABLE IF NOT EXISTS push_notifications (
@@ -188,6 +193,14 @@ CREATE TABLE IF NOT EXISTS card_reports (
     star INTEGER DEFAULT 0,                       -- 신고된 카드의 별(0~5성)
     reason TEXT NOT NULL,
     status TEXT DEFAULT 'pending',               -- 'pending', 'resolved', 'rejected'
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 스트리머 카드 재등록 금지 목록
+CREATE TABLE IF NOT EXISTS streamer_registration_blocks (
+    channel_id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    blocked_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -235,6 +248,7 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     game_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'STARTED',
     target_data TEXT,
+    ticket_spent_type TEXT DEFAULT 'NONE',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     earned_points INTEGER DEFAULT 0
@@ -279,6 +293,7 @@ ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS ticket_spent_type TEXT DEFAULT 'NONE';
 
 -- 하위 호환성 유지: user_cards 테이블에 코스메틱 외래키 제약조건 추가
 DO $$
@@ -317,6 +332,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id);
 CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);
 
 CREATE TABLE IF NOT EXISTS system_configs (
@@ -377,6 +393,7 @@ CREATE OR REPLACE FUNCTION start_minigame_session_atomic(
 RETURNS TEXT AS $$
 DECLARE
   ticket user_minigame_tickets%ROWTYPE;
+  spent_type TEXT := 'BASE';
 BEGIN
   INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
   VALUES (p_user_id, 5, 0, NOW(), NOW())
@@ -396,15 +413,17 @@ BEGIN
        SET bonus_tickets = bonus_tickets - 1,
            updated_at = NOW()
      WHERE user_id = p_user_id;
+    spent_type := 'BONUS';
   ELSE
     UPDATE user_minigame_tickets
        SET current_tickets = current_tickets - 1,
            updated_at = NOW()
      WHERE user_id = p_user_id;
+    spent_type := 'BASE';
   END IF;
 
-  INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, created_at)
-  VALUES (p_session_id, p_user_id, p_game_type, 'STARTED', p_target_data, NOW());
+  INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at)
+  VALUES (p_session_id, p_user_id, p_game_type, 'STARTED', p_target_data, spent_type, NOW());
 
   RETURN 'OK';
 END;
@@ -463,6 +482,28 @@ BEGIN
   UPDATE users
      SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + GREATEST(COALESCE(p_amount, 0), 0)
    WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION delete_user_account(p_user_id TEXT)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE market_listings SET buyer_id = NULL WHERE buyer_id = p_user_id;
+  DELETE FROM market_listings WHERE seller_id = p_user_id;
+  DELETE FROM trades WHERE sender_id = p_user_id OR receiver_id = p_user_id;
+  DELETE FROM user_blocks WHERE blocker_id = p_user_id OR blocked_id = p_user_id;
+  DELETE FROM notifications WHERE user_id = p_user_id;
+  DELETE FROM push_subscriptions WHERE user_id = p_user_id;
+  DELETE FROM coupon_logs WHERE user_id = p_user_id;
+  DELETE FROM card_reports WHERE reporter_id = p_user_id;
+  DELETE FROM user_titles WHERE user_id = p_user_id;
+  DELETE FROM user_cosmetics WHERE user_id = p_user_id;
+  DELETE FROM shop_purchases WHERE user_id = p_user_id;
+  DELETE FROM user_minigame_tickets WHERE user_id = p_user_id;
+  DELETE FROM minigame_sessions WHERE user_id = p_user_id;
+  DELETE FROM user_cards WHERE user_id = p_user_id;
+  UPDATE streamers SET registered_by = NULL WHERE registered_by = p_user_id;
+  DELETE FROM users WHERE id = p_user_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1133,6 +1174,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
 INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
+INSERT INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240') ON CONFLICT (key) DO NOTHING; -- 미니게임 동전 충전 간격(분)
 INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_end_at', '') ON CONFLICT (key) DO NOTHING;

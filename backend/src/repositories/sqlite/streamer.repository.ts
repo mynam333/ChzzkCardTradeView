@@ -161,6 +161,22 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       .run(isBanned ? 1 : 0, channelId);
   }
 
+  async isRegistrationBlocked(channelId: string): Promise<boolean> {
+    const row = this.getDb().prepare('SELECT 1 FROM streamer_registration_blocks WHERE channel_id = ? LIMIT 1').get(channelId);
+    return !!row;
+  }
+
+  async blockRegistration(channelId: string, reason: string, blockedBy?: string | null): Promise<void> {
+    this.getDb().prepare(`
+      INSERT INTO streamer_registration_blocks (channel_id, reason, blocked_by, created_at)
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(channel_id) DO UPDATE SET
+        reason = excluded.reason,
+        blocked_by = excluded.blocked_by,
+        created_at = datetime('now')
+    `).run(channelId, reason, blockedBy || null);
+  }
+
   async findStreamerIndex(channelId: string): Promise<number> {
     const rows = this.getDb().prepare('SELECT channel_id FROM streamers ORDER BY channel_id').all() as { channel_id: string }[];
     const index = rows.findIndex(r => r.channel_id === channelId);

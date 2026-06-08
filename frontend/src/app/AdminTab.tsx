@@ -133,6 +133,8 @@ export const AdminTab: React.FC = () => {
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
   const [freeDrawMaxStack, setFreeDrawMaxStack] = useState('1');
   const [isSavingInterval, setIsSavingInterval] = useState(false);
+  const [minigameTicketChargeMinutes, setMinigameTicketChargeMinutes] = useState('240');
+  const [isSavingMinigameTicketCharge, setIsSavingMinigameTicketCharge] = useState(false);
   const [drawCost, setDrawCost] = useState('10000');           // 뽑기 1회 비용 (P)
   const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
 
@@ -171,6 +173,7 @@ export const AdminTab: React.FC = () => {
 
   // 신고/밴
   const [reports, setReports] = useState<AdminReport[]>([]);
+  const [preventReregistrationByReport, setPreventReregistrationByReport] = useState<Record<number, boolean>>({});
   const [banUserId, setBanUserId] = useState('');
   const [banReason, setBanReason] = useState('');
 
@@ -211,6 +214,7 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'shop') {
       fetchShopItems();
       fetchFreeDrawInterval();
+      fetchMinigameTicketChargeInterval();
       fetchDrawCost();
     }
     if (subTab === 'push') {
@@ -538,11 +542,18 @@ export const AdminTab: React.FC = () => {
   const isSelfDeletionReport = (report: AdminReport) => report.reason.startsWith('[본인 카드 삭제 요청]');
 
   const handleDeleteStreamerFromReport = async (report: AdminReport) => {
-    if (!window.confirm(`[${report.streamer_name || report.channel_id}] 카드를 삭제하고 보유자에게 보상 지급 후 신고를 처리할까요?`)) return;
+    const preventReregistration = preventReregistrationByReport[report.id] === true;
+    const extraWarning = preventReregistration
+      ? '\n\n재등록 금지가 함께 적용되어 이후 같은 채널 ID로 카드 등록이 차단됩니다.'
+      : '';
+    if (!window.confirm(`[${report.streamer_name || report.channel_id}] 카드를 삭제하고 보유자에게 보상 지급 후 신고를 처리할까요?${extraWarning}`)) return;
     try {
       const res = await apiFetch(`/admin/streamers/${report.channel_id}/delete`, {
         method: 'POST',
-        body: JSON.stringify({ confirmation: report.channel_id })
+        body: JSON.stringify({
+          confirmation: report.channel_id,
+          prevent_reregistration: preventReregistration
+        })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -551,6 +562,11 @@ export const AdminTab: React.FC = () => {
       }
       toast(data.message || '카드 삭제 요청을 처리했습니다.', 'success');
       await handleResolveReport(report.id, 'resolved');
+      setPreventReregistrationByReport((prev) => {
+        const next = { ...prev };
+        delete next[report.id];
+        return next;
+      });
       fetchCouponStreamers(true);
       fetchStats();
     } catch {
@@ -722,6 +738,42 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러', 'error');
     } finally {
       setIsSavingInterval(false);
+    }
+  };
+
+  const fetchMinigameTicketChargeInterval = async () => {
+    try {
+      const res = await apiFetch('/admin/config/minigame-ticket-charge');
+      if (res.ok) {
+        const data = await res.json();
+        setMinigameTicketChargeMinutes(String(data.intervalMinutes ?? '240'));
+      }
+    } catch { /* noop */ }
+  };
+
+  const handleSaveMinigameTicketChargeInterval = async () => {
+    const num = parseInt(minigameTicketChargeMinutes, 10);
+    if (isNaN(num) || num < 1) {
+      toast('미니게임 동전 충전 간격은 1분 이상의 정수여야 합니다.', 'error');
+      return;
+    }
+    setIsSavingMinigameTicketCharge(true);
+    try {
+      const res = await apiFetch('/admin/config/minigame-ticket-charge', {
+        method: 'POST',
+        body: JSON.stringify({ intervalMinutes: num })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '미니게임 동전 충전 간격이 변경되었습니다.', 'success');
+        fetchMinigameTicketChargeInterval();
+      } else {
+        toast(data.message || '설정 저장 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingMinigameTicketCharge(false);
     }
   };
 
@@ -1583,7 +1635,24 @@ export const AdminTab: React.FC = () => {
                   <div className="flex flex-wrap justify-end gap-1.5 border-t border-border/40 pt-2">
                     <button onClick={() => handleBanUser(rep.reporter_id, '7d', '허위/악성 신고 누적으로 인한 제재')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">신고자 7일 밴</button>
                     {rep.status === 'pending' && isSelfDeletionReport(rep) ? (
-                      <button onClick={() => handleDeleteStreamerFromReport(rep)} className="rounded bg-red-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-red-600">카드 삭제 처리</button>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2 py-1">
+                        <label className="flex cursor-pointer select-none items-center gap-1.5 text-[10px] font-bold text-red-500">
+                          <input
+                            type="checkbox"
+                            checked={preventReregistrationByReport[rep.id] === true}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setPreventReregistrationByReport((prev) => ({
+                                ...prev,
+                                [rep.id]: checked
+                              }));
+                            }}
+                            className="h-3.5 w-3.5 rounded border-red-300 text-red-500"
+                          />
+                          재등록 금지
+                        </label>
+                        <button onClick={() => handleDeleteStreamerFromReport(rep)} className="rounded bg-red-500 px-2 py-1 text-[10px] font-bold text-white hover:bg-red-600">카드 삭제 처리</button>
+                      </div>
                     ) : null}
                     {rep.status === 'pending' && !isSelfDeletionReport(rep) ? (
                       <>
@@ -2013,7 +2082,7 @@ export const AdminTab: React.FC = () => {
             <h4 className="text-sm font-black text-foreground mb-2">스트리머 카드 삭제</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
               <b className="text-foreground">{delTarget.name}</b> 카드를 모든 보유자에게서 삭제합니다.<br />
-              보유자에게는 <b className="text-emerald-500">현재 시세({(delTarget.base_value || 0).toLocaleString()} P, 별 등급 반영)</b>만큼 포인트가 지급됩니다.<br />
+              보유자에게는 <b className="text-emerald-500">추가 무료 소환 티켓 1장</b>이 지급됩니다.<br />
               <b className="text-red-500">이 작업은 되돌릴 수 없습니다.</b>
             </p>
             <div className="mt-5 flex items-center justify-center gap-2">
@@ -2073,6 +2142,39 @@ export const AdminTab: React.FC = () => {
                 className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all shadow-md active:scale-95"
               >
                 {isSavingInterval ? '저장 중...' : '설정 저장'}
+              </button>
+            </div>
+          </div>
+
+          {/* 미니게임 동전 충전 간격 설정 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Gamepad2 className="h-4 w-4 text-sky-500" />
+              미니게임 동전 충전 간격 설정
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              미니게임 기본 동전이 1개 충전되는 시간을 분 단위로 설정합니다. 기본값은 <b>240분(4시간)</b>입니다.<br />
+              이미 충전 대기 중인 유저의 동전은 삭제하거나 초기화하지 않고, 다음 상태 조회 시 새 간격 기준으로 남은 시간이 재계산됩니다.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={minigameTicketChargeMinutes}
+                  onChange={(e) => setMinigameTicketChargeMinutes(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none"
+                  placeholder="예: 240"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">분</span>
+              </div>
+              <button
+                onClick={handleSaveMinigameTicketChargeInterval}
+                disabled={isSavingMinigameTicketCharge}
+                className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-white hover:bg-sky-600 disabled:opacity-50 transition-all shadow-md active:scale-95"
+              >
+                {isSavingMinigameTicketCharge ? '저장 중...' : '설정 저장'}
               </button>
             </div>
           </div>

@@ -199,6 +199,30 @@ export class SqliteUserRepository implements IUserRepository {
       .run(qty, id);
   }
 
+  async deleteAccount(id: string): Promise<void> {
+    const db = this.getDb();
+    const txn = db.transaction(() => {
+      db.prepare('UPDATE market_listings SET buyer_id = NULL WHERE buyer_id = ?').run(id);
+      db.prepare('DELETE FROM market_listings WHERE seller_id = ?').run(id);
+      db.prepare('DELETE FROM trades WHERE sender_id = ? OR receiver_id = ?').run(id, id);
+      db.prepare('DELETE FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?').run(id, id);
+      db.prepare('DELETE FROM notifications WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM coupon_logs WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM card_reports WHERE reporter_id = ?').run(id);
+      db.prepare('DELETE FROM user_titles WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM user_cosmetics WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM shop_purchases WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM user_minigame_tickets WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM minigame_sessions WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM user_cards WHERE user_id = ?').run(id);
+      db.prepare('UPDATE streamers SET registered_by = NULL WHERE registered_by = ?').run(id);
+      db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    });
+
+    txn();
+  }
+
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
     this.getDb().prepare('UPDATE users SET last_free_draw = ? WHERE id = ?').run(time, id);
   }

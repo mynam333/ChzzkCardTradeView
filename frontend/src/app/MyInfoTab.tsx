@@ -13,7 +13,9 @@ import {
   Check,
   Share2,
   Ban,
-  Crown
+  Crown,
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
@@ -42,6 +44,11 @@ interface UserCard {
     base_value: number;
   };
 }
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
 
 export const MyInfoTab: React.FC = () => {
   const { user, logout, updatePoints, refreshUserData, toast } = useApp();
@@ -78,6 +85,12 @@ export const MyInfoTab: React.FC = () => {
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
   const [deleteRequesting, setDeleteRequesting] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawText, setWithdrawText] = useState('');
+  const [withdrawUserId, setWithdrawUserId] = useState('');
+  const [withdrawIrreversible, setWithdrawIrreversible] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   // 크롭 모달 상태
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -92,6 +105,23 @@ export const MyInfoTab: React.FC = () => {
       fetchBlocks();
     }
   }, [user]);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     const currentUrl = new URL(window.location.href);
@@ -296,8 +326,15 @@ export const MyInfoTab: React.FC = () => {
       toast('이 브라우저는 웹 푸시 알림을 지원하지 않습니다.');
       return;
     }
+    const installPrompt = deferredInstallPrompt;
+    if (installPrompt) {
+      setDeferredInstallPrompt(null);
+      installPrompt.prompt().catch(() => { /* 설치 프롬프트 실패는 푸시 구독을 막지 않습니다. */ });
+    }
     const result = await subscribeToPush();
-    toast(result.ok ? '실시간 푸시 알림 구독이 완료되었습니다!' : result.message);
+    toast(result.ok
+      ? (installPrompt ? '푸시 알림 구독을 완료했고 앱 설치도 함께 요청했습니다.' : '실시간 푸시 알림 구독이 완료되었습니다!')
+      : result.message);
   };
 
   const handleSetRepresentative = async (channelId: string | null, star: number | null = null) => {
@@ -358,6 +395,37 @@ export const MyInfoTab: React.FC = () => {
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setDeleteRequesting(false);
+    }
+  };
+
+  const canWithdraw =
+    withdrawText === '회원 탈퇴'
+    && withdrawUserId === user.id
+    && withdrawIrreversible;
+
+  const handleWithdrawAccount = async () => {
+    if (!canWithdraw || withdrawing) return;
+    setWithdrawing(true);
+    try {
+      const res = await apiFetch('/users/me', {
+        method: 'DELETE',
+        body: JSON.stringify({
+          confirmationText: withdrawText,
+          userIdConfirm: withdrawUserId,
+          irreversible: withdrawIrreversible
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast(data.message || '회원 탈퇴가 완료되었습니다.', 'success');
+        logout();
+      } else {
+        toast(data.message || '회원 탈퇴 처리에 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -775,9 +843,9 @@ export const MyInfoTab: React.FC = () => {
       {/* 알림 & 앱 설치 */}
       <section className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><BellRing className="h-4.5 w-4.5 text-primary" /> 실시간 푸시 알림</h3>
-        <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트 소식을 푸시로 받아볼 수 있습니다. (PWA 설치 시 백그라운드 수신)</p>
+        <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트·카드 삭제 보상·신고 처리 관련 소식을 푸시로 받아볼 수 있습니다. 설치 가능한 환경에서는 앱 설치도 함께 요청합니다.</p>
         <button onClick={handleEnablePush} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2.5 text-xs font-black text-primary-foreground transition">
-          알림 받기 (구독하기)
+          알림 받기 및 앱 설치
         </button>
       </section>
 
@@ -819,6 +887,87 @@ export const MyInfoTab: React.FC = () => {
           </div>
         ) : (
           <p className="text-[11px] text-muted-foreground text-center py-3">차단한 유저가 없습니다.</p>
+        )}
+      </section>
+
+      {/* 회원 탈퇴 */}
+      <section className="cute-surface rounded-[2rem] border border-rose-500/20 bg-rose-500/[0.03] p-6 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <h3 className="text-base font-black flex items-center gap-2 text-rose-500">
+              <AlertTriangle className="h-4.5 w-4.5" /> 위험 구역
+            </h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              회원 탈퇴 시 계정, 보유 카드, 코스메틱, 쿠폰 사용 기록, 차단 정보, 알림, 미니게임 기록 등 개인 데이터가 삭제됩니다.
+              완료 후에는 복구할 수 없습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWithdrawOpen((v) => !v)}
+            className="cute-wiggle-hover shrink-0 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-black text-rose-500 transition hover:bg-rose-500/15"
+          >
+            {withdrawOpen ? '탈퇴 접기' : '회원 탈퇴 열기'}
+          </button>
+        </div>
+
+        {withdrawOpen && (
+          <div className="space-y-4 rounded-[1.5rem] border border-rose-500/25 bg-card/75 p-4 shadow-sm">
+            <div className="rounded-2xl bg-rose-500/10 p-3 text-[11px] leading-relaxed text-rose-600 dark:text-rose-200">
+              <p className="font-black">탈퇴 전 확인해 주세요.</p>
+              <p className="mt-1">
+                판매 중인 매물과 진행 중인 교환 정보도 정리됩니다. 구매 이력에서 회원님을 식별하는 정보는 제거되며,
+                탈퇴 직후 같은 세션으로는 서비스를 이용할 수 없습니다.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-black text-muted-foreground">계정 ID 확인</span>
+                <input
+                  type="text"
+                  value={withdrawUserId}
+                  onChange={(e) => setWithdrawUserId(e.target.value)}
+                  placeholder={user.id}
+                  className="w-full rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs font-bold focus:border-rose-400 focus:outline-none"
+                />
+                <span className="block text-[10px] text-muted-foreground">현재 계정 ID를 그대로 입력하세요.</span>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-black text-muted-foreground">확인 문구</span>
+                <input
+                  type="text"
+                  value={withdrawText}
+                  onChange={(e) => setWithdrawText(e.target.value)}
+                  placeholder="회원 탈퇴"
+                  className="w-full rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs font-bold focus:border-rose-400 focus:outline-none"
+                />
+                <span className="block text-[10px] text-muted-foreground"><b>회원 탈퇴</b>를 정확히 입력하세요.</span>
+              </label>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-border/70 bg-secondary/35 p-3">
+              <input
+                type="checkbox"
+                checked={withdrawIrreversible}
+                onChange={(e) => setWithdrawIrreversible(e.target.checked)}
+                className="mt-0.5 rounded border-border"
+              />
+              <span className="text-[11px] font-bold leading-relaxed text-foreground/90">
+                탈퇴 후 데이터 복구가 불가능하며, 보유 자산과 서비스 기록이 삭제되는 것을 이해했습니다.
+              </span>
+            </label>
+
+            <button
+              type="button"
+              onClick={handleWithdrawAccount}
+              disabled={!canWithdraw || withdrawing}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-500 px-5 py-3 text-xs font-black text-white shadow-md shadow-rose-500/15 transition hover:bg-rose-600 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-45"
+            >
+              <Trash2 className="h-4 w-4" />
+              {withdrawing ? '탈퇴 처리 중...' : '회원 탈퇴 영구 실행'}
+            </button>
+          </div>
         )}
       </section>
 

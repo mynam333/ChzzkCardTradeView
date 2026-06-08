@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { notificationRepository, titleRepository, userRepository } from '../repositories';
 import { IS_PRODUCTION } from '../config';
+import { sendPushToUser } from './pushController';
 
 const parseTitleId = (value: unknown): number => {
   const id = Number(value);
@@ -84,6 +85,7 @@ export const awardTitle = async (req: Request, res: Response) => {
       body: `[${title.name}] 칭호가 수여되었습니다.`,
       link: '/my-info'
     });
+    sendPushToUser(userId, '새 칭호를 획득했습니다', `[${title.name}] 칭호가 수여되었습니다.`, '/my-info');
     return res.status(200).json({ message: `${user.username}님에게 ${title.name} 칭호를 수여했습니다.` });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '칭호 수여 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -110,12 +112,15 @@ export const awardTitleToMany = async (req: Request, res: Response) => {
 
     await titleRepository.awardMany(newUserIds, id);
     for (let offset = 0; offset < newUserIds.length; offset += 25) {
-      await Promise.all(newUserIds.slice(offset, offset + 25).map((userId) => notificationRepository.create({
-        user_id: userId,
-        title: '새 칭호를 획득했습니다',
-        body: `[${title.name}] 칭호가 수여되었습니다.`,
-        link: '/my-info'
-      })));
+      await Promise.all(newUserIds.slice(offset, offset + 25).map((userId) => {
+        sendPushToUser(userId, '새 칭호를 획득했습니다', `[${title.name}] 칭호가 수여되었습니다.`, '/my-info');
+        return notificationRepository.create({
+          user_id: userId,
+          title: '새 칭호를 획득했습니다',
+          body: `[${title.name}] 칭호가 수여되었습니다.`,
+          link: '/my-info'
+        });
+      }));
     }
 
     return res.status(200).json({

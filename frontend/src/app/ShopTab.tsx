@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
@@ -25,6 +26,21 @@ const formatStreamerSerial = (streamer: { serial_number?: number | null } | null
   streamer?.serial_number == null
     ? '----'
     : String(streamer.serial_number).padStart(4, '0');
+
+const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
+  const x = Math.cos(i * 1.74) * (54 + (i % 6) * 15);
+  const y = Math.sin(i * 2.18) * (42 + (i % 5) * 13);
+  return {
+    id: i,
+    x,
+    y,
+    x2: x * 1.24,
+    y2: y * 1.24,
+    size: 3 + (i % 4) * 1.5,
+    delay: (i % 9) * 0.08,
+    duration: 1.3 + (i % 5) * 0.16
+  };
+});
 
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
@@ -317,9 +333,12 @@ export const ShopTab: React.FC = () => {
         // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
         import('canvas-confetti').then((module) => {
           const confetti = module.default;
-          confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#3b82f6'] });
+          const colors = ['#38bdf8', '#8b5cf6', '#22c55e', '#facc15', '#ffffff'];
+          confetti({ particleCount: 120, spread: 78, startVelocity: 42, scalar: 1.05, origin: { x: 0.5, y: 0.56 }, colors });
+          confetti({ particleCount: 55, angle: 62, spread: 58, startVelocity: 38, scalar: 0.85, origin: { x: 0.12, y: 0.72 }, colors });
+          confetti({ particleCount: 55, angle: 118, spread: 58, startVelocity: 38, scalar: 0.85, origin: { x: 0.88, y: 0.72 }, colors });
         }).catch((err) => console.error('Confetti 로드 실패:', err));
-      }, 1200);
+      }, 2200);
     } catch (e: any) {
       // 실패 시 롤백
       if (!isFreeDraw) updatePoints(drawCost);
@@ -441,21 +460,82 @@ export const ShopTab: React.FC = () => {
 
             {(isDrawing || drawnCard) && (
               <div className="mt-8 flex flex-col items-center justify-center border-t border-border/50 pt-8 animate-in fade-in duration-200">
-                {isDrawing ? (
-                  <div className="gacha-stage flex flex-col items-center gap-4 py-12">
-                    <div className="gacha-burst" />
-                    <div className="gacha-pack">
-                      <Sparkles className="h-9 w-9 text-white drop-shadow-lg" />
-                      <span>CHIKAPO</span>
-                    </div>
-                    <p className="text-xs font-black text-primary">치지직 스트리머 카드 팩 개봉 중...</p>
-                  </div>
-                ) : drawnCard ? (
-                  <div className="flex flex-col items-center">
-                    <span className="text-xs font-bold text-primary mb-3">
-                      {drawnCard.is_free ? '무료 소환 성공!' : '소환 성공!'} 보관함에서 확인할 수 있어요
-                    </span>
-                    <div className="gacha-result-card relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl">
+                <AnimatePresence mode="wait">
+                  {isDrawing ? (
+                    <motion.div
+                      key="drawing"
+                      initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -18, scale: 1.04, filter: 'blur(8px)' }}
+                      transition={{ duration: 0.32, ease: 'easeOut' }}
+                      className="gacha-stage flex flex-col items-center gap-4 py-12"
+                    >
+                      <div className="gacha-portal">
+                        <div className="gacha-burst" />
+                        <div className="gacha-orbit" />
+                        <div className="gacha-orbit gacha-orbit-two" />
+                        {GACHA_PARTICLES.map((p) => (
+                          <span
+                            key={p.id}
+                            className="gacha-particle"
+                            style={{
+                              '--x': `${p.x}px`,
+                              '--y': `${p.y}px`,
+                              '--x2': `${p.x2}px`,
+                              '--y2': `${p.y2}px`,
+                              '--size': `${p.size}px`,
+                              '--delay': `${p.delay}s`,
+                              '--duration': `${p.duration}s`
+                            } as React.CSSProperties}
+                          />
+                        ))}
+                        <motion.div
+                          className="gacha-pack"
+                          animate={{
+                            y: [0, -16, 6, -9, 0],
+                            rotate: [-4, 6, -8, 4, -4],
+                            scale: [1, 1.08, 0.98, 1.06, 1]
+                          }}
+                          transition={{ duration: 1.24, repeat: Infinity, ease: 'easeInOut' }}
+                        >
+                          <div className="gacha-pack-top" />
+                          <Sparkles className="h-9 w-9 text-white drop-shadow-lg" />
+                          <span>CHIKAPO</span>
+                        </motion.div>
+                      </div>
+                      <motion.p
+                        className="text-xs font-black text-primary"
+                        animate={{ opacity: [0.58, 1, 0.58] }}
+                        transition={{ duration: 1.05, repeat: Infinity }}
+                      >
+                        카드팩 에너지를 모으는 중...
+                      </motion.p>
+                    </motion.div>
+                  ) : drawnCard ? (
+                    <motion.div
+                      key="result"
+                      initial={{ opacity: 0, y: 24, scale: 0.92 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+                      className="gacha-result-wrap flex flex-col items-center"
+                    >
+                      <motion.span
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.18 }}
+                        className="mb-3 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-black text-primary shadow-sm"
+                      >
+                        {drawnCard.is_free ? '무료 소환 성공!' : '소환 성공!'} 보관함에서 확인할 수 있어요
+                      </motion.span>
+                    <motion.div
+                      className="gacha-result-card relative flex h-80 w-52 flex-col justify-between overflow-hidden rounded-[1.75rem] border border-border/80 bg-card p-4 shadow-xl"
+                      initial={{ rotateY: -28, rotateX: 12, scale: 0.82, y: 24 }}
+                      animate={{ rotateY: 0, rotateX: 0, scale: 1, y: 0 }}
+                      whileHover={{ rotateY: 5, rotateX: -4, y: -6, scale: 1.02 }}
+                      transition={{ duration: 0.62, ease: [0.16, 1, 0.3, 1] }}
+                      style={{ transformStyle: 'preserve-3d' }}
+                    >
                       <div className="absolute inset-0 z-0">
                         <img src={drawnCard.custom_image_url || drawnCard.logo_url} alt={drawnCard.name} className="h-full w-full object-cover opacity-80" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>
@@ -476,10 +556,11 @@ export const ShopTab: React.FC = () => {
                           <span className="cute-number-font text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                     <button onClick={() => setDrawnCard(null)} className="mt-4 rounded-lg bg-secondary px-4 py-1.5 text-xs font-bold hover:bg-secondary/80 text-muted-foreground">닫기</button>
-                  </div>
-                ) : null}
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
               </div>
             )}
           </section>

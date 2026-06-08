@@ -93,6 +93,21 @@ describe('findByIds 배치 조회', () => {
   });
 });
 
+describe('StreamerRepository registration blocks', () => {
+  it('blocks a deleted streamer channel from being registered again', async () => {
+    seedUser(db, 'admin-user');
+    expect(await streamerRepository.isRegistrationBlocked('blocked-channel')).toBe(false);
+
+    await streamerRepository.blockRegistration(
+      'blocked-channel',
+      '[본인 카드 삭제 요청] 권리자 요청에 따라 카드 재등록 금지',
+      'admin-user'
+    );
+
+    expect(await streamerRepository.isRegistrationBlocked('blocked-channel')).toBe(true);
+  });
+});
+
 describe('MinigameRepository practice mode', () => {
   it('creates a practice session without deducting tickets even when the balance is zero', async () => {
     seedUser(db, 'practice-user');
@@ -124,6 +139,60 @@ describe('MinigameRepository practice mode', () => {
       game_type: 'puzzle',
       status: 'STARTED'
     });
+  });
+});
+
+describe('MinigameRepository stale started session recovery', () => {
+  it('expires old paid sessions and refunds the consumed base ticket', async () => {
+    seedUser(db, 'refund-base');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO user_minigame_tickets
+        (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+      VALUES (?, 4, 0, ?, ?)
+    `).run('refund-base', now, now);
+    db.prepare(`
+      INSERT INTO minigame_sessions
+        (id, user_id, game_type, status, target_data, ticket_spent_type, created_at)
+      VALUES ('expired-base-session', 'refund-base', 'quiz', 'STARTED', ?, 'BASE', datetime('now', '-11 minutes'))
+    `).run(JSON.stringify({ practice_mode: false }));
+
+    await minigameRepository.expireSessions(10);
+
+    expect(db.prepare(`
+      SELECT current_tickets, bonus_tickets
+      FROM user_minigame_tickets
+      WHERE user_id = ?
+    `).get('refund-base')).toEqual({
+      current_tickets: 5,
+      bonus_tickets: 0
+    });
+    expect(db.prepare('SELECT status FROM minigame_sessions WHERE id = ?').get('expired-base-session')).toEqual({
+      status: 'EXPIRED'
+    });
+  });
+
+  it('returns an active paid session so reconnects do not spend another ticket', async () => {
+    seedUser(db, 'resume-user');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO user_minigame_tickets
+        (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+      VALUES (?, 4, 0, ?, ?)
+    `).run('resume-user', now, now);
+    db.prepare(`
+      INSERT INTO minigame_sessions
+        (id, user_id, game_type, status, target_data, ticket_spent_type, created_at)
+      VALUES ('resume-session', 'resume-user', 'puzzle', 'STARTED', ?, 'BASE', datetime('now'))
+    `).run(JSON.stringify({ practice_mode: false, image_url: 'https://example.com/card.png' }));
+
+    const active = await minigameRepository.findActiveStartedSession('resume-user', 'puzzle');
+
+    expect(active).toEqual(expect.objectContaining({
+      id: 'resume-session',
+      ticket_spent_type: 'BASE',
+      status: 'STARTED'
+    }));
   });
 });
 

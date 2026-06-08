@@ -1,10 +1,10 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import crypto from 'crypto';
-import { minigameRepository, streamerRepository, userRepository } from '../repositories';
+import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { UserMinigameTicket, MinigameSession } from '../repositories/interfaces';
 
-const TICKET_CHARGE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4시간
+const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match'] as const;
@@ -13,8 +13,18 @@ const SUBMISSION_GRACE_MS = 2_000;
 const PUZZLE_TIME_LIMIT_MS = 120_000;
 const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
+const STARTED_SESSION_RECOVERY_MINUTES = 3;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
+
+async function getTicketChargeIntervalMinutes(): Promise<number> {
+  const value = await systemConfigRepository.get(
+    'minigame_ticket_charge_interval_minutes',
+    String(DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES)
+  );
+  const minutes = parseInt(value, 10);
+  return Number.isFinite(minutes) && minutes >= 1 ? minutes : DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES;
+}
 
 export function getDailyMinigame(nowMs = Date.now()): {
   game_type: DailyMinigameType;
@@ -40,34 +50,42 @@ export function getDailyMinigame(nowMs = Date.now()): {
 }
 
 // 티켓 계산 및 갱신 헬퍼
-function refreshUserTickets(ticket: UserMinigameTicket): { current_tickets: number; last_charged_at: string; seconds_until_next_ticket: number } {
+function refreshUserTickets(
+  ticket: UserMinigameTicket,
+  chargeIntervalMinutes: number
+): { current_tickets: number; last_charged_at: string; seconds_until_next_ticket: number } {
   let { current_tickets, last_charged_at } = ticket;
   const now = Date.now();
-  const lastChargedMs = new Date(last_charged_at).getTime();
+  const intervalMs = Math.max(1, chargeIntervalMinutes) * 60 * 1000;
+  let lastChargedMs = new Date(last_charged_at).getTime();
+  if (!Number.isFinite(lastChargedMs) || lastChargedMs > now) {
+    lastChargedMs = now;
+    last_charged_at = new Date(now).toISOString();
+  }
 
   if (current_tickets >= MAX_TICKETS) {
     return {
       current_tickets: MAX_TICKETS,
       last_charged_at: new Date(now).toISOString(),
-      seconds_until_next_ticket: TICKET_CHARGE_INTERVAL_MS / 1000
+      seconds_until_next_ticket: intervalMs / 1000
     };
   }
 
   const elapsedMs = now - lastChargedMs;
-  if (elapsedMs >= TICKET_CHARGE_INTERVAL_MS) {
-    const chargedCount = Math.floor(elapsedMs / TICKET_CHARGE_INTERVAL_MS);
+  if (elapsedMs >= intervalMs) {
+    const chargedCount = Math.floor(elapsedMs / intervalMs);
     current_tickets = Math.min(MAX_TICKETS, current_tickets + chargedCount);
 
     const newChargedMs = current_tickets === MAX_TICKETS
       ? now
-      : lastChargedMs + chargedCount * TICKET_CHARGE_INTERVAL_MS;
+      : lastChargedMs + chargedCount * intervalMs;
 
     last_charged_at = new Date(newChargedMs).toISOString();
   }
 
-  const nextChargeTime = new Date(last_charged_at).getTime() + TICKET_CHARGE_INTERVAL_MS;
+  const nextChargeTime = new Date(last_charged_at).getTime() + intervalMs;
   const seconds_until_next_ticket = current_tickets >= MAX_TICKETS
-    ? TICKET_CHARGE_INTERVAL_MS / 1000
+    ? intervalMs / 1000
     : Math.max(0, Math.ceil((nextChargeTime - now) / 1000));
 
   return {
@@ -122,14 +140,67 @@ async function getAnswerReveal(
   };
 }
 
+async function buildRecoverableGameData(
+  gameType: DailyMinigameType,
+  target: any
+): Promise<any | null> {
+  if (target?.practice_mode === true) return null;
+
+  if (gameType === 'quiz') {
+    if (!target?.image_url || !Array.isArray(target?.choices) || target.choices.length < 4) return null;
+    return {
+      image_url: target.image_url,
+      choices: target.choices.map((choice: any) => ({
+        channel_id: choice.channel_id,
+        name: choice.name
+      }))
+    };
+  }
+
+  if (gameType === 'puzzle') {
+    if (!target?.image_url) return null;
+    return { image_url: target.image_url };
+  }
+
+  if (gameType === 'match') {
+    if (Array.isArray(target?.cards) && target.cards.length >= 2) {
+      return {
+        cards: target.cards.map((card: any) => ({
+          channel_id: card.channel_id,
+          name: card.name,
+          logo_url: card.logo_url
+        }))
+      };
+    }
+
+    if (!Array.isArray(target?.channel_ids) || target.channel_ids.length < 2) return null;
+    const streamers = await streamerRepository.findByIds(target.channel_ids);
+    if (streamers.length < 2) return null;
+    const byId = new Map(streamers.map((streamer: any) => [streamer.channel_id, streamer]));
+    return {
+      cards: target.channel_ids
+        .map((channelId: string) => byId.get(channelId))
+        .filter(Boolean)
+        .map((streamer: any) => ({
+          channel_id: streamer.channel_id,
+          name: streamer.name,
+          logo_url: streamer.logo_url
+        }))
+    };
+  }
+
+  return null;
+}
+
 // 1. GET /api/minigames/status
 export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
 
   try {
+    const chargeIntervalMinutes = await getTicketChargeIntervalMinutes();
     const dbTicket = await minigameRepository.getTicketStatus(userId);
-    const refreshed = refreshUserTickets(dbTicket);
+    const refreshed = refreshUserTickets(dbTicket, chargeIntervalMinutes);
     const dailyMinigame = getDailyMinigame();
 
     // 충전으로 인해 티켓이 늘어난 경우 DB 업데이트
@@ -143,6 +214,7 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
       bonus_tickets: dbTicket.bonus_tickets,
       max_tickets: MAX_TICKETS,
       seconds_until_next_ticket: refreshed.seconds_until_next_ticket,
+      ticket_charge_interval_minutes: chargeIntervalMinutes,
       last_charged_at: refreshed.last_charged_at,
       today_game: dailyMinigame.game_type,
       kst_date: dailyMinigame.kst_date,
@@ -179,9 +251,36 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     if (!practiceMode) {
+      await minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES).catch((err) => {
+        console.warn('[MinigameController] stale session cleanup failed:', err);
+      });
+
+      const activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
+      if (activeSession) {
+        let activeTarget: any = null;
+        try {
+          activeTarget = JSON.parse(activeSession.target_data || '{}');
+        } catch {
+          activeTarget = null;
+        }
+
+        const recoveredGameData = await buildRecoverableGameData(activeSession.game_type, activeTarget);
+        if (recoveredGameData) {
+          return res.status(200).json({
+            session_id: activeSession.id,
+            game_type,
+            practice_mode: false,
+            resumed: true,
+            message: '끊긴 미니게임 세션을 이어서 시작합니다.',
+            game_data: recoveredGameData
+          });
+        }
+      }
+
       // 일반 게임만 티켓 정보 조회 및 dynamic 충전을 반영합니다.
+      const chargeIntervalMinutes = await getTicketChargeIntervalMinutes();
       const dbTicket = await minigameRepository.getTicketStatus(userId);
-      const refreshed = refreshUserTickets(dbTicket);
+      const refreshed = refreshUserTickets(dbTicket, chargeIntervalMinutes);
 
       if (refreshed.current_tickets + dbTicket.bonus_tickets <= 0) {
         return res.status(403).json({ error: 'Forbidden', message: '사용 가능한 미니게임 티켓이 부족합니다.' });
@@ -215,7 +314,8 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
         correct_id: correctStreamer.channel_id,
         correct_name: correctStreamer.name,
         image_url: imageUrl,
-        star: star
+        star: star,
+        choices
       };
 
       gameData = {
@@ -245,7 +345,12 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       const shuffled = [...streamers].sort(() => 0.5 - Math.random()).slice(0, 6);
 
       targetData = {
-        channel_ids: shuffled.map(s => s.channel_id)
+        channel_ids: shuffled.map(s => s.channel_id),
+        cards: shuffled.map(s => ({
+          channel_id: s.channel_id,
+          name: s.name,
+          logo_url: s.logo_url
+        }))
       };
 
       gameData = {
@@ -272,7 +377,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(500).json({ error: 'InternalServerError', message: startResult.reason || '게임 세션 시작에 실패했습니다.' });
     }
 
-    minigameRepository.expireSessions(60).catch(() => { });
+    minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES).catch(() => { });
 
     return res.status(200).json({
       session_id: sessionId,
@@ -306,6 +411,27 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     if (session.user_id !== userId) {
       return res.status(403).json({ error: 'Forbidden', message: '잘못된 세션 소유권입니다.' });
     }
+    const target = JSON.parse(session.target_data);
+    const practiceMode = target.practice_mode === true;
+    const answer = await getAnswerReveal(session.game_type, target);
+
+    if (session.status === 'COMPLETED') {
+      const user = await userRepository.findById(userId);
+      const replayCorrect =
+        session.game_type === 'quiz'
+          ? payload?.answer_channel_id === target.correct_id
+          : payload?.success === true;
+
+      return res.status(200).json({
+        success: true,
+        correct: replayCorrect || (session.earned_points ?? 0) > 0,
+        earned_points: session.earned_points ?? 0,
+        new_balance: user?.point ?? 0,
+        message: '이미 처리된 미니게임 결과를 다시 불러왔습니다.',
+        practice_mode: practiceMode,
+        answer
+      });
+    }
     if (session.status !== 'STARTED') {
       return res.status(400).json({ error: 'BadRequest', message: '이미 처리되었거나 만료된 세션입니다.' });
     }
@@ -314,9 +440,6 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const sessionCreatedMs = new Date(session.created_at || '').getTime();
     const serverElapsedMs = Date.now() - sessionCreatedMs;
 
-    const target = JSON.parse(session.target_data);
-    const practiceMode = target.practice_mode === true;
-    const answer = await getAnswerReveal(session.game_type, target);
     let isCorrect = false;
     let earnedPoints = 0;
     let message = '아쉽게도 정답이 아닙니다!';
