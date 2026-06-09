@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { tradeRepository, userRepository, userCardRepository, notificationRepository, marketRepository } from '../repositories';
-import { TradeOffer } from '../repositories/interfaces';
+import { TradeOffer, User, Trade } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
@@ -11,6 +11,59 @@ const notify = (userId: string, title: string, body: string) => {
   sendPushToUser(userId, title, body, '/inventory');
   notificationRepository.create({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
 };
+
+const TRADE_ACCOUNT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+const parseUserCreatedAtMs = (createdAt?: string | null): number => {
+  if (!createdAt) return NaN;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAt)
+    ? `${createdAt.replace(' ', 'T')}Z`
+    : createdAt;
+  return new Date(normalized).getTime();
+};
+
+const findTradeAgeRestriction = (sender: User, receiver: User, nowMs = Date.now()): { message: string; availableAt?: string } | null => {
+  const checks = [
+    { user: sender, label: '제안자' },
+    { user: receiver, label: '상대방' }
+  ];
+
+  for (const { user, label } of checks) {
+    const createdMs = parseUserCreatedAtMs(user.created_at);
+    if (!Number.isFinite(createdMs)) {
+      return {
+        message: `${label} 계정의 가입 시각을 확인할 수 없어 1:1 교환을 진행할 수 없습니다.`
+      };
+    }
+
+    const availableMs = createdMs + TRADE_ACCOUNT_MIN_AGE_MS;
+    if (nowMs < availableMs) {
+      return {
+        message: `1:1 교환은 가입 후 24시간이 지난 계정끼리만 가능합니다. ${label} 계정은 아직 교환할 수 없습니다.`,
+        availableAt: new Date(availableMs).toISOString()
+      };
+    }
+  }
+
+  return null;
+};
+
+const loadTradeParticipants = async (trade: Trade): Promise<{ sender: User; receiver: User } | null> => {
+  const [sender, receiver] = await Promise.all([
+    userRepository.findById(trade.sender_id),
+    userRepository.findById(trade.receiver_id)
+  ]);
+  if (!sender || !receiver) return null;
+  return { sender, receiver };
+};
+
+const sendTradeAgeBlocked = (res: Response, restriction: { message: string; availableAt?: string }) =>
+  res.status(403).json({
+    error: 'TradeAccountTooNew',
+    reason: 'ACCOUNT_TOO_NEW',
+    message: restriction.message,
+    available_at: restriction.availableAt
+  });
 
 /**
  * 거래 오퍼 형식을 검증하고 정규화합니다.
@@ -124,6 +177,14 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
     if (receiver.id === sender.id) {
       return res.status(400).json({ error: 'BadRequest', message: '자기 자신과는 교환할 수 없습니다.' });
     }
+    const freshSender = await userRepository.findById(sender.id);
+    if (!freshSender) {
+      return res.status(404).json({ error: 'NotFound', message: '제안자 정보를 찾을 수 없습니다.' });
+    }
+    const ageRestriction = findTradeAgeRestriction(freshSender, receiver);
+    if (ageRestriction) {
+      return sendTradeAgeBlocked(res, ageRestriction);
+    }
 
     // 수신자가 제안자를 차단한 경우 교환 제안 불가
     if (await userRepository.isBlocked(receiver.id, sender.id)) {
@@ -141,9 +202,8 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
         return res.status(400).json({ error: 'InsufficientCards', message: '제안하려는 카드가 부족합니다. (이미 다른 거래에 묶여 있을 수 있어요)' });
       }
     }
-    const freshSender = await userRepository.findById(sender.id);
     const availablePoint = (freshSender?.point ?? 0) - reservations.points;
-    if (!freshSender || availablePoint < senderOffer.point) {
+    if (availablePoint < senderOffer.point) {
       return res.status(400).json({ error: 'InsufficientPoint', message: '제안하려는 포인트가 부족합니다. (다른 거래에 묶인 포인트 제외)' });
     }
 
@@ -216,6 +276,23 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
 
   try {
     const trade = await tradeRepository.findById(tradeId);
+    if (!trade) {
+      return res.status(404).json({ error: 'TradeFailed', reason: 'NOT_FOUND', message: REASON_MESSAGES.NOT_FOUND });
+    }
+    if (trade.status !== 'PENDING') {
+      return res.status(400).json({ error: 'TradeFailed', reason: 'NOT_PENDING', message: REASON_MESSAGES.NOT_PENDING });
+    }
+    if (trade.receiver_id !== user.id) {
+      return res.status(403).json({ error: 'TradeFailed', reason: 'FORBIDDEN', message: REASON_MESSAGES.FORBIDDEN });
+    }
+    const participants = await loadTradeParticipants(trade);
+    if (!participants) {
+      return res.status(400).json({ error: 'TradeFailed', reason: 'USER_NOT_FOUND', message: REASON_MESSAGES.USER_NOT_FOUND });
+    }
+    const ageRestriction = findTradeAgeRestriction(participants.sender, participants.receiver);
+    if (ageRestriction) {
+      return sendTradeAgeBlocked(res, ageRestriction);
+    }
     const result = await tradeRepository.confirm(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
@@ -243,6 +320,23 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const trade = await tradeRepository.findById(tradeId);
+    if (!trade) {
+      return res.status(404).json({ error: 'TradeFailed', reason: 'NOT_FOUND', message: REASON_MESSAGES.NOT_FOUND });
+    }
+    if (trade.status !== 'CONFIRMED') {
+      return res.status(400).json({ error: 'TradeFailed', reason: 'NOT_CONFIRMED', message: REASON_MESSAGES.NOT_CONFIRMED });
+    }
+    if (trade.sender_id !== user.id) {
+      return res.status(403).json({ error: 'TradeFailed', reason: 'FORBIDDEN', message: REASON_MESSAGES.FORBIDDEN });
+    }
+    const participants = await loadTradeParticipants(trade);
+    if (!participants) {
+      return res.status(400).json({ error: 'TradeFailed', reason: 'USER_NOT_FOUND', message: REASON_MESSAGES.USER_NOT_FOUND });
+    }
+    const ageRestriction = findTradeAgeRestriction(participants.sender, participants.receiver);
+    if (ageRestriction) {
+      return sendTradeAgeBlocked(res, ageRestriction);
+    }
     const result = await tradeRepository.finalize(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
