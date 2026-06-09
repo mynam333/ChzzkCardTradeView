@@ -153,7 +153,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           </div>
         )}
 
-        <nav className="min-h-0 flex-1 space-y-1">
+        <nav className="shrink-0 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -175,7 +175,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         </nav>
 
         {/* 테마 스위치 */}
-        <div className="mt-auto pt-4 border-t border-border">
+        <div className="mt-auto shrink-0 pt-4 border-t border-border">
           <div className="flex items-center justify-between px-2">
             <span className="text-xs font-bold text-muted-foreground">화면 테마</span>
             <button

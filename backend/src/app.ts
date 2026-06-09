@@ -80,6 +80,20 @@ app.use('/api', apiRouter);
 
 // 전역 에러 핸들러 (스택 트레이스 노출 방지 및 일관된 에러 응답)
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  const isRequestAborted =
+    err?.type === 'request.aborted' ||
+    err?.code === 'ECONNABORTED' ||
+    err?.message === 'request aborted' ||
+    (req as any).aborted === true;
+
+  if (isRequestAborted) {
+    console.warn(`[Request Aborted] ${req.method} ${req.originalUrl || req.url}`);
+    if (!res.headersSent && !res.destroyed) {
+      return res.status(499).json({ error: 'ClientClosedRequest', message: '요청이 클라이언트에 의해 중단되었습니다.' });
+    }
+    return;
+  }
+
   console.error('[Global Error]', err.stack || err);
   
   const status = err.status || err.statusCode || 500;
