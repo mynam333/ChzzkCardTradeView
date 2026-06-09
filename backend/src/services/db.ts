@@ -96,6 +96,10 @@ const createSqliteIdBackfillTrigger = (db: Database.Database, table: string) => 
   `);
 };
 
+const backfillNullIdFromRowId = (db: Database.Database, table: string) => {
+  db.exec(`UPDATE ${table} SET id = rowid WHERE id IS NULL;`);
+};
+
 const ensureUniqueIndex = (db: Database.Database, table: string, columns: string[], indexName: string) => {
   const quotedColumns = columns.map((column) => `"${column}"`).join(', ');
   const partition = columns.map((column) => `"${column}"`).join(', ');
@@ -118,38 +122,53 @@ const ensureUniqueIndex = (db: Database.Database, table: string, columns: string
 
 const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
   // Supabase export로 만든 SQLite 파일은 컬럼만 있고 PK/UNIQUE 제약이 빠질 수 있습니다.
-  // SQLite upsert(ON CONFLICT)는 실제 UNIQUE/PRIMARY KEY가 있어야 하므로 운영 시작 시 보정합니다.
-  ensureUniqueIndex(db, 'streamers', ['channel_id'], 'idx_streamers_channel_id_unique');
-  ensureUniqueIndex(db, 'system_configs', ['key'], 'idx_system_configs_key_unique');
-  ensureUniqueIndex(db, 'streamer_registration_blocks', ['channel_id'], 'idx_streamer_registration_blocks_channel_id_unique');
-  ensureUniqueIndex(db, 'tutorial_rewards', ['user_id', 'reward_key'], 'idx_tutorial_rewards_user_reward_unique');
-  ensureUniqueIndex(db, 'user_titles', ['user_id', 'title_id'], 'idx_user_titles_user_title_unique');
-  ensureUniqueIndex(db, 'user_cosmetics', ['user_id', 'item_id'], 'idx_user_cosmetics_user_item_unique');
-  ensureUniqueIndex(db, 'shop_purchases', ['user_id', 'item_id'], 'idx_shop_purchases_user_item_unique');
-  ensureUniqueIndex(db, 'user_blocks', ['blocker_id', 'blocked_id'], 'idx_user_blocks_pair_unique');
-  ensureUniqueIndex(db, 'user_minigame_tickets', ['user_id'], 'idx_user_minigame_tickets_user_unique');
-  ensureUniqueIndex(db, 'push_subscriptions', ['endpoint'], 'idx_push_subscriptions_endpoint');
-  ensureUniqueIndex(db, 'coupon_logs', ['coupon_id', 'user_id'], 'idx_coupon_logs_coupon_user_unique');
+  // SQLite upsert(ON CONFLICT)와 FK parent key는 실제 UNIQUE/PRIMARY KEY가 있어야 하므로 운영 시작 시 보정합니다.
+  const fk = db.pragma('foreign_keys', { simple: true }) as number;
+  db.pragma('foreign_keys = OFF');
+  try {
+    for (const table of [
+      'titles',
+      'user_cards',
+      'trades',
+      'value_history',
+      'coupons',
+      'coupon_logs',
+      'announcements',
+      'push_subscriptions',
+      'push_notifications',
+      'card_reports',
+      'notifications',
+      'shop_items',
+      'user_cosmetics',
+      'market_listings',
+      'market_bids',
+      'market_watches'
+    ]) {
+      backfillNullIdFromRowId(db, table);
+      ensureUniqueIndex(db, table, ['id'], `idx_${table}_id_unique`);
+      createSqliteIdBackfillTrigger(db, table);
+    }
 
-  for (const table of [
-    'titles',
-    'user_cards',
-    'trades',
-    'value_history',
-    'coupons',
-    'coupon_logs',
-    'announcements',
-    'push_subscriptions',
-    'push_notifications',
-    'card_reports',
-    'notifications',
-    'shop_items',
-    'user_cosmetics',
-    'market_listings',
-    'market_bids',
-    'market_watches'
-  ]) {
-    createSqliteIdBackfillTrigger(db, table);
+    ensureUniqueIndex(db, 'users', ['id'], 'idx_users_id_unique');
+    ensureUniqueIndex(db, 'streamers', ['channel_id'], 'idx_streamers_channel_id_unique');
+    ensureUniqueIndex(db, 'titles', ['id'], 'idx_titles_id_unique');
+    ensureUniqueIndex(db, 'shop_items', ['id'], 'idx_shop_items_id_unique');
+    ensureUniqueIndex(db, 'coupons', ['id'], 'idx_coupons_id_unique');
+    ensureUniqueIndex(db, 'user_cards', ['id'], 'idx_user_cards_id_unique');
+    ensureUniqueIndex(db, 'market_listings', ['id'], 'idx_market_listings_id_unique');
+    ensureUniqueIndex(db, 'system_configs', ['key'], 'idx_system_configs_key_unique');
+    ensureUniqueIndex(db, 'streamer_registration_blocks', ['channel_id'], 'idx_streamer_registration_blocks_channel_id_unique');
+    ensureUniqueIndex(db, 'tutorial_rewards', ['user_id', 'reward_key'], 'idx_tutorial_rewards_user_reward_unique');
+    ensureUniqueIndex(db, 'user_titles', ['user_id', 'title_id'], 'idx_user_titles_user_title_unique');
+    ensureUniqueIndex(db, 'user_cosmetics', ['user_id', 'item_id'], 'idx_user_cosmetics_user_item_unique');
+    ensureUniqueIndex(db, 'shop_purchases', ['user_id', 'item_id'], 'idx_shop_purchases_user_item_unique');
+    ensureUniqueIndex(db, 'user_blocks', ['blocker_id', 'blocked_id'], 'idx_user_blocks_pair_unique');
+    ensureUniqueIndex(db, 'user_minigame_tickets', ['user_id'], 'idx_user_minigame_tickets_user_unique');
+    ensureUniqueIndex(db, 'push_subscriptions', ['endpoint'], 'idx_push_subscriptions_endpoint');
+    ensureUniqueIndex(db, 'coupon_logs', ['coupon_id', 'user_id'], 'idx_coupon_logs_coupon_user_unique');
+    ensureUniqueIndex(db, 'minigame_sessions', ['id'], 'idx_minigame_sessions_id_unique');
+  } finally {
+    db.pragma(`foreign_keys = ${fk ? 'ON' : 'OFF'}`);
   }
 };
 
@@ -202,7 +221,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
     sqliteDb.pragma('busy_timeout = 5000');
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('synchronous = NORMAL');
-    sqliteDb.pragma('foreign_keys = ON');
+    // Supabase export SQLite는 PK/UNIQUE 제약이 빠질 수 있어 초기 호환 마이그레이션 전까지 FK 검사를 잠시 끕니다.
+    sqliteDb.pragma('foreign_keys = OFF');
     
     // init-db.sql 초기 스키마 및 더미 로드
     const sqlPath = path.join(__dirname, '../../../init-db.sql');
@@ -481,6 +501,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         if (!db) throw new Error('SQLITE_DB_NOT_READY');
         const indexes = db.prepare("PRAGMA index_list('market_listings')").all() as any[];
         const hasGlobalCardUnique = indexes.some((idx) => {
+          if (idx.partial) return false;
           if (!idx.unique) return false;
           const cols = db.prepare(`PRAGMA index_info(${JSON.stringify(idx.name)})`).all() as any[];
           return cols.length === 1 && cols[0]?.name === 'user_card_id';
@@ -630,6 +651,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
 
       try {
         ensureSqliteCompatibilityConstraints(sqliteDb);
+        sqliteDb.pragma('foreign_keys = ON');
         console.log('[DB Migration] SQLite UNIQUE/ID 호환 제약 보정 완료했습니다.');
       } catch (constraintErr: any) {
         console.error('[DB Migration] SQLite UNIQUE/ID 호환 제약 보정 실패:', constraintErr?.message || constraintErr);
@@ -655,6 +677,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       }
     } else {
       console.warn(`[DB] 초기화 SQL 파일(${sqlPath})을 찾을 수 없어 테이블 생성 단계를 건너뜁니다.`);
+      sqliteDb.pragma('foreign_keys = ON');
     }
   } catch (sqliteErr) {
     console.error('[DB] 로컬 SQLite3 데이터베이스 로딩 실패:', sqliteErr);
