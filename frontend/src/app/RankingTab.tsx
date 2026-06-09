@@ -11,7 +11,7 @@ import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { StreamerTooltip } from './StreamerTooltip';
-import { fuzzySearch } from '@/lib/search';
+import { fuzzyScore, fuzzySearch } from '@/lib/search';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
 
@@ -63,6 +63,27 @@ export const RankingTab: React.FC = () => {
   const [cardFilterStar, setCardFilterStar] = useState('');
   const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
 
+  const findBestCardFilterMatch = (query: string): Streamer | null => {
+    const normalizedQuery = query.replace(/\s+/g, '').toLowerCase().trim();
+    if (!normalizedQuery) return null;
+
+    const scored = streamers
+      .map((streamer) => {
+        const normalizedName = (streamer.name || '').replace(/\s+/g, '').toLowerCase();
+        const normalizedChannelId = (streamer.channel_id || '').toLowerCase();
+        const nameScore = fuzzyScore(streamer.name || '', query);
+        const channelScore = fuzzyScore(streamer.channel_id || '', query);
+        const score = normalizedName === normalizedQuery || normalizedChannelId === normalizedQuery
+          ? -100
+          : nameScore ?? (channelScore !== null ? 2000 + channelScore : null);
+        return { streamer, score };
+      })
+      .filter((item): item is { streamer: Streamer; score: number } => item.score !== null)
+      .sort((a, b) => a.score - b.score || (b.streamer.base_value || 0) - (a.streamer.base_value || 0));
+
+    return scored[0]?.streamer || null;
+  };
+
   // 검색어 디바운스 (타이핑 성능 최적화)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -79,6 +100,12 @@ export const RankingTab: React.FC = () => {
     }, 60_000);
     return () => clearInterval(timer);
   }, [subTab, serverSearchQuery, cardFilterChannelId, cardFilterStar]);
+
+  useEffect(() => {
+    if (subTab !== 'cards') return;
+    const match = findBestCardFilterMatch(cardFilterName);
+    setCardFilterChannelId(match ? match.channel_id : '');
+  }, [cardFilterName, streamers, subTab]);
 
   useEffect(() => {
     const handleTutorialSubTab = (event: Event) => {
@@ -167,6 +194,9 @@ export const RankingTab: React.FC = () => {
 
   // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용 (프론트엔드 2차 필터 적용)
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
+  const selectedCardFilterStreamer = cardFilterChannelId
+    ? streamers.find((streamer) => streamer.channel_id === cardFilterChannelId) || null
+    : null;
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
   const activeLength = (subTab === 'user' || subTab === 'cards') ? rankedUsers.length : rankedStreamers.length;
@@ -250,8 +280,6 @@ export const RankingTab: React.FC = () => {
               onChange={(event) => {
                 const value = event.target.value;
                 setCardFilterName(value);
-                const match = streamers.find((streamer) => fuzzySearch(streamer.name, value));
-                setCardFilterChannelId(match && value.trim() ? match.channel_id : '');
               }}
               placeholder="특정 카드를 가진 사람 필터 (스트리머 이름)"
               className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold focus:border-primary focus:outline-none"
@@ -271,6 +299,13 @@ export const RankingTab: React.FC = () => {
             >
               필터 초기화
             </button>
+            {cardFilterName.trim() && (
+              <p className="text-[10px] font-bold text-muted-foreground sm:col-span-3">
+                {selectedCardFilterStreamer
+                  ? <>유사도 검색 결과: <b className="text-primary">{selectedCardFilterStreamer.name}</b> 카드 보유자만 표시합니다.</>
+                  : '유사도 검색 결과와 일치하는 스트리머를 찾지 못했습니다.'}
+              </p>
+            )}
           </div>
         )}
 
