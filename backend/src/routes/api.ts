@@ -113,6 +113,7 @@ import {
 } from '../controllers/titleController';
 import {
   getNotifications,
+  streamNotifications,
   markNotificationRead,
   markAllNotificationsRead
 } from '../controllers/notificationController';
@@ -238,6 +239,7 @@ router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setR
 
 // 인앱 알림함
 router.get('/notifications', authMiddleware, banCheckMiddleware, getNotifications);
+router.get('/notifications/stream', authMiddleware, banCheckMiddleware, streamNotifications);
 router.post('/notifications/read-all', authMiddleware, banCheckMiddleware, markAllNotificationsRead);
 router.post('/notifications/:id/read', authMiddleware, banCheckMiddleware, markNotificationRead);
 

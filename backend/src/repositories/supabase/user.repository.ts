@@ -389,6 +389,10 @@ export class SupabaseUserRepository implements IUserRepository {
       return this.findCardHolderRankings(limit, keyword, mode, channelId, star);
     }
 
+    if (mode === 'cards') {
+      return this.findCardValueRankings(limit, keyword);
+    }
+
     const { data, error } = await this.getClient().rpc('get_user_rankings', { p_limit: limit, p_keyword: keyword });
     if (!error && Array.isArray(data)) {
       const mapped = data.map((row: any) => ({
@@ -406,12 +410,6 @@ export class SupabaseUserRepository implements IUserRepository {
         total_asset: Number(row.total_asset) || row.point,
         rank: Number(row.rank)
       }));
-      if (mode === 'cards') {
-        return mapped
-          .sort((a: UserRanking, b: UserRanking) => (b.cards_value || 0) - (a.cards_value || 0))
-          .map((item: UserRanking, idx: number) => ({ ...item, rank: idx + 1 }))
-          .slice(0, limit);
-      }
       return mapped;
     }
 
@@ -434,11 +432,26 @@ export class SupabaseUserRepository implements IUserRepository {
 
     // 후보 유저들의 보유 카드를 한 번에 조회해 N+1을 제거합니다.
     const enriched = await this.enrichWithCardValues(candidates);
-    enriched.sort((a, b) => mode === 'cards'
-      ? (b.cards_value || 0) - (a.cards_value || 0)
-      : b.total_asset - a.total_asset
-    );
+    enriched.sort((a, b) => b.total_asset - a.total_asset);
     return enriched.map((item, idx) => ({ ...item, rank: idx + 1 })).slice(0, limit);
+  }
+
+  /**
+   * 전체 카드 가치 랭킹을 먼저 확정한 뒤 검색어를 적용합니다.
+   * 검색 결과만으로 rank를 다시 매기면 프론트 검색 시 기존 순위가 흔들립니다.
+   */
+  private async findCardValueRankings(limit: number, keyword: string): Promise<UserRanking[]> {
+    const users = await this.fetchUsersForRanking();
+    if (users.length === 0) return [];
+
+    const kw = (keyword || '').trim();
+    const ranked = (await this.enrichWithCardValues(users))
+      .sort((a, b) => (b.cards_value || 0) - (a.cards_value || 0) || String(a.id).localeCompare(String(b.id)))
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
+
+    return ranked
+      .filter((u) => !kw || fuzzyScore(u.username || '', kw) !== null)
+      .slice(0, limit);
   }
 
   /**
@@ -485,19 +498,41 @@ export class SupabaseUserRepository implements IUserRepository {
     if (uErr) throw uErr;
 
     const kw = (keyword || '').trim();
-    const enriched: UserRanking[] = (users || [])
-      .filter((u: any) => !kw || fuzzyScore(u.username || '', kw) !== null)
+    const ranked: UserRanking[] = (users || [])
       .map((u: any) => {
         const a = agg.get(u.id)!;
         const cardsValue = Math.round(a.value);
         return { ...(u as User), card_count: a.count, cards_value: cardsValue, total_asset: u.point + cardsValue };
-      });
+      })
+      .sort((a, b) => mode === 'cards'
+        ? (b.cards_value || 0) - (a.cards_value || 0)
+        : b.total_asset - a.total_asset
+      )
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
 
-    enriched.sort((a, b) => mode === 'cards'
-      ? (b.cards_value || 0) - (a.cards_value || 0)
-      : b.total_asset - a.total_asset
-    );
-    return enriched.map((item, idx) => ({ ...item, rank: idx + 1 })).slice(0, limit);
+    return ranked
+      .filter((u) => !kw || fuzzyScore(u.username || '', kw) !== null)
+      .slice(0, limit);
+  }
+
+  private async fetchUsersForRanking(cap = 5000): Promise<User[]> {
+    const users: User[] = [];
+    const pageSize = 1000;
+
+    for (let offset = 0; offset < cap; offset += pageSize) {
+      const { data, error } = await this.getClient()
+        .from('users')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .range(offset, Math.min(offset + pageSize - 1, cap - 1));
+
+      if (error) throw error;
+      const page = (data || []) as User[];
+      users.push(...page);
+      if (page.length < pageSize) break;
+    }
+
+    return users;
   }
 
   /**

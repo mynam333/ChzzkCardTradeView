@@ -1,14 +1,15 @@
 import { Response } from 'express';
-import { marketRepository, userRepository, userCardRepository, notificationRepository } from '../repositories';
+import { marketRepository, userCardRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
+import { createRealtimeNotification } from './notificationController';
 
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (userId: string, title: string, body: string) => {
   // 오픈마켓 매물/낙찰 알림은 카드가 오가는 보관함(오픈마켓 탭)으로 이동시킵니다.
   sendPushToUser(userId, title, body, '/inventory');
-  notificationRepository.create({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
+  createRealtimeNotification({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
 };
 
 /**
@@ -251,6 +252,17 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       INSUFFICIENT_POINT: '보유 포인트가 부족합니다.'
     };
     return res.status(400).json({ error: result.reason, message: messageMap[result.reason] || '입찰에 실패했습니다.' });
+  }
+  const previousBidderId = result.previous_bidder_id;
+  if (previousBidderId && previousBidderId !== user.id) {
+    const listing = await marketRepository.findById(id);
+    const streamerName = listing?.card?.streamer?.name || '스트리머';
+    const star = listing?.card?.star ?? 0;
+    notify(
+      previousBidderId,
+      '[오픈마켓] 경매 상위 입찰 발생',
+      `[${streamerName}] ${star}성 카드 경매에서 다른 유저가 ${amount.toLocaleString()}P로 상위 입찰했습니다.`
+    );
   }
   return res.status(200).json(result);
 };

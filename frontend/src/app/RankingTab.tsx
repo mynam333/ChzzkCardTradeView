@@ -10,6 +10,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
+import { StreamerTooltip } from './StreamerTooltip';
 import { fuzzySearch } from '@/lib/search';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
@@ -60,6 +61,7 @@ export const RankingTab: React.FC = () => {
   const [cardFilterName, setCardFilterName] = useState('');
   const [cardFilterChannelId, setCardFilterChannelId] = useState('');
   const [cardFilterStar, setCardFilterStar] = useState('');
+  const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
 
   // 검색어 디바운스 (타이핑 성능 최적화)
   useEffect(() => {
@@ -76,7 +78,7 @@ export const RankingTab: React.FC = () => {
       if (document.visibilityState === 'visible') fetchRankings(true);
     }, 60_000);
     return () => clearInterval(timer);
-  }, [subTab, debouncedSearchQuery, cardFilterChannelId, cardFilterStar]);
+  }, [subTab, serverSearchQuery, cardFilterChannelId, cardFilterStar]);
 
   useEffect(() => {
     const handleTutorialSubTab = (event: Event) => {
@@ -98,7 +100,7 @@ export const RankingTab: React.FC = () => {
     try {
       if (subTab === 'user' || subTab === 'cards') {
         const params = new URLSearchParams();
-        if (debouncedSearchQuery.trim()) params.set('q', debouncedSearchQuery.trim());
+        if (serverSearchQuery.trim()) params.set('q', serverSearchQuery.trim());
         if (subTab === 'cards') params.set('mode', 'cards');
         if (cardFilterChannelId) params.set('channel_id', cardFilterChannelId);
         if (cardFilterStar !== '') params.set('star', cardFilterStar);
@@ -114,7 +116,7 @@ export const RankingTab: React.FC = () => {
           mode: subTab === 'change' ? 'change' : 'value',
           limit: '100'
         });
-        if (debouncedSearchQuery.trim()) params.set('q', debouncedSearchQuery.trim());
+        if (serverSearchQuery.trim()) params.set('q', serverSearchQuery.trim());
         const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
         if (res.ok) setStreamers(await res.json());
       }
@@ -305,10 +307,17 @@ export const RankingTab: React.FC = () => {
                     </div>
                     <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
                     {ur.status_message && (
-                      <p className="mt-1 inline-flex max-w-[min(56vw,22rem)] items-center gap-1.5 truncate rounded-full border border-primary/15 bg-primary/10 px-2.5 py-1 text-[11px] font-black text-primary shadow-sm dark:bg-primary/15">
-                        <MessageCircleHeart className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{ur.status_message}</span>
-                      </p>
+                      <StreamerTooltip
+                        content={ur.status_message}
+                        className="mt-1 inline-flex max-w-[min(56vw,22rem)]"
+                        tooltipClassName="status-message-tooltip"
+                        edgeGuard={{ right: 460, bottom: 140 }}
+                      >
+                        <p className="inline-flex w-full items-center gap-1.5 truncate rounded-full border border-primary/15 bg-primary/10 px-2.5 py-1 text-[11px] font-black text-primary shadow-sm dark:bg-primary/15">
+                          <MessageCircleHeart className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{ur.status_message}</span>
+                        </p>
+                      </StreamerTooltip>
                     )}
                   </div>
                 </div>

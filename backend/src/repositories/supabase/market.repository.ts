@@ -432,7 +432,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return (data as any).price;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }> {
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
     const listing = await this.findById(listingId);
     if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
       return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
@@ -478,7 +478,13 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .eq('status', 'PENDING');
     if (updateError) throw updateError;
 
-    return { ok: true, reason: 'OK', current_bid: amount, auction_ends_at: extendedEndsAt ?? listing.auction_ends_at };
+    return {
+      ok: true,
+      reason: 'OK',
+      current_bid: amount,
+      auction_ends_at: extendedEndsAt ?? listing.auction_ends_at,
+      previous_bidder_id: listing.current_bidder_id ?? null
+    };
   }
 
   async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {

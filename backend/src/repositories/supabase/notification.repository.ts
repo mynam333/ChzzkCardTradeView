@@ -25,11 +25,14 @@ export class SupabaseNotificationRepository implements INotificationRepository {
     return getSupabaseClient();
   }
 
-  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void> {
-    const { error } = await this.getClient()
+  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<AppNotification> {
+    const { data, error } = await this.getClient()
       .from('notifications')
-      .insert([{ user_id: n.user_id, title: n.title, body: n.body ?? null, link: n.link ?? null }]);
+      .insert([{ user_id: n.user_id, title: n.title, body: n.body ?? null, link: n.link ?? null }])
+      .select('*')
+      .single();
     if (error) throw error;
+    return data as AppNotification;
   }
 
   async findByUser(userId: string, limit: number): Promise<AppNotification[]> {

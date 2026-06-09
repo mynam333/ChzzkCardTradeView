@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
+import { API_BASE_URL, apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
@@ -324,8 +324,35 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
     fetchNotifications();
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') fetchNotifications();
-    }, 30_000);
+    }, 120_000);
     return () => clearInterval(timer);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || typeof EventSource === 'undefined') return;
+
+    const streamUrl = `${API_BASE_URL}/notifications/stream`;
+    const source = new EventSource(streamUrl, { withCredentials: true });
+
+    const handleNotification = (event: MessageEvent<string>) => {
+      try {
+        const notification = JSON.parse(event.data) as AppNotificationItem;
+        if (!notification?.id) return;
+        setNotifications((prev) => {
+          if (prev.some((item) => item.id === notification.id)) return prev;
+          return [notification, ...prev].slice(0, 50);
+        });
+        if (!notification.is_read) setUnreadCount((count) => count + 1);
+      } catch (e) {
+        console.error('[NotificationProvider] 실시간 알림 파싱 실패:', e);
+      }
+    };
+
+    source.addEventListener('notification', handleNotification as EventListener);
+    return () => {
+      source.removeEventListener('notification', handleNotification as EventListener);
+      source.close();
+    };
   }, [user?.id]);
 
   return (

@@ -25,10 +25,21 @@ export class SqliteNotificationRepository implements INotificationRepository {
     return getSqliteDb();
   }
 
-  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void> {
-    this.getDb().prepare(
+  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<AppNotification> {
+    const result = this.getDb().prepare(
       'INSERT INTO notifications (user_id, title, body, link) VALUES (?, ?, ?, ?)'
     ).run(n.user_id, n.title, n.body ?? null, n.link ?? null);
+
+    const row = this.getDb().prepare('SELECT * FROM notifications WHERE id = ?').get(result.lastInsertRowid) as any;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      body: row.body,
+      link: row.link,
+      is_read: row.is_read === 1,
+      created_at: row.created_at
+    };
   }
 
   async findByUser(userId: string, limit: number): Promise<AppNotification[]> {

@@ -182,9 +182,16 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                   </div>
                   <p className="text-[10px] text-zinc-400 truncate">@{profile.id}</p>
                   {profile.status_message && (
-                    <p className="mt-1 max-w-[13rem] truncate rounded-full bg-sky-400/15 px-2.5 py-1 text-[10px] font-black text-sky-100">
-                      {profile.status_message}
-                    </p>
+                    <StreamerTooltip
+                      content={profile.status_message}
+                      className="mt-1 max-w-[13rem]"
+                      tooltipClassName="status-message-tooltip"
+                      edgeGuard={{ right: 460, bottom: 140 }}
+                    >
+                      <p className="truncate rounded-full bg-sky-400/15 px-2.5 py-1 text-[10px] font-black text-sky-100">
+                        {profile.status_message}
+                      </p>
+                    </StreamerTooltip>
                   )}
                 </div>
                 <div className="ml-auto text-right">

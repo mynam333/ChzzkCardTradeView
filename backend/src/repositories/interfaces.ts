@@ -365,7 +365,7 @@ export interface AppNotification {
 }
 
 export interface INotificationRepository {
-  create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<void>;
+  create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<AppNotification>;
   findByUser(userId: string, limit: number): Promise<AppNotification[]>;
   countUnread(userId: string): Promise<number>;
   markRead(id: number, userId: string): Promise<void>;
@@ -489,7 +489,7 @@ export interface IMarketRepository {
   listAllHistory(limit: number): Promise<MarketListing[]>;
   /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
   getRecentPrice(channelId: string): Promise<number | null>;
-  placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }>;
+  placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }>;
   finishExpiredAuctions(nowIso: string): Promise<MarketListing[]>;
   upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch>;
   deleteWatch(userId: string, id: number): Promise<boolean>;
