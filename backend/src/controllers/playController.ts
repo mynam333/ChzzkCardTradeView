@@ -17,6 +17,15 @@ import { clearSessionCookie } from '../services/sessionCookie';
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
 
+// getUserMe는 /play/me 호출마다 치지직 외부 API로 프로필을 동기화해 왔습니다(외부 HTTP + DB write).
+// 닉네임/프로필 이미지는 실시간성이 낮으므로 유저당 일정 주기에 1회만 동기화해 외부 호출을 절감합니다.
+const PROFILE_SYNC_THROTTLE_MS = Math.max(60_000, Number(process.env.PROFILE_SYNC_THROTTLE_MS || 10 * 60_000));
+const PROFILE_SYNC_CACHE_RETENTION_MS = Math.max(PROFILE_SYNC_THROTTLE_MS, Number(process.env.PROFILE_SYNC_CACHE_RETENTION_MS || 24 * 60 * 60_000));
+const profileSyncAt = new Map<string, number>();
+const DRAW_POOL_CACHE_TTL = Math.max(5_000, Number(process.env.DRAW_POOL_CACHE_TTL_MS || 60_000));
+let drawPoolCache: { data: any[]; expiresAt: number } | null = null;
+let drawPoolInFlight: Promise<any[]> | null = null;
+
 const isDbStatementTimeout = (err: any): boolean => {
   return err?.code === '57014' || /statement timeout/i.test(String(err?.message || ''));
 };
@@ -37,6 +46,46 @@ const findUserCardsCoalesced = (userId: string): Promise<any[]> => {
 const clearUserCardsInFlight = (userId: string) => {
   userCardsInFlight.delete(userId);
 };
+
+const loadDrawPool = async (): Promise<any[]> => {
+  const now = Date.now();
+  if (drawPoolCache && drawPoolCache.expiresAt > now) {
+    return drawPoolCache.data;
+  }
+  if (drawPoolInFlight) return drawPoolInFlight;
+
+  drawPoolInFlight = streamerRepository.findAll()
+    .then((streamers) => {
+      drawPoolCache = { data: streamers, expiresAt: Date.now() + DRAW_POOL_CACHE_TTL };
+      return streamers;
+    })
+    .finally(() => {
+      drawPoolInFlight = null;
+    });
+
+  return drawPoolInFlight;
+};
+
+const clearDrawPoolCache = () => {
+  drawPoolCache = null;
+};
+
+const pruneProfileSyncCache = (now = Date.now()) => {
+  if (profileSyncAt.size < 1000) return;
+  for (const [userId, syncedAt] of profileSyncAt) {
+    if (now - syncedAt > PROFILE_SYNC_CACHE_RETENTION_MS) {
+      profileSyncAt.delete(userId);
+    }
+  }
+};
+
+export const getPlayControllerStats = () => ({
+  drawLocks: DRAW_LOCKS.size,
+  userCardsInFlight: userCardsInFlight.size,
+  profileSyncCache: profileSyncAt.size,
+  drawPoolCached: !!drawPoolCache && drawPoolCache.expiresAt > Date.now(),
+  drawPoolInFlight: !!drawPoolInFlight
+});
 
 const withUserDrawLock = async <T>(userId: string, task: () => Promise<T>): Promise<T> => {
   if (DRAW_LOCKS.has(userId)) {
@@ -111,6 +160,31 @@ const toDrawCardPayload = (draw: any, streamer: any) => ({
   streamer
 });
 
+// 유저당 throttle 주기 내 1회만 치지직 프로필을 동기화합니다(외부 HTTP + DB write 절감).
+// user 객체를 제자리에서 갱신하므로 호출 측 응답에 최신 닉네임/이미지가 반영됩니다.
+const maybeSyncChzzkProfile = async (userId: string, user: any): Promise<void> => {
+  pruneProfileSyncCache();
+  const last = profileSyncAt.get(userId) || 0;
+  if (Date.now() - last < PROFILE_SYNC_THROTTLE_MS) return;
+  // 동시 요청이 중복 동기화하지 않도록 시도 전에 낙관적으로 기록
+  profileSyncAt.set(userId, Date.now());
+  try {
+    const accessToken = await getValidUserAccessToken(userId);
+    if (!accessToken) return;
+    const profile = await fetchChzzkUserProfile(userId, accessToken);
+    if (!profile) return;
+    const { nickname, profileImageUrl } = profile;
+    if (user.username !== nickname || user.avatar_url !== profileImageUrl) {
+      await userRepository.updateProfile(userId, nickname, profileImageUrl);
+      user.username = nickname;
+      user.avatar_url = profileImageUrl;
+      console.log(`[PlayController] 유저 정보 업데이트 완료 (ID: ${userId}, 닉네임: ${nickname})`);
+    }
+  } catch (syncErr: any) {
+    console.warn(`[PlayController] 유저 정보 로그인 동기화 실패 (기존 정보 사용):`, syncErr.message);
+  }
+};
+
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
  */
@@ -126,31 +200,20 @@ export const getUserMe = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
 
-    // 치지직 최신 프로필/닉네임 동기화
-    try {
-      const accessToken = await getValidUserAccessToken(userId);
-      if (accessToken) {
-        const profile = await fetchChzzkUserProfile(userId, accessToken);
-        if (profile) {
-          const { nickname, profileImageUrl } = profile;
-          if (user.username !== nickname || user.avatar_url !== profileImageUrl) {
-            await userRepository.updateProfile(userId, nickname, profileImageUrl);
-            user.username = nickname;
-            user.avatar_url = profileImageUrl;
-            console.log(`[PlayController] 유저 정보 업데이트 완료 (ID: ${userId}, 닉네임: ${nickname})`);
-          }
-        }
-      }
-    } catch (syncErr: any) {
-      console.warn(`[PlayController] 유저 정보 로그인 동기화 실패 (기존 정보 사용):`, syncErr.message);
-    }
+    // 서로 독립적인 작업(치지직 프로필 동기화 / 설정값 조회 / 보유 타이틀 조회)을 병렬 실행합니다.
+    // 치지직 동기화는 throttle되어 대부분의 호출에서는 즉시 반환됩니다.
+    const [, [intervalStr, maxStackStr, drawCostStr], ownedTitles] = await Promise.all([
+      maybeSyncChzzkProfile(userId, user),
+      Promise.all([
+        systemConfigRepository.get('free_draw_interval', '24'),
+        systemConfigRepository.get('free_draw_max_stack', '1'),
+        systemConfigRepository.get('draw_cost', '10000')
+      ]),
+      titleRepository.findByUserId(userId)
+    ]);
 
-    // 무료 뽑기 간격 및 가챠 비용 정보 추가
-    const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
     const intervalHours = parseFloat(intervalStr);
-    const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
     const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
-    const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
     const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
 
     const { segmentStartIso, nextFreeDrawAt } = computeFreeDrawSegment(intervalHours);
@@ -160,7 +223,6 @@ export const getUserMe = async (req: Request, res: Response) => {
     const bonusFreeDrawTickets = Number(effectiveUser.bonus_free_draw_tickets || 0);
     const isFreeDrawEligible = segmentStartIso === null || freeDrawTickets + bonusFreeDrawTickets > 0;
 
-    const ownedTitles = await titleRepository.findByUserId(userId);
     const titles = ownedTitles.filter((title) => title.is_equipped);
 
     return res.status(200).json({
@@ -431,9 +493,9 @@ export const getUserProfile = async (req: Request, res: Response) => {
   }
 };
 
-// 랭킹은 모든 유저×보유카드를 매번 집계·정렬하는 무거운 쿼리이고, 프론트가 25초마다
-// 폴링하며 동시 접속도 많습니다. 실시간일 필요가 없으므로(시세는 2분 주기 갱신) 동일 파라미터
-// 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
+// 랭킹은 모든 유저×보유카드를 매번 집계·정렬하는 무거운 쿼리이고, 동시 접속도 많습니다.
+// 프론트는 주로 SSE(ranking 이벤트)로 갱신하고 폴링은 긴 fallback만 돌리지만, 시세는 2분 주기로
+// 갱신되므로 실시간일 필요가 없습니다. 동일 파라미터 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
 const RANKINGS_CACHE_TTL = 60_000; // 60초
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
@@ -446,6 +508,7 @@ export const clearUserRankingCaches = () => {
 export const clearRankingCaches = () => {
   clearUserRankingCaches();
   streamerRankingsCache.clear();
+  clearDrawPoolCache();
 };
 
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
@@ -710,7 +773,7 @@ export const drawCard = async (req: Request, res: Response) => {
     return await withUserDrawLock(userId, async () => {
     const { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso } = await getDrawSettings();
     // A. 가챠 대상 스트리머 목록 추출 (재화 소모 전에 먼저 검증)
-    const streamers = await streamerRepository.findAll();
+    const streamers = await loadDrawPool();
     if (streamers.length === 0) {
       return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
     }
@@ -771,7 +834,7 @@ export const drawCards = async (req: Request, res: Response) => {
   try {
     return await withUserDrawLock(userId, async () => {
       const { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso } = await getDrawSettings();
-      const streamers = await streamerRepository.findAll();
+      const streamers = await loadDrawPool();
       if (streamers.length === 0) {
         return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
       }
@@ -971,6 +1034,8 @@ export const registerStreamer = async (req: Request, res: Response) => {
       registered_by: (req as any).user?.id || null // 등록한 유저 ID 기록 (Null 가능)
     };
     await streamerRepository.save(newStreamer);
+    clearDrawPoolCache();
+    streamerRankingsCache.clear();
 
     return res.status(200).json({
       message: `${verifiedName} 스트리머가 신규 카드 리스트로 성공적으로 등록되었습니다.`,

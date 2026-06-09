@@ -88,6 +88,21 @@ class ChzzkChatManager {
     }
   }
 
+  public getStats() {
+    let pendingChatTotal = 0;
+    for (const count of this.pendingChatCounts.values()) {
+      pendingChatTotal += count;
+    }
+    return {
+      connections: this.connections.size,
+      desired: this.desired.size,
+      reconnectTimers: this.reconnectTimers.size,
+      pendingChatChannels: this.pendingChatCounts.size,
+      pendingChatTotal,
+      isFlushing: this.isFlushing
+    };
+  }
+
   /**
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
    */

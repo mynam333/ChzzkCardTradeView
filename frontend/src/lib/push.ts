@@ -92,7 +92,7 @@ export const subscribeToPush = async (): Promise<SubscribeResult> => {
     // 백엔드에 구독 정보 등록
     const res = await apiFetch('/push/subscribe', {
       method: 'POST',
-      body: JSON.stringify({ subscription })
+      body: JSON.stringify({ subscription, origin: window.location.origin })
     });
 
     if (!res.ok) {

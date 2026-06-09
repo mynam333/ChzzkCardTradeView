@@ -40,6 +40,14 @@ export const isAuthed = (): boolean => {
   return isAuthenticated;
 };
 
+const getInFlightRequests = new Map<string, Promise<Response>>();
+
+const buildGetRequestKey = (path: string, headers: Headers): string => {
+  const headerEntries = Array.from(headers.entries())
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([path, headerEntries]);
+};
+
 /**
  * 백엔드 API fetch 래퍼.
  * 인증은 httpOnly 세션 쿠키로 전송되므로(credentials: 'include') JS가 토큰을 다루지 않습니다.
@@ -49,6 +57,7 @@ export const apiFetch = async (
   options: RequestInit = {}
 ): Promise<Response> => {
   const headers = new Headers(options.headers);
+  const method = String(options.method || 'GET').toUpperCase();
   const hasBody = options.body !== undefined && options.body !== null;
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
 
@@ -56,12 +65,28 @@ export const apiFetch = async (
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const request = () => fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
     // httpOnly 세션 쿠키 전송 (CORS credentials)
     credentials: 'include',
   });
+
+  const canShareGet = method === 'GET' && !hasBody && !options.signal;
+  let response: Response;
+  if (canShareGet) {
+    const key = buildGetRequestKey(path, headers);
+    let inFlight = getInFlightRequests.get(key);
+    if (!inFlight) {
+      inFlight = request().finally(() => {
+        getInFlightRequests.delete(key);
+      });
+      getInFlightRequests.set(key, inFlight);
+    }
+    response = (await inFlight).clone();
+  } else {
+    response = await request();
+  }
 
   // 밴 상태 체크 인터셉터 (403 BannedUser 예외)
   if (response.status === 403) {

@@ -256,6 +256,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE push_notifications ADD COLUMN sent_at TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT origin FROM push_subscriptions LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] push_subscriptions 테이블에 origin 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE push_subscriptions ADD COLUMN origin TEXT;");
+      }
+      try {
         sqliteDb.exec(`
           DELETE FROM push_subscriptions
            WHERE id NOT IN (

@@ -25,6 +25,12 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   private static readonly SCHEDULE_APPLY_CHUNK_SIZE = 80;
   private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = 500;
   private static readonly VALUE_HISTORY_PRUNE_CHUNK_SIZE = 1000;
+  private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(
+    5_000,
+    Number(process.env.VALUE_AGO_CACHE_TTL_MS || 60_000)
+  );
+  private valueAgoCache = new Map<number, { data: Record<string, number>; expiresAt: number }>();
+  private valueAgoInFlight = new Map<number, Promise<Record<string, number>>>();
 
   private getClient() {
     return getSupabaseClient();
@@ -390,6 +396,30 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   private static readonly VALUE_AGO_LOOKBACK_HOURS = 3;
 
   private async valueAgoMap(hours: number): Promise<Record<string, number>> {
+    const now = Date.now();
+    const cached = this.valueAgoCache.get(hours);
+    if (cached && cached.expiresAt > now) {
+      return cached.data;
+    }
+    const inFlight = this.valueAgoInFlight.get(hours);
+    if (inFlight) return inFlight;
+
+    const request = this.loadValueAgoMap(hours)
+      .then((data) => {
+        this.valueAgoCache.set(hours, {
+          data,
+          expiresAt: Date.now() + SupabaseStreamerRepository.VALUE_AGO_CACHE_TTL_MS
+        });
+        return data;
+      })
+      .finally(() => {
+        this.valueAgoInFlight.delete(hours);
+      });
+    this.valueAgoInFlight.set(hours, request);
+    return request;
+  }
+
+  private async loadValueAgoMap(hours: number): Promise<Record<string, number>> {
     // 경계 시각 이전에 기록된 이력 중 채널별 가장 최근 값을 선택
     const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
     const cutoff = new Date(cutoffMs).toISOString();

@@ -3,10 +3,16 @@ import webpush from 'web-push';
 import cron from 'node-cron';
 import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
 import { AuthenticatedRequest } from '../middlewares/admin';
-import { IS_PRODUCTION } from '../config';
+import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from '../config';
 import { couponRepository } from '../repositories';
 import { normalizeCouponCode } from '../utils/couponCode';
 import { buildCouponPushUrl } from '../utils/pushTarget';
+import {
+  filterPushSubscriptionsByOrigin,
+  getConfiguredPushOrigins,
+  getRequestPushOrigin,
+  isPushOriginAllowed
+} from '../utils/pushOrigin';
 
 const PUSH_SEND_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SEND_BATCH_SIZE || 25));
 const PUSH_SEND_BATCH_DELAY_MS = Math.max(0, Number(process.env.PUSH_SEND_BATCH_DELAY_MS || 200));
@@ -46,7 +52,7 @@ export const getVapidPublicKey = (req: Request, res: Response) => {
  */
 export const subscribePush = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
-  const { subscription } = req.body; // { endpoint, keys: { auth, p256dh } }
+  const { subscription, origin } = req.body; // { endpoint, keys: { auth, p256dh } }
 
   if (!userId || !subscription || !subscription.endpoint) {
     return res.status(400).json({ error: 'BadRequest', message: '올바른 구독 정보 및 인증이 필요합니다.' });
@@ -55,9 +61,14 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
   const endpoint = String(subscription.endpoint || '').trim();
   const authKey = subscription.keys?.auth || '';
   const p256dhKey = subscription.keys?.p256dh || '';
+  const subscriptionOrigin = getRequestPushOrigin(origin, req.get('origin'), req.get('referer'));
+  const allowedOrigins = getConfiguredPushOrigins(process.env, CORS_ALLOWED_ORIGINS);
 
   if (!endpoint || !authKey || !p256dhKey) {
     return res.status(400).json({ error: 'BadRequest', message: '푸시 구독 endpoint/auth/p256dh 정보가 필요합니다.' });
+  }
+  if (!isPushOriginAllowed(subscriptionOrigin, allowedOrigins)) {
+    return res.status(403).json({ error: 'ForbiddenOrigin', message: '허용되지 않은 사이트의 푸시 구독입니다.' });
   }
 
   try {
@@ -67,14 +78,27 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
       const client = getSupabaseClient();
       // 같은 브라우저 endpoint는 하나의 유저에만 귀속되도록 기존 중복을 먼저 정리합니다.
       await client.from('push_subscriptions').delete().eq('endpoint', endpoint);
-      const { error } = await client
-        .from('push_subscriptions')
-        .insert({
-          user_id: userId,
-          endpoint,
-          auth_key: authKey,
-          p256dh_key: p256dhKey
-        });
+      const row = {
+        user_id: userId,
+        endpoint,
+        auth_key: authKey,
+        p256dh_key: p256dhKey,
+        origin: subscriptionOrigin
+      };
+      let { error } = await client.from('push_subscriptions').insert(row);
+
+      if (error && /origin|schema cache/i.test(error.message || '')) {
+        console.warn('[Push] push_subscriptions.origin 컬럼이 없어 origin 없이 구독을 저장합니다. 마이그레이션을 적용하세요.');
+        const fallback = await client
+          .from('push_subscriptions')
+          .insert({
+            user_id: userId,
+            endpoint,
+            auth_key: authKey,
+            p256dh_key: p256dhKey
+          });
+        error = fallback.error;
+      }
 
       if (error) throw error;
     } else {
@@ -82,9 +106,9 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
       db.transaction(() => {
         db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
         db.prepare(`
-          INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key, created_at)
-          VALUES (?, ?, ?, ?, datetime('now'))
-        `).run(userId, endpoint, authKey, p256dhKey);
+          INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key, origin, created_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+        `).run(userId, endpoint, authKey, p256dhKey, subscriptionOrigin);
       })();
     }
 
@@ -120,7 +144,12 @@ const deleteExpiredSubscriptions = async (dbMode: string, ids: any[]) => {
 };
 
 const sendPushBatch = async (subscriptions: any[], payload: string, dbMode: string) => {
-  const targets = uniqueByEndpoint(subscriptions);
+  const targets = uniqueByEndpoint(
+    filterPushSubscriptionsByOrigin(
+      subscriptions,
+      getConfiguredPushOrigins(process.env, CORS_ALLOWED_ORIGINS)
+    )
+  );
   const expiredIds: any[] = [];
   let sent = 0;
   let failed = 0;
@@ -310,17 +339,20 @@ export const sendTestPush = async (req: AuthenticatedRequest, res: Response) => 
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   try {
     const dbMode = getDbMode();
-    let count = 0;
+    let subscriptions: any[] = [];
     if (dbMode === 'SUPABASE') {
-      const { count: c } = await getSupabaseClient()
+      const { data } = await getSupabaseClient()
         .from('push_subscriptions')
-        .select('*', { count: 'exact', head: true })
+        .select('*')
         .eq('user_id', userId);
-      count = c || 0;
+      subscriptions = data || [];
     } else {
-      const row = getSqliteDb().prepare('SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id = ?').get(userId) as any;
-      count = row?.c || 0;
+      subscriptions = getSqliteDb().prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId);
     }
+    const count = filterPushSubscriptionsByOrigin(
+      subscriptions,
+      getConfiguredPushOrigins(process.env, CORS_ALLOWED_ORIGINS)
+    ).length;
 
     if (count === 0) {
       return res.status(400).json({

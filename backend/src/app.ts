@@ -15,12 +15,17 @@ import { startMarketSettlementScheduler } from './cron/marketScheduler';
 import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
 import { rateLimit } from './middlewares/rateLimit';
+import { getRuntimeStats } from './services/runtimeStats';
+import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
+setRuntimeStatsProvider(getRuntimeStats);
+startRuntimeStatsLogging();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const SLOW_REQUEST_LOG_MS = Math.max(100, Number(process.env.SLOW_REQUEST_LOG_MS || 2000));
 
 // 리버스 프록시(nginx 등) 뒤에서 X-Forwarded-For/Proto를 신뢰하여 req.ip·https 판별이 정확하도록 설정.
 // (rate limiter가 클라이언트 위조 헤더로 우회되지 않도록 첫 프록시 1홉만 신뢰)
@@ -64,6 +69,35 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // API 전체 경로에 기본 레이트 리밋 적용 (1분당 최대 100회)
 app.use('/api', rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' }));
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
+  const url = req.originalUrl || req.url;
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= SLOW_REQUEST_LOG_MS || res.statusCode >= 500) {
+      console.warn('[RequestTrace]', {
+        method: req.method,
+        url,
+        status: res.statusCode,
+        duration_ms: durationMs,
+        ip: req.ip,
+        user_agent: req.get('user-agent') || null
+      });
+    }
+  });
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      console.warn('[RequestClosed]', {
+        method: req.method,
+        url,
+        duration_ms: Date.now() - startedAt,
+        ip: req.ip
+      });
+    }
+  });
+  next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -115,7 +149,9 @@ app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
     message: '치카포 백엔드 서버가 정상 작동 중입니다.',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    log_file: getLogFilePath(),
+    runtime: getRuntimeStats()
   });
 });
 

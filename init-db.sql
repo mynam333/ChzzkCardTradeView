@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     endpoint TEXT NOT NULL,                    -- 브라우저 푸시 수신 엔드포인트 URL
     auth_key TEXT NOT NULL,                    -- 암호화 인증 키(auth)
     p256dh_key TEXT NOT NULL,                  -- 암호화 공개 키(p256dh)
+    origin TEXT,                               -- 구독을 등록한 사이트 출처(origin)
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );

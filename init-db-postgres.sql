@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     endpoint TEXT NOT NULL,
     auth_key TEXT NOT NULL,
     p256dh_key TEXT NOT NULL,
+    origin TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, endpoint)
 );
@@ -185,6 +186,7 @@ USING push_subscriptions newer
 WHERE ps.endpoint = newer.endpoint
   AND ps.id < newer.id;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
+ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS origin TEXT;
 
 -- 10. 예약 푸시 알림 테이블
 CREATE TABLE IF NOT EXISTS push_notifications (

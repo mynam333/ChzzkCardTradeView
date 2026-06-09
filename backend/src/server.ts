@@ -7,6 +7,7 @@
 import path from 'path';
 import dns from 'dns';
 import dotenv from 'dotenv';
+import { initFileLogging } from './services/fileLogger';
 
 // 외부 API(Supabase 등) 연결 시, IPv6 경로가 막힌 호스트에서 undici가 AAAA(IPv6)를
 // 먼저 시도하다 'TypeError: fetch failed'(ENETUNREACH/타임아웃 등)가 간헐적으로 나는 문제를
@@ -36,6 +37,7 @@ const envPath = path.resolve(__dirname, '../.env');
 console.log(`[ENV] .env 탐색 경로: ${envPath}`);
 
 const result = dotenv.config({ path: envPath });
+initFileLogging();
 
 if (result.error) {
   console.error(`[ENV] .env 파일 로드 실패: ${envPath}`, result.error.message);

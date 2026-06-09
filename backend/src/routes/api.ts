@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { subscribeRealtimeStream } from '../services/realtimeStream';
+import { getRuntimeStats } from '../services/runtimeStats';
+import { getLogFilePath } from '../services/fileLogger';
 import { authMiddleware } from '../middlewares/auth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
@@ -187,7 +189,9 @@ router.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     message: '치카포 백엔드 API가 정상 작동 중입니다.',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    log_file: getLogFilePath(),
+    runtime: getRuntimeStats()
   });
 });
 
