@@ -155,9 +155,9 @@
   * SQLite의 `-wal`, `-shm` 파일도 같은 디렉터리에 생성되므로 DB 파일이 위치한 디렉터리 전체가 persistent disk여야 합니다.
   * 운영에서는 `SQLITE_REQUIRE_PERSISTENT_PATH=true`를 설정해 경로 누락 시 서버가 기동되지 않게 하는 것을 권장합니다.
   * 커스텀 카드 이미지도 보존하려면 `UPLOADS_DIR` 역시 같은 persistent volume 내부 경로로 지정합니다.
-* **Supabase 오프라인 감지:** 백엔드 구동 또는 API 요청 초기 단계에서 Supabase DB에 대한 PING 및 인증 연결 상태를 감지합니다.
+* **Supabase 필수 모드:** `SUPABASE_REQUIRED=true`일 때만 백엔드 구동 시 Supabase DB에 대한 PING 및 인증 연결 상태를 감지합니다.
 * **SQLite 폴백:** 
-  * Supabase URL/Key가 누락되었거나 통신 불가 상태일 시, `SUPABASE_REQUIRED=true`가 아니라면 백엔드는 SQLite 모드로 동작합니다.
+  * `SUPABASE_REQUIRED=true`가 아니라면 Supabase URL/Key가 남아 있어도 연결 검사를 건너뛰고 SQLite 모드로 바로 동작합니다.
   * 레포지토리 패턴(Repository Pattern)을 기반으로 데이터 액세스 레이어를 추상화하여, 상위 비즈니스 로직(Service 레이어)의 코드 수정 없이 투명한 데이터 읽기/쓰기 분기를 보장합니다.
 
 ---
