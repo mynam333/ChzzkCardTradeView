@@ -465,52 +465,19 @@ export class SupabaseUserRepository implements IUserRepository {
     channelId: string,
     star: number | null
   ): Promise<UserRanking[]> {
-    const client = this.getClient();
-    // 1) 해당 카드(채널[+별]) 보유 카드들을 한 번에 조회
-    let cardQuery = client
-      .from('user_cards')
-      .select('user_id, star, streamer:streamers(base_value)')
-      .eq('channel_id', channelId)
-      .or('is_hidden.is.null,is_hidden.eq.false');
-    if (star !== null) cardQuery = cardQuery.eq('star', star);
-    const { data: cards, error: cErr } = await cardQuery;
-    if (cErr) throw cErr;
-    if (!cards || cards.length === 0) return [];
-
-    // 2) 보유자별 매칭 카드 가치/수 집계
-    const agg = new Map<string, { value: number; count: number }>();
-    for (const c of cards as any[]) {
-      const value = (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8);
-      const cur = agg.get(c.user_id) || { value: 0, count: 0 };
-      cur.value += value;
-      cur.count += 1;
-      agg.set(c.user_id, cur);
-    }
-    // 상위 후보만 유저 정보를 조회하도록 매칭 카드 가치 기준으로 정렬·상한 적용 (in() URL 길이 보호)
-    const CANDIDATE_CAP = 200;
-    const ownerIds = Array.from(agg.entries())
-      .sort((a, b) => b[1].value - a[1].value)
-      .slice(0, CANDIDATE_CAP)
-      .map(([id]) => id);
-
-    // 3) 보유자 유저 정보 일괄 조회
-    const { data: users, error: uErr } = await client.from('users').select('*').in('id', ownerIds);
-    if (uErr) throw uErr;
-
+    const ownerIds = await this.fetchCardOwnerIds(channelId, star);
+    if (ownerIds.size === 0) return [];
     const kw = (keyword || '').trim();
-    const ranked: UserRanking[] = (users || [])
-      .map((u: any) => {
-        const a = agg.get(u.id)!;
-        const cardsValue = Math.round(a.value);
-        return { ...(u as User), card_count: a.count, cards_value: cardsValue, total_asset: u.point + cardsValue };
-      })
+    const users = await this.fetchUsersForRanking();
+    const ranked = (await this.enrichWithCardValues(users))
       .sort((a, b) => mode === 'cards'
-        ? (b.cards_value || 0) - (a.cards_value || 0)
-        : b.total_asset - a.total_asset
+        ? (b.cards_value || 0) - (a.cards_value || 0) || String(a.id).localeCompare(String(b.id))
+        : b.total_asset - a.total_asset || String(a.id).localeCompare(String(b.id))
       )
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
 
     return ranked
+      .filter((u) => ownerIds.has(u.id))
       .filter((u) => !kw || fuzzyScore(u.username || '', kw) !== null)
       .slice(0, limit);
   }
@@ -540,15 +507,14 @@ export class SupabaseUserRepository implements IUserRepository {
    */
   private async enrichWithCardValues(candidates: User[]): Promise<UserRanking[]> {
     const ids = candidates.map((u) => u.id);
-    const { data: cards } = await this.getClient()
-      .from('user_cards')
-      .select('user_id, star, streamer:streamers(base_value)')
-      .in('user_id', ids)
-      .or('is_hidden.is.null,is_hidden.eq.false');
+    if (ids.length === 0) return [];
 
+    const cards = await this.fetchVisibleCardsByUserIds(ids);
+    const channelIds = Array.from(new Set(cards.map((card) => card.channel_id).filter(Boolean)));
+    const baseValueMap = await this.fetchStreamerBaseValueMap(channelIds);
     const agg = new Map<string, { value: number; count: number }>();
-    for (const c of (cards || []) as any[]) {
-      const value = (c.streamer?.base_value || 0) * (1 + (c.star || 0) * 0.8);
+    for (const c of cards) {
+      const value = (baseValueMap.get(c.channel_id) || 0) * (1 + (c.star || 0) * 0.8);
       const cur = agg.get(c.user_id) || { value: 0, count: 0 };
       cur.value += value;
       cur.count += 1;
@@ -559,6 +525,80 @@ export class SupabaseUserRepository implements IUserRepository {
       const cardsValue = Math.round(a.value);
       return { ...u, card_count: a.count, cards_value: cardsValue, total_asset: u.point + cardsValue };
     });
+  }
+
+  private async fetchVisibleCardsByUserIds(userIds: string[]): Promise<{ user_id: string; channel_id: string; star: number }[]> {
+    const cards: { user_id: string; channel_id: string; star: number }[] = [];
+    const chunkSize = 200;
+    const pageSize = 1000;
+
+    for (let start = 0; start < userIds.length; start += chunkSize) {
+      const chunk = userIds.slice(start, start + chunkSize);
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await this.getClient()
+          .from('user_cards')
+          .select('user_id, channel_id, star')
+          .in('user_id', chunk)
+          .or('is_hidden.is.null,is_hidden.eq.false')
+          .range(offset, offset + pageSize - 1);
+
+        if (error) throw error;
+        for (const row of data || []) {
+          cards.push({
+            user_id: row.user_id,
+            channel_id: row.channel_id,
+            star: Number(row.star || 0)
+          });
+        }
+        if (!data || data.length < pageSize) break;
+      }
+    }
+
+    return cards;
+  }
+
+  private async fetchCardOwnerIds(channelId: string, star: number | null): Promise<Set<string>> {
+    const ownerIds = new Set<string>();
+    const pageSize = 1000;
+
+    for (let offset = 0; ; offset += pageSize) {
+      let query = this.getClient()
+        .from('user_cards')
+        .select('user_id')
+        .eq('channel_id', channelId)
+        .or('is_hidden.is.null,is_hidden.eq.false')
+        .range(offset, offset + pageSize - 1);
+      if (star !== null) query = query.eq('star', star);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      for (const row of data || []) {
+        if (row.user_id) ownerIds.add(row.user_id);
+      }
+      if (!data || data.length < pageSize) break;
+    }
+
+    return ownerIds;
+  }
+
+  private async fetchStreamerBaseValueMap(channelIds: string[]): Promise<Map<string, number>> {
+    const valueMap = new Map<string, number>();
+    const chunkSize = 500;
+
+    for (let start = 0; start < channelIds.length; start += chunkSize) {
+      const chunk = channelIds.slice(start, start + chunkSize);
+      const { data, error } = await this.getClient()
+        .from('streamers')
+        .select('channel_id, base_value')
+        .in('channel_id', chunk);
+
+      if (error) throw error;
+      for (const streamer of data || []) {
+        valueMap.set(streamer.channel_id, Number(streamer.base_value || 0));
+      }
+    }
+
+    return valueMap;
   }
 }
 

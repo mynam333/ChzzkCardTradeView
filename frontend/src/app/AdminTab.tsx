@@ -113,6 +113,7 @@ export const AdminTab: React.FC = () => {
   const [delSearch, setDelSearch] = useState('');
   const [delPage, setDelPage] = useState(1);
   const [delTarget, setDelTarget] = useState<any | null>(null);
+  const [delPreventReregistration, setDelPreventReregistration] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   // 유지보수: DB 초기화 + 미사용 이미지
@@ -1007,12 +1008,16 @@ export const AdminTab: React.FC = () => {
     try {
       const res = await apiFetch(`/admin/streamers/${delTarget.channel_id}/delete`, {
         method: 'POST',
-        body: JSON.stringify({ confirmation: delTarget.channel_id })
+        body: JSON.stringify({
+          confirmation: delTarget.channel_id,
+          prevent_reregistration: delPreventReregistration
+        })
       });
       const data = await res.json();
       if (res.ok) {
         toast(data.message || '스트리머 카드를 삭제했습니다.', 'success');
         setDelTarget(null);
+        setDelPreventReregistration(false);
         fetchCouponStreamers(true);
       } else {
         toast(data.message || '삭제 실패', 'error');
@@ -2020,7 +2025,7 @@ export const AdminTab: React.FC = () => {
               </div>
             </div>
 
-            {/* 스트리머 카드 삭제(폐기) — 보유자에게 시세 보상 후 카드/스트리머 제거 */}
+            {/* 스트리머 카드 삭제(폐기) — 보유자에게 추가 무료 소환 티켓 보상 후 카드/스트리머 제거 */}
             {(() => {
               const kw = delSearch.trim().toLowerCase();
               const list = (kw
@@ -2035,7 +2040,7 @@ export const AdminTab: React.FC = () => {
                 <div className="rounded-2xl border border-red-500/30 bg-card p-5 shadow-sm">
                   <h3 className="text-sm font-bold flex items-center gap-1.5 text-red-500"><Trash2 className="h-4 w-4" /> 스트리머 카드 삭제(폐기)</h3>
                   <p className="mt-1 mb-3 text-[11px] text-muted-foreground leading-relaxed">
-                    삭제 시 해당 카드를 보유한 모든 유저에게 <b className="text-foreground/80">삭제 시점 시세(별 등급 반영)</b>만큼 포인트를 지급한 뒤 카드를 제거하고 스트리머를 폐기합니다. <b className="text-red-500">되돌릴 수 없습니다.</b>
+                    삭제 시 해당 카드를 1장 이상 보유한 모든 유저에게 <b className="text-foreground/80">추가 무료 소환 티켓 1장</b>을 지급한 뒤 카드를 제거하고 스트리머를 폐기합니다. 필요하면 재등록 금지도 함께 적용할 수 있습니다. <b className="text-red-500">되돌릴 수 없습니다.</b>
                   </p>
                   <input
                     type="text"
@@ -2078,7 +2083,14 @@ export const AdminTab: React.FC = () => {
 
       {/* 스트리머 카드 삭제 확인 모달 */}
       {delTarget && (
-        <div className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm" onClick={() => !deleting && setDelTarget(null)}>
+        <div
+          className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm"
+          onClick={() => {
+            if (deleting) return;
+            setDelTarget(null);
+            setDelPreventReregistration(false);
+          }}
+        >
           <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <Trash2 className="mx-auto h-9 w-9 text-red-500 mb-3" />
             <h4 className="text-sm font-black text-foreground mb-2">스트리머 카드 삭제</h4>
@@ -2087,10 +2099,32 @@ export const AdminTab: React.FC = () => {
               보유자에게는 <b className="text-emerald-500">추가 무료 소환 티켓 1장</b>이 지급됩니다.<br />
               <b className="text-red-500">이 작업은 되돌릴 수 없습니다.</b>
             </p>
+            <label className="mt-4 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-left text-[11px] leading-relaxed text-muted-foreground dark:bg-red-500/10">
+              <input
+                type="checkbox"
+                checked={delPreventReregistration}
+                onChange={(event) => setDelPreventReregistration(event.target.checked)}
+                disabled={deleting}
+                className="mt-0.5"
+              />
+              <span>
+                <b className="block text-xs text-red-500">삭제 후 재등록 금지</b>
+                권리자 요청 등으로 폐기하는 경우 선택하세요. 적용하면 같은 채널 ID의 스트리머 카드를 다시 등록할 수 없습니다.
+              </span>
+            </label>
             <div className="mt-5 flex items-center justify-center gap-2">
-              <button onClick={() => setDelTarget(null)} disabled={deleting} className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80 disabled:opacity-50">취소</button>
+              <button
+                onClick={() => {
+                  setDelTarget(null);
+                  setDelPreventReregistration(false);
+                }}
+                disabled={deleting}
+                className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80 disabled:opacity-50"
+              >
+                취소
+              </button>
               <button onClick={handleDeleteStreamer} disabled={deleting} className="rounded-lg bg-red-500 px-5 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50">
-                {deleting ? '삭제 중...' : '삭제하고 보상 지급'}
+                {deleting ? '삭제 중...' : delPreventReregistration ? '삭제·보상·재등록 금지' : '삭제하고 보상 지급'}
               </button>
             </div>
           </div>

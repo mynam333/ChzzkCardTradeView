@@ -299,13 +299,8 @@ export class SqliteUserRepository implements IUserRepository {
     const mode = options.mode === 'cards' ? 'cards' : 'total';
     const channelId = (options.channelId || '').trim();
     const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
-    const cardFilterSql = channelId
-      ? 'AND uc.channel_id = ? AND (? IS NULL OR COALESCE(uc.star, 0) = ?)'
-      : '';
     const orderExpr = mode === 'cards' ? 'cards_value' : '(point + cards_value)';
-    const params: any[] = [];
-    if (channelId) params.push(channelId, star, star);
-    params.push(keyword, `%${keyword}%`, limit);
+    const params: any[] = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
 
     const rows = this.getDb().prepare(`
       WITH UserCardValues AS (
@@ -314,7 +309,7 @@ export class SqliteUserRepository implements IUserRepository {
                COUNT(uc.id) AS card_count,
                COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
         FROM users u
-        LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0 ${cardFilterSql}
+        LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
         LEFT JOIN streamers s ON s.channel_id = uc.channel_id
         GROUP BY u.id
       ),
@@ -325,6 +320,17 @@ export class SqliteUserRepository implements IUserRepository {
       )
       SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
       WHERE (? = '' OR username LIKE ?)
+        AND (
+          ? = ''
+          OR EXISTS (
+            SELECT 1
+              FROM user_cards fc
+             WHERE fc.user_id = RankedUsers.id
+               AND COALESCE(fc.is_hidden, 0) = 0
+               AND fc.channel_id = ?
+               AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
+          )
+        )
       LIMIT ?
     `).all(...params);
 
