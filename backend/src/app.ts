@@ -34,6 +34,33 @@ const IMAGE_PROXY_SLOW_REQUEST_LOG_MS = Math.max(
   Number(process.env.IMAGE_PROXY_SLOW_REQUEST_LOG_MS || 10_000)
 );
 const REQUEST_LOG_URL_MAX_LENGTH = Math.max(120, Number(process.env.REQUEST_LOG_URL_MAX_LENGTH || 300));
+
+const resolveProjectPath = (value: string): string =>
+  path.isAbsolute(value) ? value : path.resolve(__dirname, '..', '..', value);
+
+const getHttpsCertificatePaths = (): { keyPath?: string; certPath?: string; source: string } => {
+  if (process.env.CLOUDFLARE_ORIGIN_KEY_PATH || process.env.CLOUDFLARE_ORIGIN_CERT_PATH) {
+    return {
+      keyPath: process.env.CLOUDFLARE_ORIGIN_KEY_PATH,
+      certPath: process.env.CLOUDFLARE_ORIGIN_CERT_PATH,
+      source: 'Cloudflare Origin Certificate'
+    };
+  }
+
+  if (process.env.SSL_KEY_PATH || process.env.SSL_CERT_PATH) {
+    return {
+      keyPath: process.env.SSL_KEY_PATH,
+      certPath: process.env.SSL_CERT_PATH,
+      source: 'SSL certificate'
+    };
+  }
+
+  return {
+    keyPath: process.env.SSL_PRIVKEY_PATH,
+    certPath: process.env.SSL_FULLCHAIN_PATH,
+    source: 'Let\'s Encrypt compatible certificate'
+  };
+};
 const NORMAL_CLOSE_PATHS = new Set(['/api/realtime/stream', '/api/notifications/stream']);
 
 const truncateLogValue = (value: string, maxLength = REQUEST_LOG_URL_MAX_LENGTH) => {
@@ -217,33 +244,31 @@ const startServer = async () => {
     startStreamerLiveStatusScheduler(); // 치지직 실시간 방송 상태 폴링 크론 가동
 
     const useHttps = process.env.USE_HTTPS === 'true';
-    // nginx 표준과 동일한 인증서 파일명(fullchain.pem / privkey.pem)을 사용합니다.
-    const privkeyPath = process.env.SSL_PRIVKEY_PATH;
-    const fullchainPath = process.env.SSL_FULLCHAIN_PATH;
+    const { keyPath, certPath, source } = getHttpsCertificatePaths();
 
-    if (useHttps && privkeyPath && fullchainPath) {
+    if (useHttps && keyPath && certPath) {
       try {
         // 상대 경로인 경우 프로젝트 루트 기준으로 절대 경로 해소
-        const resolvedPrivkeyPath = path.isAbsolute(privkeyPath) ? privkeyPath : path.resolve(__dirname, '..', '..', privkeyPath);
-        const resolvedFullchainPath = path.isAbsolute(fullchainPath) ? fullchainPath : path.resolve(__dirname, '..', '..', fullchainPath);
+        const resolvedKeyPath = resolveProjectPath(keyPath);
+        const resolvedCertPath = resolveProjectPath(certPath);
 
-        if (fs.existsSync(resolvedPrivkeyPath) && fs.existsSync(resolvedFullchainPath)) {
+        if (fs.existsSync(resolvedKeyPath) && fs.existsSync(resolvedCertPath)) {
           const sslOptions = {
-            key: fs.readFileSync(resolvedPrivkeyPath),   // privkey.pem
-            cert: fs.readFileSync(resolvedFullchainPath) // fullchain.pem (중간 CA 체인 포함)
+            key: fs.readFileSync(resolvedKeyPath),
+            cert: fs.readFileSync(resolvedCertPath)
           };
 
           https.createServer(sslOptions, app).listen(PORT, () => {
-            console.log(`[Server] HTTPS SSL 인증서를 성공적으로 로드했습니다.`);
-            console.log(`[Server]   ├─ privkey  : ${resolvedPrivkeyPath}`);
-            console.log(`[Server]   └─ fullchain: ${resolvedFullchainPath}`);
+            console.log(`[Server] HTTPS 인증서를 성공적으로 로드했습니다. (${source})`);
+            console.log(`[Server]   ├─ key : ${resolvedKeyPath}`);
+            console.log(`[Server]   └─ cert: ${resolvedCertPath}`);
             console.log(`[Server] 백엔드 서버가 https://localhost:${PORT} 에서 실행 중입니다.`);
           });
           return;
         } else {
           console.warn(`[Server] HTTPS가 활성화되었으나 지정된 SSL 파일이 존재하지 않습니다.`);
-          if (!fs.existsSync(resolvedPrivkeyPath))  console.warn(`[Server]   ├─ privkey  누락: ${resolvedPrivkeyPath}`);
-          if (!fs.existsSync(resolvedFullchainPath)) console.warn(`[Server]   └─ fullchain 누락: ${resolvedFullchainPath}`);
+          if (!fs.existsSync(resolvedKeyPath)) console.warn(`[Server]   ├─ key 누락: ${resolvedKeyPath}`);
+          if (!fs.existsSync(resolvedCertPath)) console.warn(`[Server]   └─ cert 누락: ${resolvedCertPath}`);
           console.warn(`[Server] 일반 HTTP 프로토콜로 폴백(Fallback) 전환하여 서버를 실행합니다.`);
         }
       } catch (sslErr: any) {
@@ -252,7 +277,8 @@ const startServer = async () => {
       }
     } else if (useHttps) {
       // USE_HTTPS=true 이지만 경로 환경변수가 누락된 경우
-      console.warn(`[Server] USE_HTTPS=true 이지만 SSL_PRIVKEY_PATH 또는 SSL_FULLCHAIN_PATH가 설정되지 않았습니다.`);
+      console.warn(`[Server] USE_HTTPS=true 이지만 인증서 key/cert 경로가 설정되지 않았습니다.`);
+      console.warn(`[Server] CLOUDFLARE_ORIGIN_KEY_PATH/CLOUDFLARE_ORIGIN_CERT_PATH 또는 SSL_KEY_PATH/SSL_CERT_PATH를 설정하세요.`);
       console.warn(`[Server] 일반 HTTP 프로토콜로 폴백(Fallback) 전환하여 서버를 실행합니다.`);
     }
 
