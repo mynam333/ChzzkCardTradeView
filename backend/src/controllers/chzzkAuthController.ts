@@ -16,6 +16,15 @@ const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
 const CHZZK_API_URL = process.env.CHZZK_API_URL || 'https://api.chzzk.naver.com';
 
+class ChzzkTokenExchangeError extends Error {
+  constructor(
+    public statusCode: number,
+    public responseBody: string
+  ) {
+    super(`치지직 토큰 교환 실패: ${statusCode} - ${responseBody}`);
+  }
+}
+
 /**
  * 1. 치지직 로그인 인터록 URL 반환 API
  */
@@ -104,7 +113,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`치지직 토큰 교환 실패: ${response.status} - ${errorText}`);
+      throw new ChzzkTokenExchangeError(response.status, errorText);
     }
 
     const rawTokenBody = await response.text();
@@ -260,6 +269,14 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
       }
     });
   } catch (err: any) {
+    if (err instanceof ChzzkTokenExchangeError && err.statusCode === 403) {
+      console.warn('[ChzzkAuthController] 치지직 인증 코드 교환 실패:', err.responseBody);
+      return res.status(400).json({
+        error: 'InvalidAuthorizationCode',
+        message: '로그인 인증 코드가 만료되었거나 이미 사용되었습니다. 다시 로그인해 주세요.'
+      });
+    }
+
     console.error('[ChzzkAuthController] 콜백 처리 중 에러:', err);
     return res.status(500).json({
       error: 'InternalServerError',

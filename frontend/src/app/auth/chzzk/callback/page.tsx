@@ -19,6 +19,7 @@ const ChzzkCallbackContent: React.FC = () => {
   const { setUser, toast } = useApp() as any; // 타입 캐스팅 편의용
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const exchangeStartedRef = React.useRef(false);
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -29,6 +30,9 @@ const ChzzkCallbackContent: React.FC = () => {
       setLoading(false);
       return;
     }
+    if (exchangeStartedRef.current) return;
+    exchangeStartedRef.current = true;
+    window.history.replaceState(null, '', '/auth/chzzk/callback');
 
     const exchangeCodeForToken = async () => {
       try {
