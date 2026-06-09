@@ -85,6 +85,74 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
   throw lastErr;
 };
 
+const createSqliteIdBackfillTrigger = (db: Database.Database, table: string) => {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_${table}_id_after_insert
+    AFTER INSERT ON ${table}
+    WHEN NEW.id IS NULL
+    BEGIN
+      UPDATE ${table} SET id = NEW.rowid WHERE rowid = NEW.rowid;
+    END;
+  `);
+};
+
+const ensureUniqueIndex = (db: Database.Database, table: string, columns: string[], indexName: string) => {
+  const quotedColumns = columns.map((column) => `"${column}"`).join(', ');
+  const partition = columns.map((column) => `"${column}"`).join(', ');
+  db.exec(`
+    DELETE FROM ${table}
+     WHERE rowid NOT IN (
+       SELECT rowid
+         FROM (
+           SELECT rowid,
+                  ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY rowid DESC) AS rn
+             FROM ${table}
+            WHERE ${columns.map((column) => `"${column}" IS NOT NULL`).join(' AND ')}
+         )
+        WHERE rn = 1
+     )
+       AND ${columns.map((column) => `"${column}" IS NOT NULL`).join(' AND ')};
+    CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${quotedColumns});
+  `);
+};
+
+const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
+  // Supabase export로 만든 SQLite 파일은 컬럼만 있고 PK/UNIQUE 제약이 빠질 수 있습니다.
+  // SQLite upsert(ON CONFLICT)는 실제 UNIQUE/PRIMARY KEY가 있어야 하므로 운영 시작 시 보정합니다.
+  ensureUniqueIndex(db, 'streamers', ['channel_id'], 'idx_streamers_channel_id_unique');
+  ensureUniqueIndex(db, 'system_configs', ['key'], 'idx_system_configs_key_unique');
+  ensureUniqueIndex(db, 'streamer_registration_blocks', ['channel_id'], 'idx_streamer_registration_blocks_channel_id_unique');
+  ensureUniqueIndex(db, 'tutorial_rewards', ['user_id', 'reward_key'], 'idx_tutorial_rewards_user_reward_unique');
+  ensureUniqueIndex(db, 'user_titles', ['user_id', 'title_id'], 'idx_user_titles_user_title_unique');
+  ensureUniqueIndex(db, 'user_cosmetics', ['user_id', 'item_id'], 'idx_user_cosmetics_user_item_unique');
+  ensureUniqueIndex(db, 'shop_purchases', ['user_id', 'item_id'], 'idx_shop_purchases_user_item_unique');
+  ensureUniqueIndex(db, 'user_blocks', ['blocker_id', 'blocked_id'], 'idx_user_blocks_pair_unique');
+  ensureUniqueIndex(db, 'user_minigame_tickets', ['user_id'], 'idx_user_minigame_tickets_user_unique');
+  ensureUniqueIndex(db, 'push_subscriptions', ['endpoint'], 'idx_push_subscriptions_endpoint');
+  ensureUniqueIndex(db, 'coupon_logs', ['coupon_id', 'user_id'], 'idx_coupon_logs_coupon_user_unique');
+
+  for (const table of [
+    'titles',
+    'user_cards',
+    'trades',
+    'value_history',
+    'coupons',
+    'coupon_logs',
+    'announcements',
+    'push_subscriptions',
+    'push_notifications',
+    'card_reports',
+    'notifications',
+    'shop_items',
+    'user_cosmetics',
+    'market_listings',
+    'market_bids',
+    'market_watches'
+  ]) {
+    createSqliteIdBackfillTrigger(db, table);
+  }
+};
+
 /**
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
@@ -563,6 +631,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();
+
+      try {
+        ensureSqliteCompatibilityConstraints(sqliteDb);
+        console.log('[DB Migration] SQLite UNIQUE/ID 호환 제약 보정 완료했습니다.');
+      } catch (constraintErr: any) {
+        console.error('[DB Migration] SQLite UNIQUE/ID 호환 제약 보정 실패:', constraintErr?.message || constraintErr);
+        throw constraintErr;
+      }
 
       // 이미지 URL 자동 상대경로 마이그레이션 (호스트/포트 변경 방어 장치)
       try {
