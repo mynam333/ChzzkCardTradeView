@@ -192,7 +192,9 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                const pointerX = P + ratio * (W - 2 * P);
+                // preserveAspectRatio="none" 상태에서는 화면 x좌표가 viewBox 전체 W에 선형 매핑됩니다.
+                // 차트 패딩(P)을 여기서 다시 적용하면 커서보다 왼쪽 포인트가 선택되는 오차가 생깁니다.
+                const pointerX = ratio * W;
                 let nearest = 0;
                 let nearestDistance = Infinity;
                 coords.forEach((coord, index) => {

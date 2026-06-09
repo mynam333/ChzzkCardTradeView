@@ -192,7 +192,7 @@ router.get('/health', (req, res) => {
 });
 
 router.get('/realtime/stream', (req, res) => {
-  subscribeRealtimeStream(res, req.query.topics);
+  subscribeRealtimeStream(res, req.query.topics, req.header('last-event-id'));
 });
 
 // ==========================================

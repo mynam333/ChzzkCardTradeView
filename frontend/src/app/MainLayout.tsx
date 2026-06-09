@@ -91,7 +91,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       <div className="pointer-events-none fixed bottom-10 right-8 -z-10 hidden h-40 w-40 rounded-full bg-primary/12 blur-3xl md:block dark:bg-primary/10" />
       
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
-      <aside className="cute-surface sticky top-0 z-20 hidden h-screen w-72 flex-col rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
+      <aside className="cute-surface scrollbar-none sticky top-0 z-20 hidden h-screen w-72 flex-col overflow-y-auto overscroll-contain rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10">
             <Image
@@ -153,7 +153,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           </div>
         )}
 
-        <nav className="flex-1 space-y-1">
+        <nav className="min-h-0 flex-1 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;

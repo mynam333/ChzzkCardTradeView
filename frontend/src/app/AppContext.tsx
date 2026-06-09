@@ -617,6 +617,10 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   const askedPushRef = useRef(false);
 
   useEffect(() => {
+    askedPushRef.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
     refreshUserData();
     registerServiceWorker();
 
@@ -652,7 +656,13 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   }, [router]);
 
   useEffect(() => {
-    if (!user || askedPushRef.current || !isPushSupported() || Notification.permission !== 'default') return;
+    if (!user || askedPushRef.current || !isPushSupported() || Notification.permission === 'denied') return;
+
+    if (Notification.permission === 'granted') {
+      askedPushRef.current = true;
+      subscribeToPush().catch(() => { /* 무시 */ });
+      return;
+    }
 
     const handleFirstGesture = async () => {
       askedPushRef.current = true;

@@ -7,6 +7,7 @@ import { createRealtimeNotification } from './notificationController';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { clearUserRankingCaches } from './playController';
+import type { MarketListing } from '../repositories/interfaces';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 
@@ -22,8 +23,30 @@ const notify = (
   createRealtimeNotification({ user_id: userId, title, body, link: target }).catch(() => { /* 무시 */ });
 };
 
-const publishMarketUpdated = (reason: string, listingId?: number) => {
-  publishRealtimeEvent('market', { reason, listingId });
+const realtimeListingPatch = (listing: MarketListing | null | undefined) => {
+  if (!listing?.id) return null;
+  return {
+    id: listing.id,
+    status: listing.status,
+    price: listing.price,
+    listing_type: listing.listing_type,
+    buy_now_price: listing.buy_now_price ?? null,
+    starting_bid: listing.starting_bid ?? null,
+    current_bid: listing.current_bid ?? null,
+    current_bidder_id: listing.current_bidder_id ?? null,
+    current_bidder_username: listing.current_bidder_username ?? null,
+    auction_ends_at: listing.auction_ends_at ?? null,
+    updated_at: listing.updated_at ?? new Date().toISOString()
+  };
+};
+
+const publishMarketUpdated = (reason: string, listing?: MarketListing | null, extra: Record<string, unknown> = {}) => {
+  publishRealtimeEvent('market', {
+    reason,
+    listingId: listing?.id,
+    listing: realtimeListingPatch(listing),
+    ...extra
+  });
 };
 
 const publishRankingUpdated = (reason: string) => {
@@ -151,7 +174,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       fee_rate: feeRate
     });
     await notifyMatchingWatches(listing);
-    publishMarketUpdated('listing_created', listing.id);
+    publishMarketUpdated('listing_created', listing);
 
     return res.json({ ok: true, listing });
   } catch (err: any) {
@@ -190,7 +213,7 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await marketRepository.updateStatus(id, 'CANCELLED');
-    publishMarketUpdated('listing_cancelled', id);
+    publishMarketUpdated('listing_cancelled', { ...listing, status: 'CANCELLED' });
     return res.json({ ok: true });
   } catch (err: any) {
     console.error('[MarketController] cancelListing 에러:', err);
@@ -288,7 +311,8 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
     const title = '[오픈마켓] 카드 판매 완료';
     const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${price}P에서 수수료 ${feeRate}%를 제한 ${settledAmount}P가 계정으로 정산되었습니다.`;
     notify(listing.seller_id, title, body);
-    publishMarketUpdated('listing_purchased', id);
+    const updatedListing = await marketRepository.findById(id).catch(() => null);
+    publishMarketUpdated('listing_purchased', updatedListing || { ...listing, status: 'SOLD', price });
     publishRankingUpdated('market_purchase');
 
     return res.json({ ok: true, settledAmount });
@@ -329,7 +353,11 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       'shop:market'
     );
   }
-  publishMarketUpdated('auction_bid', id);
+  const updatedListing = await marketRepository.findById(id).catch(() => null);
+  publishMarketUpdated('auction_bid', updatedListing, {
+    current_bid: result.current_bid,
+    auction_ends_at: result.auction_ends_at ?? null
+  });
   return res.status(200).json(result);
 };
 
@@ -402,7 +430,10 @@ export const settleExpiredAuctions = async () => {
     }
   }
   if (soldListings.length > 0) {
-    publishMarketUpdated('auction_settled');
+    publishMarketUpdated('auction_settled', null, {
+      listingIds: soldListings.map((listing) => listing.id).filter(Boolean),
+      listings: soldListings.map(realtimeListingPatch).filter(Boolean)
+    });
     publishRankingUpdated('auction_settled');
   }
 };

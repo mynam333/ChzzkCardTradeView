@@ -37,6 +37,20 @@ export type SubscribeResult =
   | { ok: true }
   | { ok: false; reason: 'unsupported' | 'denied' | 'no_vapid' | 'error'; message: string };
 
+const waitForServiceWorkerReady = async (): Promise<ServiceWorkerRegistration | null> => {
+  const registration = await registerServiceWorker();
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<ServiceWorkerRegistration | null>((resolve) => {
+        window.setTimeout(() => resolve(registration), 8000);
+      })
+    ]);
+  } catch {
+    return registration;
+  }
+};
+
 /**
  * 알림 권한을 요청하고 푸시 구독을 생성하여 백엔드에 등록합니다.
  * 로그인(JWT) 상태에서 호출해야 합니다(/push/subscribe는 인증 필요).
@@ -47,12 +61,14 @@ export const subscribeToPush = async (): Promise<SubscribeResult> => {
   }
 
   try {
-    const permission = await Notification.requestPermission();
+    const permission = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
     if (permission !== 'granted') {
       return { ok: false, reason: 'denied', message: '알림 권한이 허용되지 않았습니다.' };
     }
 
-    const registration = (await navigator.serviceWorker.ready) || (await registerServiceWorker());
+    const registration = await waitForServiceWorkerReady();
     if (!registration) {
       return { ok: false, reason: 'error', message: '서비스 워커를 사용할 수 없습니다.' };
     }

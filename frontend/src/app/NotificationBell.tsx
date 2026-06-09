@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bell, CheckCheck, Trash2 } from 'lucide-react';
 import { useApp, useNotifications } from './AppContext';
 
@@ -8,6 +8,8 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
   const { user } = useApp();
   const { notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead, hideReadNotification } = useNotifications();
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0, width: 320 });
 
   if (!user) return null;
 
@@ -16,6 +18,33 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
     setOpen(next);
     if (next) fetchNotifications();
   };
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      const button = buttonRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const padding = 12;
+      const width = Math.min(320, window.innerWidth - padding * 2);
+      const preferredLeft = align === 'left' ? rect.left : rect.right - width;
+      const left = Math.min(Math.max(preferredLeft, padding), window.innerWidth - width - padding);
+      setPanelPosition({
+        top: rect.bottom + 8,
+        left,
+        width
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [align, open]);
 
   const formatTime = (iso?: string) => {
     if (!iso) return '';
@@ -32,6 +61,7 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
   return (
     <div className={`relative ${className || ''}`}>
       <button
+        ref={buttonRef}
         onClick={toggle}
         className="cute-wiggle-hover relative rounded-full border border-border/70 bg-secondary/60 p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground"
         title="알림"
@@ -47,8 +77,11 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
       {open && (
         <>
           {/* 바깥 클릭 닫기 */}
-          <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
-          <div className={`cute-surface absolute ${align === 'left' ? 'left-0' : 'right-0'} z-[95] mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-[1.75rem] animate-in fade-in slide-in-from-top-2 duration-150`}>
+          <div className="fixed inset-0 z-[220]" onClick={() => setOpen(false)} />
+          <div
+            className="cute-surface fixed z-[230] overflow-hidden rounded-[1.75rem] animate-in fade-in slide-in-from-top-2 duration-150"
+            style={{ top: panelPosition.top, left: panelPosition.left, width: panelPosition.width }}
+          >
             <div className="flex items-center justify-between border-b border-border/60 bg-secondary/25 px-4 py-3">
               <h4 className="flex items-center gap-1.5 text-sm font-black">
                 <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-primary/10 text-primary">

@@ -371,7 +371,19 @@ export const MyInfoTab: React.FC = () => {
   // 본인에게 테스트 푸시를 보내 구독이 정상 등록됐는지 확인
   const handleTestPush = async () => {
     try {
-      const res = await apiFetch('/push/test', { method: 'POST' });
+      let res = await apiFetch('/push/test', { method: 'POST' });
+      if (res.status === 400) {
+        const data = await res.clone().json().catch(() => ({}));
+        if (data?.error === 'NoSubscription' && isPushSupported() && Notification.permission === 'granted') {
+          const subscribeResult = await subscribeToPush();
+          if (subscribeResult.ok) {
+            res = await apiFetch('/push/test', { method: 'POST' });
+          } else {
+            toast(subscribeResult.message);
+            return;
+          }
+        }
+      }
       const data = await res.json().catch(() => ({}));
       toast(data.message || (res.ok ? '테스트 푸시를 전송했습니다.' : '테스트 전송에 실패했습니다.'));
     } catch {

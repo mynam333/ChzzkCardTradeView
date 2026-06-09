@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
@@ -66,6 +66,27 @@ const mergeMarketListings = (prev: any[], next: any[]): any[] => {
   });
   // 아무 변화가 없으면 동일 배열 참조를 반환해 리렌더 자체를 건너뜁니다.
   return changed ? merged : prev;
+};
+
+type MarketRealtimeDetail = {
+  reason?: string;
+  listingId?: number;
+  listing?: any;
+  listings?: any[];
+  listingIds?: number[];
+};
+
+const applyRealtimeListingPatch = (prev: any[], patch: any, removeClosed = true): any[] => {
+  if (!patch?.id) return prev;
+  const id = Number(patch.id);
+  const index = prev.findIndex((listing) => Number(listing.id) === id);
+  if (removeClosed && patch.status && patch.status !== 'PENDING') {
+    return index >= 0 ? prev.filter((listing) => Number(listing.id) !== id) : prev;
+  }
+  if (index < 0) return prev;
+  const next = [...prev];
+  next[index] = { ...next[index], ...patch };
+  return marketListingsEqual(prev[index], next[index]) ? prev : next;
 };
 
 // 경매 남은 시간(ms)을 한눈에 보기 좋은 문자열로 변환합니다.
@@ -152,6 +173,8 @@ export const ShopTab: React.FC = () => {
   const [watchStreamerOpen, setWatchStreamerOpen] = useState(false);
   // 경매 남은 시간 실시간 카운트다운용 1초 틱
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const marketRefreshTimerRef = useRef<number | null>(null);
+  const lastMarketRefreshAtRef = useRef(0);
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
@@ -251,6 +274,7 @@ export const ShopTab: React.FC = () => {
   // silent=true(백그라운드 폴링)일 때는 로딩 스켈레톤을 띄우지 않고 변경분만 조용히 반영합니다.
   // → 경매 정보(입찰가·남은 시간 등) 갱신은 받아오되, 10초마다 리스트가 통째로 새로고침되는 현상 방지.
   const fetchMarketListings = async (silent = false) => {
+    lastMarketRefreshAtRef.current = Date.now();
     if (!silent) setIsLoadingMarket(true);
     try {
       const query = new URLSearchParams({
@@ -277,6 +301,42 @@ export const ShopTab: React.FC = () => {
       console.error(err);
     } finally {
       if (!silent) setIsLoadingMarket(false);
+    }
+  };
+
+  const scheduleMarketRefresh = (delayMs = 1200, minGapMs = 3500) => {
+    if (marketRefreshTimerRef.current !== null) {
+      window.clearTimeout(marketRefreshTimerRef.current);
+    }
+    const elapsed = Date.now() - lastMarketRefreshAtRef.current;
+    const wait = Math.max(delayMs, minGapMs - elapsed);
+    marketRefreshTimerRef.current = window.setTimeout(() => {
+      marketRefreshTimerRef.current = null;
+      fetchMarketListings(true);
+    }, wait);
+  };
+
+  const applyMarketRealtimeEvent = (detail: MarketRealtimeDetail | null | undefined) => {
+    if (!detail) return;
+    if (detail.listing) {
+      setMarketListings((prev) => applyRealtimeListingPatch(prev, detail.listing));
+      setMyListings((prev) => {
+        const idx = prev.findIndex((listing) => Number(listing.id) === Number(detail.listing.id));
+        if (idx < 0) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...detail.listing };
+        return next;
+      });
+    }
+    if (Array.isArray(detail.listings)) {
+      for (const listing of detail.listings) {
+        setMarketListings((prev) => applyRealtimeListingPatch(prev, listing));
+        setMyListings((prev) => applyRealtimeListingPatch(prev, listing, false));
+      }
+    }
+    if (Array.isArray(detail.listingIds) && detail.listingIds.length > 0) {
+      const ids = new Set(detail.listingIds.map(Number));
+      setMarketListings((prev) => prev.filter((listing) => !ids.has(Number(listing.id))));
     }
   };
 
@@ -342,21 +402,31 @@ export const ShopTab: React.FC = () => {
 
   useEffect(() => {
     if (subTab !== 'market') return;
-    let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => fetchMarketListings(true), 400);
+    const handleMarketUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<MarketRealtimeDetail>).detail;
+      applyMarketRealtimeEvent(detail);
+      if (detail?.reason === 'auction_bid' && marketSort !== 'bid_desc') {
+        return;
+      }
+      scheduleMarketRefresh(detail?.reason === 'auction_bid' ? 2000 : 700);
     };
-    window.addEventListener('chikapo:market-updated', scheduleRefresh);
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') scheduleMarketRefresh(200, 0);
+    };
+    window.addEventListener('chikapo:market-updated', handleMarketUpdated);
+    document.addEventListener('visibilitychange', handleVisible);
     const fallbackMs = typeof EventSource === 'undefined' ? 15_000 : 120_000;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       fetchMarketListings(true); // 스트림이 끊긴 환경을 위한 fallback
     }, fallbackMs);
     return () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      window.removeEventListener('chikapo:market-updated', scheduleRefresh);
+      if (marketRefreshTimerRef.current !== null) {
+        window.clearTimeout(marketRefreshTimerRef.current);
+        marketRefreshTimerRef.current = null;
+      }
+      window.removeEventListener('chikapo:market-updated', handleMarketUpdated);
+      document.removeEventListener('visibilitychange', handleVisible);
       window.clearInterval(timer);
     };
   }, [subTab, marketPage, marketSort, marketType, marketSearch, user?.id]);
@@ -381,8 +451,9 @@ export const ShopTab: React.FC = () => {
   useEffect(() => {
     if (subTab !== 'my_listings' || !user) return;
     let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (document.visibilityState !== 'visible') return;
+    const scheduleRefresh = (event?: Event) => {
+      const detail = event ? (event as CustomEvent<MarketRealtimeDetail>).detail : null;
+      applyMarketRealtimeEvent(detail);
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => fetchMyListings(), 500);
     };
@@ -407,8 +478,9 @@ export const ShopTab: React.FC = () => {
   useEffect(() => {
     if (subTab !== 'history' || !user) return;
     let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (document.visibilityState !== 'visible') return;
+    const scheduleRefresh = (event?: Event) => {
+      const detail = event ? (event as CustomEvent<MarketRealtimeDetail>).detail : null;
+      applyMarketRealtimeEvent(detail);
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => fetchMarketHistory(true), 500);
     };

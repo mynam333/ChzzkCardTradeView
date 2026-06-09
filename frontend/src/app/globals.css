@@ -497,6 +497,15 @@ body::before {
   background: transparent;
 }
 
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* ============================================================
    코스메틱 테두리 오버레이 — 최소 베이스
    실제 테두리 비주얼은 관리자가 입력한 CSS({"class","css"})가 주입되어
