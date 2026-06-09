@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import util from 'util';
 
 type LogLevel = 'log' | 'info' | 'warn' | 'error';
 type RuntimeStatsProvider = () => unknown;
@@ -18,6 +17,7 @@ let logDir = '';
 let retentionDays = 14;
 let runtimeStatsProvider: RuntimeStatsProvider | null = null;
 let runtimeStatsTimer: NodeJS.Timeout | null = null;
+let maxLogStringLength = 2000;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -27,17 +27,60 @@ const dateStamp = (date = new Date()) => {
 
 const currentLogPath = () => path.join(logDir, `backend-${dateStamp()}.log`);
 
+const truncateString = (value: string, maxLength = maxLogStringLength) => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}...<truncated:${value.length - maxLength}>`;
+};
+
+const normalizeForLog = (value: any, seen = new WeakSet<object>(), depth = 0): any => {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack ? truncateString(value.stack, 4000) : undefined
+    };
+  }
+
+  if (typeof value === 'string') return truncateString(value);
+  if (typeof value === 'bigint') return value.toString();
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value.toISOString();
+  if (seen.has(value)) return '[Circular]';
+  if (depth >= 6) return '[MaxDepth]';
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const limit = 100;
+    const normalized = value.slice(0, limit).map((item) => normalizeForLog(item, seen, depth + 1));
+    if (value.length > limit) {
+      normalized.push(`...<truncated:${value.length - limit}>`);
+    }
+    return normalized;
+  }
+
+  const result: Record<string, any> = {};
+  const entries = Object.entries(value).slice(0, 100);
+  for (const [key, nestedValue] of entries) {
+    result[key] = normalizeForLog(nestedValue, seen, depth + 1);
+  }
+  const extraKeys = Object.keys(value).length - entries.length;
+  if (extraKeys > 0) {
+    result.__truncated_keys = extraKeys;
+  }
+  return result;
+};
+
 const serializeArg = (arg: any): string => {
   if (arg instanceof Error) {
-    return arg.stack || arg.message;
+    return truncateString(arg.stack || arg.message, 4000);
   }
-  if (typeof arg === 'string') return arg;
-  return util.inspect(arg, {
-    depth: 6,
-    breakLength: 160,
-    maxArrayLength: 100,
-    maxStringLength: 4000
-  });
+  if (typeof arg === 'string') return truncateString(arg);
+  try {
+    return JSON.stringify(normalizeForLog(arg));
+  } catch {
+    return truncateString(String(arg));
+  }
 };
 
 const writeLine = (line: string) => {
@@ -77,6 +120,7 @@ export const initFileLogging = () => {
 
   logDir = path.resolve(process.env.LOG_DIR || path.join(process.cwd(), 'logs'));
   retentionDays = Math.max(1, Math.floor(Number(process.env.LOG_RETENTION_DAYS || 14)));
+  maxLogStringLength = Math.max(500, Number(process.env.LOG_MAX_STRING_LENGTH || 2000));
 
   try {
     fs.mkdirSync(logDir, { recursive: true });

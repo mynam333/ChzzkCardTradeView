@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import { streamerRepository } from '../repositories';
 
 const CHAT_COUNT_FLUSH_INTERVAL_MS = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_INTERVAL_MS || 5000));
+const CHAT_MANAGER_VERBOSE_LOGS = process.env.CHAT_MANAGER_VERBOSE_LOGS === 'true';
 
 // 웹소켓 메시지 전송용 인터페이스
 interface ChzzkSocketFrame {
@@ -41,6 +42,12 @@ class ChzzkChatManager {
         console.error('[ChatManager] 채팅 카운트 flush 실패:', err?.message || err);
       });
     }, CHAT_COUNT_FLUSH_INTERVAL_MS);
+  }
+
+  private logVerbose(message: string) {
+    if (CHAT_MANAGER_VERBOSE_LOGS) {
+      console.log(message);
+    }
   }
 
   private addPendingChatCount(channelId: string, count: number) {
@@ -144,7 +151,7 @@ class ChzzkChatManager {
       return;
     }
 
-    console.log(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
+    this.logVerbose(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
     try {
       const { accessToken } = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
       
@@ -194,7 +201,7 @@ class ChzzkChatManager {
             }
             isJoined = true;
             currentSid = frame.bdy?.sid || frame.sid || ''; // 발급받은 세션 ID 보관
-            console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
+            this.logVerbose(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
           } else if (frame.cmd === 93101 || frame.cmd === 93102) { // 93101: CMD_CHAT, 93102: CMD_DONATION
             // 채팅 수신 시 메모리에 누적하고 주기적으로 채널별 합산 flush합니다.
             const chatCount = Array.isArray(frame.bdy) ? frame.bdy.length : 1;
@@ -222,7 +229,7 @@ class ChzzkChatManager {
       }, 20000);
 
       ws.on('close', () => {
-        console.log(`[ChatManager] 웹소켓 연결 닫힘 (채널: ${channelId})`);
+        this.logVerbose(`[ChatManager] 웹소켓 연결 닫힘 (채널: ${channelId})`);
         const conn = this.connections.get(channelId);
         const wasExplicitlyClosed = conn?.isExplicitlyClosed;
         this.cleanupConnection(channelId);
@@ -230,7 +237,7 @@ class ChzzkChatManager {
         // 명시적 종료가 아니고, 여전히 연결 유지 대상(방송 중)일 때만 5초 후 재연결
         // 방송이 종료되면 scheduler가 disconnect()로 desired에서 제거하므로 재연결하지 않음
         if (!wasExplicitlyClosed && this.desired.has(channelId)) {
-          console.log(`[ChatManager] 예기치 못한 종료 감지 -> 5초 후 자동 재연결 시도 (채널: ${channelId})`);
+          this.logVerbose(`[ChatManager] 예기치 못한 종료 감지 -> 5초 후 자동 재연결 시도 (채널: ${channelId})`);
           const timer = setTimeout(() => {
             this.reconnectTimers.delete(channelId);
             // 타이머 발화 시점에도 여전히 연결 대상인지 재확인
@@ -285,7 +292,7 @@ class ChzzkChatManager {
 
     const conn = this.connections.get(channelId);
     if (conn) {
-      console.log(`[ChatManager] 채팅 수집 중단 (채널: ${channelId})`);
+      this.logVerbose(`[ChatManager] 채팅 수집 중단 (채널: ${channelId})`);
       conn.isExplicitlyClosed = true;
       conn.socket.close();
       this.cleanupConnection(channelId);

@@ -26,6 +26,46 @@ startRuntimeStatsLogging();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const SLOW_REQUEST_LOG_MS = Math.max(100, Number(process.env.SLOW_REQUEST_LOG_MS || 2000));
+const IMAGE_PROXY_SLOW_REQUEST_LOG_MS = Math.max(
+  SLOW_REQUEST_LOG_MS,
+  Number(process.env.IMAGE_PROXY_SLOW_REQUEST_LOG_MS || 10_000)
+);
+const REQUEST_LOG_URL_MAX_LENGTH = Math.max(120, Number(process.env.REQUEST_LOG_URL_MAX_LENGTH || 300));
+const NORMAL_CLOSE_PATHS = new Set(['/api/realtime/stream', '/api/notifications/stream']);
+
+const truncateLogValue = (value: string, maxLength = REQUEST_LOG_URL_MAX_LENGTH) => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}...<truncated:${value.length - maxLength}>`;
+};
+
+const getImageProxyTargetHost = (req: Request) => {
+  const rawQueryUrl = Array.isArray(req.query.url) ? req.query.url[0] : req.query.url;
+  const rawUrl = typeof rawQueryUrl === 'string'
+    ? rawQueryUrl
+    : new URL(req.originalUrl || req.url, 'http://localhost').searchParams.get('url');
+  if (!rawUrl) return null;
+
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return 'invalid-url';
+  }
+};
+
+const getRequestLogInfo = (req: Request) => {
+  if (req.path.startsWith('/api/image-proxy')) {
+    return {
+      url: '/api/image-proxy',
+      target_host: getImageProxyTargetHost(req)
+    };
+  }
+
+  return {
+    url: truncateLogValue(req.originalUrl || req.url)
+  };
+};
+
+const isNormalClientClose = (req: Request) => NORMAL_CLOSE_PATHS.has(req.path);
 
 // 리버스 프록시(nginx 등) 뒤에서 X-Forwarded-For/Proto를 신뢰하여 req.ip·https 판별이 정확하도록 설정.
 // (rate limiter가 클라이언트 위조 헤더로 우회되지 않도록 첫 프록시 1홉만 신뢰)
@@ -72,13 +112,15 @@ app.use('/api', rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
-  const url = req.originalUrl || req.url;
   res.on('finish', () => {
     const durationMs = Date.now() - startedAt;
-    if (durationMs >= SLOW_REQUEST_LOG_MS || res.statusCode >= 500) {
+    const slowThresholdMs = req.path.startsWith('/api/image-proxy')
+      ? IMAGE_PROXY_SLOW_REQUEST_LOG_MS
+      : SLOW_REQUEST_LOG_MS;
+    if (durationMs >= slowThresholdMs || res.statusCode >= 500) {
       console.warn('[RequestTrace]', {
         method: req.method,
-        url,
+        ...getRequestLogInfo(req),
         status: res.statusCode,
         duration_ms: durationMs,
         ip: req.ip,
@@ -87,10 +129,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
   });
   res.on('close', () => {
-    if (!res.writableEnded) {
+    if (!res.writableEnded && !isNormalClientClose(req)) {
       console.warn('[RequestClosed]', {
         method: req.method,
-        url,
+        ...getRequestLogInfo(req),
         duration_ms: Date.now() - startedAt,
         ip: req.ip
       });

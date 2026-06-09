@@ -16,6 +16,7 @@ import {
 
 const PUSH_SEND_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SEND_BATCH_SIZE || 25));
 const PUSH_SEND_BATCH_DELAY_MS = Math.max(0, Number(process.env.PUSH_SEND_BATCH_DELAY_MS || 200));
+let warnedMissingPushOriginColumn = false;
 
 // VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
 const getVapidKeys = () => ({
@@ -88,7 +89,10 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
       let { error } = await client.from('push_subscriptions').insert(row);
 
       if (error && /origin|schema cache/i.test(error.message || '')) {
-        console.warn('[Push] push_subscriptions.origin 컬럼이 없어 origin 없이 구독을 저장합니다. 마이그레이션을 적용하세요.');
+        if (!warnedMissingPushOriginColumn) {
+          console.warn('[Push] push_subscriptions.origin 컬럼이 없어 origin 없이 구독을 저장합니다. 마이그레이션을 적용하세요.');
+          warnedMissingPushOriginColumn = true;
+        }
         const fallback = await client
           .from('push_subscriptions')
           .insert({
