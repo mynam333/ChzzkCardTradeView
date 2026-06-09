@@ -20,14 +20,18 @@ export interface ChzzkTokenResult {
   expiresIn: number; // 초 단위 만료 시간
 }
 
+type ChzzkTokenRefreshResult =
+  | { ok: true; token: ChzzkTokenResult }
+  | { ok: false; status?: number };
+
 /**
  * refresh_token으로 치지직 OAuth access_token을 갱신합니다.
  * 성공 시 새 토큰 세트를, 실패 시 null을 반환합니다.
  */
-export const refreshChzzkToken = async (refreshToken: string): Promise<ChzzkTokenResult | null> => {
+const refreshChzzkTokenDetailed = async (refreshToken: string): Promise<ChzzkTokenRefreshResult> => {
   const clientId = process.env.CHZZK_CLIENT_ID || '';
   const clientSecret = process.env.CHZZK_CLIENT_SECRET || '';
-  if (!refreshToken || !clientId || !clientSecret) return null;
+  if (!refreshToken || !clientId || !clientSecret) return { ok: false };
 
   try {
     const res = await fetch('https://openapi.chzzk.naver.com/auth/v1/token', {
@@ -42,19 +46,24 @@ export const refreshChzzkToken = async (refreshToken: string): Promise<ChzzkToke
     });
     if (!res.ok) {
       console.warn(`[ChzzkService] 토큰 갱신 실패 (HTTP ${res.status})`);
-      return null;
+      return { ok: false, status: res.status };
     }
     const body = (await res.json()) as any;
     const content = body.content || body;
     const accessToken = content.accessToken || content.access_token;
     const newRefresh = content.refreshToken || content.refresh_token || refreshToken;
     const expiresIn = Number(content.expiresIn || content.expires_in || 0);
-    if (!accessToken) return null;
-    return { accessToken, refreshToken: newRefresh, expiresIn };
+    if (!accessToken) return { ok: false };
+    return { ok: true, token: { accessToken, refreshToken: newRefresh, expiresIn } };
   } catch (e: any) {
     console.warn('[ChzzkService] 토큰 갱신 중 예외:', e.message);
-    return null;
+    return { ok: false };
   }
+};
+
+export const refreshChzzkToken = async (refreshToken: string): Promise<ChzzkTokenResult | null> => {
+  const result = await refreshChzzkTokenDetailed(refreshToken);
+  return result.ok ? result.token : null;
 };
 
 export const fetchChzzkChannelProfile = async (
@@ -172,19 +181,23 @@ export const getValidUserAccessToken = async (userId: string): Promise<string | 
     if (needsRefresh && user.refresh_token) {
       const refresh = decryptToken(user.refresh_token);
       if (refresh) {
-        const refreshed = await refreshChzzkToken(refresh);
-        if (refreshed) {
-          const newExpiry = refreshed.expiresIn
-            ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString()
+        const refreshResult = await refreshChzzkTokenDetailed(refresh);
+        if (refreshResult.ok) {
+          const newExpiry = refreshResult.token.expiresIn
+            ? new Date(Date.now() + refreshResult.token.expiresIn * 1000).toISOString()
             : null;
           await userRepository.updateTokens(
             userId,
-            encryptToken(refreshed.accessToken),
-            encryptToken(refreshed.refreshToken),
+            encryptToken(refreshResult.token.accessToken),
+            encryptToken(refreshResult.token.refreshToken),
             newExpiry
           );
           console.log(`[ChzzkService] 치지직 토큰 갱신 완료 (유저: ${userId})`);
-          return refreshed.accessToken;
+          return refreshResult.token.accessToken;
+        }
+        if (refreshResult.status === 401) {
+          await userRepository.updateTokens(userId, null, null, null);
+          console.warn(`[ChzzkService] 만료되었거나 폐기된 치지직 refresh_token을 정리했습니다 (유저: ${userId}).`);
         }
       }
     }

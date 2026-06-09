@@ -23,8 +23,23 @@ import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
 import { formatUploadUrl } from "../../services/imageService";
 
 export class SqliteStreamerRepository implements IStreamerRepository {
+  private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(
+    5_000,
+    Number(process.env.VALUE_AGO_CACHE_TTL_MS || 60_000)
+  );
+  private static readonly VALUE_AGO_LOOKBACK_HOURS = Math.max(
+    1,
+    Number(process.env.VALUE_AGO_LOOKBACK_HOURS || 3)
+  );
+  private valueAgoCache = new Map<number, { data: Record<string, number>; expiresAt: number }>();
+  private valueAgoInFlight = new Map<number, Promise<Record<string, number>>>();
+
   private getDb() {
     return getSqliteDb();
+  }
+
+  private toSqliteUtcString(date: Date): string {
+    return date.toISOString().replace('T', ' ').replace('Z', '+00:00');
   }
 
   async findAll(): Promise<Streamer[]> {
@@ -348,32 +363,59 @@ export class SqliteStreamerRepository implements IStreamerRepository {
   }
 
   // 채널별로 지정한 시간 경계에 가장 근접한(경계 이전 중 가장 최근) 시세를 선택
-  private valueAgoMap(modifier: string): Record<string, number> {
+  private async valueAgoMap(hours: number): Promise<Record<string, number>> {
+    const now = Date.now();
+    const cached = this.valueAgoCache.get(hours);
+    if (cached && cached.expiresAt > now) {
+      return cached.data;
+    }
+    const inFlight = this.valueAgoInFlight.get(hours);
+    if (inFlight) return inFlight;
+
+    const request = Promise.resolve()
+      .then(() => this.loadValueAgoMap(hours))
+      .then((data) => {
+        this.valueAgoCache.set(hours, {
+          data,
+          expiresAt: Date.now() + SqliteStreamerRepository.VALUE_AGO_CACHE_TTL_MS
+        });
+        return data;
+      })
+      .finally(() => {
+        this.valueAgoInFlight.delete(hours);
+      });
+    this.valueAgoInFlight.set(hours, request);
+    return request;
+  }
+
+  private loadValueAgoMap(hours: number): Record<string, number> {
+    const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+    const cutoff = this.toSqliteUtcString(new Date(cutoffMs));
+    const windowStart = this.toSqliteUtcString(
+      new Date(cutoffMs - SqliteStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000)
+    );
     const rows = this.getDb().prepare(
-      `SELECT vh.channel_id AS channel_id, vh.value AS value
-         FROM value_history vh
-         JOIN (
-           SELECT channel_id, MAX(recorded_at) AS latest
-             FROM value_history
-            WHERE datetime(recorded_at) <= datetime('now', ?)
-            GROUP BY channel_id
-         ) latest_old
-           ON vh.channel_id = latest_old.channel_id AND vh.recorded_at = latest_old.latest`
-    ).all(modifier) as any[];
+      `SELECT channel_id, value, recorded_at
+         FROM value_history
+        WHERE recorded_at >= ? AND recorded_at <= ?
+        ORDER BY recorded_at DESC`
+    ).all(windowStart, cutoff) as any[];
 
     const map: Record<string, number> = {};
     for (const r of rows) {
-      map[r.channel_id] = r.value;
+      if (map[r.channel_id] === undefined) {
+        map[r.channel_id] = r.value;
+      }
     }
     return map;
   }
 
   async getValue24hAgoMap(): Promise<Record<string, number>> {
-    return this.valueAgoMap('-24 hours');
+    return this.valueAgoMap(24);
   }
 
   async getValue1hAgoMap(): Promise<Record<string, number>> {
-    return this.valueAgoMap('-1 hours');
+    return this.valueAgoMap(1);
   }
 }
 // 3. SQLite 쿠폰 레포지토리

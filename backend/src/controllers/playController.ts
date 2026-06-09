@@ -499,6 +499,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
 const RANKINGS_CACHE_TTL = 60_000; // 60초
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
+const streamerRankingsInFlight = new Map<string, Promise<any[]>>();
 
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
@@ -508,6 +509,7 @@ export const clearUserRankingCaches = () => {
 export const clearRankingCaches = () => {
   clearUserRankingCaches();
   streamerRankingsCache.clear();
+  streamerRankingsInFlight.clear();
   clearDrawPoolCache();
 };
 
@@ -623,60 +625,73 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
       res.set('Cache-Control', 'public, max-age=60');
       return res.status(200).json(cached.data);
     }
-
-    const streamers = await streamerRepository.findRankingBase();
-    const [value24hMap, value1hMap] = await Promise.all([
-      mode === 'value' ? streamerRepository.getValue24hAgoMap() : Promise.resolve({} as Record<string, number>),
-      mode === 'change' ? streamerRepository.getValue1hAgoMap() : Promise.resolve({} as Record<string, number>)
-    ]);
-
-    const scoreChange = (streamer: any) => {
-      const current = Number(streamer.base_value || 0);
-      const previous = Number(value1hMap[streamer.channel_id] ?? current);
-      return previous > 0 ? ((current - previous) / previous) * 100 : 0;
-    };
-
-    let ranked = streamers
-      .slice()
-      .sort((a: any, b: any) => {
-        if (mode === 'change') {
-          return scoreChange(b) - scoreChange(a) || Number(b.base_value || 0) - Number(a.base_value || 0);
-        }
-        return Number(b.base_value || 0) - Number(a.base_value || 0);
-      })
-      .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
-
-    if (keyword) {
-      ranked = ranked
-        .map((item) => ({ ...item, score: fuzzyScore(item.streamer.name || '', keyword) }))
-        .filter((item) => item.score !== null)
-        .sort((a, b) => (a.score ?? 0) - (b.score ?? 0) || a.rank - b.rank);
+    const inFlight = streamerRankingsInFlight.get(cacheKey);
+    if (inFlight) {
+      const data = await inFlight;
+      res.set('Cache-Control', 'public, max-age=60');
+      return res.status(200).json(data);
     }
 
-    const sliced = ranked.slice(0, limit);
-    const channelIds = sliced.map((item) => item.streamer.channel_id);
-    const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
+    const request = (async () => {
+      const streamers = await streamerRepository.findRankingBase();
+      const [value24hMap, value1hMap] = await Promise.all([
+        mode === 'value' ? streamerRepository.getValue24hAgoMap() : Promise.resolve({} as Record<string, number>),
+        mode === 'change' ? streamerRepository.getValue1hAgoMap() : Promise.resolve({} as Record<string, number>)
+      ]);
 
-    const data = sliced.map(({ streamer, rank }) => ({
-      channel_id: streamer.channel_id,
-      name: streamer.name,
-      logo_url: streamer.logo_url,
-      custom_image_url: streamer.custom_image_url,
-      follower_count: streamer.follower_count,
-      base_value: streamer.base_value,
-      is_active: streamer.is_active,
-      rank,
-      titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
-      prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
-      value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
-    }));
+      const scoreChange = (streamer: any) => {
+        const current = Number(streamer.base_value || 0);
+        const previous = Number(value1hMap[streamer.channel_id] ?? current);
+        return previous > 0 ? ((current - previous) / previous) * 100 : 0;
+      };
 
-    streamerRankingsCache.set(cacheKey, { data, expiresAt: now + RANKINGS_CACHE_TTL });
-    if (streamerRankingsCache.size > 100) {
-      for (const [key, value] of streamerRankingsCache) {
-        if (value.expiresAt <= now) streamerRankingsCache.delete(key);
+      let ranked = streamers
+        .slice()
+        .sort((a: any, b: any) => {
+          if (mode === 'change') {
+            return scoreChange(b) - scoreChange(a) || Number(b.base_value || 0) - Number(a.base_value || 0);
+          }
+          return Number(b.base_value || 0) - Number(a.base_value || 0);
+        })
+        .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
+
+      if (keyword) {
+        ranked = ranked
+          .map((item) => ({ ...item, score: fuzzyScore(item.streamer.name || '', keyword) }))
+          .filter((item) => item.score !== null)
+          .sort((a, b) => (a.score ?? 0) - (b.score ?? 0) || a.rank - b.rank);
       }
-    }
+
+      const sliced = ranked.slice(0, limit);
+      const channelIds = sliced.map((item) => item.streamer.channel_id);
+      const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
+
+      const data = sliced.map(({ streamer, rank }) => ({
+        channel_id: streamer.channel_id,
+        name: streamer.name,
+        logo_url: streamer.logo_url,
+        custom_image_url: streamer.custom_image_url,
+        follower_count: streamer.follower_count,
+        base_value: streamer.base_value,
+        is_active: streamer.is_active,
+        rank,
+        titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
+        prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
+        value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
+      }));
+
+      streamerRankingsCache.set(cacheKey, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
+      if (streamerRankingsCache.size > 100) {
+        for (const [key, value] of streamerRankingsCache) {
+          if (value.expiresAt <= Date.now()) streamerRankingsCache.delete(key);
+        }
+      }
+      return data;
+    })().finally(() => {
+      streamerRankingsInFlight.delete(cacheKey);
+    });
+    streamerRankingsInFlight.set(cacheKey, request);
+    const data = await request;
 
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(data);
