@@ -144,6 +144,8 @@ const PUZZLE_COLUMNS = 3;
 const PUZZLE_ROWS = 4;
 const PUZZLE_PIECE_COUNT = PUZZLE_COLUMNS * PUZZLE_ROWS;
 const PUZZLE_TIME_LIMIT_SECONDS = 120;
+const PUZZLE_HINT_PENALTY_SECONDS = 10;
+const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
@@ -749,7 +751,18 @@ export const ArcadeTab: React.FC = () => {
   const [draggingPuzzleIndex, setDraggingPuzzleIndex] = useState<number | null>(null);
   const [dragOverPuzzleIndex, setDragOverPuzzleIndex] = useState<number | null>(null);
   const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_TIME_LIMIT_SECONDS);
+  const [puzzleHintUsed, setPuzzleHintUsed] = useState(false);
+  const [showPuzzleHint, setShowPuzzleHint] = useState(false);
   const puzzleDragRef = React.useRef<{ index: number; startX: number; startY: number; dragging: boolean } | null>(null);
+  const puzzleHintTimeoutRef = React.useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (puzzleHintTimeoutRef.current !== null) {
+        window.clearTimeout(puzzleHintTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // 3. 카드 뒤집기 전용 상태
   const [matchCards, setMatchCards] = useState<MatchCard[]>([]);
@@ -788,6 +801,12 @@ export const ArcadeTab: React.FC = () => {
     setSessionId(null);
     setIsGameOver(false);
     setIsPracticeMode(false);
+    setPuzzleHintUsed(false);
+    setShowPuzzleHint(false);
+    if (puzzleHintTimeoutRef.current !== null) {
+      window.clearTimeout(puzzleHintTimeoutRef.current);
+      puzzleHintTimeoutRef.current = null;
+    }
   }, []);
 
   // 게임 결과 제출 처리 (치팅 방지를 위해 백엔드에서 서버 시간 2중 검증함)
@@ -1033,6 +1052,12 @@ export const ArcadeTab: React.FC = () => {
     setIsGameOver(false);
     setGameTimeLeft(MATCH_TIME_LIMIT_SECONDS);
     setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
+    setPuzzleHintUsed(false);
+    setShowPuzzleHint(false);
+    if (puzzleHintTimeoutRef.current !== null) {
+      window.clearTimeout(puzzleHintTimeoutRef.current);
+      puzzleHintTimeoutRef.current = null;
+    }
 
     try {
       const res = await apiFetch('/minigames/start', {
@@ -1150,6 +1175,30 @@ export const ArcadeTab: React.FC = () => {
         success: true
       });
     }
+  };
+
+  const handleUsePuzzleHint = () => {
+    if (
+      puzzleHintUsed ||
+      gameBusy ||
+      gameResult ||
+      isGameOver ||
+      activeGame !== 'puzzle' ||
+      (countdownLeft !== null && countdownLeft > 0)
+    ) {
+      return;
+    }
+
+    setPuzzleHintUsed(true);
+    setShowPuzzleHint(true);
+    setPuzzleTimeLeft((prev) => Math.max(0, prev - PUZZLE_HINT_PENALTY_SECONDS));
+    if (puzzleHintTimeoutRef.current !== null) {
+      window.clearTimeout(puzzleHintTimeoutRef.current);
+    }
+    puzzleHintTimeoutRef.current = window.setTimeout(() => {
+      setShowPuzzleHint(false);
+      puzzleHintTimeoutRef.current = null;
+    }, PUZZLE_HINT_DURATION_MS);
   };
 
   const handleRotatePiece = (index: number) => {
@@ -1596,7 +1645,7 @@ export const ArcadeTab: React.FC = () => {
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-2xl border border-primary/15 bg-white/70 px-2.5 py-1.5 dark:bg-card/60">
                 <p className="text-[9px] font-bold text-muted-foreground">기본 충전</p>
-                <p className="text-xs font-black text-primary"><span className="cute-number-font">{baseTickets}</span>/5</p>
+                <p className="text-xs font-black text-primary"><span className="cute-number-font">{baseTickets}/5</span></p>
               </div>
               <div className={`rounded-2xl border px-2.5 py-1.5 ${bonusTickets > 0 ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/10' : 'border-primary/12 bg-white/65 dark:bg-card/55'}`}>
                 <p className="text-[9px] font-bold text-muted-foreground">추가 티켓</p>
@@ -1941,6 +1990,41 @@ export const ArcadeTab: React.FC = () => {
                 조각을 드래그해서 위치를 바꾸고, 탭하면 90도씩 회전합니다. 120초 안에 위치와 회전을 모두 맞춰주세요!
               </p>
 
+              <div className="flex w-full max-w-[min(30rem,calc(100vw_-_4rem))] flex-col gap-2 rounded-2xl border border-teal-500/15 bg-teal-500/8 p-3 shadow-sm dark:border-teal-300/15 dark:bg-teal-400/10 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <div className="min-w-0 text-center sm:text-left">
+                  <p className="text-[10px] font-black text-teal-700 dark:text-teal-200 sm:text-xs">
+                    이미지가 어렵다면 순서 힌트를 사용하세요.
+                  </p>
+                  <p className="mt-0.5 text-[9px] font-bold text-muted-foreground sm:text-[10px]">
+                    1회만 사용 가능 · 제한시간 -{PUZZLE_HINT_PENALTY_SECONDS}초 · 퍼즐 조각 순서 {PUZZLE_HINT_DURATION_MS / 1000}초간 표시
+                  </p>
+                </div>
+
+                <div className="group relative flex justify-center sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={handleUsePuzzleHint}
+                    disabled={puzzleHintUsed || gameBusy || isGameOver || !!gameResult || (countdownLeft !== null && countdownLeft > 0)}
+                    className={`cute-wiggle-hover inline-flex items-center justify-center gap-1.5 rounded-2xl border px-3.5 py-2 text-[11px] font-black shadow-sm transition active:scale-95 disabled:pointer-events-none disabled:opacity-55 sm:px-4 sm:text-xs ${
+                      puzzleHintUsed
+                        ? 'border-border bg-secondary/70 text-muted-foreground'
+                        : 'border-teal-500/30 bg-gradient-to-r from-teal-500 to-primary text-white shadow-teal-500/15 hover:brightness-105 dark:from-teal-400 dark:to-primary dark:text-slate-950'
+                    }`}
+                    aria-describedby="puzzle-hint-tooltip"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    {puzzleHintUsed ? '힌트 사용 완료' : '순서 힌트'}
+                  </button>
+                  <div
+                    id="puzzle-hint-tooltip"
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-64 -translate-x-1/2 rounded-2xl border border-border bg-popover px-3 py-2 text-center text-[10px] font-bold leading-relaxed text-popover-foreground opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100 dark:border-white/12 sm:left-auto sm:right-0 sm:translate-x-0 sm:text-left"
+                  >
+                    각 퍼즐 조각에 원래 순서 번호(1~12)를 {PUZZLE_HINT_DURATION_MS / 1000}초간 반투명하게 표시합니다. 사용 즉시 제한시간이 {PUZZLE_HINT_PENALTY_SECONDS}초 줄어듭니다.
+                  </div>
+                </div>
+              </div>
+
               {/* 원본의 중앙 3:4 영역을 실제 좌표로 크롭한 뒤 정사각형 12개로 분할 */}
               <div className="rounded-[1.75rem] border border-border bg-secondary/30 p-1.5 shadow-inner">
                 <div className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-2xl touch-none select-none">
@@ -1957,13 +2041,22 @@ export const ArcadeTab: React.FC = () => {
                         onPointerMove={(event) => handlePuzzlePointerMove(event, idx)}
                         onPointerUp={(event) => handlePuzzlePointerUp(event, idx)}
                         onPointerCancel={handlePuzzlePointerCancel}
-                        style={{
-                          transform: `rotate(${piece.rotation}deg)`,
-                        }}
                         className={`relative h-full w-full min-h-0 min-w-0 cursor-grab overflow-hidden ring-1 ring-inset ring-card/45 transition-[transform,opacity,box-shadow,filter] duration-200 active:cursor-grabbing active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isDragging ? 'opacity-55 brightness-75 shadow-inner' : ''} ${isDropTarget ? 'z-10 ring-2 ring-primary ring-offset-1 ring-offset-background brightness-110' : ''}`}
                         aria-label={`퍼즐 조각 ${idx + 1}: 탭하면 회전, 드래그하면 위치 교체`}
                       >
-                        <PuzzlePieceImage src={gameData.image_url || ''} pieceId={piece.id} />
+                        <div
+                          className="absolute inset-0 transition-transform duration-200"
+                          style={{
+                            transform: `rotate(${piece.rotation}deg)`,
+                          }}
+                        >
+                          <PuzzlePieceImage src={gameData.image_url || ''} pieceId={piece.id} />
+                        </div>
+                        {showPuzzleHint && (
+                          <span className="pointer-events-none absolute inset-0 z-20 flex select-none items-center justify-center bg-white/8 text-[clamp(1.6rem,9vw,3.4rem)] cute-number-font font-black text-white/68 opacity-95 [text-shadow:0_2px_10px_rgba(0,0,0,0.55)] dark:bg-black/8 dark:text-white/62">
+                            {piece.id + 1}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
