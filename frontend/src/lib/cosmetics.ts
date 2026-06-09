@@ -9,6 +9,17 @@ import { API_BASE_URL } from './api';
 export const proxiedImage = (url?: string | null): string => {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  if (url.startsWith('/uploads/') || url.startsWith('uploads/')) return url.startsWith('/') ? url : `/${url}`;
+  try {
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : API_BASE_URL;
+    const parsed = new URL(url, baseOrigin);
+    const apiBase = new URL(API_BASE_URL, baseOrigin);
+    if (parsed.pathname.startsWith('/uploads/') && parsed.origin === apiBase.origin) {
+      return parsed.toString();
+    }
+  } catch {
+    // URL 파싱 실패 시 기존 프록시 경로로 폴백합니다.
+  }
   return `${API_BASE_URL}/image-proxy?url=${encodeURIComponent(url)}`;
 };
 
@@ -182,8 +193,16 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
   if (typeof document === 'undefined' || !cosmetic?.style_json) return;
   let obj: any;
   try { obj = JSON.parse(cosmetic.style_json); } catch { return; }
-  if (!obj || typeof obj.class !== 'string' || typeof obj.css !== 'string' || !obj.css.trim()) return;
+  if (!obj || typeof obj.class !== 'string') return;
   const key = obj.class.trim();
+  if (typeof obj.css !== 'string' || !obj.css.trim()) {
+    const stale = injectedBorderCss.get(key);
+    if (stale) {
+      stale.remove();
+      injectedBorderCss.delete(key);
+    }
+    return;
+  }
   const cssText = normalizeSvgInCss(obj.css);
   let el = injectedBorderCss.get(key);
   if (!el) {

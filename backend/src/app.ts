@@ -95,7 +95,11 @@ const getRequestLogInfo = (req: Request) => {
   };
 };
 
-const isNormalClientClose = (req: Request) => NORMAL_CLOSE_PATHS.has(req.path);
+const isNormalClientClose = (req: Request) => {
+  if (NORMAL_CLOSE_PATHS.has(req.path)) return true;
+  const rawPath = (req.originalUrl || req.url || '').split('?', 1)[0];
+  return NORMAL_CLOSE_PATHS.has(rawPath);
+};
 
 // 리버스 프록시(nginx 등) 뒤에서 X-Forwarded-For/Proto를 신뢰하여 req.ip·https 판별이 정확하도록 설정.
 // (rate limiter가 클라이언트 위조 헤더로 우회되지 않도록 첫 프록시 1홉만 신뢰)
@@ -185,7 +189,11 @@ const uploadsDir = getUploadsDir();
 ensureDirectory(uploadsDir);
 console.log(`[Storage] 업로드 디렉터리: ${uploadsDir}`);
 app.use('/uploads', express.static(uploadsDir, {
-  setHeaders: (res) => { res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); }
+  setHeaders: (res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+  }
 }));
 
 // 통합 API 라우터 등록

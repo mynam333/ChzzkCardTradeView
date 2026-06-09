@@ -498,11 +498,16 @@ export const getUserProfile = async (req: Request, res: Response) => {
 // 갱신되므로 실시간일 필요가 없습니다. 동일 파라미터 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
 const RANKINGS_CACHE_TTL = 60_000; // 60초
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
+const rankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsInFlight = new Map<string, Promise<any[]>>();
+const streamerDetailCache = new Map<string, { data: any; expiresAt: number }>();
+const streamerDetailInFlight = new Map<string, Promise<any>>();
+const STREAMER_DETAIL_CACHE_TTL = 30_000;
 
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
+  rankingsInFlight.clear();
   rankingPoolCache.clear();
 };
 
@@ -510,6 +515,8 @@ export const clearRankingCaches = () => {
   clearUserRankingCaches();
   streamerRankingsCache.clear();
   streamerRankingsInFlight.clear();
+  streamerDetailCache.clear();
+  streamerDetailInFlight.clear();
   clearDrawPoolCache();
 };
 
@@ -525,12 +532,21 @@ const loadRankingPool = async (
   const now = Date.now();
   const hit = rankingPoolCache.get(key);
   if (hit && hit.expiresAt > now) return hit.data;
-  const data = await userRepository.findRankings(100, '', { mode, channelId, star });
-  rankingPoolCache.set(key, { data, expiresAt: now + RANKINGS_CACHE_TTL });
-  if (rankingPoolCache.size > 100) {
-    for (const [k, v] of rankingPoolCache) if (v.expiresAt <= now) rankingPoolCache.delete(k);
-  }
-  return data;
+  const inFlight = rankingsInFlight.get(`pool|${key}`);
+  if (inFlight) return inFlight;
+  const request = userRepository.findRankings(100, '', { mode, channelId, star })
+    .then((data) => {
+      rankingPoolCache.set(key, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
+      if (rankingPoolCache.size > 100) {
+        for (const [k, v] of rankingPoolCache) if (v.expiresAt <= Date.now()) rankingPoolCache.delete(k);
+      }
+      return data;
+    })
+    .finally(() => {
+      rankingsInFlight.delete(`pool|${key}`);
+    });
+  rankingsInFlight.set(`pool|${key}`, request);
+  return request;
 };
 
 /**
@@ -551,6 +567,14 @@ export const getUserRankings = async (req: Request, res: Response) => {
       res.set('Cache-Control', 'public, max-age=60');
       return res.status(200).json(cached.data);
     }
+    const inFlight = rankingsInFlight.get(cacheKey);
+    if (inFlight) {
+      const data = await inFlight;
+      res.set('Cache-Control', 'public, max-age=60');
+      return res.status(200).json(data);
+    }
+
+    const request = (async () => {
     // 검색어가 있으면 초성/띄어쓰기 무시 유사도 검색까지 지원합니다.
     // - 부분일치 결과: 리포지토리 keyword 필터로 순위 무관하게 정확히 포착(기존 동작 유지)
     // - 초성/띄어쓰기 유사 매칭: 상위 랭킹 풀을 따로 받아 유사도로 보강(랭킹 노출 범위 내)
@@ -598,13 +622,19 @@ export const getUserRankings = async (req: Request, res: Response) => {
       };
     });
 
-    rankingsCache.set(cacheKey, { data: mapped, expiresAt: now + RANKINGS_CACHE_TTL });
+    rankingsCache.set(cacheKey, { data: mapped, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
     // 메모리 보호: 캐시가 커지면 만료된 항목을 정리합니다(검색어 키 누적 방지).
     if (rankingsCache.size > 200) {
       for (const [key, value] of rankingsCache) {
-        if (value.expiresAt <= now) rankingsCache.delete(key);
+        if (value.expiresAt <= Date.now()) rankingsCache.delete(key);
       }
     }
+    return mapped;
+    })().finally(() => {
+      rankingsInFlight.delete(cacheKey);
+    });
+    rankingsInFlight.set(cacheKey, request);
+    const mapped = await request;
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(mapped);
   } catch (err: any) {
@@ -1278,48 +1308,84 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
   }
 
   try {
-    const streamer = await streamerRepository.findById(channel_id);
-    if (!streamer) {
+    const normalizedRange = range === '24h' ? '24h' : '7d';
+    const cacheKey = `${channel_id}|${normalizedRange}`;
+    const now = Date.now();
+    const cached = streamerDetailCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=30');
+      return res.status(200).json(cached.data);
+    }
+    const inFlight = streamerDetailInFlight.get(cacheKey);
+    if (inFlight) {
+      const data = await inFlight;
+      res.set('Cache-Control', 'public, max-age=30');
+      return res.status(200).json(data);
+    }
+
+    const request = (async () => {
+      const streamer = await streamerRepository.findById(channel_id);
+      if (!streamer) {
+        return null;
+      }
+
+      const hours = normalizedRange === '24h' ? 24 : 24 * 7;
+      const rangeEndAt = new Date();
+      const rangeStartAt = new Date(rangeEndAt.getTime() - hours * 60 * 60 * 1000);
+      const sinceIso = rangeStartAt.toISOString();
+      const history = (await streamerRepository.getValueHistory(channel_id, sinceIso))
+        .slice()
+        .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+
+      // 차트가 "현재 - 선택 구간" 전체를 항상 표현하도록 양끝 기준점을 보강합니다.
+      // 실제 기록이 중간부터 있거나 마지막 기록이 현재보다 이전이어도 선이 중간에서 끊겨 보이지 않습니다.
+      const boundedHistory = history.slice();
+      const startValue = boundedHistory[0]?.value ?? streamer.base_value;
+      const endValue = streamer.base_value;
+      if (boundedHistory.length === 0 || new Date(boundedHistory[0].recorded_at).getTime() > rangeStartAt.getTime()) {
+        boundedHistory.unshift({ value: startValue, recorded_at: rangeStartAt.toISOString() });
+      }
+      if (boundedHistory.length === 1 || new Date(boundedHistory[boundedHistory.length - 1].recorded_at).getTime() < rangeEndAt.getTime()) {
+        boundedHistory.push({ value: endValue, recorded_at: rangeEndAt.toISOString() });
+      }
+
+      // 24h 등락률 계산용 24h 전 시세
+      const value24hMap = await streamerRepository.getValue24hAgoMap();
+      const prevValue24h = value24hMap[channel_id] ?? streamer.prev_value ?? streamer.base_value;
+
+      // 최근 마켓 거래 체결가 조회
+      const recentMarketPrice = await marketRepository.getRecentPrice(channel_id);
+
+      return {
+        streamer: {
+          ...streamer,
+          prev_value: prevValue24h,
+          recent_market_price: recentMarketPrice
+        },
+        history: downsampleValueHistory(boundedHistory),
+        range_start_at: rangeStartAt.toISOString(),
+        range_end_at: rangeEndAt.toISOString()
+      };
+    })().then((data) => {
+      if (data) {
+        streamerDetailCache.set(cacheKey, { data, expiresAt: Date.now() + STREAMER_DETAIL_CACHE_TTL });
+        if (streamerDetailCache.size > 300) {
+          for (const [key, value] of streamerDetailCache) {
+            if (value.expiresAt <= Date.now()) streamerDetailCache.delete(key);
+          }
+        }
+      }
+      return data;
+    }).finally(() => {
+      streamerDetailInFlight.delete(cacheKey);
+    });
+    streamerDetailInFlight.set(cacheKey, request);
+    const data = await request;
+    if (!data) {
       return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
     }
-
-    const hours = range === '24h' ? 24 : 24 * 7;
-    const rangeEndAt = new Date();
-    const rangeStartAt = new Date(rangeEndAt.getTime() - hours * 60 * 60 * 1000);
-    const sinceIso = rangeStartAt.toISOString();
-    const history = (await streamerRepository.getValueHistory(channel_id, sinceIso))
-      .slice()
-      .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
-
-    // 차트가 "현재 - 선택 구간" 전체를 항상 표현하도록 양끝 기준점을 보강합니다.
-    // 실제 기록이 중간부터 있거나 마지막 기록이 현재보다 이전이어도 선이 중간에서 끊겨 보이지 않습니다.
-    const boundedHistory = history.slice();
-    const startValue = boundedHistory[0]?.value ?? streamer.base_value;
-    const endValue = streamer.base_value;
-    if (boundedHistory.length === 0 || new Date(boundedHistory[0].recorded_at).getTime() > rangeStartAt.getTime()) {
-      boundedHistory.unshift({ value: startValue, recorded_at: rangeStartAt.toISOString() });
-    }
-    if (boundedHistory.length === 1 || new Date(boundedHistory[boundedHistory.length - 1].recorded_at).getTime() < rangeEndAt.getTime()) {
-      boundedHistory.push({ value: endValue, recorded_at: rangeEndAt.toISOString() });
-    }
-
-    // 24h 등락률 계산용 24h 전 시세
-    const value24hMap = await streamerRepository.getValue24hAgoMap();
-    const prevValue24h = value24hMap[channel_id] ?? streamer.prev_value ?? streamer.base_value;
-
-    // 최근 마켓 거래 체결가 조회
-    const recentMarketPrice = await marketRepository.getRecentPrice(channel_id);
-
-    return res.status(200).json({
-      streamer: {
-        ...streamer,
-        prev_value: prevValue24h,
-        recent_market_price: recentMarketPrice
-      },
-      history: downsampleValueHistory(boundedHistory),
-      range_start_at: rangeStartAt.toISOString(),
-      range_end_at: rangeEndAt.toISOString()
-    });
+    res.set('Cache-Control', 'public, max-age=30');
+    return res.status(200).json(data);
   } catch (err: any) {
     console.error('[PlayController] getStreamerDetail 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 상세 조회에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });

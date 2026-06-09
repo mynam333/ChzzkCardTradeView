@@ -156,6 +156,11 @@ const couponLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'coupon' });
 const authLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'auth' });
 const registerLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'register' });
 const reportLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'report' });
+const imageProxyLimiter = rateLimit({
+  windowMs: 60_000,
+  max: Math.max(10, Number(process.env.IMAGE_PROXY_RATE_LIMIT_PER_MINUTE || 45)),
+  key: 'image-proxy'
+});
 
 // Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한 + 이미지 MIME 사전 필터)
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -206,7 +211,7 @@ router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 // 로그아웃 — httpOnly 세션 쿠키 제거
 router.post('/auth/logout', logout);
-router.get('/image-proxy', proxyImage);
+router.get('/image-proxy', imageProxyLimiter, proxyImage);
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
 router.delete('/users/me', authMiddleware, deleteMyAccount);
