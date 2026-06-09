@@ -8,6 +8,9 @@ import { couponRepository } from '../repositories';
 import { normalizeCouponCode } from '../utils/couponCode';
 import { buildCouponPushUrl } from '../utils/pushTarget';
 
+const PUSH_SEND_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SEND_BATCH_SIZE || 25));
+const PUSH_SEND_BATCH_DELAY_MS = Math.max(0, Number(process.env.PUSH_SEND_BATCH_DELAY_MS || 200));
+
 // VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
 const getVapidKeys = () => ({
   publicKey: process.env.VAPID_PUBLIC_KEY || '',
@@ -91,6 +94,77 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const uniqueByEndpoint = (subscriptions: any[]) =>
+  Array.from(new Map(subscriptions.map((sub) => [sub.endpoint, sub])).values());
+
+const deleteExpiredSubscriptions = async (dbMode: string, ids: any[]) => {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => id !== undefined && id !== null)));
+  if (uniqueIds.length === 0) return;
+
+  if (dbMode === 'SUPABASE') {
+    const client = getSupabaseClient();
+    for (let i = 0; i < uniqueIds.length; i += 500) {
+      await client.from('push_subscriptions').delete().in('id', uniqueIds.slice(i, i + 500));
+    }
+    return;
+  }
+
+  const db = getSqliteDb();
+  for (let i = 0; i < uniqueIds.length; i += 500) {
+    const group = uniqueIds.slice(i, i + 500);
+    const placeholders = group.map(() => '?').join(',');
+    db.prepare(`DELETE FROM push_subscriptions WHERE id IN (${placeholders})`).run(...group);
+  }
+};
+
+const sendPushBatch = async (subscriptions: any[], payload: string, dbMode: string) => {
+  const targets = uniqueByEndpoint(subscriptions);
+  const expiredIds: any[] = [];
+  let sent = 0;
+  let failed = 0;
+
+  for (let i = 0; i < targets.length; i += PUSH_SEND_BATCH_SIZE) {
+    const group = targets.slice(i, i + PUSH_SEND_BATCH_SIZE);
+    const results = await Promise.allSettled(group.map((sub) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: {
+          auth: sub.auth_key,
+          p256dh: sub.p256dh_key
+        }
+      };
+      return webpush.sendNotification(pushSubscription, payload, {
+        TTL: 60 * 60,
+        urgency: 'normal'
+      });
+    }));
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        sent++;
+        return;
+      }
+      failed++;
+      const err: any = result.reason;
+      if (err?.statusCode === 410 || err?.statusCode === 404) {
+        expiredIds.push(group[index].id);
+      }
+    });
+
+    if (i + PUSH_SEND_BATCH_SIZE < targets.length && PUSH_SEND_BATCH_DELAY_MS > 0) {
+      await sleep(PUSH_SEND_BATCH_DELAY_MS);
+    }
+  }
+
+  await deleteExpiredSubscriptions(dbMode, expiredIds).catch((err) => {
+    console.warn('[Push] 만료 구독 일괄 정리 실패:', err?.message || err);
+  });
+
+  return { targets: targets.length, sent, failed, expired: expiredIds.length };
+};
+
 /**
  * 3. 예약 푸시 알림 등록 API (ADMIN 전용)
  */
@@ -166,39 +240,13 @@ const sendPushToAll = async (title: string, body: string, url = '/') => {
       subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
     }
 
-    const uniqueSubscriptions = Array.from(
-      new Map(subscriptions.map((sub) => [sub.endpoint, sub])).values()
-    );
-
     const payload = JSON.stringify({ title, body, url });
-    const promises = uniqueSubscriptions.map((sub) => {
-      const pushSubscription = {
-        endpoint: sub.endpoint,
-        keys: {
-          auth: sub.auth_key,
-          p256dh: sub.p256dh_key
-        }
-      };
-
-      return webpush.sendNotification(pushSubscription, payload).catch((err: any) => {
-        // 만료되었거나 에러난 구독 정보 삭제 처리
-        if (err.statusCode === 410 || err.statusCode === 404) {
-          console.log(`[Push] 만료된 구독 엔드포인트 정리: ${sub.endpoint}`);
-          if (dbMode === 'SUPABASE') {
-            // 만료 구독 정리. 네트워크 오류로 실패해도 무시(미처리 거부 방지).
-            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then(
-              () => undefined,
-              () => undefined
-            );
-          } else {
-            getSqliteDb().prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
-          }
-        }
-      });
-    });
-
-    await Promise.all(promises);
-    console.log(`[Push] 푸시 알림 전송 완료 (대상 기기: ${promises.length}대)`);
+    const stats = await sendPushBatch(subscriptions, payload, dbMode);
+    console.log(
+      `[Push] 푸시 알림 전송 완료 ` +
+      `(대상 ${stats.targets}대 / 성공 ${stats.sent} / 실패 ${stats.failed} / 만료정리 ${stats.expired}, ` +
+      `배치 ${PUSH_SEND_BATCH_SIZE}, 지연 ${PUSH_SEND_BATCH_DELAY_MS}ms)`
+    );
   } catch (err) {
     console.error('[Push] 푸시 알림 일괄 전송 도중 에러:', err);
   }
@@ -221,27 +269,8 @@ export const sendPushToUser = async (userId: string, title: string, body: string
     }
 
     if (subscriptions.length === 0) return;
-    subscriptions = Array.from(
-      new Map(subscriptions.map((sub) => [sub.endpoint, sub])).values()
-    );
-
     const payload = JSON.stringify({ title, body, url: url || '/' });
-    await Promise.all(subscriptions.map((sub) => {
-      const pushSubscription = { endpoint: sub.endpoint, keys: { auth: sub.auth_key, p256dh: sub.p256dh_key } };
-      return webpush.sendNotification(pushSubscription, payload).catch((err: any) => {
-        if (err.statusCode === 410 || err.statusCode === 404) {
-          if (dbMode === 'SUPABASE') {
-            // 만료 구독 정리. 네트워크 오류로 실패해도 무시(미처리 거부 방지).
-            getSupabaseClient().from('push_subscriptions').delete().eq('id', sub.id).then(
-              () => undefined,
-              () => undefined
-            );
-          } else {
-            getSqliteDb().prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
-          }
-        }
-      });
-    }));
+    await sendPushBatch(subscriptions, payload, dbMode);
   } catch (err) {
     console.error('[Push] 개별 푸시 전송 중 에러:', err);
   }
@@ -315,6 +344,8 @@ export const sendTestPush = async (req: AuthenticatedRequest, res: Response) => 
   }
 };
 
+let isPushSchedulerRunning = false;
+
 /**
  * node-cron 푸시 스케줄러 등록
  * 1분마다 주기적으로 감시하여 전송할 시간이 경과한 'pending' 푸시를 자동 일괄 발송합니다.
@@ -322,6 +353,11 @@ export const sendTestPush = async (req: AuthenticatedRequest, res: Response) => 
 export const startPushNotificationScheduler = () => {
   // 1분 주기 감시
   cron.schedule('* * * * *', async () => {
+    if (isPushSchedulerRunning) {
+      console.warn('[Scheduler] 이전 푸시 발송 작업이 아직 진행 중이라 이번 틱을 건너뜁니다.');
+      return;
+    }
+    isPushSchedulerRunning = true;
     try {
       const dbMode = getDbMode();
       const nowIso = new Date().toISOString();
@@ -377,6 +413,8 @@ export const startPushNotificationScheduler = () => {
       }
     } catch (err) {
       console.error('[Scheduler] 예약 푸시 알림 스케줄러 구동 중 오류:', err);
+    } finally {
+      isPushSchedulerRunning = false;
     }
   });
 

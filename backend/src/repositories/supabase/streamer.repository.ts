@@ -22,8 +22,20 @@ import {
 import { STAR_IMAGE_COLUMNS, withStarImages } from "./shared";
 
 export class SupabaseStreamerRepository implements IStreamerRepository {
+  private static readonly SCHEDULE_APPLY_CHUNK_SIZE = 80;
+  private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = 500;
+  private static readonly VALUE_HISTORY_PRUNE_CHUNK_SIZE = 1000;
+
   private getClient() {
     return getSupabaseClient();
+  }
+
+  private chunk<T>(items: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
   }
 
   async findAll(): Promise<Streamer[]> {
@@ -300,54 +312,74 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
     if (results.length === 0) return;
     const client = this.getClient();
-    // 1차: 서버측 단일 RPC로 일괄 반영 (네트워크 왕복 1회). 미배포 시 폴백.
-    const { error } = await client.rpc('bulk_apply_streamer_schedule', { p_updates: results });
-    if (!error) return;
-    console.warn('[Supabase] bulk_apply_streamer_schedule RPC 실패, 행별 폴백 사용:', error.message);
-    // 폴백: 행마다 개별 update (느리지만 정확)
-    for (const r of results) {
-      const patch: any = {
-        prev_value: r.prev_value,
-        base_value: r.base_value,
-        activity_score: r.activity_score,
-        broadcast_multiplier: r.broadcast_multiplier,
-        updated_at: new Date().toISOString()
-      };
-      if (r.polled) {
-        patch.is_active = r.is_active;
-        patch.follower_count = r.follower_count;
-        patch.last_broadcast_at = r.last_broadcast_at ?? null;
-        if (r.logo_url) {
-          patch.logo_url = r.logo_url;
+    // 너무 큰 JSONB 루프 RPC는 Supabase statement_timeout에 걸릴 수 있어 작은 묶음으로 반영합니다.
+    for (const group of this.chunk(results, SupabaseStreamerRepository.SCHEDULE_APPLY_CHUNK_SIZE)) {
+      const { error } = await client.rpc('bulk_apply_streamer_schedule', { p_updates: group });
+      if (!error) continue;
+      console.warn(`[Supabase] bulk_apply_streamer_schedule RPC 실패(${group.length}건), 행별 폴백 사용:`, error.message);
+      // 폴백: 행마다 개별 update (느리지만 정확)
+      for (const r of group) {
+        const patch: any = {
+          prev_value: r.prev_value,
+          base_value: r.base_value,
+          activity_score: r.activity_score,
+          broadcast_multiplier: r.broadcast_multiplier,
+          updated_at: new Date().toISOString()
+        };
+        if (r.polled) {
+          patch.is_active = r.is_active;
+          patch.follower_count = r.follower_count;
+          patch.last_broadcast_at = r.last_broadcast_at ?? null;
+          if (r.logo_url) {
+            patch.logo_url = r.logo_url;
+          }
         }
-      }
-      await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
-      if (r.add_minutes > 0) {
-        await client.rpc('increment_streamer_minutes', { p_channel_id: r.channel_id, p_minutes: r.add_minutes })
-          .then(({ error: e }) => { if (e) console.warn('[Supabase] minutes 폴백 실패:', e.message); });
-      }
-      if (r.add_broadcast_count > 0) {
-        await client.rpc('increment_streamer_broadcast', { p_channel_id: r.channel_id })
-          .then(({ error: e }) => { if (e) console.warn('[Supabase] broadcast 폴백 실패:', e.message); });
-      }
-      if (r.consumed_chats > 0) {
-        await client.rpc('decrement_streamer_chat', { p_channel_id: r.channel_id, p_amount: r.consumed_chats })
-          .then(({ error: e }) => { if (e) console.warn('[Supabase] chat 폴백 실패:', e.message); });
+        await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
+        if (r.add_minutes > 0) {
+          await client.rpc('increment_streamer_minutes', { p_channel_id: r.channel_id, p_minutes: r.add_minutes })
+            .then(({ error: e }) => { if (e) console.warn('[Supabase] minutes 폴백 실패:', e.message); });
+        }
+        if (r.add_broadcast_count > 0) {
+          await client.rpc('increment_streamer_broadcast', { p_channel_id: r.channel_id })
+            .then(({ error: e }) => { if (e) console.warn('[Supabase] broadcast 폴백 실패:', e.message); });
+        }
+        if (r.consumed_chats > 0) {
+          await client.rpc('decrement_streamer_chat', { p_channel_id: r.channel_id, p_amount: r.consumed_chats })
+            .then(({ error: e }) => { if (e) console.warn('[Supabase] chat 폴백 실패:', e.message); });
+        }
       }
     }
   }
 
   async bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void> {
     if (points.length === 0) return;
-    const { error } = await this.getClient().from('value_history').insert(points);
-    if (error) throw error;
+    const client = this.getClient();
+    for (const group of this.chunk(points, SupabaseStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_SIZE)) {
+      const { error } = await client.from('value_history').insert(group);
+      if (error) throw error;
+    }
   }
 
   async pruneValueHistory(olderThanDays: number): Promise<void> {
     const days = Math.max(1, Math.floor(olderThanDays));
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-    const { error } = await this.getClient().from('value_history').delete().lt('recorded_at', cutoff);
-    if (error) throw error;
+    const client = this.getClient();
+    for (let i = 0; i < 20; i++) {
+      const { data, error: selectError } = await client
+        .from('value_history')
+        .select('id')
+        .lt('recorded_at', cutoff)
+        .order('recorded_at', { ascending: true })
+        .limit(SupabaseStreamerRepository.VALUE_HISTORY_PRUNE_CHUNK_SIZE);
+      if (selectError) throw selectError;
+      const ids = (data || []).map((row: any) => row.id).filter((id: any) => id != null);
+      if (ids.length === 0) return;
+
+      const { error: deleteError } = await client.from('value_history').delete().in('id', ids);
+      if (deleteError) throw deleteError;
+      if (ids.length < SupabaseStreamerRepository.VALUE_HISTORY_PRUNE_CHUNK_SIZE) return;
+    }
+    console.warn('[Supabase] value_history 오래된 이력이 많아 이번 주기에는 일부만 정리했습니다.');
   }
 
   // 경계 시각 직전 좁은 구간만 조회하기 위한 룩백 윈도우(시간).

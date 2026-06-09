@@ -376,9 +376,13 @@ export const syncAllStreamersLiveStatus = async () => {
       Array.from({ length: Math.min(CONCURRENCY, pollTargets.length) }, () => worker())
     );
 
-    // 4) DB 일괄 반영 (단일 트랜잭션/RPC로 왕복 최소화)
+    // 4) DB 일괄 반영. Supabase에서는 내부적으로 작은 배치로 나눠 statement_timeout을 피합니다.
+    const dbApplyStart = Date.now();
     await streamerRepository.bulkApplyScheduleResults(results);
+    console.log(`[LiveStatusScheduler] DB 시세 반영 완료: ${results.length}건 (${Date.now() - dbApplyStart}ms)`);
+    const historyStart = Date.now();
     await streamerRepository.bulkRecordValueHistory(historyPoints);
+    console.log(`[LiveStatusScheduler] 시세 이력 기록 완료: ${historyPoints.length}건 (${Date.now() - historyStart}ms)`);
     clearRankingCaches();
     publishRealtimeEvent('ranking', {
       reason: 'streamer_sync',
@@ -393,7 +397,11 @@ export const syncAllStreamersLiveStatus = async () => {
     }
     // 5) 주기적으로 오래된 시세 이력 정리 (7일 초과분)
     if (cycle % PRUNE_EVERY_CYCLES === 0) {
-      await streamerRepository.pruneValueHistory(VALUE_HISTORY_RETENTION_DAYS);
+      const pruneStart = Date.now();
+      await streamerRepository.pruneValueHistory(VALUE_HISTORY_RETENTION_DAYS).catch((err: any) => {
+        console.warn(`[LiveStatusScheduler] 오래된 시세 이력 정리 실패(다음 주기에 재시도): ${err?.message || err}`);
+      });
+      console.log(`[LiveStatusScheduler] 오래된 시세 이력 정리 확인 완료 (${Date.now() - pruneStart}ms)`);
     }
 
     console.log(
