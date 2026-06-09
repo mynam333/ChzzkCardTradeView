@@ -529,29 +529,31 @@ export class SupabaseUserRepository implements IUserRepository {
 
   private async fetchVisibleCardsByUserIds(userIds: string[]): Promise<{ user_id: string; channel_id: string; star: number }[]> {
     const cards: { user_id: string; channel_id: string; star: number }[] = [];
-    const chunkSize = 200;
+    const userIdSet = new Set(userIds);
     const pageSize = 1000;
 
-    for (let start = 0; start < userIds.length; start += chunkSize) {
-      const chunk = userIds.slice(start, start + chunkSize);
-      for (let offset = 0; ; offset += pageSize) {
-        const { data, error } = await this.getClient()
-          .from('user_cards')
-          .select('user_id, channel_id, star')
-          .in('user_id', chunk)
-          .or('is_hidden.is.null,is_hidden.eq.false')
-          .range(offset, offset + pageSize - 1);
+    // 많은 user_id를 .in(...)에 넣으면 Supabase 요청 URL/헤더가 16KB를 넘어
+    // UND_ERR_HEADERS_OVERFLOW가 발생할 수 있습니다. 카드 목록은 페이지 단위로 읽고
+    // 대상 유저 필터링은 서버 메모리에서 수행합니다.
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await this.getClient()
+        .from('user_cards')
+        .select('id, user_id, channel_id, star')
+        .or('is_hidden.is.null,is_hidden.eq.false')
+        .order('id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
 
-        if (error) throw error;
-        for (const row of data || []) {
+      if (error) throw error;
+      for (const row of data || []) {
+        if (userIdSet.has(row.user_id)) {
           cards.push({
             user_id: row.user_id,
             channel_id: row.channel_id,
             star: Number(row.star || 0)
           });
         }
-        if (!data || data.length < pageSize) break;
       }
+      if (!data || data.length < pageSize) break;
     }
 
     return cards;
@@ -583,19 +585,25 @@ export class SupabaseUserRepository implements IUserRepository {
 
   private async fetchStreamerBaseValueMap(channelIds: string[]): Promise<Map<string, number>> {
     const valueMap = new Map<string, number>();
-    const chunkSize = 500;
+    const channelIdSet = new Set(channelIds);
+    const pageSize = 1000;
 
-    for (let start = 0; start < channelIds.length; start += chunkSize) {
-      const chunk = channelIds.slice(start, start + chunkSize);
+    // channel_id 배열도 커지면 .in(...) URL이 길어질 수 있어 전체 스트리머를
+    // 페이지 단위로 읽고 필요한 채널만 매핑합니다.
+    for (let offset = 0; ; offset += pageSize) {
       const { data, error } = await this.getClient()
         .from('streamers')
         .select('channel_id, base_value')
-        .in('channel_id', chunk);
+        .order('channel_id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
 
       if (error) throw error;
       for (const streamer of data || []) {
-        valueMap.set(streamer.channel_id, Number(streamer.base_value || 0));
+        if (channelIdSet.has(streamer.channel_id)) {
+          valueMap.set(streamer.channel_id, Number(streamer.base_value || 0));
+        }
       }
+      if (!data || data.length < pageSize) break;
     }
 
     return valueMap;
