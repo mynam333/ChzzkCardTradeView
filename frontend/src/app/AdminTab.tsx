@@ -1557,8 +1557,10 @@ export const AdminTab: React.FC = () => {
                   <p className="text-xs text-muted-foreground text-center py-8">발송된 알림 내역이 없습니다.</p>
                 ) : (
                   sentPushes.map((p) => {
-                    const sentTimeStr = p.created_at
-                      ? new Date(p.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                    // 등록 시각이 아닌 실제 발송 시각(sent_at)을 우선 표시 (과거 데이터는 created_at로 폴백)
+                    const sentTimeSource = p.sent_at || p.created_at;
+                    const sentTimeStr = sentTimeSource
+                      ? new Date(sentTimeSource).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
                       : '기록 없음';
                     return (
                       <div key={p.id} className="p-3 bg-secondary/15 border border-border/20 rounded-xl space-y-1">

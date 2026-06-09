@@ -130,6 +130,7 @@ export const ShopTab: React.FC = () => {
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
   const [marketHistoryPage, setMarketHistoryPage] = useState(1);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyScope, setHistoryScope] = useState<'all' | 'mine'>('all'); // 전체 / 내 거래 이력
 
   // URL category 쿼리 파라미터를 기반으로 초기 shopType 결정
   const categoryParam = searchParams.get('category');
@@ -163,19 +164,12 @@ export const ShopTab: React.FC = () => {
     if (user) { fetchOwned(); fetchPurchased(); }
   }, [user]);
 
-  // 1. 마운트 시 즉시 최신 정보 가져오기 및 주기적(10초) 폴링
+  // 1. 마운트 시 최신 정보 1회 가져오기.
+  // 무료 소환 리셋은 아래 nextFreeDrawAt 타이머로 정확히 갱신하므로 주기 폴링은 하지 않습니다.
   useEffect(() => {
     if (!user) return;
 
-    // 마운트 시 즉각 데이터 리프레시
     refreshUserData();
-
-    // 10초 주기 백그라운드 갱신 인터벌
-    const intervalId = setInterval(() => {
-      refreshUserData();
-    }, 10000);
-
-    return () => clearInterval(intervalId);
   }, [user?.id]); // 유저가 변경될 때마다 갱신 주기 재설정
 
   // 2. 차기 무료 뽑기 리셋 시각(nextFreeDrawAt) 정각 감지 타이머
@@ -273,18 +267,20 @@ export const ShopTab: React.FC = () => {
     }
   };
 
-  const fetchMarketHistory = async () => {
+  // silent=true(백그라운드 폴링)일 때는 로딩 스켈레톤 없이 변경분만 조용히 반영합니다.
+  const fetchMarketHistory = async (silent = false) => {
     if (!user) return;
-    setIsLoadingHistory(true);
+    if (!silent) setIsLoadingHistory(true);
     try {
-      const res = await apiFetch('/market/history');
+      const res = await apiFetch(`/market/history?scope=${historyScope}`);
       if (res.ok) {
-        setMarketHistory(await res.json());
+        const data = (await res.json()) || [];
+        setMarketHistory((prev) => (silent ? mergeMarketListings(prev, data) : data));
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setIsLoadingHistory(false);
+      if (!silent) setIsLoadingHistory(false);
     }
   };
 
@@ -304,7 +300,7 @@ export const ShopTab: React.FC = () => {
   // 관심 매물 알림의 스트리머 이름 검색용 목록 로드 (마켓 탭 진입 시 1회)
   useEffect(() => {
     if (subTab !== 'market' || !user || streamerOptions.length > 0) return;
-    apiFetch('/streamers')
+    apiFetch('/streamers/ranking?mode=value&limit=1000')
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => setStreamerOptions(Array.isArray(data) ? data : []))
       .catch(() => { /* 검색 목록 로드 실패는 무시 */ });
@@ -313,12 +309,9 @@ export const ShopTab: React.FC = () => {
   useEffect(() => {
     if (subTab !== 'market') return;
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
       fetchMarketListings(true); // 백그라운드 폴링: 로딩 표시 없이 변경분만 반영
-      if (user) {
-        fetchMyListings();
-        fetchMarketWatches();
-      }
-    }, 10_000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, [subTab, marketPage, marketSort, marketType, marketSearch, user?.id]);
 
@@ -339,12 +332,25 @@ export const ShopTab: React.FC = () => {
     }
   }, [subTab, user]);
 
+  // 탭 진입 / 유저 변경 / 범위(전체·내거래) 변경 시에만 스켈레톤과 함께 로드.
+  // (deps를 user 객체가 아닌 user?.id로 두어 10초마다의 user 갱신으로 재로딩되지 않게 함)
   useEffect(() => {
     if (subTab === 'history' && user) {
       setMarketHistoryPage(1);
       fetchMarketHistory();
     }
-  }, [subTab, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subTab, user?.id, historyScope]);
+
+  // 거래 이력 백그라운드 폴링: 실시간성이 낮아 60초로 제한하고 숨겨진 탭에서는 멈춥니다.
+  useEffect(() => {
+    if (subTab !== 'history' || !user) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') fetchMarketHistory(true);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subTab, user?.id, historyScope]);
 
   useEffect(() => {
     setCosmeticPage(1);
@@ -805,7 +811,7 @@ export const ShopTab: React.FC = () => {
             <p className="text-xs text-muted-foreground">포인트로 카드 테두리와 이름 이펙트를 구매하세요. 구매한 코스메틱은 보관함에서 카드에 장착할 수 있습니다.</p>
 
             {/* 종류 탭 (아이콘 추가로 시각적 조화성 증대) */}
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div data-tour="shop-cosmetic-tools" className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex rounded-lg bg-secondary p-1 w-fit border border-border/40">
                 {([
                   ['border', '테두리', Layers],
@@ -964,7 +970,7 @@ export const ShopTab: React.FC = () => {
             </div>
 
             {/* 필터 & 검색 */}
-            <div className="flex flex-col sm:flex-row items-center gap-3">
+            <div data-tour="shop-market-filters" className="flex flex-col sm:flex-row items-center gap-3">
               <div className="relative w-full sm:flex-1">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <input
@@ -1004,7 +1010,7 @@ export const ShopTab: React.FC = () => {
             </div>
 
             {user && (
-              <div className="rounded-[1.5rem] border border-sky-200/70 bg-sky-50/70 p-4 dark:border-sky-400/15 dark:bg-sky-400/10">
+              <div data-tour="shop-market-watch" className="rounded-[1.5rem] border border-sky-200/70 bg-sky-50/70 p-4 dark:border-sky-400/15 dark:bg-sky-400/10">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
                     <h3 className="flex items-center gap-2 text-sm font-black text-sky-700 dark:text-sky-200">
@@ -1418,7 +1424,23 @@ export const ShopTab: React.FC = () => {
                 <h2 className="text-xl font-black flex items-center gap-2">
                   <Clock className="h-5.5 w-5.5 text-primary" /> 거래 이력 (영수증)
                 </h2>
-                <p className="text-xs text-muted-foreground">내가 오픈마켓에서 구매했거나 판매 완료한 최근 거래 내역입니다.</p>
+                <p className="text-xs text-muted-foreground">
+                  {historyScope === 'all'
+                    ? '오픈마켓에서 완료된 전체 거래 내역입니다.'
+                    : '내가 오픈마켓에서 구매했거나 판매 완료한 최근 거래 내역입니다.'}
+                </p>
+              </div>
+              {/* 전체 / 내 거래 이력 토글 */}
+              <div className="flex self-start rounded-2xl border border-border bg-secondary/60 p-1">
+                {([['all', '전체'], ['mine', '내 거래 이력']] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => { setHistoryScope(key); setMarketHistoryPage(1); }}
+                    className={`cute-wiggle-hover rounded-xl px-3 py-1.5 text-xs font-bold transition ${historyScope === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1448,7 +1470,7 @@ export const ShopTab: React.FC = () => {
                           <th className="py-2.5">거래 종류</th>
                           <th className="py-2.5">카드 정보</th>
                           <th className="py-2.5">거래 금액</th>
-                          <th className="py-2.5">정산/지출</th>
+                          <th className="py-2.5">{historyScope === 'all' ? '판매자 → 구매자' : '정산/지출'}</th>
                           <th className="py-2.5">거래 일시</th>
                         </tr>
                       </thead>
@@ -1464,7 +1486,11 @@ export const ShopTab: React.FC = () => {
                           let actionPoint = '';
                           let actionPointColor = '';
 
-                          if (l.status === 'SOLD') {
+                          if (historyScope === 'all') {
+                            // 전체 거래 장부: 모두 완료된(SOLD) 거래
+                            typeLabel = '거래 완료';
+                            typeColor = 'bg-emerald-500/10 text-emerald-500';
+                          } else if (l.status === 'SOLD') {
                             if (isSeller) {
                               typeLabel = '판매 완료';
                               typeColor = 'bg-emerald-500/10 text-emerald-500';
@@ -1512,7 +1538,15 @@ export const ShopTab: React.FC = () => {
                                 </div>
                               </td>
                               <td className="py-3 font-bold text-yellow-500">{l.price.toLocaleString()} P</td>
-                              <td className="py-3 font-semibold text-[11px]"><span className={actionPointColor}>{actionPoint}</span></td>
+                              <td className="py-3 font-semibold text-[11px]">
+                                {historyScope === 'all' ? (
+                                  <span className="text-muted-foreground">
+                                    {l.seller_username || '?'} <span className="text-primary">→</span> {l.buyer_username || '?'}
+                                  </span>
+                                ) : (
+                                  <span className={actionPointColor}>{actionPoint}</span>
+                                )}
+                              </td>
                               <td className="py-3 text-muted-foreground text-[10px]">{formattedDate}</td>
                             </tr>
                           );

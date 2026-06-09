@@ -36,6 +36,29 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     return (data || []).map(withStarImages);
   }
 
+  async findRankingBase(): Promise<Streamer[]> {
+    const { data, error } = await this.getClient()
+      .from('streamers')
+      .select('channel_id, name, logo_url, custom_image_url, follower_count, base_value, is_active, serial_number, prev_value')
+      .order('base_value', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      channel_id: row.channel_id,
+      name: row.name,
+      logo_url: row.logo_url,
+      custom_image_url: row.custom_image_url,
+      custom_images: [],
+      is_image_banned: false,
+      follower_count: row.follower_count,
+      activity_score: 0,
+      base_value: row.base_value,
+      is_active: row.is_active,
+      serial_number: row.serial_number ?? undefined,
+      prev_value: row.prev_value ?? row.base_value
+    }));
+  }
+
   async findById(channelId: string): Promise<Streamer | null> {
     const { data, error } = await this.getClient()
       .from('streamers')

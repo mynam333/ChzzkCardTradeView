@@ -7,6 +7,7 @@ import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
 
 interface HistoryPoint { value: number; recorded_at: string; }
+interface HistoryRange { start: string; end: string; }
 interface StreamerDetail {
   channel_id: string;
   name: string;
@@ -29,6 +30,7 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
   const { toast } = useApp();
   const [streamer, setStreamer] = useState<StreamerDetail | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [historyRange, setHistoryRange] = useState<HistoryRange | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<'24h' | '7d'>('7d');
   const [hover, setHover] = useState<number | null>(null);
@@ -38,12 +40,18 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
     (async () => {
       setLoading(true);
       setHistory([]);
+      setHistoryRange(null);
       try {
         const res = await apiFetch(`/streamers/${channelId}?range=${range}`);
         if (res.ok && alive) {
           const data = await res.json();
           setStreamer(data.streamer as StreamerDetail);
           setHistory(data.history || []);
+          setHistoryRange(
+            data.range_start_at && data.range_end_at
+              ? { start: data.range_start_at, end: data.range_end_at }
+              : null
+          );
         } else if (alive) {
           toast('스트리머 상세 정보를 불러오지 못했습니다.', 'error');
         }
@@ -140,37 +148,69 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
 
             {/* SVG 라인 차트 (hover 시 해당 시점 강조 + 툴팁) */}
             {history.length >= 2 ? (() => {
-              const W = 460, H = 170, P = 10;
-              const n = history.length;
-              const values = history.map(h => h.value);
+              const W = 460, H = 170, P = 14;
+              const parseTime = (iso: string) => {
+                const normalized = iso.includes('T') || iso.endsWith('Z') ? iso : iso.replace(' ', 'T') + 'Z';
+                const ts = new Date(normalized).getTime();
+                return Number.isFinite(ts) ? ts : Date.now();
+              };
+              const sortedHistory = history.slice().sort((a, b) => parseTime(a.recorded_at) - parseTime(b.recorded_at));
+              const n = sortedHistory.length;
+              const values = sortedHistory.map(h => h.value);
               const min = Math.min(...values), max = Math.max(...values);
               const rng = max - min || 1;
-              const coords = history.map((h, i) => ({
-                x: P + (i / (n - 1)) * (W - 2 * P),
-                y: H - P - ((h.value - min) / rng) * (H - 2 * P)
-              }));
+
+              // 축 라벨은 데이터 포인트가 아니라 '요청한 조회 구간'(현재 ~ 현재-range)을 기준으로 표시합니다.
+              // 24시간이면 현재부터 24시간 전까지, 7일이면 현재부터 7일 전까지가 명확히 보이도록.
+              const rangeMs = range === '24h' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+              const fallbackEndTs = Date.now();
+              const rangeEndTs = historyRange ? parseTime(historyRange.end) : fallbackEndTs;
+              const rangeStartTs = historyRange ? parseTime(historyRange.start) : rangeEndTs - rangeMs;
+              const safeRangeMs = Math.max(1, rangeEndTs - rangeStartTs);
+              const coords = sortedHistory.map((h) => {
+                const pointTs = Math.min(rangeEndTs, Math.max(rangeStartTs, parseTime(h.recorded_at)));
+                return {
+                  x: P + ((pointTs - rangeStartTs) / safeRangeMs) * (W - 2 * P),
+                  y: H - P - ((h.value - min) / rng) * (H - 2 * P)
+                };
+              });
               const pts = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
               const up = values[n - 1] >= values[0];
               const stroke = up ? '#f43f5e' : '#3b82f6';
 
               const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                const ratio = (e.clientX - rect.left) / rect.width;
-                const idx = Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1))));
-                setHover(idx);
+                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                const pointerX = P + ratio * (W - 2 * P);
+                let nearest = 0;
+                let nearestDistance = Infinity;
+                coords.forEach((coord, index) => {
+                  const distance = Math.abs(coord.x - pointerX);
+                  if (distance < nearestDistance) {
+                    nearest = index;
+                    nearestDistance = distance;
+                  }
+                });
+                setHover(nearest);
               };
               const hovered = hover !== null && hover < n ? hover : null;
               const fmtTime = (iso: string) => {
-                const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
+                const d = new Date(parseTime(iso));
                 return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
               };
+              const fmtAxis = (ts: number) => new Date(ts).toLocaleString(
+                'ko-KR',
+                range === '24h'
+                  ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+                  : { month: 'numeric', day: 'numeric' }
+              );
 
               return (
                 <div className="rounded-2xl border border-border bg-secondary/20 p-3">
-                  <div className="relative">
+                  <div className="relative overflow-visible">
                     <svg
                       viewBox={`0 0 ${W} ${H}`}
-                      className="h-44 w-full min-w-0"
+                      className="h-44 w-full min-w-0 overflow-visible"
                       preserveAspectRatio="none"
                       onMouseMove={onMove}
                       onMouseLeave={() => setHover(null)}
@@ -188,14 +228,14 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                         className="pointer-events-none absolute -top-1 z-10 -translate-x-1/2 -translate-y-full rounded-lg bg-foreground px-2 py-1 text-[10px] font-bold text-background shadow-lg whitespace-nowrap"
                         style={{ left: `${(coords[hovered].x / W) * 100}%` }}
                       >
-                        {fmtTime(history[hovered].recorded_at)} · {values[hovered].toLocaleString()}P
+                        {fmtTime(sortedHistory[hovered].recorded_at)} · {values[hovered].toLocaleString()}P
                       </div>
                     )}
                   </div>
                   <div className="mt-2 grid gap-1 text-[10px] text-muted-foreground sm:grid-cols-3 sm:items-center">
-                    <span className="truncate">{new Date(history[0].recorded_at).toLocaleDateString('ko-KR')}</span>
+                    <span className="truncate">{fmtAxis(rangeStartTs)}</span>
                     <span className="text-left font-bold sm:text-center">최저 {min.toLocaleString()}P · 최고 {max.toLocaleString()}P</span>
-                    <span className="truncate text-left sm:text-right">{new Date(history[n - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
+                    <span className="truncate text-left sm:text-right">{fmtAxis(rangeEndTs)}</span>
                   </div>
                 </div>
               );

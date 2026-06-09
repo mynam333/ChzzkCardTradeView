@@ -14,6 +14,7 @@ import {
   Sparkles,
   Store,
   TrendingUp,
+  ChevronsUpDown,
   User,
   UserRound,
   X
@@ -43,6 +44,7 @@ type TutorialStep = {
   waitForEvent?: string;
   grantGachaTicket?: boolean;
   shopSubTab?: 'gacha_shop' | 'market' | 'history';
+  rankingSubTab?: 'value' | 'change' | 'user' | 'cards';
   demo?: 'inventory-menu' | 'minigame-result';
 };
 
@@ -53,7 +55,7 @@ type HighlightRect = {
   height: number;
 };
 
-const TUTORIAL_VERSION = '2026-06-08-v1';
+const TUTORIAL_VERSION = '2026-06-09-v2';
 const MANUAL_START_EVENT = 'chikapo-start-tutorial';
 const UARU_CHANNEL_ID = '6d395c84c99777272f872171b4dfc122';
 
@@ -214,6 +216,19 @@ const tutorialSteps: TutorialStep[] = [
     shopSubTab: 'gacha_shop'
   },
   {
+    id: 'shop-cosmetic-tools',
+    section: 'shop',
+    tab: 'shop',
+    title: '상품을 빠르게 찾기',
+    lines: [
+      '코스메틱이 많아지면 검색과 정렬을 같이 쓰면 편해요.',
+      '테두리와 이름 효과를 나누어 보고, 가격순이나 이름순으로 정리해서 원하는 상품을 찾을 수 있습니다.'
+    ],
+    tip: '페이지가 나뉘어 있어도 검색어나 정렬을 바꾸면 첫 페이지부터 다시 보여줘요.',
+    target: 'shop-cosmetic-tools',
+    shopSubTab: 'gacha_shop'
+  },
+  {
     id: 'shop-market',
     section: 'shop',
     tab: 'shop',
@@ -226,12 +241,50 @@ const tutorialSteps: TutorialStep[] = [
     shopSubTab: 'market'
   },
   {
+    id: 'shop-market-filters',
+    section: 'shop',
+    tab: 'shop',
+    title: '매물 검색과 정렬',
+    lines: [
+      '장터에서는 스트리머 이름이나 판매자 이름으로 매물을 검색할 수 있어요.',
+      '즉시 판매와 경매를 나누어 보고, 가격순이나 마감 임박순으로 정렬하면 필요한 카드를 찾기 쉬워집니다.'
+    ],
+    target: 'shop-market-filters',
+    shopSubTab: 'market'
+  },
+  {
+    id: 'shop-auction',
+    section: 'shop',
+    tab: 'shop',
+    title: '경매 매물 이해하기',
+    lines: [
+      '경매 매물은 현재 입찰가가 실시간으로 갱신되고, 마감 시간이 지나면 최고 입찰자에게 낙찰됩니다.',
+      '즉시 구매가가 있는 경매는 기다리지 않고 바로 구매할 수도 있어요.'
+    ],
+    tip: '입찰은 현재가보다 100P 이상 높게 넣어야 하며, 낙찰 시점에 포인트가 정산됩니다.',
+    target: 'shop-market',
+    shopSubTab: 'market'
+  },
+  {
+    id: 'shop-market-watch',
+    section: 'shop',
+    tab: 'shop',
+    title: '관심 매물 알림',
+    lines: [
+      '원하는 스트리머 카드가 장터에 올라왔을 때 알림을 받을 수 있어요.',
+      '등급과 최대 가격을 정해두면 조건에 맞는 매물이 등록될 때 사이트 알림과 푸시 알림으로 알려줍니다.'
+    ],
+    tip: '푸시 알림을 받으려면 내 정보에서 알림 구독을 먼저 허용해 주세요.',
+    target: 'shop-market-watch',
+    shopSubTab: 'market'
+  },
+  {
     id: 'shop-my-listings',
     section: 'shop',
     tab: 'shop',
     title: '내 판매 관리',
     lines: [
-      '내가 등록한 매물은 상점에서 상태를 확인하고 취소할 수 있어요.',
+      '내가 등록한 즉시 판매와 경매 매물은 상점에서 상태를 확인하고 취소할 수 있어요.',
       '단, 판매 등록 중인 카드는 거래가 끝나거나 취소되기 전까지 다른 작업이 제한됩니다.'
     ],
     target: 'shop-my-listings',
@@ -266,12 +319,36 @@ const tutorialSteps: TutorialStep[] = [
     tab: 'inventory',
     title: '카드 작업 메뉴',
     lines: [
-      '우클릭 메뉴에서는 코스메틱 장착, 시스템 판매, 마켓 등록 같은 작업을 할 수 있어요.',
+      '우클릭 메뉴에서는 즐겨찾기, 외부 공개 숨김, 코스메틱 장착, 시스템 판매, 마켓 등록 같은 작업을 할 수 있어요.',
       '판매나 마켓 등록은 되돌리기 어려운 부분이 있으니 확인 모달을 천천히 읽어 주세요.'
     ],
     tip: "모바일에서는 길게 눌러서 우클릭 메뉴를 열 수 있어요.",
     target: 'inventory-list',
     demo: 'inventory-menu'
+  },
+  {
+    id: 'inventory-favorite',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '즐겨찾기 카드 고정',
+    lines: [
+      '자주 보는 카드는 별 배지로 즐겨찾기에 고정할 수 있어요.',
+      '정렬 기준을 바꾸더라도 즐겨찾기한 카드는 보관함 맨 앞에 먼저 모입니다.'
+    ],
+    tip: '카드 위의 별 배지는 평소에는 은은하게 숨어 있다가 카드에 마우스를 올리면 보여요.',
+    target: 'inventory-favorite-badge'
+  },
+  {
+    id: 'inventory-hidden',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '외부 공개 숨김',
+    lines: [
+      '특정 보유 카드를 다른 사람에게 보이고 싶지 않을 때는 외부 공개 숨김을 켤 수 있어요.',
+      '숨긴 카드는 내 보관함에서는 보이지만, 다른 사람이 보는 프로필이나 보유 카드 목록에서는 제외됩니다.'
+    ],
+    tip: '내가 가진 카드라는 사실을 공개하고 싶지 않은 카드에만 신중하게 사용하면 됩니다.',
+    target: 'inventory-list'
   },
   {
     id: 'inventory-bulk',
@@ -383,7 +460,7 @@ const tutorialSteps: TutorialStep[] = [
     title: '중간에 끊겨도 이어가기',
     lines: [
       '연결이 불안정해 STARTED 상태에서 끊긴 게임은 이어서 시작하도록 보정되어 있어요.',
-      '결과 채점 중에는 화면 안내가 끝날 때까지 잠시 기다려 주세요.'
+      '결과 제출 때 잠깐 지연이 생겨도 화면에 남은 시간이 있었다면 서버가 한 번 더 확인해서 억울한 시간 초과를 줄입니다.'
     ]
   },
   {
@@ -407,7 +484,33 @@ const tutorialSteps: TutorialStep[] = [
       '유저가 보유한 카드 총 가치로 순위가 매겨져요.',
       '희귀 카드와 인기 스트리머 카드를 모을수록 랭킹 경쟁에서 유리합니다.'
     ],
-    target: 'ranking-list'
+    target: 'ranking-list',
+    rankingSubTab: 'user'
+  },
+  {
+    id: 'ranking-card-value',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '카드 가치 랭킹',
+    lines: [
+      '카드 가치 랭킹은 보유 포인트를 제외하고, 카드들의 가치만 합산해서 순위를 보여줘요.',
+      '포인트를 많이 모은 사람과 카드 수집을 잘한 사람을 따로 볼 수 있어서 랭킹 의미가 더 분명해졌습니다.'
+    ],
+    target: 'ranking-list',
+    rankingSubTab: 'cards'
+  },
+  {
+    id: 'ranking-card-filter',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '특정 카드 보유자 찾기',
+    lines: [
+      '특정 스트리머 카드를 가진 사람만 보고 싶을 때는 카드 가치 랭킹의 필터를 사용해요.',
+      '스트리머 이름을 입력하고, 필요하면 0성부터 5성까지 등급도 함께 좁힐 수 있습니다.'
+    ],
+    tip: '등급을 비워두면 해당 스트리머 카드 보유자를 등급과 관계없이 볼 수 있어요.',
+    target: 'ranking-card-filter',
+    rankingSubTab: 'cards'
   },
   {
     id: 'ranking-market',
@@ -418,7 +521,8 @@ const tutorialSteps: TutorialStep[] = [
       '스트리머 카드의 기준 가치와 최근 변화를 볼 수 있어요.',
       '마켓에서 사고팔기 전, 시세를 먼저 보는 습관을 들이면 포인트 관리가 편해집니다.'
     ],
-    target: 'ranking-list'
+    target: 'ranking-list',
+    rankingSubTab: 'value'
   },
   {
     id: 'ranking-change',
@@ -429,7 +533,20 @@ const tutorialSteps: TutorialStep[] = [
       '등락률은 최근 흐름을 빠르게 보여주는 지표예요.',
       '단기 변동만 보고 무리하게 거래하기보다, 내가 좋아하는 카드의 흐름을 참고하는 정도로 보면 좋습니다.'
     ],
-    target: 'ranking-tabs'
+    target: 'ranking-tabs',
+    rankingSubTab: 'change'
+  },
+  {
+    id: 'ranking-status-message',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '랭킹의 짧은 소개 문구',
+    lines: [
+      '유저 랭킹에는 상태 메시지가 함께 표시될 수 있어요.',
+      '내가 어떤 카드를 모으는지, 어떤 교환을 원하는지 짧게 적어두면 다른 유저가 나를 이해하기 쉬워집니다.'
+    ],
+    target: 'ranking-list',
+    rankingSubTab: 'user'
   },
   {
     id: 'my-info-entry',
@@ -453,6 +570,18 @@ const tutorialSteps: TutorialStep[] = [
       '보유 카드 중 마음에 드는 카드를 골라 나를 표현할 수 있습니다.'
     ],
     target: 'my-info-profile'
+  },
+  {
+    id: 'my-info-status',
+    section: 'my-info',
+    tab: 'my-info',
+    title: '상태 메시지 남기기',
+    lines: [
+      '프로필 상태 메시지는 랭킹과 프로필 공유 화면에 함께 표시되는 짧은 소개 문구예요.',
+      '수집 목표나 교환하고 싶은 카드처럼 다른 유저에게 알려주고 싶은 말을 80자 안에 적을 수 있습니다.'
+    ],
+    tip: '너무 긴 설명보다는 한 줄 소개처럼 가볍게 적으면 랭킹에서도 읽기 좋아요.',
+    target: 'my-info-status'
   },
   {
     id: 'my-info-titles',
@@ -493,7 +622,7 @@ const tutorialSteps: TutorialStep[] = [
     tab: 'my-info',
     title: '푸시 알림과 앱 설치',
     lines: [
-      '알림을 허용하면 공지, 이벤트, 카드 삭제 보상 같은 중요한 소식을 받을 수 있어요.',
+      '알림을 허용하면 공지, 이벤트, 신고 처리, 관심 매물 등록, 카드 삭제 보상 같은 중요한 소식을 받을 수 있어요.',
       '설치 가능한 환경에서는 같은 버튼으로 PWA 앱 설치도 함께 시도합니다.'
     ],
     target: 'my-info-push'
@@ -538,7 +667,7 @@ const tutorialSteps: TutorialStep[] = [
     title: '추천 이용 흐름',
     lines: [
       '처음에는 메인에서 공지를 보고, 상점에서 무료 소환을 확인한 뒤 보관함을 정리해 보세요.',
-      '그 다음 미니게임으로 포인트를 모으고 랭킹에서 내 위치를 확인하면 흐름이 자연스럽습니다.'
+      '그 다음 미니게임으로 포인트를 모으고, 랭킹과 관심 매물 알림을 보며 사고 싶은 카드를 천천히 찾아가면 흐름이 자연스럽습니다.'
     ]
   },
   {
@@ -547,8 +676,8 @@ const tutorialSteps: TutorialStep[] = [
     tab: 'main',
     title: '실수 방지 팁',
     lines: [
-      '판매, 마켓 등록, 회원 탈퇴처럼 되돌리기 어려운 기능은 확인창을 꼭 읽어 주세요.',
-      '거래 중인 카드는 다른 작업이 제한될 수 있으니 보관함의 상태 표시도 함께 확인하면 좋습니다.'
+      '판매, 경매 등록, 즉시구매, 회원 탈퇴처럼 되돌리기 어려운 기능은 확인창을 꼭 읽어 주세요.',
+      '거래 중인 카드와 숨김 처리한 카드는 다른 화면에서 보이는 방식이 달라질 수 있으니 보관함의 상태 표시도 함께 확인하면 좋습니다.'
     ]
   },
   {
@@ -576,6 +705,7 @@ export const TutorialGuide: React.FC = () => {
   const [waitingSatisfied, setWaitingSatisfied] = useState(false);
   const [actionStatus, setActionStatus] = useState('');
   const [gachaRewardClaiming, setGachaRewardClaiming] = useState(false);
+  const [mobilePanelPosition, setMobilePanelPosition] = useState<'bottom' | 'top'>('bottom');
   const [uaruImageUrl, setUaruImageUrl] = useState(`https://api.dicebear.com/10.x/fun-emoji/svg?seed=${UARU_CHANNEL_ID}`);
   // 티켓 지급을 스텝당 1회만 시도하기 위한 가드 (effect 재실행에 따른 중복 호출·로딩 고착 방지)
   const claimedTicketStepRef = useRef<string | null>(null);
@@ -667,6 +797,13 @@ export const TutorialGuide: React.FC = () => {
   }, [collapsed, open, step.id, step.shopSubTab]);
 
   useEffect(() => {
+    if (!open || collapsed || !step.rankingSubTab) return;
+    window.dispatchEvent(new CustomEvent('chikapo:tutorial-ranking-subtab', {
+      detail: { subTab: step.rankingSubTab }
+    }));
+  }, [collapsed, open, step.id, step.rankingSubTab]);
+
+  useEffect(() => {
     setWaitingSatisfied(false);
     setActionStatus('');
   }, [step.id]);
@@ -737,6 +874,22 @@ export const TutorialGuide: React.FC = () => {
         }
         if (shouldScroll) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+          window.setTimeout(() => {
+            const nextRect = target.getBoundingClientRect();
+            const panel = document.querySelector<HTMLElement>('[data-tour-panel="dialog"]');
+            const panelHeight = panel?.getBoundingClientRect().height ?? 0;
+            const isMobile = window.innerWidth < 768;
+            if (!isMobile || panelHeight <= 0) return;
+
+            const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+            const topSafe = mobilePanelPosition === 'top' ? panelHeight + 20 : 20;
+            const bottomSafe = mobilePanelPosition === 'bottom' ? panelHeight + 20 : 20;
+            if (nextRect.top < topSafe) {
+              window.scrollBy({ top: nextRect.top - topSafe, behavior: 'smooth' });
+            } else if (nextRect.bottom > viewportHeight - bottomSafe) {
+              window.scrollBy({ top: nextRect.bottom - (viewportHeight - bottomSafe), behavior: 'smooth' });
+            }
+          }, 260);
         }
         const rect = target.getBoundingClientRect();
         const padding = 10;
@@ -762,7 +915,7 @@ export const TutorialGuide: React.FC = () => {
       window.removeEventListener('resize', handleViewportChange);
       window.removeEventListener('scroll', handleViewportChange, true);
     };
-  }, [activeTab, collapsed, open, step.id, step.tab, targetSelector]);
+  }, [activeTab, collapsed, mobilePanelPosition, open, step.id, step.tab, targetSelector]);
 
   useEffect(() => {
     if (!open || step.demo !== 'minigame-result') return;
@@ -790,7 +943,9 @@ export const TutorialGuide: React.FC = () => {
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="fixed bottom-24 right-4 z-[80] flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-4 py-3 text-xs font-black text-foreground shadow-[0_18px_50px_rgba(24,112,210,0.24)] backdrop-blur-xl transition hover:-translate-y-0.5 md:bottom-8 md:right-8 dark:bg-card/90"
+        className={`fixed right-4 z-[80] flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-4 py-3 text-xs font-black text-foreground shadow-[0_18px_50px_rgba(24,112,210,0.24)] backdrop-blur-xl transition hover:-translate-y-0.5 md:bottom-8 md:right-8 dark:bg-card/90 ${
+          mobilePanelPosition === 'top' ? 'top-20' : 'bottom-24'
+        }`}
       >
         <MessageCircleHeart className="h-4 w-4 text-primary" />
         튜토리얼 계속 보기
@@ -829,7 +984,7 @@ export const TutorialGuide: React.FC = () => {
       {step.demo === 'inventory-menu' && (
         <div className="pointer-events-none fixed right-4 top-24 z-[75] w-56 rounded-2xl border border-border bg-card/96 p-2 text-xs font-bold text-foreground shadow-[0_18px_60px_rgba(15,23,42,0.24)] backdrop-blur-xl md:right-10">
           <p className="px-3 py-2 text-[10px] font-black text-primary">카드 메뉴 예시</p>
-          {['🎨 코스메틱 장착', '💰 카드 판매하기', '🏪 마켓 판매 등록', '🚩 카드 이미지 신고'].map((label) => (
+          {['⭐ 즐겨찾기 고정', '🙈 외부 공개 숨기기', '🎨 코스메틱 장착', '🏪 마켓 판매 등록', '🚩 카드 이미지 신고'].map((label) => (
             <div key={label} className="rounded-xl px-3 py-2 text-muted-foreground">
               {label}
             </div>
@@ -879,12 +1034,19 @@ export const TutorialGuide: React.FC = () => {
         </div>
       )}
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[80] flex justify-center px-3 pb-24 md:bottom-6 md:px-6 md:pb-0">
+      <div
+        className={`pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-3 md:bottom-6 md:px-6 md:pb-0 ${
+          mobilePanelPosition === 'top'
+            ? 'top-3 items-start pt-[env(safe-area-inset-top)] md:top-auto'
+            : 'bottom-0 items-end pb-[calc(6rem+env(safe-area-inset-bottom))] md:top-auto'
+        }`}
+      >
       <section
+        data-tour-panel="dialog"
         role="dialog"
         aria-modal="false"
         aria-labelledby="tutorial-guide-title"
-        className="pointer-events-auto w-full max-w-2xl overflow-hidden rounded-[2rem] border border-primary/20 bg-card/95 text-foreground shadow-[0_24px_80px_rgba(24,112,210,0.22)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/90 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42)]"
+        className="pointer-events-auto max-h-[min(72vh,34rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-[2rem] border border-primary/20 bg-card/95 text-foreground shadow-[0_24px_80px_rgba(24,112,210,0.22)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/90 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42)] md:max-h-[calc(100vh-3rem)]"
       >
         <div className="h-1.5 bg-secondary">
           <div
@@ -917,6 +1079,15 @@ export const TutorialGuide: React.FC = () => {
             </div>
 
             <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setMobilePanelPosition((position) => position === 'bottom' ? 'top' : 'bottom')}
+                className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground md:hidden"
+                aria-label={mobilePanelPosition === 'bottom' ? '튜토리얼 창을 위로 이동' : '튜토리얼 창을 아래로 이동'}
+                title={mobilePanelPosition === 'bottom' ? '창을 위로 이동' : '창을 아래로 이동'}
+              >
+                <ChevronsUpDown className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 onClick={() => setCollapsed(true)}

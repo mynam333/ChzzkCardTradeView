@@ -239,6 +239,17 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 게임 타입입니다.' });
   }
 
+  // 연습 모드 한정 테스트용 강제 지정: 특정 스트리머(channel)와 특정 별(0~5성) 이미지를 사용합니다.
+  // (일반 게임에서는 무시 — 무작위성/공정성을 해치지 않도록 연습 모드에서만 적용)
+  const forceChannelId = practiceMode && typeof req.body.force_channel_id === 'string'
+    ? req.body.force_channel_id.trim()
+    : '';
+  const forceStar = practiceMode
+    && req.body.force_star !== undefined && req.body.force_star !== null && req.body.force_star !== ''
+    && Number.isFinite(Number(req.body.force_star))
+    ? Math.max(0, Math.min(5, Math.floor(Number(req.body.force_star))))
+    : null;
+
   try {
     const dailyMinigame = getDailyMinigame();
     if (!practiceMode && game_type !== dailyMinigame.game_type) {
@@ -296,20 +307,29 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: 'BadRequest', message: '등록된 스트리머가 부족하여 미니게임을 시작할 수 없습니다. (최소 4명 필요)' });
     }
 
+    // 연습 모드 강제 지정 스트리머 해석
+    const forcedStreamer = forceChannelId ? streamers.find(s => s.channel_id === forceChannelId) : null;
+    if (forceChannelId && !forcedStreamer) {
+      return res.status(404).json({ error: 'NotFound', message: '지정한 스트리머(channel_id)를 찾을 수 없습니다.' });
+    }
+
     const sessionId = crypto.randomUUID();
     let gameData: any = {};
     let targetData: any = {};
 
     if (game_type === 'quiz') {
-      const shuffled = [...streamers].sort(() => 0.5 - Math.random());
-      const correctStreamer = shuffled[0];
-      const star = Math.floor(Math.random() * 6); // 0 ~ 5성
+      const correctStreamer = forcedStreamer || [...streamers].sort(() => 0.5 - Math.random())[0];
+      const star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6); // 0 ~ 5성
       const imageUrl = getCardImageUrl(correctStreamer, star);
 
-      const choices = shuffled.slice(0, 4).map(s => ({
-        channel_id: s.channel_id,
-        name: s.name
-      })).sort(() => 0.5 - Math.random()); // 보기 섞기
+      // 정답을 반드시 포함한 4지선다 (정답 + 서로 다른 오답 3)
+      const distractors = streamers
+        .filter(s => s.channel_id !== correctStreamer.channel_id)
+        .sort(() => 0.5 - Math.random())
+        .slice(0, 3);
+      const choices = [correctStreamer, ...distractors]
+        .map(s => ({ channel_id: s.channel_id, name: s.name }))
+        .sort(() => 0.5 - Math.random()); // 보기 섞기
 
       targetData = {
         correct_id: correctStreamer.channel_id,
@@ -326,8 +346,8 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
     } else if (game_type === 'puzzle') {
       // 카드 퍼즐: 가로 3칸 세로 4칸 (정사각형 조각)
-      const correctStreamer = streamers[Math.floor(Math.random() * streamers.length)];
-      const star = Math.floor(Math.random() * 6);
+      const correctStreamer = forcedStreamer || streamers[Math.floor(Math.random() * streamers.length)];
+      const star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6);
       const imageUrl = getCardImageUrl(correctStreamer, star);
 
       targetData = {
@@ -342,12 +362,16 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       };
 
     } else if (game_type === 'match') {
-      // 카드 뒤집기: 6명 선정 (12장)
-      const shuffled = [...streamers].sort(() => 0.5 - Math.random()).slice(0, 6);
+      // 카드 뒤집기: 6명 선정 (12장). 강제 지정 스트리머가 있으면 반드시 포함.
+      const pool = [...streamers].sort(() => 0.5 - Math.random());
+      let chosen = pool.slice(0, 6);
+      if (forcedStreamer && !chosen.some(s => s.channel_id === forcedStreamer.channel_id)) {
+        chosen = [forcedStreamer, ...pool.filter(s => s.channel_id !== forcedStreamer.channel_id).slice(0, 5)];
+      }
 
       targetData = {
-        channel_ids: shuffled.map(s => s.channel_id),
-        cards: shuffled.map(s => ({
+        channel_ids: chosen.map(s => s.channel_id),
+        cards: chosen.map(s => ({
           channel_id: s.channel_id,
           name: s.name,
           logo_url: s.logo_url
@@ -355,7 +379,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       };
 
       gameData = {
-        cards: shuffled.map(s => ({
+        cards: chosen.map(s => ({
           channel_id: s.channel_id,
           name: s.name,
           logo_url: s.logo_url

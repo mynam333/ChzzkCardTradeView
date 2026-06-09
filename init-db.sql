@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS user_cards (
     FOREIGN KEY(border_item_id) REFERENCES shop_items(id) ON DELETE SET NULL,
     FOREIGN KEY(name_effect_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
 
 -- 4. 1:1 교환 제안 테이블
 CREATE TABLE IF NOT EXISTS trades (

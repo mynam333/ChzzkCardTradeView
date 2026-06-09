@@ -192,10 +192,12 @@ CREATE TABLE IF NOT EXISTS push_notifications (
     coupon_code TEXT,
     status TEXT DEFAULT 'pending',               -- 'pending', 'sent'
     scheduled_at TIMESTAMPTZ,
+    sent_at TIMESTAMPTZ,                          -- 실제 발송 완료 시각
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE push_notifications ADD COLUMN IF NOT EXISTS coupon_code TEXT;
+ALTER TABLE push_notifications ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
 
 -- 11. 카드 신고 내역 테이블
 CREATE TABLE IF NOT EXISTS card_reports (
@@ -343,11 +345,14 @@ END $$;
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_trades_sender_id ON trades(sender_id);
 CREATE INDEX IF NOT EXISTS idx_trades_receiver_id ON trades(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id);
 CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);
@@ -1191,6 +1196,7 @@ CREATE TABLE IF NOT EXISTS system_configs (
 INSERT INTO system_configs (key, value) VALUES ('free_draw_interval', '24') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
+INSERT INTO system_configs (key, value) VALUES ('draw_target_value', '2500') ON CONFLICT (key) DO NOTHING; -- 가챠 추첨 목표 기댓값(평균 카드 가치)
 INSERT INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240') ON CONFLICT (key) DO NOTHING; -- 미니게임 동전 충전 간격(분)
 INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;

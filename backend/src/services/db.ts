@@ -224,6 +224,9 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_order INTEGER;");
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_at TEXT;");
       }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);");
       try {
         sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();
       } catch (e) {
@@ -243,6 +246,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
       } catch (e) {
         console.log('[DB Migration] push_notifications 테이블에 coupon_code 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE push_notifications ADD COLUMN coupon_code TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT sent_at FROM push_notifications LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] push_notifications 테이블에 sent_at(발송 시각) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE push_notifications ADD COLUMN sent_at TEXT;");
       }
       try {
         sqliteDb.exec(`
@@ -454,6 +463,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1')").run();
       // 뽑기 비용 기본값 (하드코딩 제거, DB 관리)
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000')").run();
+      // 가챠 추첨 목표 기댓값(원하는 1회 뽑기 평균 카드 가치). 가중 지수를 이 값에 맞춰 적응 조정.
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_target_value', '2500')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();

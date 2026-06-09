@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Search,
-  RefreshCw
+  RefreshCw,
+  MessageCircleHeart
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
@@ -23,6 +24,7 @@ interface Streamer {
   prev_value?: number;
   value_1h_ago?: number;
   is_active?: boolean;
+  rank?: number;
   titles?: UserTitle[];
 }
 
@@ -69,10 +71,24 @@ export const RankingTab: React.FC = () => {
 
   useEffect(() => {
     fetchRankings();
-    // 시세를 준실시간으로 반영하기 위해 25초마다 조용히 갱신 (로딩 스피너 없이)
-    const timer = setInterval(() => fetchRankings(true), 25_000);
+    // 랭킹 집계는 서버 부담이 큰 편이라 60초 단위로 조용히 갱신하고, 백그라운드 탭에서는 쉬어갑니다.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchRankings(true);
+    }, 60_000);
     return () => clearInterval(timer);
   }, [subTab, debouncedSearchQuery, cardFilterChannelId, cardFilterStar]);
+
+  useEffect(() => {
+    const handleTutorialSubTab = (event: Event) => {
+      const subTabId = (event as CustomEvent<{ subTab?: SubTab }>).detail?.subTab;
+      if (subTabId === 'value' || subTabId === 'change' || subTabId === 'user' || subTabId === 'cards') {
+        setSubTab(subTabId);
+      }
+    };
+
+    window.addEventListener('chikapo:tutorial-ranking-subtab', handleTutorialSubTab);
+    return () => window.removeEventListener('chikapo:tutorial-ranking-subtab', handleTutorialSubTab);
+  }, []);
 
   // 탭 전환·검색 시 1페이지로 초기화
   useEffect(() => { setPage(1); }, [subTab, searchQuery, cardFilterChannelId, cardFilterStar]);
@@ -89,12 +105,17 @@ export const RankingTab: React.FC = () => {
         const query = params.toString();
         const res = await apiFetch(`/users/ranking${query ? `?${query}` : ''}`);
         if (res.ok) setUserRankings(await res.json());
-        if (subTab === 'cards' && streamers.length === 0) {
-          const streamerRes = await apiFetch('/streamers');
+        if (subTab === 'cards') {
+          const streamerRes = await apiFetch('/streamers/ranking?mode=value&limit=1000');
           if (streamerRes.ok) setStreamers(await streamerRes.json());
         }
       } else {
-        const res = await apiFetch('/streamers');
+        const params = new URLSearchParams({
+          mode: subTab === 'change' ? 'change' : 'value',
+          limit: '100'
+        });
+        if (debouncedSearchQuery.trim()) params.set('q', debouncedSearchQuery.trim());
+        const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
         if (res.ok) setStreamers(await res.json());
       }
     } catch (e) {
@@ -221,7 +242,7 @@ export const RankingTab: React.FC = () => {
         </div>
 
         {subTab === 'cards' && (
-          <div className="mb-5 grid gap-2 rounded-2xl border border-primary/15 bg-primary/5 p-3 sm:grid-cols-[1fr_110px_auto] dark:bg-primary/10">
+          <div data-tour="ranking-card-filter" className="mb-5 grid gap-2 rounded-2xl border border-primary/15 bg-primary/5 p-3 sm:grid-cols-[1fr_110px_auto] dark:bg-primary/10">
             <input
               value={cardFilterName}
               onChange={(event) => {
@@ -284,7 +305,10 @@ export const RankingTab: React.FC = () => {
                     </div>
                     <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
                     {ur.status_message && (
-                      <p className="mt-0.5 max-w-[13rem] truncate text-[10px] font-bold text-primary/85">{ur.status_message}</p>
+                      <p className="mt-1 inline-flex max-w-[min(56vw,22rem)] items-center gap-1.5 truncate rounded-full border border-primary/15 bg-primary/10 px-2.5 py-1 text-[11px] font-black text-primary shadow-sm dark:bg-primary/15">
+                        <MessageCircleHeart className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{ur.status_message}</span>
+                      </p>
                     )}
                   </div>
                 </div>

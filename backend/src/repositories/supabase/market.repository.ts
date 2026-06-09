@@ -352,17 +352,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
     };
   }
 
-  async listHistory(userId: string): Promise<MarketListing[]> {
-    const { data: listingsData, error } = await this.getClient()
-      .from('market_listings')
-      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
-      .or(`seller_id.eq.${userId},buyer_id.eq.${userId}`)
-      .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])
-      .order('updated_at', { ascending: false });
-
-    if (error || !listingsData) {
-      return [];
-    }
+  // 매물 목록에 카드/스트리머/코스메틱 정보를 일괄(배치) 결합합니다. (listHistory/listAllHistory 공용)
+  private async attachCardsToListings(listingsData: any[]): Promise<MarketListing[]> {
+    if (!listingsData || listingsData.length === 0) return [];
 
     const cardIds = listingsData.map(l => l.user_card_id);
     let cardsMap: Record<number, any> = {};
@@ -400,6 +392,30 @@ export class SupabaseMarketRepository implements IMarketRepository {
     }
 
     return listingsData.map(l => this.mapRow(l, cardsMap[l.user_card_id]));
+  }
+
+  async listHistory(userId: string): Promise<MarketListing[]> {
+    const { data: listingsData, error } = await this.getClient()
+      .from('market_listings')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
+      .or(`seller_id.eq.${userId},buyer_id.eq.${userId}`)
+      .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])
+      .order('updated_at', { ascending: false });
+
+    if (error || !listingsData) return [];
+    return this.attachCardsToListings(listingsData);
+  }
+
+  async listAllHistory(limit: number): Promise<MarketListing[]> {
+    const { data: listingsData, error } = await this.getClient()
+      .from('market_listings')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
+      .eq('status', 'SOLD')
+      .order('updated_at', { ascending: false })
+      .limit(Math.max(1, Math.floor(limit)));
+
+    if (error || !listingsData) return [];
+    return this.attachCardsToListings(listingsData);
   }
 
   async getRecentPrice(channelId: string): Promise<number | null> {

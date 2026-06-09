@@ -300,7 +300,11 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
   }
 
   try {
-    const history = await marketRepository.listHistory(user.id);
+    // scope=all → 전체 공개 거래 장부(완료된 SOLD 거래), 그 외 → 내 거래 이력
+    const scope = req.query.scope === 'all' ? 'all' : 'mine';
+    const history = scope === 'all'
+      ? await marketRepository.listAllHistory(100)
+      : await marketRepository.listHistory(user.id);
     return res.json(history);
   } catch (err: any) {
     console.error('[MarketController] listMarketHistory 에러:', err);

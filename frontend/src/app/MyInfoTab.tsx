@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useApp } from './AppContext';
 import {
   User,
@@ -16,7 +17,8 @@ import {
   Crown,
   AlertTriangle,
   Trash2,
-  Sparkles
+  Sparkles,
+  Send
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
@@ -54,6 +56,9 @@ type BeforeInstallPromptEvent = Event & {
 
 export const MyInfoTab: React.FC = () => {
   const { user, logout, updatePoints, refreshUserData, toast } = useApp();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pwaAutoTriggeredRef = useRef(false);
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
@@ -363,6 +368,27 @@ export const MyInfoTab: React.FC = () => {
       : result.message);
   };
 
+  // 본인에게 테스트 푸시를 보내 구독이 정상 등록됐는지 확인
+  const handleTestPush = async () => {
+    try {
+      const res = await apiFetch('/push/test', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      toast(data.message || (res.ok ? '테스트 푸시를 전송했습니다.' : '테스트 전송에 실패했습니다.'));
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.');
+    }
+  };
+
+  // 주소에 ?pwasub 가 있으면 접속 시 자동으로 알림 받기 + 앱 설치를 실행하고 파라미터를 정리합니다.
+  useEffect(() => {
+    if (pwaAutoTriggeredRef.current) return;
+    if (searchParams.get('pwasub') === null) return;
+    pwaAutoTriggeredRef.current = true;
+    handleEnablePush();
+    router.replace('/my-info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const handleSetRepresentative = async (channelId: string | null, star: number | null = null) => {
     try {
       const res = await apiFetch('/users/me/representative', {
@@ -588,7 +614,7 @@ export const MyInfoTab: React.FC = () => {
         </div>
       </section>
 
-      <section className="cute-surface rounded-[2rem] p-6 space-y-3">
+      <section data-tour="my-info-status" className="cute-surface rounded-[2rem] p-6 space-y-3">
         <h3 className="text-base font-bold flex items-center gap-2"><User className="h-4.5 w-4.5 text-primary" /> 프로필 상태 메시지</h3>
         <p className="text-xs text-muted-foreground">랭킹과 프로필 공유 화면에 표시될 짧은 소개 문구입니다. 최대 80자까지 입력할 수 있습니다.</p>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -891,9 +917,20 @@ export const MyInfoTab: React.FC = () => {
       <section data-tour="my-info-push" className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><BellRing className="h-4.5 w-4.5 text-primary" /> 실시간 푸시 알림</h3>
         <p className="text-xs text-muted-foreground">알림을 허용하면 공지·이벤트·카드 삭제 보상·신고 처리 관련 소식을 푸시로 받아볼 수 있습니다. 설치 가능한 환경에서는 앱 설치도 함께 요청합니다.</p>
-        <button onClick={handleEnablePush} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2.5 text-xs font-black text-primary-foreground transition">
-          알림 받기 및 앱 설치
-        </button>
+        <div className="flex flex-wrap gap-2.5">
+          <button
+            onClick={handleEnablePush}
+            className="cute-wiggle-hover inline-flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 px-5 py-2.5 text-xs font-black text-white shadow-sm shadow-blue-500/25 transition hover:-translate-y-0.5"
+          >
+            <BellRing className="h-4 w-4" /> 알림 받기 및 앱 설치
+          </button>
+          <button
+            onClick={handleTestPush}
+            className="cute-wiggle-hover inline-flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-5 py-2.5 text-xs font-black text-white shadow-sm shadow-emerald-500/25 transition hover:-translate-y-0.5"
+          >
+            <Send className="h-4 w-4" /> 푸시 알림 테스트
+          </button>
+        </div>
       </section>
 
       {/* 튜토리얼 다시 보기 */}

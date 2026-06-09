@@ -9,6 +9,7 @@ import {
 } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { fuzzyScore } from '../utils/search';
+import { computeValueDrawWeights } from '../utils/gachaWeights';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
@@ -366,8 +367,9 @@ export const getUserProfile = async (req: Request, res: Response) => {
 // 랭킹은 모든 유저×보유카드를 매번 집계·정렬하는 무거운 쿼리이고, 프론트가 25초마다
 // 폴링하며 동시 접속도 많습니다. 실시간일 필요가 없으므로(시세는 2분 주기 갱신) 동일 파라미터
 // 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
-const RANKINGS_CACHE_TTL = 20_000; // 20초
+const RANKINGS_CACHE_TTL = 60_000; // 60초
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
+const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
 // (검색은 키워드별 결과 + 동일한 전체 풀이 필요하므로, 풀을 캐싱하면 무거운 집계가 반복되지 않음)
@@ -404,7 +406,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
     const now = Date.now();
     const cached = rankingsCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
-      res.set('Cache-Control', 'public, max-age=20');
+      res.set('Cache-Control', 'public, max-age=60');
       return res.status(200).json(cached.data);
     }
     // 검색어가 있으면 초성/띄어쓰기 무시 유사도 검색까지 지원합니다.
@@ -461,11 +463,86 @@ export const getUserRankings = async (req: Request, res: Response) => {
         if (value.expiresAt <= now) rankingsCache.delete(key);
       }
     }
-    res.set('Cache-Control', 'public, max-age=20');
+    res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(mapped);
   } catch (err: any) {
     console.error('[PlayController] getUserRankings 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const getStreamerRankings = async (req: Request, res: Response) => {
+  try {
+    const mode = req.query.mode === 'change' ? 'change' : 'value';
+    const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const limit = Math.max(1, Math.min(1000, Math.floor(Number(req.query.limit || 100))));
+    const cacheKey = `${mode}|${keyword}|${limit}`;
+    const now = Date.now();
+    const cached = streamerRankingsCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=60');
+      return res.status(200).json(cached.data);
+    }
+
+    const streamers = await streamerRepository.findRankingBase();
+    const [value24hMap, value1hMap] = await Promise.all([
+      mode === 'value' ? streamerRepository.getValue24hAgoMap() : Promise.resolve({} as Record<string, number>),
+      mode === 'change' ? streamerRepository.getValue1hAgoMap() : Promise.resolve({} as Record<string, number>)
+    ]);
+
+    const scoreChange = (streamer: any) => {
+      const current = Number(streamer.base_value || 0);
+      const previous = Number(value1hMap[streamer.channel_id] ?? current);
+      return previous > 0 ? ((current - previous) / previous) * 100 : 0;
+    };
+
+    let ranked = streamers
+      .slice()
+      .sort((a: any, b: any) => {
+        if (mode === 'change') {
+          return scoreChange(b) - scoreChange(a) || Number(b.base_value || 0) - Number(a.base_value || 0);
+        }
+        return Number(b.base_value || 0) - Number(a.base_value || 0);
+      })
+      .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
+
+    if (keyword) {
+      ranked = ranked
+        .map((item) => ({ ...item, score: fuzzyScore(item.streamer.name || '', keyword) }))
+        .filter((item) => item.score !== null)
+        .sort((a, b) => (a.score ?? 0) - (b.score ?? 0) || a.rank - b.rank);
+    }
+
+    const sliced = ranked.slice(0, limit);
+    const channelIds = sliced.map((item) => item.streamer.channel_id);
+    const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
+
+    const data = sliced.map(({ streamer, rank }) => ({
+      channel_id: streamer.channel_id,
+      name: streamer.name,
+      logo_url: streamer.logo_url,
+      custom_image_url: streamer.custom_image_url,
+      follower_count: streamer.follower_count,
+      base_value: streamer.base_value,
+      is_active: streamer.is_active,
+      rank,
+      titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
+      prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
+      value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
+    }));
+
+    streamerRankingsCache.set(cacheKey, { data, expiresAt: now + RANKINGS_CACHE_TTL });
+    if (streamerRankingsCache.size > 100) {
+      for (const [key, value] of streamerRankingsCache) {
+        if (value.expiresAt <= now) streamerRankingsCache.delete(key);
+      }
+    }
+
+    res.set('Cache-Control', 'public, max-age=60');
+    return res.status(200).json(data);
+  } catch (err: any) {
+    console.error('[PlayController] getStreamerRankings 에러:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '스트리머 랭킹을 가져오는 중 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 
@@ -561,8 +638,12 @@ export const drawCard = async (req: Request, res: Response) => {
     const { segmentStartIso } = computeFreeDrawSegment(intervalHours);
     // intervalHours === 0 이면 segmentStartIso = null → 무제한 무료뽑기
 
-    // C. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 높을수록 확률 하락, 낮을수록 확률 상승)
-    const weights = streamers.map(s => 1 / (s.base_value || 100));
+    // C. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 낮을수록 확률 상승 — 절대 명제 유지)
+    //    분포가 매번 달라져도 추첨 기댓값이 목표값(기본 2500) 부근이 되도록 가중 지수(alpha)를 적응적으로 결정.
+    //    → 중간 가치 카드도 충분히 등장하고 다양성이 올라가며, "가치 낮을수록 확률 높음"은 항상 보존됩니다.
+    const targetExpectedStr = await systemConfigRepository.get('draw_target_value', '2500');
+    const targetExpected = Math.max(100, parseInt(targetExpectedStr, 10) || 2500);
+    const { weights } = computeValueDrawWeights(streamers.map(s => s.base_value || 100), targetExpected);
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
     let randomNum = Math.random() * totalWeight;
@@ -924,8 +1005,24 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
     }
 
     const hours = range === '24h' ? 24 : 24 * 7;
-    const sinceIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-    const history = await streamerRepository.getValueHistory(channel_id, sinceIso);
+    const rangeEndAt = new Date();
+    const rangeStartAt = new Date(rangeEndAt.getTime() - hours * 60 * 60 * 1000);
+    const sinceIso = rangeStartAt.toISOString();
+    const history = (await streamerRepository.getValueHistory(channel_id, sinceIso))
+      .slice()
+      .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+
+    // 차트가 "현재 - 선택 구간" 전체를 항상 표현하도록 양끝 기준점을 보강합니다.
+    // 실제 기록이 중간부터 있거나 마지막 기록이 현재보다 이전이어도 선이 중간에서 끊겨 보이지 않습니다.
+    const boundedHistory = history.slice();
+    const startValue = boundedHistory[0]?.value ?? streamer.base_value;
+    const endValue = streamer.base_value;
+    if (boundedHistory.length === 0 || new Date(boundedHistory[0].recorded_at).getTime() > rangeStartAt.getTime()) {
+      boundedHistory.unshift({ value: startValue, recorded_at: rangeStartAt.toISOString() });
+    }
+    if (boundedHistory.length === 1 || new Date(boundedHistory[boundedHistory.length - 1].recorded_at).getTime() < rangeEndAt.getTime()) {
+      boundedHistory.push({ value: endValue, recorded_at: rangeEndAt.toISOString() });
+    }
 
     // 24h 등락률 계산용 24h 전 시세
     const value24hMap = await streamerRepository.getValue24hAgoMap();
@@ -940,7 +1037,9 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
         prev_value: prevValue24h,
         recent_market_price: recentMarketPrice
       },
-      history
+      history: boundedHistory,
+      range_start_at: rangeStartAt.toISOString(),
+      range_end_at: rangeEndAt.toISOString()
     });
   } catch (err: any) {
     console.error('[PlayController] getStreamerDetail 에러:', err);

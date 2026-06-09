@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
@@ -698,6 +699,9 @@ const createInitialPuzzlePieces = (): PuzzlePiece[] => {
 
 export const ArcadeTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const autoStartRef = useRef(false); // URL 파라미터 기반 연습 자동 시작 1회 가드
   const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState(0);
   const [baseTickets, setBaseTickets] = useState(0);
@@ -1006,7 +1010,11 @@ export const ArcadeTab: React.FC = () => {
   };
 
   // 게임 시작 처리
-  const handleStartGame = async (type: GameType, practiceMode = false) => {
+  const handleStartGame = async (
+    type: GameType,
+    practiceMode = false,
+    override?: { channelId?: string; star?: number | null; blur?: string | null }
+  ) => {
     if (!practiceMode && (!todayGame || type !== todayGame)) {
       toast('오늘의 미니게임이 변경되었습니다. 최신 게임을 다시 불러옵니다.', 'warning');
       fetchStatus();
@@ -1030,7 +1038,13 @@ export const ArcadeTab: React.FC = () => {
       const res = await apiFetch('/minigames/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_type: type, practice_mode: practiceMode })
+        body: JSON.stringify({
+          game_type: type,
+          practice_mode: practiceMode,
+          // 연습 모드 한정: 특정 스트리머/별 이미지를 강제 지정(테스트용)
+          ...(practiceMode && override?.channelId ? { force_channel_id: override.channelId } : {}),
+          ...(practiceMode && override?.star != null ? { force_star: override.star } : {})
+        })
       });
 
       const data = (await res.json()) as StartGameResponse;
@@ -1055,9 +1069,12 @@ export const ArcadeTab: React.FC = () => {
         setSelectedQuizChoice(null);
         setQuizTimeLeft(15);
 
-        // 4가지 블러 종류 중 랜덤 선택
+        // 4가지 블러 종류 중 랜덤 선택 (연습 모드에서 override.blur로 강제 지정 가능)
         const blurTypes: ('gaussian' | 'mosaic' | 'motion' | 'radial')[] = ['gaussian', 'mosaic', 'motion', 'radial'];
-        const chosenBlur = blurTypes[Math.floor(Math.random() * blurTypes.length)];
+        const forcedBlur = practiceMode && override?.blur && (blurTypes as string[]).includes(override.blur)
+          ? (override.blur as 'gaussian' | 'mosaic' | 'motion' | 'radial')
+          : null;
+        const chosenBlur = forcedBlur ?? blurTypes[Math.floor(Math.random() * blurTypes.length)];
         setQuizBlurType(chosenBlur);
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
@@ -1091,6 +1108,27 @@ export const ArcadeTab: React.FC = () => {
       setGameBusy(false);
     }
   };
+
+  // URL 파라미터로 연습 게임을 자동 시작합니다 (특정 유저·별 이미지 테스트용).
+  // 예) /arcade?practice=quiz&channel=<channel_id>&star=3&blur=motion
+  //     practice=quiz|puzzle|match (필수), channel=스트리머 channel_id, star=0~5, blur=(퀴즈) gaussian|mosaic|motion|radial
+  useEffect(() => {
+    if (autoStartRef.current || !user) return;
+    const practiceType = searchParams.get('practice');
+    if (practiceType !== 'quiz' && practiceType !== 'puzzle' && practiceType !== 'match') return;
+    autoStartRef.current = true;
+
+    const channelId = searchParams.get('channel') || undefined;
+    const starRaw = searchParams.get('star');
+    const star = starRaw !== null && starRaw !== ''
+      ? Math.max(0, Math.min(5, parseInt(starRaw, 10) || 0))
+      : null;
+    const blur = searchParams.get('blur');
+
+    handleStartGame(practiceType as GameType, true, { channelId, star, blur });
+    router.replace('/arcade'); // 파라미터 정리 (새로고침 시 재실행 방지)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, searchParams]);
 
   // ==========================================
   // 1. 인물 퀴즈 버튼 핸들러

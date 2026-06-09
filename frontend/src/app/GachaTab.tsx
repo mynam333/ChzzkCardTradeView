@@ -1540,6 +1540,7 @@ export const GachaTab: React.FC = () => {
                       )}
 
                       <button
+                        data-tour="inventory-favorite-badge"
                         type="button"
                         title={card.favorite_order == null ? '즐겨찾기 고정' : '즐겨찾기 해제'}
                         onClick={(event) => {

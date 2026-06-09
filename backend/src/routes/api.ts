@@ -44,7 +44,8 @@ import {
   getScheduledNotifications,
   getSentNotifications,
   updateScheduledNotification,
-  deleteScheduledNotification
+  deleteScheduledNotification,
+  sendTestPush
 } from '../controllers/pushController';
 import { claimTutorialGachaTicket } from '../controllers/tutorialController';
 
@@ -52,6 +53,7 @@ import {
   getUserMe,
   deleteMyAccount,
   getUserRankings,
+  getStreamerRankings,
   getUserCards,
   updateMyStatusMessage,
   updateMyCardVisibility,
@@ -353,6 +355,7 @@ router.get('/streamers', async (req, res) => {
 });
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
+router.get('/streamers/ranking', getStreamerRankings);
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, uploadSingleImage, uploadCustomImage);
 // 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제
 router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, deleteOwnCustomImage);
@@ -380,6 +383,8 @@ router.get('/push/vapid-key', getVapidPublicKey);
 
 // PWA 푸시 구독 등록
 router.post('/push/subscribe', authMiddleware, banCheckMiddleware, subscribePush);
+// 본인에게 테스트 푸시 1건 전송 (구독 정상 등록 여부 확인용)
+router.post('/push/test', authMiddleware, banCheckMiddleware, sendTestPush);
 
 // ==========================================
 // 3. 관리자(ADMIN) 전용 통제 기능 (Admin Guard 및 Auth Check 필터 통과)

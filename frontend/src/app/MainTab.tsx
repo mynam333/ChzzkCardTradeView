@@ -29,8 +29,10 @@ export const MainTab: React.FC = () => {
     setMounted(true);
     fetchNotices();
     fetchHotStreamers();
-    // 급상승/시세 요약을 준실시간으로 반영 (25초 주기)
-    const timer = setInterval(() => fetchHotStreamers(), 25_000);
+    // 메인 요약은 실시간성이 낮아 60초 단위로만 조용히 갱신합니다.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchHotStreamers();
+    }, 60_000);
     return () => clearInterval(timer);
   }, []);
 
@@ -62,10 +64,10 @@ export const MainTab: React.FC = () => {
 
   const fetchHotStreamers = async () => {
     try {
-      const res = await apiFetch('/streamers');
+      const res = await apiFetch('/streamers/ranking?mode=value&limit=3');
       if (res.ok) {
         const data = await res.json();
-        setHotStreamers(data.slice(0, 3));
+        setHotStreamers(data);
       }
     } catch (e) {
       console.error('핫 스트리머 목록 로드 에러:', e);

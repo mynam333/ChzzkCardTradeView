@@ -232,6 +232,8 @@ export interface UserRanking extends User {
 // 2. 스트리머 리포지토리 인터페이스
 export interface IStreamerRepository {
   findAll(): Promise<Streamer[]>;
+  /** 랭킹·검색 목록용 최소 필드만 조회합니다(커스텀 별 이미지 등 무거운 필드 제외). */
+  findRankingBase(): Promise<Streamer[]>;
   findById(channelId: string): Promise<Streamer | null>;
   /** 여러 스트리머를 channel_id 배열로 한 번에 조회합니다(N+1 방지). */
   findByIds(channelIds: string[]): Promise<Streamer[]>;
@@ -483,6 +485,8 @@ export interface IMarketRepository {
   buyAtomic(listingId: number, buyerId: string): Promise<{ ok: boolean; reason: string; settled_amount?: number; seller_id?: string; price?: number }>;
   /** 내가 판매 완료했거나 구매 완료한 거래 로그 조회 */
   listHistory(userId: string): Promise<MarketListing[]>;
+  /** 전체 유저의 완료된(SOLD) 오픈마켓 거래 이력 (공개 거래 장부). */
+  listAllHistory(limit: number): Promise<MarketListing[]>;
   /** 특정 스트리머 카드가 오픈마켓에서 최근 판매 완료된 체결가 조회 */
   getRecentPrice(channelId: string): Promise<number | null>;
   placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null }>;

@@ -273,6 +273,49 @@ export const sendPushToAdmins = async (title: string, body: string, url = '/admi
 };
 
 /**
+ * 현재 로그인 유저에게 테스트 푸시를 1건 전송합니다.
+ * 푸시 구독이 정상 등록되어 알림이 실제로 도착하는지 본인이 확인하는 용도입니다.
+ */
+export const sendTestPush = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    const dbMode = getDbMode();
+    let count = 0;
+    if (dbMode === 'SUPABASE') {
+      const { count: c } = await getSupabaseClient()
+        .from('push_subscriptions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      count = c || 0;
+    } else {
+      const row = getSqliteDb().prepare('SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id = ?').get(userId) as any;
+      count = row?.c || 0;
+    }
+
+    if (count === 0) {
+      return res.status(400).json({
+        error: 'NoSubscription',
+        message: '등록된 푸시 구독이 없습니다. 먼저 "알림 받기 및 앱 설치"를 눌러 구독해 주세요.'
+      });
+    }
+
+    await sendPushToUser(
+      userId,
+      '🔔 푸시 테스트 알림',
+      '푸시 알림이 정상적으로 등록되어 있어요! 이 알림이 보이면 성공입니다.',
+      '/my-info'
+    );
+    return res.status(200).json({
+      ok: true,
+      message: `테스트 푸시를 전송했습니다. (구독 ${count}건) 잠시 후 알림을 확인해 주세요.`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '테스트 푸시 전송 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
  * node-cron 푸시 스케줄러 등록
  * 1분마다 주기적으로 감시하여 전송할 시간이 경과한 'pending' 푸시를 자동 일괄 발송합니다.
  */
@@ -321,14 +364,15 @@ export const startPushNotificationScheduler = () => {
         // 즉시 전송 실행
         await sendPushToAll(notif.title, notif.body, buildCouponPushUrl(notif.coupon_code));
 
-        // 상태를 'sent'로 업데이트
+        // 상태를 'sent'로 업데이트하고 실제 발송 시각(sent_at)을 기록
+        const sentAtIso = new Date().toISOString();
         if (dbMode === 'SUPABASE') {
           await getSupabaseClient()
             .from('push_notifications')
-            .update({ status: 'sent' })
+            .update({ status: 'sent', sent_at: sentAtIso })
             .eq('id', notif.id);
         } else {
-          getSqliteDb().prepare('UPDATE push_notifications SET status = \'sent\' WHERE id = ?').run(notif.id);
+          getSqliteDb().prepare('UPDATE push_notifications SET status = \'sent\', sent_at = ? WHERE id = ?').run(sentAtIso, notif.id);
         }
       }
     } catch (err) {
@@ -395,14 +439,15 @@ export const getSentNotifications = async (req: Request, res: Response) => {
       if (countErr) throw countErr;
       total = count || 0;
 
-      // 페이징 데이터 조회
+      // 페이징 데이터 조회 (실제 발송 시각 기준 정렬, 과거 데이터는 created_at로 폴백)
       const { data, error } = await client
         .from('push_notifications')
         .select('*')
         .eq('status', 'sent')
+        .order('sent_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
-        
+
       if (error) throw error;
       list = data || [];
     } else {
@@ -415,11 +460,11 @@ export const getSentNotifications = async (req: Request, res: Response) => {
       `).get() as any;
       total = countRes ? countRes.cnt : 0;
 
-      // 페이징 데이터 조회
+      // 페이징 데이터 조회 (실제 발송 시각 기준 정렬, 과거 데이터는 created_at로 폴백)
       list = db.prepare(`
-        SELECT * FROM push_notifications 
-        WHERE status = 'sent' 
-        ORDER BY created_at DESC
+        SELECT * FROM push_notifications
+        WHERE status = 'sent'
+        ORDER BY COALESCE(sent_at, created_at) DESC
         LIMIT ? OFFSET ?
       `).all(limit, offset);
     }

@@ -322,7 +322,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       return;
     }
     fetchNotifications();
-    const timer = setInterval(fetchNotifications, 30_000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchNotifications();
+    }, 30_000);
     return () => clearInterval(timer);
   }, [user?.id]);
 
@@ -450,7 +452,9 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
   useEffect(() => {
     checkMaintenanceStatus();
-    const timer = setInterval(checkMaintenanceStatus, 30_000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') checkMaintenanceStatus();
+    }, 30_000);
     return () => clearInterval(timer);
   }, []);
 

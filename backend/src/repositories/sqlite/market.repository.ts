@@ -372,6 +372,35 @@ export class SqliteMarketRepository implements IMarketRepository {
     return rows.map(r => this.mapRow(r));
   }
 
+  async listAllHistory(limit: number): Promise<MarketListing[]> {
+    const rows = this.getDb().prepare(`
+      SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
+             uc.user_id AS card_user_id, uc.channel_id, uc.serial_number, uc.star,
+             uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
+             s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
+             s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+             s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+             s.base_value AS streamer_base_value, s.follower_count AS streamer_follower,
+             s.is_active AS streamer_is_active, s.is_image_banned AS streamer_is_image_banned,
+             s.serial_number AS streamer_serial,
+             bi.id AS border_id, bi.style_json AS border_style,
+             ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
+        FROM market_listings ml
+        JOIN users u ON u.id = ml.seller_id
+        LEFT JOIN users bu ON bu.id = ml.buyer_id
+        LEFT JOIN users cb ON cb.id = ml.current_bidder_id
+        JOIN user_cards uc ON uc.id = ml.user_card_id
+        JOIN streamers s ON s.channel_id = uc.channel_id
+        LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
+        LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
+       WHERE ml.status = 'SOLD'
+       ORDER BY ml.updated_at DESC
+       LIMIT ?
+    `).all(Math.max(1, Math.floor(limit))) as any[];
+
+    return rows.map(r => this.mapRow(r));
+  }
+
   async getRecentPrice(channelId: string): Promise<number | null> {
     const row = this.getDb().prepare(`
       SELECT ml.price
