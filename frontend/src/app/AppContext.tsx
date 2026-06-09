@@ -10,6 +10,46 @@ import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
+type ShopSubTabId = 'gacha_shop' | 'market' | 'history';
+
+const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin', 'arcade'];
+const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'history'];
+
+const parseNotificationLink = (link: string | null): { tab: TabId; shopSubTab?: ShopSubTabId } | null => {
+  const raw = (link || '').trim();
+  if (!raw) return null;
+
+  let normalized = raw;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin === window.location.origin) {
+      normalized = `${url.pathname}${url.search}`;
+    }
+  } catch {
+    // 상대 경로나 탭 id는 그대로 처리합니다.
+  }
+
+  const [pathPart, queryString = ''] = normalized.replace(/^\/+/, '').split('?');
+  let tabPart = pathPart;
+  let subTabPart: string | undefined;
+
+  if (pathPart.includes(':')) {
+    [tabPart, subTabPart] = pathPart.split(':', 2);
+  } else if (pathPart.includes('/')) {
+    [tabPart, subTabPart] = pathPart.split('/', 2);
+  }
+
+  const tab = (tabPart || 'main') as TabId;
+  if (!VALID_TABS.includes(tab)) return null;
+
+  const query = new URLSearchParams(queryString);
+  const requestedShopSubTab = subTabPart || query.get('tab') || query.get('subTab') || undefined;
+  const shopSubTab = tab === 'shop' && SHOP_SUB_TABS.includes(requestedShopSubTab as ShopSubTabId)
+    ? requestedShopSubTab as ShopSubTabId
+    : undefined;
+
+  return { tab, shopSubTab };
+};
 
 // -----------------------------------------------------------------------------
 // 1. Theme Context & Provider (테마 관리 전용)
@@ -272,6 +312,7 @@ interface NotificationProviderProps {
 }
 
 export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user, setActiveTab, children }) => {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -299,13 +340,19 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       setUnreadCount((c) => Math.max(0, c - 1));
       try { await apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }); } catch { /* 무시 */ }
     }
-    // 알림의 link를 탭으로 변환해 해당 위치로 이동시킵니다.
-    // 백엔드는 탭 id('inventory') 또는 경로('/inventory') 형태로 보낼 수 있어 앞 슬래시를 정규화합니다.
-    const rawLink = (n.link || '').replace(/^\//, '').trim();
-    const target = rawLink === '' ? 'main' : rawLink;
-    const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin', 'arcade'];
-    if (n.link && VALID_TABS.includes(target as TabId)) {
-      setActiveTab(target as TabId);
+    // 알림의 link를 탭/하위 탭으로 변환해 해당 위치로 이동시킵니다.
+    const target = parseNotificationLink(n.link);
+    if (target) {
+      if (target.tab === 'shop' && target.shopSubTab) {
+        router.push(`/shop?tab=${target.shopSubTab}`);
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('chikapo:shop-subtab', {
+            detail: { subTab: target.shopSubTab }
+          }));
+        }, 0);
+      } else {
+        setActiveTab(target.tab);
+      }
     }
   };
 

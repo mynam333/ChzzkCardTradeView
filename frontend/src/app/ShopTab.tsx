@@ -87,13 +87,17 @@ export const ShopTab: React.FC = () => {
 
   const searchParams = useSearchParams();
   const router = useRouter();
+  const subTabParam = searchParams.get('tab');
+  const initialSubTab = (subTabParam === 'market' || subTabParam === 'history' || subTabParam === 'gacha_shop')
+    ? subTabParam
+    : 'gacha_shop';
 
   // ---- 가챠(소환) ----
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnCard, setDrawnCard] = useState<any | null>(null);
 
   // ---- 대분류 탭 ----
-  const [subTab, setSubTab] = useState<'gacha_shop' | 'market' | 'history'>('gacha_shop');
+  const [subTab, setSubTab] = useState<'gacha_shop' | 'market' | 'history'>(initialSubTab);
 
   // ---- 상점 ----
   const [items, setItems] = useState<ShopItem[]>([]);
@@ -148,6 +152,13 @@ export const ShopTab: React.FC = () => {
     const param = searchParams.get('category');
     if (param === 'border' || param === 'name_effect') {
       setShopType(param);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const param = searchParams.get('tab');
+    if (param === 'gacha_shop' || param === 'market' || param === 'history') {
+      setSubTab(param);
     }
   }, [searchParams]);
 
@@ -357,15 +368,19 @@ export const ShopTab: React.FC = () => {
   }, [shopType, items, shopSearch, shopSort]);
 
   useEffect(() => {
-    const handleTutorialSubTab = (event: Event) => {
+    const handleShopSubTab = (event: Event) => {
       const subTabId = (event as CustomEvent<{ subTab?: 'gacha_shop' | 'market' | 'history' }>).detail?.subTab;
       if (subTabId === 'gacha_shop' || subTabId === 'market' || subTabId === 'history') {
         setSubTab(subTabId);
       }
     };
 
-    window.addEventListener('chikapo:tutorial-shop-subtab', handleTutorialSubTab);
-    return () => window.removeEventListener('chikapo:tutorial-shop-subtab', handleTutorialSubTab);
+    window.addEventListener('chikapo:tutorial-shop-subtab', handleShopSubTab);
+    window.addEventListener('chikapo:shop-subtab', handleShopSubTab);
+    return () => {
+      window.removeEventListener('chikapo:tutorial-shop-subtab', handleShopSubTab);
+      window.removeEventListener('chikapo:shop-subtab', handleShopSubTab);
+    };
   }, []);
 
   const handleBuyMarketItem = async (listingId: number, price: number, streamerName: string) => {

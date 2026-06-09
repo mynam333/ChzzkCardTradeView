@@ -5,11 +5,18 @@ import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
 import { createRealtimeNotification } from './notificationController';
 
+type MarketNotificationTarget = 'inventory' | 'shop:market';
+
 // 푸시 + 인앱 알림 동시 전송 헬퍼
-const notify = (userId: string, title: string, body: string) => {
-  // 오픈마켓 매물/낙찰 알림은 카드가 오가는 보관함(오픈마켓 탭)으로 이동시킵니다.
-  sendPushToUser(userId, title, body, '/inventory');
-  createRealtimeNotification({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
+const notify = (
+  userId: string,
+  title: string,
+  body: string,
+  target: MarketNotificationTarget = 'inventory'
+) => {
+  const pushUrl = target === 'shop:market' ? '/shop?tab=market' : '/inventory';
+  sendPushToUser(userId, title, body, pushUrl);
+  createRealtimeNotification({ user_id: userId, title, body, link: target }).catch(() => { /* 무시 */ });
 };
 
 /**
@@ -261,7 +268,8 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     notify(
       previousBidderId,
       '[오픈마켓] 경매 상위 입찰 발생',
-      `[${streamerName}] ${star}성 카드 경매에서 다른 유저가 ${amount.toLocaleString()}P로 상위 입찰했습니다.`
+      `[${streamerName}] ${star}성 카드 경매에서 다른 유저가 ${amount.toLocaleString()}P로 상위 입찰했습니다.`,
+      'shop:market'
     );
   }
   return res.status(200).json(result);
@@ -349,7 +357,8 @@ const notifyMatchingWatches = async (listing: any) => {
     notify(
       watch.user_id,
       '[오픈마켓] 관심 카드 등록 알림',
-      `${streamerName} ${star}성 카드가 ${price.toLocaleString()}P 조건으로 오픈마켓에 등록되었습니다.`
+      `${streamerName} ${star}성 카드가 ${price.toLocaleString()}P 조건으로 오픈마켓에 등록되었습니다.`,
+      'shop:market'
     );
   }
 };
