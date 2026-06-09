@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS user_cards (
 );
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;
 
 -- 4. 1:1 교환 제안 테이블
 CREATE TABLE IF NOT EXISTS trades (

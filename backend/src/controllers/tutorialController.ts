@@ -15,6 +15,35 @@ const normalizeTutorialVersion = (version: unknown): string => {
 };
 
 const completedRewardKey = (version: string) => `${TUTORIAL_COMPLETED_PREFIX}${version}`;
+const isDbStatementTimeout = (err: any): boolean => {
+  return err?.code === '57014' || /statement timeout/i.test(String(err?.message || ''));
+};
+
+const claimTutorialGachaTicketAtomic = async (
+  userId: string
+): Promise<{ granted: boolean; bonusFreeDrawTickets: number } | null> => {
+  if (getDbMode() !== 'SUPABASE') return null;
+
+  const { data, error } = await getSupabaseClient().rpc('claim_tutorial_gacha_ticket', {
+    p_user_id: userId,
+    p_reward_key: GACHA_REWARD_KEY
+  });
+
+  if (error) {
+    const missingFunction = error.code === 'PGRST202' || /claim_tutorial_gacha_ticket/i.test(error.message || '');
+    if (missingFunction) {
+      console.warn('[TutorialController] claim_tutorial_gacha_ticket RPC 미적용, 폴백 사용:', error.message);
+      return null;
+    }
+    throw error;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    granted: !!row?.granted,
+    bonusFreeDrawTickets: Number(row?.bonus_free_draw_tickets || 0)
+  };
+};
 
 const claimRewardOnce = async (userId: string, rewardKey: string): Promise<boolean> => {
   const nowIso = new Date().toISOString();
@@ -169,24 +198,42 @@ export const claimTutorialGachaTicket = async (req: Request, res: Response) => {
   }
 
   try {
-    const granted = await claimRewardOnce(String(userId), GACHA_REWARD_KEY);
-    if (granted) {
-      await userRepository.addBonusFreeDrawTickets(String(userId), 1);
+    const atomicResult = await claimTutorialGachaTicketAtomic(String(userId));
+    let granted: boolean;
+    let bonusFreeDrawTickets: number;
+
+    if (atomicResult) {
+      granted = atomicResult.granted;
+      bonusFreeDrawTickets = atomicResult.bonusFreeDrawTickets;
+    } else {
+      granted = await claimRewardOnce(String(userId), GACHA_REWARD_KEY);
+      if (granted) {
+        await userRepository.addBonusFreeDrawTickets(String(userId), 1);
+      }
+      const user = await userRepository.findById(String(userId));
+      bonusFreeDrawTickets = Number(user?.bonus_free_draw_tickets || 0);
     }
 
-    const user = await userRepository.findById(String(userId));
     return res.status(200).json({
       granted,
       already_claimed: !granted,
       reward_type: 'free_draw_ticket',
       reward_amount: granted ? 1 : 0,
-      bonus_free_draw_tickets: Number(user?.bonus_free_draw_tickets || 0),
+      bonus_free_draw_tickets: bonusFreeDrawTickets,
       message: granted
         ? '튜토리얼 체험용 추가 무료 소환 티켓 1장을 지급했습니다.'
         : '이미 튜토리얼 체험용 무료 소환 티켓을 받은 계정입니다.'
     });
   } catch (err: any) {
     console.error('[TutorialController] claimTutorialGachaTicket 에러:', err);
+    if (isDbStatementTimeout(err)) {
+      res.set('Retry-After', '3');
+      return res.status(503).json({
+        error: 'DatabaseBusy',
+        message: '튜토리얼 보상 지급이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.',
+        details: IS_PRODUCTION ? undefined : err.message
+      });
+    }
     return res.status(500).json({
       error: 'InternalServerError',
       message: '튜토리얼 보상 지급 중 오류가 발생했습니다.',

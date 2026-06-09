@@ -15,6 +15,28 @@ import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 
 const DRAW_LOCKS = new Set<string>();
+const userCardsInFlight = new Map<string, Promise<any[]>>();
+
+const isDbStatementTimeout = (err: any): boolean => {
+  return err?.code === '57014' || /statement timeout/i.test(String(err?.message || ''));
+};
+
+const findUserCardsCoalesced = (userId: string): Promise<any[]> => {
+  const existing = userCardsInFlight.get(userId);
+  if (existing) return existing;
+
+  const request = userCardRepository.findByUserId(userId).finally(() => {
+    if (userCardsInFlight.get(userId) === request) {
+      userCardsInFlight.delete(userId);
+    }
+  });
+  userCardsInFlight.set(userId, request);
+  return request;
+};
+
+const clearUserCardsInFlight = (userId: string) => {
+  userCardsInFlight.delete(userId);
+};
 
 const withUserDrawLock = async <T>(userId: string, task: () => Promise<T>): Promise<T> => {
   if (DRAW_LOCKS.has(userId)) {
@@ -611,10 +633,19 @@ export const getUserCards = async (req: Request, res: Response) => {
   }
 
   try {
-    const cards = await userCardRepository.findByUserId(userId);
+    const cards = await findUserCardsCoalesced(userId);
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(cards);
   } catch (err: any) {
     console.error('[PlayController] getUserCards 에러:', err);
+    if (isDbStatementTimeout(err)) {
+      res.set('Retry-After', '3');
+      return res.status(503).json({
+        error: 'DatabaseBusy',
+        message: '카드 목록 조회가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.',
+        details: IS_PRODUCTION ? undefined : err.message
+      });
+    }
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
@@ -640,8 +671,10 @@ export const updateMyCardVisibility = async (req: Request, res: Response) => {
   const cardId = Number(req.params.card_id);
   if (!Number.isFinite(cardId)) return res.status(400).json({ error: 'BadRequest', message: '카드 ID가 올바르지 않습니다.' });
   try {
+    clearUserCardsInFlight(userId);
     const ok = await userCardRepository.updateVisibility(userId, cardId, !!req.body?.hidden);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    clearUserCardsInFlight(userId);
     return res.status(200).json({ message: req.body?.hidden ? '카드를 외부 공개에서 숨겼습니다.' : '카드 공개 숨김을 해제했습니다.' });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '카드 숨김 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -654,8 +687,10 @@ export const updateMyCardFavorite = async (req: Request, res: Response) => {
   const cardId = Number(req.params.card_id);
   if (!Number.isFinite(cardId)) return res.status(400).json({ error: 'BadRequest', message: '카드 ID가 올바르지 않습니다.' });
   try {
+    clearUserCardsInFlight(userId);
     const ok = await userCardRepository.setFavorite(userId, cardId, !!req.body?.favorite);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    clearUserCardsInFlight(userId);
     return res.status(200).json({ message: req.body?.favorite ? '즐겨찾기에 고정했습니다.' : '즐겨찾기 고정을 해제했습니다.' });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '즐겨찾기 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -699,6 +734,7 @@ export const drawCard = async (req: Request, res: Response) => {
       }
       return res.status(500).json({ error: 'InternalServerError', message: '카드 뽑기 처리에 실패했습니다.' });
     }
+    clearUserCardsInFlight(userId);
 
     return res.status(200).json({
       message: draw.is_free
@@ -787,6 +823,7 @@ export const drawCards = async (req: Request, res: Response) => {
           free_draw_source: draw.free_draw_source
         });
       }
+      clearUserCardsInFlight(userId);
 
       return res.status(200).json({
         message: `10연차 소환으로 카드 ${cards.length}장을 획득했습니다!`,
@@ -1022,9 +1059,11 @@ export const sellCards = async (req: Request, res: Response) => {
     }
 
     // D. 판매 처리: 카드 삭제와 포인트 가산을 단일 트랜잭션/RPC로 처리
+    clearUserCardsInFlight(userId);
     const actualGainedPoints = await userCardRepository.sellCardsAtomic(userId, sellActions);
     const refreshed = await userRepository.findById(userId);
     const nextPoint = refreshed ? refreshed.point : user.point + actualGainedPoints;
+    clearUserCardsInFlight(userId);
 
     return res.status(200).json({
       message: `성공적으로 카드 판매가 완료되었습니다. 총 ${actualGainedPoints.toLocaleString()} 포인트를 획득하였습니다!`,
@@ -1097,6 +1136,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       }
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
     }
+    clearUserCardsInFlight(userId);
     return res.status(200).json({ message: `한계돌파 성공! ${result.newStar}성 카드가 되었습니다. ⭐`, new_star: result.newStar });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '합성 처리 실패', details: IS_PRODUCTION ? undefined : err.message });

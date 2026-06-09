@@ -226,6 +226,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
       }
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);");
       try {
         sqliteDb.prepare("SELECT reward_type FROM coupons LIMIT 1").get();

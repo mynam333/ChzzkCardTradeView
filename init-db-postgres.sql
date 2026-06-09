@@ -351,6 +351,11 @@ CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order
+  ON user_cards(user_id, favorite_order ASC NULLS LAST, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max
+  ON user_cards(user_id, favorite_order DESC)
+  WHERE favorite_order IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trades_sender_id ON trades(sender_id);
 CREATE INDEX IF NOT EXISTS idx_trades_receiver_id ON trades(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
@@ -508,6 +513,36 @@ BEGIN
   UPDATE users
      SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + GREATEST(COALESCE(p_amount, 0), 0)
    WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION claim_tutorial_gacha_ticket(p_user_id TEXT, p_reward_key TEXT)
+RETURNS TABLE (
+  granted BOOLEAN,
+  bonus_free_draw_tickets INTEGER
+) AS $$
+DECLARE
+  inserted INTEGER := 0;
+  next_bonus INTEGER := 0;
+BEGIN
+  INSERT INTO tutorial_rewards (user_id, reward_key, reward_type, reward_amount, created_at)
+  VALUES (p_user_id, p_reward_key, 'free_draw_ticket', 1, NOW())
+  ON CONFLICT (user_id, reward_key) DO NOTHING;
+  GET DIAGNOSTICS inserted = ROW_COUNT;
+
+  IF inserted > 0 THEN
+    UPDATE users
+       SET bonus_free_draw_tickets = COALESCE(users.bonus_free_draw_tickets, 0) + 1
+     WHERE id = p_user_id
+     RETURNING users.bonus_free_draw_tickets INTO next_bonus;
+  ELSE
+    SELECT COALESCE(users.bonus_free_draw_tickets, 0)
+      INTO next_bonus
+      FROM users
+     WHERE id = p_user_id;
+  END IF;
+
+  RETURN QUERY SELECT inserted > 0, COALESCE(next_bonus, 0);
 END;
 $$ LANGUAGE plpgsql;
 
