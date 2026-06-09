@@ -2,6 +2,7 @@ import { chatManager } from './chatManager';
 import { getNotificationStreamStats } from './notificationStream';
 import { getRealtimeStreamStats } from './realtimeStream';
 import { getPlayControllerStats } from '../controllers/playController';
+import { getSoftBanStats } from '../middlewares/softBan';
 
 export const getRuntimeStats = () => {
   const memory = process.memoryUsage();
@@ -20,6 +21,9 @@ export const getRuntimeStats = () => {
     chat: chatManager.getStats(),
     caches: {
       play: getPlayControllerStats()
+    },
+    protection: {
+      softBan: getSoftBanStats()
     }
   };
 };

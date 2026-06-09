@@ -17,6 +17,8 @@ import {
 const PUSH_SEND_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SEND_BATCH_SIZE || 25));
 const PUSH_SEND_BATCH_DELAY_MS = Math.max(0, Number(process.env.PUSH_SEND_BATCH_DELAY_MS || 200));
 let warnedMissingPushOriginColumn = false;
+let warnedMissingPushEndpointUniqueIndex = false;
+const pushSubscribeLocks = new Map<string, Promise<void>>();
 
 // VAPID 키는 dotenv.config() 이후에 읽어야 하므로 지연 초기화(Lazy Initialization) 사용
 const getVapidKeys = () => ({
@@ -48,6 +50,93 @@ export const getVapidPublicKey = (req: Request, res: Response) => {
   return res.status(200).json({ publicKey: getVapidKeys().publicKey });
 };
 
+const withPushSubscribeLock = async <T>(endpoint: string, task: () => Promise<T>): Promise<T> => {
+  const previous = pushSubscribeLocks.get(endpoint) || Promise.resolve();
+  let guard: Promise<void>;
+  const next = previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (pushSubscribeLocks.get(endpoint) === guard) {
+        pushSubscribeLocks.delete(endpoint);
+      }
+    });
+  guard = next.then(() => undefined, () => undefined);
+  pushSubscribeLocks.set(endpoint, guard);
+  return next;
+};
+
+const isMissingPushOriginColumnError = (error: any) => /origin|schema cache/i.test(error?.message || '');
+const isMissingEndpointUniqueIndexError = (error: any) =>
+  /no unique|on conflict|constraint|42P10/i.test(`${error?.code || ''} ${error?.message || ''}`);
+
+const warnMissingPushOriginColumnOnce = () => {
+  if (warnedMissingPushOriginColumn) return;
+  console.warn('[Push] push_subscriptions.origin 컬럼이 없어 origin 없이 구독을 저장합니다. 마이그레이션을 적용하세요.');
+  warnedMissingPushOriginColumn = true;
+};
+
+const warnMissingEndpointUniqueIndexOnce = () => {
+  if (warnedMissingPushEndpointUniqueIndex) return;
+  console.warn('[Push] push_subscriptions.endpoint unique index가 없어 delete/insert 폴백을 사용합니다. 마이그레이션을 적용하세요.');
+  warnedMissingPushEndpointUniqueIndex = true;
+};
+
+const getEndpointHost = (endpoint: string) => {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return 'invalid-endpoint';
+  }
+};
+
+const saveSupabasePushSubscription = async (
+  client: ReturnType<typeof getSupabaseClient>,
+  row: { user_id: string; endpoint: string; auth_key: string; p256dh_key: string; origin?: string | null }
+) => {
+  let { error } = await client
+    .from('push_subscriptions')
+    .upsert(row, { onConflict: 'endpoint' });
+
+  if (!error) return;
+
+  if (isMissingPushOriginColumnError(error)) {
+    warnMissingPushOriginColumnOnce();
+    const fallbackRow = {
+      user_id: row.user_id,
+      endpoint: row.endpoint,
+      auth_key: row.auth_key,
+      p256dh_key: row.p256dh_key
+    };
+    const fallback = await client
+      .from('push_subscriptions')
+      .upsert(fallbackRow, { onConflict: 'endpoint' });
+    error = fallback.error;
+    if (!error) return;
+  }
+
+  if (isMissingEndpointUniqueIndexError(error)) {
+    warnMissingEndpointUniqueIndexOnce();
+    await client.from('push_subscriptions').delete().eq('endpoint', row.endpoint);
+    const insert = await client.from('push_subscriptions').insert(row);
+    error = insert.error;
+    if (error && isMissingPushOriginColumnError(error)) {
+      warnMissingPushOriginColumnOnce();
+      const fallback = await client
+        .from('push_subscriptions')
+        .insert({
+          user_id: row.user_id,
+          endpoint: row.endpoint,
+          auth_key: row.auth_key,
+          p256dh_key: row.p256dh_key
+        });
+      error = fallback.error;
+    }
+  }
+
+  if (error) throw error;
+};
+
 /**
  * 2. 브라우저 푸시 알림 구독 정보 등록 API
  */
@@ -73,51 +162,40 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
   }
 
   try {
-    const dbMode = getDbMode();
+    await withPushSubscribeLock(endpoint, async () => {
+      const dbMode = getDbMode();
 
-    if (dbMode === 'SUPABASE') {
-      const client = getSupabaseClient();
-      // 같은 브라우저 endpoint는 하나의 유저에만 귀속되도록 기존 중복을 먼저 정리합니다.
-      await client.from('push_subscriptions').delete().eq('endpoint', endpoint);
-      const row = {
-        user_id: userId,
-        endpoint,
-        auth_key: authKey,
-        p256dh_key: p256dhKey,
-        origin: subscriptionOrigin
-      };
-      let { error } = await client.from('push_subscriptions').insert(row);
-
-      if (error && /origin|schema cache/i.test(error.message || '')) {
-        if (!warnedMissingPushOriginColumn) {
-          console.warn('[Push] push_subscriptions.origin 컬럼이 없어 origin 없이 구독을 저장합니다. 마이그레이션을 적용하세요.');
-          warnedMissingPushOriginColumn = true;
-        }
-        const fallback = await client
-          .from('push_subscriptions')
-          .insert({
-            user_id: userId,
-            endpoint,
-            auth_key: authKey,
-            p256dh_key: p256dhKey
-          });
-        error = fallback.error;
-      }
-
-      if (error) throw error;
-    } else {
-      const db = getSqliteDb();
-      db.transaction(() => {
-        db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+      if (dbMode === 'SUPABASE') {
+        await saveSupabasePushSubscription(getSupabaseClient(), {
+          user_id: userId,
+          endpoint,
+          auth_key: authKey,
+          p256dh_key: p256dhKey,
+          origin: subscriptionOrigin
+        });
+      } else {
+        const db = getSqliteDb();
         db.prepare(`
           INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key, origin, created_at)
           VALUES (?, ?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(endpoint) DO UPDATE SET
+            user_id = excluded.user_id,
+            auth_key = excluded.auth_key,
+            p256dh_key = excluded.p256dh_key,
+            origin = excluded.origin
         `).run(userId, endpoint, authKey, p256dhKey, subscriptionOrigin);
-      })();
-    }
+      }
+    });
 
     return res.status(201).json({ message: '푸시 알림 구독 등록이 완료되었습니다.' });
   } catch (err: any) {
+    console.error('[Push] 구독 등록 실패:', {
+      user_id: userId,
+      endpoint_host: getEndpointHost(endpoint),
+      origin: subscriptionOrigin,
+      code: err?.code,
+      message: err?.message || err
+    });
     return res.status(500).json({ error: 'InternalServerError', message: '구독 등록 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

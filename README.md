@@ -396,7 +396,8 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 PORT=5000
 DATABASE_URL=your_supabase_postgresql_connection_string
 SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_SERVICE_ROLE_KEY=your_server_only_secret_or_service_role_key
+SUPABASE_REQUIRED=true
 JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret
@@ -442,3 +443,5 @@ npm run dev
 ### 8.2 Backend 배포
 백엔드 Node.js/Express 서버 및 스케줄러는 Render, Fly.io, 혹은 Docker 컨테이너 기반 클라우드 서비스를 통해 배포합니다.
 * 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
+* `SUPABASE_SERVICE_ROLE_KEY`에는 브라우저용 publishable/anon key가 아니라 서버 전용 `sb_secret_*` 또는 legacy `service_role` key만 설정합니다.
+* Supabase 직접 접근 차단은 [docs/supabase-hardening.md](docs/supabase-hardening.md)와 [supabase-hardening.sql](supabase-hardening.sql)을 적용합니다.

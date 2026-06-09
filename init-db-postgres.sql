@@ -584,6 +584,23 @@ RETURNS VOID AS $$
    WHERE channel_id = p_channel_id;
 $$ LANGUAGE sql;
 
+-- 스트리머 채팅 카운트 배치 증가
+-- p_counts: [{ "channel_id": "...", "count": 123 }, ...]
+CREATE OR REPLACE FUNCTION bulk_increment_streamer_chat(p_counts JSONB)
+RETURNS VOID AS $$
+DECLARE
+  c JSONB;
+BEGIN
+  FOR c IN SELECT * FROM jsonb_array_elements(p_counts)
+  LOOP
+    UPDATE streamers
+       SET chat_count = chat_count + GREATEST(COALESCE((c->>'count')::INTEGER, 0), 0),
+           updated_at = NOW()
+     WHERE channel_id = c->>'channel_id';
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 스트리머 채팅 카운트 원자적 차감 (0 하한)
 CREATE OR REPLACE FUNCTION decrement_streamer_chat(p_channel_id TEXT, p_amount INTEGER)
 RETURNS VOID AS $$

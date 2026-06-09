@@ -10,6 +10,16 @@ import { clearUserRankingCaches } from './playController';
 import type { MarketListing } from '../repositories/interfaces';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
+const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000));
+const MARKET_SETTLE_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.MARKET_SETTLE_MIN_INTERVAL_MS || 15_000));
+
+const marketListCache = new Map<string, { data: any; expiresAt: number }>();
+let marketSettleInFlight: Promise<void> | null = null;
+let lastMarketSettleAt = 0;
+
+const clearMarketListCache = () => {
+  marketListCache.clear();
+};
 
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (
@@ -41,6 +51,7 @@ const realtimeListingPatch = (listing: MarketListing | null | undefined) => {
 };
 
 const publishMarketUpdated = (reason: string, listing?: MarketListing | null, extra: Record<string, unknown> = {}) => {
+  clearMarketListCache();
   publishRealtimeEvent('market', {
     reason,
     listingId: listing?.id,
@@ -60,17 +71,35 @@ const publishRankingUpdated = (reason: string) => {
  */
 export const listActiveListings = async (req: AuthenticatedRequest, res: Response) => {
   const page = Math.max(1, Number(req.query.page || 1));
-  const limit = Math.max(1, Number(req.query.limit || 12));
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 12)));
   const search = req.query.search ? String(req.query.search) : undefined;
   const sort = (req.query.sort || 'latest') as 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
   const type = (req.query.type || 'all') as 'all' | 'fixed' | 'auction';
+  const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type });
+  const now = Date.now();
+  const cached = marketListCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    res.set('Cache-Control', 'private, max-age=5');
+    return res.json(cached.data);
+  }
 
   try {
     await settleExpiredAuctions();
     const result = await marketRepository.listActive({ page, limit, search, sort, type });
+    marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
+    if (marketListCache.size > 200) {
+      for (const [key, value] of marketListCache) {
+        if (value.expiresAt <= Date.now()) marketListCache.delete(key);
+      }
+    }
+    res.set('Cache-Control', 'private, max-age=5');
     return res.json(result);
   } catch (err: any) {
     console.error('[MarketController] listActiveListings 에러:', err);
+    if (cached) {
+      res.set('Cache-Control', 'private, max-age=1');
+      return res.json(cached.data);
+    }
     return res.status(500).json({ error: 'ServerError', message: '마켓 목록을 가져오는 중 오류가 발생했습니다.' });
   }
 };
@@ -419,23 +448,33 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
 };
 
 export const settleExpiredAuctions = async () => {
-  const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
-  for (const listing of soldListings) {
-    const streamerName = listing.card?.streamer?.name || '스트리머';
-    const star = listing.card?.star ?? 0;
-    const price = listing.price;
-    notify(listing.seller_id, '[오픈마켓] 경매 낙찰 완료', `[${streamerName}] ${star}성 카드 경매가 ${price}P에 낙찰되었습니다.`);
-    if (listing.buyer_id) {
-      notify(listing.buyer_id, '[오픈마켓] 경매 낙찰', `[${streamerName}] ${star}성 카드 경매에 낙찰되어 카드가 보관함으로 이동했습니다.`);
+  const now = Date.now();
+  if (marketSettleInFlight) return marketSettleInFlight;
+  if (now - lastMarketSettleAt < MARKET_SETTLE_MIN_INTERVAL_MS) return;
+
+  marketSettleInFlight = (async () => {
+    lastMarketSettleAt = now;
+    const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+    for (const listing of soldListings) {
+      const streamerName = listing.card?.streamer?.name || '스트리머';
+      const star = listing.card?.star ?? 0;
+      const price = listing.price;
+      notify(listing.seller_id, '[오픈마켓] 경매 낙찰 완료', `[${streamerName}] ${star}성 카드 경매가 ${price}P에 낙찰되었습니다.`);
+      if (listing.buyer_id) {
+        notify(listing.buyer_id, '[오픈마켓] 경매 낙찰', `[${streamerName}] ${star}성 카드 경매에 낙찰되어 카드가 보관함으로 이동했습니다.`);
+      }
     }
-  }
-  if (soldListings.length > 0) {
-    publishMarketUpdated('auction_settled', null, {
-      listingIds: soldListings.map((listing) => listing.id).filter(Boolean),
-      listings: soldListings.map(realtimeListingPatch).filter(Boolean)
-    });
-    publishRankingUpdated('auction_settled');
-  }
+    if (soldListings.length > 0) {
+      publishMarketUpdated('auction_settled', null, {
+        listingIds: soldListings.map((listing) => listing.id).filter(Boolean),
+        listings: soldListings.map(realtimeListingPatch).filter(Boolean)
+      });
+      publishRankingUpdated('auction_settled');
+    }
+  })().finally(() => {
+    marketSettleInFlight = null;
+  });
+  return marketSettleInFlight;
 };
 
 const notifyMatchingWatches = async (listing: any) => {

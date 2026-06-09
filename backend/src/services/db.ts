@@ -16,6 +16,30 @@ let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
  */
 const SUPABASE_FETCH_MAX_RETRIES = 3;
 const SUPABASE_FETCH_BACKOFF_MS = [250, 600, 1200];
+
+const decodeJwtPayload = (token: string): Record<string, any> | null => {
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=');
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+};
+
+const assertServerSupabaseKey = (key: string) => {
+  if (key.startsWith('sb_publishable_')) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY에 publishable key가 설정되어 있습니다. 서버 전용 secret/service_role key를 사용하세요.');
+  }
+  if (key.startsWith('sb_secret_')) return;
+
+  const payload = decodeJwtPayload(key);
+  if (payload && payload.role !== 'service_role') {
+    throw new Error(`SUPABASE_SERVICE_ROLE_KEY가 service_role이 아닙니다. 감지된 role=${payload.role || 'unknown'}`);
+  }
+};
+
 const fetchWithRetry: typeof fetch = async (input, init) => {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= SUPABASE_FETCH_MAX_RETRIES; attempt++) {
@@ -39,9 +63,11 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
 export const initDatabaseConnection = async (): Promise<void> => {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseRequired = process.env.SUPABASE_REQUIRED === 'true';
 
   if (supabaseUrl && supabaseKey) {
     try {
+      assertServerSupabaseKey(supabaseKey);
       // Supabase 클라이언트 인스턴스화 (일시 네트워크 오류 재시도 fetch 주입)
       supabaseClient = createClient(supabaseUrl, supabaseKey, {
         global: { fetch: fetchWithRetry }
@@ -58,9 +84,15 @@ export const initDatabaseConnection = async (): Promise<void> => {
       console.log('[DB] Supabase 클라우드 데이터베이스와 연동되었습니다. (SUPABASE MODE)');
       return;
     } catch (err: any) {
+      if (supabaseRequired) {
+        throw new Error(`[DB] Supabase 필수 모드 초기화 실패: ${err.message || err}`);
+      }
       console.warn(`[DB] Supabase 연결 검사 실패: ${err.message || err}. 로컬 SQLite 모드로 작동을 준비합니다.`);
     }
   } else {
+    if (supabaseRequired) {
+      throw new Error('[DB] SUPABASE_REQUIRED=true 이지만 SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY가 누락되었습니다.');
+    }
     console.log('[DB] Supabase 접속 환경 변수가 불완전합니다. 로컬 SQLite 모드로 동작합니다.');
   }
 

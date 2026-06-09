@@ -23,7 +23,18 @@ import { STAR_IMAGE_COLUMNS, withStarImages } from "./shared";
 
 export class SupabaseStreamerRepository implements IStreamerRepository {
   private static readonly SCHEDULE_APPLY_CHUNK_SIZE = 80;
-  private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = 500;
+  private static readonly CHAT_COUNT_INCREMENT_CHUNK_SIZE = Math.max(
+    20,
+    Number(process.env.CHAT_COUNT_INCREMENT_CHUNK_SIZE || 200)
+  );
+  private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = Math.max(
+    20,
+    Number(process.env.VALUE_HISTORY_INSERT_CHUNK_SIZE || 100)
+  );
+  private static readonly VALUE_HISTORY_INSERT_CHUNK_DELAY_MS = Math.max(
+    0,
+    Number(process.env.VALUE_HISTORY_INSERT_CHUNK_DELAY_MS || 30)
+  );
   private static readonly VALUE_HISTORY_PRUNE_CHUNK_SIZE = 1000;
   private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(
     5_000,
@@ -42,6 +53,10 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       chunks.push(items.slice(i, i + size));
     }
     return chunks;
+  }
+
+  private sleep(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 
   async findAll(): Promise<Streamer[]> {
@@ -235,6 +250,22 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     }
   }
 
+  async bulkIncrementChatCounts(counts: { channel_id: string; count: number }[]): Promise<void> {
+    const filtered = counts.filter((item) => item.channel_id && item.count > 0);
+    if (filtered.length === 0) return;
+    const client = this.getClient();
+
+    for (const group of this.chunk(filtered, SupabaseStreamerRepository.CHAT_COUNT_INCREMENT_CHUNK_SIZE)) {
+      const { error } = await client.rpc('bulk_increment_streamer_chat', { p_counts: group });
+      if (!error) continue;
+
+      console.warn(`[Supabase] bulk_increment_streamer_chat RPC 실패(${group.length}건), 행별 폴백 사용:`, error.message);
+      for (const item of group) {
+        await this.incrementChatCount(item.channel_id, item.count);
+      }
+    }
+  }
+
   async incrementBroadcastMinutes(channelId: string, minutes: number): Promise<void> {
     if (minutes <= 0) return;
     const { error } = await this.getClient().rpc('increment_streamer_minutes', { p_channel_id: channelId, p_minutes: minutes });
@@ -360,9 +391,14 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   async bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void> {
     if (points.length === 0) return;
     const client = this.getClient();
-    for (const group of this.chunk(points, SupabaseStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_SIZE)) {
+    const groups = this.chunk(points, SupabaseStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_SIZE);
+    for (let i = 0; i < groups.length; i += 1) {
+      const group = groups[i];
       const { error } = await client.from('value_history').insert(group);
       if (error) throw error;
+      if (i + 1 < groups.length && SupabaseStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_DELAY_MS > 0) {
+        await this.sleep(SupabaseStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_DELAY_MS);
+      }
     }
   }
 

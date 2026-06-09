@@ -148,6 +148,12 @@ const OFFLINE_COMPUTE_EVERY_CYCLES = readPositiveIntegerEnv(
 ); // 폴링하지 않은 오프라인 스트리머의 DB 시세/이력 반영 주기
 const PRUNE_EVERY_CYCLES = 30;          // 약 1시간마다 시세 이력 정리
 const VALUE_HISTORY_RETENTION_DAYS = 7; // 7일 초과 시세 이력 삭제
+const VALUE_HISTORY_RECORD_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_RECORD_EVERY_CYCLES', 3);
+const VALUE_HISTORY_MIN_ABS_DELTA = readPositiveIntegerEnv('VALUE_HISTORY_MIN_ABS_DELTA', 25);
+const VALUE_HISTORY_MIN_PCT_DELTA = Math.max(
+  0,
+  Number(process.env.VALUE_HISTORY_MIN_PCT_DELTA || 0.005)
+);
 const POLL_JITTER_MS = 30;              // 호출 버스트 완화용 소량 지터(ms)
 const INACTIVE_STREAMER_PRUNE_DAYS = 90;
 const POLL_FAILURE_BACKOFF_BASE_MS = 2 * 60 * 1000;
@@ -183,6 +189,17 @@ const registerPollingFailure = (channelId: string) => {
   const count = Math.min((prev?.count || 0) + 1, 8);
   const delay = Math.min(POLL_FAILURE_BACKOFF_BASE_MS * (2 ** (count - 1)), POLL_FAILURE_BACKOFF_MAX_MS);
   pollFailures.set(channelId, { count, until: Date.now() + delay });
+};
+
+const shouldRecordValueHistory = (result: StreamerScheduleResult, cycle: number) => {
+  if (result.is_active || result.add_broadcast_count > 0) return true;
+  if (cycle % VALUE_HISTORY_RECORD_EVERY_CYCLES === 0) return true;
+
+  const prevValue = Number(result.prev_value || 0);
+  const nextValue = Number(result.base_value || 0);
+  const delta = Math.abs(nextValue - prevValue);
+  const pctThreshold = prevValue > 0 ? prevValue * VALUE_HISTORY_MIN_PCT_DELTA : 0;
+  return delta >= Math.max(VALUE_HISTORY_MIN_ABS_DELTA, pctThreshold);
 };
 
 /**
@@ -404,8 +421,19 @@ export const syncAllStreamersLiveStatus = async () => {
       await streamerRepository.bulkApplyScheduleResults(results);
       console.log(`[LiveStatusScheduler] DB 시세 반영 완료: ${results.length}건 (${Date.now() - dbApplyStart}ms)`);
       const historyStart = Date.now();
-      await streamerRepository.bulkRecordValueHistory(historyPoints);
-      console.log(`[LiveStatusScheduler] 시세 이력 기록 완료: ${historyPoints.length}건 (${Date.now() - historyStart}ms)`);
+      const filteredHistoryPoints = results
+        .filter((result) => shouldRecordValueHistory(result, cycle))
+        .map((result) => ({ channel_id: result.channel_id, value: result.base_value }));
+      await streamerRepository.bulkRecordValueHistory(filteredHistoryPoints).catch((err: any) => {
+        console.warn(
+          `[LiveStatusScheduler] 시세 이력 기록 실패(다음 주기에 재시도): ` +
+          `${err?.message || err} (대상 ${filteredHistoryPoints.length}/${historyPoints.length}건)`
+        );
+      });
+      console.log(
+        `[LiveStatusScheduler] 시세 이력 기록 확인: ${filteredHistoryPoints.length}/${historyPoints.length}건 ` +
+        `(${Date.now() - historyStart}ms, 샘플링 ${VALUE_HISTORY_RECORD_EVERY_CYCLES}주기)`
+      );
       clearRankingCaches();
       publishRealtimeEvent('ranking', {
         reason: 'streamer_sync',

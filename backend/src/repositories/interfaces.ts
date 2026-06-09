@@ -256,6 +256,8 @@ export interface IStreamerRepository {
   /** 방송 중 누적 방송 시간(분)을 증가시킵니다. */
   incrementBroadcastMinutes(channelId: string, minutes: number): Promise<void>;
   incrementChatCount(channelId: string, count?: number): Promise<void>;
+  /** 여러 채널의 채팅 카운트를 한 번에 증가시킵니다. */
+  bulkIncrementChatCounts(counts: { channel_id: string; count: number }[]): Promise<void>;
   /** since 이후의 시세 이력 포인트를 시간순으로 반환합니다(그래프용). */
   getValueHistory(channelId: string, sinceIso: string): Promise<ValueHistoryPoint[]>;
   count(): Promise<number>;

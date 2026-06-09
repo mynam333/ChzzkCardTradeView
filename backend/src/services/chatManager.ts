@@ -3,6 +3,7 @@ import { streamerRepository } from '../repositories';
 
 const CHAT_COUNT_FLUSH_INTERVAL_MS = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_INTERVAL_MS || 5000));
 const CHAT_MANAGER_VERBOSE_LOGS = process.env.CHAT_MANAGER_VERBOSE_LOGS === 'true';
+const CHAT_COUNT_FLUSH_WARN_THRESHOLD = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_WARN_THRESHOLD || 10_000));
 
 // 웹소켓 메시지 전송용 인터페이스
 interface ChzzkSocketFrame {
@@ -72,9 +73,18 @@ class ChzzkChatManager {
     this.isFlushing = true;
     const snapshot = this.drainPendingChatCounts();
     try {
-      for (const [channelId, count] of snapshot) {
-        await streamerRepository.incrementChatCount(channelId, count);
+      const counts = Array.from(snapshot.entries())
+        .filter(([, count]) => count > 0)
+        .map(([channel_id, count]) => ({ channel_id, count }));
+      let total = 0;
+      for (const item of counts) total += item.count;
+      if (total >= CHAT_COUNT_FLUSH_WARN_THRESHOLD) {
+        console.warn('[ChatManager] 대량 채팅 카운트 flush:', {
+          channels: counts.length,
+          total
+        });
       }
+      await streamerRepository.bulkIncrementChatCounts(counts);
     } catch (err) {
       this.restorePendingChatCounts(snapshot);
       throw err;

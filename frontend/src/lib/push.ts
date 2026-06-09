@@ -37,6 +37,11 @@ export type SubscribeResult =
   | { ok: true }
   | { ok: false; reason: 'unsupported' | 'denied' | 'no_vapid' | 'error'; message: string };
 
+let subscribeInFlight: Promise<SubscribeResult> | null = null;
+let lastRegisteredEndpoint = '';
+let lastRegisteredAt = 0;
+const PUSH_REGISTER_DEDUPE_MS = 10 * 60 * 1000;
+
 const waitForServiceWorkerReady = async (): Promise<ServiceWorkerRegistration | null> => {
   const registration = await registerServiceWorker();
   try {
@@ -56,6 +61,15 @@ const waitForServiceWorkerReady = async (): Promise<ServiceWorkerRegistration | 
  * 로그인(JWT) 상태에서 호출해야 합니다(/push/subscribe는 인증 필요).
  */
 export const subscribeToPush = async (): Promise<SubscribeResult> => {
+  if (subscribeInFlight) return subscribeInFlight;
+
+  subscribeInFlight = subscribeToPushInternal().finally(() => {
+    subscribeInFlight = null;
+  });
+  return subscribeInFlight;
+};
+
+const subscribeToPushInternal = async (): Promise<SubscribeResult> => {
   if (!isPushSupported()) {
     return { ok: false, reason: 'unsupported', message: '이 브라우저는 웹 푸시 알림을 지원하지 않습니다.' };
   }
@@ -89,6 +103,15 @@ export const subscribeToPush = async (): Promise<SubscribeResult> => {
       });
     }
 
+    const endpoint = subscription.endpoint || '';
+    if (
+      endpoint &&
+      endpoint === lastRegisteredEndpoint &&
+      Date.now() - lastRegisteredAt < PUSH_REGISTER_DEDUPE_MS
+    ) {
+      return { ok: true };
+    }
+
     // 백엔드에 구독 정보 등록
     const res = await apiFetch('/push/subscribe', {
       method: 'POST',
@@ -100,6 +123,8 @@ export const subscribeToPush = async (): Promise<SubscribeResult> => {
       return { ok: false, reason: 'error', message: data.message || '구독 등록에 실패했습니다.' };
     }
 
+    lastRegisteredEndpoint = endpoint;
+    lastRegisteredAt = Date.now();
     return { ok: true };
   } catch (e: any) {
     console.error('[Push] 구독 처리 중 오류:', e);

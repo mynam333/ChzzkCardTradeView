@@ -5,6 +5,57 @@ import { AuthenticatedRequest } from './admin';
 import { JWT_SECRET, IS_PRODUCTION } from '../config';
 import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
+const AUTH_USER_CACHE_TTL_MS = Math.max(1000, Number(process.env.AUTH_USER_CACHE_TTL_MS || 15_000));
+const AUTH_USER_LOOKUP_TIMEOUT_MS = Math.max(500, Number(process.env.AUTH_USER_LOOKUP_TIMEOUT_MS || 3000));
+
+const userCache = new Map<string, { user: any; expiresAt: number }>();
+const userLookups = new Map<string, Promise<any>>();
+
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('AuthUserLookupTimeout')), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+const findUserCached = async (userId: string) => {
+  const now = Date.now();
+  const cached = userCache.get(userId);
+  if (cached && cached.expiresAt > now) return cached.user;
+
+  let lookup = userLookups.get(userId);
+  if (!lookup) {
+    lookup = userRepository.findById(userId)
+      .then((user) => {
+        if (user) {
+          userCache.set(userId, { user, expiresAt: Date.now() + AUTH_USER_CACHE_TTL_MS });
+        } else {
+          userCache.delete(userId);
+        }
+        return user;
+      })
+      .finally(() => {
+        userLookups.delete(userId);
+      });
+    userLookups.set(userId, lookup);
+  }
+
+  try {
+    return await withTimeout(lookup, AUTH_USER_LOOKUP_TIMEOUT_MS);
+  } catch (err: any) {
+    if (cached) return cached.user;
+    throw err;
+  }
+};
+
 /**
  * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어.
  * 우선순위: httpOnly 세션 쿠키 → Authorization: Bearer 헤더 (둘 다 지원하여 점진적 전환).
@@ -34,7 +85,7 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
-    const user = await userRepository.findById(decoded.id);
+    const user = await findUserCached(decoded.id);
 
     if (!user) {
       return res.status(401).json({
@@ -46,6 +97,13 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
     req.user = user;
     next();
   } catch (err: any) {
+    if (err?.message === 'AuthUserLookupTimeout') {
+      res.setHeader('Retry-After', '3');
+      return res.status(503).json({
+        error: 'AuthServiceBusy',
+        message: '인증 정보를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.'
+      });
+    }
     return res.status(401).json({
       error: 'Unauthorized',
       message: '만료되었거나 손상된 토큰입니다.',

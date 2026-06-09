@@ -251,6 +251,17 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       .run(count, channelId);
   }
 
+  async bulkIncrementChatCounts(counts: { channel_id: string; count: number }[]): Promise<void> {
+    if (counts.length === 0) return;
+    const db = this.getDb();
+    const stmt = db.prepare('UPDATE streamers SET chat_count = chat_count + ?, updated_at = datetime(\'now\') WHERE channel_id = ?');
+    db.transaction(() => {
+      for (const item of counts) {
+        if (item.count > 0) stmt.run(item.count, item.channel_id);
+      }
+    })();
+  }
+
   async updateValueMetrics(channelId: string, prevValue: number, baseValue: number, activityScore: number, multiplier: number): Promise<void> {
     this.getDb().prepare(
       `UPDATE streamers
