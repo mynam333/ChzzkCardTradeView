@@ -2253,127 +2253,141 @@ export const AdminTab: React.FC = () => {
               <Store className="h-4 w-4" /> {shopForm.id ? `아이템 수정 (#${shopForm.id})` : '코스메틱 아이템 추가'}
             </h3>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px] font-bold text-muted-foreground block mb-1">종류</label>
-                <select value={shopForm.type} onChange={(e) => setShopForm({ ...shopForm, type: e.target.value as any })}
-                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
-                  <option value="border">테두리</option>
-                  <option value="name_effect">이름 이펙트</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[11px] font-bold text-muted-foreground block mb-1">가격 (P)</label>
-                <input type="number" min={0} value={shopForm.price}
-                  onChange={(e) => setShopForm({ ...shopForm, price: Number(e.target.value) })}
-                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-              </div>
-            </div>
-
-            <input type="text" placeholder="아이템 이름" value={shopForm.name}
-              onChange={(e) => setShopForm({ ...shopForm, name: e.target.value })}
-              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            <input type="text" placeholder="설명 (선택)" value={shopForm.description}
-              onChange={(e) => setShopForm({ ...shopForm, description: e.target.value })}
-              className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground block mb-1">1인 최대 구매 갯수 (0 = 무제한)</label>
-              <input type="number" min={0} value={shopForm.purchase_limit}
-                onChange={(e) => setShopForm({ ...shopForm, purchase_limit: Math.max(0, Number(e.target.value) || 0) })}
-                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            </div>
-
-            {/* 커스텀 CSS (테두리/이름 이펙트 공통 · 클래스명 + CSS 코드 전문) */}
-            {(() => {
-              const isBorder = shopForm.type === 'border';
-              const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
-              const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
-              const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
-              const setCustom = (cls: string, css: string) => {
-                const c = cls.trim();
-                if (!c && !css.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
-                const obj: any = { class: c || (isBorder ? 'cb-custom' : 'ne-custom') };
-                if (css.trim()) obj.css = css;
-                setShopForm({ ...shopForm, style_json: JSON.stringify(obj) });
-              };
-              return (
-                <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 p-3 space-y-2">
-                  <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS {isBorder ? '테두리' : '이름 이펙트'} (직접 작성)</p>
-                  <input
-                    type="text"
-                    placeholder={isBorder ? '적용 클래스명 (예: cb-mydragon)' : '적용 클래스명 (예: ne-rainbow)'}
-                    value={curClass}
-                    onChange={(e) => setCustom(e.target.value, curCss)}
-                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
-                  />
-                  <textarea
-                    rows={6}
-                    placeholder={isBorder
-                      ? '.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'
-                      : '.ne-rainbow { background: linear-gradient(90deg,#f0f,#0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }\n@keyframes ... { }'}
-                    value={curCss}
-                    onChange={(e) => setCustom(curClass, e.target.value)}
-                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] font-mono leading-relaxed"
-                  />
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    {isBorder
-                      ? <>입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.</>
-                      : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
-                    <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
-                  </p>
-                </div>
-              );
-            })()}
-
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground block mb-1">
-                스타일 (CSS JSON · 고급) <span className="font-normal">간단 인라인 예: {`{"borderColor":"#f00","borderWidth":"3px"}`}</span>
-              </label>
-              <textarea rows={2} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
-                onChange={(e) => setShopForm({ ...shopForm, style_json: e.target.value })}
-                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono" />
-            </div>
-
-            {shopForm.type === 'name_effect' && (
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" placeholder="웹폰트 CSS 또는 .woff2 URL (선택)" value={shopForm.font_url}
-                  onChange={(e) => setShopForm({ ...shopForm, font_url: e.target.value })}
-                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-                <input type="text" placeholder="font-family (선택)" value={shopForm.font_family}
-                  onChange={(e) => setShopForm({ ...shopForm, font_family: e.target.value })}
-                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-                <p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">
-                  직접 폰트 파일 URL을 사용할 때는 font-family도 입력하세요. 클래스 기반 효과에도 미리보기와 실제 카드 모두 동일하게 적용됩니다.
-                </p>
-              </div>
-            )}
-
-            {/* 미리보기 */}
-            <div className="flex items-center gap-4 rounded-lg bg-secondary/30 p-4">
-              <span className="text-[11px] font-bold text-muted-foreground">미리보기</span>
-              {shopForm.type === 'border' ? (
-                <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '40px', height: '64px' }}>
-                  <div style={{
-                    width: '224px',
-                    height: '358.4px',
-                    transform: 'scale(calc(40 / 224))',
-                    transformOrigin: 'top left',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    pointerEvents: 'none',
-                    containerType: 'inline-size',
-                    ...(borderClass({ style_json: shopForm.style_json }) ? {} : (parseStyle(shopForm.style_json) || {}))
-                  }}>
-                    <CosmeticFrame border={{ style_json: shopForm.style_json }} />
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start">
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-muted-foreground block mb-1">종류</label>
+                    <select value={shopForm.type} onChange={(e) => setShopForm({ ...shopForm, type: e.target.value as any })}
+                      className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
+                      <option value="border">테두리</option>
+                      <option value="name_effect">이름 이펙트</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-muted-foreground block mb-1">가격 (P)</label>
+                    <input type="number" min={0} value={shopForm.price}
+                      onChange={(e) => setShopForm({ ...shopForm, price: Number(e.target.value) })}
+                      className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
                   </div>
                 </div>
-              ) : (
-                <CosmeticName effect={{ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family }} className="text-lg font-black">
-                  {shopForm.name || '미리보기'}
-                </CosmeticName>
-              )}
+
+                <input type="text" placeholder="아이템 이름" value={shopForm.name}
+                  onChange={(e) => setShopForm({ ...shopForm, name: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                <input type="text" placeholder="설명 (선택)" value={shopForm.description}
+                  onChange={(e) => setShopForm({ ...shopForm, description: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">1인 최대 구매 갯수 (0 = 무제한)</label>
+                  <input type="number" min={0} value={shopForm.purchase_limit}
+                    onChange={(e) => setShopForm({ ...shopForm, purchase_limit: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                </div>
+
+                {/* 커스텀 CSS (테두리/이름 이펙트 공통 · 클래스명 + CSS 코드 전문) */}
+                {(() => {
+                  const isBorder = shopForm.type === 'border';
+                  const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
+                  const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
+                  const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
+                  const setCustom = (cls: string, css: string) => {
+                    const c = cls.trim();
+                    if (!c && !css.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
+                    const obj: any = { class: c || (isBorder ? 'cb-custom' : 'ne-custom') };
+                    if (css.trim()) obj.css = css;
+                    setShopForm({ ...shopForm, style_json: JSON.stringify(obj) });
+                  };
+                  return (
+                    <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 p-3 space-y-2">
+                      <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS {isBorder ? '테두리' : '이름 이펙트'} (직접 작성)</p>
+                      <input
+                        type="text"
+                        placeholder={isBorder ? '적용 클래스명 (예: cb-mydragon)' : '적용 클래스명 (예: ne-rainbow)'}
+                        value={curClass}
+                        onChange={(e) => setCustom(e.target.value, curCss)}
+                        className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
+                      />
+                      <textarea
+                        rows={6}
+                        placeholder={isBorder
+                          ? '.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'
+                          : '.ne-rainbow { background: linear-gradient(90deg,#f0f,#0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }\n@keyframes ... { }'}
+                        value={curCss}
+                        onChange={(e) => setCustom(curClass, e.target.value)}
+                        className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[11px] font-mono leading-relaxed"
+                      />
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        {isBorder
+                          ? <>입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.</>
+                          : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
+                        <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground block mb-1">
+                    스타일 (CSS JSON · 고급) <span className="font-normal">간단 인라인 예: {`{"borderColor":"#f00","borderWidth":"3px"}`}</span>
+                  </label>
+                  <textarea rows={2} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
+                    onChange={(e) => setShopForm({ ...shopForm, style_json: e.target.value })}
+                    className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono" />
+                </div>
+
+                {shopForm.type === 'name_effect' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" placeholder="웹폰트 CSS 또는 .woff2 URL (선택)" value={shopForm.font_url}
+                      onChange={(e) => setShopForm({ ...shopForm, font_url: e.target.value })}
+                      className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                    <input type="text" placeholder="font-family (선택)" value={shopForm.font_family}
+                      onChange={(e) => setShopForm({ ...shopForm, font_family: e.target.value })}
+                      className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
+                    <p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">
+                      직접 폰트 파일 URL을 사용할 때는 font-family도 입력하세요. 클래스 기반 효과에도 미리보기와 실제 카드 모두 동일하게 적용됩니다.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 미리보기 */}
+              <div className="rounded-2xl border border-border/70 bg-gradient-to-br from-secondary/40 via-card to-primary/5 p-4 shadow-inner xl:sticky xl:top-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black text-foreground">큰 미리보기</span>
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {shopForm.type === 'border' ? '테두리' : '이름 효과'}
+                  </span>
+                </div>
+                {shopForm.type === 'border' ? (
+                  <div className="flex justify-center">
+                    <div
+                      className="relative aspect-[5/8] w-[min(180px,100%)] overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-slate-950 via-slate-800 to-primary/30 shadow-lg"
+                      style={{
+                        containerType: 'inline-size',
+                        ...(borderClass({ style_json: shopForm.style_json }) ? {} : (parseStyle(shopForm.style_json) || {}))
+                      }}
+                    >
+                      <div className="absolute inset-[10%] rounded-xl bg-gradient-to-br from-white/20 via-white/5 to-black/20" />
+                      <div className="absolute inset-x-4 bottom-5 space-y-1">
+                        <div className="h-2 rounded-full bg-white/35" />
+                        <div className="h-1.5 w-2/3 rounded-full bg-white/20" />
+                      </div>
+                      <CosmeticFrame border={{ style_json: shopForm.style_json }} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border/70 bg-background/60 px-4 text-center">
+                    <CosmeticName effect={{ style_json: shopForm.style_json, font_url: shopForm.font_url, font_family: shopForm.font_family }} className="text-2xl font-black">
+                      {shopForm.name || '미리보기'}
+                    </CosmeticName>
+                  </div>
+                )}
+                <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+                  실제 카드 비율에 가깝게 보여줍니다. 애니메이션 테두리는 이 영역에서 바로 확인할 수 있습니다.
+                </p>
+              </div>
             </div>
 
             <label className="flex items-center gap-2 text-xs font-bold">

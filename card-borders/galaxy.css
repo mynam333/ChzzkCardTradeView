@@ -1,7 +1,9 @@
 /* ============================================================
-   갤럭시 (Galaxy) — 고리 행성 + 별자리 + 흐르는 성운 + 빛나는 별밭 + 유성
+   갤럭시 아스트랄 오러리 (Galaxy Astral Orrery)
+   - 다중 금속/성운 프레임, 상단 고리 행성, 하단 별자리, 코너 룬 장식
+   - 후경 성운은 가장자리 위주로 유영하며 색상 순환
+   - 전경 별밭은 3D 패럴랙스처럼 미세 회전/표류하고, 비주기적 유성 글린트가 지나감
    적용 클래스: cb-galaxy
-   ▶ 성운/별은 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-galaxy {
   position: absolute;
@@ -10,50 +12,159 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+
+  --galaxy-edge-mask: radial-gradient(84% 75% at 50% 38%, transparent 42%, #000 76%);
+  --galaxy-core-mask: radial-gradient(76% 68% at 50% 43%, transparent 37%, rgba(0,0,0,.55) 62%, #000 88%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  --em: radial-gradient(82% 74% at 50% 36%, transparent 44%, #000 84%);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='gg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23b89cff'/%3E%3Cstop offset='.5' stop-color='%237aa2ff'/%3E%3Cstop offset='1' stop-color='%23ff86c8'/%3E%3C/linearGradient%3E%3CradialGradient id='glow' cx='40%25' cy='38%25' r='65%25'%3E%3Cstop offset='0' stop-color='%23d7c6ff'/%3E%3Cstop offset='.55' stop-color='%237c5cf0'/%3E%3Cstop offset='1' stop-color='%23341a8a'/%3E%3C/radialGradient%3E%3Cfilter id='sg'%3E%3CfeGaussianBlur stdDeviation='.6'/%3E%3C/filter%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23gg)' stroke-width='2.4'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='1' ry='1' fill='none' stroke='%2360a5fa' stroke-width='.8' opacity='.55'/%3E%3Cg transform='translate(84,18)'%3E%3Ccircle r='7' fill='url(%23pl)'/%3E%3Cellipse rx='12' ry='3.4' fill='none' stroke='%23d7c6ff' stroke-width='1' opacity='.85' transform='rotate(-22)'/%3E%3Cellipse rx='12' ry='3.4' fill='none' stroke='%237c5cf0' stroke-width='.6' opacity='.6' transform='rotate(-22)'/%3E%3C/g%3E%3Cg stroke='%23a9c8ff' stroke-width='.4' opacity='.6'%3E%3Cpath d='M12,118 L20,128 L17,140 L27,134'/%3E%3C/g%3E%3Cg fill='%23ffffff' filter='url(%23sg)'%3E%3Ccircle cx='12' cy='118' r='.9'/%3E%3Ccircle cx='20' cy='128' r='.8'/%3E%3Ccircle cx='17' cy='140' r='.7'/%3E%3Ccircle cx='27' cy='134' r='.8'/%3E%3Ccircle cx='80' cy='112' r='.8'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 16px rgba(167,139,250,.55), inset 0 0 14px rgba(96,165,250,.4);
+
+  /* 정교한 프레임: 삼중 유리/금속선 + 행성 + 별자리 + 코너 오러리 룬 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='rim' x1='2' y1='2' x2='98' y2='158' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23f0e7ff'/%3E%3Cstop offset='.18' stop-color='%2397b8ff'/%3E%3Cstop offset='.48' stop-color='%236d5df6'/%3E%3Cstop offset='.72' stop-color='%23ff7ac8'/%3E%3Cstop offset='1' stop-color='%23b9f5ff'/%3E%3C/linearGradient%3E%3ClinearGradient id='inner' x1='100' y1='0' x2='0' y2='160' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%238be9ff'/%3E%3Cstop offset='.5' stop-color='%238a63ff'/%3E%3Cstop offset='1' stop-color='%23ff8bd8'/%3E%3C/linearGradient%3E%3CradialGradient id='planet' cx='38%25' cy='34%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23fff7ff'/%3E%3Cstop offset='.3' stop-color='%23f4a7ff'/%3E%3Cstop offset='.62' stop-color='%236d5df6'/%3E%3Cstop offset='1' stop-color='%231e1b70'/%3E%3C/radialGradient%3E%3CradialGradient id='gem' cx='45%25' cy='38%25' r='64%25'%3E%3Cstop offset='0' stop-color='%23ffffff'/%3E%3Cstop offset='.35' stop-color='%23b9f5ff'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/radialGradient%3E%3Cfilter id='soft'%3E%3CfeGaussianBlur stdDeviation='.55'/%3E%3C/filter%3E%3Cfilter id='spark'%3E%3CfeGaussianBlur stdDeviation='.22'/%3E%3C/filter%3E%3C/defs%3E%3Crect x='1.2' y='1.2' width='97.6' height='157.6' rx='4.2' ry='4.2' fill='none' stroke='%230b102f' stroke-width='2.6' opacity='.78'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23rim)' stroke-width='2.45'/%3E%3Crect x='6.2' y='6.2' width='87.6' height='147.6' rx='.9' ry='.9' fill='none' stroke='url(%23inner)' stroke-width='.9' opacity='.78'/%3E%3Crect x='9.4' y='9.4' width='81.2' height='141.2' rx='.55' ry='.55' fill='none' stroke='%23e9d5ff' stroke-width='.28' opacity='.58' stroke-dasharray='2.4 3.2'/%3E%3Cpath d='M4.7,25.2 C12.4,19.5 17.2,12.2 20.5,4.2 M95.3,25.2 C87.6,19.5 82.8,12.2 79.5,4.2 M4.7,134.8 C12.4,140.5 17.2,147.8 20.5,155.8 M95.3,134.8 C87.6,140.5 82.8,147.8 79.5,155.8' fill='none' stroke='%23c4b5fd' stroke-width='.85' opacity='.78'/%3E%3Cpath d='M8.2,28.7 L15.5,24.4 L17.9,16.4 L22.2,23.8 L30.2,26.1 L22.8,30.4 L20.5,38.4 L16.1,31.1 Z M91.8,28.7 L84.5,24.4 L82.1,16.4 L77.8,23.8 L69.8,26.1 L77.2,30.4 L79.5,38.4 L83.9,31.1 Z M8.2,131.3 L15.5,135.6 L17.9,143.6 L22.2,136.2 L30.2,133.9 L22.8,129.6 L20.5,121.6 L16.1,128.9 Z M91.8,131.3 L84.5,135.6 L82.1,143.6 L77.8,136.2 L69.8,133.9 L77.2,129.6 L79.5,121.6 L83.9,128.9 Z' fill='none' stroke='%2360a5fa' stroke-width='.42' opacity='.76'/%3E%3Cg transform='translate(80.8,20.5)'%3E%3Cellipse rx='17.2' ry='4.1' fill='none' stroke='%23f5d0fe' stroke-width='1.1' opacity='.86' transform='rotate(-21)'/%3E%3Cellipse rx='16.6' ry='3.15' fill='none' stroke='%2367e8f9' stroke-width='.55' opacity='.72' transform='rotate(-21)'/%3E%3Ccircle r='7.1' fill='url(%23planet)'/%3E%3Cpath d='M-5.2,-1.7 C-1.3,-4.8 3.8,-4.5 6.2,-1.1 C2.6,.2 -1.4,.6 -5.2,-1.7 Z' fill='%23ffffff' opacity='.28'/%3E%3Ccircle cx='-2.8' cy='-2.8' r='1' fill='%23fff' opacity='.7'/%3E%3C/g%3E%3Cg stroke='%23bcd7ff' stroke-width='.48' opacity='.68'%3E%3Cpath d='M12.5,116.5 L19.8,126.9 L16.5,139.4 L27.8,132.6 L35.8,143.4'/%3E%3Cpath d='M66.5,113.8 L75.2,121.5 L84.3,118.4 L89,128.2'/%3E%3C/g%3E%3Cg fill='%23ffffff' filter='url(%23spark)'%3E%3Ccircle cx='12.5' cy='116.5' r='.95'/%3E%3Ccircle cx='19.8' cy='126.9' r='.75'/%3E%3Ccircle cx='16.5' cy='139.4' r='.8'/%3E%3Ccircle cx='27.8' cy='132.6' r='.9'/%3E%3Ccircle cx='35.8' cy='143.4' r='.62'/%3E%3Ccircle cx='66.5' cy='113.8' r='.72'/%3E%3Ccircle cx='75.2' cy='121.5' r='.85'/%3E%3Ccircle cx='84.3' cy='118.4' r='.68'/%3E%3Ccircle cx='89' cy='128.2' r='.76'/%3E%3Ccircle cx='13' cy='45' r='.65' opacity='.7'/%3E%3Ccircle cx='88' cy='62' r='.6' opacity='.8'/%3E%3Ccircle cx='53' cy='18' r='.55' opacity='.75'/%3E%3C/g%3E%3Cg opacity='.85'%3E%3Ccircle cx='50' cy='5.8' r='1.75' fill='url(%23gem)'/%3E%3Ccircle cx='50' cy='154.2' r='1.75' fill='url(%23gem)'/%3E%3Ccircle cx='5.8' cy='80' r='1.25' fill='url(%23gem)'/%3E%3Ccircle cx='94.2' cy='80' r='1.25' fill='url(%23gem)'/%3E%3C/g%3E%3Cpath d='M50,10.5 C54,20 54,31 50,39.5 C46,31 46,20 50,10.5 Z M50,149.5 C54,140 54,129 50,120.5 C46,129 46,140 50,149.5 Z' fill='none' stroke='%23f0abfc' stroke-width='.38' opacity='.65'/%3E%3C/svg%3E");
+
+  box-shadow:
+    0 0 18px rgba(129, 140, 248, .52),
+    0 0 30px rgba(236, 72, 153, .22),
+    inset 0 0 18px rgba(15, 23, 42, .55),
+    inset 0 0 9px rgba(125, 211, 252, .36);
+  animation: galaxy-aurora-breath 5.8s ease-in-out infinite;
 }
-/* 성운 (떠다니며 색 순환) */
+
+/* 후경 성운: 가장자리 위주로 번지는 색상층 + 블랙홀 렌즈감 */
 .cb-galaxy::before {
   content: "";
   position: absolute;
-  inset: -12%;
+  inset: -18%;
   pointer-events: none;
+  -webkit-mask: var(--galaxy-core-mask);
+  mask: var(--galaxy-core-mask);
   mix-blend-mode: screen;
-  -webkit-mask: var(--em); mask: var(--em);
+  background-repeat: no-repeat;
   background-image:
-    radial-gradient(58px 84px at 16% 22%, rgba(167,139,250,.5), transparent 70%),
-    radial-gradient(72px 80px at 86% 80%, rgba(56,189,248,.42), transparent 70%),
-    radial-gradient(52px 60px at 80% 16%, rgba(236,72,153,.36), transparent 70%),
-    radial-gradient(46px 66px at 22% 80%, rgba(124,92,240,.34), transparent 72%);
-  animation: galaxy-drift 18s ease-in-out infinite alternate, galaxy-hue 11s linear infinite;
+    radial-gradient(72px 108px at 14% 18%, rgba(168, 85, 247, .58), transparent 70%),
+    radial-gradient(94px 112px at 94% 76%, rgba(34, 211, 238, .48), transparent 72%),
+    radial-gradient(74px 86px at 82% 13%, rgba(244, 114, 182, .42), transparent 72%),
+    radial-gradient(82px 128px at 18% 88%, rgba(79, 70, 229, .42), transparent 74%),
+    conic-gradient(from 220deg at 50% 48%, transparent 0deg, rgba(125, 211, 252, .16) 46deg, transparent 92deg, rgba(217, 70, 239, .15) 152deg, transparent 226deg, rgba(99, 102, 241, .18) 292deg, transparent 360deg);
+  filter: saturate(1.35) brightness(1.04);
+  transform-origin: 51% 47%;
+  animation: galaxy-nebula-orbit 19s cubic-bezier(.45,.05,.55,.95) infinite, galaxy-nebula-hue 14s linear infinite;
 }
-/* 별밭 (미세 흐름 + 깜빡임) */
+
+/* 전경 별밭 + 유성: 작은 별은 가장자리 밀도 높게, 유성은 비스듬히 짧게 통과 */
 .cb-galaxy::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-repeat: repeat;
-  background-size: 100% 200px;
+  -webkit-mask: var(--galaxy-edge-mask);
+  mask: var(--galaxy-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat:
+    repeat, repeat, repeat, repeat, repeat, repeat,
+    repeat, repeat, repeat, repeat, repeat, repeat,
+    no-repeat, no-repeat;
+  background-size:
+    100% 160px, 100% 190px, 100% 160px, 100% 190px, 100% 160px, 100% 190px,
+    100% 160px, 100% 190px, 100% 160px, 100% 190px, 100% 160px, 100% 190px,
+    190% 190%, 100% 100%;
+  background-position:
+    0 0, 0 14px, 0 2px, 0 29px, 0 5px, 0 21px,
+    0 0, 0 9px, 0 0, 0 18px, 0 7px, 0 31px,
+    -130% -80%, center;
   background-image:
-    radial-gradient(1.9px 1.9px at 22px 26px, #fff, transparent 60%),
-    radial-gradient(1.3px 1.3px at 70px 60px, #fff, transparent 60%),
-    radial-gradient(2.3px 2.3px at 46px 112px, #fff, transparent 60%),
-    radial-gradient(1.4px 1.4px at 90px 88px, #cfe3ff, transparent 60%),
-    radial-gradient(1.7px 1.7px at 32px 156px, #fff, transparent 60%),
-    radial-gradient(1.2px 1.2px at 60px 182px, #e7d6ff, transparent 60%);
-  animation: galaxy-starfall 26s linear infinite, galaxy-twinkle 2.8s ease-in-out infinite;
+    radial-gradient(1.6px 1.6px at 12px 13px, rgba(255,255,255,.95), transparent 62%),
+    radial-gradient(1.1px 1.1px at 36px 31px, rgba(191,219,254,.86), transparent 62%),
+    radial-gradient(1.9px 1.9px at 83px 44px, rgba(255,255,255,.9), transparent 63%),
+    radial-gradient(1.2px 1.2px at 18px 82px, rgba(233,213,255,.9), transparent 62%),
+    radial-gradient(2.1px 2.1px at 68px 105px, rgba(255,255,255,.85), transparent 62%),
+    radial-gradient(1px 1px at 91px 137px, rgba(186,230,253,.86), transparent 62%),
+    radial-gradient(1.4px 1.4px at 42px 151px, rgba(255,255,255,.78), transparent 62%),
+    radial-gradient(1px 1px at 75px 169px, rgba(245,208,254,.82), transparent 62%),
+    radial-gradient(1.1px 1.1px at 28px 22px, rgba(255,255,255,.72), transparent 62%),
+    radial-gradient(1.4px 1.4px at 58px 67px, rgba(191,219,254,.78), transparent 62%),
+    radial-gradient(1px 1px at 8px 111px, rgba(255,255,255,.68), transparent 62%),
+    radial-gradient(1.7px 1.7px at 94px 150px, rgba(233,213,255,.74), transparent 62%),
+    linear-gradient(118deg, transparent 0 42%, rgba(186,230,253,0) 46%, rgba(255,255,255,.95) 49%, rgba(244,114,182,.65) 50.5%, rgba(59,130,246,.18) 53%, transparent 58%),
+    radial-gradient(45px 62px at 50% 6%, rgba(255,255,255,.12), transparent 70%);
+  opacity: .86;
+  transform-origin: 50% 50%;
+  animation: galaxy-stellar-parallax 17s linear infinite, galaxy-star-twinkle 3.4s ease-in-out infinite;
 }
-@keyframes galaxy-drift { from { transform: translate(-3%, -2%); } to { transform: translate(3%, 2%); } }
-@keyframes galaxy-hue { to { filter: hue-rotate(360deg); } }
-@keyframes galaxy-starfall { from { background-position-y: 0; } to { background-position-y: 200px; } }
-@keyframes galaxy-twinkle { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+
+@keyframes galaxy-aurora-breath {
+  0%, 100% {
+    filter: brightness(1) saturate(1.05) drop-shadow(0 0 2px rgba(125, 211, 252, .28));
+  }
+  45% {
+    filter: brightness(1.12) saturate(1.28) drop-shadow(0 0 8px rgba(217, 70, 239, .48));
+  }
+  72% {
+    filter: brightness(1.06) saturate(1.16) drop-shadow(0 0 5px rgba(96, 165, 250, .42));
+  }
+}
+
+@keyframes galaxy-nebula-orbit {
+  0% {
+    transform: perspective(520px) rotateX(2deg) rotateY(-4deg) rotateZ(0deg) translate3d(-2%, -1%, 0);
+  }
+  34% {
+    transform: perspective(520px) rotateX(-3deg) rotateY(8deg) rotateZ(2.2deg) translate3d(2.4%, -2.8%, 8px);
+  }
+  67% {
+    transform: perspective(520px) rotateX(4deg) rotateY(3deg) rotateZ(-1.4deg) translate3d(1.2%, 2.6%, 4px);
+  }
+  100% {
+    transform: perspective(520px) rotateX(2deg) rotateY(-4deg) rotateZ(0deg) translate3d(-2%, -1%, 0);
+  }
+}
+
+@keyframes galaxy-nebula-hue {
+  to { filter: hue-rotate(360deg) saturate(1.35) brightness(1.04); }
+}
+
+@keyframes galaxy-stellar-parallax {
+  0% {
+    background-position:
+      0 0, 0 14px, 0 2px, 0 29px, 0 5px, 0 21px,
+      0 0, 0 9px, 0 0, 0 18px, 0 7px, 0 31px,
+      -130% -80%, center;
+    transform: perspective(480px) rotateX(1.8deg) rotateY(-2.4deg) translateX(-3px);
+  }
+  50% {
+    background-position:
+      0 80px, 0 109px, 0 82px, 0 124px, 0 85px, 0 116px,
+      0 80px, 0 104px, 0 80px, 0 113px, 0 87px, 0 126px,
+      -130% -80%, center;
+    transform: perspective(480px) rotateX(-2.2deg) rotateY(4.2deg) translateX(3px);
+  }
+  66% {
+    background-position:
+      0 106px, 0 139px, 0 108px, 0 154px, 0 111px, 0 146px,
+      0 106px, 0 134px, 0 106px, 0 143px, 0 113px, 0 156px,
+      130% 170%, center;
+    transform: perspective(480px) rotateX(-1deg) rotateY(5.2deg) translateX(4px);
+  }
+  100% {
+    background-position:
+      0 160px, 0 204px, 0 162px, 0 219px, 0 165px, 0 211px,
+      0 160px, 0 199px, 0 160px, 0 208px, 0 167px, 0 221px,
+      -130% -80%, center;
+    transform: perspective(480px) rotateX(1.8deg) rotateY(-2.4deg) translateX(-3px);
+  }
+}
+
+@keyframes galaxy-star-twinkle {
+  0%, 100% { opacity: .58; }
+  38% { opacity: .98; }
+  61% { opacity: .74; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-galaxy::before, .cb-galaxy::after { animation: none; }
+  .cb-galaxy,
+  .cb-galaxy::before,
+  .cb-galaxy::after {
+    animation: none;
+  }
 }

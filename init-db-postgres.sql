@@ -1347,12 +1347,13 @@ BEGIN
   END IF;
 
   current_amount := COALESCE(listing.current_bid, listing.starting_bid, listing.price, 0);
-  IF p_amount < current_amount + 100 THEN
+  current_reserved := COALESCE(listing.bid_reserved, 0);
+  previous_bidder := listing.current_bidder_id;
+
+  IF p_amount < CASE WHEN previous_bidder IS NOT NULL AND current_reserved > 0 THEN current_amount + 100 ELSE current_amount END THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
   END IF;
 
-  current_reserved := COALESCE(listing.bid_reserved, 0);
-  previous_bidder := listing.current_bidder_id;
   IF previous_bidder = p_bidder_id AND current_reserved > 0 THEN
     payable_now := p_amount - current_reserved;
   ELSE

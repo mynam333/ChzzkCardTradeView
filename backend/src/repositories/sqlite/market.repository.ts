@@ -472,11 +472,12 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (listing.seller_id === bidderId) throw new Error('CANNOT_BID_OWN_ITEM');
       if (listing.auction_ends_at && new Date(listing.auction_ends_at).getTime() <= Date.now()) throw new Error('AUCTION_ENDED');
       const currentBid = Number(listing.current_bid || listing.starting_bid || 0);
-      const minBid = currentBid + 100;
+      const currentReserved = Number(listing.bid_reserved || 0);
+      const hasActiveBid = Boolean(listing.current_bidder_id) && currentReserved > 0;
+      const minBid = hasActiveBid ? currentBid + 100 : currentBid;
       if (amount < minBid) throw new Error('BID_TOO_LOW');
       const bidder = db.prepare('SELECT point FROM users WHERE id = ?').get(bidderId) as any;
       if (!bidder) throw new Error('BIDDER_NOT_FOUND');
-      const currentReserved = Number(listing.bid_reserved || 0);
       const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
       const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
       if (payableNow <= 0) throw new Error('BID_TOO_LOW');

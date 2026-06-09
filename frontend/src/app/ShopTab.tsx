@@ -596,7 +596,9 @@ export const ShopTab: React.FC = () => {
       return;
     }
     const amount = Math.floor(Number(bidInputs[listing.id]));
-    const minBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0) + 100;
+    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
+    const hasActiveBid = Boolean(listing.current_bidder_id);
+    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
     if (!Number.isFinite(amount) || amount < minBid) {
       toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
       return;
@@ -1384,7 +1386,8 @@ export const ShopTab: React.FC = () => {
                     const isAuction = listing.listing_type === 'auction';
                     const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
                     const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
-                    const minBid = currentBid + 100;
+                    const hasActiveBid = Boolean(listing.current_bidder_id);
+                    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
                     const endsAt = listing.auction_ends_at ? new Date(listing.auction_ends_at) : null;
                     const remainingMs = endsAt ? endsAt.getTime() - nowTs : 0;
                     const isEnded = !!endsAt && remainingMs <= 0;

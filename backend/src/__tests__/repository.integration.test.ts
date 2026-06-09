@@ -434,15 +434,15 @@ describe('MarketRepository 재등록 제약', () => {
       fee_rate: 5
     });
 
-    expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-a', 1500)).toMatchObject({
+    expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-a', 1000)).toMatchObject({
       ok: true,
       reason: 'OK'
     });
-    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 3500 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 4000 });
     expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
       current_bidder_id: 'auction-bidder-a',
-      current_bid: 1500,
-      bid_reserved: 1500
+      current_bid: 1000,
+      bid_reserved: 1000
     });
 
     expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-b', 2000)).toMatchObject({

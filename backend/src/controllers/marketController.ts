@@ -365,7 +365,7 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       NOT_FOUND_OR_NOT_AUCTION: '진행 중인 경매 매물을 찾을 수 없습니다.',
       CANNOT_BID_OWN_ITEM: '본인의 경매에는 입찰할 수 없습니다.',
       AUCTION_ENDED: '이미 종료된 경매입니다.',
-      BID_TOO_LOW: '현재가보다 100P 이상 높은 금액으로 입찰해 주세요.',
+      BID_TOO_LOW: '입찰자가 없으면 현재가부터, 이후에는 현재가보다 100P 이상 높은 금액으로 입찰해 주세요.',
       INSUFFICIENT_POINT: '보유 포인트가 부족합니다.'
     };
     return res.status(400).json({ error: result.reason, message: messageMap[result.reason] || '입찰에 실패했습니다.' });

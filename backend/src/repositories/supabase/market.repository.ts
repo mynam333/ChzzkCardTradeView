@@ -500,14 +500,16 @@ export class SupabaseMarketRepository implements IMarketRepository {
     }
 
     const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
-    if (amount < currentBid + 100) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
+    const currentReserved = Number(listing.bid_reserved || 0);
+    const hasActiveBid = Boolean(listing.current_bidder_id) && currentReserved > 0;
+    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
+    if (amount < minBid) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
 
     const { data: bidder, error: bidderError } = await this.getClient()
       .from('users')
       .select('point')
       .eq('id', bidderId)
       .maybeSingle();
-    const currentReserved = Number(listing.bid_reserved || 0);
     const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
     const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
     if (payableNow <= 0) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
