@@ -382,9 +382,10 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       return;
     }
     fetchNotifications();
+    const fallbackMs = typeof EventSource === 'undefined' ? 120_000 : 600_000;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') fetchNotifications();
-    }, 120_000);
+    }, fallbackMs);
     return () => clearInterval(timer);
   }, [user?.id]);
 
@@ -539,10 +540,56 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   };
 
   useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+
+    const source = new EventSource(`${API_BASE_URL}/realtime/stream`, { withCredentials: true });
+
+    const handleMaintenance = (event: MessageEvent<string>) => {
+      try {
+        const data = JSON.parse(event.data) as {
+          active?: boolean;
+          startAt?: string | null;
+          endAt?: string | null;
+        };
+        setMaintenanceActive(!!data.active);
+        setMaintenanceStartAt(data.startAt || null);
+        setMaintenanceEndAt(data.endAt || null);
+      } catch (err) {
+        console.error('[AppContext] 점검 스트림 파싱 실패:', err);
+      }
+    };
+
+    const relayEvent = (name: 'ranking' | 'market') => (event: MessageEvent<string>) => {
+      let detail: unknown = null;
+      try {
+        detail = JSON.parse(event.data);
+      } catch {
+        detail = null;
+      }
+      window.dispatchEvent(new CustomEvent(`chikapo:${name}-updated`, { detail }));
+    };
+
+    const handleRanking = relayEvent('ranking');
+    const handleMarket = relayEvent('market');
+
+    source.addEventListener('maintenance', handleMaintenance as EventListener);
+    source.addEventListener('ranking', handleRanking as EventListener);
+    source.addEventListener('market', handleMarket as EventListener);
+
+    return () => {
+      source.removeEventListener('maintenance', handleMaintenance as EventListener);
+      source.removeEventListener('ranking', handleRanking as EventListener);
+      source.removeEventListener('market', handleMarket as EventListener);
+      source.close();
+    };
+  }, []);
+
+  useEffect(() => {
     checkMaintenanceStatus();
+    const fallbackMs = typeof EventSource === 'undefined' ? 30_000 : 300_000;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') checkMaintenanceStatus();
-    }, 30_000);
+    }, fallbackMs);
     return () => clearInterval(timer);
   }, []);
 

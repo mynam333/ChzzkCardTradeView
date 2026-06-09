@@ -5,6 +5,8 @@ import type { Streamer, StreamerScheduleResult } from '../repositories/interface
 import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
+import { publishRealtimeEvent } from '../services/realtimeStream';
+import { clearRankingCaches } from '../controllers/playController';
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
 const SCHEDULE_INTERVAL_MINUTES = 2;
@@ -137,10 +139,13 @@ const PRUNE_EVERY_CYCLES = 30;          // 약 1시간마다 시세 이력 정�
 const VALUE_HISTORY_RETENTION_DAYS = 7; // 7일 초과 시세 이력 삭제
 const POLL_JITTER_MS = 30;              // 호출 버스트 완화용 소량 지터(ms)
 const INACTIVE_STREAMER_PRUNE_DAYS = 90;
+const POLL_FAILURE_BACKOFF_BASE_MS = 2 * 60 * 1000;
+const POLL_FAILURE_BACKOFF_MAX_MS = 30 * 60 * 1000;
 
 // 이전 주기가 끝나기 전 다음 크론이 겹쳐 실행되는 것을 막는 가드(오버랩 방지)
 let isSyncRunning = false;
 let scheduleCycle = 0;
+const pollFailures = new Map<string, { count: number; until: number }>();
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -149,6 +154,24 @@ const shardOf = (channelId: string, shards: number): number => {
   let h = 0;
   for (let i = 0; i < channelId.length; i++) h = (h * 31 + channelId.charCodeAt(i)) >>> 0;
   return h % shards;
+};
+
+const isPollingBackedOff = (channelId: string, now: number) => {
+  const failure = pollFailures.get(channelId);
+  if (!failure) return false;
+  if (failure.until <= now) return false;
+  return true;
+};
+
+const clearPollingFailure = (channelId: string) => {
+  pollFailures.delete(channelId);
+};
+
+const registerPollingFailure = (channelId: string) => {
+  const prev = pollFailures.get(channelId);
+  const count = Math.min((prev?.count || 0) + 1, 8);
+  const delay = Math.min(POLL_FAILURE_BACKOFF_BASE_MS * (2 ** (count - 1)), POLL_FAILURE_BACKOFF_MAX_MS);
+  pollFailures.set(channelId, { count, until: Date.now() + delay });
 };
 
 /**
@@ -292,8 +315,10 @@ export const syncAllStreamersLiveStatus = async () => {
     const pollTargets: Streamer[] = [];
     const computeOnly: Streamer[] = [];
     const activeShard = cycle % OFFLINE_POLL_SHARDS;
+    const nowMs = Date.now();
     for (const s of streamers) {
-      const shouldPoll = s.is_active || shardOf(s.channel_id, OFFLINE_POLL_SHARDS) === activeShard;
+      const shouldPoll = (s.is_active || shardOf(s.channel_id, OFFLINE_POLL_SHARDS) === activeShard)
+        && !isPollingBackedOff(s.channel_id, nowMs);
       if (shouldPoll) pollTargets.push(s);
       else computeOnly.push(s);
     }
@@ -315,6 +340,7 @@ export const syncAllStreamersLiveStatus = async () => {
         const streamer = pollTargets[cursor++];
         try {
           const profile = await fetchChzzkChannelProfile(streamer.channel_id);
+          clearPollingFailure(streamer.channel_id);
 
           // 채팅 수집 소켓 연결/해제 관리 (방송 켬 트랜지션은 결과의 add_broadcast_count로 일괄 반영)
           if (profile.openLive && profile.chatChannelId) {
@@ -338,6 +364,7 @@ export const syncAllStreamersLiveStatus = async () => {
             pruneTargets.push({ streamer, lastLiveAt: new Date().toISOString(), reason: 'not_found' });
             continue;
           }
+          registerPollingFailure(streamer.channel_id);
           failCount++;
           console.error(`[LiveStatusScheduler] 스트리머 폴링 실패 (ID: ${streamer.channel_id}):`, err.message);
         }
@@ -352,6 +379,13 @@ export const syncAllStreamersLiveStatus = async () => {
     // 4) DB 일괄 반영 (단일 트랜잭션/RPC로 왕복 최소화)
     await streamerRepository.bulkApplyScheduleResults(results);
     await streamerRepository.bulkRecordValueHistory(historyPoints);
+    clearRankingCaches();
+    publishRealtimeEvent('ranking', {
+      reason: 'streamer_sync',
+      streamers: streamers.length,
+      polled: pollTargets.length,
+      live: liveCount
+    });
     for (const target of pruneTargets) {
       await rewardHoldersAndDeleteStreamer(target.streamer, target.reason || 'inactive', target.lastLiveAt).catch((err: any) => {
         console.error(`[LiveStatusScheduler] 장기 미방송 스트리머 정리 실패 (${target.streamer.channel_id}):`, err.message);

@@ -332,9 +332,8 @@ export const getUserProfile = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
-    const requesterId = (req as any).user?.id;
     const allCards = await userCardRepository.findByUserId(user_id);
-    const cards = requesterId === user_id ? allCards : allCards.filter((card: any) => !card.is_hidden);
+    const cards = allCards.filter((card: any) => !card.is_hidden);
 
     // 채널+별 등급별 묶음 + 총 자산 계산
     const map: { [key: string]: any } = {};
@@ -420,6 +419,11 @@ const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
   rankingPoolCache.clear();
+};
+
+export const clearRankingCaches = () => {
+  clearUserRankingCaches();
+  streamerRankingsCache.clear();
 };
 
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.

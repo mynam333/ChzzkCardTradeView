@@ -15,6 +15,7 @@ import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
 import { deleteLocalUploadByUrl } from '../services/imageService';
 import { clearUserRankingCaches } from './playController';
+import { publishRealtimeEvent } from '../services/realtimeStream';
 
 /**
  * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 추가 무료 소환 티켓 보상 지급
@@ -657,6 +658,10 @@ export const setMaintenanceStatus = async (req: Request, res: Response) => {
   }
 
   try {
+    const currentActive = await systemConfigRepository.get('maintenance_active', 'false');
+    const currentStartAt = await systemConfigRepository.get('maintenance_start_at', '');
+    const currentEndAt = await systemConfigRepository.get('maintenance_end_at', '');
+
     if (active !== undefined) {
       await systemConfigRepository.set('maintenance_active', active ? 'true' : 'false');
     }
@@ -667,11 +672,16 @@ export const setMaintenanceStatus = async (req: Request, res: Response) => {
       await systemConfigRepository.set('maintenance_end_at', endAt || '');
     }
 
+    const nextState = {
+      active: active !== undefined ? active : currentActive === 'true',
+      startAt: startAt !== undefined ? (startAt || null) : (currentStartAt || null),
+      endAt: endAt !== undefined ? (endAt || null) : (currentEndAt || null)
+    };
+    publishRealtimeEvent('maintenance', nextState);
+
     return res.status(200).json({
       message: '점검 설정이 성공적으로 저장되었습니다.',
-      active: active ?? false,
-      startAt: startAt || null,
-      endAt: endAt || null
+      ...nextState
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '점검 설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });

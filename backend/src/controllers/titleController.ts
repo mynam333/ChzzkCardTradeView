@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { notificationRepository, titleRepository, userRepository } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
+import { minifyCss } from '../utils/css';
 
 const parseTitleId = (value: unknown): number => {
   const id = Number(value);
@@ -11,7 +12,7 @@ const parseTitleId = (value: unknown): number => {
 const normalizePayload = (body: any) => {
   const name = String(body?.name || '').trim();
   const description = String(body?.description || '').trim();
-  const css = String(body?.css || '').trim();
+  const css = minifyCss(String(body?.css || '').trim());
   const iconName = String(body?.icon_name || '').trim();
   const iconColor = String(body?.icon_color || '#ffffff').trim();
 

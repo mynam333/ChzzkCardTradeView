@@ -14,6 +14,7 @@ import {
   userCardRepository,
   userRepository
 } from '../repositories';
+import { getUserProfile } from '../controllers/playController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 
 /**
@@ -33,6 +34,22 @@ const seedUser = (db: Database.Database, id: string, point = 0) => {
 const seedStreamer = (db: Database.Database, channelId: string, name: string) => {
   db.prepare("INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active) VALUES (?, ?, ?, 1000, 0, 1000, 0)")
     .run(channelId, name, 'https://example.com/logo.png');
+};
+
+const createJsonResponse = () => {
+  const res: any = {
+    statusCode: 0,
+    body: undefined,
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body: unknown) {
+      this.body = body;
+      return this;
+    }
+  };
+  return res;
 };
 
 let db: Database.Database;
@@ -302,6 +319,37 @@ describe('UserCardRepository 별 등급 분리', () => {
       { serial_number: 1, star: 4 },
       { serial_number: 2, star: 3 }
     ]);
+  });
+});
+
+describe('User profile hidden cards', () => {
+  it('본인 프로필에서도 숨김 카드는 통계, 컬렉션, 대표 카드 후보에서 제외된다', async () => {
+    seedUser(db, 'profile-user', 100);
+    seedStreamer(db, 'visible-channel', '공개 스트리머');
+    seedStreamer(db, 'hidden-channel', '숨김 스트리머');
+    db.prepare("UPDATE streamers SET base_value = 5000 WHERE channel_id = 'visible-channel'").run();
+    db.prepare("UPDATE streamers SET base_value = 9000 WHERE channel_id = 'hidden-channel'").run();
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, is_hidden)
+      VALUES ('profile-user', 'visible-channel', 1, 0, 0),
+             ('profile-user', 'hidden-channel', 1, 0, 1)
+    `).run();
+    await userRepository.updateRepresentativeCard('profile-user', 'hidden-channel', 0);
+
+    const req: any = { params: { user_id: 'profile-user' }, user: { id: 'profile-user' } };
+    const res = createJsonResponse();
+    await getUserProfile(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.card_count).toBe(1);
+    expect(res.body.unique_count).toBe(1);
+    expect(res.body.total_asset).toBe(5100);
+    expect(res.body.collection).toEqual([
+      expect.objectContaining({ channel_id: 'visible-channel' })
+    ]);
+    expect(res.body.representative_card).toEqual(expect.objectContaining({
+      channel_id: 'visible-channel'
+    }));
   });
 });
 

@@ -95,11 +95,23 @@ export const RankingTab: React.FC = () => {
 
   useEffect(() => {
     fetchRankings();
-    // 랭킹 집계는 서버 부담이 큰 편이라 60초 단위로 조용히 갱신하고, 백그라운드 탭에서는 쉬어갑니다.
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => fetchRankings(true), 500);
+    };
+    window.addEventListener('chikapo:ranking-updated', scheduleRefresh);
+    // 스트림이 끊긴 환경을 위한 느린 fallback입니다.
+    const fallbackMs = typeof EventSource === 'undefined' ? 60_000 : 300_000;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') fetchRankings(true);
-    }, 60_000);
-    return () => clearInterval(timer);
+    }, fallbackMs);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:ranking-updated', scheduleRefresh);
+      clearInterval(timer);
+    };
   }, [subTab, serverSearchQuery, cardFilterChannelId, cardFilterStar]);
 
   useEffect(() => {

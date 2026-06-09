@@ -30,11 +30,23 @@ export const MainTab: React.FC = () => {
     setMounted(true);
     fetchNotices();
     fetchHotStreamers();
-    // 메인 요약은 실시간성이 낮아 60초 단위로만 조용히 갱신합니다.
+    let refreshTimer: number | null = null;
+    const scheduleHotStreamerRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => fetchHotStreamers(), 500);
+    };
+    window.addEventListener('chikapo:ranking-updated', scheduleHotStreamerRefresh);
+    // 스트림이 끊긴 환경을 위한 느린 fallback입니다.
+    const fallbackMs = typeof EventSource === 'undefined' ? 60_000 : 300_000;
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') fetchHotStreamers();
-    }, 60_000);
-    return () => clearInterval(timer);
+    }, fallbackMs);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:ranking-updated', scheduleHotStreamerRefresh);
+      clearInterval(timer);
+    };
   }, []);
 
   const fetchNotices = async () => {

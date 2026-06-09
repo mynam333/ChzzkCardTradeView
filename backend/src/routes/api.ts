@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { subscribeRealtimeStream } from '../services/realtimeStream';
 import { authMiddleware } from '../middlewares/auth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
@@ -188,6 +189,10 @@ router.get('/health', (req, res) => {
     message: '치카포 백엔드 API가 정상 작동 중입니다.',
     timestamp: new Date().toISOString()
   });
+});
+
+router.get('/realtime/stream', (req, res) => {
+  subscribeRealtimeStream(res, req.query.topics);
 });
 
 // ==========================================

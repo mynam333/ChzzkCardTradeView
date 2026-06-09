@@ -11,6 +11,7 @@ import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 import { startStreamerLiveStatusScheduler } from './cron/streamerScheduler';
+import { startMarketSettlementScheduler } from './cron/marketScheduler';
 import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
 import { rateLimit } from './middlewares/rateLimit';
@@ -110,6 +111,7 @@ const startServer = async () => {
     await initDatabaseConnection();
     initRepositories(); // 레포지토리 초기화 추가
     startPushNotificationScheduler(); // PWA 푸시 알림 예약 크론 가동
+    startMarketSettlementScheduler(); // 오픈마켓 만료 경매 정산 크론 가동
     startStreamerLiveStatusScheduler(); // 치지직 실시간 방송 상태 폴링 크론 가동
 
     const useHttps = process.env.USE_HTTPS === 'true';

@@ -5,6 +5,8 @@ import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
 import { createRealtimeNotification } from './notificationController';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
+import { publishRealtimeEvent } from '../services/realtimeStream';
+import { clearUserRankingCaches } from './playController';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 
@@ -18,6 +20,15 @@ const notify = (
   const pushUrl = target === 'shop:market' ? '/shop?tab=market' : '/inventory';
   sendPushToUser(userId, title, body, pushUrl);
   createRealtimeNotification({ user_id: userId, title, body, link: target }).catch(() => { /* 무시 */ });
+};
+
+const publishMarketUpdated = (reason: string, listingId?: number) => {
+  publishRealtimeEvent('market', { reason, listingId });
+};
+
+const publishRankingUpdated = (reason: string) => {
+  clearUserRankingCaches();
+  publishRealtimeEvent('ranking', { reason });
 };
 
 /**
@@ -140,6 +151,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       fee_rate: feeRate
     });
     await notifyMatchingWatches(listing);
+    publishMarketUpdated('listing_created', listing.id);
 
     return res.json({ ok: true, listing });
   } catch (err: any) {
@@ -178,6 +190,7 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     await marketRepository.updateStatus(id, 'CANCELLED');
+    publishMarketUpdated('listing_cancelled', id);
     return res.json({ ok: true });
   } catch (err: any) {
     console.error('[MarketController] cancelListing 에러:', err);
@@ -275,6 +288,8 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
     const title = '[오픈마켓] 카드 판매 완료';
     const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${price}P에서 수수료 ${feeRate}%를 제한 ${settledAmount}P가 계정으로 정산되었습니다.`;
     notify(listing.seller_id, title, body);
+    publishMarketUpdated('listing_purchased', id);
+    publishRankingUpdated('market_purchase');
 
     return res.json({ ok: true, settledAmount });
   } catch (err: any) {
@@ -314,6 +329,7 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       'shop:market'
     );
   }
+  publishMarketUpdated('auction_bid', id);
   return res.status(200).json(result);
 };
 
@@ -374,7 +390,7 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-const settleExpiredAuctions = async () => {
+export const settleExpiredAuctions = async () => {
   const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
   for (const listing of soldListings) {
     const streamerName = listing.card?.streamer?.name || '스트리머';
@@ -384,6 +400,10 @@ const settleExpiredAuctions = async () => {
     if (listing.buyer_id) {
       notify(listing.buyer_id, '[오픈마켓] 경매 낙찰', `[${streamerName}] ${star}성 카드 경매에 낙찰되어 카드가 보관함으로 이동했습니다.`);
     }
+  }
+  if (soldListings.length > 0) {
+    publishMarketUpdated('auction_settled');
+    publishRankingUpdated('auction_settled');
   }
 };
 

@@ -342,11 +342,23 @@ export const ShopTab: React.FC = () => {
 
   useEffect(() => {
     if (subTab !== 'market') return;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => fetchMarketListings(true), 400);
+    };
+    window.addEventListener('chikapo:market-updated', scheduleRefresh);
+    const fallbackMs = typeof EventSource === 'undefined' ? 15_000 : 120_000;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      fetchMarketListings(true); // 백그라운드 폴링: 로딩 표시 없이 변경분만 반영
-    }, 15_000);
-    return () => window.clearInterval(timer);
+      fetchMarketListings(true); // 스트림이 끊긴 환경을 위한 fallback
+    }, fallbackMs);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:market-updated', scheduleRefresh);
+      window.clearInterval(timer);
+    };
   }, [subTab, marketPage, marketSort, marketType, marketSearch, user?.id]);
 
   useEffect(() => {
@@ -366,6 +378,21 @@ export const ShopTab: React.FC = () => {
     }
   }, [subTab, user]);
 
+  useEffect(() => {
+    if (subTab !== 'my_listings' || !user) return;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => fetchMyListings(), 500);
+    };
+    window.addEventListener('chikapo:market-updated', scheduleRefresh);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:market-updated', scheduleRefresh);
+    };
+  }, [subTab, user?.id]);
+
   // 탭 진입 / 유저 변경 / 범위(전체·내거래) 변경 시에만 스켈레톤과 함께 로드.
   // (deps를 user 객체가 아닌 user?.id로 두어 10초마다의 user 갱신으로 재로딩되지 않게 함)
   useEffect(() => {
@@ -379,10 +406,22 @@ export const ShopTab: React.FC = () => {
   // 거래 이력 백그라운드 폴링: 실시간성이 낮아 60초로 제한하고 숨겨진 탭에서는 멈춥니다.
   useEffect(() => {
     if (subTab !== 'history' || !user) return;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => fetchMarketHistory(true), 500);
+    };
+    window.addEventListener('chikapo:market-updated', scheduleRefresh);
+    const fallbackMs = typeof EventSource === 'undefined' ? 60_000 : 300_000;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') fetchMarketHistory(true);
-    }, 60_000);
-    return () => window.clearInterval(timer);
+    }, fallbackMs);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:market-updated', scheduleRefresh);
+      window.clearInterval(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subTab, user?.id, historyScope]);
 

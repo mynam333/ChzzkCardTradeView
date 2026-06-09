@@ -2,36 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import * as shop from '../services/shopService';
-
-/**
- * CSS 코드를 압축합니다 (주석 제거, 연속 공백/줄바꿈 축소).
- * 단, SVG data URI가 포함된 url(...) 부분은 손상되지 않도록 보호합니다.
- */
-const minifyCss = (css: string): string => {
-  // 1. 주석 제거
-  let minified = css.replace(/\/\*[\s\S]*?\*\//g, '');
-  
-  // 2. url() 패턴 보호 (특히 Base64 인코딩이나 SVG data URI가 포함된 곳)
-  const urls: string[] = [];
-  minified = minified.replace(/url\((['"]?)(data:[\w+\/]+;base64,[\s\S]*?|data:image\/svg\+xml[\s\S]*?)\1\)/gi, (match) => {
-    urls.push(match);
-    return `___URL_PLACEHOLDER_${urls.length - 1}___`;
-  });
-
-  // 3. url 외 영역 공백 및 줄바꿈 압축
-  minified = minified
-    .replace(/\s+/g, ' ')               // 다중 공백 -> 단일 공백
-    .replace(/\s*([\{\}:;\,])\s*/g, '$1') // 기호 주변 공백 제거
-    .trim();
-
-  // 4. 보호된 url 복원 및 url 내부 공백 제거 (SVG 내부는 연속된 공백과 줄바꿈을 공백 하나로 치환 가능)
-  minified = minified.replace(/___URL_PLACEHOLDER_(\d+)___/g, (_, index) => {
-    const originalUrl = urls[parseInt(index, 10)];
-    return originalUrl.replace(/\s+/g, ' ');
-  });
-
-  return minified;
-};
+import { minifyCss } from '../utils/css';
 
 const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });

@@ -1,0 +1,92 @@
+/*
+ * Title name: 별이다섯개
+ * Lucide icon: Star
+ * Icon color: #facc15
+ *
+ * Paste this entire file into the title CSS field.
+ * {{selector}} is replaced with the title's generated class.
+ */
+
+{{selector}} {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(250, 204, 21, 0.72);
+  background:
+    radial-gradient(circle at 16% 50%, rgba(250, 204, 21, 0.22), transparent 28%),
+    linear-gradient(135deg, #1e1b4b 0%, #312e81 42%, #713f12 100%);
+  color: #fff7d6;
+  letter-spacing: 0.045em;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.65);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(250, 204, 21, 0.1),
+    0 4px 12px rgba(120, 53, 15, 0.18);
+  animation: chikapo-five-star-breathe 2.8s ease-in-out infinite;
+}
+
+{{selector}}::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0.16rem 0.38rem 0.16rem auto;
+  width: 2.9rem;
+  opacity: 0.58;
+  background:
+    radial-gradient(circle at 8% 50%, rgba(254, 240, 138, 0.95) 0 0.08rem, transparent 0.1rem),
+    radial-gradient(circle at 28% 34%, rgba(250, 204, 21, 0.95) 0 0.08rem, transparent 0.1rem),
+    radial-gradient(circle at 48% 58%, rgba(254, 240, 138, 0.95) 0 0.08rem, transparent 0.1rem),
+    radial-gradient(circle at 68% 32%, rgba(250, 204, 21, 0.95) 0 0.08rem, transparent 0.1rem),
+    radial-gradient(circle at 88% 52%, rgba(254, 240, 138, 0.95) 0 0.08rem, transparent 0.1rem);
+  filter: drop-shadow(0 0 3px rgba(250, 204, 21, 0.45));
+  animation: chikapo-five-star-twinkle 1.9s ease-in-out infinite;
+}
+
+{{selector}} > * {
+  position: relative;
+  z-index: 1;
+}
+
+{{selector}} svg {
+  color: #facc15;
+  filter: drop-shadow(0 0 3px rgba(250, 204, 21, 0.65));
+}
+
+@keyframes chikapo-five-star-breathe {
+  0%,
+  100% {
+    border-color: rgba(250, 204, 21, 0.64);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 0 0 1px rgba(250, 204, 21, 0.1),
+      0 4px 12px rgba(120, 53, 15, 0.18);
+  }
+
+  50% {
+    border-color: rgba(254, 240, 138, 0.9);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      0 0 0 1px rgba(250, 204, 21, 0.18),
+      0 5px 14px rgba(120, 53, 15, 0.24);
+  }
+}
+
+@keyframes chikapo-five-star-twinkle {
+  0%,
+  100% {
+    opacity: 0.46;
+    transform: translateY(0);
+  }
+
+  50% {
+    opacity: 0.86;
+    transform: translateY(-0.04rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  {{selector}},
+  {{selector}}::before {
+    animation: none;
+  }
+}
