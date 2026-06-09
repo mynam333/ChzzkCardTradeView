@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
 import { createRealtimeNotification } from './notificationController';
+import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 
@@ -92,6 +93,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
   if (listingType === 'auction' && !allowedAuctionHours.includes(auctionHours)) {
     return res.status(400).json({ error: 'BadRequest', message: '경매 진행 시간은 1, 2, 3, 6, 12, 24, 48, 72시간 중 하나여야 합니다.' });
   }
+  const feeRate = listingType === 'auction' ? getAuctionFeeRate(auctionHours) : FIXED_MARKET_FEE_RATE;
 
   try {
     // 1) 내 소유 카드인지 검사
@@ -134,7 +136,8 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       starting_bid: listingType === 'auction' ? startBid : null,
       auction_ends_at: listingType === 'auction'
         ? new Date(Date.now() + auctionHours * 60 * 60 * 1000).toISOString()
-        : null
+        : null,
+      fee_rate: feeRate
     });
     await notifyMatchingWatches(listing);
 
@@ -228,10 +231,11 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
     const streamerName = listing.card?.streamer?.name || '스트리머';
     const star = listing.card?.star ?? 0;
     const price = result.price ?? listing.buy_now_price ?? listing.price;
-    const settledAmount = result.settled_amount ?? Math.floor(price * 0.95);
+    const feeRate = listing.fee_rate ?? FIXED_MARKET_FEE_RATE;
+    const settledAmount = result.settled_amount ?? calculateMarketFee(price, feeRate).settledAmount;
 
     const title = '[오픈마켓] 카드 판매 완료';
-    const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${price}P에서 수수료 5%를 제한 ${settledAmount}P가 계정으로 정산되었습니다.`;
+    const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${price}P에서 수수료 ${feeRate}%를 제한 ${settledAmount}P가 계정으로 정산되었습니다.`;
     notify(listing.seller_id, title, body);
 
     return res.json({ ok: true, settledAmount });

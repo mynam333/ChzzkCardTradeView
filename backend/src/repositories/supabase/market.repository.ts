@@ -2,6 +2,7 @@ import { getSupabaseClient } from "../../services/db";
 import { IMarketRepository, MarketListing, MarketWatch } from "../interfaces";
 import { formatUploadUrl } from "../../services/imageService";
 import { fuzzyMatch } from "../../utils/search";
+import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from "../../utils/marketFee";
 
 export class SupabaseMarketRepository implements IMarketRepository {
   private getClient() {
@@ -24,6 +25,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       current_bidder_id: row.current_bidder_id ?? null,
       auction_ends_at: row.auction_ends_at ?? null,
       fee: row.fee ?? 0,
+      fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
       with_cosmetics: !!row.with_cosmetics,
       created_at: row.created_at,
@@ -106,10 +108,12 @@ export class SupabaseMarketRepository implements IMarketRepository {
     buy_now_price?: number | null;
     starting_bid?: number | null;
     auction_ends_at?: string | null;
+    fee_rate?: number;
   }): Promise<MarketListing> {
     const listingType = listing.listing_type || 'fixed';
     const startingBid = Math.floor(Number(listing.starting_bid ?? listing.price));
     const buyNowPrice = listing.buy_now_price == null ? null : Math.floor(Number(listing.buy_now_price));
+    const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
     if ((listingType === 'auction' ? startingBid : listing.price) < 100) {
       throw new Error('MIN_PRICE_LIMIT');
     }
@@ -124,6 +128,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
         starting_bid: listingType === 'auction' ? startingBid : null,
         current_bid: listingType === 'auction' ? startingBid : null,
         auction_ends_at: listingType === 'auction' ? listing.auction_ends_at : null,
+        fee_rate: feeRate,
         with_cosmetics: !!listing.with_cosmetics,
         status: 'PENDING'
       }])
@@ -516,8 +521,8 @@ export class SupabaseMarketRepository implements IMarketRepository {
         continue;
       }
 
-      const fee = Math.floor(amount * 0.05);
-      const settledAmount = amount - fee;
+      const feeRate = Number(row.fee_rate ?? FIXED_MARKET_FEE_RATE);
+      const { fee, settledAmount } = calculateMarketFee(amount, feeRate);
       const client = this.getClient();
       const { error: buyerError } = await client
         .from('users')

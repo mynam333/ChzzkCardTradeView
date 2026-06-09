@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
+import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '@/lib/marketFee';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { fuzzySearch } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
@@ -2283,8 +2284,8 @@ export const GachaTab: React.FC = () => {
         const buyNowPrice = Math.floor(Number(marketPriceInput)) || 0;
         const startingBid = Math.floor(Number(marketStartingBidInput)) || 0;
         const settlementBase = marketListingType === 'auction' ? Math.max(startingBid, buyNowPrice || startingBid) : buyNowPrice;
-        const fee = Math.floor(settlementBase * 0.05);
-        const settlement = Math.max(0, settlementBase - fee);
+        const feeRate = marketListingType === 'auction' ? getAuctionFeeRate(marketAuctionHours) : FIXED_MARKET_FEE_RATE;
+        const { fee, settlement } = calculateMarketFee(settlementBase, feeRate);
 
         return (
           <div className="modal-backdrop modal-backdrop-center z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setMarketRegisterCard(null)}>
@@ -2379,7 +2380,7 @@ export const GachaTab: React.FC = () => {
                         className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-bold focus:border-primary focus:outline-none"
                       >
                         {[1, 2, 3, 6, 12, 24, 48, 72].map((hour) => (
-                          <option key={hour} value={hour}>{hour}시간</option>
+                          <option key={hour} value={hour}>{hour}시간 · 수수료 {getAuctionFeeRate(hour)}%</option>
                         ))}
                       </select>
                     </div>
@@ -2435,7 +2436,7 @@ export const GachaTab: React.FC = () => {
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">수수료 (5%)</span>
+                    <span className="text-muted-foreground">수수료 ({feeRate}%)</span>
                     <span className="text-rose-500 font-bold">-{fee.toLocaleString()} P</span>
                   </div>
                   <div className="flex justify-between border-t border-border/40 pt-1.5 font-bold">

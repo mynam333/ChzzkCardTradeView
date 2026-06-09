@@ -432,6 +432,7 @@ export interface MarketListing {
   current_bidder_id?: string | null;
   auction_ends_at?: string | null;
   fee: number;
+  fee_rate?: number;
   settled_amount: number;
   with_cosmetics?: boolean;
   created_at?: string;
@@ -463,6 +464,7 @@ export interface IMarketRepository {
     buy_now_price?: number | null;
     starting_bid?: number | null;
     auction_ends_at?: string | null;
+    fee_rate?: number;
   }): Promise<MarketListing>;
   findById(id: number): Promise<MarketListing | null>;
   /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */

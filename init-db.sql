@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
     auction_ends_at TEXT,
     buyer_id TEXT,
     fee INTEGER DEFAULT 0,
+    fee_rate INTEGER DEFAULT 5,
     settled_amount INTEGER DEFAULT 0,
     with_cosmetics INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),

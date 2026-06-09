@@ -1223,6 +1223,8 @@ CREATE TABLE IF NOT EXISTS market_listings (
   auction_ends_at TIMESTAMPTZ,
   buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   fee INTEGER DEFAULT 0,
+  fee_rate INTEGER DEFAULT 5,
+  settled_amount INTEGER DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -1239,6 +1241,8 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
@@ -1301,8 +1305,8 @@ BEGIN
     RETURN 'INSUFFICIENT_POINT';
   END IF;
 
-  -- 수수료 계산 (5% 소수점 버림)
-  calc_fee := FLOOR(listing.price * 0.05)::INTEGER;
+  -- 수수료 계산: 매물 등록 시 저장된 수수료율 사용
+  calc_fee := FLOOR(listing.price * (COALESCE(listing.fee_rate, 5)::NUMERIC / 100))::INTEGER;
   calc_settled := listing.price - calc_fee;
 
   -- 구매자 포인트 차감

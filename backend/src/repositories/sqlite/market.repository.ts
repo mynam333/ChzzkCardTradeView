@@ -3,6 +3,7 @@ import { IMarketRepository, MarketListing } from "../interfaces";
 import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
 import { formatUploadUrl } from "../../services/imageService";
 import { fuzzyMatch } from "../../utils/search";
+import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from "../../utils/marketFee";
 
 export class SqliteMarketRepository implements IMarketRepository {
   private getDb() {
@@ -24,6 +25,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       current_bidder_id: row.current_bidder_id ?? null,
       auction_ends_at: row.auction_ends_at ?? null,
       fee: row.fee ?? 0,
+      fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
       with_cosmetics: row.with_cosmetics === 1,
       created_at: row.created_at,
@@ -75,18 +77,20 @@ export class SqliteMarketRepository implements IMarketRepository {
     buy_now_price?: number | null;
     starting_bid?: number | null;
     auction_ends_at?: string | null;
+    fee_rate?: number;
   }): Promise<MarketListing> {
     const listingType = listing.listing_type === 'auction' ? 'auction' : 'fixed';
     const buyNowPrice = listingType === 'auction' ? (listing.buy_now_price ?? null) : listing.price;
     const startingBid = listingType === 'auction' ? Math.max(100, Number(listing.starting_bid || listing.price)) : null;
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
+    const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
     if (price < 100 || (startingBid != null && startingBid < 100)) {
       throw new Error('MIN_PRICE_LIMIT');
     }
     const result = this.getDb().prepare(`
       INSERT INTO market_listings
-        (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, with_cosmetics, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+        (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, fee_rate, with_cosmetics, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
     `).run(
       listing.seller_id,
       listing.user_card_id,
@@ -96,6 +100,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       startingBid,
       startingBid,
       listing.auction_ends_at ?? null,
+      feeRate,
       listing.with_cosmetics ? 1 : 0
     );
 
@@ -280,9 +285,8 @@ export class SqliteMarketRepository implements IMarketRepository {
         throw new Error('INSUFFICIENT_POINT');
       }
 
-      // 수수료 5% 소수점 버림
-      const fee = Math.floor(finalPrice * 0.05);
-      const settledAmount = finalPrice - fee;
+      const feeRate = Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE);
+      const { fee, settledAmount } = calculateMarketFee(finalPrice, feeRate);
 
       // 정산
       db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(finalPrice, buyerId);
@@ -489,8 +493,8 @@ export class SqliteMarketRepository implements IMarketRepository {
           return false;
         }
         const price = Number(locked.current_bid || 0);
-        const fee = Math.floor(price * 0.05);
-        const settledAmount = price - fee;
+        const feeRate = Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE);
+        const { fee, settledAmount } = calculateMarketFee(price, feeRate);
         db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(price, locked.current_bidder_id);
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, locked.seller_id);
         db.prepare(`

@@ -47,7 +47,7 @@ const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
 // 동일 내용의 매물은 기존 객체 참조를 유지해 불필요한 카드 리렌더(및 입장 애니메이션 재생)를 막습니다.
 const MARKET_LISTING_VOLATILE_KEYS = [
   'price', 'status', 'current_bid', 'current_bidder_id', 'current_bidder_username',
-  'buy_now_price', 'auction_ends_at', 'updated_at'
+  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at'
 ];
 const marketListingsEqual = (a: any, b: any): boolean =>
   MARKET_LISTING_VOLATILE_KEYS.every((key) => a?.[key] === b?.[key]);
@@ -975,7 +975,7 @@ export const ShopTab: React.FC = () => {
                 <h2 className="cute-outline-soft flex items-center gap-2 text-2xl font-black">
                   <Store className="h-5.5 w-5.5 text-primary" /> 오픈마켓 장터
                 </h2>
-                <p className="text-xs text-muted-foreground">다른 유저들이 올린 카드를 구매하거나 내 카드를 판매하세요.<br />판매 등록은 보관함의 우클릭 메뉴에서 가능합니다. (거래 완료 시 5%의 수수료 차감)</p>
+                <p className="text-xs text-muted-foreground">다른 유저들이 올린 카드를 구매하거나 내 카드를 판매하세요.<br />판매 등록은 보관함의 우클릭 메뉴에서 가능합니다. 즉시 판매는 5%, 경매는 진행 시간에 따라 수수료가 달라집니다.</p>
               </div>
               {user && (
                 <span className="cute-number-font flex items-center gap-1 self-start text-xs font-bold text-primary sm:self-auto">
@@ -1347,7 +1347,7 @@ export const ShopTab: React.FC = () => {
                       <tr className="border-b border-border/80 text-muted-foreground">
                         <th className="py-2.5">카드 정보</th>
                         <th className="py-2.5">가격/입찰</th>
-                        <th className="py-2.5">정산액 (수수료 5% 제함)</th>
+                        <th className="py-2.5">정산액</th>
                         <th className="py-2.5">상태</th>
                         <th className="py-2.5 text-right">관리</th>
                       </tr>
@@ -1358,6 +1358,7 @@ export const ShopTab: React.FC = () => {
                         const star = l.card?.star ?? 0;
                         const isAuction = l.listing_type === 'auction';
                         const currentBid = Number(l.current_bid || l.starting_bid || l.price || 0);
+                        const feeRate = Number(l.fee_rate ?? 5);
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
                             <td className="py-3 flex items-center gap-2">
@@ -1383,7 +1384,12 @@ export const ShopTab: React.FC = () => {
                               )}
                             </td>
                             <td className="py-3 text-muted-foreground font-semibold">
-                              {l.status === 'SOLD' ? `${l.settled_amount.toLocaleString()} P` : '-'}
+                              {l.status === 'SOLD' ? (
+                                <div className="flex flex-col">
+                                  <span>{l.settled_amount.toLocaleString()} P</span>
+                                  <span className="text-[9px] font-bold text-rose-500">수수료 {feeRate}%</span>
+                                </div>
+                              ) : '-'}
                             </td>
                             <td className="py-3">
                               {l.status === 'PENDING' && (
