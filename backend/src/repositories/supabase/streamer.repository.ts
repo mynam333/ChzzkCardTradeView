@@ -230,14 +230,25 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   }
 
   async getValueHistory(channelId: string, sinceIso: string): Promise<{ value: number; recorded_at: string }[]> {
-    const { data, error } = await this.getClient()
-      .from('value_history')
-      .select('value, recorded_at')
-      .eq('channel_id', channelId)
-      .gte('recorded_at', sinceIso)
-      .order('recorded_at', { ascending: true });
-    if (error || !data) return [];
-    return data.map((r: any) => ({ value: r.value, recorded_at: r.recorded_at }));
+    const rows: { value: number; recorded_at: string }[] = [];
+    const pageSize = 1000;
+    const maxRows = 10_000;
+
+    for (let offset = 0; offset < maxRows; offset += pageSize) {
+      const { data, error } = await this.getClient()
+        .from('value_history')
+        .select('value, recorded_at')
+        .eq('channel_id', channelId)
+        .gte('recorded_at', sinceIso)
+        .order('recorded_at', { ascending: true })
+        .range(offset, Math.min(offset + pageSize - 1, maxRows - 1));
+
+      if (error || !data) return rows;
+      rows.push(...data.map((r: any) => ({ value: r.value, recorded_at: r.recorded_at })));
+      if (data.length < pageSize) break;
+    }
+
+    return rows;
   }
 
   async count(): Promise<number> {

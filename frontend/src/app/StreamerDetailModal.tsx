@@ -170,11 +170,21 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               const coords = sortedHistory.map((h) => {
                 const pointTs = Math.min(rangeEndTs, Math.max(rangeStartTs, parseTime(h.recorded_at)));
                 return {
+                  ts: pointTs,
                   x: P + ((pointTs - rangeStartTs) / safeRangeMs) * (W - 2 * P),
                   y: H - P - ((h.value - min) / rng) * (H - 2 * P)
                 };
               });
-              const pts = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+              const gapThresholdMs = range === '24h' ? 20 * 60 * 1000 : 2 * 60 * 60 * 1000;
+              const segments = coords.reduce<Array<typeof coords>>((acc, coord, index) => {
+                const prev = coords[index - 1];
+                if (!prev || coord.ts - prev.ts > gapThresholdMs) {
+                  acc.push([coord]);
+                } else {
+                  acc[acc.length - 1].push(coord);
+                }
+                return acc;
+              }, []);
               const up = values[n - 1] >= values[0];
               const stroke = up ? '#f43f5e' : '#3b82f6';
 
@@ -215,7 +225,19 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                       onMouseMove={onMove}
                       onMouseLeave={() => setHover(null)}
                     >
-                      <polyline points={pts} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                      {segments
+                        .filter((segment) => segment.length >= 2)
+                        .map((segment, index) => (
+                          <polyline
+                            key={index}
+                            points={segment.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ')}
+                            fill="none"
+                            stroke={stroke}
+                            strokeWidth="2"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                        ))}
                       {hovered !== null && (
                         <>
                           <line x1={coords[hovered].x} y1={P} x2={coords[hovered].x} y2={H - P} stroke="currentColor" strokeWidth="1" className="text-muted-foreground/40" strokeDasharray="3 3" />

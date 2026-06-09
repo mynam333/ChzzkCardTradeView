@@ -995,6 +995,48 @@ export const fuseCards = async (req: Request, res: Response) => {
  * 8. 특정 스트리머 상세 정보 + 시세 변화 그래프 데이터 조회 (공개)
  * GET /api/streamers/:channel_id?range=24h|7d
  */
+type StreamerValueHistoryPoint = { value: number; recorded_at: string };
+
+const MAX_STREAMER_DETAIL_HISTORY_POINTS = 1200;
+
+const downsampleValueHistory = (
+  points: StreamerValueHistoryPoint[],
+  maxPoints = MAX_STREAMER_DETAIL_HISTORY_POINTS
+): StreamerValueHistoryPoint[] => {
+  if (points.length <= maxPoints) return points;
+  if (maxPoints < 4) return [points[0], points[points.length - 1]];
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const bucketCount = Math.max(1, Math.floor((maxPoints - 2) / 2));
+  const bucketSize = (points.length - 2) / bucketCount;
+  const sampled: StreamerValueHistoryPoint[] = [first];
+
+  for (let i = 0; i < bucketCount; i += 1) {
+    const start = 1 + Math.floor(i * bucketSize);
+    const end = Math.min(points.length - 1, 1 + Math.floor((i + 1) * bucketSize));
+    if (start >= end) continue;
+
+    let minIndex = start;
+    let maxIndex = start;
+    for (let j = start + 1; j < end; j += 1) {
+      if (points[j].value < points[minIndex].value) minIndex = j;
+      if (points[j].value > points[maxIndex].value) maxIndex = j;
+    }
+
+    if (minIndex === maxIndex) {
+      sampled.push(points[minIndex]);
+    } else if (minIndex < maxIndex) {
+      sampled.push(points[minIndex], points[maxIndex]);
+    } else {
+      sampled.push(points[maxIndex], points[minIndex]);
+    }
+  }
+
+  sampled.push(last);
+  return sampled.filter((point, index, arr) => index === 0 || point.recorded_at !== arr[index - 1].recorded_at);
+};
+
 export const getStreamerDetail = async (req: Request, res: Response) => {
   const { channel_id } = req.params;
   const range = (req.query.range as string) || '7d';
@@ -1042,7 +1084,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
         prev_value: prevValue24h,
         recent_market_price: recentMarketPrice
       },
-      history: boundedHistory,
+      history: downsampleValueHistory(boundedHistory),
       range_start_at: rangeStartAt.toISOString(),
       range_end_at: rangeEndAt.toISOString()
     });

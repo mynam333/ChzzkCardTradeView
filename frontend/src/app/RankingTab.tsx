@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   TrendingUp,
   Search,
@@ -61,6 +61,7 @@ export const RankingTab: React.FC = () => {
   const [cardFilterName, setCardFilterName] = useState('');
   const [cardFilterChannelId, setCardFilterChannelId] = useState('');
   const [cardFilterStar, setCardFilterStar] = useState('');
+  const fetchSeqRef = useRef(0);
   const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
 
   const findBestCardFilterMatch = (query: string): Streamer | null => {
@@ -123,6 +124,9 @@ export const RankingTab: React.FC = () => {
   useEffect(() => { setPage(1); }, [subTab, searchQuery, cardFilterChannelId, cardFilterStar]);
 
   const fetchRankings = async (silent = false) => {
+    const requestSeq = ++fetchSeqRef.current;
+    const isCurrentRequest = () => requestSeq === fetchSeqRef.current;
+
     if (!silent) setLoading(true);
     try {
       if (subTab === 'user' || subTab === 'cards') {
@@ -132,12 +136,15 @@ export const RankingTab: React.FC = () => {
         if (cardFilterChannelId) params.set('channel_id', cardFilterChannelId);
         if (cardFilterStar !== '') params.set('star', cardFilterStar);
         const query = params.toString();
-        const res = await apiFetch(`/users/ranking${query ? `?${query}` : ''}`);
-        if (res.ok) setUserRankings(await res.json());
-        if (subTab === 'cards') {
-          const streamerRes = await apiFetch('/streamers/ranking?mode=value&limit=1000');
-          if (streamerRes.ok) setStreamers(await streamerRes.json());
-        }
+        const [rankings, streamerOptions] = await Promise.all([
+          apiFetch(`/users/ranking${query ? `?${query}` : ''}`).then((res) => res.ok ? res.json() : null),
+          subTab === 'cards'
+            ? apiFetch('/streamers/ranking?mode=value&limit=1000').then((res) => res.ok ? res.json() : null)
+            : Promise.resolve(null)
+        ]);
+        if (!isCurrentRequest()) return;
+        if (rankings) setUserRankings(rankings);
+        if (streamerOptions) setStreamers(streamerOptions);
       } else {
         const params = new URLSearchParams({
           mode: subTab === 'change' ? 'change' : 'value',
@@ -145,16 +152,19 @@ export const RankingTab: React.FC = () => {
         });
         if (serverSearchQuery.trim()) params.set('q', serverSearchQuery.trim());
         const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
-        if (res.ok) setStreamers(await res.json());
+        const streamersData = res.ok ? await res.json() : null;
+        if (!isCurrentRequest()) return;
+        if (streamersData) setStreamers(streamersData);
       }
     } catch (e) {
+      if (!isCurrentRequest()) return;
       console.error('랭킹 데이터 획득 실패:', e);
       if (!silent) {
         if (subTab === 'user' || subTab === 'cards') setUserRankings([]);
         else setStreamers([]);
       }
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && isCurrentRequest()) setLoading(false);
     }
   };
 
@@ -323,9 +333,9 @@ export const RankingTab: React.FC = () => {
               <div
                 key={ur.id}
                 onClick={() => setProfileUserId(ur.id)}
-                className="cute-card-pop flex cursor-pointer items-center justify-between rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45"
+                className="cute-card-pop flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45 sm:gap-4"
               >
-                <div className="flex items-center gap-4">
+                <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
                   <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
                   <div className="relative shrink-0">
                     <img src={ur.avatar_url} alt={ur.username} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
@@ -336,7 +346,7 @@ export const RankingTab: React.FC = () => {
                     )}
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       <h4 className="truncate text-xs font-bold text-foreground">{ur.username}</h4>
                       <UserTitleList titles={ur.titles} compact />
                     </div>
@@ -344,7 +354,7 @@ export const RankingTab: React.FC = () => {
                     {ur.status_message && (
                       <StreamerTooltip
                         content={ur.status_message}
-                        className="mt-1 inline-flex max-w-[min(56vw,22rem)]"
+                        className="mt-1 inline-flex max-w-full sm:max-w-[min(56vw,22rem)]"
                         tooltipClassName="status-message-tooltip"
                         edgeGuard={{ right: 460, bottom: 140 }}
                       >
@@ -356,7 +366,7 @@ export const RankingTab: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 text-right">
                   <span className="cute-number-font text-xs font-black text-primary">{(subTab === 'cards' ? (ur.cards_value || 0) : ((ur.total_asset ?? ur.point) || 0)).toLocaleString()} P</span>
                   <p className="text-[9px] text-muted-foreground">{subTab === 'cards' ? '카드 가치만' : '총 자산 (포인트+카드가치)'}</p>
                 </div>
@@ -384,7 +394,7 @@ export const RankingTab: React.FC = () => {
                   <div className="flex items-center gap-4">
                     <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
                     <div className="relative shrink-0">
-                      <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
+                      <img src={st.logo_url || '/icon.png'} alt={st.name} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
                       {st.is_active && (
                         <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                       )}
