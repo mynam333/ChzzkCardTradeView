@@ -29,6 +29,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
       with_cosmetics: row.with_cosmetics === 1,
+      seller_hidden_at: row.seller_hidden_at ?? null,
       created_at: row.created_at,
       updated_at: row.updated_at,
       seller_username: row.seller_username,
@@ -244,10 +245,23 @@ export class SqliteMarketRepository implements IMarketRepository {
         LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
         LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
        WHERE ml.seller_id = ?
+         AND ml.seller_hidden_at IS NULL
        ORDER BY ml.id DESC
     `).all(userId) as any[];
 
     return rows.map(r => this.mapRow(r));
+  }
+
+  async hideForSeller(id: number, sellerId: string): Promise<boolean> {
+    const result = this.getDb().prepare(`
+      UPDATE market_listings
+         SET seller_hidden_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ?
+         AND seller_id = ?
+         AND status IN ('SOLD', 'CANCELLED', 'AUCTION_ENDED')
+         AND seller_hidden_at IS NULL
+    `).run(id, sellerId);
+    return result.changes > 0;
   }
 
   async updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void> {

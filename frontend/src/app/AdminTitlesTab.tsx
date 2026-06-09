@@ -10,6 +10,7 @@ import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 const emptyForm = {
   id: 0,
   name: '',
+  description: '',
   css: '',
   icon_name: 'Award',
   icon_color: '#facc15'
@@ -34,6 +35,7 @@ export const AdminTitlesTab: React.FC = () => {
   const previewTitle: UserTitle = {
     id: form.id || -1,
     name: form.name || '칭호 미리보기',
+    description: form.description || '칭호에 마우스를 올리면 설명이 이렇게 표시됩니다.',
     css: form.css,
     icon_name: form.icon_name || null,
     icon_color: form.icon_color
@@ -83,6 +85,7 @@ export const AdminTitlesTab: React.FC = () => {
     setForm({
       id: title.id,
       name: title.name,
+      description: title.description || '',
       css: title.css,
       icon_name: title.icon_name || '',
       icon_color: title.icon_color
@@ -99,6 +102,7 @@ export const AdminTitlesTab: React.FC = () => {
         method: form.id ? 'PUT' : 'POST',
         body: JSON.stringify({
           name: form.name,
+          description: form.description,
           css: form.css,
           icon_name: form.icon_name,
           icon_color: form.icon_color
@@ -234,6 +238,14 @@ export const AdminTitlesTab: React.FC = () => {
           </div>
 
           <label className="mt-3 block space-y-1 text-xs font-bold">
+            <span>칭호 설명</span>
+            <textarea value={form.description} maxLength={300} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3}
+              className="w-full resize-y rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-normal leading-relaxed"
+              placeholder="예: 첫 번째 이벤트를 함께한 유저에게 지급되는 기념 칭호입니다." />
+            <span className="block text-[10px] font-normal text-muted-foreground">{form.description.length}/300 · 칭호에 마우스를 올리면 표시됩니다.</span>
+          </label>
+
+          <label className="mt-3 block space-y-1 text-xs font-bold">
             <span>아이콘 색상</span>
             <span className="flex gap-2">
               <input type="color" value={form.icon_color} onChange={(e) => setForm({ ...form, icon_color: e.target.value })}
@@ -272,6 +284,9 @@ export const AdminTitlesTab: React.FC = () => {
               <div key={title.id} className={`rounded-xl border p-3 transition ${selectedTitleId === title.id ? 'border-primary bg-primary/5' : 'border-border bg-secondary/20'}`}>
                 <button className="w-full text-left" onClick={() => selectTitleForAssignment(title.id)}>
                   <UserTitleBadge title={title} />
+                  <span className="mt-2 block line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">
+                    {title.description || '설명 없음'}
+                  </span>
                 </button>
                 <div className="mt-2 flex justify-end gap-1">
                   <button onClick={() => editTitle(title)} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground" title="수정"><Edit3 className="h-3.5 w-3.5" /></button>

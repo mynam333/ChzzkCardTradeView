@@ -186,6 +186,44 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
 };
 
 /**
+ * 완료/취소된 내 등록 매물을 내 관리 화면에서 숨김 처리합니다. DB 레코드는 유지됩니다.
+ * DELETE /api/market/my/:id
+ */
+export const hideMyListing = async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  }
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ error: 'BadRequest', message: '올바른 매물 ID를 지정해 주세요.' });
+  }
+
+  try {
+    const listing = await marketRepository.findById(id);
+    if (!listing) {
+      return res.status(404).json({ error: 'NotFound', message: '존재하지 않는 매물입니다.' });
+    }
+    if (listing.seller_id !== user.id) {
+      return res.status(403).json({ error: 'Forbidden', message: '본인의 매물만 삭제할 수 있습니다.' });
+    }
+    if (listing.status === 'PENDING') {
+      return res.status(400).json({ error: 'BadRequest', message: '판매 중인 매물은 먼저 등록 취소해야 삭제할 수 있습니다.' });
+    }
+
+    const ok = await marketRepository.hideForSeller(id, user.id);
+    return res.status(ok ? 200 : 400).json({
+      ok,
+      message: ok ? '내 등록 매물 관리에서 삭제했습니다.' : '이미 삭제되었거나 삭제할 수 없는 매물입니다.'
+    });
+  } catch (err: any) {
+    console.error('[MarketController] hideMyListing 에러:', err);
+    return res.status(500).json({ error: 'ServerError', message: '매물 삭제 처리 중 오류가 발생했습니다.' });
+  }
+};
+
+/**
  * 5. 매물 구매 및 정산
  * POST /api/market/buy/:id
  */

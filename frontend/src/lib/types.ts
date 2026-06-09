@@ -8,6 +8,7 @@ export type CosmeticType = 'border' | 'name_effect';
 export interface UserTitle {
   id: number;
   name: string;
+  description: string | null;
   css: string;
   icon_name: string | null;
   icon_color: string;

@@ -41,19 +41,34 @@ export const UserTitleBadge: React.FC<{ title: UserTitle; compact?: boolean }> =
 
   const Icon = (title.icon_name && icons[title.icon_name as keyof typeof icons]) || Award;
   const customClass = cssClassFromEffect(title);
+  const description = title.description?.trim();
 
   return (
     <span
-      className={[
-        'inline-flex shrink-0 items-center rounded-full border border-border/40 bg-secondary px-2 py-0.5 font-bold leading-none text-secondary-foreground shadow-sm dark:border-white/10 dark:bg-zinc-800 dark:text-white',
-        compact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]',
-        generatedClass(title.id),
-        customClass
-      ].filter(Boolean).join(' ')}
-      title={title.name}
+      className="group/title relative inline-flex shrink-0 align-middle"
+      tabIndex={description ? 0 : undefined}
+      aria-label={description ? `${title.name}: ${description}` : title.name}
     >
-      <Icon aria-hidden="true" className={compact ? 'h-2.5 w-2.5' : 'h-3 w-3'} style={{ color: title.icon_color }} />
-      <span>{title.name}</span>
+      <span
+        className={[
+          'inline-flex shrink-0 items-center rounded-full border border-border/40 bg-secondary px-2 py-0.5 font-bold leading-none text-secondary-foreground shadow-sm transition-transform group-hover/title:-translate-y-0.5 dark:border-white/10 dark:bg-zinc-800 dark:text-white',
+          compact ? 'gap-1 text-[9px]' : 'gap-1.5 text-[10px]',
+          generatedClass(title.id),
+          customClass
+        ].filter(Boolean).join(' ')}
+        title={description ? undefined : title.name}
+      >
+        <Icon aria-hidden="true" className={compact ? 'h-2.5 w-2.5' : 'h-3 w-3'} style={{ color: title.icon_color }} />
+        <span>{title.name}</span>
+      </span>
+      {description && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-1/2 top-full z-[120] mt-2 w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-2xl border border-sky-200/80 bg-white/95 px-3 py-2 text-center text-[11px] font-semibold leading-relaxed text-slate-700 opacity-0 shadow-[0_18px_45px_rgba(59,130,246,0.22)] ring-1 ring-white/70 backdrop-blur transition duration-150 group-hover/title:translate-y-0.5 group-hover/title:opacity-100 group-focus-visible/title:translate-y-0.5 group-focus-visible/title:opacity-100 dark:border-sky-300/20 dark:bg-slate-950/95 dark:text-sky-50 dark:shadow-[0_18px_45px_rgba(14,165,233,0.18)] dark:ring-white/10"
+        >
+          {description}
+        </span>
+      )}
     </span>
   );
 };

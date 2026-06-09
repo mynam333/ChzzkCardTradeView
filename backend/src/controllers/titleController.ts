@@ -10,17 +10,20 @@ const parseTitleId = (value: unknown): number => {
 
 const normalizePayload = (body: any) => {
   const name = String(body?.name || '').trim();
+  const description = String(body?.description || '').trim();
   const css = String(body?.css || '').trim();
   const iconName = String(body?.icon_name || '').trim();
   const iconColor = String(body?.icon_color || '#ffffff').trim();
 
   if (!name || name.length > 40) throw new Error('칭호명은 1~40자로 입력해 주세요.');
+  if (description.length > 300) throw new Error('칭호 설명은 300자 이하로 입력해 주세요.');
   if (css.length > 20000) throw new Error('CSS는 20,000자 이하로 입력해 주세요.');
   if (iconName && !/^[A-Za-z][A-Za-z0-9]*$/.test(iconName)) throw new Error('Lucide 아이콘명이 올바르지 않습니다.');
   if (!/^#[0-9a-fA-F]{6}$/.test(iconColor)) throw new Error('아이콘 색상은 6자리 HEX 값이어야 합니다.');
 
   return {
     name,
+    description: description || null,
     css,
     icon_name: iconName || null,
     icon_color: iconColor.toLowerCase()

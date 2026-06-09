@@ -14,6 +14,20 @@ import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfil
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 
+const DRAW_LOCKS = new Set<string>();
+
+const withUserDrawLock = async <T>(userId: string, task: () => Promise<T>): Promise<T> => {
+  if (DRAW_LOCKS.has(userId)) {
+    throw new Error('DRAW_IN_PROGRESS');
+  }
+  DRAW_LOCKS.add(userId);
+  try {
+    return await task();
+  } finally {
+    DRAW_LOCKS.delete(userId);
+  }
+};
+
 const computeFreeDrawSegment = (intervalHours: number): { segmentStartIso: string | null; nextFreeDrawAt: string | null } => {
   if (intervalHours <= 0) {
     return { segmentStartIso: null, nextFreeDrawAt: null };
@@ -42,6 +56,38 @@ const isInactiveForThreeMonths = (lastLiveAt?: string | null): boolean => {
   if (Number.isNaN(lastLiveMs)) return false;
   return lastLiveMs <= Date.now() - 90 * 24 * 60 * 60 * 1000;
 };
+
+const getDrawSettings = async () => {
+  const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
+  const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
+  const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
+  const intervalHours = parseFloat(intervalStr);
+  const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
+  const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
+  const { segmentStartIso } = computeFreeDrawSegment(intervalHours);
+  return { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso };
+};
+
+const pickWeightedStreamer = (streamers: any[], weights: number[], totalWeight: number) => {
+  let randomNum = Math.random() * totalWeight;
+  let luckyStreamer = streamers[0];
+  for (let i = 0; i < streamers.length; i++) {
+    randomNum -= weights[i];
+    if (randomNum <= 0) {
+      luckyStreamer = streamers[i];
+      break;
+    }
+  }
+  return luckyStreamer;
+};
+
+const toDrawCardPayload = (draw: any, streamer: any) => ({
+  id: draw.card?.id,
+  channel_id: streamer.channel_id,
+  serial_number: draw.card?.serial_number,
+  acquired_at: new Date().toISOString(),
+  streamer
+});
 
 /**
  * 1. 현재 사용자 최신 세션 정보 반환 (포인트 동기화)
@@ -621,55 +667,31 @@ export const drawCard = async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   }
 
-  // 뽑기 비용: DB의 draw_cost 설정값 사용 (기본 10000P)
-  const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
-  const DRAW_COST = Math.max(0, parseInt(drawCostStr, 10) || 10000);
-
   try {
+    return await withUserDrawLock(userId, async () => {
+    const { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso } = await getDrawSettings();
     // A. 가챠 대상 스트리머 목록 추출 (재화 소모 전에 먼저 검증)
     const streamers = await streamerRepository.findAll();
     if (streamers.length === 0) {
       return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
     }
 
-    // B. 무료 뽑기 가능 세그먼트 계산 — KST 자정 기준으로 설정된 n시간 간격마다 정각에 리셋
-    // 예) 1시간 설정 시: 00:00, 01:00, 02:00 ... KST 정각마다 리셋
-    //     → 00:59에 뽑아도 01:00 정각이 되면 다시 뽑을 수 있음
     const nowIso = new Date().toISOString();
-    const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
-    const intervalHours = parseFloat(intervalStr);
-    const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
-    const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
-    const { segmentStartIso } = computeFreeDrawSegment(intervalHours);
-    // intervalHours === 0 이면 segmentStartIso = null → 무제한 무료뽑기
 
-    // C. 실시간 스트리머 가치 기반 가중치 추첨 (가치가 낮을수록 확률 상승 — 절대 명제 유지)
-    //    분포가 매번 달라져도 추첨 기댓값이 목표값(기본 2500) 부근이 되도록 가중 지수(alpha)를 적응적으로 결정.
-    //    → 중간 가치 카드도 충분히 등장하고 다양성이 올라가며, "가치 낮을수록 확률 높음"은 항상 보존됩니다.
     const targetExpectedStr = await systemConfigRepository.get('draw_target_value', '2500');
     const targetExpected = Math.max(100, parseInt(targetExpectedStr, 10) || 2500);
     const { weights } = computeValueDrawWeights(streamers.map(s => s.base_value || 100), targetExpected);
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-
-    let randomNum = Math.random() * totalWeight;
-    let luckyStreamer = streamers[0];
-
-    for (let i = 0; i < streamers.length; i++) {
-      randomNum -= weights[i];
-      if (randomNum <= 0) {
-        luckyStreamer = streamers[i];
-        break;
-      }
-    }
+    const luckyStreamer = pickWeightedStreamer(streamers, weights, totalWeight);
 
     // D. 무료권/포인트 차감 + 시리얼 채번 + 카드 생성을 단일 트랜잭션/RPC로 처리
-    const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, DRAW_COST, nowIso, segmentStartIso, freeDrawMaxStack, intervalHours);
+    const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, drawCost, nowIso, segmentStartIso, freeDrawMaxStack, intervalHours);
     if (!draw.ok) {
       if (draw.reason === 'USER_NOT_FOUND') {
         return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
       }
       if (draw.reason === 'INSUFFICIENT_POINT') {
-        return res.status(400).json({ error: 'BadRequest', message: `포인트가 부족합니다. (1회 뽑기: ${DRAW_COST.toLocaleString()} P)` });
+        return res.status(400).json({ error: 'BadRequest', message: `포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)` });
       }
       return res.status(500).json({ error: 'InternalServerError', message: '카드 뽑기 처리에 실패했습니다.' });
     }
@@ -683,17 +705,103 @@ export const drawCard = async (req: Request, res: Response) => {
       free_draw_source: draw.free_draw_source,
       free_draw_tickets_left: draw.free_draw_tickets_left ?? 0,
       bonus_free_draw_tickets_left: draw.bonus_free_draw_tickets_left ?? 0,
-      card: {
-        id: draw.card?.id,
-        channel_id: luckyStreamer.channel_id,
-        serial_number: draw.card?.serial_number,
-        acquired_at: new Date().toISOString(),
-        streamer: luckyStreamer
-      }
+      card: toDrawCardPayload(draw, luckyStreamer)
+    });
     });
   } catch (err: any) {
+    if (err.message === 'DRAW_IN_PROGRESS') {
+      return res.status(429).json({ error: 'DrawInProgress', message: '이미 카드 소환이 진행 중입니다. 잠시 후 다시 시도해 주세요.' });
+    }
     console.error('[PlayController] drawCard 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const drawCards = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  }
+
+  const count = Math.max(1, Math.min(10, Math.floor(Number(req.body?.count || 10))));
+  if (count !== 10) {
+    return res.status(400).json({ error: 'BadRequest', message: '10연차는 정확히 10회 소환만 지원합니다.' });
+  }
+
+  try {
+    return await withUserDrawLock(userId, async () => {
+      const { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso } = await getDrawSettings();
+      const streamers = await streamerRepository.findAll();
+      if (streamers.length === 0) {
+        return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
+      }
+
+      const { segmentStartIso: latestSegmentStartIso } = computeFreeDrawSegment(intervalHours);
+      const syncedUser = await userRepository.syncFreeDrawTickets(userId, latestSegmentStartIso, freeDrawMaxStack, intervalHours);
+      const user = syncedUser || await userRepository.findById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+      }
+
+      const availableTickets = segmentStartIso === null
+        ? count
+        : Number(user.free_draw_tickets || 0) + Number(user.bonus_free_draw_tickets || 0);
+      const paidDraws = segmentStartIso === null ? 0 : Math.max(0, count - availableTickets);
+      const requiredPoint = paidDraws * drawCost;
+      if (Number(user.point || 0) < requiredPoint) {
+        return res.status(400).json({
+          error: 'BadRequest',
+          message: `10연차에 필요한 재화가 부족합니다. (필요 포인트: ${requiredPoint.toLocaleString()} P 또는 무료 티켓 10장)`
+        });
+      }
+
+      const targetExpectedStr = await systemConfigRepository.get('draw_target_value', '2500');
+      const targetExpected = Math.max(100, parseInt(targetExpectedStr, 10) || 2500);
+      const { weights } = computeValueDrawWeights(streamers.map(s => s.base_value || 100), targetExpected);
+      const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+      const cards: any[] = [];
+      let pointsLeft = Number(user.point || 0);
+      let freeTicketsLeft = Number(user.free_draw_tickets || 0);
+      let bonusTicketsLeft = Number(user.bonus_free_draw_tickets || 0);
+      let freeCount = 0;
+      let paidCount = 0;
+
+      for (let i = 0; i < count; i++) {
+        const luckyStreamer = pickWeightedStreamer(streamers, weights, totalWeight);
+        const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, drawCost, new Date().toISOString(), segmentStartIso, freeDrawMaxStack, intervalHours);
+        if (!draw.ok) {
+          throw new Error(draw.reason || 'DRAW_FAILED');
+        }
+        if (draw.is_free) freeCount += 1;
+        else paidCount += 1;
+        pointsLeft = draw.points_left ?? pointsLeft;
+        freeTicketsLeft = draw.free_draw_tickets_left ?? freeTicketsLeft;
+        bonusTicketsLeft = draw.bonus_free_draw_tickets_left ?? bonusTicketsLeft;
+        cards.push({
+          ...toDrawCardPayload(draw, luckyStreamer),
+          is_free: !!draw.is_free,
+          free_draw_source: draw.free_draw_source
+        });
+      }
+
+      return res.status(200).json({
+        message: `10연차 소환으로 카드 ${cards.length}장을 획득했습니다!`,
+        count,
+        free_count: freeCount,
+        paid_count: paidCount,
+        points_spent: paidCount * drawCost,
+        points_left: pointsLeft,
+        free_draw_tickets_left: freeTicketsLeft,
+        bonus_free_draw_tickets_left: bonusTicketsLeft,
+        cards
+      });
+    });
+  } catch (err: any) {
+    if (err.message === 'DRAW_IN_PROGRESS') {
+      return res.status(429).json({ error: 'DrawInProgress', message: '이미 카드 소환이 진행 중입니다. 잠시 후 다시 시도해 주세요.' });
+    }
+    console.error('[PlayController] drawCards 에러:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '10연차 소환 처리에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

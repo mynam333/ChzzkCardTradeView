@@ -43,7 +43,7 @@ type TutorialStep = {
   target?: string;
   waitForEvent?: string;
   grantGachaTicket?: boolean;
-  shopSubTab?: 'gacha_shop' | 'market' | 'history';
+  shopSubTab?: 'gacha_shop' | 'market' | 'my_listings' | 'history';
   rankingSubTab?: 'value' | 'change' | 'user' | 'cards';
   demo?: 'inventory-menu' | 'minigame-result';
 };
@@ -368,7 +368,7 @@ const tutorialSteps: TutorialStep[] = [
     title: '1:1 교환',
     lines: [
       '다른 유저와 카드를 직접 교환할 수 있어요.',
-      '교환은 제안, 상대 확인, 최종 승인 단계를 거쳐 체결되므로 실수 가능성을 줄여줍니다.'
+      '교환은 가입 하루 뒤부터 가능하며 제안, 상대 확인, 최종 승인 단계를 거쳐 체결되므로 실수 가능성을 줄여줍니다.'
     ],
     tip: '교환 중인 카드는 중복 판매나 마켓 등록이 제한될 수 있어요.',
     target: 'inventory-trade-actions'
@@ -1005,9 +1005,8 @@ export const TutorialGuide: React.FC = () => {
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className={`fixed right-4 z-[80] flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-4 py-3 text-xs font-black text-foreground shadow-[0_18px_50px_rgba(24,112,210,0.24)] backdrop-blur-xl transition hover:-translate-y-0.5 md:bottom-8 md:right-8 dark:bg-card/90 ${
-          mobilePanelPosition === 'top' ? 'top-20' : 'bottom-24'
-        }`}
+        className={`fixed right-4 z-[80] flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-4 py-3 text-xs font-black text-foreground shadow-[0_18px_50px_rgba(24,112,210,0.24)] backdrop-blur-xl transition hover:-translate-y-0.5 md:bottom-8 md:right-8 dark:bg-card/90 ${mobilePanelPosition === 'top' ? 'top-20' : 'bottom-24'
+          }`}
       >
         <MessageCircleHeart className="h-4 w-4 text-primary" />
         튜토리얼 계속 보기
@@ -1097,160 +1096,159 @@ export const TutorialGuide: React.FC = () => {
       )}
 
       <div
-        className={`pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-3 md:bottom-6 md:px-6 md:pb-0 ${
-          mobilePanelPosition === 'top'
+        className={`pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-3 md:bottom-6 md:px-6 md:pb-0 ${mobilePanelPosition === 'top'
             ? 'top-3 items-start pt-[env(safe-area-inset-top)] md:top-auto'
             : 'bottom-0 items-end pb-[calc(6rem+env(safe-area-inset-bottom))] md:top-auto'
-        }`}
+          }`}
       >
-      <section
-        data-tour-panel="dialog"
-        role="dialog"
-        aria-modal="false"
-        aria-labelledby="tutorial-guide-title"
-        className="pointer-events-auto max-h-[min(72vh,34rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-[2rem] border border-primary/20 bg-card/95 text-foreground shadow-[0_24px_80px_rgba(24,112,210,0.22)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/90 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42)] md:max-h-[calc(100vh-3rem)]"
-      >
-        <div className="h-1.5 bg-secondary">
-          <div
-            className="h-full rounded-r-full bg-gradient-to-r from-primary via-sky-400 to-accent transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        <section
+          data-tour-panel="dialog"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="tutorial-guide-title"
+          className="pointer-events-auto max-h-[min(72vh,34rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-[2rem] border border-primary/20 bg-card/95 text-foreground shadow-[0_24px_80px_rgba(24,112,210,0.22)] backdrop-blur-2xl dark:border-white/10 dark:bg-card/90 dark:shadow-[0_24px_80px_rgba(0,0,0,0.42)] md:max-h-[calc(100vh-3rem)]"
+        >
+          <div className="h-1.5 bg-secondary">
+            <div
+              className="h-full rounded-r-full bg-gradient-to-r from-primary via-sky-400 to-accent transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
 
-        <div className="relative overflow-hidden p-4 sm:p-5">
-          <div className="pointer-events-none absolute -right-10 -top-16 h-36 w-36 rounded-full bg-primary/12 blur-2xl dark:bg-primary/18" />
-          <div className="pointer-events-none absolute -bottom-20 left-8 h-32 w-32 rounded-full bg-accent/20 blur-2xl dark:bg-accent/10" />
+          <div className="relative overflow-hidden p-4 sm:p-5">
+            <div className="pointer-events-none absolute -right-10 -top-16 h-36 w-36 rounded-full bg-primary/12 blur-2xl dark:bg-primary/18" />
+            <div className="pointer-events-none absolute -bottom-20 left-8 h-32 w-32 rounded-full bg-accent/20 blur-2xl dark:bg-accent/10" />
 
-          <div className="relative flex items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-gradient-to-br from-white via-secondary/80 to-primary/15 text-primary shadow-inner dark:from-white/15 dark:via-secondary/60 dark:to-primary/20">
-              <SectionIcon className="h-6 w-6" />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="cute-pill rounded-full px-2.5 py-1 text-[10px] font-black">
-                  {sectionLabels[step.section]} {sectionStepNumbers[stepIndex]}/{sectionTotal}
-                </span>
-                <span className="text-[10px] font-black text-primary">
-                  전체 {stepIndex + 1}/{tutorialSteps.length}
-                </span>
+            <div className="relative flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-gradient-to-br from-white via-secondary/80 to-primary/15 text-primary shadow-inner dark:from-white/15 dark:via-secondary/60 dark:to-primary/20">
+                <SectionIcon className="h-6 w-6" />
               </div>
-              <h2 id="tutorial-guide-title" className="mt-2 text-lg font-black leading-tight text-foreground sm:text-xl">
-                {step.title}
-              </h2>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="cute-pill rounded-full px-2.5 py-1 text-[10px] font-black">
+                    {sectionLabels[step.section]} {sectionStepNumbers[stepIndex]}/{sectionTotal}
+                  </span>
+                  <span className="text-[10px] font-black text-primary">
+                    전체 {stepIndex + 1}/{tutorialSteps.length}
+                  </span>
+                </div>
+                <h2 id="tutorial-guide-title" className="mt-2 text-lg font-black leading-tight text-foreground sm:text-xl">
+                  {step.title}
+                </h2>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setMobilePanelPosition((position) => position === 'bottom' ? 'top' : 'bottom')}
+                  className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground md:hidden"
+                  aria-label={mobilePanelPosition === 'bottom' ? '튜토리얼 창을 위로 이동' : '튜토리얼 창을 아래로 이동'}
+                  title={mobilePanelPosition === 'bottom' ? '창을 위로 이동' : '창을 아래로 이동'}
+                >
+                  <ChevronsUpDown className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"
+                  aria-label="튜토리얼 잠시 접기"
+                  title="잠시 접기"
+                >
+                  <PauseCircle className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={skipTutorial}
+                  className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"
+                  aria-label="튜토리얼 스킵"
+                  title="스킵"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setMobilePanelPosition((position) => position === 'bottom' ? 'top' : 'bottom')}
-                className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground md:hidden"
-                aria-label={mobilePanelPosition === 'bottom' ? '튜토리얼 창을 위로 이동' : '튜토리얼 창을 아래로 이동'}
-                title={mobilePanelPosition === 'bottom' ? '창을 위로 이동' : '창을 아래로 이동'}
-              >
-                <ChevronsUpDown className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCollapsed(true)}
-                className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"
-                aria-label="튜토리얼 잠시 접기"
-                title="잠시 접기"
-              >
-                <PauseCircle className="h-4 w-4" />
-              </button>
+            <div className="relative mt-4 rounded-[1.5rem] border border-border/70 bg-secondary/55 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-white/[0.04]">
+              <div className="mb-3 flex items-center gap-2 text-xs font-black text-primary">
+                <MessageCircleHeart className="h-4 w-4" />
+                치카포 가이드
+              </div>
+              <div className="space-y-2 text-sm font-bold leading-relaxed text-foreground/90">
+                {step.lines.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
+              {step.tip && (
+                <p className="mt-3 rounded-2xl border border-primary/15 bg-primary/10 px-3 py-2 text-xs font-bold leading-relaxed text-primary dark:bg-primary/10">
+                  {step.tip}
+                </p>
+              )}
+              {(actionStatus || gachaRewardClaiming || isWaitingForAction) && (
+                <p className="mt-3 rounded-2xl border border-sky-300/40 bg-sky-100/80 px-3 py-2 text-xs font-black leading-relaxed text-sky-700 dark:border-sky-300/20 dark:bg-sky-400/10 dark:text-sky-200">
+                  {gachaRewardClaiming ? '튜토리얼 체험용 무료 소환 티켓을 준비하는 중입니다...' : actionStatus || '강조된 위치에서 직접 조작하면 다음 단계가 열립니다.'}
+                </p>
+              )}
+            </div>
+
+            <div className="relative mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
                 onClick={skipTutorial}
-                className="rounded-full border border-border bg-secondary/70 p-2 text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground"
-                aria-label="튜토리얼 스킵"
-                title="스킵"
+                className="order-2 text-xs font-black text-muted-foreground underline-offset-4 transition hover:text-foreground hover:underline sm:order-1"
               >
-                <X className="h-4 w-4" />
+                이번엔 건너뛰기
               </button>
-            </div>
-          </div>
 
-          <div className="relative mt-4 rounded-[1.5rem] border border-border/70 bg-secondary/55 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-white/[0.04]">
-            <div className="mb-3 flex items-center gap-2 text-xs font-black text-primary">
-              <MessageCircleHeart className="h-4 w-4" />
-              치카포 가이드
-            </div>
-            <div className="space-y-2 text-sm font-bold leading-relaxed text-foreground/90">
-              {step.lines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-            {step.tip && (
-              <p className="mt-3 rounded-2xl border border-primary/15 bg-primary/10 px-3 py-2 text-xs font-bold leading-relaxed text-primary dark:bg-primary/10">
-                {step.tip}
-              </p>
-            )}
-            {(actionStatus || gachaRewardClaiming || isWaitingForAction) && (
-              <p className="mt-3 rounded-2xl border border-sky-300/40 bg-sky-100/80 px-3 py-2 text-xs font-black leading-relaxed text-sky-700 dark:border-sky-300/20 dark:bg-sky-400/10 dark:text-sky-200">
-                {gachaRewardClaiming ? '튜토리얼 체험용 무료 소환 티켓을 준비하는 중입니다...' : actionStatus || '강조된 위치에서 직접 조작하면 다음 단계가 열립니다.'}
-              </p>
-            )}
-          </div>
-
-          <div className="relative mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              onClick={skipTutorial}
-              className="order-2 text-xs font-black text-muted-foreground underline-offset-4 transition hover:text-foreground hover:underline sm:order-1"
-            >
-              이번엔 건너뛰기
-            </button>
-
-            <div className="order-1 flex items-center gap-2 sm:order-2">
-              <button
-                type="button"
-                onClick={() => goToStep(stepIndex - 1)}
-                disabled={!canGoBack}
-                className="cute-wiggle-hover inline-flex items-center justify-center gap-1.5 rounded-2xl border border-border bg-secondary/80 px-4 py-2.5 text-xs font-black text-foreground transition disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                이전
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isWaitingForAction) return;
-                  if (isLastStep) {
-                    finishTutorial();
-                    return;
-                  }
-                  goToStep(stepIndex + 1);
-                }}
-                disabled={isWaitingForAction}
-                className="cute-wiggle-hover inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-primary px-5 py-2.5 text-xs font-black text-primary-foreground shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95 disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none"
-              >
-                {isLastStep ? (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    {step.actionLabel ?? '완료'}
-                  </>
-                ) : (
-                  <>
-                    <PlayCircle className="h-4 w-4" />
-                    {step.actionLabel ?? '다음'}
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-              {isWaitingForAction && (
+              <div className="order-1 flex items-center gap-2 sm:order-2">
                 <button
                   type="button"
-                  onClick={() => goToStep(stepIndex + 1)}
-                  className="rounded-2xl border border-border bg-secondary/80 px-3 py-2.5 text-[11px] font-black text-muted-foreground transition hover:text-foreground"
+                  onClick={() => goToStep(stepIndex - 1)}
+                  disabled={!canGoBack}
+                  className="cute-wiggle-hover inline-flex items-center justify-center gap-1.5 rounded-2xl border border-border bg-secondary/80 px-4 py-2.5 text-xs font-black text-foreground transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  체험 건너뛰기
+                  <ArrowLeft className="h-4 w-4" />
+                  이전
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isWaitingForAction) return;
+                    if (isLastStep) {
+                      finishTutorial();
+                      return;
+                    }
+                    goToStep(stepIndex + 1);
+                  }}
+                  disabled={isWaitingForAction}
+                  className="cute-wiggle-hover inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-primary px-5 py-2.5 text-xs font-black text-primary-foreground shadow-lg shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95 disabled:cursor-not-allowed disabled:opacity-55 sm:flex-none"
+                >
+                  {isLastStep ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      {step.actionLabel ?? '완료'}
+                    </>
+                  ) : (
+                    <>
+                      <PlayCircle className="h-4 w-4" />
+                      {step.actionLabel ?? '다음'}
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+                {isWaitingForAction && (
+                  <button
+                    type="button"
+                    onClick={() => goToStep(stepIndex + 1)}
+                    className="rounded-2xl border border-border bg-secondary/80 px-3 py-2.5 text-[11px] font-black text-muted-foreground transition hover:text-foreground"
+                  >
+                    체험 건너뛰기
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
       </div>
     </>
   );

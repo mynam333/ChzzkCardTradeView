@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS tutorial_rewards (
 CREATE TABLE IF NOT EXISTS titles (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
+    description TEXT,
     css TEXT NOT NULL DEFAULT '',
     icon_name TEXT,
     icon_color TEXT NOT NULL DEFAULT '#ffffff',
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS user_titles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id);
+ALTER TABLE titles ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE user_titles ADD COLUMN IF NOT EXISTS is_equipped BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = TRUE;
 
@@ -227,8 +229,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     body TEXT,
     link TEXT,
     is_read BOOLEAN DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
 
 -- 14. 유저 보유 코스메틱 (미장착 수량)
@@ -1227,6 +1231,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
   fee_rate INTEGER DEFAULT 5,
   settled_amount INTEGER DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
+  seller_hidden_at TIMESTAMPTZ,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
@@ -1245,6 +1250,7 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS bid_reserved INTEGER DEFAULT 0;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFAULT 0;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card

@@ -23,6 +23,7 @@ export interface User {
 export interface UserTitle {
   id: number;
   name: string;
+  description: string | null;
   css: string;
   icon_name: string | null;
   icon_color: string;
@@ -211,8 +212,8 @@ export interface ITitleRepository {
   findById(id: number): Promise<UserTitle | null>;
   findByUserId(userId: string): Promise<UserTitle[]>;
   findByUserIds(userIds: string[]): Promise<Record<string, UserTitle[]>>;
-  create(title: Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle>;
-  update(id: number, title: Partial<Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null>;
+  create(title: Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle>;
+  update(id: number, title: Partial<Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null>;
   delete(id: number): Promise<void>;
   award(userId: string, titleId: number): Promise<void>;
   awardMany(userIds: string[], titleId: number): Promise<void>;
@@ -361,6 +362,7 @@ export interface AppNotification {
   body: string | null;
   link: string | null;
   is_read: boolean;
+  deleted_at?: string | null;
   created_at?: string;
 }
 
@@ -370,6 +372,7 @@ export interface INotificationRepository {
   countUnread(userId: string): Promise<number>;
   markRead(id: number, userId: string): Promise<void>;
   markAllRead(userId: string): Promise<void>;
+  hideRead(id: number, userId: string): Promise<boolean>;
 }
 
 // 6. 유저 보유 카드 리포지토리 인터페이스
@@ -436,6 +439,7 @@ export interface MarketListing {
   fee_rate?: number;
   settled_amount: number;
   with_cosmetics?: boolean;
+  seller_hidden_at?: string | null;
   created_at?: string;
   updated_at?: string;
   // 비정규화 조인 정보
@@ -480,6 +484,7 @@ export interface IMarketRepository {
   }): Promise<{ listings: MarketListing[]; total: number }>;
   /** 내 판매 목록 관리 */
   listByUser(userId: string): Promise<MarketListing[]>;
+  hideForSeller(id: number, sellerId: string): Promise<boolean>;
   updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void>;
   /**
    * 원자적 구매 처리 (트랜잭션)

@@ -40,6 +40,7 @@ export class SupabaseNotificationRepository implements INotificationRepository {
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
+      .is('deleted_at', null)
       .order('id', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -51,7 +52,8 @@ export class SupabaseNotificationRepository implements INotificationRepository {
       .from('notifications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .eq('is_read', false);
+      .eq('is_read', false)
+      .is('deleted_at', null);
     if (error) return 0;
     return count || 0;
   }
@@ -70,8 +72,23 @@ export class SupabaseNotificationRepository implements INotificationRepository {
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', userId)
-      .eq('is_read', false);
+      .eq('is_read', false)
+      .is('deleted_at', null);
     if (error) throw error;
+  }
+
+  async hideRead(id: number, userId: string): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('notifications')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .eq('is_read', true)
+      .is('deleted_at', null)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
   }
 }
 

@@ -7,8 +7,10 @@ import {
   initRepositories,
   marketRepository,
   minigameRepository,
+  notificationRepository,
   reportRepository,
   streamerRepository,
+  titleRepository,
   userCardRepository,
   userRepository
 } from '../repositories';
@@ -105,6 +107,34 @@ describe('StreamerRepository registration blocks', () => {
     );
 
     expect(await streamerRepository.isRegistrationBlocked('blocked-channel')).toBe(true);
+  });
+});
+
+describe('TitleRepository descriptions', () => {
+  it('칭호 설명을 생성, 수정, 수여 조회까지 보존한다', async () => {
+    seedUser(db, 'title-user');
+
+    const created = await titleRepository.create({
+      name: '친절한 안내자',
+      description: '튜토리얼을 끝까지 도와준 유저에게 지급됩니다.',
+      css: 'color: #2563eb;',
+      icon_name: 'Award',
+      icon_color: '#60a5fa'
+    });
+
+    expect(created.description).toBe('튜토리얼을 끝까지 도와준 유저에게 지급됩니다.');
+
+    const updated = await titleRepository.update(created.id, {
+      description: '처음 방문한 유저를 따뜻하게 도와준 칭호입니다.'
+    });
+    expect(updated?.description).toBe('처음 방문한 유저를 따뜻하게 도와준 칭호입니다.');
+
+    await titleRepository.award('title-user', created.id);
+    const owned = await titleRepository.findByUserId('title-user');
+    expect(owned[0]).toMatchObject({
+      id: created.id,
+      description: '처음 방문한 유저를 따뜻하게 도와준 칭호입니다.'
+    });
   });
 });
 
@@ -395,6 +425,53 @@ describe('MarketRepository 재등록 제약', () => {
       settled_amount: 1900
     });
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'auction-bidder-b' });
+  });
+
+  it('완료/취소된 내 등록 매물은 화면에서만 숨기고 DB 기록은 유지한다', async () => {
+    seedUser(db, 'hide-seller');
+    seedUser(db, 'hide-buyer', 10000);
+    seedStreamer(db, 'hide-channel', '숨김 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('hide-seller', 'hide-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'hide-seller',
+      user_card_id: cardId,
+      price: 1000
+    });
+    expect(await marketRepository.buyAtomic(listing.id as number, 'hide-buyer')).toMatchObject({ ok: true });
+
+    expect(await marketRepository.hideForSeller(listing.id as number, 'hide-seller')).toBe(true);
+    expect(await marketRepository.listByUser('hide-seller')).toEqual([]);
+    expect(db.prepare('SELECT status, seller_hidden_at FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+      status: 'SOLD',
+      seller_hidden_at: expect.any(String)
+    });
+  });
+});
+
+describe('NotificationRepository hidden read notifications', () => {
+  it('읽은 알림은 알림함에서만 숨기고 DB 기록은 유지한다', async () => {
+    seedUser(db, 'notification-user');
+    const notification = await notificationRepository.create({
+      user_id: 'notification-user',
+      title: '알림',
+      body: '본문',
+      link: 'inventory'
+    });
+
+    expect(await notificationRepository.hideRead(notification.id as number, 'notification-user')).toBe(false);
+    await notificationRepository.markRead(notification.id as number, 'notification-user');
+    expect(await notificationRepository.hideRead(notification.id as number, 'notification-user')).toBe(true);
+
+    expect(await notificationRepository.findByUser('notification-user', 50)).toEqual([]);
+    expect(await notificationRepository.countUnread('notification-user')).toBe(0);
+    expect(db.prepare('SELECT title, deleted_at FROM notifications WHERE id = ?').get(notification.id)).toEqual({
+      title: '알림',
+      deleted_at: expect.any(String)
+    });
   });
 });
 

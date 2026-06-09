@@ -72,3 +72,24 @@ export const markAllNotificationsRead = async (req: AuthenticatedRequest, res: R
     return res.status(500).json({ error: 'InternalServerError', message: '전체 읽음 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
+
+/**
+ * 읽은 알림을 내 알림함에서 숨김 처리합니다. DB 레코드는 유지됩니다.
+ */
+export const hideReadNotification = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'BadRequest', message: '유효한 알림 ID가 필요합니다.' });
+
+  try {
+    const ok = await notificationRepository.hideRead(id, userId);
+    if (!ok) {
+      return res.status(400).json({ error: 'BadRequest', message: '읽은 알림만 삭제할 수 있습니다.' });
+    }
+    return res.status(200).json({ ok: true, message: '알림을 삭제했습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '알림 삭제 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};

@@ -29,6 +29,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
       with_cosmetics: !!row.with_cosmetics,
+      seller_hidden_at: row.seller_hidden_at ?? null,
       created_at: row.created_at,
       updated_at: row.updated_at,
       seller_username: row.seller?.username || row.seller_username,
@@ -270,6 +271,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .from('market_listings')
       .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('seller_id', userId)
+      .is('seller_hidden_at', null)
       .order('id', { ascending: false });
 
     if (error || !listingsData) {
@@ -312,6 +314,20 @@ export class SupabaseMarketRepository implements IMarketRepository {
     }
 
     return listingsData.map(l => this.mapRow(l, cardsMap[l.user_card_id]));
+  }
+
+  async hideForSeller(id: number, sellerId: string): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('market_listings')
+      .update({ seller_hidden_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('seller_id', sellerId)
+      .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])
+      .is('seller_hidden_at', null)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
   }
 
   async updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void> {

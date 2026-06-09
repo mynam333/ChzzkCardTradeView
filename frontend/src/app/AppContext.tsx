@@ -10,10 +10,10 @@ import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
 export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
-type ShopSubTabId = 'gacha_shop' | 'market' | 'history';
+type ShopSubTabId = 'gacha_shop' | 'market' | 'my_listings' | 'history';
 
 const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin', 'arcade'];
-const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'history'];
+const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'my_listings', 'history'];
 
 const parseNotificationLink = (link: string | null): { tab: TabId; shopSubTab?: ShopSubTabId } | null => {
   const raw = (link || '').trim();
@@ -296,6 +296,7 @@ interface NotificationContextType {
   fetchNotifications: () => Promise<void>;
   openNotification: (n: AppNotificationItem) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
+  hideReadNotification: (id: number) => Promise<void>;
 }
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
@@ -362,6 +363,18 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
     try { await apiFetch('/notifications/read-all', { method: 'POST' }); } catch { /* 무시 */ }
   };
 
+  const hideReadNotification = async (id: number) => {
+    const target = notifications.find((item) => item.id === id);
+    if (!target?.is_read) return;
+    setNotifications((prev) => prev.filter((item) => item.id !== id));
+    try {
+      const res = await apiFetch(`/notifications/${id}`, { method: 'DELETE' });
+      if (!res.ok) fetchNotifications();
+    } catch {
+      fetchNotifications();
+    }
+  };
+
   useEffect(() => {
     if (!user) {
       setNotifications([]);
@@ -408,7 +421,8 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       unreadCount,
       fetchNotifications,
       openNotification,
-      markAllNotificationsRead
+      markAllNotificationsRead,
+      hideReadNotification
     }}>
       {children}
     </NotificationContext.Provider>

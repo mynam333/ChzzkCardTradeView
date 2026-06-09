@@ -38,13 +38,14 @@ export class SqliteNotificationRepository implements INotificationRepository {
       body: row.body,
       link: row.link,
       is_read: row.is_read === 1,
+      deleted_at: row.deleted_at ?? null,
       created_at: row.created_at
     };
   }
 
   async findByUser(userId: string, limit: number): Promise<AppNotification[]> {
     const rows = this.getDb().prepare(
-      'SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?'
+      'SELECT * FROM notifications WHERE user_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?'
     ).all(userId, limit) as any[];
     return rows.map((r) => ({
       id: r.id,
@@ -53,13 +54,14 @@ export class SqliteNotificationRepository implements INotificationRepository {
       body: r.body,
       link: r.link,
       is_read: r.is_read === 1,
+      deleted_at: r.deleted_at ?? null,
       created_at: r.created_at
     }));
   }
 
   async countUnread(userId: string): Promise<number> {
     const row = this.getDb().prepare(
-      'SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0'
+      'SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL'
     ).get(userId) as any;
     return row?.c || 0;
   }
@@ -69,7 +71,14 @@ export class SqliteNotificationRepository implements INotificationRepository {
   }
 
   async markAllRead(userId: string): Promise<void> {
-    this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0').run(userId);
+    this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL').run(userId);
+  }
+
+  async hideRead(id: number, userId: string): Promise<boolean> {
+    const result = this.getDb()
+      .prepare("UPDATE notifications SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND is_read = 1 AND deleted_at IS NULL")
+      .run(id, userId);
+    return result.changes > 0;
   }
 }
 

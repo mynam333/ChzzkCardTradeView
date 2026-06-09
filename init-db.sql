@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS tutorial_rewards (
 CREATE TABLE IF NOT EXISTS titles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    description TEXT,
     css TEXT NOT NULL DEFAULT '',
     icon_name TEXT,
     icon_color TEXT NOT NULL DEFAULT '#ffffff',
@@ -221,6 +222,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     body TEXT,                                 -- 알림 본문
     link TEXT,                                 -- 클릭 시 이동할 탭/경로 (예: 'gacha')
     is_read INTEGER DEFAULT 0,                 -- 읽음 여부 (0/1)
+    deleted_at TEXT,                           -- 알림함에서 숨김 처리한 시각(DB 기록은 유지)
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -301,6 +303,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
     fee_rate INTEGER DEFAULT 5,
     settled_amount INTEGER DEFAULT 0,
     with_cosmetics INTEGER DEFAULT 0,
+    seller_hidden_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,

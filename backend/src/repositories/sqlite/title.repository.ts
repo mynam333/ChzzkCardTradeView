@@ -49,23 +49,24 @@ export class SqliteTitleRepository implements ITitleRepository {
     return result;
   }
 
-  async create(title: Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle> {
+  async create(title: Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle> {
     const info = this.getDb().prepare(`
-      INSERT INTO titles (name, css, icon_name, icon_color)
-      VALUES (?, ?, ?, ?)
-    `).run(title.name, title.css, title.icon_name, title.icon_color);
+      INSERT INTO titles (name, description, css, icon_name, icon_color)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(title.name, title.description, title.css, title.icon_name, title.icon_color);
     return (await this.findById(Number(info.lastInsertRowid)))!;
   }
 
-  async update(id: number, title: Partial<Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null> {
+  async update(id: number, title: Partial<Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null> {
     const current = await this.findById(id);
     if (!current) return null;
     this.getDb().prepare(`
       UPDATE titles
-      SET name = ?, css = ?, icon_name = ?, icon_color = ?, updated_at = datetime('now')
+      SET name = ?, description = ?, css = ?, icon_name = ?, icon_color = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       title.name ?? current.name,
+      title.description === undefined ? current.description : title.description,
       title.css ?? current.css,
       title.icon_name === undefined ? current.icon_name : title.icon_name,
       title.icon_color ?? current.icon_color,

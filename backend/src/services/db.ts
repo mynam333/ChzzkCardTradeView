@@ -278,6 +278,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] user_titles 테이블에 is_equipped 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE user_titles ADD COLUMN is_equipped INTEGER NOT NULL DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT description FROM titles LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] titles 테이블에 description 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE titles ADD COLUMN description TEXT;");
+      }
       sqliteDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = 1;");
       try {
         sqliteDb.prepare("SELECT star FROM card_reports LIMIT 1").get();
@@ -291,6 +297,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         blocked_by TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       );`);
+      try {
+        sqliteDb.prepare("SELECT deleted_at FROM notifications LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] notifications 테이블에 deleted_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE notifications ADD COLUMN deleted_at TEXT;");
+      }
       try {
         sqliteDb.prepare("SELECT is_pinned FROM announcements LIMIT 1").get();
       } catch (e) {
@@ -318,6 +330,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         fee_rate INTEGER DEFAULT 5,
         settled_amount INTEGER DEFAULT 0,
         with_cosmetics INTEGER DEFAULT 0,
+        seller_hidden_at TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -354,6 +367,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
                 fee_rate INTEGER DEFAULT 5,
                 settled_amount INTEGER DEFAULT 0,
                 with_cosmetics INTEGER DEFAULT 0,
+                seller_hidden_at TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -361,9 +375,9 @@ export const initDatabaseConnection = async (): Promise<void> => {
                 FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
               );
               INSERT INTO market_listings_new
-                (id, seller_id, user_card_id, price, status, buyer_id, bid_reserved, fee, fee_rate, settled_amount, with_cosmetics, created_at, updated_at)
+                (id, seller_id, user_card_id, price, status, buyer_id, bid_reserved, fee, fee_rate, settled_amount, with_cosmetics, seller_hidden_at, created_at, updated_at)
               SELECT id, seller_id, user_card_id, price, status, buyer_id, 0, fee, 5, settled_amount,
-                     COALESCE(with_cosmetics, 0), created_at, updated_at
+                     COALESCE(with_cosmetics, 0), NULL, created_at, updated_at
                 FROM market_listings;
               DROP TABLE market_listings;
               ALTER TABLE market_listings_new RENAME TO market_listings;
@@ -428,7 +442,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
         ['current_bidder_id', 'ALTER TABLE market_listings ADD COLUMN current_bidder_id TEXT;'],
         ['auction_ends_at', 'ALTER TABLE market_listings ADD COLUMN auction_ends_at TEXT;'],
         ['bid_reserved', 'ALTER TABLE market_listings ADD COLUMN bid_reserved INTEGER DEFAULT 0;'],
-        ['fee_rate', 'ALTER TABLE market_listings ADD COLUMN fee_rate INTEGER DEFAULT 5;']
+        ['fee_rate', 'ALTER TABLE market_listings ADD COLUMN fee_rate INTEGER DEFAULT 5;'],
+        ['seller_hidden_at', 'ALTER TABLE market_listings ADD COLUMN seller_hidden_at TEXT;']
       ] as const) {
         try {
           sqliteDb.prepare(`SELECT ${column} FROM market_listings LIMIT 1`).get();

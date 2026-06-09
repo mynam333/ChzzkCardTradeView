@@ -82,22 +82,44 @@ const formatRemaining = (ms: number): string => {
   return `${seconds}초`;
 };
 
+const getPaginationItems = (currentPage: number, totalPages: number): Array<number | 'ellipsis'> => {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, totalPages]);
+  for (let page = currentPage - 2; page <= currentPage + 2; page++) {
+    if (page > 1 && page < totalPages) pages.add(page);
+  }
+
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const result: Array<number | 'ellipsis'> = [];
+  sorted.forEach((page, index) => {
+    const previous = sorted[index - 1];
+    if (previous && page - previous > 1) result.push('ellipsis');
+    result.push(page);
+  });
+  return result;
+};
+
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
 
   const searchParams = useSearchParams();
   const router = useRouter();
   const subTabParam = searchParams.get('tab');
-  const initialSubTab = (subTabParam === 'market' || subTabParam === 'history' || subTabParam === 'gacha_shop')
+  const initialSubTab = (subTabParam === 'market' || subTabParam === 'my_listings' || subTabParam === 'history' || subTabParam === 'gacha_shop')
     ? subTabParam
     : 'gacha_shop';
 
   // ---- 가챠(소환) ----
   const [isDrawing, setIsDrawing] = useState(false);
+  const [drawingCount, setDrawingCount] = useState<1 | 10>(1);
   const [drawnCard, setDrawnCard] = useState<any | null>(null);
+  const [drawnCards, setDrawnCards] = useState<any[]>([]);
 
   // ---- 대분류 탭 ----
-  const [subTab, setSubTab] = useState<'gacha_shop' | 'market' | 'history'>(initialSubTab);
+  const [subTab, setSubTab] = useState<'gacha_shop' | 'market' | 'my_listings' | 'history'>(initialSubTab);
 
   // ---- 상점 ----
   const [items, setItems] = useState<ShopItem[]>([]);
@@ -118,6 +140,7 @@ export const ShopTab: React.FC = () => {
   const [biddingListingId, setBiddingListingId] = useState<number | null>(null);
   const [bidInputs, setBidInputs] = useState<Record<number, string>>({});
   const [cancellingListingId, setCancellingListingId] = useState<number | null>(null);
+  const [hidingListingId, setHidingListingId] = useState<number | null>(null);
   const [marketWatches, setMarketWatches] = useState<any[]>([]);
   const [watchChannelId, setWatchChannelId] = useState('');
   const [watchStar, setWatchStar] = useState('');
@@ -157,7 +180,7 @@ export const ShopTab: React.FC = () => {
 
   useEffect(() => {
     const param = searchParams.get('tab');
-    if (param === 'gacha_shop' || param === 'market' || param === 'history') {
+    if (param === 'gacha_shop' || param === 'market' || param === 'my_listings' || param === 'history') {
       setSubTab(param);
     }
   }, [searchParams]);
@@ -337,9 +360,9 @@ export const ShopTab: React.FC = () => {
   }, [marketSearch]);
 
   useEffect(() => {
-    if (subTab === 'market' && user) {
+    if ((subTab === 'market' || subTab === 'my_listings') && user) {
       fetchMyListings();
-      fetchMarketWatches();
+      if (subTab === 'market') fetchMarketWatches();
     }
   }, [subTab, user]);
 
@@ -369,8 +392,8 @@ export const ShopTab: React.FC = () => {
 
   useEffect(() => {
     const handleShopSubTab = (event: Event) => {
-      const subTabId = (event as CustomEvent<{ subTab?: 'gacha_shop' | 'market' | 'history' }>).detail?.subTab;
-      if (subTabId === 'gacha_shop' || subTabId === 'market' || subTabId === 'history') {
+      const subTabId = (event as CustomEvent<{ subTab?: 'gacha_shop' | 'market' | 'my_listings' | 'history' }>).detail?.subTab;
+      if (subTabId === 'gacha_shop' || subTabId === 'market' || subTabId === 'my_listings' || subTabId === 'history') {
         setSubTab(subTabId);
       }
     };
@@ -435,6 +458,24 @@ export const ShopTab: React.FC = () => {
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setCancellingListingId(null);
+    }
+  };
+
+  const handleHideMyListing = async (listingId: number) => {
+    setHidingListingId(listingId);
+    try {
+      const res = await apiFetch(`/market/my/${listingId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast('내 등록 매물 관리에서 삭제했습니다.', 'success');
+        setMyListings(prev => prev.filter(item => item.id !== listingId));
+      } else {
+        toast(data.message || '삭제에 실패했습니다.', 'error');
+      }
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setHidingListingId(null);
     }
   };
 
@@ -542,45 +583,69 @@ export const ShopTab: React.FC = () => {
   const bonusFreeTickets = user?.bonusFreeDrawTickets ?? 0;
   const totalFreeTickets = user?.freeDrawInterval === 0 ? Infinity : resetFreeTickets + bonusFreeTickets;
 
-  const handleDraw = async () => {
+  const handleDraw = async (count: 1 | 10 = 1) => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
     const drawCost = user.drawCost ?? 10000;
-    if (!isFreeDraw && user.point < drawCost) {
-      toast(`포인트가 부족합니다. (1회 뽑기: ${drawCost.toLocaleString()} P)`, 'warning');
+    const availableTickets = user.freeDrawInterval === 0 ? Infinity : totalFreeTickets;
+    const paidDraws = user.freeDrawInterval === 0 ? 0 : Math.max(0, count - (Number.isFinite(availableTickets) ? Number(availableTickets) : count));
+    const requiredPoint = paidDraws * drawCost;
+    if (user.point < requiredPoint) {
+      toast(`포인트가 부족합니다. (${count === 10 ? '10연차' : '1회'} 필요 포인트: ${requiredPoint.toLocaleString()} P)`, 'warning');
       return;
     }
 
     // 낙관적 포인트 차감
-    if (!isFreeDraw) updatePoints(-drawCost);
+    if (requiredPoint > 0) updatePoints(-requiredPoint);
     setIsDrawing(true);
+    setDrawingCount(count);
     setDrawnCard(null);
+    setDrawnCards([]);
     try {
-      const res = await apiFetch('/cards/draw', { method: 'POST' });
+      const res = await apiFetch(count === 10 ? '/cards/draw-many' : '/cards/draw', {
+        method: 'POST',
+        ...(count === 10 ? { body: JSON.stringify({ count: 10 }) } : {})
+      });
       if (!res.ok) {
         const e = await res.json();
         throw new Error(e.message || '카드 뽑기 요청에 실패했습니다.');
       }
       const data = await res.json();
       setTimeout(() => {
-        const nextDrawnCard = { ...data.card.streamer, free_draw_source: data.free_draw_source, is_free: data.is_free };
-        setDrawnCard(nextDrawnCard);
+        if (count === 10) {
+          const nextDrawnCards = (data.cards || []).map((card: any) => ({
+            ...card.streamer,
+            card_id: card.id,
+            card_serial_number: card.serial_number,
+            is_free: card.is_free,
+            free_draw_source: card.free_draw_source
+          }));
+          setDrawnCards(nextDrawnCards);
+          if (nextDrawnCards[0]) {
+            window.dispatchEvent(new CustomEvent('chikapo:gacha-result', {
+              detail: { card: nextDrawnCards[0] }
+            }));
+          }
+        } else {
+          const nextDrawnCard = { ...data.card.streamer, free_draw_source: data.free_draw_source, is_free: data.is_free };
+          setDrawnCard(nextDrawnCard);
+          window.dispatchEvent(new CustomEvent('chikapo:gacha-result', {
+            detail: { card: nextDrawnCard }
+          }));
+        }
         setIsDrawing(false);
         refreshUserData();
-        window.dispatchEvent(new CustomEvent('chikapo:gacha-result', {
-          detail: { card: nextDrawnCard }
-        }));
         // SSR 및 Turbopack의 CJS 모듈 바인딩 이슈 우회를 위해 동적 임포트 적용
         import('canvas-confetti').then((module) => {
           const confetti = module.default;
           const colors = ['#38bdf8', '#8b5cf6', '#22c55e', '#facc15', '#ffffff'];
-          confetti({ particleCount: 120, spread: 78, startVelocity: 42, scalar: 1.05, origin: { x: 0.5, y: 0.56 }, colors });
+          confetti({ particleCount: count === 10 ? 220 : 120, spread: count === 10 ? 96 : 78, startVelocity: 42, scalar: 1.05, origin: { x: 0.5, y: 0.56 }, colors });
           confetti({ particleCount: 55, angle: 62, spread: 58, startVelocity: 38, scalar: 0.85, origin: { x: 0.12, y: 0.72 }, colors });
           confetti({ particleCount: 55, angle: 118, spread: 58, startVelocity: 38, scalar: 0.85, origin: { x: 0.88, y: 0.72 }, colors });
         }).catch((err) => console.error('Confetti 로드 실패:', err));
-      }, 2200);
+      }, count === 10 ? 3200 : 2200);
     } catch (e: any) {
       // 실패 시 롤백
-      if (!isFreeDraw) updatePoints(drawCost);
+      if (requiredPoint > 0) updatePoints(requiredPoint);
       setIsDrawing(false);
       toast(e.message || '서버와의 통신 오류가 발생했습니다.', 'error');
     }
@@ -632,6 +697,10 @@ export const ShopTab: React.FC = () => {
   const paginatedCosmetics = filtered.slice((cosmeticPage - 1) * 8, cosmeticPage * 8);
 
   const marketTotalPages = Math.ceil(marketTotal / 12);
+  const tenDrawPaidCount = user?.freeDrawInterval === 0
+    ? 0
+    : Math.max(0, 10 - (Number.isFinite(totalFreeTickets) ? Number(totalFreeTickets) : 10));
+  const tenDrawPointCost = tenDrawPaidCount * (user?.drawCost ?? 10000);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -640,6 +709,7 @@ export const ShopTab: React.FC = () => {
         {([
           ['gacha_shop', '소환 및 일반 상점', Store],
           ['market', '오픈마켓 (유저 거래)', ArrowRightLeft],
+          ['my_listings', '내 등록 매물 관리', Layers],
           ['history', '거래 이력 (영수증)', Clock]
         ] as const).map(([tabId, label, Icon]) => {
           const isActive = subTab === tabId;
@@ -688,12 +758,12 @@ export const ShopTab: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex w-full flex-col items-center gap-2 sm:w-auto">
                 <button
                   data-tour="shop-gacha-button"
-                  onClick={handleDraw}
+                  onClick={() => handleDraw(1)}
                   disabled={isDrawing}
-                  className="cute-wiggle-hover group relative flex h-28 w-44 cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none dark:from-primary dark:via-emerald-500 dark:to-teal-600 dark:shadow-lg dark:shadow-primary/20"
+                  className="cute-wiggle-hover group relative flex h-28 w-full cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-sky-400 via-emerald-500 to-teal-500 font-bold text-primary-foreground shadow-md shadow-emerald-500/15 transition-all hover:scale-105 active:scale-95 disabled:pointer-events-none sm:w-44 dark:from-primary dark:via-emerald-500 dark:to-teal-600 dark:shadow-lg dark:shadow-primary/20"
                 >
                   <Sparkles className="h-8 w-8 animate-pulse text-white" />
                   <div className="text-center">
@@ -707,10 +777,26 @@ export const ShopTab: React.FC = () => {
                     )}
                   </div>
                 </button>
+                <button
+                  onClick={() => handleDraw(10)}
+                  disabled={isDrawing}
+                  className="cute-wiggle-hover group relative flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-2xl border border-violet-300/40 bg-gradient-to-r from-violet-500 via-fuchsia-500 to-sky-500 px-4 py-3 text-xs font-black text-white shadow-md shadow-violet-500/15 transition hover:scale-[1.03] active:scale-95 disabled:pointer-events-none disabled:opacity-60 sm:w-44"
+                >
+                  <span className="absolute inset-0 bg-white/0 transition group-hover:bg-white/10" />
+                  <Sparkles className="relative h-4 w-4" />
+                  <span className="relative">10연차 소환</span>
+                  <span className="relative rounded-full bg-white/18 px-1.5 py-0.5 text-[9px]">
+                    {user?.freeDrawInterval === 0
+                      ? '무료'
+                      : Number.isFinite(totalFreeTickets) && totalFreeTickets >= 10
+                        ? '티켓 10장'
+                        : `${tenDrawPointCost.toLocaleString()}P`}
+                  </span>
+                </button>
               </div>
             </div>
 
-            {(isDrawing || drawnCard) && (
+            {(isDrawing || drawnCard || drawnCards.length > 0) && (
               <div className="mt-8 flex flex-col items-center justify-center border-t border-border/50 pt-8 animate-in fade-in duration-200">
                 <AnimatePresence mode="wait">
                   {isDrawing ? (
@@ -760,8 +846,50 @@ export const ShopTab: React.FC = () => {
                         animate={{ opacity: [0.58, 1, 0.58] }}
                         transition={{ duration: 1.05, repeat: Infinity }}
                       >
-                        카드팩 에너지를 모으는 중...
+                        {drawingCount === 10 ? '10개의 카드팩을 동시에 개봉하는 중...' : '카드팩 에너지를 모으는 중...'}
                       </motion.p>
+                    </motion.div>
+                  ) : drawnCards.length > 0 ? (
+                    <motion.div
+                      key="multi-result"
+                      initial={{ opacity: 0, y: 24, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+                      className="w-full"
+                    >
+                      <div className="mb-4 text-center">
+                        <span className="inline-flex rounded-full border border-violet-300/35 bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-600 shadow-sm dark:text-violet-200">
+                          10연차 소환 완료! 보관함에서 모두 확인할 수 있어요
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                        {drawnCards.map((card, index) => (
+                          <motion.div
+                            key={`${card.channel_id}-${card.card_id || index}`}
+                            initial={{ opacity: 0, y: 18, rotateY: -18 }}
+                            animate={{ opacity: 1, y: 0, rotateY: 0 }}
+                            transition={{ delay: index * 0.045, duration: 0.28 }}
+                            className="relative flex aspect-[5/7] min-h-44 flex-col justify-between overflow-hidden rounded-2xl border border-border/80 bg-card p-2.5 shadow-md"
+                            style={{ transformStyle: 'preserve-3d' }}
+                          >
+                            <img src={card.custom_image_url || card.logo_url} alt={card.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-black/15" />
+                            <div className="relative z-10 flex justify-between">
+                              <span className="rounded bg-black/45 px-1.5 py-0.5 text-[8px] font-black text-white/85">#{index + 1}</span>
+                              {card.is_free && <span className="rounded bg-yellow-300 px-1.5 py-0.5 text-[8px] font-black text-yellow-950">FREE</span>}
+                            </div>
+                            <div className="relative z-10 mt-auto text-white">
+                              <h4 className="truncate text-xs font-black drop-shadow-md">{card.name}</h4>
+                              <div className="mt-1 flex items-center justify-between border-t border-white/20 pt-1">
+                                <span className="text-[9px] text-zinc-300">시세</span>
+                                <span className="cute-number-font text-[11px] font-black text-emerald-300">{(card.base_value || 0).toLocaleString()}P</span>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                      <button onClick={() => setDrawnCards([])} className="mx-auto mt-4 block rounded-lg bg-secondary px-4 py-1.5 text-xs font-bold text-muted-foreground hover:bg-secondary/80">닫기</button>
                     </motion.div>
                   ) : drawnCard ? (
                     <motion.div
@@ -1308,8 +1436,11 @@ export const ShopTab: React.FC = () => {
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </button>
-                    {Array.from({ length: marketTotalPages }).map((_, i) => {
-                      const p = i + 1;
+                    {getPaginationItems(marketPage, marketTotalPages).map((item, index) => {
+                      if (item === 'ellipsis') {
+                        return <span key={`ellipsis-${index}`} className="px-1 text-xs font-black text-muted-foreground">...</span>;
+                      }
+                      const p = item;
                       return (
                         <button
                           key={p}
@@ -1332,13 +1463,21 @@ export const ShopTab: React.FC = () => {
               </div>
             )}
           </section>
-
+        </div>
+      ) : subTab === 'my_listings' ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
           {/* 내가 등록한 판매 카드 관리 내역 */}
-          {user && (
           <section data-tour="shop-my-listings" className="cute-surface rounded-[2rem] p-6 space-y-4">
-              <h3 className="text-base font-bold flex items-center gap-2">
-                <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 내 등록 매물 관리 ({myListings.length}건)
-              </h3>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h3 className="text-base font-bold flex items-center gap-2">
+                    <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 내 등록 매물 관리 ({myListings.length}건)
+                  </h3>
+                  <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+                    판매 중인 매물은 등록 취소할 수 있고, 취소/완료된 매물은 이 화면에서 삭제해 숨길 수 있습니다. DB 기록은 유지됩니다.
+                  </p>
+                </div>
+              </div>
               {myListings.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">등록된 판매 매물이 없습니다.</p>
               ) : (
@@ -1417,13 +1556,21 @@ export const ShopTab: React.FC = () => {
                               )}
                             </td>
                             <td className="py-3 text-right">
-                              {l.status === 'PENDING' && (
+                              {l.status === 'PENDING' ? (
                                 <button
                                   onClick={() => handleCancelMarketItem(l.id)}
                                   disabled={cancellingListingId === l.id}
                                   className="rounded-lg bg-rose-600/10 hover:bg-rose-600/20 px-2.5 py-1 text-[10px] font-bold text-rose-500 transition disabled:opacity-50"
                                 >
                                   등록 취소
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleHideMyListing(l.id)}
+                                  disabled={hidingListingId === l.id}
+                                  className="rounded-lg bg-secondary px-2.5 py-1 text-[10px] font-bold text-muted-foreground transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50 dark:hover:bg-rose-500/10"
+                                >
+                                  {hidingListingId === l.id ? '삭제 중...' : '목록 삭제'}
                                 </button>
                               )}
                             </td>
@@ -1435,7 +1582,6 @@ export const ShopTab: React.FC = () => {
                 </div>
               )}
             </section>
-          )}
         </div>
       ) : (
         <div className="space-y-6 animate-in fade-in duration-200">

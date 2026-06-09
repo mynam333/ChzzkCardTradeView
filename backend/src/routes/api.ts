@@ -60,6 +60,7 @@ import {
   updateMyCardVisibility,
   updateMyCardFavorite,
   drawCard,
+  drawCards,
   searchChzzkStreamer,
   registerStreamer,
   sellCards
@@ -77,6 +78,7 @@ import {
   listMyListings,
   createListing,
   cancelListing,
+  hideMyListing,
   purchaseListing,
   placeBid,
   listMarketWatches,
@@ -115,7 +117,8 @@ import {
   getNotifications,
   streamNotifications,
   markNotificationRead,
-  markAllNotificationsRead
+  markAllNotificationsRead,
+  hideReadNotification
 } from '../controllers/notificationController';
 import {
   getShopItems,
@@ -212,6 +215,7 @@ router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
 router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
 router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
+router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, drawLimiter, drawCards);
 router.patch('/cards/:card_id/visibility', authMiddleware, banCheckMiddleware, updateMyCardVisibility);
 router.patch('/cards/:card_id/favorite', authMiddleware, banCheckMiddleware, updateMyCardFavorite);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
@@ -242,6 +246,7 @@ router.get('/notifications', authMiddleware, banCheckMiddleware, getNotification
 router.get('/notifications/stream', authMiddleware, banCheckMiddleware, streamNotifications);
 router.post('/notifications/read-all', authMiddleware, banCheckMiddleware, markAllNotificationsRead);
 router.post('/notifications/:id/read', authMiddleware, banCheckMiddleware, markNotificationRead);
+router.delete('/notifications/:id', authMiddleware, banCheckMiddleware, hideReadNotification);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
 router.post('/trades', authMiddleware, banCheckMiddleware, tradeLimiter, createTrade);
@@ -254,6 +259,7 @@ router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, reje
 // 오픈마켓 API
 router.get('/market/listings', authMiddleware, listActiveListings);
 router.get('/market/my', authMiddleware, listMyListings);
+router.delete('/market/my/:id', authMiddleware, banCheckMiddleware, hideMyListing);
 router.get('/market/history', authMiddleware, listMarketHistory);
 router.get('/market/watches', authMiddleware, banCheckMiddleware, listMarketWatches);
 router.post('/market/watches', authMiddleware, banCheckMiddleware, upsertMarketWatch);

@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, Trash2 } from 'lucide-react';
 import { useApp, useNotifications } from './AppContext';
 
 export const NotificationBell: React.FC<{ className?: string; align?: 'left' | 'right' }> = ({ className, align = 'right' }) => {
   const { user } = useApp();
-  const { notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead } = useNotifications();
+  const { notifications, unreadCount, fetchNotifications, openNotification, markAllNotificationsRead, hideReadNotification } = useNotifications();
   const [open, setOpen] = useState(false);
 
   if (!user) return null;
@@ -68,20 +68,37 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
                 <p className="px-4 py-10 text-center text-xs text-muted-foreground">받은 알림이 없습니다.</p>
               ) : (
                 notifications.map((n) => (
-                  <button
+                  <div
                     key={n.id}
-                    onClick={() => { openNotification(n); setOpen(false); }}
-                    className={`flex w-full flex-col items-start gap-1 border-b border-border/40 px-4 py-3 text-left transition hover:bg-secondary/45 ${n.is_read ? 'opacity-65' : 'bg-primary/6'}`}
+                    className={`group flex w-full items-start gap-2 border-b border-border/40 px-4 py-3 text-left transition hover:bg-secondary/45 ${n.is_read ? 'opacity-65' : 'bg-primary/6'}`}
                   >
-                    <div className="flex w-full items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-xs font-black text-foreground">
-                        {!n.is_read && <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_rgba(22,136,240,0.45)]" />}
-                        {n.title}
-                      </span>
-                      <span className="cute-number-font shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
-                    </div>
-                    {n.body && <span className="break-keep text-[11px] font-semibold leading-snug text-muted-foreground">{n.body}</span>}
-                  </button>
+                    <button
+                      onClick={() => { openNotification(n); setOpen(false); }}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5 text-xs font-black text-foreground">
+                          {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_10px_rgba(22,136,240,0.45)]" />}
+                          <span className="truncate">{n.title}</span>
+                        </span>
+                        <span className="cute-number-font shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                      </div>
+                      {n.body && <span className="mt-1 block break-keep text-[11px] font-semibold leading-snug text-muted-foreground">{n.body}</span>}
+                    </button>
+                    {n.is_read && (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          hideReadNotification(n.id);
+                        }}
+                        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-card/70 text-muted-foreground opacity-80 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10 sm:opacity-0 sm:group-hover:opacity-100"
+                        title="읽은 알림 삭제"
+                        aria-label="읽은 알림 삭제"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 ))
               )}
             </div>

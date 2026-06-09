@@ -47,13 +47,13 @@ export class SupabaseTitleRepository implements ITitleRepository {
     return result;
   }
 
-  async create(title: Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle> {
+  async create(title: Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>): Promise<UserTitle> {
     const { data, error } = await this.getClient().from('titles').insert(title).select().single();
     if (error) throw error;
     return data as UserTitle;
   }
 
-  async update(id: number, title: Partial<Pick<UserTitle, 'name' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null> {
+  async update(id: number, title: Partial<Pick<UserTitle, 'name' | 'description' | 'css' | 'icon_name' | 'icon_color'>>): Promise<UserTitle | null> {
     const { data, error } = await this.getClient()
       .from('titles')
       .update({ ...title, updated_at: new Date().toISOString() })
