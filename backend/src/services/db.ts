@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
+import { ensureParentDirectory, getSqliteDbPath } from './storagePaths';
 
 let sqliteDb: Database.Database | null = null;
 let supabaseClient: SupabaseClient | null = null;
@@ -16,6 +17,7 @@ let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
  */
 const SUPABASE_FETCH_MAX_RETRIES = 3;
 const SUPABASE_FETCH_BACKOFF_MS = [250, 600, 1200];
+const SUPABASE_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.SUPABASE_FETCH_TIMEOUT_MS || 15_000));
 
 const decodeJwtPayload = (token: string): Record<string, any> | null => {
   try {
@@ -40,16 +42,42 @@ const assertServerSupabaseKey = (key: string) => {
   }
 };
 
+const isAbortError = (err: any) =>
+  err?.name === 'AbortError' ||
+  err?.code === 'ABORT_ERR' ||
+  err?.message === 'This operation was aborted';
+
+const fetchWithTimeout = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  if (init?.signal?.aborted) {
+    throw new DOMException('This operation was aborted', 'AbortError');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SUPABASE_FETCH_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  init?.signal?.addEventListener('abort', onAbort, { once: true });
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+    init?.signal?.removeEventListener('abort', onAbort);
+  }
+};
+
 const fetchWithRetry: typeof fetch = async (input, init) => {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= SUPABASE_FETCH_MAX_RETRIES; attempt++) {
     try {
-      return await fetch(input, init);
+      return await fetchWithTimeout(input, init);
     } catch (err: any) {
       lastErr = err;
-      // 네트워크 계층 오류(TypeError: fetch failed)만 재시도. 그 외(abort 등)는 즉시 전파.
-      const isNetworkError = err instanceof TypeError;
-      if (!isNetworkError || attempt === SUPABASE_FETCH_MAX_RETRIES) break;
+      // 네트워크 계층 오류(TypeError: fetch failed)와 타임아웃 abort만 짧게 재시도합니다.
+      const isRetryableFetchError = err instanceof TypeError || isAbortError(err);
+      if (!isRetryableFetchError || attempt === SUPABASE_FETCH_MAX_RETRIES) break;
       // 지수 백오프로 일시적 끊김이 회복될 시간을 줍니다.
       await new Promise((resolve) => setTimeout(resolve, SUPABASE_FETCH_BACKOFF_MS[attempt] ?? 1200));
     }
@@ -99,12 +127,17 @@ export const initDatabaseConnection = async (): Promise<void> => {
   // 로컬 SQLite로 Fallback 처리
   try {
     dbMode = 'LOCAL_SQL';
-    // 루트 폴더에 local.sqlite 생성
-    const dbPath = path.join(__dirname, '../../../local.sqlite');
+    const dbPath = getSqliteDbPath();
+    if (process.env.SQLITE_REQUIRE_PERSISTENT_PATH === 'true' && !process.env.SQLITE_DB_PATH?.trim()) {
+      throw new Error('[DB] SQLITE_REQUIRE_PERSISTENT_PATH=true 이지만 SQLITE_DB_PATH가 설정되지 않았습니다.');
+    }
+    ensureParentDirectory(dbPath);
     sqliteDb = new Database(dbPath);
     
     // SQLite3 기본 설정 변경 (성능 향상 및 락 방지)
+    sqliteDb.pragma('busy_timeout = 5000');
     sqliteDb.pragma('journal_mode = WAL');
+    sqliteDb.pragma('synchronous = NORMAL');
     sqliteDb.pragma('foreign_keys = ON');
     
     // init-db.sql 초기 스키마 및 더미 로드
@@ -112,7 +145,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
     if (fs.existsSync(sqlPath)) {
       const sqlSchema = fs.readFileSync(sqlPath, 'utf8');
       sqliteDb.exec(sqlSchema);
-      console.log('[DB] 로컬 SQLite3 데이터베이스 연결 및 초기 스키마 적재가 완료되었습니다. (LOCAL MODE)');
+      console.log(`[DB] 로컬 SQLite3 데이터베이스 연결 및 초기 스키마 적재가 완료되었습니다. (LOCAL MODE: ${dbPath})`);
       
       // 테이블 컬럼 자동 마이그레이션 방어 장치
       try {

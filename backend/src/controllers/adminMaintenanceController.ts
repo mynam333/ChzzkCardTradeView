@@ -4,8 +4,10 @@ import path from 'path';
 import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
 import { streamerRepository } from '../repositories';
 import { IS_PRODUCTION } from '../config';
+import { ensureDirectory, getUploadsDir } from '../services/storagePaths';
 
-const UPLOADS_DIR = path.join(__dirname, '../../../public/uploads');
+const UPLOADS_DIR = getUploadsDir();
+ensureDirectory(UPLOADS_DIR);
 
 // ============================================================
 //  공용 DB 헬퍼 (SQLite / Supabase 양 모드)

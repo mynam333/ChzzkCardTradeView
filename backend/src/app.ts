@@ -19,6 +19,7 @@ import { apiAccessGuard } from './middlewares/apiAccessGuard';
 import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
 import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
+import { ensureDirectory, getUploadsDir } from './services/storagePaths';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -153,7 +154,10 @@ app.use(cookieParser());
 app.use(csrfOriginGuard);
 
 // 로컬 SQLite 업로드 이미지 정적 서빙 경로 마운트 (타 오리진 로드 허용)
-app.use('/uploads', express.static(path.join(__dirname, '../../public/uploads'), {
+const uploadsDir = getUploadsDir();
+ensureDirectory(uploadsDir);
+console.log(`[Storage] 업로드 디렉터리: ${uploadsDir}`);
+app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res) => { res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); }
 }));
 

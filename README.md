@@ -142,7 +142,7 @@
 | **Backend** | `Node.js` & `Express` | RESTful API 서버, 비즈니스 로직 처리 (TypeScript 적용) |
 | | `Node-cron` | 스트리머 정보 갱신 배치 및 푸시 알림 예약 스케줄 처리 |
 | | `Web-push` | VAPID 암호화 프로토콜을 활용한 모바일/PC 브라우저 푸시 알림 발송 라이브러리 |
-| **Database** | `Supabase` (PostgreSQL) 및 `SQLite` | 기본적으로 Supabase 클라우드를 사용하며, 오프라인 시 로컬 SQLite SQL 파일로 자동 폴백 |
+| **Database** | `SQLite` persistent disk 또는 `Supabase` (PostgreSQL) | 소규모/저비용 운영은 persistent disk 기반 SQLite, 관리형 Postgres가 필요하면 Supabase 사용 |
 | **OpenAPI** | `Chzzk API` | 치지직 스트리머 채널 정보 추출 및 로그인 연동 |
 | **Deployment** | `Vercel` (Frontend) | 프론트엔드 호스팅 및 자동 CI/CD 파이프라인 구축 |
 | | `Render` / `Docker` (Backend) | 백엔드 애플리케이션 및 스케줄러 호스팅 |
@@ -150,10 +150,14 @@
 
 ---
 
-### 3.1 하이브리드 데이터베이스 폴백 시스템 (DB Fallback System)
+### 3.1 데이터베이스 운영 모드
+* **Persistent SQLite 운영:** `SQLITE_DB_PATH`를 배포 플랫폼의 persistent volume 경로로 지정하면 백엔드는 해당 SQLite 파일을 주 DB로 사용합니다.
+  * SQLite의 `-wal`, `-shm` 파일도 같은 디렉터리에 생성되므로 DB 파일이 위치한 디렉터리 전체가 persistent disk여야 합니다.
+  * 운영에서는 `SQLITE_REQUIRE_PERSISTENT_PATH=true`를 설정해 경로 누락 시 서버가 기동되지 않게 하는 것을 권장합니다.
+  * 커스텀 카드 이미지도 보존하려면 `UPLOADS_DIR` 역시 같은 persistent volume 내부 경로로 지정합니다.
 * **Supabase 오프라인 감지:** 백엔드 구동 또는 API 요청 초기 단계에서 Supabase DB에 대한 PING 및 인증 연결 상태를 감지합니다.
-* **로컬 SQL (SQLite) 폴백 우회:** 
-  * Supabase URL/Key가 누락되었거나 통신 불가 상태일 시, 백엔드는 즉시 내장된 로컬 SQLite 파일 데이터베이스(`local.db`)로 동작 모드를 전환합니다.
+* **SQLite 폴백:** 
+  * Supabase URL/Key가 누락되었거나 통신 불가 상태일 시, `SUPABASE_REQUIRED=true`가 아니라면 백엔드는 SQLite 모드로 동작합니다.
   * 레포지토리 패턴(Repository Pattern)을 기반으로 데이터 액세스 레이어를 추상화하여, 상위 비즈니스 로직(Service 레이어)의 코드 수정 없이 투명한 데이터 읽기/쓰기 분기를 보장합니다.
 
 ---
@@ -394,10 +398,10 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 #### Backend Environment (`backend/.env`)
 ```env
 PORT=5000
-DATABASE_URL=your_supabase_postgresql_connection_string
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_SERVICE_ROLE_KEY=your_server_only_secret_or_service_role_key
-SUPABASE_REQUIRED=true
+SQLITE_DB_PATH=./local.sqlite
+SQLITE_REQUIRE_PERSISTENT_PATH=false
+UPLOADS_DIR=./public/uploads
+SUPABASE_REQUIRED=false
 JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret
@@ -442,6 +446,10 @@ npm run dev
 
 ### 8.2 Backend 배포
 백엔드 Node.js/Express 서버 및 스케줄러는 Render, Fly.io, 혹은 Docker 컨테이너 기반 클라우드 서비스를 통해 배포합니다.
-* 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
+* SQLite 운영 시 persistent disk/volume을 만들고, `SQLITE_DB_PATH`와 `UPLOADS_DIR`를 해당 volume 내부로 지정합니다.
+  * Render 예시: disk mount path `/var/data`, `SQLITE_DB_PATH=/var/data/chikapo.sqlite`, `UPLOADS_DIR=/var/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
+  * Fly.io 예시: volume mount path `/data`, `SQLITE_DB_PATH=/data/chikapo.sqlite`, `UPLOADS_DIR=/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
+* Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `SUPABASE_REQUIRED=false`로 둡니다.
+* Supabase 운영 시에는 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
 * `SUPABASE_SERVICE_ROLE_KEY`에는 브라우저용 publishable/anon key가 아니라 서버 전용 `sb_secret_*` 또는 legacy `service_role` key만 설정합니다.
 * Supabase 직접 접근 차단은 [docs/supabase-hardening.md](docs/supabase-hardening.md)와 [supabase-hardening.sql](supabase-hardening.sql)을 적용합니다.

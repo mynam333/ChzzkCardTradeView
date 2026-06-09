@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { IS_PRODUCTION } from '../config';
 import fs from 'fs';
 import path from 'path';
+import { ensureDirectory, getUploadsDir } from '../services/storagePaths';
 
 /**
  * 이미지 프록시 — 치지직 CDN/외부 이미지를 동일 출처(+CORS 허용)로 우회 제공.
@@ -23,6 +24,20 @@ const ALLOWED_HOST_SUFFIXES = [
   'discordapp.net',
   'discord.com'
 ];
+
+const UPLOADS_DIR = getUploadsDir();
+ensureDirectory(UPLOADS_DIR);
+
+const resolveLocalUploadPath = (pathname: string): string | null => {
+  const marker = '/uploads/';
+  const idx = pathname.indexOf(marker);
+  if (idx < 0) return null;
+  const rel = pathname.slice(idx + marker.length);
+  const resolvedPath = path.resolve(UPLOADS_DIR, rel);
+  const relCheck = path.relative(UPLOADS_DIR, resolvedPath);
+  if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) return null;
+  return resolvedPath;
+};
 
 const isAllowedHost = (hostname: string): boolean => {
   const h = hostname.toLowerCase();
@@ -53,12 +68,8 @@ export const proxyImage = async (req: Request, res: Response) => {
       decodedPath = cleanPath;
     }
 
-    const localFilePath = path.join(__dirname, '../../../public', decodedPath);
-    const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
-    const resolvedPath = path.resolve(localFilePath);
-
-    const relCheck = path.relative(absoluteUploadsDir, resolvedPath);
-    if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+    const resolvedPath = resolveLocalUploadPath(decodedPath);
+    if (!resolvedPath) {
       return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 파일 경로입니다.' });
     }
 
@@ -107,12 +118,8 @@ export const proxyImage = async (req: Request, res: Response) => {
       decodedPath = target.pathname;
     }
 
-    const localFilePath = path.join(__dirname, '../../../public', decodedPath);
-    const absoluteUploadsDir = path.resolve(path.join(__dirname, '../../../public/uploads'));
-    const resolvedPath = path.resolve(localFilePath);
-
-    const relCheck = path.relative(absoluteUploadsDir, resolvedPath);
-    if (!relCheck.startsWith('..') && !path.isAbsolute(relCheck) && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
+    const resolvedPath = resolveLocalUploadPath(decodedPath);
+    if (resolvedPath && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
       const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400');

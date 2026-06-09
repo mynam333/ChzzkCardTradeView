@@ -1,8 +1,10 @@
 import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
+import { ensureDirectory, getUploadsDir } from './storagePaths';
 
-const UPLOADS_DIR = path.join(__dirname, '../../../public/uploads');
+const UPLOADS_DIR = getUploadsDir();
+ensureDirectory(UPLOADS_DIR);
 
 /**
  * 커스텀 이미지 URL이 자체 업로드 디렉터리 내부의 로컬 파일을 가리키면 해당 파일을 삭제합니다.

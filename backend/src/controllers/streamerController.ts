@@ -6,6 +6,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import fs from 'fs';
 import path from 'path';
+import { getUploadsDir } from '../services/storagePaths';
 
 /**
  * 스트리머 본인이 등록한 특정 별(0~5성) 커스텀 카드 이미지를 삭제(초기화)
@@ -90,7 +91,7 @@ export const uploadCustomImage = async (req: AuthenticatedRequest, res: Response
     
     // 스트리머명_channelId 형태의 폴더 생성
     const folderName = `${safeStreamerName}_${channel_id}`;
-    const uploadDir = path.join(__dirname, '../../../public/uploads', folderName);
+    const uploadDir = path.join(getUploadsDir(), folderName);
     
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
