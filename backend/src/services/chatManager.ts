@@ -1,6 +1,8 @@
 import WebSocket from 'ws';
 import { streamerRepository } from '../repositories';
 
+const CHAT_COUNT_FLUSH_INTERVAL_MS = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_INTERVAL_MS || 5000));
+
 // 웹소켓 메시지 전송용 인터페이스
 interface ChzzkSocketFrame {
   ver: string;
@@ -29,6 +31,62 @@ class ChzzkChatManager {
   private desired: Set<string> = new Set();
   // 채널별 대기 중인 재연결 타이머 (disconnect 시 취소용)
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  private pendingChatCounts: Map<string, number> = new Map();
+  private flushTimer?: NodeJS.Timeout;
+  private isFlushing = false;
+
+  constructor() {
+    this.flushTimer = setInterval(() => {
+      this.flushPendingChatCounts().catch((err: any) => {
+        console.error('[ChatManager] 채팅 카운트 flush 실패:', err?.message || err);
+      });
+    }, CHAT_COUNT_FLUSH_INTERVAL_MS);
+  }
+
+  private addPendingChatCount(channelId: string, count: number) {
+    if (count <= 0) return;
+    this.pendingChatCounts.set(channelId, (this.pendingChatCounts.get(channelId) || 0) + count);
+  }
+
+  private drainPendingChatCounts(): Map<string, number> {
+    const snapshot = this.pendingChatCounts;
+    this.pendingChatCounts = new Map();
+    return snapshot;
+  }
+
+  private restorePendingChatCounts(snapshot: Map<string, number>) {
+    for (const [channelId, count] of snapshot) {
+      this.pendingChatCounts.set(channelId, (this.pendingChatCounts.get(channelId) || 0) + count);
+    }
+  }
+
+  private async flushPendingChatCounts() {
+    if (this.isFlushing || this.pendingChatCounts.size === 0) return;
+    this.isFlushing = true;
+    const snapshot = this.drainPendingChatCounts();
+    try {
+      for (const [channelId, count] of snapshot) {
+        await streamerRepository.incrementChatCount(channelId, count);
+      }
+    } catch (err) {
+      this.restorePendingChatCounts(snapshot);
+      throw err;
+    } finally {
+      this.isFlushing = false;
+    }
+  }
+
+  private async flushChannelChatCount(channelId: string) {
+    const count = this.pendingChatCounts.get(channelId) || 0;
+    if (count <= 0) return;
+    this.pendingChatCounts.delete(channelId);
+    try {
+      await streamerRepository.incrementChatCount(channelId, count);
+    } catch (err) {
+      this.pendingChatCounts.set(channelId, (this.pendingChatCounts.get(channelId) || 0) + count);
+      throw err;
+    }
+  }
 
   /**
    * 치지직 채팅 서버 연결용 토큰 획득 API 호출
@@ -123,9 +181,9 @@ class ChzzkChatManager {
             currentSid = frame.bdy?.sid || frame.sid || ''; // 발급받은 세션 ID 보관
             console.log(`[ChatManager] 채팅방에 성공적으로 조인 완료 (채널: ${channelId}, SID: ${currentSid})`);
           } else if (frame.cmd === 93101 || frame.cmd === 93102) { // 93101: CMD_CHAT, 93102: CMD_DONATION
-            // 채팅 수신 시 DB 카운트 증가
+            // 채팅 수신 시 메모리에 누적하고 주기적으로 채널별 합산 flush합니다.
             const chatCount = Array.isArray(frame.bdy) ? frame.bdy.length : 1;
-            await streamerRepository.incrementChatCount(channelId, chatCount);
+            this.addPendingChatCount(channelId, chatCount);
           } else if (frame.cmd === 0) { // 서버의 PING 요청에 대한 PONG 처리 (라이브러리 스펙 매핑)
             const pongFrame = {
               ver: '2',
@@ -216,6 +274,9 @@ class ChzzkChatManager {
       conn.isExplicitlyClosed = true;
       conn.socket.close();
       this.cleanupConnection(channelId);
+      this.flushChannelChatCount(channelId).catch((err: any) => {
+        console.error(`[ChatManager] 채널 flush 실패 (${channelId}):`, err?.message || err);
+      });
     }
   }
 
@@ -236,9 +297,16 @@ class ChzzkChatManager {
    * 서버 종료 시 모든 연결을 해제합니다.
    */
   public disconnectAll() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = undefined;
+    }
     for (const channelId of this.connections.keys()) {
       this.disconnect(channelId);
     }
+    this.flushPendingChatCounts().catch((err: any) => {
+      console.error('[ChatManager] 전체 disconnect flush 실패:', err?.message || err);
+    });
   }
 }
 
