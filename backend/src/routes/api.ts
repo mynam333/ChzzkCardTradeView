@@ -26,7 +26,8 @@ import {
   getMinigameTicketChargeInterval,
   setMinigameTicketChargeInterval,
   getMaintenanceStatus,
-  setMaintenanceStatus
+  setMaintenanceStatus,
+  resetUserStatusMessage
 } from '../controllers/adminController';
 import { claimCoupon, createCoupon } from '../controllers/couponController';
 import {
@@ -47,7 +48,7 @@ import {
   deleteScheduledNotification,
   sendTestPush
 } from '../controllers/pushController';
-import { claimTutorialGachaTicket } from '../controllers/tutorialController';
+import { claimTutorialGachaTicket, getTutorialProgress, markTutorialCompleted } from '../controllers/tutorialController';
 
 import {
   getUserMe,
@@ -202,6 +203,8 @@ router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, s
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);
 router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);
+router.get('/tutorial/progress', authMiddleware, banCheckMiddleware, getTutorialProgress);
+router.post('/tutorial/progress', authMiddleware, banCheckMiddleware, markTutorialCompleted);
 router.post('/tutorial/rewards/gacha-ticket', authMiddleware, banCheckMiddleware, claimTutorialGachaTicket);
 // 유저 차단 관리
 router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
@@ -430,6 +433,7 @@ router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
 
 // 관리자 유저 목록 (닉네임/채널ID 검색 + 페이지네이션)
 router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);
+router.post('/admin/users/:user_id/status-message/reset', authMiddleware, adminMiddleware, resetUserStatusMessage);
 
 router.get('/admin/titles', authMiddleware, adminMiddleware, listTitles);
 router.post('/admin/titles', authMiddleware, adminMiddleware, createTitle);

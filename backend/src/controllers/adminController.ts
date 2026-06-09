@@ -14,6 +14,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
 import { deleteLocalUploadByUrl } from '../services/imageService';
+import { clearUserRankingCaches } from './playController';
 
 /**
  * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 추가 무료 소환 티켓 보상 지급
@@ -461,6 +462,7 @@ export const listUsers = async (req: Request, res: Response) => {
       avatar_url: u.avatar_url,
       role: u.role,
       point: u.point,
+      status_message: u.status_message ?? null,
       banned_until: u.banned_until ?? null,
       ban_reason: u.ban_reason ?? null,
       created_at: u.created_at ?? null,
@@ -476,6 +478,37 @@ export const listUsers = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '유저 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const resetUserStatusMessage = async (req: Request, res: Response) => {
+  const { user_id } = req.params;
+  if (!user_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '대상 유저 ID가 유효하지 않습니다.' });
+  }
+
+  try {
+    const targetUser = await userRepository.findById(user_id);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'NotFound', message: '대상 사용자를 찾을 수 없습니다.' });
+    }
+    if (!targetUser.status_message) {
+      return res.status(200).json({
+        message: `${targetUser.username}님의 상태 메시지는 이미 비어 있습니다.`,
+        user_id,
+        status_message: null
+      });
+    }
+
+    await userRepository.updateStatusMessage(user_id, null);
+    clearUserRankingCaches();
+    return res.status(200).json({
+      message: `${targetUser.username}님의 상태 메시지를 초기화했습니다.`,
+      user_id,
+      status_message: null
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '상태 메시지 초기화 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

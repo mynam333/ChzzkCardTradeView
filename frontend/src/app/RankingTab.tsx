@@ -165,6 +165,7 @@ export const RankingTab: React.FC = () => {
 
   // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용 (프론트엔드 2차 필터 적용)
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
+  const statusMessageUsers = rankedUsers.filter((u) => !!u.status_message?.trim());
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
   const activeLength = (subTab === 'user' || subTab === 'cards') ? rankedUsers.length : rankedStreamers.length;
@@ -269,6 +270,50 @@ export const RankingTab: React.FC = () => {
             >
               필터 초기화
             </button>
+          </div>
+        )}
+
+        {(subTab === 'user' || subTab === 'cards') && (
+          <div className="mb-5 rounded-[1.5rem] border border-primary/15 bg-gradient-to-br from-primary/10 via-card to-sky-100/50 p-4 shadow-sm dark:from-primary/15 dark:via-card dark:to-sky-500/10">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="flex items-center gap-1.5 text-xs font-black text-foreground">
+                  <MessageCircleHeart className="h-4 w-4 text-primary" />
+                  컬렉터 상태 메시지
+                </h3>
+                <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                  현재 랭킹/검색 결과에서 상태 메시지를 설정한 유저 {statusMessageUsers.length.toLocaleString()}명
+                </p>
+              </div>
+              <span className="rounded-full border border-primary/15 bg-card/80 px-2.5 py-1 text-[10px] font-black text-primary">
+                클릭하면 프로필 열기
+              </span>
+            </div>
+            {statusMessageUsers.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border bg-card/60 px-3 py-4 text-center text-[11px] font-bold text-muted-foreground">
+                표시할 상태 메시지가 없습니다.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {statusMessageUsers.slice(0, 8).map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setProfileUserId(u.id)}
+                    className="group min-w-0 rounded-2xl border border-border/60 bg-card/80 p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`cute-number-font shrink-0 text-[10px] font-black ${rankColor(u.rank)}`}>#{u.rank}</span>
+                      <img src={u.avatar_url} alt={u.username} className="h-7 w-7 shrink-0 rounded-xl border border-border bg-secondary object-cover" />
+                      <span className="truncate text-xs font-black text-foreground group-hover:text-primary">{u.username}</span>
+                    </div>
+                    <p className="mt-2 line-clamp-2 break-keep rounded-xl bg-primary/10 px-3 py-2 text-[11px] font-bold leading-relaxed text-primary dark:bg-primary/15">
+                      {u.status_message}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

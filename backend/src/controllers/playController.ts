@@ -371,6 +371,11 @@ const RANKINGS_CACHE_TTL = 60_000; // 60초
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 
+export const clearUserRankingCaches = () => {
+  rankingsCache.clear();
+  rankingPoolCache.clear();
+};
+
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
 // (검색은 키워드별 결과 + 동일한 전체 풀이 필요하므로, 풀을 캐싱하면 무거운 집계가 반복되지 않음)
 const rankingPoolCache = new Map<string, { data: any[]; expiresAt: number }>();

@@ -892,15 +892,19 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 유저 랭킹: (포인트 + 보유 카드 시세 합산) 총자산 기준 정렬
+-- RETURNS TABLE 컬럼 추가/변경은 CREATE OR REPLACE만으로 교체할 수 없어 기존 오버로드를 먼저 제거합니다.
+DROP FUNCTION IF EXISTS public.get_user_rankings(INTEGER);
+DROP FUNCTION IF EXISTS public.get_user_rankings(INTEGER, TEXT);
+
 CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER)
 RETURNS TABLE (
   id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
-  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, status_message TEXT, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT
 ) AS $$
   -- 카드 가치는 별(0~5성) 배수(1 + star*0.8)를 반영하여 합산
   SELECT u.id, u.username, u.avatar_url, u.role, u.point,
-         u.last_free_draw, u.banned_until, u.created_at,
+         u.last_free_draw, u.banned_until, u.status_message, u.created_at,
          COUNT(uc.id) AS card_count,
          (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0))::BIGINT AS total_asset
     FROM users u
@@ -915,12 +919,12 @@ $$ LANGUAGE sql;
 CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER, p_keyword TEXT)
 RETURNS TABLE (
   id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
-  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, created_at TIMESTAMPTZ,
+  last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, status_message TEXT, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT, rank BIGINT
 ) AS $$
   WITH RankedUsers AS (
     SELECT u.id, u.username, u.avatar_url, u.role, u.point,
-           u.last_free_draw, u.banned_until, u.created_at,
+           u.last_free_draw, u.banned_until, u.status_message, u.created_at,
            COUNT(uc.id) AS card_count,
            (u.point + COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0))::BIGINT AS total_asset,
            ROW_NUMBER() OVER (

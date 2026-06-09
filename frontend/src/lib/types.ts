@@ -76,6 +76,7 @@ export interface AdminUser {
   avatar_url: string | null;
   role: 'USER' | 'ADMIN';
   point: number;
+  status_message?: string | null;
   banned_until: string | null;
   created_at: string | null;
   titles: UserTitle[];

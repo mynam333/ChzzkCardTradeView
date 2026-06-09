@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Users, RefreshCw } from 'lucide-react';
+import { Eraser, MessageCircleHeart, Users, RefreshCw } from 'lucide-react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import type { AdminUser } from '@/lib/types';
@@ -21,6 +21,7 @@ export const AdminUsersTab: React.FC = () => {
   const [userTotal, setUserTotal] = useState(0);
   const [userTotalPages, setUserTotalPages] = useState(1);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [resettingStatusUserId, setResettingStatusUserId] = useState<string | null>(null);
 
   const fetchUsers = async (page = userPage, keyword = userSearch) => {
     setUsersLoading(true);
@@ -76,6 +77,27 @@ export const AdminUsersTab: React.FC = () => {
     }
   };
 
+  const resetStatusMessage = async (target: AdminUser) => {
+    if (!target.status_message) return;
+    if (!confirm(`${target.username}님의 상태 메시지를 초기화할까요?`)) return;
+
+    setResettingStatusUserId(target.id);
+    try {
+      const res = await apiFetch(`/admin/users/${target.id}/status-message/reset`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.message || '상태 메시지 초기화에 실패했습니다.', 'error');
+        return;
+      }
+      setUsers((prev) => prev.map((user) => user.id === target.id ? { ...user, status_message: null } : user));
+      toast(data.message || '상태 메시지를 초기화했습니다.', 'success');
+    } catch {
+      toast('서버 통신 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setResettingStatusUserId(null);
+    }
+  };
+
   return (
     <section className="space-y-4">
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
@@ -92,7 +114,7 @@ export const AdminUsersTab: React.FC = () => {
           onChange={(e) => setUserSearch(e.target.value)}
           className="mb-1 w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
         />
-        <p className="mb-3 text-[10px] text-muted-foreground">프로필 이미지·닉네임·채널 ID를 클릭하면 복사됩니다.</p>
+        <p className="mb-3 text-[10px] text-muted-foreground">프로필 이미지·닉네임·채널 ID를 클릭하면 복사됩니다. 상태 메시지가 있는 유저는 바로 확인하고 초기화할 수 있습니다.</p>
 
         <div className="space-y-2">
           {usersLoading ? (
@@ -100,7 +122,7 @@ export const AdminUsersTab: React.FC = () => {
           ) : users.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">{userSearch.trim() ? '검색 결과가 없습니다.' : '유저가 없습니다.'}</p>
           ) : users.map((u) => (
-            <div key={u.id} className="flex items-center gap-3 rounded-lg bg-secondary/30 p-2.5">
+            <div key={u.id} className="flex items-start gap-3 rounded-lg bg-secondary/30 p-2.5">
               {/* 프로필 이미지 (클릭 시 닉네임 복사) */}
               <button
                 type="button"
@@ -126,14 +148,34 @@ export const AdminUsersTab: React.FC = () => {
                     <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">정지</span>
                   )}
                 </button>
-                {/* 채널 ID (클릭 복사) */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  {/* 채널 ID (클릭 복사) */}
+                  <button
+                    type="button"
+                    onClick={() => copyText(u.id, '채널 ID')}
+                    title="채널 ID 복사"
+                    className="block max-w-full truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                  >{u.id}</button>
+                  {u.status_message && (
+                    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-primary/15">
+                      <MessageCircleHeart className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{u.status_message}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              {u.status_message && (
                 <button
                   type="button"
-                  onClick={() => copyText(u.id, '채널 ID')}
-                  title="채널 ID 복사"
-                  className="block max-w-full truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                >{u.id}</button>
-              </div>
+                  onClick={() => resetStatusMessage(u)}
+                  disabled={resettingStatusUserId === u.id}
+                  className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-black text-rose-500 transition hover:bg-rose-500/15 disabled:pointer-events-none disabled:opacity-50"
+                  title="상태 메시지 초기화"
+                >
+                  <Eraser className="h-3.5 w-3.5" />
+                  {resettingStatusUserId === u.id ? '초기화 중' : '상태 초기화'}
+                </button>
+              )}
             </div>
           ))}
         </div>

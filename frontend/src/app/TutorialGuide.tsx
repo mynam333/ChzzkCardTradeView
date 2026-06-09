@@ -707,6 +707,8 @@ export const TutorialGuide: React.FC = () => {
   const [gachaRewardClaiming, setGachaRewardClaiming] = useState(false);
   const [mobilePanelPosition, setMobilePanelPosition] = useState<'bottom' | 'top'>('bottom');
   const [uaruImageUrl, setUaruImageUrl] = useState(`https://api.dicebear.com/10.x/fun-emoji/svg?seed=${UARU_CHANNEL_ID}`);
+  const [tutorialProgressCheckedFor, setTutorialProgressCheckedFor] = useState<string | null>(null);
+  const [tutorialCompletedOnBackend, setTutorialCompletedOnBackend] = useState(false);
   // 티켓 지급을 스텝당 1회만 시도하기 위한 가드 (effect 재실행에 따른 중복 호출·로딩 고착 방지)
   const claimedTicketStepRef = useRef<string | null>(null);
 
@@ -742,6 +744,14 @@ export const TutorialGuide: React.FC = () => {
     if (!user?.id) return;
     localStorage.setItem(completedStorageKey(user.id), '1');
     sessionStorage.setItem(sessionStorageKey(user.id), '1');
+    setTutorialCompletedOnBackend(true);
+    void apiFetch('/tutorial/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: TUTORIAL_VERSION })
+    }).catch((err) => {
+      console.warn('[TutorialGuide] 튜토리얼 완료 상태 저장 실패:', err);
+    });
   };
 
   const finishTutorial = () => {
@@ -773,14 +783,66 @@ export const TutorialGuide: React.FC = () => {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!user?.id) {
+      setTutorialProgressCheckedFor(null);
+      setTutorialCompletedOnBackend(false);
+      return;
+    }
+
+    const userId = String(user.id);
+    let cancelled = false;
+    setTutorialProgressCheckedFor(null);
+    setTutorialCompletedOnBackend(false);
+
+    const localCompleted = localStorage.getItem(completedStorageKey(user.id)) === '1';
+    apiFetch(`/tutorial/progress?version=${encodeURIComponent(TUTORIAL_VERSION)}`)
+      .then(async (res) => {
+        if (!res.ok) return { completed: localCompleted };
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const completed = !!data?.completed || localCompleted;
+        setTutorialCompletedOnBackend(completed);
+        if (completed) {
+          localStorage.setItem(completedStorageKey(user.id), '1');
+          sessionStorage.setItem(sessionStorageKey(user.id), '1');
+        }
+        if (!data?.completed && localCompleted) {
+          void apiFetch('/tutorial/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: TUTORIAL_VERSION })
+          }).catch((err) => {
+            console.warn('[TutorialGuide] 로컬 튜토리얼 완료 상태 백엔드 동기화 실패:', err);
+          });
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('[TutorialGuide] 튜토리얼 진행 상태 조회 실패:', err);
+        setTutorialCompletedOnBackend(localCompleted);
+      })
+      .finally(() => {
+        if (!cancelled) setTutorialProgressCheckedFor(userId);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!user?.id || open) return;
+    if (tutorialProgressCheckedFor !== String(user.id)) return;
+    if (tutorialCompletedOnBackend) return;
     if (localStorage.getItem(completedStorageKey(user.id)) === '1') return;
     if (sessionStorage.getItem(sessionStorageKey(user.id)) === '1') return;
 
     sessionStorage.setItem(sessionStorageKey(user.id), '1');
     const timer = window.setTimeout(() => startTutorial(0), 900);
     return () => window.clearTimeout(timer);
-  }, [open, user?.id]);
+  }, [open, tutorialCompletedOnBackend, tutorialProgressCheckedFor, user?.id]);
 
   useEffect(() => {
     if (!open || collapsed) return;
