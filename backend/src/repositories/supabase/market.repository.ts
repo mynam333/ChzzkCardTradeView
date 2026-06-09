@@ -24,6 +24,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       current_bid: row.current_bid ?? null,
       current_bidder_id: row.current_bidder_id ?? null,
       auction_ends_at: row.auction_ends_at ?? null,
+      bid_reserved: row.bid_reserved ?? 0,
       fee: row.fee ?? 0,
       fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
@@ -128,6 +129,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
         starting_bid: listingType === 'auction' ? startingBid : null,
         current_bid: listingType === 'auction' ? startingBid : null,
         auction_ends_at: listingType === 'auction' ? listing.auction_ends_at : null,
+        bid_reserved: 0,
         fee_rate: feeRate,
         with_cosmetics: !!listing.with_cosmetics,
         status: 'PENDING'
@@ -313,6 +315,21 @@ export class SupabaseMarketRepository implements IMarketRepository {
   }
 
   async updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void> {
+    if (!extra && (status === 'CANCELLED' || status === 'AUCTION_ENDED')) {
+      const listing = await this.findById(id);
+      const reserved = Number(listing?.bid_reserved || 0);
+      if (listing?.status === 'PENDING' && reserved > 0 && listing.current_bidder_id) {
+        await this.getClient().rpc('increment_user_point', { p_id: listing.current_bidder_id, p_delta: reserved });
+      }
+      const { error } = await this.getClient()
+        .from('market_listings')
+        .update({ status, bid_reserved: 0, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) throw error;
+      return;
+    }
+
     const payload: any = { status, updated_at: new Date().toISOString() };
     if (extra) {
       payload.buyer_id = extra.buyer_id ?? null;
@@ -438,6 +455,25 @@ export class SupabaseMarketRepository implements IMarketRepository {
   }
 
   async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
+    const { data: rpcData, error: rpcError } = await this.getClient().rpc('place_market_bid_atomic', {
+      p_listing_id: listingId,
+      p_bidder_id: bidderId,
+      p_amount: amount
+    });
+    if (!rpcError && rpcData) {
+      const result = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+      return {
+        ok: !!result.ok,
+        reason: String(result.reason || (result.ok ? 'OK' : 'FAILED')),
+        current_bid: result.current_bid == null ? undefined : Number(result.current_bid),
+        auction_ends_at: result.auction_ends_at ?? null,
+        previous_bidder_id: result.previous_bidder_id ?? null
+      };
+    }
+    if (rpcError) {
+      console.warn('[SupabaseMarketRepository] place_market_bid_atomic RPC 실패, 폴백 사용:', rpcError.message);
+    }
+
     const listing = await this.findById(listingId);
     if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
       return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
@@ -455,15 +491,33 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .select('point')
       .eq('id', bidderId)
       .maybeSingle();
-    if (bidderError || !bidder || Number(bidder.point || 0) < amount) {
+    const currentReserved = Number(listing.bid_reserved || 0);
+    const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
+    const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
+    if (payableNow <= 0) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
+    if (bidderError || !bidder || Number(bidder.point || 0) < payableNow) {
       return { ok: false, reason: 'INSUFFICIENT_POINT', current_bid: currentBid };
     }
+
+    const { data: deductedBidder, error: deductError } = await this.getClient()
+      .from('users')
+      .update({ point: Number(bidder.point || 0) - payableNow })
+      .eq('id', bidderId)
+      .gte('point', payableNow)
+      .select('id')
+      .maybeSingle();
+    if (deductError) throw deductError;
+    if (!deductedBidder) return { ok: false, reason: 'INSUFFICIENT_POINT', current_bid: currentBid };
 
     const nowIso = new Date().toISOString();
     const { error: bidError } = await this.getClient()
       .from('market_bids')
       .insert([{ listing_id: listingId, bidder_id: bidderId, amount, created_at: nowIso }]);
     if (bidError) throw bidError;
+
+    if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
+      await this.getClient().rpc('increment_user_point', { p_id: listing.current_bidder_id, p_delta: currentReserved });
+    }
 
     // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
     const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
@@ -474,7 +528,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
       : null;
 
-    const updatePayload: any = { current_bid: amount, current_bidder_id: bidderId, updated_at: nowIso };
+    const updatePayload: any = { current_bid: amount, current_bidder_id: bidderId, bid_reserved: amount, updated_at: nowIso };
     if (extendedEndsAt) updatePayload.auction_ends_at = extendedEndsAt;
     const { error: updateError } = await this.getClient()
       .from('market_listings')
@@ -511,12 +565,13 @@ export class SupabaseMarketRepository implements IMarketRepository {
         continue;
       }
 
+      const reserved = Number(row.bid_reserved || 0);
       const { data: bidder } = await this.getClient()
         .from('users')
         .select('point')
         .eq('id', bidderId)
         .maybeSingle();
-      if (!bidder || Number(bidder.point || 0) < amount) {
+      if (!bidder || (reserved <= 0 && Number(bidder.point || 0) < amount)) {
         await this.updateStatus(row.id, 'AUCTION_ENDED');
         continue;
       }
@@ -524,15 +579,16 @@ export class SupabaseMarketRepository implements IMarketRepository {
       const feeRate = Number(row.fee_rate ?? FIXED_MARKET_FEE_RATE);
       const { fee, settledAmount } = calculateMarketFee(amount, feeRate);
       const client = this.getClient();
-      const { error: buyerError } = await client
-        .from('users')
-        .update({ point: Number(bidder.point || 0) - amount })
-        .eq('id', bidderId)
-        .gte('point', amount);
-      if (buyerError) throw buyerError;
+      if (reserved <= 0) {
+        const { error: buyerError } = await client
+          .from('users')
+          .update({ point: Number(bidder.point || 0) - amount })
+          .eq('id', bidderId)
+          .gte('point', amount);
+        if (buyerError) throw buyerError;
+      }
 
-      const { data: seller } = await client.from('users').select('point').eq('id', row.seller_id).maybeSingle();
-      await client.from('users').update({ point: Number(seller?.point || 0) + settledAmount }).eq('id', row.seller_id);
+      await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
       await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
       const { error: listingError } = await client
         .from('market_listings')
@@ -541,6 +597,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
           buyer_id: bidderId,
           price: amount,
           fee,
+          bid_reserved: 0,
           settled_amount: settledAmount,
           updated_at: nowIso
         })
@@ -549,7 +606,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       if (listingError) throw listingError;
 
       const cardData = await this.getCardDetail(row.user_card_id);
-      settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, settled_amount: settledAmount }, cardData));
+      settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
     }
     return settled;
   }

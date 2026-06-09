@@ -313,6 +313,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         price INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'PENDING',
         buyer_id TEXT,
+        bid_reserved INTEGER DEFAULT 0,
         fee INTEGER DEFAULT 0,
         fee_rate INTEGER DEFAULT 5,
         settled_amount INTEGER DEFAULT 0,
@@ -348,6 +349,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
                 price INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 buyer_id TEXT,
+                bid_reserved INTEGER DEFAULT 0,
                 fee INTEGER DEFAULT 0,
                 fee_rate INTEGER DEFAULT 5,
                 settled_amount INTEGER DEFAULT 0,
@@ -359,8 +361,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
                 FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
               );
               INSERT INTO market_listings_new
-                (id, seller_id, user_card_id, price, status, buyer_id, fee, fee_rate, settled_amount, with_cosmetics, created_at, updated_at)
-              SELECT id, seller_id, user_card_id, price, status, buyer_id, fee, 5, settled_amount,
+                (id, seller_id, user_card_id, price, status, buyer_id, bid_reserved, fee, fee_rate, settled_amount, with_cosmetics, created_at, updated_at)
+              SELECT id, seller_id, user_card_id, price, status, buyer_id, 0, fee, 5, settled_amount,
                      COALESCE(with_cosmetics, 0), created_at, updated_at
                 FROM market_listings;
               DROP TABLE market_listings;
@@ -425,6 +427,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         ['current_bid', 'ALTER TABLE market_listings ADD COLUMN current_bid INTEGER;'],
         ['current_bidder_id', 'ALTER TABLE market_listings ADD COLUMN current_bidder_id TEXT;'],
         ['auction_ends_at', 'ALTER TABLE market_listings ADD COLUMN auction_ends_at TEXT;'],
+        ['bid_reserved', 'ALTER TABLE market_listings ADD COLUMN bid_reserved INTEGER DEFAULT 0;'],
         ['fee_rate', 'ALTER TABLE market_listings ADD COLUMN fee_rate INTEGER DEFAULT 5;']
       ] as const) {
         try {

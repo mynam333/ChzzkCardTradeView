@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS shop_purchases (
 CREATE TABLE IF NOT EXISTS user_minigame_tickets (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     current_tickets INTEGER NOT NULL DEFAULT 5,  -- 자동 충전되는 기본 티켓(최대 5장)
-    bonus_tickets INTEGER NOT NULL DEFAULT 0,    -- 쿠폰 등으로 지급되는 초과 티켓(먼저 소모)
+    bonus_tickets INTEGER NOT NULL DEFAULT 0,    -- 쿠폰 등으로 지급되는 초과 티켓(기본 충전 티켓 소진 후 소모)
     last_charged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -405,7 +405,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 미니게임 세션 시작: 보너스 티켓을 먼저 차감하고, 없을 때 기본 충전 티켓을 차감
+-- 미니게임 세션 시작: 기본 충전 티켓을 먼저 차감하고, 없을 때 보너스 티켓을 차감
 CREATE OR REPLACE FUNCTION start_minigame_session_atomic(
   p_session_id TEXT,
   p_user_id TEXT,
@@ -430,18 +430,18 @@ BEGIN
     RETURN 'NO_TICKET';
   END IF;
 
-  IF COALESCE(ticket.bonus_tickets, 0) > 0 THEN
-    UPDATE user_minigame_tickets
-       SET bonus_tickets = bonus_tickets - 1,
-           updated_at = NOW()
-     WHERE user_id = p_user_id;
-    spent_type := 'BONUS';
-  ELSE
+  IF COALESCE(ticket.current_tickets, 0) > 0 THEN
     UPDATE user_minigame_tickets
        SET current_tickets = current_tickets - 1,
            updated_at = NOW()
      WHERE user_id = p_user_id;
     spent_type := 'BASE';
+  ELSE
+    UPDATE user_minigame_tickets
+       SET bonus_tickets = bonus_tickets - 1,
+           updated_at = NOW()
+     WHERE user_id = p_user_id;
+    spent_type := 'BONUS';
   END IF;
 
   INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at)
@@ -1221,6 +1221,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
   current_bid INTEGER,
   current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   auction_ends_at TIMESTAMPTZ,
+  bid_reserved INTEGER DEFAULT 0,
   buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   fee INTEGER DEFAULT 0,
   fee_rate INTEGER DEFAULT 5,
@@ -1241,6 +1242,7 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS bid_reserved INTEGER DEFAULT 0;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
@@ -1257,6 +1259,86 @@ CREATE TABLE IF NOT EXISTS market_bids (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);
+
+CREATE OR REPLACE FUNCTION place_market_bid_atomic(p_listing_id INTEGER, p_bidder_id TEXT, p_amount INTEGER)
+RETURNS JSONB AS $$
+DECLARE
+  listing market_listings%ROWTYPE;
+  bidder_point INTEGER;
+  current_amount INTEGER;
+  current_reserved INTEGER;
+  payable_now INTEGER;
+  previous_bidder TEXT;
+  next_ends_at TIMESTAMPTZ;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('market_bid:' || p_listing_id::TEXT));
+
+  SELECT * INTO listing FROM market_listings
+   WHERE id = p_listing_id AND status = 'PENDING' AND listing_type = 'auction'
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'NOT_FOUND_OR_NOT_AUCTION');
+  END IF;
+  IF listing.seller_id = p_bidder_id THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'CANNOT_BID_OWN_ITEM');
+  END IF;
+  IF listing.auction_ends_at IS NOT NULL AND listing.auction_ends_at <= NOW() THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'AUCTION_ENDED');
+  END IF;
+
+  current_amount := COALESCE(listing.current_bid, listing.starting_bid, listing.price, 0);
+  IF p_amount < current_amount + 100 THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
+  END IF;
+
+  current_reserved := COALESCE(listing.bid_reserved, 0);
+  previous_bidder := listing.current_bidder_id;
+  IF previous_bidder = p_bidder_id AND current_reserved > 0 THEN
+    payable_now := p_amount - current_reserved;
+  ELSE
+    payable_now := p_amount;
+  END IF;
+  IF payable_now <= 0 THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
+  END IF;
+
+  SELECT point INTO bidder_point FROM users WHERE id = p_bidder_id FOR UPDATE;
+  IF bidder_point IS NULL OR bidder_point < payable_now THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'INSUFFICIENT_POINT', 'current_bid', current_amount);
+  END IF;
+
+  UPDATE users SET point = point - payable_now WHERE id = p_bidder_id;
+  IF previous_bidder IS NOT NULL AND previous_bidder <> p_bidder_id AND current_reserved > 0 THEN
+    UPDATE users SET point = point + current_reserved WHERE id = previous_bidder;
+  END IF;
+
+  INSERT INTO market_bids (listing_id, bidder_id, amount)
+  VALUES (p_listing_id, p_bidder_id, p_amount);
+
+  IF listing.auction_ends_at IS NOT NULL
+     AND listing.auction_ends_at - NOW() < INTERVAL '1 minute' THEN
+    next_ends_at := NOW() + INTERVAL '3 minutes';
+  ELSE
+    next_ends_at := listing.auction_ends_at;
+  END IF;
+
+  UPDATE market_listings
+     SET current_bid = p_amount,
+         current_bidder_id = p_bidder_id,
+         bid_reserved = p_amount,
+         auction_ends_at = next_ends_at,
+         updated_at = NOW()
+   WHERE id = p_listing_id;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'reason', 'OK',
+    'current_bid', p_amount,
+    'auction_ends_at', next_ends_at,
+    'previous_bidder_id', previous_bidder
+  );
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS market_watches (
   id BIGSERIAL PRIMARY KEY,
@@ -1280,6 +1362,8 @@ DECLARE
   b_point INTEGER;
   calc_fee INTEGER;
   calc_settled INTEGER;
+  reserved_amount INTEGER;
+  payable_now INTEGER;
   card_border_id INTEGER;
   card_name_effect_id INTEGER;
 BEGIN
@@ -1301,7 +1385,14 @@ BEGIN
   IF b_point IS NULL THEN
     RETURN 'BUYER_NOT_FOUND';
   END IF;
-  IF b_point < listing.price THEN
+  reserved_amount := COALESCE(listing.bid_reserved, 0);
+  IF listing.current_bidder_id = p_buyer_id AND reserved_amount > 0 THEN
+    payable_now := GREATEST(listing.price - reserved_amount, 0);
+  ELSE
+    payable_now := listing.price;
+  END IF;
+
+  IF b_point < payable_now THEN
     RETURN 'INSUFFICIENT_POINT';
   END IF;
 
@@ -1310,7 +1401,20 @@ BEGIN
   calc_settled := listing.price - calc_fee;
 
   -- 구매자 포인트 차감
-  UPDATE users SET point = point - listing.price WHERE id = p_buyer_id;
+  UPDATE users SET point = point - payable_now WHERE id = p_buyer_id;
+
+  -- 현재 최고 입찰자가 즉시구매하고 예약금이 구매가보다 크면 차액 환불
+  IF listing.current_bidder_id = p_buyer_id
+     AND reserved_amount > listing.price THEN
+    UPDATE users SET point = point + (reserved_amount - listing.price) WHERE id = p_buyer_id;
+  END IF;
+
+  -- 기존 최고 입찰자가 따로 있으면 묶여 있던 입찰금을 환불
+  IF listing.current_bidder_id IS NOT NULL
+     AND listing.current_bidder_id <> p_buyer_id
+     AND reserved_amount > 0 THEN
+    UPDATE users SET point = point + reserved_amount WHERE id = listing.current_bidder_id;
+  END IF;
 
   -- 판매자 포인트 가산
   UPDATE users SET point = point + calc_settled WHERE id = listing.seller_id;
@@ -1320,6 +1424,7 @@ BEGIN
      SET status = 'SOLD',
          buyer_id = p_buyer_id,
          fee = calc_fee,
+         bid_reserved = 0,
          settled_amount = calc_settled,
          updated_at = NOW()
    WHERE id = p_listing_id;

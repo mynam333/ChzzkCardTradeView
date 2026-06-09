@@ -143,13 +143,13 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
 
       // 1. 티켓 차감
       const now = new Date().toISOString();
-      const useBonus = (ticket.bonus_tickets || 0) > 0;
-      const ticketSpentType = useBonus ? 'BONUS' : 'BASE';
+      const useBase = (ticket.current_tickets || 0) > 0;
+      const ticketSpentType = useBase ? 'BASE' : 'BONUS';
       const { error: ticketError } = await client
         .from('user_minigame_tickets')
         .update({
-          current_tickets: useBonus ? ticket.current_tickets : ticket.current_tickets - 1,
-          bonus_tickets: useBonus ? ticket.bonus_tickets - 1 : ticket.bonus_tickets,
+          current_tickets: useBase ? ticket.current_tickets - 1 : ticket.current_tickets,
+          bonus_tickets: useBase ? ticket.bonus_tickets : ticket.bonus_tickets - 1,
           updated_at: now
         })
         .eq('user_id', session.user_id);

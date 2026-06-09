@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "default-src 'self'; frame-ancestors 'none'; connect-src 'self' https://api.yuaru.com:2053 http://localhost:5000 http://localhost:2053 blob:; img-src 'self' https://nng-phinf.pstatic.net https://wizvaqoyscmkwfkcnkhx.supabase.co https://api.yuaru.com:2053 https://api.dicebear.com http://localhost:2053 data: blob:; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:;"
+            value: "default-src 'self'; frame-ancestors 'none'; connect-src 'self' https://api.yuaru.com:2053 http://localhost:5000 http://localhost:2053 blob: https://ssl.pstatic.net; img-src 'self' https://nng-phinf.pstatic.net https://wizvaqoyscmkwfkcnkhx.supabase.co https://api.yuaru.com:2053 https://api.dicebear.com http://localhost:2053 data: blob: https://ssl.pstatic.net; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:;"
           },
           {
             key: "X-Frame-Options",

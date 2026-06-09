@@ -115,6 +115,15 @@ export const cardImage = (
   return targetUrl;
 };
 
+/**
+ * 스트리머 프로필/아바타 아이콘은 카드 커스텀 이미지와 분리해
+ * 항상 치지직 기본 프로필(logo_url)을 사용합니다.
+ */
+export const streamerProfileImage = (
+  streamer?: { logo_url?: string | null } | null,
+  fallback: string = '/icon.png'
+): string => streamer?.logo_url || fallback;
+
 /** 테두리 코스메틱 스타일 (레거시 인라인 JSON 방식) */
 export const borderStyle = (border?: { style_json?: string | null } | null): React.CSSProperties => {
   if (!border) return {};

@@ -104,17 +104,17 @@ export class SqliteMinigameRepository implements IMinigameRepository {
           return { ok: false, reason: '사용 가능한 미니게임 티켓이 부족합니다.' };
         }
 
-        // 2. 쿠폰 등으로 얻은 보너스 티켓을 먼저 차감하고, 없으면 기본 충전 티켓을 차감
-        if ((ticket.bonus_tickets || 0) > 0) {
-          db.prepare(
-            "UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
-          ).run(session.user_id);
-          ticketSpentType = 'BONUS';
-        } else {
+        // 2. 기본 충전 티켓을 먼저 차감하고, 없으면 쿠폰 등으로 얻은 보너스 티켓을 차감합니다.
+        if ((ticket.current_tickets || 0) > 0) {
           db.prepare(
             "UPDATE user_minigame_tickets SET current_tickets = current_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
           ).run(session.user_id);
           ticketSpentType = 'BASE';
+        } else {
+          db.prepare(
+            "UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets - 1, updated_at = datetime('now') WHERE user_id = ?"
+          ).run(session.user_id);
+          ticketSpentType = 'BONUS';
         }
       }
 

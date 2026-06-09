@@ -7,6 +7,7 @@ import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAle
 import { apiFetch } from '@/lib/api';
 import type { Announcement } from '@/lib/types';
 import { formatAnnouncementDate, getAnnouncementPreview } from '@/lib/announcement';
+import { streamerProfileImage } from '@/lib/cosmetics';
 import { StreamerRegisterModal } from './StreamerRegisterModal';
 import { AnnouncementBoardModal } from './AnnouncementBoardModal';
 import { DraggableAnnouncementPopups } from './DraggableAnnouncementPopups';
@@ -279,7 +280,7 @@ export const MainTab: React.FC = () => {
               <div key={st.channel_id} className="cute-card-pop flex items-center justify-between rounded-2xl border border-border/50 bg-secondary/35 p-3 hover:border-primary/35 hover:bg-secondary/55">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img src={st.custom_image_url || st.logo_url} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
+                    <img src={streamerProfileImage(st)} alt={st.name} className="h-10 w-10 rounded-full border border-border bg-card object-cover" />
                     <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-black text-primary-foreground shadow-sm">
                       {index + 1}
                     </span>

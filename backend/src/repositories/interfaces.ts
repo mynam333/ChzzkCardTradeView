@@ -431,6 +431,7 @@ export interface MarketListing {
   current_bid?: number | null;
   current_bidder_id?: string | null;
   auction_ends_at?: string | null;
+  bid_reserved?: number;
   fee: number;
   fee_rate?: number;
   settled_amount: number;

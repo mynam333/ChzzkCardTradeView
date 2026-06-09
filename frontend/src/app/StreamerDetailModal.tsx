@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch } from '@/lib/api';
+import { streamerProfileImage } from '@/lib/cosmetics';
 import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
 
@@ -93,7 +94,7 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
                 <div className="flex min-w-0 items-center gap-3">
                   <img
-                    src={streamer.custom_image_url || streamer.logo_url || '/icon.png'}
+                    src={streamerProfileImage(streamer)}
                     alt={streamer.name}
                     className="h-14 w-14 shrink-0 rounded-full border border-border object-cover"
                   />

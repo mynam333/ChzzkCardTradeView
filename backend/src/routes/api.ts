@@ -307,8 +307,10 @@ const loadStreamerTitles = async (channelIds: string[]) => {
     titlesCache = { data, expiresAt: now + STREAMER_TITLES_CACHE_TTL };
     return data;
   } catch (err: any) {
-    console.error('[Streamers] 스트리머 칭호 조회 실패:', err?.message || err);
-    if (err?.cause) console.error('[Streamers] 상세 원인(cause):', err.cause);
+    if (err?.cause) {
+      console.error('[Streamers] 스트리머 칭호 조회 실패:', err?.message || err);
+      console.error('[Streamers] 상세 원인(cause):', err.cause)
+    };
     // 직전 성공 캐시가 있으면 그대로 사용(없으면 칭호 없이) 하고, 곧 재시도하도록 짧게 캐싱합니다.
     if (titlesCache) {
       titlesCache.expiresAt = now + 30_000;
@@ -333,7 +335,7 @@ router.get('/streamers', async (req, res) => {
       loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
       loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
     ]);
-    
+
     // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출
     const enriched = streamers.map((s) => ({
       channel_id: s.channel_id,

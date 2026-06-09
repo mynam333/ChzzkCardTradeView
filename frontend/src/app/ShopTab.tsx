@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { fuzzySearch } from '@/lib/search';
-import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage } from '@/lib/cosmetics';
+import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel } from 'lucide-react';
@@ -465,6 +465,7 @@ export const ShopTab: React.FC = () => {
         toast('입찰이 등록되었습니다.', 'success');
         setBidInputs(prev => ({ ...prev, [listing.id]: '' }));
         fetchMarketListings();
+        refreshUserData();
       } else {
         toast(data.message || '입찰에 실패했습니다.', 'error');
       }
@@ -1071,7 +1072,7 @@ export const ShopTab: React.FC = () => {
                                   }}
                                   className="flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-bold text-sky-950 transition hover:bg-sky-100 dark:text-sky-50 dark:hover:bg-sky-400/15"
                                 >
-                                  <img src={s.custom_image_url || s.logo_url} alt={s.name} className="h-6 w-6 shrink-0 rounded-full border border-sky-200 object-cover dark:border-sky-300/20" />
+                                  <img src={streamerProfileImage(s)} alt={s.name} className="h-6 w-6 shrink-0 rounded-full border border-sky-200 object-cover dark:border-sky-300/20" />
                                   <span className="truncate">{s.name}</span>
                                 </button>
                               ));

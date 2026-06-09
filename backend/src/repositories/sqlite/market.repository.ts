@@ -24,6 +24,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       current_bid: row.current_bid ?? null,
       current_bidder_id: row.current_bidder_id ?? null,
       auction_ends_at: row.auction_ends_at ?? null,
+      bid_reserved: row.bid_reserved ?? 0,
       fee: row.fee ?? 0,
       fee_rate: row.fee_rate ?? FIXED_MARKET_FEE_RATE,
       settled_amount: row.settled_amount ?? 0,
@@ -89,8 +90,8 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
     const result = this.getDb().prepare(`
       INSERT INTO market_listings
-        (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, fee_rate, with_cosmetics, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+        (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
     `).run(
       listing.seller_id,
       listing.user_card_id,
@@ -250,18 +251,39 @@ export class SqliteMarketRepository implements IMarketRepository {
   }
 
   async updateStatus(id: number, status: MarketListing['status'], extra?: { buyer_id?: string; fee?: number; settled_amount?: number }): Promise<void> {
+    const db = this.getDb();
+    if (!extra && (status === 'CANCELLED' || status === 'AUCTION_ENDED')) {
+      const listing = db.prepare('SELECT * FROM market_listings WHERE id = ? AND status = ?').get(id, 'PENDING') as any;
+      if (listing) {
+        this.refundReservedBid(db, listing);
+        db.prepare(`
+          UPDATE market_listings
+             SET status = ?, bid_reserved = 0, updated_at = datetime('now')
+           WHERE id = ?
+        `).run(status, id);
+        return;
+      }
+    }
+
     if (extra) {
-      this.getDb().prepare(`
+      db.prepare(`
         UPDATE market_listings
            SET status = ?, buyer_id = ?, fee = ?, settled_amount = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(status, extra.buyer_id ?? null, extra.fee ?? 0, extra.settled_amount ?? 0, id);
     } else {
-      this.getDb().prepare(`
+      db.prepare(`
         UPDATE market_listings
            SET status = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(status, id);
+    }
+  }
+
+  private refundReservedBid(db: any, listing: any) {
+    const reserved = Number(listing?.bid_reserved || 0);
+    if (reserved > 0 && listing?.current_bidder_id) {
+      db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
     }
   }
 
@@ -281,7 +303,12 @@ export class SqliteMarketRepository implements IMarketRepository {
         ? Number(listing.buy_now_price || listing.price)
         : Number(listing.price);
 
-      if (buyer.point < finalPrice) {
+      const reserved = Number(listing.bid_reserved || 0);
+      const reservedByBuyer = listing.current_bidder_id === buyerId ? reserved : 0;
+      const payableNow = Math.max(0, finalPrice - reservedByBuyer);
+      const reservedRefundToBuyer = Math.max(0, reservedByBuyer - finalPrice);
+
+      if (buyer.point < payableNow) {
         throw new Error('INSUFFICIENT_POINT');
       }
 
@@ -289,13 +316,19 @@ export class SqliteMarketRepository implements IMarketRepository {
       const { fee, settledAmount } = calculateMarketFee(finalPrice, feeRate);
 
       // 정산
-      db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(finalPrice, buyerId);
+      db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, buyerId);
+      if (reservedRefundToBuyer > 0) {
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reservedRefundToBuyer, buyerId);
+      }
+      if (reserved > 0 && listing.current_bidder_id && listing.current_bidder_id !== buyerId) {
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
+      }
       db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, listing.seller_id);
 
       // 매물 갱신
       db.prepare(`
         UPDATE market_listings
-           SET status = 'SOLD', buyer_id = ?, fee = ?, settled_amount = ?, updated_at = datetime('now')
+           SET status = 'SOLD', buyer_id = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(buyerId, fee, settledAmount, listingId);
 
@@ -429,9 +462,17 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (amount < minBid) throw new Error('BID_TOO_LOW');
       const bidder = db.prepare('SELECT point FROM users WHERE id = ?').get(bidderId) as any;
       if (!bidder) throw new Error('BIDDER_NOT_FOUND');
-      if (Number(bidder.point || 0) < amount) throw new Error('INSUFFICIENT_POINT');
+      const currentReserved = Number(listing.bid_reserved || 0);
+      const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
+      const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
+      if (payableNow <= 0) throw new Error('BID_TOO_LOW');
+      if (Number(bidder.point || 0) < payableNow) throw new Error('INSUFFICIENT_POINT');
 
       db.prepare('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)').run(listingId, bidderId, amount);
+      db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, bidderId);
+      if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(currentReserved, listing.current_bidder_id);
+      }
 
       // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
       const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
@@ -443,11 +484,11 @@ export class SqliteMarketRepository implements IMarketRepository {
         : null;
 
       if (extendedEndsAt) {
-        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, auction_ends_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run(amount, bidderId, extendedEndsAt, listingId);
+        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, auction_ends_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(amount, bidderId, amount, extendedEndsAt, listingId);
       } else {
-        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run(amount, bidderId, listingId);
+        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(amount, bidderId, amount, listingId);
       }
       return {
         ok: true,
@@ -487,19 +528,22 @@ export class SqliteMarketRepository implements IMarketRepository {
       const result = this.getDb().transaction(() => {
         const locked = db.prepare("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING'").get(row.id) as any;
         if (!locked) return false;
+        const reserved = Number(locked.bid_reserved || 0);
         const buyer = db.prepare('SELECT point FROM users WHERE id = ?').get(locked.current_bidder_id) as any;
-        if (!buyer || Number(buyer.point || 0) < Number(locked.current_bid || 0)) {
+        if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < Number(locked.current_bid || 0))) {
           db.prepare("UPDATE market_listings SET status = 'AUCTION_ENDED', updated_at = datetime('now') WHERE id = ?").run(row.id);
           return false;
         }
         const price = Number(locked.current_bid || 0);
         const feeRate = Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE);
         const { fee, settledAmount } = calculateMarketFee(price, feeRate);
-        db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(price, locked.current_bidder_id);
+        if (reserved <= 0) {
+          db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(price, locked.current_bidder_id);
+        }
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, locked.seller_id);
         db.prepare(`
           UPDATE market_listings
-             SET status = 'SOLD', buyer_id = ?, price = ?, fee = ?, settled_amount = ?, updated_at = datetime('now')
+             SET status = 'SOLD', buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
            WHERE id = ?
         `).run(locked.current_bidder_id, price, fee, settledAmount, row.id);
         db.prepare('UPDATE user_cards SET user_id = ? WHERE id = ?').run(locked.current_bidder_id, locked.user_card_id);

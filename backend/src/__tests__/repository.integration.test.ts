@@ -140,6 +140,37 @@ describe('MinigameRepository practice mode', () => {
       status: 'STARTED'
     });
   });
+
+  it('spends charged base tickets before bonus tickets for normal sessions', async () => {
+    seedUser(db, 'ticket-priority-user');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO user_minigame_tickets
+        (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+      VALUES (?, 2, 3, ?, ?)
+    `).run('ticket-priority-user', now, now);
+
+    const result = await minigameRepository.startSession({
+      id: 'ticket-priority-session',
+      user_id: 'ticket-priority-user',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false })
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(db.prepare(`
+      SELECT current_tickets, bonus_tickets
+      FROM user_minigame_tickets
+      WHERE user_id = ?
+    `).get('ticket-priority-user')).toEqual({
+      current_tickets: 1,
+      bonus_tickets: 3
+    });
+    expect(db.prepare('SELECT ticket_spent_type FROM minigame_sessions WHERE id = ?').get('ticket-priority-session')).toEqual({
+      ticket_spent_type: 'BASE'
+    });
+  });
 });
 
 describe('MinigameRepository stale started session recovery', () => {
@@ -303,6 +334,67 @@ describe('MarketRepository 재등록 제약', () => {
     expect(relisted.status).toBe('PENDING');
     expect(relisted.seller_id).toBe('new-buyer');
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'new-buyer' });
+  });
+
+  it('경매 입찰금은 입찰 시 예약되고 낙찰 정산 때 이중 차감되지 않는다', async () => {
+    seedUser(db, 'auction-seller');
+    seedUser(db, 'auction-bidder-a', 5000);
+    seedUser(db, 'auction-bidder-b', 7000);
+    seedStreamer(db, 'auction-channel', '경매 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('auction-seller', 'auction-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'auction-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-a', 1500)).toMatchObject({
+      ok: true,
+      reason: 'OK'
+    });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 3500 });
+    expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+      current_bidder_id: 'auction-bidder-a',
+      current_bid: 1500,
+      bid_reserved: 1500
+    });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-b', 2000)).toMatchObject({
+      ok: true,
+      reason: 'OK',
+      previous_bidder_id: 'auction-bidder-a'
+    });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 5000 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
+    expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+      current_bidder_id: 'auction-bidder-b',
+      current_bid: 2000,
+      bid_reserved: 2000
+    });
+
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(listing.id);
+    const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+
+    expect(soldListings).toHaveLength(1);
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-seller')).toEqual({ point: 1900 });
+    expect(db.prepare('SELECT status, buyer_id, price, fee, bid_reserved, settled_amount FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+      status: 'SOLD',
+      buyer_id: 'auction-bidder-b',
+      price: 2000,
+      fee: 100,
+      bid_reserved: 0,
+      settled_amount: 1900
+    });
+    expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'auction-bidder-b' });
   });
 });
 

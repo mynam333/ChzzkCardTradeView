@@ -295,6 +295,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
     current_bid INTEGER,
     current_bidder_id TEXT,
     auction_ends_at TEXT,
+    bid_reserved INTEGER DEFAULT 0,
     buyer_id TEXT,
     fee INTEGER DEFAULT 0,
     fee_rate INTEGER DEFAULT 5,
