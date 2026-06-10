@@ -6,6 +6,27 @@ import { initFileLogging } from './fileLogger';
 
 let bootstrapped = false;
 
+const resolveBackendDir = () => {
+  const candidates = [
+    path.resolve(process.cwd(), 'backend'),
+    process.cwd(),
+    path.resolve(__dirname, '../..')
+  ];
+
+  for (const candidate of candidates) {
+    const packagePath = path.join(candidate, 'package.json');
+    if (!fs.existsSync(packagePath)) continue;
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+      if (packageJson?.name === 'backend') return candidate;
+    } catch {
+      // Ignore invalid package metadata and try the next candidate.
+    }
+  }
+
+  return path.resolve(__dirname, '../..');
+};
+
 export const bootstrapProcess = (name: string) => {
   if (bootstrapped) return;
   bootstrapped = true;
@@ -24,10 +45,11 @@ export const bootstrapProcess = (name: string) => {
     if (err?.cause) console.error(`[${name}] 상세 원인(cause):`, err.cause);
   });
 
-  const envPath = path.resolve(__dirname, '../.env');
+  const backendDir = resolveBackendDir();
+  const envPath = path.join(backendDir, '.env');
   const result = dotenv.config({ path: envPath });
   const role = String(process.env.PROCESS_ROLE || '').trim();
-  const roleEnvPath = role ? path.resolve(__dirname, `../.env.${role}`) : '';
+  const roleEnvPath = role ? path.join(backendDir, `.env.${role}`) : '';
   const roleResult = roleEnvPath && fs.existsSync(roleEnvPath)
     ? dotenv.config({ path: roleEnvPath, override: true })
     : null;

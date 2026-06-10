@@ -17,7 +17,11 @@ let logDir = '';
 let retentionDays = 14;
 let runtimeStatsProvider: RuntimeStatsProvider | null = null;
 let runtimeStatsTimer: NodeJS.Timeout | null = null;
+let pruneTimer: NodeJS.Timeout | null = null;
 let maxLogStringLength = 2000;
+let logFilePrefix = 'backend';
+let logFileRole = 'process';
+let splitByProcessRole = true;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -25,7 +29,17 @@ const dateStamp = (date = new Date()) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 
-const currentLogPath = () => path.join(logDir, `backend-${dateStamp()}.log`);
+const sanitizeLogNamePart = (value: string, fallback: string) => {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+};
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const currentLogPath = () => {
+  const suffix = splitByProcessRole ? `-${logFileRole}` : '';
+  return path.join(logDir, `${logFilePrefix}${suffix}-${dateStamp()}.log`);
+};
 
 const truncateString = (value: string, maxLength = maxLogStringLength) => {
   if (value.length <= maxLength) return value;
@@ -101,9 +115,10 @@ const formatLine = (level: LogLevel, args: any[]) => {
 const pruneOldLogs = () => {
   if (!logDir || retentionDays <= 0) return;
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const logFilePattern = new RegExp(`^${escapeRegExp(logFilePrefix)}(?:-[a-z0-9._-]+)?-\\d{4}-\\d{2}-\\d{2}\\.log$`);
   try {
     for (const entry of fs.readdirSync(logDir)) {
-      if (!/^backend-\d{4}-\d{2}-\d{2}\.log$/.test(entry)) continue;
+      if (!logFilePattern.test(entry)) continue;
       const fullPath = path.join(logDir, entry);
       const stat = fs.statSync(fullPath);
       if (stat.mtimeMs < cutoff) {
@@ -121,11 +136,17 @@ export const initFileLogging = () => {
   logDir = path.resolve(process.env.LOG_DIR || path.join(process.cwd(), 'logs'));
   retentionDays = Math.max(1, Math.floor(Number(process.env.LOG_RETENTION_DAYS || 14)));
   maxLogStringLength = Math.max(500, Number(process.env.LOG_MAX_STRING_LENGTH || 2000));
+  logFilePrefix = sanitizeLogNamePart(process.env.LOG_FILE_PREFIX || 'backend', 'backend');
+  logFileRole = sanitizeLogNamePart(process.env.LOG_PROCESS_NAME || process.env.PROCESS_ROLE || 'process', 'process');
+  splitByProcessRole = process.env.LOG_SPLIT_BY_PROCESS !== 'false';
 
   try {
     fs.mkdirSync(logDir, { recursive: true });
     initialized = true;
     pruneOldLogs();
+    const pruneIntervalMs = Math.max(60_000, Number(process.env.LOG_PRUNE_INTERVAL_MS || 6 * 60 * 60 * 1000));
+    pruneTimer = setInterval(pruneOldLogs, pruneIntervalMs);
+    pruneTimer.unref?.();
 
     for (const level of LOG_LEVELS) {
       console[level] = (...args: any[]) => {

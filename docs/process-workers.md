@@ -64,6 +64,13 @@ MYSQL_TRANSACTION_MAX_ATTEMPTS=3
 MYSQL_SQLITE_BACKUP_ENABLED=true
 MYSQL_SQLITE_BACKUP_DIR=./backups/mysql-sqlite
 MYSQL_SQLITE_BACKUP_RETENTION_DAYS=7
+
+BACKEND_FILE_LOGGING=true
+LOG_DIR=./backend/logs
+LOG_RETENTION_DAYS=14
+LOG_FILE_PREFIX=backend
+LOG_SPLIT_BY_PROCESS=true
+LOG_PRUNE_INTERVAL_MS=21600000
 ```
 
 ## 역할별 dotenv 예시
@@ -127,6 +134,39 @@ pm2 status
 pm2 logs chikapo-api
 pm2 logs chikapo-live-worker
 pm2 logs chikapo-backup-worker
+```
+
+## 파일 로그
+
+`BACKEND_FILE_LOGGING=true`이면 각 프로세스의 console 로그가 `LOG_DIR` 아래에 날짜별 파일로 저장된다.
+
+기본 파일명:
+
+```text
+backend-api-2026-06-10.log
+backend-live-worker-2026-06-10.log
+backend-scheduler-worker-2026-06-10.log
+backend-backup-worker-2026-06-10.log
+backend-image-worker-2026-06-10.log
+```
+
+`LOG_RETENTION_DAYS`보다 오래된 `backend-*.log` 파일은 프로세스 시작 시와 `LOG_PRUNE_INTERVAL_MS` 간격마다 자동 삭제된다.
+
+실시간 확인:
+
+```bash
+tail -f backend/logs/backend-api-$(date +%F).log
+tail -f backend/logs/backend-live-worker-$(date +%F).log
+tail -f backend/logs/backend-image-worker-$(date +%F).log
+```
+
+PM2 자체 로그는 `~/.pm2/logs`에도 남을 수 있다. PM2 로그까지 장기 보관할 필요가 있으면 `pm2-logrotate`를 같이 설정한다.
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:retain 7
+pm2 set pm2-logrotate:max_size 20M
+pm2 set pm2-logrotate:compress true
 ```
 
 ## Nginx 라우팅 예시
