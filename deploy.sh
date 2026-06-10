@@ -27,6 +27,10 @@ mysqldump -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" \
 echo "[deploy] pull"
 git pull --ff-only
 
+# 🚨 [추가] 빌드 전 기존 Node 프로세스를 멈춰 메모리와 CPU를 확보합니다.
+echo "[deploy] stop PM2 to free up memory"
+pm2 stop ecosystem.config.cjs || echo "PM2 is not running, skipping stop."
+
 echo "[deploy] install (throttled)"
 nice -n 15 ionice -c2 -n7 pnpm fetch
 nice -n 15 ionice -c2 -n7 pnpm install \
@@ -41,7 +45,8 @@ nice -n 15 ionice -c2 -n7 pnpm --filter backend build
 echo "[deploy] apply schema"
 mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < init-db-mysql.sql
 
-echo "[deploy] reload pm2"
+# 🚨 [수정] 멈춰있던 PM2를 환경변수 업데이트와 함께 다시 구동합니다.
+echo "[deploy] reload and start PM2"
 pm2 reload ecosystem.config.cjs --update-env
 
 echo "[deploy] status"
