@@ -79,7 +79,11 @@ export interface AdminUser {
   point: number;
   status_message?: string | null;
   banned_until: string | null;
+  ban_reason?: string | null;
   created_at: string | null;
+  deleted_at?: string | null;
+  is_deleted?: boolean;
+  identity_source?: 'current' | 'rejoined' | 'deleted_snapshot' | 'unknown';
   titles: UserTitle[];
 }
 

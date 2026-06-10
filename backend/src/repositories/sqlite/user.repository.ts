@@ -46,7 +46,10 @@ export class SqliteUserRepository implements IUserRepository {
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       token_expires_at: row.token_expires_at ?? null,
-      created_at: row.created_at
+      created_at: row.created_at,
+      is_deleted: row.is_deleted === 1 || row.is_deleted === true,
+      deleted_at: row.deleted_at ?? null,
+      identity_source: row.identity_source ?? (row.is_deleted ? 'deleted_snapshot' : 'current')
     };
   }
 
@@ -84,16 +87,57 @@ export class SqliteUserRepository implements IUserRepository {
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
     const db = this.getDb();
     const kw = (keyword || '').trim();
-    if (kw) {
-      const like = `%${kw}%`;
-      const total = (db.prepare('SELECT COUNT(*) AS c FROM users WHERE username LIKE ? OR id LIKE ?').get(like, like) as any)?.c || 0;
-      const rows = db.prepare(
-        'SELECT * FROM users WHERE username LIKE ? OR id LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-      ).all(like, like, limit, offset) as any[];
-      return { users: rows.map((r) => this.mapUser(r)), total };
-    }
-    const total = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as any)?.c || 0;
-    const rows = db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset) as any[];
+    const activeWhere = kw ? 'WHERE u.username LIKE ? OR u.id LIKE ?' : '';
+    const deletedWhere = kw ? 'AND (du.username_snapshot LIKE ? OR du.user_id LIKE ?)' : '';
+    const like = `%${kw}%`;
+    const total = kw
+      ? (db.prepare('SELECT COUNT(*) AS c FROM users WHERE username LIKE ? OR id LIKE ?').get(like, like) as any)?.c || 0
+      : (db.prepare('SELECT COUNT(*) AS c FROM users').get() as any)?.c || 0;
+    const params = kw ? [like, like, like, like, limit, offset] : [limit, offset];
+    const rows = db.prepare(`
+      WITH combined AS (
+        SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw,
+               u.free_draw_tickets, u.bonus_free_draw_tickets, u.banned_until, u.ban_reason,
+               u.representative_card_channel_id, u.representative_card_star, u.status_message,
+               u.access_token, u.refresh_token, u.token_expires_at, u.created_at,
+               du.deleted_at,
+               CASE WHEN du.user_id IS NULL THEN 'current' ELSE 'rejoined' END AS identity_source,
+               0 AS is_deleted,
+               COALESCE(u.created_at, '') AS sort_at
+          FROM users u
+          LEFT JOIN deleted_user_accounts du ON du.user_id = u.id
+          ${activeWhere}
+        UNION ALL
+        SELECT du.user_id AS id,
+               COALESCE(du.username_snapshot, '탈퇴 유저') AS username,
+               du.avatar_url_snapshot AS avatar_url,
+               'USER' AS role,
+               COALESCE(du.point_at_deletion, 0) AS point,
+               NULL AS last_free_draw,
+               0 AS free_draw_tickets,
+               0 AS bonus_free_draw_tickets,
+               NULL AS banned_until,
+               NULL AS ban_reason,
+               NULL AS representative_card_channel_id,
+               NULL AS representative_card_star,
+               NULL AS status_message,
+               NULL AS access_token,
+               NULL AS refresh_token,
+               NULL AS token_expires_at,
+               du.deleted_at AS created_at,
+               du.deleted_at,
+               'deleted_snapshot' AS identity_source,
+               1 AS is_deleted,
+               COALESCE(du.deleted_at, '') AS sort_at
+          FROM deleted_user_accounts du
+          LEFT JOIN users u ON u.id = du.user_id
+         WHERE u.id IS NULL
+          ${deletedWhere}
+      )
+      SELECT * FROM combined
+       ORDER BY sort_at DESC, id ASC
+       LIMIT ? OFFSET ?
+    `).all(...params) as any[];
     return { users: rows.map((r) => this.mapUser(r)), total };
   }
 

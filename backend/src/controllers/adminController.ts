@@ -562,6 +562,9 @@ export const listUsers = async (req: Request, res: Response) => {
       banned_until: u.banned_until ?? null,
       ban_reason: u.ban_reason ?? null,
       created_at: u.created_at ?? null,
+      deleted_at: u.deleted_at ?? null,
+      is_deleted: u.is_deleted === true,
+      identity_source: u.identity_source ?? (u.is_deleted ? 'deleted_snapshot' : 'current'),
       titles: titlesByUser[u.id] || []
     }));
 

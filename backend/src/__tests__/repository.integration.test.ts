@@ -148,6 +148,48 @@ describe('UserRepository rankings', () => {
   });
 });
 
+describe('UserRepository admin listUsers', () => {
+  it('관리자 유저 목록에는 탈퇴 유저 스냅샷을 포함하지만 total은 현재 유저만 센다', async () => {
+    seedUser(db, 'admin-list-active', 1000);
+    seedUser(db, 'admin-list-deleted', 3000);
+    await userRepository.deleteAccount('admin-list-deleted');
+
+    const result = await userRepository.listUsers('', 20, 0);
+
+    expect(result.total).toBe(1);
+    expect(result.users).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'admin-list-active',
+        is_deleted: false
+      }),
+      expect.objectContaining({
+        id: 'admin-list-deleted',
+        username: 'user_admin-list-deleted',
+        point: 3000,
+        is_deleted: true,
+        deleted_at: expect.any(String),
+        identity_source: 'deleted_snapshot'
+      })
+    ]));
+  });
+
+  it('관리자 유저 목록 검색에서도 탈퇴 유저 스냅샷을 찾을 수 있다', async () => {
+    seedUser(db, 'admin-list-search-deleted', 1200);
+    await userRepository.deleteAccount('admin-list-search-deleted');
+
+    const result = await userRepository.listUsers('search-deleted', 20, 0);
+
+    expect(result.total).toBe(0);
+    expect(result.users).toEqual([
+      expect.objectContaining({
+        id: 'admin-list-search-deleted',
+        is_deleted: true,
+        identity_source: 'deleted_snapshot'
+      })
+    ]);
+  });
+});
+
 describe('accountInteractionRestrictionMiddleware', () => {
   it('탈퇴 후 24시간 이내 재가입 계정의 상호작용 요청을 차단한다', async () => {
     seedUser(db, 'recent-rejoin-user');

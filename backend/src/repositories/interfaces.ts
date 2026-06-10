@@ -18,6 +18,9 @@ export interface User {
   refresh_token?: string | null;
   token_expires_at?: string | null; // 치지직 access_token 만료 시각(ISO)
   created_at?: string;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  identity_source?: 'current' | 'rejoined' | 'deleted_snapshot' | 'unknown';
 }
 
 export interface DeletedUserAccount {

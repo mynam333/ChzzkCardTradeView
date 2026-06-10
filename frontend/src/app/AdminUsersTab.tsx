@@ -73,6 +73,12 @@ const identityLabel = (source?: PointAuditResponse['user']['identity_source']) =
   return '현재 계정';
 };
 
+const userIdentityLabel = (user: Pick<AdminUser, 'is_deleted' | 'identity_source'>) => {
+  if (user.is_deleted || user.identity_source === 'deleted_snapshot') return '탈퇴';
+  if (user.identity_source === 'rejoined') return '재가입';
+  return null;
+};
+
 /**
  * 관리자 > 유저 목록 탭.
  * 닉네임/채널ID 서버 검색 + 페이지네이션, 클릭 시 닉네임/ID 복사.
@@ -348,7 +354,7 @@ export const AdminUsersTab: React.FC = () => {
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users className="h-4 w-4" /> 유저 목록 ({userTotal.toLocaleString()})</h3>
+          <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users className="h-4 w-4" /> 유저 목록 ({userTotal.toLocaleString()} · 탈퇴 제외)</h3>
           <button onClick={() => fetchUsers(userPage, userSearch)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
         </div>
 
@@ -390,6 +396,11 @@ export const AdminUsersTab: React.FC = () => {
                 >
                   <span className="truncate text-xs font-bold text-foreground hover:underline">{u.username}</span>
                   {u.role === 'ADMIN' && <span className="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-500">ADMIN</span>}
+                  {userIdentityLabel(u) && (
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${u.is_deleted ? 'bg-rose-500/15 text-rose-500' : 'bg-amber-500/15 text-amber-500'}`}>
+                      {userIdentityLabel(u)}
+                    </span>
+                  )}
                   {u.banned_until && new Date(u.banned_until).getTime() > Date.now() && (
                     <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">정지</span>
                   )}
@@ -408,6 +419,11 @@ export const AdminUsersTab: React.FC = () => {
                       <span className="truncate">{u.status_message}</span>
                     </span>
                   )}
+                  {u.deleted_at && (
+                    <span className="text-[10px] font-bold text-rose-500">
+                      탈퇴 기록 {formatLocalDateTime(u.deleted_at, { hour12: false })}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="ml-auto flex shrink-0 flex-col gap-1.5 sm:flex-row">
@@ -421,7 +437,7 @@ export const AdminUsersTab: React.FC = () => {
                   <WalletCards className="h-3.5 w-3.5" />
                   감사
                 </button>
-                {u.status_message && (
+                {u.status_message && !u.is_deleted && (
                 <button
                   type="button"
                   onClick={() => resetStatusMessage(u)}

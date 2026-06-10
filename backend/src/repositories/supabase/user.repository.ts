@@ -91,6 +91,7 @@ export class SupabaseUserRepository implements IUserRepository {
 
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
     const kw = (keyword || '').trim();
+    const safe = kw.replace(/[,()]/g, ' ');
     let query = this.getClient()
       .from('users')
       .select('*', { count: 'exact' })
@@ -98,12 +99,62 @@ export class SupabaseUserRepository implements IUserRepository {
       .range(offset, offset + limit - 1);
     if (kw) {
       // 닉네임 또는 ID 부분일치 (특수문자 escape: 콤마/괄호는 or 필터 구문 충돌 방지)
-      const safe = kw.replace(/[,()]/g, ' ');
       query = query.or(`username.ilike.%${safe}%,id.ilike.%${safe}%`);
     }
-    const { data, error, count } = await query;
+    const deletedQueryBase = this.getClient()
+      .from('deleted_user_accounts')
+      .select('user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion')
+      .order('deleted_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    const deletedQuery = kw
+      ? deletedQueryBase.or(`username_snapshot.ilike.%${safe}%,user_id.ilike.%${safe}%`)
+      : deletedQueryBase;
+
+    const [{ data, error, count }, deletedResult] = await Promise.all([query, deletedQuery]);
     if (error || !data) return { users: [], total: 0 };
-    return { users: data as User[], total: count || 0 };
+
+    let deletedRows = deletedResult.data || [];
+    if (deletedResult.error) {
+      console.warn('[Supabase] deleted_user_accounts 목록 조회 실패:', deletedResult.error.message);
+      deletedRows = [];
+    }
+    const deletedIds = deletedRows.map((row: any) => row.user_id).filter(Boolean);
+    const currentIdSet = new Set<string>((data as User[]).map((user) => user.id));
+    if (deletedIds.length > 0) {
+      const { data: existingUsers } = await this.getClient()
+        .from('users')
+        .select('id')
+        .in('id', deletedIds);
+      for (const existing of existingUsers || []) currentIdSet.add(existing.id);
+    }
+
+    const currentUsers = (data as User[]).map((user) => ({
+      ...user,
+      identity_source: deletedRows.some((row: any) => row.user_id === user.id) ? 'rejoined' : 'current',
+      is_deleted: false
+    } as User));
+    const deletedUsers = deletedRows
+      .filter((row: any) => !currentIdSet.has(row.user_id))
+      .map((row: any) => ({
+        id: row.user_id,
+        username: row.username_snapshot || '탈퇴 유저',
+        avatar_url: row.avatar_url_snapshot || null,
+        role: 'USER',
+        point: Number(row.point_at_deletion || 0),
+        last_free_draw: null,
+        free_draw_tickets: 0,
+        bonus_free_draw_tickets: 0,
+        banned_until: null,
+        ban_reason: null,
+        created_at: row.deleted_at,
+        deleted_at: row.deleted_at,
+        is_deleted: true,
+        identity_source: 'deleted_snapshot'
+      } as User));
+    const users = [...currentUsers, ...deletedUsers]
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(a.id).localeCompare(String(b.id)))
+      .slice(0, limit * 2);
+    return { users, total: count || 0 };
   }
 
   async listBannedUsers(keyword: string, sortBy: string, sortOrder: 'asc' | 'desc', limit: number, offset: number): Promise<{ users: User[]; total: number }> {
