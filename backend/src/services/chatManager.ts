@@ -4,6 +4,9 @@ import { streamerRepository } from '../repositories';
 const CHAT_COUNT_FLUSH_INTERVAL_MS = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_INTERVAL_MS || 5000));
 const CHAT_MANAGER_VERBOSE_LOGS = process.env.CHAT_MANAGER_VERBOSE_LOGS === 'true';
 const CHAT_COUNT_FLUSH_WARN_THRESHOLD = Math.max(1000, Number(process.env.CHAT_COUNT_FLUSH_WARN_THRESHOLD || 10_000));
+const CHAT_CONNECT_TIMEOUT_MS = Math.max(1000, Number(process.env.CHAT_CONNECT_TIMEOUT_MS || 5000));
+const CHAT_CONNECT_BACKOFF_BASE_MS = Math.max(30_000, Number(process.env.CHAT_CONNECT_BACKOFF_BASE_MS || 5 * 60_000));
+const CHAT_CONNECT_BACKOFF_MAX_MS = Math.max(CHAT_CONNECT_BACKOFF_BASE_MS, Number(process.env.CHAT_CONNECT_BACKOFF_MAX_MS || 30 * 60_000));
 
 // 웹소켓 메시지 전송용 인터페이스
 interface ChzzkSocketFrame {
@@ -33,6 +36,7 @@ class ChzzkChatManager {
   private desired: Set<string> = new Set();
   // 채널별 대기 중인 재연결 타이머 (disconnect 시 취소용)
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  private connectFailures: Map<string, { failures: number; nextAttemptAt: number; lastLogAt: number }> = new Map();
   private pendingChatCounts: Map<string, number> = new Map();
   private flushTimer?: NodeJS.Timeout;
   private isFlushing = false;
@@ -114,6 +118,7 @@ class ChzzkChatManager {
       connections: this.connections.size,
       desired: this.desired.size,
       reconnectTimers: this.reconnectTimers.size,
+      backedOff: this.connectFailures.size,
       pendingChatChannels: this.pendingChatCounts.size,
       pendingChatTotal,
       isFlushing: this.isFlushing
@@ -134,7 +139,9 @@ class ChzzkChatManager {
       headers['Authorization'] = `Bearer ${streamerAccessToken}`;
     }
 
-    const res = await fetch(url, { headers });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CHAT_CONNECT_TIMEOUT_MS);
+    const res = await fetch(url, { headers, signal: controller.signal }).finally(() => clearTimeout(timeout));
 
     if (!res.ok) {
       throw new Error(`채팅 토큰 요청 실패 (HTTP 상태코드: ${res.status})`);
@@ -149,6 +156,47 @@ class ChzzkChatManager {
     throw new Error(body.message || '채팅 토큰 파싱 에러');
   }
 
+  private getErrorCauseMessage(err: any): string {
+    const cause = err?.cause;
+    return cause?.code || cause?.message || err?.message || String(err);
+  }
+
+  private isConnectBackedOff(channelId: string): boolean {
+    const state = this.connectFailures.get(channelId);
+    if (!state) return false;
+    if (state.nextAttemptAt <= Date.now()) return false;
+    return true;
+  }
+
+  private registerConnectFailure(channelId: string, err: any) {
+    const now = Date.now();
+    const previous = this.connectFailures.get(channelId);
+    const failures = (previous?.failures || 0) + 1;
+    const delay = Math.min(
+      CHAT_CONNECT_BACKOFF_MAX_MS,
+      CHAT_CONNECT_BACKOFF_BASE_MS * Math.max(1, 2 ** (failures - 1))
+    );
+    const lastLogAt = previous?.lastLogAt || 0;
+    const shouldLog = now - lastLogAt >= 60_000;
+    this.connectFailures.set(channelId, {
+      failures,
+      nextAttemptAt: now + delay,
+      lastLogAt: shouldLog ? now : lastLogAt
+    });
+    if (shouldLog) {
+      console.warn('[ChatManager] 채팅 연결 실패, 백오프 적용:', {
+        channel: channelId,
+        failures,
+        retry_after_ms: delay,
+        reason: this.getErrorCauseMessage(err)
+      });
+    }
+  }
+
+  private clearConnectFailure(channelId: string) {
+    this.connectFailures.delete(channelId);
+  }
+
   /**
    * 특정 채널의 방송 중 채팅방 웹소켓 연결 시작
    */
@@ -160,10 +208,14 @@ class ChzzkChatManager {
       // 이미 연결되어 있으면 추가 연결을 건너뜁니다.
       return;
     }
+    if (this.isConnectBackedOff(channelId)) {
+      return;
+    }
 
     this.logVerbose(`[ChatManager] 채팅 수집 시작 (스트리머 ID: ${channelId}, 채팅방 ID: ${chatChannelId})`);
     try {
       const { accessToken } = await this.getChatAccessToken(chatChannelId, streamerAccessToken);
+      this.clearConnectFailure(channelId);
       
       // 치지직 기본 웹소켓 서버 주소 분산 매핑 (라이브러리 로직)
       const serverId = Math.abs(
@@ -272,10 +324,7 @@ class ChzzkChatManager {
         isExplicitlyClosed: false
       });
     } catch (err: any) {
-      console.error(`[ChatManager] 소켓 연결 중 예외 발생 (채널: ${channelId}):`, err);
-      if (err.cause) {
-        console.error(`[ChatManager] 상세 원인 (Cause):`, err.cause);
-      }
+      this.registerConnectFailure(channelId, err);
     }
   }
 
@@ -294,6 +343,7 @@ class ChzzkChatManager {
   public disconnect(channelId: string) {
     // 더 이상 연결 유지 대상이 아님 → 재연결 가드 해제 및 대기 중 재연결 타이머 취소
     this.desired.delete(channelId);
+    this.clearConnectFailure(channelId);
     const pending = this.reconnectTimers.get(channelId);
     if (pending) {
       clearTimeout(pending);

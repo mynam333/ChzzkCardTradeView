@@ -146,7 +146,11 @@ app.use('/api', apiAccessGuard);
 // API 전체 경로에 soft-ban + 기본 레이트 리밋 적용.
 // soft-ban은 짧은 시간의 비정상 반복 요청을 몇 분간 쉬게 하여 DB/API 폭주를 완화합니다.
 app.use('/api', softBanMiddleware);
-app.use('/api', rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' }));
+const globalApiLimiter = rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' });
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/image-proxy' || req.path === '/api/image-proxy') return next();
+  return globalApiLimiter(req, res, next);
+});
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();

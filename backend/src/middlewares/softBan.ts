@@ -32,6 +32,8 @@ const isExemptPath = (path: string) =>
   path === '/api/health' ||
   path === '/health' ||
   path === '/api/push/vapid-key' ||
+  path === '/api/image-proxy' ||
+  path === '/image-proxy' ||
   path.startsWith('/uploads');
 
 const requestWeight = (req: Request) => {

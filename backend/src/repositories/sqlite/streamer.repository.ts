@@ -42,6 +42,12 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     return date.toISOString().replace('T', ' ').replace('Z', '+00:00');
   }
 
+  private normalizeSqliteUtcString(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return this.toSqliteUtcString(parsed);
+  }
+
   async findAll(): Promise<Streamer[]> {
     const rows = this.getDb().prepare('SELECT * FROM streamers ORDER BY base_value DESC').all();
     return rows.map((row: any) => ({
@@ -248,11 +254,12 @@ export class SqliteStreamerRepository implements IStreamerRepository {
   }
 
   async getValueHistory(channelId: string, sinceIso: string): Promise<{ value: number; recorded_at: string }[]> {
+    const since = this.normalizeSqliteUtcString(sinceIso);
     const rows = this.getDb().prepare(
       `SELECT value, recorded_at FROM value_history
-        WHERE channel_id = ? AND datetime(recorded_at) >= datetime(?)
+        WHERE channel_id = ? AND recorded_at >= ?
         ORDER BY recorded_at ASC`
-    ).all(channelId, sinceIso) as any[];
+    ).all(channelId, since) as any[];
     return rows.map(r => ({ value: r.value, recorded_at: r.recorded_at }));
   }
 

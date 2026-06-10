@@ -406,15 +406,33 @@ export const unblockUser = async (req: Request, res: Response) => {
 /**
  * 유저 공개 프로필 조회 — 프로필 모달(닉네임/포인트/대표 카드/보유 카드 요약/총자산)
  */
+const PUBLIC_PROFILE_CACHE_TTL = 30_000;
+const publicProfileCache = new Map<string, { data: any; expiresAt: number }>();
+const publicProfileInFlight = new Map<string, Promise<any>>();
+
 export const getUserProfile = async (req: Request, res: Response) => {
   const { user_id } = req.params;
   if (!user_id) {
     return res.status(400).json({ error: 'BadRequest', message: '유저 ID가 필요합니다.' });
   }
   try {
+    const now = Date.now();
+    const cached = publicProfileCache.get(user_id);
+    if (cached && cached.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=30');
+      return res.status(200).json(cached.data);
+    }
+    const existing = publicProfileInFlight.get(user_id);
+    if (existing) {
+      const data = await existing;
+      res.set('Cache-Control', 'public, max-age=30');
+      return res.status(200).json(data);
+    }
+
+    const request = (async () => {
     const user = await userRepository.findById(user_id);
     if (!user) {
-      return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+      return null;
     }
     const allCards = await userCardRepository.findByUserId(user_id);
     const cards = allCards.filter((card: any) => !card.is_hidden);
@@ -473,7 +491,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
 
     const titles = (await titleRepository.findByUserId(user_id)).filter((title) => title.is_equipped);
 
-    return res.status(200).json({
+    return {
       id: user.id,
       username: user.username,
       role: user.role,
@@ -486,7 +504,27 @@ export const getUserProfile = async (req: Request, res: Response) => {
       total_asset: user.point + cardAsset,
       representative_card: repCard,
       collection
+    };
+    })().then((data) => {
+      if (data) {
+        publicProfileCache.set(user_id, { data, expiresAt: Date.now() + PUBLIC_PROFILE_CACHE_TTL });
+        if (publicProfileCache.size > 300) {
+          for (const [key, value] of publicProfileCache) {
+            if (value.expiresAt <= Date.now()) publicProfileCache.delete(key);
+          }
+        }
+      }
+      return data;
+    }).finally(() => {
+      publicProfileInFlight.delete(user_id);
     });
+    publicProfileInFlight.set(user_id, request);
+    const data = await request;
+    if (!data) {
+      return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
+    }
+    res.set('Cache-Control', 'public, max-age=30');
+    return res.status(200).json(data);
   } catch (err: any) {
     console.error('[PlayController] getUserProfile 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '프로필 조회 실패', details: IS_PRODUCTION ? undefined : err.message });

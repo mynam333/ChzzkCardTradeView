@@ -6,21 +6,32 @@ import { API_BASE_URL } from './api';
  * 프로필 카드 캡처(html-to-image) 시 캔버스 오염 및 표시 깨짐을 방지합니다.
  * data:/blob: URL이나 빈 값은 그대로 둡니다.
  */
-export const proxiedImage = (url?: string | null): string => {
+export const proxiedImage = (
+  url?: string | null,
+  options: { width?: number; quality?: number } = {}
+): string => {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-  if (url.startsWith('/uploads/') || url.startsWith('uploads/')) return url.startsWith('/') ? url : `/${url}`;
+  const shouldResize = !!options.width;
+  if (!shouldResize && (url.startsWith('/uploads/') || url.startsWith('uploads/'))) return url.startsWith('/') ? url : `/${url}`;
   try {
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : API_BASE_URL;
     const parsed = new URL(url, baseOrigin);
     const apiBase = new URL(API_BASE_URL, baseOrigin);
-    if (parsed.pathname.startsWith('/uploads/') && parsed.origin === apiBase.origin) {
+    if (!shouldResize && parsed.pathname.startsWith('/uploads/') && parsed.origin === apiBase.origin) {
       return parsed.toString();
     }
   } catch {
     // URL 파싱 실패 시 기존 프록시 경로로 폴백합니다.
   }
-  return `${API_BASE_URL}/image-proxy?url=${encodeURIComponent(url)}`;
+  const params = new URLSearchParams({ url });
+  if (options.width && Number.isFinite(options.width)) {
+    params.set('w', String(Math.max(16, Math.floor(options.width))));
+  }
+  if (options.quality && Number.isFinite(options.quality)) {
+    params.set('q', String(Math.max(45, Math.min(92, Math.floor(options.quality)))));
+  }
+  return `${API_BASE_URL}/image-proxy?${params.toString()}`;
 };
 
 /** shop_items.style_json(JSON 문자열)을 React 인라인 스타일 객체로 파싱 */

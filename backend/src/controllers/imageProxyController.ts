@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { IS_PRODUCTION } from '../config';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { ensureDirectory, getUploadsDir } from '../services/storagePaths';
 
 /**
@@ -35,6 +36,11 @@ interface ProxyCacheEntry {
   size: number;
 }
 
+interface ProxyTransform {
+  width: number | null;
+  quality: number;
+}
+
 const readPositiveNumber = (name: string, fallback: number) => {
   const parsed = Number(process.env[name]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -46,13 +52,22 @@ const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_NEGATI
 const IMAGE_PROXY_MAX_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_BYTES', 4 * 1024 * 1024);
 const IMAGE_PROXY_MAX_CACHE_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_BYTES', 64 * 1024 * 1024);
 const IMAGE_PROXY_MAX_CACHE_ENTRIES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_ENTRIES', 500);
-const IMAGE_PROXY_MAX_CONCURRENCY = readPositiveNumber('IMAGE_PROXY_MAX_CONCURRENCY', 4);
+const IMAGE_PROXY_MAX_RESIZE_WIDTH = readPositiveNumber('IMAGE_PROXY_MAX_RESIZE_WIDTH', 768);
+const PSTATIC_RESIZE_TYPES = (process.env.IMAGE_PROXY_PSTATIC_TYPES || 'f60_60_na,f120_120_na,f240_240_na')
+  .split(',')
+  .map((value) => value.trim())
+  .filter((value) => /^f\d+_\d+_na$/.test(value))
+  .map((value) => {
+    const [, width, height] = value.match(/^f(\d+)_(\d+)_na$/) || [];
+    return { value, size: Math.max(Number(width || 0), Number(height || 0)) };
+  })
+  .filter((item) => item.size > 0)
+  .sort((a, b) => a.size - b.size);
 
 const proxyCache = new Map<string, ProxyCacheEntry>();
 const negativeCache = new Map<string, number>();
 const inFlight = new Map<string, Promise<ProxyCacheEntry>>();
 let proxyCacheBytes = 0;
-let activeRemoteFetches = 0;
 
 const cleanupNegativeCache = () => {
   const now = Date.now();
@@ -85,6 +100,60 @@ const isAllowedHost = (hostname: string): boolean => {
     }
   } catch { /* noop */ }
   return ALLOWED_HOST_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
+};
+
+const readQueryNumber = (value: unknown): number | null => {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const parseTransform = (req: Request): ProxyTransform => {
+  const width = readQueryNumber(req.query.w);
+  const quality = readQueryNumber(req.query.q);
+  return {
+    width: width ? Math.max(16, Math.min(IMAGE_PROXY_MAX_RESIZE_WIDTH, Math.floor(width))) : null,
+    quality: quality ? Math.max(45, Math.min(92, Math.floor(quality))) : 78
+  };
+};
+
+const transformCacheSuffix = (transform: ProxyTransform) =>
+  transform.width ? `|w=${transform.width}|q=${transform.quality}` : '|original';
+
+const isPstaticImageHost = (hostname: string): boolean => {
+  const h = hostname.toLowerCase();
+  return h === 'pstatic.net' || h.endsWith('.pstatic.net');
+};
+
+const pickPstaticResizeType = (width: number): string | null => {
+  const targetWidth = Math.max(1, width);
+  if (targetWidth <= 480) {
+    return PSTATIC_RESIZE_TYPES.find((candidate) => candidate.size === 240)?.value
+      || PSTATIC_RESIZE_TYPES[PSTATIC_RESIZE_TYPES.length - 1]?.value
+      || null;
+  }
+  return null;
+};
+
+const getUpstreamImageUrl = (target: URL, transform: ProxyTransform): URL => {
+  const upstream = new URL(target.toString());
+  if (transform.width && isPstaticImageHost(upstream.hostname)) {
+    const resizeType = pickPstaticResizeType(transform.width);
+    if (resizeType) {
+      upstream.searchParams.set('type', resizeType);
+    }
+  }
+  return upstream;
+};
+
+const getLocalContentType = (filePath: string): string => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.avif') return 'image/avif';
+  if (ext === '.svg') return 'image/svg+xml';
+  return 'image/jpeg';
 };
 
 const getCachedProxyImage = (key: string): ProxyCacheEntry | null => {
@@ -155,11 +224,31 @@ const readBodyWithLimit = async (upstream: globalThis.Response): Promise<Buffer>
   return Buffer.concat(chunks, total);
 };
 
-const fetchRemoteImage = async (target: URL): Promise<ProxyCacheEntry> => {
+const resizeImageForProxy = async (
+  body: Buffer,
+  contentType: string,
+  transform: ProxyTransform
+): Promise<{ body: Buffer; contentType: string }> => {
+  if (!transform.width) return { body, contentType };
+
+  try {
+    const resized = await sharp(body, { animated: false })
+      .rotate()
+      .resize({ width: transform.width, withoutEnlargement: true })
+      .webp({ quality: transform.quality })
+      .toBuffer();
+    return { body: resized, contentType: 'image/webp' };
+  } catch {
+    return { body, contentType };
+  }
+};
+
+const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise<ProxyCacheEntry> => {
+  const upstreamUrl = getUpstreamImageUrl(target, transform);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), IMAGE_PROXY_TIMEOUT_MS);
   try {
-    const upstream = await fetch(target.toString(), {
+    const upstream = await fetch(upstreamUrl.toString(), {
       signal: controller.signal,
       headers: {
         // 치지직 CDN은 일부 경우 referer/UA 검사를 하므로 기본값 부여
@@ -188,12 +277,13 @@ const fetchRemoteImage = async (target: URL): Promise<ProxyCacheEntry> => {
       throw error;
     }
 
-    const body = await readBodyWithLimit(upstream);
+    const rawBody = await readBodyWithLimit(upstream);
+    const transformed = await resizeImageForProxy(rawBody, contentType, transform);
     return {
-      body,
-      contentType,
+      body: transformed.body,
+      contentType: transformed.contentType,
       expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
-      size: body.length
+      size: transformed.body.length
     };
   } finally {
     clearTimeout(timeout);
@@ -205,6 +295,7 @@ export const proxyImage = async (req: Request, res: Response) => {
   if (!raw) {
     return res.status(400).json({ error: 'BadRequest', message: 'url 파라미터가 필요합니다.' });
   }
+  const transform = parseTransform(req);
 
   // 1. 상대 경로(/uploads/...)인 경우 로컬 파일 시스템에서 직접 전송 (네트워크 미경유)
   if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
@@ -222,7 +313,17 @@ export const proxyImage = async (req: Request, res: Response) => {
     }
 
     if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
-      const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      const contentType = getLocalContentType(resolvedPath);
+      if (transform.width) {
+        const rawBody = fs.readFileSync(resolvedPath);
+        const transformed = await resizeImageForProxy(rawBody, contentType, transform);
+        return sendProxyImage(res, {
+          body: transformed.body,
+          contentType: transformed.contentType,
+          expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
+          size: transformed.body.length
+        }, 'MISS');
+      }
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -268,7 +369,17 @@ export const proxyImage = async (req: Request, res: Response) => {
 
     const resolvedPath = resolveLocalUploadPath(decodedPath);
     if (resolvedPath && fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile()) {
-      const contentType = resolvedPath.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      const contentType = getLocalContentType(resolvedPath);
+      if (transform.width) {
+        const rawBody = fs.readFileSync(resolvedPath);
+        const transformed = await resizeImageForProxy(rawBody, contentType, transform);
+        return sendProxyImage(res, {
+          body: transformed.body,
+          contentType: transformed.contentType,
+          expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
+          size: transformed.body.length
+        }, 'MISS');
+      }
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -285,7 +396,8 @@ export const proxyImage = async (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 이미지 호스트입니다.' });
   }
 
-  const cacheKey = target.toString();
+  const upstreamTarget = getUpstreamImageUrl(target, transform);
+  const cacheKey = `${upstreamTarget.toString()}${transformCacheSuffix(transform)}`;
   const cached = getCachedProxyImage(cacheKey);
   if (cached) {
     return sendProxyImage(res, cached, 'HIT');
@@ -299,12 +411,7 @@ export const proxyImage = async (req: Request, res: Response) => {
 
   let request = inFlight.get(cacheKey);
   if (!request) {
-    if (activeRemoteFetches >= IMAGE_PROXY_MAX_CONCURRENCY) {
-      res.setHeader('Retry-After', '3');
-      return res.status(429).json({ error: 'TooManyRequests', message: '이미지 프록시 동시 처리 한도를 초과했습니다.' });
-    }
-    activeRemoteFetches += 1;
-    request = fetchRemoteImage(target)
+    request = fetchRemoteImage(target, transform)
       .then((entry) => {
         setCachedProxyImage(cacheKey, entry);
         return entry;
@@ -315,7 +422,6 @@ export const proxyImage = async (req: Request, res: Response) => {
         throw err;
       })
       .finally(() => {
-        activeRemoteFetches -= 1;
         inFlight.delete(cacheKey);
       });
     inFlight.set(cacheKey, request);

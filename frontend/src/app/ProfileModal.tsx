@@ -170,10 +170,11 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
               {/* 헤더: 닉네임 + ID */}
               <div className="flex items-center gap-3">
                 <img
-                  src={proxiedImage(profile.avatar_url)}
+                  src={proxiedImage(profile.avatar_url, { width: 112, quality: 76 })}
                   alt={profile.username}
                   crossOrigin="anonymous"
-                  className="h-14 w-14 rounded-full border-2 border-primary/50 bg-zinc-800 object-cover"
+                  className="rounded-full border-2 border-primary/50 bg-zinc-800 object-cover"
+                  style={{ width: 'clamp(2.75rem, 13vw, 3.5rem)', height: 'clamp(2.75rem, 13vw, 3.5rem)' }}
                 />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -206,9 +207,10 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                   <div
                     style={{
                       containerType: 'inline-size',
+                      width: 'clamp(8.75rem, 42vw, 11rem)',
                       ...(borderClass(rep.border) ? {} : (borderStyle(rep.border) || {}))
                     }}
-                    className={`relative flex aspect-[5/8] w-44 flex-col justify-between overflow-hidden rounded-xl bg-zinc-800 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
+                    className={`relative flex aspect-[5/8] flex-col justify-between overflow-hidden rounded-xl bg-zinc-800 shadow-xl border border-white/10 ${rep.star >= 1 ? `card-star card-star-${rep.star}` : ''}`}
                   >
                     {/* 프리미엄 테두리 코스메틱 오버레이 */}
                     <CosmeticFrame border={rep.border} />
@@ -216,7 +218,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                     {/* 카드 이미지 배경 */}
                     <div className="absolute inset-0 z-0">
                       <img
-                        src={proxiedImage(cardImage(repStreamer, rep.star))}
+                        src={proxiedImage(cardImage(repStreamer, rep.star), { width: 420, quality: 84 })}
                         alt={repStreamer.name}
                         crossOrigin="anonymous"
                         className="h-full w-full object-cover opacity-85"
@@ -288,10 +290,11 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                     {profile.collection.slice(0, 25).map((c) => (
                       <StreamerTooltip key={`${c.channel_id}#${c.star}`} name={c.streamer.name} className="relative">
                         <img
-                          src={proxiedImage(cardImage(c.streamer, c.star))}
+                          src={proxiedImage(cardImage(c.streamer, c.star), { width: 96, quality: 72 })}
                           alt={c.streamer.name}
                           crossOrigin="anonymous"
-                          className="h-9 w-9 rounded-lg border border-white/10 object-cover"
+                          className="rounded-lg border border-white/10 object-cover"
+                          style={{ width: 'clamp(1.9rem, 8.5vw, 2.25rem)', height: 'clamp(1.9rem, 8.5vw, 2.25rem)' }}
                         />
                         {c.count > 1 && (
                           <span className="absolute -bottom-1 -right-1 rounded-full bg-primary px-1 text-[8px] font-black text-primary-foreground">
@@ -306,7 +309,10 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                       </StreamerTooltip>
                     ))}
                     {profile.collection.length > 25 && (
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-[9px] font-bold text-zinc-400">
+                      <div
+                        className="flex items-center justify-center rounded-lg bg-white/5 text-[9px] font-bold text-zinc-400"
+                        style={{ width: 'clamp(1.9rem, 8.5vw, 2.25rem)', height: 'clamp(1.9rem, 8.5vw, 2.25rem)' }}
+                      >
                         +{profile.collection.length - 25}
                       </div>
                     )}
