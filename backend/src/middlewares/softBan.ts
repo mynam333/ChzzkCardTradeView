@@ -17,12 +17,12 @@ const readPositiveNumber = (name: string, fallback: number) => {
 };
 
 const WINDOW_MS = readPositiveNumber('SOFT_BAN_WINDOW_MS', 60_000);
-const BAN_MS = readPositiveNumber('SOFT_BAN_DURATION_MS', 5 * 60_000);
-const MAX_SCORE = readPositiveNumber('SOFT_BAN_MAX_SCORE', 240);
-const MAX_REQUESTS = readPositiveNumber('SOFT_BAN_MAX_REQUESTS', 180);
-const MAX_MUTATIONS = readPositiveNumber('SOFT_BAN_MAX_MUTATIONS', 60);
-const MAX_PUSH_SUBSCRIBES = readPositiveNumber('SOFT_BAN_MAX_PUSH_SUBSCRIBES', 6);
-const MAX_IMAGE_PROXY = readPositiveNumber('SOFT_BAN_MAX_IMAGE_PROXY', 80);
+const BAN_MS = readPositiveNumber('SOFT_BAN_DURATION_MS', 60_000);
+const MAX_SCORE = readPositiveNumber('SOFT_BAN_MAX_SCORE', 3000);
+const MAX_REQUESTS = readPositiveNumber('SOFT_BAN_MAX_REQUESTS', 3000);
+const MAX_MUTATIONS = readPositiveNumber('SOFT_BAN_MAX_MUTATIONS', 300);
+const MAX_PUSH_SUBSCRIBES = readPositiveNumber('SOFT_BAN_MAX_PUSH_SUBSCRIBES', 30);
+const MAX_IMAGE_PROXY = readPositiveNumber('SOFT_BAN_MAX_IMAGE_PROXY', 1000);
 
 const buckets = new Map<string, SoftBanBucket>();
 
@@ -38,10 +38,10 @@ const isExemptPath = (path: string) =>
 
 const requestWeight = (req: Request) => {
   if (req.method === 'OPTIONS') return 0;
-  if (req.path === '/api/realtime/stream' || req.path === '/api/notifications/stream') return 0.25;
-  if (req.path === '/api/push/subscribe') return 25;
-  if (req.path.startsWith('/api/image-proxy')) return 2;
-  if (req.method !== 'GET' && req.method !== 'HEAD') return 3;
+  if (req.path === '/api/realtime/stream' || req.path === '/api/notifications/stream') return 0;
+  if (req.path === '/api/push/subscribe') return 6;
+  if (req.path.startsWith('/api/image-proxy')) return 0.2;
+  if (req.method === 'GET' || req.method === 'HEAD') return 0.1;
   return 1;
 };
 
@@ -152,6 +152,7 @@ export const getSoftBanStats = () => {
     maxScore: MAX_SCORE,
     maxRequests: MAX_REQUESTS,
     maxMutations: MAX_MUTATIONS,
-    maxPushSubscribes: MAX_PUSH_SUBSCRIBES
+    maxPushSubscribes: MAX_PUSH_SUBSCRIBES,
+    maxImageProxy: MAX_IMAGE_PROXY
   };
 };

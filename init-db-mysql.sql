@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS coupons (
     reward_channel_id VARCHAR(191),
     reward_item_id BIGINT,
     reward_quantity BIGINT DEFAULT 0,
+    rewards JSON,
     max_uses BIGINT DEFAULT 1,
     used_count BIGINT DEFAULT 0,
     expires_at VARCHAR(64),

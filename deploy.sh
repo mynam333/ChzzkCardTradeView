@@ -1,53 +1,156 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/ubuntu/ChzzkCardTradeView
+PROJECT_DIR="${PROJECT_DIR:-/home/ubuntu/ChzzkCardTradeView}"
+RELEASE_ARCHIVE="${1:-}"
+RELEASE_ROOT="${PROJECT_DIR}/releases"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+RELEASE_DIR="${RELEASE_ROOT}/${TIMESTAMP}"
+LOCK_FILE="${PROJECT_DIR}/deploy.lock"
+API_APP_NAME="${API_APP_NAME:-chikapo-api}"
+WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker}"
+KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
-# lock
-exec 9>/tmp/deploy.lock
-flock -n 9 || { echo "[deploy] already running"; exit 1; }
-
-# env (더 안전한 방식)
-if [ -f .env ]; then
-  set -a
-  . ./.env
-  set +a
-else
-  echo "[Error] .env file not found!"
+if [ -z "${RELEASE_ARCHIVE}" ]; then
+  echo "[deploy] usage: ./deploy.sh /path/to/backend-release.tar.gz"
   exit 1
 fi
 
-mkdir -p backups
+cd "${PROJECT_DIR}"
+mkdir -p "${RELEASE_ROOT}"
 
-echo "[deploy] backup mysql"
-mysqldump -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" \
-  --single-transaction --routines --triggers \
-  "$DB_NAME" > backups/mysql-before-update-$(date +%F-%H%M%S).sql
+exec 9>"${LOCK_FILE}"
+flock -n 9 || { echo "[deploy] already running"; exit 1; }
 
-echo "[deploy] pull"
-git pull --ff-only
+if [ ! -f "${RELEASE_ARCHIVE}" ]; then
+  echo "[deploy] release archive not found: ${RELEASE_ARCHIVE}"
+  exit 1
+fi
 
-# 🚨 [추가] 빌드 전 기존 Node 프로세스를 멈춰 메모리와 CPU를 확보합니다.
-echo "[deploy] stop PM2 to free up memory"
-pm2 stop ecosystem.config.cjs || echo "PM2 is not running, skipping stop."
+load_env_file() {
+  local file="$1"
+  if [ -f "${file}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${file}"
+    set +a
+  fi
+}
 
-echo "[deploy] install (throttled)"
-nice -n 15 ionice -c2 -n7 pnpm fetch
-nice -n 15 ionice -c2 -n7 pnpm install \
-  --offline \
-  --frozen-lockfile \
-  --child-concurrency=1 \
-  --network-concurrency=8
+load_env_file ".env"
+load_env_file "backend/.env"
 
-echo "[deploy] build backend"
-nice -n 15 ionice -c2 -n7 pnpm --filter backend build
+DB_HOST_VALUE="${MYSQL_HOST:-${DB_HOST:-}}"
+DB_PORT_VALUE="${MYSQL_PORT:-${DB_PORT:-3306}}"
+DB_USER_VALUE="${MYSQL_USER:-${DB_USER:-}}"
+DB_PASSWORD_VALUE="${MYSQL_PASSWORD:-${DB_PASSWORD:-}}"
+DB_NAME_VALUE="${MYSQL_DATABASE:-${DB_NAME:-}}"
 
-echo "[deploy] apply schema"
-mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < init-db-mysql.sql
+echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
+mkdir -p "${RELEASE_DIR}"
+tar -xzf "${RELEASE_ARCHIVE}" -C "${RELEASE_DIR}"
 
-# 🚨 [수정] 멈춰있던 PM2를 환경변수 업데이트와 함께 다시 구동합니다.
-echo "[deploy] reload and start PM2"
-pm2 reload ecosystem.config.cjs --update-env
+for required in backend/dist backend/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml ecosystem.config.cjs init-db-mysql.sql; do
+  if [ ! -e "${RELEASE_DIR}/${required}" ]; then
+    echo "[deploy] invalid release archive. missing: ${required}"
+    exit 1
+  fi
+done
+
+if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2>&1; then
+  if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
+    mkdir -p backups
+    echo "[deploy] backup mysql"
+    mysqldump -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" -p"${DB_PASSWORD_VALUE}" \
+      --single-transaction --routines --triggers \
+      "${DB_NAME_VALUE}" > "backups/mysql-before-update-${TIMESTAMP}.sql"
+  else
+    echo "[deploy] mysql backup skipped: MYSQL_* or DB_* env is incomplete"
+  fi
+fi
+
+NEED_INSTALL=false
+if [ ! -d "node_modules" ] || [ ! -d "backend/node_modules" ]; then
+  NEED_INSTALL=true
+elif ! cmp -s "pnpm-lock.yaml" "${RELEASE_DIR}/pnpm-lock.yaml"; then
+  NEED_INSTALL=true
+elif ! cmp -s "backend/package.json" "${RELEASE_DIR}/backend/package.json"; then
+  NEED_INSTALL=true
+fi
+
+echo "[deploy] update metadata"
+cp "${RELEASE_DIR}/package.json" package.json
+cp "${RELEASE_DIR}/pnpm-lock.yaml" pnpm-lock.yaml
+cp "${RELEASE_DIR}/pnpm-workspace.yaml" pnpm-workspace.yaml
+cp "${RELEASE_DIR}/backend/package.json" backend/package.json
+cp "${RELEASE_DIR}/ecosystem.config.cjs" ecosystem.config.cjs
+cp "${RELEASE_DIR}/init-db-mysql.sql" init-db-mysql.sql
+cp "${RELEASE_DIR}/deploy.sh" deploy.sh
+chmod +x deploy.sh
+
+if [ "${NEED_INSTALL}" = "true" ]; then
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "[deploy] pnpm is required on the server when dependencies changed"
+    exit 1
+  fi
+  echo "[deploy] install production dependencies because package metadata changed"
+  nice -n 15 ionice -c2 -n7 pnpm install --prod --frozen-lockfile --filter backend...
+else
+  echo "[deploy] dependencies unchanged; skip install"
+fi
+
+echo "[deploy] replace backend dist"
+rm -rf backend/dist.next
+cp -a "${RELEASE_DIR}/backend/dist" backend/dist.next
+if [ -d backend/dist ]; then
+  rm -rf "backend/dist.prev"
+  mv backend/dist backend/dist.prev
+fi
+mv backend/dist.next backend/dist
+
+if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; then
+  if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
+    echo "[deploy] apply mysql schema"
+    mysql -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" -p"${DB_PASSWORD_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql
+  else
+    echo "[deploy] schema skipped: MYSQL_* or DB_* env is incomplete"
+  fi
+fi
+
+echo "[deploy] reload api without downtime"
+pm2 startOrReload ecosystem.config.cjs --only "${API_APP_NAME}" --update-env
+
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
+if [ -z "${HEALTHCHECK_URL}" ]; then
+  HEALTHCHECK_SCHEME="http"
+  if [ "${USE_HTTPS:-false}" = "true" ]; then
+    HEALTHCHECK_SCHEME="https"
+  fi
+  HEALTHCHECK_URL="${HEALTHCHECK_SCHEME}://127.0.0.1:${PORT:-5000}/health"
+fi
+
+echo "[deploy] health check: ${HEALTHCHECK_URL}"
+for attempt in $(seq 1 30); do
+  if curl -fsSk "${HEALTHCHECK_URL}" >/dev/null; then
+    echo "[deploy] api is healthy"
+    break
+  fi
+  if [ "${attempt}" = "30" ]; then
+    echo "[deploy] api health check failed"
+    pm2 status
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "[deploy] reload workers sequentially"
+for app_name in ${WORKER_APP_NAMES}; do
+  pm2 startOrReload ecosystem.config.cjs --only "${app_name}" --update-env
+  sleep 2
+done
+
+echo "[deploy] prune old releases"
+find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n +"$((KEEP_RELEASES + 1))" | xargs -r rm -rf
 
 echo "[deploy] status"
 pm2 status

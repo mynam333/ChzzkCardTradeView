@@ -1,0 +1,99 @@
+name: Deploy Backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'init-db-mysql.sql'
+      - 'ecosystem.config.cjs'
+      - 'deploy.sh'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-backend.yml'
+
+concurrency:
+  group: production-backend
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_NAME: backend-release-${{ github.sha }}.tar.gz
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build backend
+        run: pnpm --filter backend build
+
+      - name: Pack backend release
+        run: |
+          tar -czf "$RELEASE_NAME" \
+            backend/dist \
+            backend/package.json \
+            package.json \
+            pnpm-lock.yaml \
+            pnpm-workspace.yaml \
+            ecosystem.config.cjs \
+            init-db-mysql.sql \
+            deploy.sh
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/ubuntu/ChzzkCardTradeView}"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp -i ~/.ssh/deploy_key -P "$SSH_PORT" "$RELEASE_NAME" "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/$RELEASE_NAME"
+
+      - name: Deploy release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          DEPLOY_PATH="${DEPLOY_PATH:-/home/ubuntu/ChzzkCardTradeView}"
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -euo pipefail
+            cd '$DEPLOY_PATH'
+            tar -xzf '$RELEASE_NAME' deploy.sh
+            chmod +x deploy.sh
+            ./deploy.sh '$DEPLOY_PATH/$RELEASE_NAME'
+          "

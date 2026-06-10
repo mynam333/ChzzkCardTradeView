@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 import https from 'https';
 import fs from 'fs';
+import type { Server as NetServer } from 'net';
 
 import { initDatabaseConnection } from './services/db';
 import { initRepositories } from './repositories';
@@ -66,6 +67,50 @@ const getHttpsCertificatePaths = (): { keyPath?: string; certPath?: string; sour
   };
 };
 const NORMAL_CLOSE_PATHS = new Set(['/api/realtime/stream', '/api/notifications/stream']);
+let activeServer: NetServer | null = null;
+let shuttingDown = false;
+
+const notifyProcessReady = () => {
+  if (typeof process.send === 'function') {
+    process.send('ready');
+  }
+};
+
+const registerServer = (server: NetServer, url: string) => {
+  activeServer = server;
+  console.log(`[Server] 백엔드 서버가 ${url} 에서 실행 중입니다.`);
+  notifyProcessReady();
+};
+
+const shutdownGracefully = (signal: NodeJS.Signals) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Server] ${signal} 수신. 새 요청 수락을 중지하고 종료합니다.`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error('[Server] 정상 종료 제한 시간을 초과하여 프로세스를 강제 종료합니다.');
+    process.exit(1);
+  }, Number(process.env.GRACEFUL_SHUTDOWN_TIMEOUT_MS || 12_000));
+  forceExitTimer.unref();
+
+  if (!activeServer) {
+    process.exit(0);
+    return;
+  }
+
+  activeServer.close((err?: Error) => {
+    if (err) {
+      console.error('[Server] HTTP 서버 종료 중 오류:', err);
+      process.exit(1);
+      return;
+    }
+    console.log('[Server] 기존 연결 정리 완료. 프로세스를 종료합니다.');
+    process.exit(0);
+  });
+};
+
+process.once('SIGTERM', shutdownGracefully);
+process.once('SIGINT', shutdownGracefully);
 
 const truncateLogValue = (value: string, maxLength = REQUEST_LOG_URL_MAX_LENGTH) => {
   if (value.length <= maxLength) return value;
@@ -285,11 +330,12 @@ const startServer = async () => {
             cert: fs.readFileSync(resolvedCertPath)
           };
 
-          https.createServer(sslOptions, app).listen(PORT, () => {
+          const httpsServer = https.createServer(sslOptions, app);
+          httpsServer.listen(PORT, () => {
             console.log(`[Server] HTTPS 인증서를 성공적으로 로드했습니다. (${source})`);
             console.log(`[Server]   ├─ key : ${resolvedKeyPath}`);
             console.log(`[Server]   └─ cert: ${resolvedCertPath}`);
-            console.log(`[Server] 백엔드 서버가 https://localhost:${PORT} 에서 실행 중입니다.`);
+            registerServer(httpsServer, `https://localhost:${PORT}`);
           });
           return;
         } else {
@@ -309,8 +355,8 @@ const startServer = async () => {
       console.warn(`[Server] 일반 HTTP 프로토콜로 폴백(Fallback) 전환하여 서버를 실행합니다.`);
     }
 
-    app.listen(PORT, () => {
-      console.log(`[Server] 백엔드 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+    const httpServer = app.listen(PORT, () => {
+      registerServer(httpServer, `http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('[Server] 서버 시작 도중 초기화 오류가 발생했습니다:', error);

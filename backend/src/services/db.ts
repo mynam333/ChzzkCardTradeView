@@ -196,6 +196,27 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
   }
 };
 
+const ensureMysqlColumn = async (db: MysqlDb, table: string, column: string, ddl: string) => {
+  const existing = await db.get<{ present: number }>(
+    `SELECT 1 AS present
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1`,
+    table,
+    column
+  );
+  if (existing) return;
+
+  console.log(`[DB Migration] MySQL ${table}.${column} 컬럼이 없어 추가합니다.`);
+  await db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+};
+
+const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
+  await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+};
+
 /**
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
@@ -204,6 +225,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
   if (configuredDbMode === 'mysql') {
     mysqlDb = createMysqlDb();
     await mysqlDb.get('SELECT 1 AS ok');
+    await ensureMysqlCompatibilityMigrations(mysqlDb);
     dbMode = 'MYSQL';
     console.log('[DB] MySQL 데이터베이스와 연동되었습니다. (MYSQL MODE)');
     return;
