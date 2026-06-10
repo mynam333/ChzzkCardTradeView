@@ -2,19 +2,30 @@ process.env.PROCESS_ROLE = process.env.PROCESS_ROLE || 'scheduler-worker';
 process.env.MYSQL_CONNECTION_LIMIT = process.env.MYSQL_CONNECTION_LIMIT || '2';
 
 import { bootstrapProcess } from '../services/processBootstrap';
-import { initDatabaseConnection } from '../services/db';
-import { initRepositories } from '../repositories';
-import { getRuntimeStats } from '../services/runtimeStats';
-import { setRuntimeStatsProvider, startRuntimeStatsLogging } from '../services/fileLogger';
-import { initVapid, startPushNotificationScheduler } from '../controllers/pushController';
-import { startMarketSettlementScheduler } from '../cron/marketScheduler';
 
 bootstrapProcess('SchedulerWorker');
-setRuntimeStatsProvider(getRuntimeStats);
-startRuntimeStatsLogging();
-initVapid();
 
 const start = async () => {
+  const [
+    { initDatabaseConnection },
+    { initRepositories },
+    { getRuntimeStats },
+    { setRuntimeStatsProvider, startRuntimeStatsLogging },
+    { initVapid, startPushNotificationScheduler },
+    { startMarketSettlementScheduler }
+  ] = await Promise.all([
+    import('../services/db'),
+    import('../repositories'),
+    import('../services/runtimeStats'),
+    import('../services/fileLogger'),
+    import('../controllers/pushController'),
+    import('../cron/marketScheduler')
+  ]);
+
+  setRuntimeStatsProvider(getRuntimeStats);
+  startRuntimeStatsLogging();
+  initVapid();
+
   await initDatabaseConnection();
   initRepositories();
   startPushNotificationScheduler();

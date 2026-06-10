@@ -3,7 +3,6 @@ process.env.PROCESS_ROLE = process.env.PROCESS_ROLE || 'image-worker';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { bootstrapProcess } from '../services/processBootstrap';
-import { proxyImage } from '../controllers/imageProxyController';
 
 bootstrapProcess('ImageProxyWorker');
 
@@ -32,7 +31,14 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.get('/api/image-proxy', proxyImage);
+app.get('/api/image-proxy', async (req, res, next) => {
+  try {
+    const { proxyImage } = await import('../controllers/imageProxyController');
+    return proxyImage(req, res);
+  } catch (err) {
+    return next(err);
+  }
+});
 app.get('/health', (_req, res) => {
   res.status(200).json({
     status: 'ok',

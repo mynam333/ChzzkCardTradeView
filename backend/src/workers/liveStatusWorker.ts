@@ -1,17 +1,27 @@
 process.env.PROCESS_ROLE = process.env.PROCESS_ROLE || 'live-worker';
 
 import { bootstrapProcess } from '../services/processBootstrap';
-import { initDatabaseConnection } from '../services/db';
-import { initRepositories } from '../repositories';
-import { getRuntimeStats } from '../services/runtimeStats';
-import { setRuntimeStatsProvider, startRuntimeStatsLogging } from '../services/fileLogger';
-import { startStreamerLiveStatusScheduler } from '../cron/streamerScheduler';
 
 bootstrapProcess('LiveStatusWorker');
-setRuntimeStatsProvider(getRuntimeStats);
-startRuntimeStatsLogging();
 
 const start = async () => {
+  const [
+    { initDatabaseConnection },
+    { initRepositories },
+    { getRuntimeStats },
+    { setRuntimeStatsProvider, startRuntimeStatsLogging },
+    { startStreamerLiveStatusScheduler }
+  ] = await Promise.all([
+    import('../services/db'),
+    import('../repositories'),
+    import('../services/runtimeStats'),
+    import('../services/fileLogger'),
+    import('../cron/streamerScheduler')
+  ]);
+
+  setRuntimeStatsProvider(getRuntimeStats);
+  startRuntimeStatsLogging();
+
   await initDatabaseConnection();
   initRepositories();
   startStreamerLiveStatusScheduler();
