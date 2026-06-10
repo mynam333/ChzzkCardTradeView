@@ -1,12 +1,70 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Eraser, MessageCircleHeart, Users, RefreshCw } from 'lucide-react';
+import { Activity, ArrowRightLeft, ChevronRight, Eraser, MessageCircleHeart, RefreshCw, Users, WalletCards } from 'lucide-react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import type { AdminUser } from '@/lib/types';
+import { formatLocalDateTime } from '@/lib/time';
+import type { AdminUser, PointAuditResponse, PointLedgerEntry, PointLedgerSourceType } from '@/lib/types';
 
 const USERS_PER_PAGE = 20;
+const AUDIT_PAGE_SIZE = 80;
+
+const pointSourceLabels: Record<PointLedgerSourceType, string> = {
+  gacha_draw: '소환',
+  card_sell: '카드 판매',
+  coupon: '쿠폰',
+  minigame: '미니게임',
+  shop_purchase: '상점',
+  market_purchase: '마켓 구매',
+  market_sale: '마켓 판매',
+  market_bid: '경매 입찰',
+  market_bid_refund: '입찰 환불',
+  trade: '교환',
+  admin_reset: '관리자 조정',
+  manual_adjustment: '직접 조정',
+  unknown: '기타'
+};
+
+const reasonLabels: Record<string, string> = {
+  gacha_draw_paid: '유료 소환',
+  card_sell: '카드 판매',
+  coupon_redeem: '쿠폰 사용',
+  minigame_reward: '미니게임 보상',
+  shop_purchase: '상점 구매',
+  market_buy: '즉시 구매',
+  auction_win: '경매 낙찰',
+  market_sale: '마켓 판매',
+  market_sale_settlement: '판매 정산',
+  auction_sale: '경매 판매',
+  auction_sale_settlement: '경매 정산',
+  market_bid: '입찰 예약',
+  auction_bid_reserved: '입찰 예약',
+  outbid_refund: '상위 입찰 환불',
+  auction_outbid_refund: '상위 입찰 환불',
+  auction_cancel_refund: '경매 취소 환불',
+  seller_account_deleted_refund: '판매자 탈퇴 환불',
+  trade_settlement: '교환 정산',
+  point_set: '포인트 설정',
+  point_increment: '포인트 증가',
+  point_deduct: '포인트 차감'
+};
+
+const metadataSummary = (metadata: Record<string, unknown> | null) => {
+  if (!metadata) return '';
+  const priorityKeys = [
+    'listing_id', 'transaction_id', 'card_id', 'user_card_id', 'coupon_id', 'coupon_code',
+    'session_id', 'game_type', 'item_id', 'item_name', 'channel_id', 'serial_number', 'star'
+  ];
+  return priorityKeys
+    .filter((key) => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '')
+    .map((key) => `${key}: ${String(metadata[key])}`)
+    .join(' · ');
+};
+
+const pointClass = (amount: number) => (
+  amount > 0 ? 'text-emerald-500' : amount < 0 ? 'text-rose-500' : 'text-muted-foreground'
+);
 
 /**
  * 관리자 > 유저 목록 탭.
@@ -22,6 +80,9 @@ export const AdminUsersTab: React.FC = () => {
   const [userTotalPages, setUserTotalPages] = useState(1);
   const [usersLoading, setUsersLoading] = useState(false);
   const [resettingStatusUserId, setResettingStatusUserId] = useState<string | null>(null);
+  const [audit, setAudit] = useState<PointAuditResponse | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditTrail, setAuditTrail] = useState<{ id: string; username: string | null }[]>([]);
 
   const fetchUsers = async (page = userPage, keyword = userSearch) => {
     setUsersLoading(true);
@@ -98,8 +159,173 @@ export const AdminUsersTab: React.FC = () => {
     }
   };
 
+  const fetchPointAudit = async (userId: string, append = false, beforeId?: number | null) => {
+    if (!userId) return;
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: String(AUDIT_PAGE_SIZE) });
+      if (append && beforeId) params.set('before_id', String(beforeId));
+      const res = await apiFetch(`/admin/users/${encodeURIComponent(userId)}/audit/points?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.message || '포인트 감사 내역을 불러오지 못했습니다.', 'error');
+        return;
+      }
+
+      const nextAudit = data as PointAuditResponse;
+      if (append) {
+        setAudit((prev) => prev ? {
+          ...nextAudit,
+          entries: [...prev.entries, ...(nextAudit.entries || [])],
+          page_summary: {
+            income: prev.page_summary.income + nextAudit.page_summary.income,
+            expense: prev.page_summary.expense + nextAudit.page_summary.expense,
+            net: prev.page_summary.net + nextAudit.page_summary.net
+          }
+        } : nextAudit);
+      } else {
+        setAudit(nextAudit);
+        setAuditTrail((prev) => {
+          const current = { id: nextAudit.user.id, username: nextAudit.user.username || null };
+          if (prev[prev.length - 1]?.id === current.id) return prev;
+          return [...prev.filter((item) => item.id !== current.id), current].slice(-8);
+        });
+      }
+    } catch {
+      toast('포인트 감사 내역 조회 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const flowLabel = (entry: PointLedgerEntry, targetUserId: string) => {
+    const source = entry.counterparty_username || entry.counterparty_user_id || pointSourceLabels[entry.source_type] || entry.source_type;
+    const target = audit?.user.username || targetUserId;
+    if (entry.amount > 0) return { from: source, to: target };
+    if (entry.amount < 0) return { from: target, to: source };
+    return { from: source, to: target };
+  };
+
   return (
     <section className="space-y-4">
+      {audit && (
+        <div className="rounded-2xl border border-primary/20 bg-card p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <h3 className="flex items-center gap-1.5 text-sm font-bold">
+                <Activity className="h-4 w-4 text-primary" /> 포인트 감사
+              </h3>
+              <div className="mt-2 flex min-w-0 items-center gap-2">
+                {audit.user.avatar_url
+                  ? <img src={audit.user.avatar_url} alt={audit.user.username || audit.user.id} className="h-9 w-9 rounded-full border border-border object-cover" referrerPolicy="no-referrer" />
+                  : <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-bold text-muted-foreground">{(audit.user.username || '?').slice(0, 2)}</span>}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-foreground">{audit.user.username || '탈퇴/삭제 유저'}</p>
+                  <button
+                    type="button"
+                    onClick={() => copyText(audit.user.id, '감사 대상 ID')}
+                    className="block max-w-full truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    {audit.user.id}
+                  </button>
+                </div>
+              </div>
+              {auditTrail.length > 1 && (
+                <div className="mt-3 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                  {auditTrail.map((item, index) => (
+                    <React.Fragment key={`${item.id}-${index}`}>
+                      {index > 0 && <ChevronRight className="h-3 w-3" />}
+                      <button
+                        type="button"
+                        onClick={() => fetchPointAudit(item.id)}
+                        className="max-w-[140px] truncate rounded-full border border-border bg-secondary/40 px-2 py-0.5 font-bold hover:text-foreground"
+                        title={item.id}
+                      >
+                        {item.username || item.id}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg bg-emerald-500/10 px-3 py-2">
+                <p className="text-[10px] font-bold text-emerald-500">수입</p>
+                <p className="text-xs font-black text-emerald-500">+{audit.page_summary.income.toLocaleString()} P</p>
+              </div>
+              <div className="rounded-lg bg-rose-500/10 px-3 py-2">
+                <p className="text-[10px] font-bold text-rose-500">지출</p>
+                <p className="text-xs font-black text-rose-500">-{audit.page_summary.expense.toLocaleString()} P</p>
+              </div>
+              <div className="rounded-lg bg-secondary/60 px-3 py-2">
+                <p className="text-[10px] font-bold text-muted-foreground">현재</p>
+                <p className="text-xs font-black text-foreground">{audit.user.point == null ? '-' : `${audit.user.point.toLocaleString()} P`}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {audit.entries.length === 0 ? (
+              <p className="py-8 text-center text-xs text-muted-foreground">기록된 포인트 원장이 없습니다.</p>
+            ) : audit.entries.map((entry) => {
+              const flow = flowLabel(entry, audit.user.id);
+              const metadata = metadataSummary(entry.metadata);
+              return (
+                <div key={entry.id} className="rounded-xl border border-border bg-secondary/25 p-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary">{pointSourceLabels[entry.source_type] || entry.source_type}</span>
+                        <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{reasonLabels[entry.reason] || entry.reason}</span>
+                        {entry.source_id && <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">#{entry.source_id}</span>}
+                      </div>
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+                        <span className="max-w-[180px] truncate font-bold text-foreground">{flow.from}</span>
+                        <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="max-w-[180px] truncate font-bold text-foreground">{flow.to}</span>
+                        {entry.counterparty_user_id && (
+                          <button
+                            type="button"
+                            onClick={() => fetchPointAudit(entry.counterparty_user_id as string)}
+                            className="rounded-full border border-border px-2 py-0.5 text-[10px] font-black text-muted-foreground hover:text-foreground"
+                            title={entry.counterparty_user_id}
+                          >
+                            상대 추적
+                          </button>
+                        )}
+                      </div>
+                      {entry.description && <p className="mt-1 text-[10px] text-muted-foreground">{entry.description}</p>}
+                      {metadata && <p className="mt-1 truncate text-[10px] text-muted-foreground" title={metadata}>{metadata}</p>}
+                      <p className="mt-1 text-[10px] text-muted-foreground">{formatLocalDateTime(entry.created_at, { hour12: false })}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className={`text-sm font-black ${pointClass(entry.amount)}`}>
+                        {entry.amount > 0 ? '+' : ''}{entry.amount.toLocaleString()} P
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">잔액 {entry.balance_after == null ? '-' : `${entry.balance_after.toLocaleString()} P`}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-[10px] text-muted-foreground">새 원장은 배포 이후 발생한 포인트 변동부터 누적됩니다.</p>
+            {audit.next_before_id && (
+              <button
+                type="button"
+                onClick={() => fetchPointAudit(audit.user.id, true, audit.next_before_id)}
+                disabled={auditLoading}
+                className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              >
+                {auditLoading ? '불러오는 중...' : '더 보기'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users className="h-4 w-4" /> 유저 목록 ({userTotal.toLocaleString()})</h3>
@@ -164,18 +390,30 @@ export const AdminUsersTab: React.FC = () => {
                   )}
                 </div>
               </div>
-              {u.status_message && (
+              <div className="ml-auto flex shrink-0 flex-col gap-1.5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => fetchPointAudit(u.id)}
+                  disabled={auditLoading && audit?.user.id === u.id}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-[10px] font-black text-primary transition hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-50"
+                  title="포인트 감사"
+                >
+                  <WalletCards className="h-3.5 w-3.5" />
+                  감사
+                </button>
+                {u.status_message && (
                 <button
                   type="button"
                   onClick={() => resetStatusMessage(u)}
                   disabled={resettingStatusUserId === u.id}
-                  className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-black text-rose-500 transition hover:bg-rose-500/15 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-black text-rose-500 transition hover:bg-rose-500/15 disabled:pointer-events-none disabled:opacity-50"
                   title="상태 메시지 초기화"
                 >
                   <Eraser className="h-3.5 w-3.5" />
                   {resettingStatusUserId === u.id ? '초기화 중' : '상태 초기화'}
                 </button>
-              )}
+                )}
+              </div>
             </div>
           ))}
         </div>

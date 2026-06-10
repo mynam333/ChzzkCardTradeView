@@ -1,4 +1,5 @@
 import { getSqliteDb } from "../../services/db";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -156,6 +157,28 @@ export class SqliteTradeRepository implements ITradeRepository {
       // 포인트 정산 (양방향 동시 반영)
       db.prepare('UPDATE users SET point = point - ? + ? WHERE id = ?').run(senderOut, receiverOut, row.sender_id);
       db.prepare('UPDATE users SET point = point - ? + ? WHERE id = ?').run(receiverOut, senderOut, row.receiver_id);
+      const senderDelta = receiverOut - senderOut;
+      const receiverDelta = senderOut - receiverOut;
+      recordSqlitePointLedger(db, {
+        userId: row.sender_id,
+        counterpartyUserId: row.receiver_id,
+        amount: senderDelta,
+        sourceType: 'trade',
+        sourceId: id,
+        reason: 'trade_finalize',
+        description: `1:1 교환 체결 #${id}`,
+        metadata: { trade_id: id, sender_out: senderOut, receiver_out: receiverOut }
+      });
+      recordSqlitePointLedger(db, {
+        userId: row.receiver_id,
+        counterpartyUserId: row.sender_id,
+        amount: receiverDelta,
+        sourceType: 'trade',
+        sourceId: id,
+        reason: 'trade_finalize',
+        description: `1:1 교환 체결 #${id}`,
+        metadata: { trade_id: id, sender_out: senderOut, receiver_out: receiverOut }
+      });
 
       // 거래 체결 처리
       db.prepare("UPDATE trades SET status = 'ACCEPTED', completed_at = datetime('now') WHERE id = ?").run(id);

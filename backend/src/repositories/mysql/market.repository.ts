@@ -3,6 +3,7 @@ import { IMarketRepository, MarketListing } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
 import { fuzzyMatch } from '../../utils/search';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee';
+import { recordMysqlPointLedger } from '../../services/pointLedger';
 
 export class MysqlMarketRepository implements IMarketRepository {
   private getDb() {
@@ -180,7 +181,7 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async hideForSeller(id: number, sellerId: string): Promise<boolean> {
     const result = await this.getDb().run(`
-      UPDATE market_listings SET seller_hidden_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
+      UPDATE market_listings SET seller_hidden_at = UTC_TIMESTAMP()
        WHERE id = ? AND seller_id = ? AND status IN ('SOLD', 'CANCELLED', 'AUCTION_ENDED') AND seller_hidden_at IS NULL
     `, id, sellerId);
     return result.changes > 0;
@@ -202,6 +203,9 @@ export class MysqlMarketRepository implements IMarketRepository {
         'UPDATE market_listings SET status = ?, pending_user_card_id = NULL, buyer_id = ?, fee = ?, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
         status, extra.buyer_id ?? null, extra.fee ?? 0, extra.settled_amount ?? 0, id
       );
+      if (status === 'SOLD') {
+        await this.recordTransactionAudit(this.getDb(), id, 'sold');
+      }
       return;
     }
     await this.getDb().run(
@@ -214,7 +218,40 @@ export class MysqlMarketRepository implements IMarketRepository {
     const reserved = Number(listing?.bid_reserved || 0);
     if (reserved > 0 && listing?.current_bidder_id) {
       await db.run('UPDATE users SET point = point + ? WHERE id = ?', reserved, listing.current_bidder_id);
+      await recordMysqlPointLedger(db, {
+        userId: listing.current_bidder_id,
+        counterpartyUserId: listing.seller_id || null,
+        amount: reserved,
+        sourceType: 'market_bid_refund',
+        sourceId: listing.id,
+        reason: 'auction_cancel_refund',
+        description: `경매 #${listing.id} 종료/취소로 예약 입찰금 환불`,
+        metadata: { listing_id: listing.id, reserved }
+      });
     }
+  }
+
+  private async recordTransactionAudit(
+    db: { run: (...args: any[]) => Promise<any> },
+    listingId: number,
+    eventType: 'sold' | 'account_deleted',
+    relatedUserId: string | null = null
+  ) {
+    const auditKey = relatedUserId ? `${eventType}:${listingId}:${relatedUserId}` : `${eventType}:${listingId}`;
+    await db.run(`
+      INSERT IGNORE INTO market_transaction_audit_logs
+        (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
+         user_card_id, channel_id, serial_number, star, price, status, listing_type, current_bid,
+         bid_reserved, fee, settled_amount, listing_created_at, listing_updated_at)
+      SELECT
+        ?, ml.id, ?, ?, ml.seller_id, ml.buyer_id, ml.current_bidder_id,
+        ml.user_card_id, uc.channel_id, uc.serial_number, uc.star, ml.price, ml.status,
+        ml.listing_type, ml.current_bid, ml.bid_reserved, ml.fee, ml.settled_amount,
+        ml.created_at, ml.updated_at
+      FROM market_listings ml
+      LEFT JOIN user_cards uc ON uc.id = ml.user_card_id
+      WHERE ml.id = ?
+    `, auditKey, eventType, relatedUserId, listingId);
   }
 
   async buyAtomic(listingId: number, buyerId: string): Promise<{ ok: boolean; reason: string; settled_amount?: number; seller_id?: string; price?: number }> {
@@ -236,12 +273,53 @@ export class MysqlMarketRepository implements IMarketRepository {
         const { fee, settledAmount } = calculateMarketFee(finalPrice, Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE));
 
         await tx.run('UPDATE users SET point = point - ? WHERE id = ?', payableNow, buyerId);
+        await recordMysqlPointLedger(tx, {
+          userId: buyerId,
+          counterpartyUserId: listing.seller_id,
+          amount: -payableNow,
+          sourceType: 'market_purchase',
+          sourceId: listingId,
+          reason: 'market_buy',
+          description: `오픈마켓 매물 #${listingId} 구매`,
+          metadata: { listing_id: listingId, price: finalPrice, payable_now: payableNow }
+        });
         if (reservedRefundToBuyer > 0) await tx.run('UPDATE users SET point = point + ? WHERE id = ?', reservedRefundToBuyer, buyerId);
+        if (reservedRefundToBuyer > 0) await recordMysqlPointLedger(tx, {
+          userId: buyerId,
+          counterpartyUserId: listing.seller_id,
+          amount: reservedRefundToBuyer,
+          sourceType: 'market_bid_refund',
+          sourceId: listingId,
+          reason: 'market_buy_reserved_refund',
+          description: `오픈마켓 매물 #${listingId} 즉시구매 차액 환불`,
+          metadata: { listing_id: listingId, price: finalPrice, reserved_refund: reservedRefundToBuyer }
+        });
         if (reserved > 0 && listing.current_bidder_id && listing.current_bidder_id !== buyerId) {
           await tx.run('UPDATE users SET point = point + ? WHERE id = ?', reserved, listing.current_bidder_id);
+          await recordMysqlPointLedger(tx, {
+            userId: listing.current_bidder_id,
+            counterpartyUserId: listing.seller_id,
+            amount: reserved,
+            sourceType: 'market_bid_refund',
+            sourceId: listingId,
+            reason: 'market_buy_outbid_refund',
+            description: `오픈마켓 매물 #${listingId} 즉시구매로 기존 입찰금 환불`,
+            metadata: { listing_id: listingId, reserved }
+          });
         }
         await tx.run('UPDATE users SET point = point + ? WHERE id = ?', settledAmount, listing.seller_id);
+        await recordMysqlPointLedger(tx, {
+          userId: listing.seller_id,
+          counterpartyUserId: buyerId,
+          amount: settledAmount,
+          sourceType: 'market_sale',
+          sourceId: listingId,
+          reason: 'market_sale_settlement',
+          description: `오픈마켓 매물 #${listingId} 판매 정산`,
+          metadata: { listing_id: listingId, price: finalPrice, fee, settled_amount: settledAmount }
+        });
         await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", buyerId, fee, settledAmount, listingId);
+        await this.recordTransactionAudit(tx, listingId, 'sold');
 
         if (listing.with_cosmetics === 1) {
           await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', buyerId, listing.user_card_id);
@@ -310,8 +388,28 @@ export class MysqlMarketRepository implements IMarketRepository {
 
         await tx.run('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)', listingId, bidderId, amount);
         await tx.run('UPDATE users SET point = point - ? WHERE id = ?', payableNow, bidderId);
+        await recordMysqlPointLedger(tx, {
+          userId: bidderId,
+          counterpartyUserId: listing.seller_id,
+          amount: -payableNow,
+          sourceType: 'market_bid',
+          sourceId: listingId,
+          reason: 'auction_bid_reserved',
+          description: `경매 #${listingId} 입찰 예약`,
+          metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
+        });
         if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
           await tx.run('UPDATE users SET point = point + ? WHERE id = ?', currentReserved, listing.current_bidder_id);
+          await recordMysqlPointLedger(tx, {
+            userId: listing.current_bidder_id,
+            counterpartyUserId: listing.seller_id,
+            amount: currentReserved,
+            sourceType: 'market_bid_refund',
+            sourceId: listingId,
+            reason: 'auction_outbid_refund',
+            description: `경매 #${listingId} 상위 입찰로 기존 예약금 환불`,
+            metadata: { listing_id: listingId, refunded_bid: currentReserved, new_bidder_id: bidderId }
+          });
         }
 
         const nowMs = Date.now();
@@ -353,9 +451,32 @@ export class MysqlMarketRepository implements IMarketRepository {
         }
         const price = Number(locked.current_bid || 0);
         const { fee, settledAmount } = calculateMarketFee(price, Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE));
-        if (reserved <= 0) await tx.run('UPDATE users SET point = point - ? WHERE id = ?', price, locked.current_bidder_id);
+        if (reserved <= 0) {
+          await tx.run('UPDATE users SET point = point - ? WHERE id = ?', price, locked.current_bidder_id);
+          await recordMysqlPointLedger(tx, {
+            userId: locked.current_bidder_id,
+            counterpartyUserId: locked.seller_id,
+            amount: -price,
+            sourceType: 'market_purchase',
+            sourceId: row.id,
+            reason: 'auction_win_charge',
+            description: `경매 #${row.id} 낙찰 대금 차감`,
+            metadata: { listing_id: row.id, price }
+          });
+        }
         await tx.run('UPDATE users SET point = point + ? WHERE id = ?', settledAmount, locked.seller_id);
+        await recordMysqlPointLedger(tx, {
+          userId: locked.seller_id,
+          counterpartyUserId: locked.current_bidder_id,
+          amount: settledAmount,
+          sourceType: 'market_sale',
+          sourceId: row.id,
+          reason: 'auction_sale_settlement',
+          description: `경매 #${row.id} 낙찰 판매 정산`,
+          metadata: { listing_id: row.id, price, fee, settled_amount: settledAmount }
+        });
         await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", locked.current_bidder_id, price, fee, settledAmount, row.id);
+        await this.recordTransactionAudit(tx, row.id, 'sold');
         await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', locked.current_bidder_id, locked.user_card_id);
         return true;
       });

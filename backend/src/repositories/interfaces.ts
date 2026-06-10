@@ -20,6 +20,11 @@ export interface User {
   created_at?: string;
 }
 
+export interface DeletedUserAccount {
+  user_id: string;
+  deleted_at: string;
+}
+
 export interface UserTitle {
   id: number;
   name: string;
@@ -198,6 +203,8 @@ export interface IUserRepository {
   addBonusFreeDrawTickets(id: string, amount: number): Promise<void>;
   /** 회원 탈퇴: 계정과 계정에 종속된 개인 데이터를 삭제/비식별 처리합니다. */
   deleteAccount(id: string): Promise<void>;
+  /** 탈퇴 후 재가입 제한 및 감사 추적용 tombstone 조회. */
+  findDeletedAccount(id: string): Promise<DeletedUserAccount | null>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */

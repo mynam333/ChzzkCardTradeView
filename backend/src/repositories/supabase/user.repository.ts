@@ -11,6 +11,7 @@ import {
   INotificationRepository,
   ISystemConfigRepository,
   User,
+  DeletedUserAccount,
   UserRanking,
   Streamer,
   StreamerScheduleResult,
@@ -268,6 +269,13 @@ export class SupabaseUserRepository implements IUserRepository {
       if (deleteError) throw deleteError;
     };
 
+    await client.from('deleted_user_accounts').upsert({
+      user_id: id,
+      deleted_at: new Date().toISOString()
+    }).then(({ error }) => {
+      if (error) console.warn('[Supabase] deleted_user_accounts 기록 실패:', error.message);
+    });
+
     await client.from('market_listings').update({ buyer_id: null }).eq('buyer_id', id);
     await deleteEq('market_listings', 'seller_id');
     await client.from('trades').delete().or(`sender_id.eq.${id},receiver_id.eq.${id}`);
@@ -286,6 +294,19 @@ export class SupabaseUserRepository implements IUserRepository {
 
     const { error: userDeleteError } = await client.from('users').delete().eq('id', id);
     if (userDeleteError) throw userDeleteError;
+  }
+
+  async findDeletedAccount(id: string): Promise<DeletedUserAccount | null> {
+    const { data, error } = await this.getClient()
+      .from('deleted_user_accounts')
+      .select('user_id, deleted_at')
+      .eq('user_id', id)
+      .maybeSingle();
+    if (error) {
+      console.warn('[Supabase] deleted_user_accounts 조회 실패:', error.message);
+      return null;
+    }
+    return data as DeletedUserAccount | null;
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {

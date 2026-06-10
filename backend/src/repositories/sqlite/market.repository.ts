@@ -4,6 +4,7 @@ import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
 import { formatUploadUrl } from "../../services/imageService";
 import { fuzzyMatch } from "../../utils/search";
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from "../../utils/marketFee";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 
 export class SqliteMarketRepository implements IMarketRepository {
   private getDb() {
@@ -264,7 +265,7 @@ export class SqliteMarketRepository implements IMarketRepository {
   async hideForSeller(id: number, sellerId: string): Promise<boolean> {
     const result = this.getDb().prepare(`
       UPDATE market_listings
-         SET seller_hidden_at = datetime('now'), updated_at = datetime('now')
+         SET seller_hidden_at = datetime('now')
        WHERE id = ?
          AND seller_id = ?
          AND status IN ('SOLD', 'CANCELLED', 'AUCTION_ENDED')
@@ -294,6 +295,9 @@ export class SqliteMarketRepository implements IMarketRepository {
            SET status = ?, buyer_id = ?, fee = ?, settled_amount = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(status, extra.buyer_id ?? null, extra.fee ?? 0, extra.settled_amount ?? 0, id);
+      if (status === 'SOLD') {
+        this.recordTransactionAudit(db, id, 'sold');
+      }
     } else {
       db.prepare(`
         UPDATE market_listings
@@ -307,7 +311,35 @@ export class SqliteMarketRepository implements IMarketRepository {
     const reserved = Number(listing?.bid_reserved || 0);
     if (reserved > 0 && listing?.current_bidder_id) {
       db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
+      recordSqlitePointLedger(db, {
+        userId: listing.current_bidder_id,
+        counterpartyUserId: listing.seller_id || null,
+        amount: reserved,
+        sourceType: 'market_bid_refund',
+        sourceId: listing.id,
+        reason: 'auction_cancel_refund',
+        description: `경매 #${listing.id} 종료/취소로 예약 입찰금 환불`,
+        metadata: { listing_id: listing.id, reserved }
+      });
     }
+  }
+
+  private recordTransactionAudit(db: any, listingId: number, eventType: 'sold' | 'account_deleted', relatedUserId: string | null = null) {
+    const auditKey = relatedUserId ? `${eventType}:${listingId}:${relatedUserId}` : `${eventType}:${listingId}`;
+    db.prepare(`
+      INSERT OR IGNORE INTO market_transaction_audit_logs
+        (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
+         user_card_id, channel_id, serial_number, star, price, status, listing_type, current_bid,
+         bid_reserved, fee, settled_amount, listing_created_at, listing_updated_at)
+      SELECT
+        ?, ml.id, ?, ?, ml.seller_id, ml.buyer_id, ml.current_bidder_id,
+        ml.user_card_id, uc.channel_id, uc.serial_number, uc.star, ml.price, ml.status,
+        ml.listing_type, ml.current_bid, ml.bid_reserved, ml.fee, ml.settled_amount,
+        ml.created_at, ml.updated_at
+      FROM market_listings ml
+      LEFT JOIN user_cards uc ON uc.id = ml.user_card_id
+      WHERE ml.id = ?
+    `).run(auditKey, eventType, relatedUserId, listingId);
   }
 
   async buyAtomic(listingId: number, buyerId: string): Promise<{ ok: boolean; reason: string; settled_amount?: number; seller_id?: string; price?: number }> {
@@ -340,13 +372,53 @@ export class SqliteMarketRepository implements IMarketRepository {
 
       // 정산
       db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, buyerId);
+      recordSqlitePointLedger(db, {
+        userId: buyerId,
+        counterpartyUserId: listing.seller_id,
+        amount: -payableNow,
+        sourceType: 'market_purchase',
+        sourceId: listingId,
+        reason: 'market_buy',
+        description: `오픈마켓 매물 #${listingId} 구매`,
+        metadata: { listing_id: listingId, price: finalPrice, payable_now: payableNow }
+      });
       if (reservedRefundToBuyer > 0) {
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reservedRefundToBuyer, buyerId);
+        recordSqlitePointLedger(db, {
+          userId: buyerId,
+          counterpartyUserId: listing.seller_id,
+          amount: reservedRefundToBuyer,
+          sourceType: 'market_bid_refund',
+          sourceId: listingId,
+          reason: 'market_buy_reserved_refund',
+          description: `오픈마켓 매물 #${listingId} 즉시구매 차액 환불`,
+          metadata: { listing_id: listingId, price: finalPrice, reserved_refund: reservedRefundToBuyer }
+        });
       }
       if (reserved > 0 && listing.current_bidder_id && listing.current_bidder_id !== buyerId) {
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
+        recordSqlitePointLedger(db, {
+          userId: listing.current_bidder_id,
+          counterpartyUserId: listing.seller_id,
+          amount: reserved,
+          sourceType: 'market_bid_refund',
+          sourceId: listingId,
+          reason: 'market_buy_outbid_refund',
+          description: `오픈마켓 매물 #${listingId} 즉시구매로 기존 입찰금 환불`,
+          metadata: { listing_id: listingId, reserved }
+        });
       }
       db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, listing.seller_id);
+      recordSqlitePointLedger(db, {
+        userId: listing.seller_id,
+        counterpartyUserId: buyerId,
+        amount: settledAmount,
+        sourceType: 'market_sale',
+        sourceId: listingId,
+        reason: 'market_sale_settlement',
+        description: `오픈마켓 매물 #${listingId} 판매 정산`,
+        metadata: { listing_id: listingId, price: finalPrice, fee: fee, settled_amount: settledAmount }
+      });
 
       // 매물 갱신
       db.prepare(`
@@ -354,6 +426,7 @@ export class SqliteMarketRepository implements IMarketRepository {
            SET status = 'SOLD', buyer_id = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(buyerId, fee, settledAmount, listingId);
+      this.recordTransactionAudit(db, listingId, 'sold');
 
       // 소유권 및 코스메틱 처리 분기
       if (listing.with_cosmetics === 1) {
@@ -494,8 +567,28 @@ export class SqliteMarketRepository implements IMarketRepository {
 
       db.prepare('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)').run(listingId, bidderId, amount);
       db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, bidderId);
+      recordSqlitePointLedger(db, {
+        userId: bidderId,
+        counterpartyUserId: listing.seller_id,
+        amount: -payableNow,
+        sourceType: 'market_bid',
+        sourceId: listingId,
+        reason: 'auction_bid_reserved',
+        description: `경매 #${listingId} 입찰 예약`,
+        metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
+      });
       if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(currentReserved, listing.current_bidder_id);
+        recordSqlitePointLedger(db, {
+          userId: listing.current_bidder_id,
+          counterpartyUserId: listing.seller_id,
+          amount: currentReserved,
+          sourceType: 'market_bid_refund',
+          sourceId: listingId,
+          reason: 'auction_outbid_refund',
+          description: `경매 #${listingId} 상위 입찰로 기존 예약금 환불`,
+          metadata: { listing_id: listingId, refunded_bid: currentReserved, new_bidder_id: bidderId }
+        });
       }
 
       // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
@@ -563,13 +656,34 @@ export class SqliteMarketRepository implements IMarketRepository {
         const { fee, settledAmount } = calculateMarketFee(price, feeRate);
         if (reserved <= 0) {
           db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(price, locked.current_bidder_id);
+          recordSqlitePointLedger(db, {
+            userId: locked.current_bidder_id,
+            counterpartyUserId: locked.seller_id,
+            amount: -price,
+            sourceType: 'market_purchase',
+            sourceId: row.id,
+            reason: 'auction_win_charge',
+            description: `경매 #${row.id} 낙찰 대금 차감`,
+            metadata: { listing_id: row.id, price }
+          });
         }
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, locked.seller_id);
+        recordSqlitePointLedger(db, {
+          userId: locked.seller_id,
+          counterpartyUserId: locked.current_bidder_id,
+          amount: settledAmount,
+          sourceType: 'market_sale',
+          sourceId: row.id,
+          reason: 'auction_sale_settlement',
+          description: `경매 #${row.id} 낙찰 판매 정산`,
+          metadata: { listing_id: row.id, price, fee, settled_amount: settledAmount }
+        });
         db.prepare(`
           UPDATE market_listings
              SET status = 'SOLD', buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
            WHERE id = ?
         `).run(locked.current_bidder_id, price, fee, settledAmount, row.id);
+        this.recordTransactionAudit(db, row.id, 'sold');
         db.prepare('UPDATE user_cards SET user_id = ? WHERE id = ?').run(locked.current_bidder_id, locked.user_card_id);
         return true;
       })();

@@ -1,5 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { IMinigameRepository, UserMinigameTicket, MinigameSession } from '../interfaces';
+import { recordMysqlPointLedger } from '../../services/pointLedger';
 
 const MAX_AUTO_TICKETS = 5;
 
@@ -118,6 +119,15 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       if (session.status !== 'STARTED') return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
       await tx.run("UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = ? WHERE id = ?", earnedPoints, formatKstDbTime(), sessionId);
       await tx.run('UPDATE users SET point = point + ? WHERE id = ?', earnedPoints, session.user_id);
+      await recordMysqlPointLedger(tx, {
+        userId: session.user_id,
+        amount: earnedPoints,
+        sourceType: 'minigame',
+        sourceId: sessionId,
+        reason: 'minigame_reward',
+        description: `${session.game_type} 미니게임 보상`,
+        metadata: { session_id: sessionId, game_type: session.game_type }
+      });
       const user = await tx.get('SELECT point FROM users WHERE id = ?', session.user_id);
       return { ok: true, newPoints: user?.point ?? 0 };
     });

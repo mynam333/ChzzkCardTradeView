@@ -7,6 +7,9 @@ import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 const AUTH_USER_CACHE_TTL_MS = Math.max(1000, Number(process.env.AUTH_USER_CACHE_TTL_MS || 15_000));
 const AUTH_USER_LOOKUP_TIMEOUT_MS = Math.max(500, Number(process.env.AUTH_USER_LOOKUP_TIMEOUT_MS || 3000));
+const AUTH_BEARER_ENABLED =
+  process.env.AUTH_BEARER_ENABLED === 'true' ||
+  (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
 
 const userCache = new Map<string, { user: any; expiresAt: number }>();
 const userLookups = new Map<string, Promise<any>>();
@@ -67,12 +70,13 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
     .map(cookieName => cookies[cookieName])
     .find(Boolean);
 
-  // 2) 없으면 Authorization: Bearer 헤더 폴백
+  // 2) 없으면 Authorization: Bearer 헤더 폴백.
+  // 운영 프론트는 httpOnly 쿠키만 쓰므로 Bearer는 명시적으로 켠 경우에만 허용합니다.
   if (!token) {
     const authHeader = req.headers.authorization;
     if (authHeader) {
       const [type, headerToken] = authHeader.split(' ');
-      if (type === 'Bearer' && headerToken) token = headerToken;
+      if (type === 'Bearer' && headerToken && AUTH_BEARER_ENABLED) token = headerToken;
     }
   }
 

@@ -24,6 +24,28 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+    user_id TEXT PRIMARY KEY,
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS point_ledger_entries (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    counterparty_user_id TEXT,
+    amount INTEGER NOT NULL,
+    balance_after INTEGER,
+    source_type TEXT NOT NULL,
+    source_id TEXT,
+    reason TEXT NOT NULL,
+    description TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_source ON point_ledger_entries(source_type, source_id);
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     reward_key TEXT NOT NULL,

@@ -12,6 +12,7 @@ const COUNTDOWN_MS = 3_000;
 const SUBMISSION_GRACE_MS = 2_000;
 const CLIENT_REPORTED_GRACE_MS = 8_000;
 const PUZZLE_TIME_LIMIT_MS = 120_000;
+const PUZZLE_PIECE_COUNT = 12;
 const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
@@ -71,6 +72,48 @@ const getSessionTiming = (session: Pick<MinigameSession, 'game_type' | 'created_
     time_remaining_ms: timeRemainingMs,
     submit_allowance_ms: getGameSubmitAllowanceMs(session.game_type)
   };
+};
+
+const normalizeRotation = (rotation: unknown) => {
+  const numeric = Number(rotation);
+  if (!Number.isFinite(numeric)) return NaN;
+  return ((Math.floor(numeric) % 360) + 360) % 360;
+};
+
+const isSolvedPuzzlePayload = (pieces: unknown): boolean => {
+  if (!Array.isArray(pieces) || pieces.length !== PUZZLE_PIECE_COUNT) return false;
+  const seen = new Set<number>();
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index] as any;
+    const id = Number(piece?.id);
+    if (!Number.isInteger(id) || id < 0 || id >= PUZZLE_PIECE_COUNT || seen.has(id)) return false;
+    seen.add(id);
+    if (id !== index || normalizeRotation(piece?.rotation) !== 0) return false;
+  }
+  return seen.size === PUZZLE_PIECE_COUNT;
+};
+
+const isSolvedMatchPayload = (payloadChannelIds: unknown, targetChannelIds: unknown): boolean => {
+  if (!Array.isArray(payloadChannelIds) || !Array.isArray(targetChannelIds)) return false;
+  const expected = targetChannelIds.map((id) => String(id || '').trim()).filter(Boolean);
+  if (expected.length === 0 || payloadChannelIds.length !== expected.length * 2) return false;
+
+  const expectedCounts = new Map<string, number>();
+  for (const id of expected) {
+    expectedCounts.set(id, (expectedCounts.get(id) || 0) + 2);
+  }
+
+  const actualCounts = new Map<string, number>();
+  for (const rawId of payloadChannelIds) {
+    const id = String(rawId || '').trim();
+    if (!id || !expectedCounts.has(id)) return false;
+    actualCounts.set(id, (actualCounts.get(id) || 0) + 1);
+  }
+
+  for (const [id, count] of expectedCounts) {
+    if (actualCounts.get(id) !== count) return false;
+  }
+  return actualCounts.size === expectedCounts.size;
 };
 
 async function getTicketChargeIntervalMinutes(): Promise<number> {
@@ -514,7 +557,9 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       const replayCorrect =
         session.game_type === 'quiz'
           ? payload?.answer_channel_id === target.correct_id
-          : payload?.success === true;
+          : session.game_type === 'puzzle'
+            ? isSolvedPuzzlePayload(payload?.puzzle_pieces)
+            : isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids);
 
       return res.status(200).json({
         success: true,
@@ -610,7 +655,12 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
       }
 
-      if (success === true) {
+      const solvedPuzzle = isSolvedPuzzlePayload(payload?.puzzle_pieces);
+      if (success === true && !solvedPuzzle) {
+        return res.status(400).json({ error: 'BadRequest', message: '퍼즐 완료 상태를 서버에서 검증할 수 없습니다.' });
+      }
+
+      if (solvedPuzzle) {
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
@@ -649,7 +699,12 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
       }
 
-      if (success === true) {
+      const solvedMatch = isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids);
+      if (success === true && !solvedMatch) {
+        return res.status(400).json({ error: 'BadRequest', message: '짝맞추기 완료 상태를 서버에서 검증할 수 없습니다.' });
+      }
+
+      if (solvedMatch) {
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 

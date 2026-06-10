@@ -91,9 +91,6 @@ export const CardPreview: React.FC<CardPreviewProps> = ({ withComet = false, ...
     <CometCard
       rotateDepth={8}
       translateDepth={10}
-      hoverScale={1}
-      hoverZ={0}
-      showGlare={false}
       className="h-full w-full"
     >
       <CardShell {...props} />

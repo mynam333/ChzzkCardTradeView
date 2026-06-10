@@ -1,4 +1,5 @@
 import { getSqliteDb } from "../../services/db";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -142,6 +143,15 @@ export class SqliteCouponRepository implements ICouponRepository {
           const points = Number(reward.points || 0);
           db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(points, userId);
           pointsAdded += points;
+          recordSqlitePointLedger(db, {
+            userId,
+            amount: points,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_redeem',
+            description: `쿠폰 ${coupon.code} 사용 보상`,
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'card') {
           const quantity = Number(reward.quantity || 0);
           const latest = db.prepare('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ?')

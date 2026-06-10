@@ -29,7 +29,8 @@ import {
   setMinigameTicketChargeInterval,
   getMaintenanceStatus,
   setMaintenanceStatus,
-  resetUserStatusMessage
+  resetUserStatusMessage,
+  getUserPointAudit
 } from '../controllers/adminController';
 import { claimCoupon, createCoupon } from '../controllers/couponController';
 import {
@@ -477,6 +478,7 @@ router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
 
 // 관리자 유저 목록 (닉네임/채널ID 검색 + 페이지네이션)
 router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);
+router.get('/admin/users/:user_id/audit/points', authMiddleware, adminMiddleware, getUserPointAudit);
 router.post('/admin/users/:user_id/status-message/reset', authMiddleware, adminMiddleware, resetUserStatusMessage);
 
 router.get('/admin/titles', authMiddleware, adminMiddleware, listTitles);

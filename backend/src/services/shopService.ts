@@ -3,6 +3,7 @@
  * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트). 카드당 각 1개 장착, 해제 시 보유로 반환.
  */
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 
 export interface ShopItem {
   id: number;
@@ -243,6 +244,15 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       }
       const paid = await tx.run('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?', item.price, userId, item.price);
       if (paid.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+      await recordMysqlPointLedger(tx, {
+        userId,
+        amount: -Number(item.price || 0),
+        sourceType: 'shop_purchase',
+        sourceId: itemId,
+        reason: 'shop_purchase',
+        description: `상점 아이템 구매: ${item.name || itemId}`,
+        metadata: { item_id: itemId, item_name: item.name, price: item.price }
+      });
       await tx.run(`
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
         ON DUPLICATE KEY UPDATE quantity = quantity + 1
@@ -271,6 +281,15 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
     const paid = db.prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
       .run(item.price, userId, item.price);
     if (paid.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+    recordSqlitePointLedger(db, {
+      userId,
+      amount: -Number(item.price || 0),
+      sourceType: 'shop_purchase',
+      sourceId: itemId,
+      reason: 'shop_purchase',
+      description: `상점 아이템 구매: ${item.name || itemId}`,
+      metadata: { item_id: itemId, item_name: item.name, price: item.price }
+    });
 
     db.prepare(`
       INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)

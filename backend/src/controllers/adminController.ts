@@ -17,6 +17,7 @@ import { deleteLocalUploadByUrl } from '../services/imageService';
 import { clearUserRankingCaches } from './playController';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { CardReport } from '../repositories/interfaces';
+import { listPointLedgerForUser } from '../services/pointLedger';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -601,6 +602,51 @@ export const resetUserStatusMessage = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '상태 메시지 초기화 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const getUserPointAudit = async (req: Request, res: Response) => {
+  const { user_id } = req.params;
+  const limit = Math.max(1, Math.min(200, Math.floor(Number(req.query.limit || 80))));
+  const beforeId = req.query.before_id ? Math.max(0, Math.floor(Number(req.query.before_id))) : null;
+
+  if (!user_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '대상 유저 ID가 유효하지 않습니다.' });
+  }
+
+  try {
+    const targetUser = await userRepository.findById(user_id);
+    const { entries, next_before_id } = await listPointLedgerForUser(user_id, { limit, beforeId });
+    const totals = entries.reduce((acc, entry) => {
+      if (entry.amount > 0) acc.income += entry.amount;
+      if (entry.amount < 0) acc.expense += Math.abs(entry.amount);
+      return acc;
+    }, { income: 0, expense: 0 });
+
+    return res.status(200).json({
+      user: targetUser ? {
+        id: targetUser.id,
+        username: targetUser.username,
+        avatar_url: targetUser.avatar_url,
+        point: targetUser.point,
+        role: targetUser.role
+      } : {
+        id: user_id,
+        username: null,
+        avatar_url: null,
+        point: null,
+        role: null
+      },
+      entries,
+      page_summary: {
+        income: totals.income,
+        expense: totals.expense,
+        net: totals.income - totals.expense
+      },
+      next_before_id
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '유저 포인트 감사 내역 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

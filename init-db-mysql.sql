@@ -24,6 +24,28 @@ CREATE TABLE IF NOT EXISTS users (
     created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP())
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+    user_id VARCHAR(191) PRIMARY KEY,
+    deleted_at VARCHAR(64) NOT NULL DEFAULT (UTC_TIMESTAMP())
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS point_ledger_entries (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id VARCHAR(191) NOT NULL,
+    counterparty_user_id VARCHAR(191),
+    amount BIGINT NOT NULL,
+    balance_after BIGINT,
+    source_type VARCHAR(64) NOT NULL,
+    source_id VARCHAR(191),
+    reason VARCHAR(120) NOT NULL,
+    description TEXT,
+    metadata JSON NULL,
+    created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    KEY idx_point_ledger_user_id (user_id, id),
+    KEY idx_point_ledger_counterparty (counterparty_user_id, id),
+    KEY idx_point_ledger_source (source_type, source_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id VARCHAR(191) NOT NULL,
     reward_key VARCHAR(191) NOT NULL,

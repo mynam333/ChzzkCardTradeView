@@ -70,6 +70,8 @@ type MinigameResult = {
 type SubmitPayload = {
   success?: boolean;
   answer_channel_id?: string;
+  puzzle_pieces?: Array<{ id: number; rotation: number }>;
+  matched_channel_ids?: string[];
 };
 
 type TicketStatusResponse = {
@@ -1220,7 +1222,11 @@ export const ArcadeTab: React.FC = () => {
   const completePuzzleIfSolved = (pieces: PuzzlePiece[]) => {
     if (isPuzzleSolved(pieces)) {
       submitResult({
-        success: true
+        success: true,
+        puzzle_pieces: pieces.map((piece) => ({
+          id: piece.id,
+          rotation: normalizeRotation(piece.rotation)
+        }))
       });
     }
   };
@@ -1386,7 +1392,8 @@ export const ArcadeTab: React.FC = () => {
             // 12장 모두 매치되었는지 확인
             if (matchedDeck.every(c => c.isMatched)) {
               submitResult({
-                success: true
+                success: true,
+                matched_channel_ids: matchedDeck.map((card) => card.channel_id)
               });
             }
             return matchedDeck;

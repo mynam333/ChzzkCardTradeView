@@ -164,7 +164,9 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
       'notifications',
       'shop_items',
       'user_cosmetics',
+      'point_ledger_entries',
       'market_listings',
+      'market_transaction_audit_logs',
       'market_bids',
       'market_watches'
     ]) {
@@ -174,12 +176,15 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     }
 
     ensureUniqueIndex(db, 'users', ['id'], 'idx_users_id_unique');
+    ensureUniqueIndex(db, 'deleted_user_accounts', ['user_id'], 'idx_deleted_user_accounts_user_id_unique');
     ensureUniqueIndex(db, 'streamers', ['channel_id'], 'idx_streamers_channel_id_unique');
     ensureUniqueIndex(db, 'titles', ['id'], 'idx_titles_id_unique');
     ensureUniqueIndex(db, 'shop_items', ['id'], 'idx_shop_items_id_unique');
     ensureUniqueIndex(db, 'coupons', ['id'], 'idx_coupons_id_unique');
     ensureUniqueIndex(db, 'user_cards', ['id'], 'idx_user_cards_id_unique');
+    ensureUniqueIndex(db, 'point_ledger_entries', ['id'], 'idx_point_ledger_entries_id_unique');
     ensureUniqueIndex(db, 'market_listings', ['id'], 'idx_market_listings_id_unique');
+    ensureUniqueIndex(db, 'market_transaction_audit_logs', ['audit_key'], 'idx_market_audit_key_unique');
     ensureUniqueIndex(db, 'system_configs', ['key'], 'idx_system_configs_key_unique');
     ensureUniqueIndex(db, 'streamer_registration_blocks', ['channel_id'], 'idx_streamer_registration_blocks_channel_id_unique');
     ensureUniqueIndex(db, 'tutorial_rewards', ['user_id', 'reward_key'], 'idx_tutorial_rewards_user_reward_unique');
@@ -215,6 +220,61 @@ const ensureMysqlColumn = async (db: MysqlDb, table: string, column: string, ddl
 
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+      user_id VARCHAR(191) PRIMARY KEY,
+      deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS point_ledger_entries (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id VARCHAR(191) NOT NULL,
+      counterparty_user_id VARCHAR(191) NULL,
+      amount BIGINT NOT NULL,
+      balance_after BIGINT NULL,
+      source_type VARCHAR(64) NOT NULL,
+      source_id VARCHAR(191) NULL,
+      reason VARCHAR(120) NOT NULL,
+      description VARCHAR(500) NULL,
+      metadata JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_point_ledger_user_id (user_id, id),
+      INDEX idx_point_ledger_counterparty (counterparty_user_id, id),
+      INDEX idx_point_ledger_source (source_type, source_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      audit_key VARCHAR(255) NOT NULL UNIQUE,
+      listing_id BIGINT NULL,
+      event_type VARCHAR(64) NOT NULL,
+      related_user_id VARCHAR(191) NULL,
+      seller_id VARCHAR(191) NULL,
+      buyer_id VARCHAR(191) NULL,
+      current_bidder_id VARCHAR(191) NULL,
+      user_card_id BIGINT NULL,
+      channel_id VARCHAR(191) NULL,
+      serial_number BIGINT NULL,
+      star INT NULL,
+      price BIGINT NULL,
+      status VARCHAR(32) NULL,
+      listing_type VARCHAR(32) NULL,
+      current_bid BIGINT NULL,
+      bid_reserved BIGINT NULL,
+      fee BIGINT NULL,
+      settled_amount BIGINT NULL,
+      listing_created_at DATETIME NULL,
+      listing_updated_at DATETIME NULL,
+      recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_market_audit_listing (listing_id, event_type),
+      INDEX idx_market_audit_user (related_user_id, recorded_at),
+      INDEX idx_market_audit_seller (seller_id, recorded_at),
+      INDEX idx_market_audit_buyer (buyer_id, recorded_at),
+      INDEX idx_market_audit_bidder (current_bidder_id, recorded_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 };
 
 /**
@@ -401,6 +461,26 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] users 테이블에 bonus_free_draw_tickets 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE users ADD COLUMN bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0;");
       }
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+        user_id TEXT PRIMARY KEY,
+        deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS point_ledger_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        counterparty_user_id TEXT,
+        amount INTEGER NOT NULL,
+        balance_after INTEGER,
+        source_type TEXT NOT NULL,
+        source_id TEXT,
+        reason TEXT NOT NULL,
+        description TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now'))
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_source ON point_ledger_entries(source_type, source_id);`);
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS tutorial_rewards (
         user_id TEXT NOT NULL,
         reward_key TEXT NOT NULL,
@@ -563,6 +643,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_sold_updated_card ON market_listings(status, updated_at DESC, user_card_id, price);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_participants ON market_listings(seller_id, buyer_id, current_bidder_id);`);
       try {
         const db = sqliteDb;
         if (!db) throw new Error('SQLITE_DB_NOT_READY');
@@ -615,6 +696,33 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.error('[DB Migration] market_listings UNIQUE 제약 변경 실패:', e);
       }
       sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings(user_card_id) WHERE status = 'PENDING';`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        audit_key TEXT NOT NULL UNIQUE,
+        listing_id INTEGER,
+        event_type TEXT NOT NULL,
+        related_user_id TEXT,
+        seller_id TEXT,
+        buyer_id TEXT,
+        current_bidder_id TEXT,
+        user_card_id INTEGER,
+        channel_id TEXT,
+        serial_number INTEGER,
+        star INTEGER,
+        price INTEGER,
+        status TEXT,
+        listing_type TEXT,
+        current_bid INTEGER,
+        bid_reserved INTEGER,
+        fee INTEGER,
+        settled_amount INTEGER,
+        listing_created_at TEXT,
+        listing_updated_at TEXT,
+        recorded_at TEXT DEFAULT (datetime('now'))
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs(listing_id, event_type);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs(related_user_id, recorded_at);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_audit_participants ON market_transaction_audit_logs(seller_id, buyer_id, current_bidder_id);`);
 
       // 미니게임 티켓 및 세션 테이블 생성
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS user_minigame_tickets (

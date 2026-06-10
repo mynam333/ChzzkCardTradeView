@@ -48,6 +48,9 @@ const createResponse = () => {
   return response as unknown as Response;
 };
 
+const solvedPuzzlePieces = Array.from({ length: 12 }, (_, id) => ({ id, rotation: 0 }));
+const solvedMatchChannelIds = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+
 const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
   findSessionById.mockResolvedValue({
     id: 'puzzle-session',
@@ -70,7 +73,7 @@ const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
     user: { id: 'user-1' },
     body: {
       session_id: 'puzzle-session',
-      payload: { success: true }
+      payload: { success: true, puzzle_pieces: solvedPuzzlePieces }
     }
   } as AuthenticatedRequest;
   const response = createResponse();
@@ -86,7 +89,7 @@ const runMatchSubmission = async (elapsedMs: number, practiceMode = false) => {
     user_id: 'user-1',
     game_type: 'match',
     status: 'STARTED',
-    target_data: JSON.stringify({ practice_mode: practiceMode }),
+    target_data: JSON.stringify({ practice_mode: practiceMode, channel_ids: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] }),
     created_at: new Date(Date.now() - elapsedMs).toISOString()
   });
   findUserById.mockResolvedValue({ point: 5000 } as never);
@@ -96,7 +99,7 @@ const runMatchSubmission = async (elapsedMs: number, practiceMode = false) => {
     user: { id: 'user-1' },
     body: {
       session_id: 'match-session',
-      payload: { success: true }
+      payload: { success: true, matched_channel_ids: solvedMatchChannelIds }
     }
   } as AuthenticatedRequest;
   const response = createResponse();
@@ -173,7 +176,7 @@ describe('submitMinigameResult puzzle time limit', () => {
       user: { id: 'user-1' },
       body: {
         session_id: 'puzzle-session',
-        payload: { success: true }
+        payload: { success: true, puzzle_pieces: solvedPuzzlePieces }
       }
     } as AuthenticatedRequest;
     const response = createResponse();
@@ -198,6 +201,37 @@ describe('submitMinigameResult puzzle time limit', () => {
       earned_points: 0,
       practice_mode: true
     }));
+  });
+
+  it('rejects a bare success flag without a verifiable puzzle state', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'puzzle-session',
+      user_id: 'user-1',
+      game_type: 'puzzle',
+      status: 'STARTED',
+      target_data: JSON.stringify({
+        practice_mode: false,
+        correct_id: 'channel-answer',
+        correct_name: '정답 스트리머',
+        image_url: 'https://example.com/answer.png',
+        star: 3
+      }),
+      created_at: new Date(Date.now() - 5000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'puzzle-session',
+        payload: { success: true }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(400);
   });
 });
 
@@ -235,6 +269,31 @@ describe('submitMinigameResult match time limit', () => {
       correct: true,
       earned_points: 1000
     }));
+  });
+
+  it('rejects a bare success flag without verifiable matched card ids', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'match-session',
+      user_id: 'user-1',
+      game_type: 'match',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, channel_ids: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] }),
+      created_at: new Date(Date.now() - 7000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'match-session',
+        payload: { success: true }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(400);
   });
 });
 

@@ -412,6 +412,145 @@ describe('MarketRepository 재등록 제약', () => {
     expect(relisted.status).toBe('PENDING');
     expect(relisted.seller_id).toBe('new-buyer');
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'new-buyer' });
+    expect(db.prepare(`
+      SELECT user_id, counterparty_user_id, amount, source_type, reason, source_id
+        FROM point_ledger_entries
+       WHERE source_id = ?
+       ORDER BY id ASC
+    `).all(String(first.id))).toEqual([
+      {
+        user_id: 'new-buyer',
+        counterparty_user_id: 'old-seller',
+        amount: -1000,
+        source_type: 'market_purchase',
+        reason: 'market_buy',
+        source_id: String(first.id)
+      },
+      {
+        user_id: 'old-seller',
+        counterparty_user_id: 'new-buyer',
+        amount: 950,
+        source_type: 'market_sale',
+        reason: 'market_sale_settlement',
+        source_id: String(first.id)
+      }
+    ]);
+  });
+
+  it('판매 체결과 탈퇴 시점의 오픈마켓 감사 로그에는 탈퇴 유저 ID가 유지된다', async () => {
+    seedUser(db, 'audit-seller');
+    seedUser(db, 'audit-buyer', 10000);
+    seedStreamer(db, 'audit-channel', '감사 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('audit-seller', 'audit-channel', 7, 2)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'audit-seller',
+      user_card_id: cardId,
+      price: 1500
+    });
+    expect(await marketRepository.buyAtomic(listing.id as number, 'audit-buyer')).toMatchObject({ ok: true });
+
+    expect(db.prepare(`
+      SELECT event_type, seller_id, buyer_id, channel_id, serial_number, star, price, status
+        FROM market_transaction_audit_logs
+       WHERE audit_key = ?
+    `).get(`sold:${listing.id}`)).toEqual({
+      event_type: 'sold',
+      seller_id: 'audit-seller',
+      buyer_id: 'audit-buyer',
+      channel_id: 'audit-channel',
+      serial_number: 7,
+      star: 2,
+      price: 1500,
+      status: 'SOLD'
+    });
+
+    await userRepository.deleteAccount('audit-seller');
+
+    expect(await userRepository.findDeletedAccount('audit-seller')).toEqual({
+      user_id: 'audit-seller',
+      deleted_at: expect.any(String)
+    });
+    expect(db.prepare('SELECT id FROM users WHERE id = ?').get('audit-seller')).toBeUndefined();
+    expect(db.prepare('SELECT id FROM market_listings WHERE id = ?').get(listing.id)).toBeUndefined();
+    expect(db.prepare(`
+      SELECT event_type, related_user_id, seller_id, buyer_id, channel_id, serial_number, star, price, status
+        FROM market_transaction_audit_logs
+       WHERE audit_key = ?
+    `).get(`account_deleted:${listing.id}:audit-seller`)).toEqual({
+      event_type: 'account_deleted',
+      related_user_id: 'audit-seller',
+      seller_id: 'audit-seller',
+      buyer_id: 'audit-buyer',
+      channel_id: 'audit-channel',
+      serial_number: 7,
+      star: 2,
+      price: 1500,
+      status: 'SOLD'
+    });
+  });
+
+  it('진행 중인 경매 판매자가 탈퇴하면 입찰자 예약금을 환불한다', async () => {
+    seedUser(db, 'delete-auction-seller');
+    seedUser(db, 'delete-auction-bidder', 5000);
+    seedStreamer(db, 'delete-auction-channel', '탈퇴 경매 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('delete-auction-seller', 'delete-auction-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'delete-auction-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    expect(await marketRepository.placeBid(listing.id as number, 'delete-auction-bidder', 1200)).toMatchObject({ ok: true });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('delete-auction-bidder')).toEqual({ point: 3800 });
+
+    await userRepository.deleteAccount('delete-auction-seller');
+
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('delete-auction-bidder')).toEqual({ point: 5000 });
+    expect(db.prepare('SELECT id FROM market_listings WHERE id = ?').get(listing.id)).toBeUndefined();
+    expect(db.prepare(`
+      SELECT user_id, counterparty_user_id, amount, source_type, reason, source_id
+        FROM point_ledger_entries
+       WHERE user_id = 'delete-auction-bidder'
+       ORDER BY id ASC
+    `).all()).toEqual([
+      {
+        user_id: 'delete-auction-bidder',
+        counterparty_user_id: 'delete-auction-seller',
+        amount: -1200,
+        source_type: 'market_bid',
+        reason: 'auction_bid_reserved',
+        source_id: String(listing.id)
+      },
+      {
+        user_id: 'delete-auction-bidder',
+        counterparty_user_id: 'delete-auction-seller',
+        amount: 1200,
+        source_type: 'market_bid_refund',
+        reason: 'seller_account_deleted_refund',
+        source_id: String(listing.id)
+      }
+    ]);
+    expect(db.prepare(`
+      SELECT event_type, related_user_id, seller_id, current_bidder_id, bid_reserved
+        FROM market_transaction_audit_logs
+       WHERE audit_key = ?
+    `).get(`account_deleted:${listing.id}:delete-auction-seller`)).toEqual({
+      event_type: 'account_deleted',
+      related_user_id: 'delete-auction-seller',
+      seller_id: 'delete-auction-seller',
+      current_bidder_id: 'delete-auction-bidder',
+      bid_reserved: 1200
+    });
   });
 
   it('경매 입찰금은 입찰 시 예약되고 낙찰 정산 때 이중 차감되지 않는다', async () => {
@@ -452,6 +591,34 @@ describe('MarketRepository 재등록 제약', () => {
     });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 5000 });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
+    expect(db.prepare(`
+      SELECT user_id, counterparty_user_id, amount, source_type, reason
+        FROM point_ledger_entries
+       WHERE source_id = ?
+       ORDER BY id ASC
+    `).all(String(listing.id))).toEqual([
+      {
+        user_id: 'auction-bidder-a',
+        counterparty_user_id: 'auction-seller',
+        amount: -1000,
+        source_type: 'market_bid',
+        reason: 'auction_bid_reserved'
+      },
+      {
+        user_id: 'auction-bidder-b',
+        counterparty_user_id: 'auction-seller',
+        amount: -2000,
+        source_type: 'market_bid',
+        reason: 'auction_bid_reserved'
+      },
+      {
+        user_id: 'auction-bidder-a',
+        counterparty_user_id: 'auction-seller',
+        amount: 1000,
+        source_type: 'market_bid_refund',
+        reason: 'auction_outbid_refund'
+      }
+    ]);
     expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
       current_bidder_id: 'auction-bidder-b',
       current_bid: 2000,
@@ -493,6 +660,41 @@ describe('MarketRepository 재등록 제약', () => {
       settled_amount: 1900
     });
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'auction-bidder-b' });
+    expect(db.prepare(`
+      SELECT user_id, counterparty_user_id, amount, source_type, reason
+        FROM point_ledger_entries
+       WHERE source_id = ?
+       ORDER BY id ASC
+    `).all(String(listing.id))).toEqual([
+      {
+        user_id: 'auction-bidder-a',
+        counterparty_user_id: 'auction-seller',
+        amount: -1000,
+        source_type: 'market_bid',
+        reason: 'auction_bid_reserved'
+      },
+      {
+        user_id: 'auction-bidder-b',
+        counterparty_user_id: 'auction-seller',
+        amount: -2000,
+        source_type: 'market_bid',
+        reason: 'auction_bid_reserved'
+      },
+      {
+        user_id: 'auction-bidder-a',
+        counterparty_user_id: 'auction-seller',
+        amount: 1000,
+        source_type: 'market_bid_refund',
+        reason: 'auction_outbid_refund'
+      },
+      {
+        user_id: 'auction-seller',
+        counterparty_user_id: 'auction-bidder-b',
+        amount: 1900,
+        source_type: 'market_sale',
+        reason: 'auction_sale_settlement'
+      }
+    ]);
   });
 
   it('완료/취소된 내 등록 매물은 화면에서만 숨기고 DB 기록은 유지한다', async () => {
@@ -510,13 +712,20 @@ describe('MarketRepository 재등록 제약', () => {
       price: 1000
     });
     expect(await marketRepository.buyAtomic(listing.id as number, 'hide-buyer')).toMatchObject({ ok: true });
+    const soldUpdatedAt = '2026-01-01T00:00:00.000Z';
+    db.prepare('UPDATE market_listings SET updated_at = ? WHERE id = ?').run(soldUpdatedAt, listing.id);
 
     expect(await marketRepository.hideForSeller(listing.id as number, 'hide-seller')).toBe(true);
     expect(await marketRepository.listByUser('hide-seller')).toEqual([]);
-    expect(db.prepare('SELECT status, seller_hidden_at FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+    expect(db.prepare('SELECT status, seller_hidden_at, updated_at FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
       status: 'SOLD',
-      seller_hidden_at: expect.any(String)
+      seller_hidden_at: expect.any(String),
+      updated_at: soldUpdatedAt
     });
+    const sellerHistory = await marketRepository.listHistory('hide-seller');
+    const buyerHistory = await marketRepository.listHistory('hide-buyer');
+    expect(sellerHistory.map((item) => item.id)).toContain(listing.id);
+    expect(buyerHistory.map((item) => item.id)).toContain(listing.id);
   });
 });
 

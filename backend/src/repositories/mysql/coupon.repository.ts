@@ -1,4 +1,5 @@
 import { getMysqlDb } from '../../services/db';
+import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { ICouponRepository, Coupon, CouponRedeemResult } from '../interfaces';
 import { couponToRewards, parseCouponRewards, rewardsToJson } from '../../utils/couponRewards';
 
@@ -109,6 +110,15 @@ export class MysqlCouponRepository implements ICouponRepository {
           const points = Number(reward.points || 0);
           await tx.run('UPDATE users SET point = point + ? WHERE id = ?', points, userId);
           pointsAdded += points;
+          await recordMysqlPointLedger(tx, {
+            userId,
+            amount: points,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_redeem',
+            description: `쿠폰 ${coupon.code} 사용 보상`,
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'card') {
           const quantity = Number(reward.quantity || 0);
           const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', reward.channel_id);

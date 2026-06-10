@@ -83,6 +83,54 @@ export interface AdminUser {
   titles: UserTitle[];
 }
 
+export type PointLedgerSourceType =
+  | 'gacha_draw'
+  | 'card_sell'
+  | 'coupon'
+  | 'minigame'
+  | 'shop_purchase'
+  | 'market_purchase'
+  | 'market_sale'
+  | 'market_bid'
+  | 'market_bid_refund'
+  | 'trade'
+  | 'admin_reset'
+  | 'manual_adjustment'
+  | 'unknown';
+
+export interface PointLedgerEntry {
+  id: number;
+  user_id: string;
+  username?: string | null;
+  counterparty_user_id: string | null;
+  counterparty_username?: string | null;
+  amount: number;
+  balance_after: number | null;
+  source_type: PointLedgerSourceType;
+  source_id: string | null;
+  reason: string;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface PointAuditResponse {
+  user: {
+    id: string;
+    username: string | null;
+    avatar_url: string | null;
+    point: number | null;
+    role: AdminUser['role'] | null;
+  };
+  entries: PointLedgerEntry[];
+  page_summary: {
+    income: number;
+    expense: number;
+    net: number;
+  };
+  next_before_id: number | null;
+}
+
 /** 관리자 신고 목록 항목 (reporter_username/streamer_name 보강 포함) */
 export interface AdminReport {
   id: number;

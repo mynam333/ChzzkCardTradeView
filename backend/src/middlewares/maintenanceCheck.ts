@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { systemConfigRepository, userRepository } from '../repositories';
-import { JWT_SECRET } from '../config';
+import { IS_PRODUCTION, JWT_SECRET } from '../config';
 import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 // 점검 예외 허용 API 경로 목록 (Prefix 매칭 또는 Exact 매칭)
@@ -15,6 +15,10 @@ const MAINTENANCE_BYPASS_PATHS = [
   '/realtime/stream'
 ];
 
+const AUTH_BEARER_ENABLED =
+  process.env.AUTH_BEARER_ENABLED === 'true' ||
+  (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
+
 const getSessionToken = (req: Request): string | undefined => {
   const cookies = (req as any).cookies || {};
   const cookieToken = SESSION_COOKIE_NAMES
@@ -23,7 +27,7 @@ const getSessionToken = (req: Request): string | undefined => {
   if (cookieToken) return cookieToken;
 
   const authHeader = req.headers.authorization;
-  if (!authHeader) return undefined;
+  if (!authHeader || !AUTH_BEARER_ENABLED) return undefined;
   const [type, token] = authHeader.split(' ');
   return type === 'Bearer' && token ? token : undefined;
 };

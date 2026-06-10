@@ -1,4 +1,5 @@
 import { getMysqlDb } from '../../services/db';
+import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { IUserCardRepository } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
 
@@ -69,6 +70,15 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         const deducted = await tx.run('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?', drawCost, userId, drawCost);
         if (deducted.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
         nextPoint -= drawCost;
+        await recordMysqlPointLedger(tx, {
+          userId,
+          amount: -drawCost,
+          balanceAfter: nextPoint,
+          sourceType: 'gacha_draw',
+          reason: 'gacha_draw_paid',
+          description: '유료 카드 소환 포인트 차감',
+          metadata: { channel_id: channelId, draw_cost: drawCost }
+        });
       }
 
       const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', channelId);
@@ -274,7 +284,17 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         const placeholders = rows.map(() => '?').join(',');
         await tx.run(`DELETE FROM user_cards WHERE id IN (${placeholders})`, rows.map((r) => r.id));
       }
-      if (total > 0) await tx.run('UPDATE users SET point = point + ? WHERE id = ?', total, userId);
+      if (total > 0) {
+        await tx.run('UPDATE users SET point = point + ? WHERE id = ?', total, userId);
+        await recordMysqlPointLedger(tx, {
+          userId,
+          amount: total,
+          sourceType: 'card_sell',
+          reason: 'card_sell',
+          description: '보유 카드 판매 보상',
+          metadata: { actions }
+        });
+      }
       return total;
     });
   }

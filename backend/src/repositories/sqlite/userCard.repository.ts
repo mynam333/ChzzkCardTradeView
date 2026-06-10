@@ -1,4 +1,5 @@
 import { getSqliteDb } from "../../services/db";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -94,6 +95,15 @@ export class SqliteUserCardRepository implements IUserCardRepository {
           .run(drawCost, userId, drawCost);
         if (deducted.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
         nextPoint -= drawCost;
+        recordSqlitePointLedger(db, {
+          userId,
+          amount: -drawCost,
+          balanceAfter: nextPoint,
+          sourceType: 'gacha_draw',
+          reason: 'gacha_draw_paid',
+          description: '유료 카드 소환 포인트 차감',
+          metadata: { channel_id: channelId, draw_cost: drawCost }
+        });
       }
 
       const latest = db.prepare('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ?')
@@ -343,6 +353,14 @@ export class SqliteUserCardRepository implements IUserCardRepository {
 
       if (total > 0) {
         db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(total, userId);
+        recordSqlitePointLedger(db, {
+          userId,
+          amount: total,
+          sourceType: 'card_sell',
+          reason: 'card_sell',
+          description: '보유 카드 판매 보상',
+          metadata: { actions }
+        });
       }
 
       return total;

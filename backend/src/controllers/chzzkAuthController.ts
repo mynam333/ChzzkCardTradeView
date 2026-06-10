@@ -15,6 +15,7 @@ import {
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
 const CHZZK_API_URL = process.env.CHZZK_API_URL || 'https://api.chzzk.naver.com';
+const ACCOUNT_REJOIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 class ChzzkTokenExchangeError extends Error {
   constructor(
@@ -24,6 +25,12 @@ class ChzzkTokenExchangeError extends Error {
     super(`치지직 토큰 교환 실패: ${statusCode} - ${responseBody}`);
   }
 }
+
+const getAccountRejoinAvailableAt = (deletedAt: string): Date | null => {
+  const deletedTime = new Date(deletedAt).getTime();
+  if (!Number.isFinite(deletedTime)) return null;
+  return new Date(deletedTime + ACCOUNT_REJOIN_COOLDOWN_MS);
+};
 
 /**
  * 1. 치지직 로그인 인터록 URL 반환 API
@@ -199,6 +206,15 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     // E. DB 조회 또는 생성 (계정 자동 연동 및 정보 최신화)
     let user = await userRepository.findById(chzzkUser.id);
     if (!user) {
+      const deletedAccount = await userRepository.findDeletedAccount(chzzkUser.id);
+      const rejoinAvailableAt = deletedAccount ? getAccountRejoinAvailableAt(deletedAccount.deleted_at) : null;
+      if (rejoinAvailableAt && rejoinAvailableAt.getTime() > Date.now()) {
+        return res.status(403).json({
+          error: 'AccountRejoinCooldown',
+          message: `회원 탈퇴 후 24시간이 지나야 같은 치지직 계정으로 다시 가입할 수 있습니다. (재가입 가능 시각: ${rejoinAvailableAt.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })})`,
+          rejoin_available_at: rejoinAvailableAt.toISOString()
+        });
+      }
       user = {
         id: chzzkUser.id,
         username: chzzkUser.nickname,

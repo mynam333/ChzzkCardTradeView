@@ -1,5 +1,6 @@
 import { getSqliteDb } from "../../services/db";
 import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../interfaces";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 
 const MAX_AUTO_TICKETS = 5;
 
@@ -157,6 +158,15 @@ export class SqliteMinigameRepository implements IMinigameRepository {
       db.prepare(
         'UPDATE users SET point = point + ? WHERE id = ?'
       ).run(earnedPoints, session.user_id);
+      recordSqlitePointLedger(db, {
+        userId: session.user_id,
+        amount: earnedPoints,
+        sourceType: 'minigame',
+        sourceId: sessionId,
+        reason: 'minigame_reward',
+        description: `${session.game_type} 미니게임 보상`,
+        metadata: { session_id: sessionId, game_type: session.game_type }
+      });
 
       // 4. 새로운 포인트 잔액 조회
       const user = db.prepare('SELECT point FROM users WHERE id = ?').get(session.user_id) as any;

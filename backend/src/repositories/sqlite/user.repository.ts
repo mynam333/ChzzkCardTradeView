@@ -1,5 +1,6 @@
 import { getSqliteDb } from "../../services/db";
 import { fuzzyScore } from "../../utils/search";
+import { recordSqlitePointLedger } from "../../services/pointLedger";
 import {
   IUserRepository,
   IStreamerRepository, 
@@ -11,6 +12,7 @@ import {
   INotificationRepository,
   ISystemConfigRepository,
   User,
+  DeletedUserAccount,
   UserRanking,
   Streamer,
   StreamerScheduleResult,
@@ -132,17 +134,44 @@ export class SqliteUserRepository implements IUserRepository {
   }
 
   async updatePoint(id: string, point: number): Promise<void> {
+    const before = this.getDb().prepare('SELECT point FROM users WHERE id = ?').get(id) as any;
     this.getDb().prepare('UPDATE users SET point = ? WHERE id = ?').run(point, id);
+    if (before) {
+      recordSqlitePointLedger(this.getDb(), {
+        userId: id,
+        amount: Number(point || 0) - Number(before.point || 0),
+        balanceAfter: Number(point || 0),
+        sourceType: 'manual_adjustment',
+        reason: 'point_set',
+        description: '관리/시스템에 의해 포인트가 특정 값으로 변경되었습니다.'
+      });
+    }
   }
 
   async incrementPoint(id: string, delta: number): Promise<void> {
     this.getDb().prepare('UPDATE users SET point = point + ? WHERE id = ?').run(delta, id);
+    recordSqlitePointLedger(this.getDb(), {
+      userId: id,
+      amount: delta,
+      sourceType: 'manual_adjustment',
+      reason: 'point_increment',
+      description: '관리/시스템에 의해 포인트가 증감되었습니다.'
+    });
   }
 
   async tryDeductPoint(id: string, amount: number): Promise<boolean> {
     const result = this.getDb()
       .prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
       .run(amount, id, amount);
+    if (result.changes > 0) {
+      recordSqlitePointLedger(this.getDb(), {
+        userId: id,
+        amount: -amount,
+        sourceType: 'manual_adjustment',
+        reason: 'point_deduct',
+        description: '관리/시스템에 의해 포인트가 차감되었습니다.'
+      });
+    }
     return result.changes > 0;
   }
 
@@ -211,6 +240,89 @@ export class SqliteUserRepository implements IUserRepository {
   async deleteAccount(id: string): Promise<void> {
     const db = this.getDb();
     const txn = db.transaction(() => {
+      db.prepare(`
+        INSERT OR IGNORE INTO market_transaction_audit_logs
+          (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
+           user_card_id, channel_id, serial_number, star, price, status, listing_type, current_bid,
+           bid_reserved, fee, settled_amount, listing_created_at, listing_updated_at)
+        SELECT
+          'account_deleted:' || ml.id || ':' || ?,
+          ml.id,
+          'account_deleted',
+          ?,
+          ml.seller_id,
+          ml.buyer_id,
+          ml.current_bidder_id,
+          ml.user_card_id,
+          uc.channel_id,
+          uc.serial_number,
+          uc.star,
+          ml.price,
+          ml.status,
+          ml.listing_type,
+          ml.current_bid,
+          ml.bid_reserved,
+          ml.fee,
+          ml.settled_amount,
+          ml.created_at,
+          ml.updated_at
+        FROM market_listings ml
+        LEFT JOIN user_cards uc ON uc.id = ml.user_card_id
+        WHERE ml.seller_id = ? OR ml.buyer_id = ? OR ml.current_bidder_id = ?
+      `).run(id, id, id, id, id);
+      db.prepare(`
+        INSERT INTO deleted_user_accounts (user_id, deleted_at)
+        VALUES (?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET deleted_at = excluded.deleted_at
+      `).run(id);
+      db.prepare(`
+        UPDATE users
+           SET point = point + COALESCE((
+             SELECT SUM(ml.bid_reserved)
+               FROM market_listings ml
+              WHERE ml.seller_id = ?
+                AND ml.status = 'PENDING'
+                AND ml.current_bidder_id = users.id
+                AND ml.bid_reserved > 0
+           ), 0)
+         WHERE id IN (
+           SELECT current_bidder_id
+             FROM market_listings
+            WHERE seller_id = ?
+              AND status = 'PENDING'
+              AND current_bidder_id IS NOT NULL
+              AND bid_reserved > 0
+         )
+      `).run(id, id);
+      const pendingBidRefunds = db.prepare(`
+        SELECT id AS listing_id, current_bidder_id AS user_id, bid_reserved AS amount
+          FROM market_listings
+         WHERE seller_id = ?
+           AND status = 'PENDING'
+           AND current_bidder_id IS NOT NULL
+           AND bid_reserved > 0
+      `).all(id) as { listing_id: number; user_id: string; amount: number }[];
+      for (const refund of pendingBidRefunds) {
+        recordSqlitePointLedger(db, {
+          userId: refund.user_id,
+          counterpartyUserId: id,
+          amount: Number(refund.amount || 0),
+          sourceType: 'market_bid_refund',
+          sourceId: refund.listing_id,
+          reason: 'seller_account_deleted_refund',
+          description: `판매자 ${id} 탈퇴로 진행 중 경매 예약금 환불`,
+          metadata: { deleted_seller_id: id, listing_id: refund.listing_id }
+        });
+      }
+      db.prepare(`
+        UPDATE market_listings
+           SET current_bidder_id = NULL,
+               bid_reserved = 0,
+               current_bid = COALESCE(starting_bid, current_bid),
+               updated_at = datetime('now')
+         WHERE current_bidder_id = ?
+           AND status = 'PENDING'
+      `).run(id);
       db.prepare('UPDATE market_listings SET buyer_id = NULL WHERE buyer_id = ?').run(id);
       db.prepare('DELETE FROM market_listings WHERE seller_id = ?').run(id);
       db.prepare('DELETE FROM trades WHERE sender_id = ? OR receiver_id = ?').run(id, id);
@@ -230,6 +342,13 @@ export class SqliteUserRepository implements IUserRepository {
     });
 
     txn();
+  }
+
+  async findDeletedAccount(id: string): Promise<DeletedUserAccount | null> {
+    const row = this.getDb()
+      .prepare('SELECT user_id, deleted_at FROM deleted_user_accounts WHERE user_id = ?')
+      .get(id) as DeletedUserAccount | undefined;
+    return row || null;
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {

@@ -1,4 +1,5 @@
 import { getMysqlDb } from '../../services/db';
+import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { ITradeRepository, Trade } from '../interfaces';
 
 export class MysqlTradeRepository implements ITradeRepository {
@@ -124,6 +125,28 @@ export class MysqlTradeRepository implements ITradeRepository {
         await moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || []);
         await tx.run('UPDATE users SET point = point - ? + ? WHERE id = ?', senderOut, receiverOut, row.sender_id);
         await tx.run('UPDATE users SET point = point - ? + ? WHERE id = ?', receiverOut, senderOut, row.receiver_id);
+        const senderDelta = receiverOut - senderOut;
+        const receiverDelta = senderOut - receiverOut;
+        await recordMysqlPointLedger(tx, {
+          userId: row.sender_id,
+          counterpartyUserId: row.receiver_id,
+          amount: senderDelta,
+          sourceType: 'trade',
+          sourceId: id,
+          reason: 'trade_finalize',
+          description: `1:1 교환 체결 #${id}`,
+          metadata: { trade_id: id, sender_out: senderOut, receiver_out: receiverOut }
+        });
+        await recordMysqlPointLedger(tx, {
+          userId: row.receiver_id,
+          counterpartyUserId: row.sender_id,
+          amount: receiverDelta,
+          sourceType: 'trade',
+          sourceId: id,
+          reason: 'trade_finalize',
+          description: `1:1 교환 체결 #${id}`,
+          metadata: { trade_id: id, sender_out: senderOut, receiver_out: receiverOut }
+        });
         await tx.run("UPDATE trades SET status = 'ACCEPTED', completed_at = UTC_TIMESTAMP() WHERE id = ?", id);
       });
       return { ok: true, reason: 'OK' };

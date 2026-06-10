@@ -21,6 +21,28 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 
+CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+    user_id TEXT PRIMARY KEY,                  -- 탈퇴한 치지직 채널 ID
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS point_ledger_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    counterparty_user_id TEXT,
+    amount INTEGER NOT NULL,
+    balance_after INTEGER,
+    source_type TEXT NOT NULL,
+    source_id TEXT,
+    reason TEXT NOT NULL,
+    description TEXT,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_point_ledger_source ON point_ledger_entries(source_type, source_id);
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id TEXT NOT NULL,
     reward_key TEXT NOT NULL,
@@ -318,9 +340,39 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);
+CREATE INDEX IF NOT EXISTS idx_market_listings_participants
+    ON market_listings(seller_id, buyer_id, current_bidder_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
     ON market_listings(user_card_id)
     WHERE status = 'PENDING';
+
+CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    audit_key TEXT NOT NULL UNIQUE,
+    listing_id INTEGER,
+    event_type TEXT NOT NULL,
+    related_user_id TEXT,
+    seller_id TEXT,
+    buyer_id TEXT,
+    current_bidder_id TEXT,
+    user_card_id INTEGER,
+    channel_id TEXT,
+    serial_number INTEGER,
+    star INTEGER,
+    price INTEGER,
+    status TEXT,
+    listing_type TEXT,
+    current_bid INTEGER,
+    bid_reserved INTEGER,
+    fee INTEGER,
+    settled_amount INTEGER,
+    listing_created_at TEXT,
+    listing_updated_at TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs(listing_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs(related_user_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_market_audit_participants ON market_transaction_audit_logs(seller_id, buyer_id, current_bidder_id);
 
 CREATE TABLE IF NOT EXISTS market_bids (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
