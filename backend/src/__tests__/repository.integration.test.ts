@@ -822,6 +822,47 @@ describe('MarketRepository 재등록 제약', () => {
     ]);
   });
 
+  it('최신순 오픈마켓 목록은 입찰로 갱신된 경매를 앞으로 올린다', async () => {
+    seedUser(db, 'activity-seller-a');
+    seedUser(db, 'activity-seller-b');
+    seedUser(db, 'activity-bidder', 10000);
+    seedStreamer(db, 'activity-channel-a', '활동순 A');
+    seedStreamer(db, 'activity-channel-b', '활동순 B');
+    const cardA = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('activity-seller-a', 'activity-channel-a', 1, 0)
+    `).run().lastInsertRowid);
+    const cardB = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('activity-seller-b', 'activity-channel-b', 1, 0)
+    `).run().lastInsertRowid);
+
+    const older = await marketRepository.create({
+      seller_id: 'activity-seller-a',
+      user_card_id: cardA,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    const newer = await marketRepository.create({
+      seller_id: 'activity-seller-b',
+      user_card_id: cardB,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    db.prepare("UPDATE market_listings SET created_at = datetime('now', '-2 hour'), updated_at = datetime('now', '-2 hour') WHERE id = ?").run(older.id);
+    db.prepare("UPDATE market_listings SET created_at = datetime('now', '-1 hour'), updated_at = datetime('now', '-1 hour') WHERE id = ?").run(newer.id);
+
+    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(newer.id);
+
+    expect(await marketRepository.placeBid(older.id as number, 'activity-bidder', 1200)).toMatchObject({ ok: true });
+
+    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(older.id);
+  });
+
   it('완료/취소된 내 등록 매물은 화면에서만 숨기고 DB 기록은 유지한다', async () => {
     seedUser(db, 'hide-seller');
     seedUser(db, 'hide-buyer', 10000);

@@ -208,7 +208,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     // 정렬 적용
     listings.sort((a, b) => {
       if (options.sort === 'latest') {
-        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+        return new Date(b.updated_at || b.created_at || '').getTime() - new Date(a.updated_at || a.created_at || '').getTime();
       } else if (options.sort === 'oldest') {
         return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
       } else if (options.sort === 'price_desc') {

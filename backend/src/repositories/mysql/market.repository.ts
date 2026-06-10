@@ -158,7 +158,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       listings = listings.filter((item) => fuzzyMatch(item.card?.streamer?.name || '', q) || fuzzyMatch(item.seller_username || '', q));
     }
     listings.sort((a, b) => {
-      if (options.sort === 'latest') return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+      if (options.sort === 'latest') return new Date(b.updated_at || b.created_at || '').getTime() - new Date(a.updated_at || a.created_at || '').getTime();
       if (options.sort === 'oldest') return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
       if (options.sort === 'price_desc') return b.price - a.price;
       if (options.sort === 'price_asc') return a.price - b.price;

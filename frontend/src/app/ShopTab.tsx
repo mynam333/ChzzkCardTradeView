@@ -158,6 +158,7 @@ export const ShopTab: React.FC = () => {
   const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc'>('latest');
   const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction' | 'bidding'>('all');
   const [marketPage, setMarketPage] = useState(1);
+  const [marketPageInput, setMarketPageInput] = useState('1');
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
   const [purchasingListingId, setPurchasingListingId] = useState<number | null>(null);
@@ -305,6 +306,21 @@ export const ShopTab: React.FC = () => {
     } finally {
       if (!silent) setIsLoadingMarket(false);
     }
+  };
+
+  useEffect(() => {
+    setMarketPageInput(String(marketPage));
+  }, [marketPage]);
+
+  const goToMarketPage = () => {
+    const parsed = Math.floor(Number(marketPageInput));
+    if (!Number.isFinite(parsed)) {
+      setMarketPageInput(String(marketPage));
+      return;
+    }
+    const nextPage = Math.min(Math.max(1, parsed), Math.max(1, marketTotalPages));
+    setMarketPage(nextPage);
+    setMarketPageInput(String(nextPage));
   };
 
   const scheduleMarketRefresh = (delayMs = 1200, minGapMs = 3500) => {
@@ -1561,36 +1577,63 @@ export const ShopTab: React.FC = () => {
 
                 {/* 오픈마켓 페이지네이션 바 */}
                 {marketTotalPages > 1 && (
-                  <div className="flex items-center justify-center gap-2 pt-4 border-t border-border/30">
-                    <button
-                      onClick={() => setMarketPage(p => Math.max(1, p - 1))}
-                      disabled={marketPage === 1}
-                      className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                  <div className="flex flex-col items-center justify-center gap-3 border-t border-border/30 pt-4 sm:flex-row sm:flex-wrap">
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => setMarketPage(p => Math.max(1, p - 1))}
+                        disabled={marketPage === 1}
+                        className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      {getPaginationItems(marketPage, marketTotalPages).map((item, index) => {
+                        if (item === 'ellipsis') {
+                          return <span key={`ellipsis-${index}`} className="px-1 text-xs font-black text-muted-foreground">...</span>;
+                        }
+                        const p = item;
+                        return (
+                          <button
+                            key={p}
+                            onClick={() => setMarketPage(p)}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition ${marketPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
+                          >
+                            {p}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => setMarketPage(p => Math.min(marketTotalPages, p + 1))}
+                        disabled={marketPage === marketTotalPages}
+                        className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <form
+                      className="flex items-center gap-1.5"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        goToMarketPage();
+                      }}
                     >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    {getPaginationItems(marketPage, marketTotalPages).map((item, index) => {
-                      if (item === 'ellipsis') {
-                        return <span key={`ellipsis-${index}`} className="px-1 text-xs font-black text-muted-foreground">...</span>;
-                      }
-                      const p = item;
-                      return (
-                        <button
-                          key={p}
-                          onClick={() => setMarketPage(p)}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition ${marketPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
-                        >
-                          {p}
-                        </button>
-                      );
-                    })}
-                    <button
-                      onClick={() => setMarketPage(p => Math.min(marketTotalPages, p + 1))}
-                      disabled={marketPage === marketTotalPages}
-                      className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={marketTotalPages}
+                        value={marketPageInput}
+                        onChange={(event) => setMarketPageInput(event.target.value)}
+                        onBlur={goToMarketPage}
+                        className="h-8 w-16 rounded-lg border border-border bg-card px-2 text-center text-xs font-black focus:border-primary focus:outline-none"
+                        aria-label="이동할 오픈마켓 페이지"
+                      />
+                      <span className="text-[11px] font-bold text-muted-foreground">/ {marketTotalPages.toLocaleString()}</span>
+                      <button
+                        type="submit"
+                        className="h-8 rounded-lg border border-border bg-card px-3 text-xs font-black text-foreground transition hover:bg-secondary/40"
+                      >
+                        이동
+                      </button>
+                    </form>
                   </div>
                 )}
               </div>
