@@ -402,6 +402,8 @@ SQLITE_DB_PATH=./local.sqlite
 SQLITE_REQUIRE_PERSISTENT_PATH=false
 UPLOADS_DIR=./public/uploads
 SUPABASE_REQUIRED=false
+# SQLite 파일을 MySQL로 이전할 때만 설정
+# MYSQL_URL=mysql://user:password@127.0.0.1:3306/chzzk_card_trade_view
 JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret
@@ -449,6 +451,7 @@ npm run dev
 * SQLite 운영 시 persistent disk/volume을 만들고, `SQLITE_DB_PATH`와 `UPLOADS_DIR`를 해당 volume 내부로 지정합니다.
   * Render 예시: disk mount path `/var/data`, `SQLITE_DB_PATH=/var/data/chikapo.sqlite`, `UPLOADS_DIR=/var/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
   * Fly.io 예시: volume mount path `/data`, `SQLITE_DB_PATH=/data/chikapo.sqlite`, `UPLOADS_DIR=/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
+* SQLite 파일을 MySQL 8로 이전하려면 [docs/mysql-migration.md](docs/mysql-migration.md)를 참고합니다.
 * Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `SUPABASE_REQUIRED=false`로 둡니다.
 * Supabase 운영 시에는 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
 * `SUPABASE_SERVICE_ROLE_KEY`에는 브라우저용 publishable/anon key가 아니라 서버 전용 `sb_secret_*` 또는 legacy `service_role` key만 설정합니다.
