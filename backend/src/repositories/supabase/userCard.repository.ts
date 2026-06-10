@@ -159,8 +159,32 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return cards;
   }
 
-  async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
+    const normalizedMaterials = materials
+      .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))
+      .filter((m) => m.star >= 0 && m.star <= 4 && m.count > 0);
+    if (normalizedMaterials.length === 0) return { ok: false, reason: 'INVALID_MATERIALS' };
+    const gain = normalizedMaterials.reduce((sum, m) => sum + ((m.star + 1) * m.count), 0);
+    const newStar = star + gain;
+    if (newStar > 5) return { ok: false, reason: 'EXCEEDS_MAX_STAR' };
+
+    const isLegacyFuse = normalizedMaterials.length === 1 && normalizedMaterials[0].star === 0 && normalizedMaterials[0].count === 1;
+    if (!isLegacyFuse) {
+      const { data, error } = await this.getClient().rpc('fuse_card_atomic_v2', {
+        p_user_id: userId,
+        p_channel_id: channelId,
+        p_star: star,
+        p_materials: normalizedMaterials
+      });
+      if (error) {
+        console.error('[SupabaseUserCardRepository] fuse_card_atomic_v2 RPC 에러:', error.message);
+        return { ok: false, reason: 'RPC_ERROR' };
+      }
+      const reason = String(data);
+      return { ok: reason === 'OK', reason, newStar: reason === 'OK' ? newStar : undefined };
+    }
+
     const { data, error } = await this.getClient().rpc('fuse_card_atomic', {
       p_user_id: userId,
       p_channel_id: channelId,
@@ -171,7 +195,7 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       return { ok: false, reason: 'RPC_ERROR' };
     }
     const reason = String(data);
-    return { ok: reason === 'OK', reason, newStar: reason === 'OK' ? star + 1 : undefined };
+    return { ok: reason === 'OK', reason, newStar: reason === 'OK' ? newStar : undefined };
   }
 
   async findLatestSerialNumber(channelId: string): Promise<number> {

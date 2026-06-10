@@ -54,6 +54,15 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 };
 
+type ClaimedCouponReward = {
+  type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+  points?: number;
+  channel_id?: string | null;
+  item_id?: number | null;
+  quantity?: number;
+  label?: string;
+};
+
 export const MyInfoTab: React.FC = () => {
   const { user, logout, updatePoints, refreshUserData, toast } = useApp();
   const searchParams = useSearchParams();
@@ -62,6 +71,7 @@ export const MyInfoTab: React.FC = () => {
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
+  const [lastCouponClaim, setLastCouponClaim] = useState<{ message: string; rewards: ClaimedCouponReward[] } | null>(null);
   const couponSectionRef = useRef<HTMLElement>(null);
   const couponInputRef = useRef<HTMLInputElement>(null);
   const pendingCouponRef = useRef('');
@@ -326,6 +336,14 @@ export const MyInfoTab: React.FC = () => {
     new Map(inventory.map(c => [`${c.channel_id}#${c.star || 0}`, c])).values()
   );
 
+  const couponRewardText = (reward: ClaimedCouponReward) => {
+    if (reward.type === 'point') return `${(reward.points || 0).toLocaleString()}P`;
+    if (reward.type === 'card') return `${reward.label || reward.channel_id || '스트리머'} 카드 ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'cosmetic') return `${reward.label || `아이템#${reward.item_id}`} ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
+    return `추가 무료 소환 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
+  };
+
   const handleClaimCoupon = async () => {
     const normalizedCouponCode = couponCode.trim().toUpperCase();
     if (!normalizedCouponCode) {
@@ -340,9 +358,10 @@ export const MyInfoTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast(data.message);
-        if (data.points_added) updatePoints(data.points_added);
-        // 카드 보상이면 보관함 갱신
-        if (data.reward_type === 'card') fetchInventory();
+        const rewards = Array.isArray(data.rewards) ? data.rewards as ClaimedCouponReward[] : [];
+        if (data.points_added) updatePoints(Number(data.points_added));
+        if (rewards.some((reward) => reward.type === 'card') || data.reward_type === 'card') fetchInventory();
+        setLastCouponClaim({ message: data.message || '쿠폰 보상이 지급되었습니다.', rewards });
         setCouponCode('');
       } else {
         toast(data.message || '쿠폰 등록 실패');
@@ -916,13 +935,29 @@ export const MyInfoTab: React.FC = () => {
       {/* 쿠폰 입력 */}
       <section data-tour="my-info-coupon" ref={couponSectionRef} className="cute-surface rounded-[2rem] p-6 space-y-4">
         <h3 className="text-base font-bold flex items-center gap-2"><Tag className="h-4.5 w-4.5 text-primary" /> 리딤 쿠폰 등록</h3>
-        <p className="text-xs text-muted-foreground">발급된 쿠폰 코드를 입력하시면 포인트가 즉시 지급됩니다.</p>
+        <p className="text-xs text-muted-foreground">발급된 쿠폰 코드를 입력하시면 설정된 보상이 한 번에 지급됩니다.</p>
         <div className="flex gap-2">
           <input ref={couponInputRef} type="text" placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
             onChange={(e) => setCouponCode(e.target.value)}
             className="flex-1 rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none" />
           <button onClick={handleClaimCoupon} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2 text-xs font-black text-primary-foreground">등록</button>
         </div>
+        {lastCouponClaim && (
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3">
+            <p className="text-[11px] font-black text-primary">최근 쿠폰 보상</p>
+            {lastCouponClaim.rewards.length > 0 ? (
+              <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                {lastCouponClaim.rewards.map((reward, index) => (
+                  <div key={`${reward.type}-${index}`} className="rounded-xl bg-card/80 px-3 py-2 text-[11px] font-bold text-foreground shadow-sm">
+                    {couponRewardText(reward)}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-[11px] text-muted-foreground">{lastCouponClaim.message}</p>
+            )}
+          </div>
+        )}
       </section>
 
       {/* 알림 & 앱 설치 */}

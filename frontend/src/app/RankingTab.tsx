@@ -62,6 +62,7 @@ export const RankingTab: React.FC = () => {
   const [cardFilterChannelId, setCardFilterChannelId] = useState('');
   const [cardFilterStar, setCardFilterStar] = useState('');
   const fetchSeqRef = useRef(0);
+  const supportsCardHolderFilter = subTab === 'user' || subTab === 'cards';
   const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
 
   const findBestCardFilterMatch = (query: string): Streamer | null => {
@@ -115,10 +116,10 @@ export const RankingTab: React.FC = () => {
   }, [subTab, serverSearchQuery, cardFilterChannelId, cardFilterStar]);
 
   useEffect(() => {
-    if (subTab !== 'cards') return;
+    if (!supportsCardHolderFilter) return;
     const match = findBestCardFilterMatch(cardFilterName);
     setCardFilterChannelId(match ? match.channel_id : '');
-  }, [cardFilterName, streamers, subTab]);
+  }, [cardFilterName, streamers, supportsCardHolderFilter]);
 
   useEffect(() => {
     const handleTutorialSubTab = (event: Event) => {
@@ -150,7 +151,7 @@ export const RankingTab: React.FC = () => {
         const query = params.toString();
         const [rankings, streamerOptions] = await Promise.all([
           apiFetch(`/users/ranking${query ? `?${query}` : ''}`).then((res) => res.ok ? res.json() : null),
-          subTab === 'cards'
+          supportsCardHolderFilter
             ? apiFetch('/streamers/ranking?mode=value&limit=1000').then((res) => res.ok ? res.json() : null)
             : Promise.resolve(null)
         ]);
@@ -250,7 +251,7 @@ export const RankingTab: React.FC = () => {
           <p className="text-xs text-muted-foreground">
             {subTab === 'value' && '카드 가치(시세)가 높은 순으로 정렬됩니다.'}
             {subTab === 'change' && '최근 1시간 동안 시세가 가장 많이 오른 순으로 정렬됩니다.'}
-            {subTab === 'user' && '포인트와 보유 카드 가치를 합산한 총자산 순위입니다.'}
+            {subTab === 'user' && '포인트와 보유 카드 가치를 합산한 총자산 순위입니다. 특정 카드를 가진 사람만 필터링할 수 있습니다.'}
             {subTab === 'cards' && '포인트를 제외하고 보유 카드 가치만 합산한 순위입니다. 특정 카드를 가진 사람만 필터링할 수 있습니다.'}
           </p>
         </div>
@@ -295,7 +296,7 @@ export const RankingTab: React.FC = () => {
           />
         </div>
 
-        {subTab === 'cards' && (
+        {supportsCardHolderFilter && (
           <div data-tour="ranking-card-filter" className="mb-5 grid gap-2 rounded-2xl border border-primary/15 bg-primary/5 p-3 sm:grid-cols-[1fr_110px_auto] dark:bg-primary/10">
             <input
               value={cardFilterName}

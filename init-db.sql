@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS coupons (
     reward_channel_id TEXT,                    -- 지급 스트리머 채널 ID (reward_type='card')
     reward_item_id INTEGER,                    -- 지급 상점 아이템 ID (reward_type='cosmetic')
     reward_quantity INTEGER DEFAULT 0,         -- 지급 수량 (card/cosmetic/minigame_ticket/free_draw_ticket)
+    rewards TEXT NOT NULL DEFAULT '[]',        -- 다중 보상 JSON 배열. 비어 있으면 레거시 단일 보상 컬럼 사용
     max_uses INTEGER DEFAULT 1,                -- 발급 갯수 (single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,              -- 현재 사용 횟수
     expires_at TEXT,                           -- 유효 만료 기한 (ISO String)

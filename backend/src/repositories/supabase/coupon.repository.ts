@@ -20,6 +20,7 @@ import {
   Trade,
   AppNotification
 } from '../interfaces';
+import { parseCouponRewards, rewardsToJson, couponToRewards } from '../../utils/couponRewards';
 
 export class SupabaseCouponRepository implements ICouponRepository {
   private getClient() {
@@ -36,18 +37,19 @@ export class SupabaseCouponRepository implements ICouponRepository {
       .maybeSingle();
 
     if (error || !data) return null;
-    return data as Coupon;
+    return { ...(data as Coupon), rewards: parseCouponRewards((data as any).rewards) };
   }
 
   async create(coupon: Coupon): Promise<Coupon> {
+    const rewards = couponToRewards(coupon);
     const { data, error } = await this.getClient()
       .from('coupons')
-      .insert([coupon])
+      .insert([{ ...coupon, rewards: JSON.parse(rewardsToJson(rewards)) }])
       .select()
       .single();
 
     if (error) throw error;
-    return data as Coupon;
+    return { ...(data as Coupon), rewards: parseCouponRewards((data as any).rewards ?? rewardsToJson(rewards)) };
   }
 
   async incrementUsedCount(couponId: number): Promise<void> {
@@ -73,7 +75,10 @@ export class SupabaseCouponRepository implements ICouponRepository {
       .select('*')
       .order('id', { ascending: false });
     if (error) throw error;
-    return (data || []) as Coupon[];
+    return ((data || []) as Coupon[]).map((coupon) => ({
+      ...coupon,
+      rewards: parseCouponRewards((coupon as any).rewards)
+    }));
   }
 
   async checkCouponRedeemed(couponId: number, userId: string): Promise<boolean> {
@@ -121,7 +126,8 @@ export class SupabaseCouponRepository implements ICouponRepository {
       new_points: row.new_points === null || row.new_points === undefined ? undefined : Number(row.new_points),
       reward_channel_id: row.reward_channel_id ?? null,
       reward_item_id: row.reward_item_id ?? null,
-      reward_quantity: Number(row.reward_quantity) || 0
+      reward_quantity: Number(row.reward_quantity) || 0,
+      rewards: parseCouponRewards(row.rewards)
     };
   }
 }

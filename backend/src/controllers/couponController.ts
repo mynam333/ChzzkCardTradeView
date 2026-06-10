@@ -5,6 +5,107 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { getItem as getShopItem } from '../services/shopService';
 import { normalizeCouponCode } from '../utils/couponCode';
+import { CouponReward } from '../repositories/interfaces';
+import { COUPON_REWARD_TYPES, couponToRewards } from '../utils/couponRewards';
+
+const normalizePositiveInt = (value: unknown) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
+};
+
+const normalizeRewardsFromBody = (body: any): { rewards?: CouponReward[]; message?: string } => {
+  const rawRewards = Array.isArray(body.rewards) && body.rewards.length > 0
+    ? body.rewards
+    : [{
+        type: body.reward_type || 'point',
+        points: body.points,
+        channel_id: body.reward_channel_id,
+        item_id: body.reward_item_id,
+        quantity: body.reward_quantity
+  }];
+
+  if (rawRewards.length === 0) return { message: '쿠폰 보상을 1개 이상 설정해 주세요.' };
+
+  const rewards: CouponReward[] = [];
+  for (const rawReward of rawRewards) {
+    const type = rawReward?.type;
+    if (!COUPON_REWARD_TYPES.includes(type)) {
+      return { message: '보상 종류는 point · card · cosmetic · minigame_ticket · free_draw_ticket만 가능합니다.' };
+    }
+
+    if (type === 'point') {
+      const points = normalizePositiveInt(rawReward.points);
+      if (points <= 0) return { message: '재화 보상은 0보다 큰 지급 포인트가 필요합니다.' };
+      rewards.push({ type, points });
+    } else if (type === 'card') {
+      const channelId = String(rawReward.channel_id || '').trim();
+      const quantity = normalizePositiveInt(rawReward.quantity);
+      if (!channelId) return { message: '카드 보상은 지급할 스트리머 채널 ID가 필요합니다.' };
+      if (quantity <= 0) return { message: '카드 보상은 0보다 큰 지급 수량이 필요합니다.' };
+      rewards.push({ type, channel_id: channelId, quantity });
+    } else if (type === 'cosmetic') {
+      const itemId = normalizePositiveInt(rawReward.item_id);
+      const quantity = normalizePositiveInt(rawReward.quantity);
+      if (!itemId) return { message: '코스메틱 보상은 지급할 상점 아이템을 선택해야 합니다.' };
+      if (quantity <= 0) return { message: '코스메틱 보상은 0보다 큰 지급 수량이 필요합니다.' };
+      rewards.push({ type, item_id: itemId, quantity });
+    } else {
+      const quantity = normalizePositiveInt(rawReward.quantity);
+      if (quantity <= 0) {
+        return { message: type === 'free_draw_ticket' ? '무료 소환 티켓 보상은 0보다 큰 지급 수량이 필요합니다.' : '미니게임 티켓 보상은 0보다 큰 지급 수량이 필요합니다.' };
+      }
+      rewards.push({ type, quantity });
+    }
+  }
+
+  return { rewards };
+};
+
+const legacyFieldsFromReward = (reward: CouponReward) => ({
+  reward_type: reward.type,
+  points: reward.type === 'point' ? Number(reward.points || 0) : 0,
+  reward_channel_id: reward.type === 'card' ? reward.channel_id || null : null,
+  reward_item_id: reward.type === 'cosmetic' ? Number(reward.item_id || 0) : null,
+  reward_quantity: reward.type === 'point' ? 0 : Number(reward.quantity || 0)
+});
+
+const rewardSummary = (reward: CouponReward) => {
+  if (reward.type === 'point') return `${Number(reward.points || 0).toLocaleString()}P`;
+  if (reward.type === 'card') return `${reward.label || reward.channel_id || '스트리머'} 카드 ×${Number(reward.quantity || 0).toLocaleString()}`;
+  if (reward.type === 'cosmetic') return `${reward.label || `아이템#${reward.item_id}`} ×${Number(reward.quantity || 0).toLocaleString()}`;
+  if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ×${Number(reward.quantity || 0).toLocaleString()}`;
+  return `추가 무료 소환 티켓 ×${Number(reward.quantity || 0).toLocaleString()}`;
+};
+
+const enrichRewards = async (rewards: CouponReward[]): Promise<{ rewards?: CouponReward[]; status?: number; message?: string }> => {
+  const streamerNames = new Map<string, string>();
+  const itemNames = new Map<number, string>();
+  const enriched: CouponReward[] = [];
+
+  for (const reward of rewards) {
+    if (reward.type === 'card') {
+      const channelId = reward.channel_id || '';
+      if (!streamerNames.has(channelId)) {
+        const streamer = await streamerRepository.findById(channelId);
+        if (!streamer) return { status: 404, message: '지급할 스트리머 카드를 찾을 수 없습니다.' };
+        streamerNames.set(channelId, streamer.name);
+      }
+      enriched.push({ ...reward, label: streamerNames.get(channelId) });
+    } else if (reward.type === 'cosmetic') {
+      const itemId = Number(reward.item_id || 0);
+      if (!itemNames.has(itemId)) {
+        const item = await getShopItem(itemId);
+        if (!item) return { status: 404, message: '지급할 상점 아이템을 찾을 수 없습니다.' };
+        itemNames.set(itemId, item.name);
+      }
+      enriched.push({ ...reward, label: itemNames.get(itemId) });
+    } else {
+      enriched.push(reward);
+    }
+  }
+
+  return { rewards: enriched };
+};
 
 /**
  * 1. 쿠폰 생성 (ADMIN 전용)
@@ -22,11 +123,6 @@ export const createCoupon = async (req: Request, res: Response) => {
   const {
     code,
     coupon_type,
-    reward_type = 'point',
-    points,
-    reward_channel_id,
-    reward_item_id,
-    reward_quantity,
     max_uses,
     expires_at
   } = req.body;
@@ -34,60 +130,15 @@ export const createCoupon = async (req: Request, res: Response) => {
   if (!['single', 'multi'].includes(coupon_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '쿠폰 타입은 single 또는 multi만 가능합니다.' });
   }
-  if (!['point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket'].includes(reward_type)) {
-    return res.status(400).json({ error: 'BadRequest', message: '보상 종류는 point · card · cosmetic · minigame_ticket · free_draw_ticket만 가능합니다.' });
-  }
-
-  // 보상 종류별 필수값 검증
-  let rewardPoints = 0;
-  let rewardChannelId: string | null = null;
-  let rewardItemId: number | null = null;
-  let rewardQuantity = 0;
-
-  if (reward_type === 'point') {
-    rewardPoints = Number(points);
-    if (!rewardPoints || rewardPoints <= 0) {
-      return res.status(400).json({ error: 'BadRequest', message: '재화 쿠폰은 0보다 큰 지급 포인트가 필요합니다.' });
-    }
-  } else if (reward_type === 'card') {
-    rewardChannelId = reward_channel_id;
-    rewardQuantity = Number(reward_quantity);
-    if (!rewardChannelId) {
-      return res.status(400).json({ error: 'BadRequest', message: '카드 쿠폰은 지급할 스트리머 채널 ID가 필요합니다.' });
-    }
-    if (!rewardQuantity || rewardQuantity <= 0) {
-      return res.status(400).json({ error: 'BadRequest', message: '카드 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
-    }
-  } else if (reward_type === 'cosmetic') {
-    rewardItemId = Number(reward_item_id);
-    rewardQuantity = Number(reward_quantity);
-    if (!rewardItemId) {
-      return res.status(400).json({ error: 'BadRequest', message: '코스메틱 쿠폰은 지급할 상점 아이템을 선택해야 합니다.' });
-    }
-    if (!rewardQuantity || rewardQuantity <= 0) {
-      return res.status(400).json({ error: 'BadRequest', message: '코스메틱 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
-    }
-  } else {
-    rewardQuantity = Number(reward_quantity);
-    if (!rewardQuantity || rewardQuantity <= 0) {
-      return res.status(400).json({ error: 'BadRequest', message: reward_type === 'free_draw_ticket' ? '무료 소환 티켓 쿠폰은 0보다 큰 지급 수량이 필요합니다.' : '미니게임 티켓 쿠폰은 0보다 큰 지급 수량이 필요합니다.' });
-    }
+  const normalized = normalizeRewardsFromBody(req.body);
+  if (!normalized.rewards) {
+    return res.status(400).json({ error: 'BadRequest', message: normalized.message || '쿠폰 보상 정보가 올바르지 않습니다.' });
   }
 
   try {
-    // 카드 보상이면 스트리머 실존 여부 확인
-    if (reward_type === 'card' && rewardChannelId) {
-      const streamer = await streamerRepository.findById(rewardChannelId);
-      if (!streamer) {
-        return res.status(404).json({ error: 'NotFound', message: '지급할 스트리머 카드를 찾을 수 없습니다.' });
-      }
-    }
-    // 코스메틱 보상이면 상점 아이템 실존 여부 확인
-    if (reward_type === 'cosmetic' && rewardItemId) {
-      const item = await getShopItem(rewardItemId);
-      if (!item) {
-        return res.status(404).json({ error: 'NotFound', message: '지급할 상점 아이템을 찾을 수 없습니다.' });
-      }
+    const enriched = await enrichRewards(normalized.rewards);
+    if (!enriched.rewards) {
+      return res.status(enriched.status || 400).json({ error: enriched.status === 404 ? 'NotFound' : 'BadRequest', message: enriched.message || '쿠폰 보상 정보가 올바르지 않습니다.' });
     }
 
     let finalCode = normalizeCouponCode(code);
@@ -103,15 +154,17 @@ export const createCoupon = async (req: Request, res: Response) => {
 
     // single: 발급 갯수(>=1), multi: 0(무제한)
     const maxUsesCount = coupon_type === 'single' ? Math.max(1, Number(max_uses) || 1) : 0;
+    const legacy = legacyFieldsFromReward(enriched.rewards[0]);
 
     const coupon = await couponRepository.create({
       code: finalCode,
       coupon_type,
-      reward_type,
-      points: rewardPoints,
-      reward_channel_id: rewardChannelId,
-      reward_item_id: rewardItemId,
-      reward_quantity: rewardQuantity,
+      reward_type: legacy.reward_type,
+      points: legacy.points,
+      reward_channel_id: legacy.reward_channel_id,
+      reward_item_id: legacy.reward_item_id,
+      reward_quantity: legacy.reward_quantity,
+      rewards: enriched.rewards,
       max_uses: maxUsesCount,
       used_count: 0,
       expires_at: expires_at || null,
@@ -160,27 +213,13 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(500).json({ error: 'InternalServerError', message: '올바르지 않은 쿠폰 상태입니다.' });
     }
 
-    // 카드 보상이면 지급 전에 스트리머 실존 여부 확인 (로그 기록 전 사전 검증)
-    let rewardStreamer = null;
-    if (coupon.reward_type === 'card') {
-      if (!coupon.reward_channel_id) {
-        return res.status(500).json({ error: 'InternalServerError', message: '카드 쿠폰 정보가 올바르지 않습니다.' });
-      }
-      rewardStreamer = await streamerRepository.findById(coupon.reward_channel_id);
-      if (!rewardStreamer) {
-        return res.status(404).json({ error: 'NotFound', message: '지급 대상 스트리머 카드를 더 이상 찾을 수 없습니다.' });
-      }
-    }
-    // 코스메틱 보상이면 지급 전에 아이템 실존 여부 확인
-    let rewardItem = null;
-    if (coupon.reward_type === 'cosmetic') {
-      if (!coupon.reward_item_id) {
-        return res.status(500).json({ error: 'InternalServerError', message: '코스메틱 쿠폰 정보가 올바르지 않습니다.' });
-      }
-      rewardItem = await getShopItem(coupon.reward_item_id);
-      if (!rewardItem) {
-        return res.status(404).json({ error: 'NotFound', message: '지급 대상 코스메틱 아이템을 더 이상 찾을 수 없습니다.' });
-      }
+    const rewards = couponToRewards(coupon);
+    const enriched = await enrichRewards(rewards);
+    if (!enriched.rewards) {
+      return res.status(enriched.status || 500).json({
+        error: enriched.status === 404 ? 'NotFound' : 'InternalServerError',
+        message: enriched.message || '쿠폰 보상 정보가 올바르지 않습니다.'
+      });
     }
 
     const redeem = await couponRepository.redeemAtomic(coupon.id, userId);
@@ -197,50 +236,18 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 보상 지급에 실패했습니다.' });
     }
 
-    if (coupon.reward_type === 'card' && rewardStreamer) {
-      return res.status(200).json({
-        message: `쿠폰이 등록되어 '${rewardStreamer.name}' 카드 ${coupon.reward_quantity}장이 지급되었습니다!`,
-        reward_type: 'card',
-        reward_channel_id: rewardStreamer.channel_id,
-        reward_quantity: coupon.reward_quantity,
-        points_added: 0
-      });
-    }
+    const rewardList = enriched.rewards;
+    const pointsAdded = redeem.points_added ?? rewardList.reduce((sum, reward) => sum + (reward.type === 'point' ? Number(reward.points || 0) : 0), 0);
+    const message = rewardList.length === 1
+      ? `쿠폰이 등록되어 ${rewardSummary(rewardList[0])} 보상이 지급되었습니다.`
+      : `쿠폰이 등록되어 ${rewardList.length}개의 보상이 지급되었습니다: ${rewardList.map(rewardSummary).join(', ')}`;
 
-    if (coupon.reward_type === 'cosmetic' && rewardItem) {
-      return res.status(200).json({
-        message: `쿠폰이 등록되어 '${rewardItem.name}' 코스메틱 ${coupon.reward_quantity}개가 지급되었습니다! (상점 보관함에서 확인)`,
-        reward_type: 'cosmetic',
-        reward_item_id: rewardItem.id,
-        reward_quantity: coupon.reward_quantity,
-        points_added: 0
-      });
-    }
-
-    if (coupon.reward_type === 'minigame_ticket') {
-      return res.status(200).json({
-        message: `쿠폰이 등록되어 추가 미니게임 티켓 ${coupon.reward_quantity}장이 지급되었습니다!`,
-        reward_type: 'minigame_ticket',
-        reward_quantity: coupon.reward_quantity,
-        points_added: 0
-      });
-    }
-
-    if (coupon.reward_type === 'free_draw_ticket') {
-      return res.status(200).json({
-        message: `쿠폰이 등록되어 추가 무료 소환 티켓 ${coupon.reward_quantity}장이 지급되었습니다!`,
-        reward_type: 'free_draw_ticket',
-        reward_quantity: coupon.reward_quantity,
-        points_added: 0
-      });
-    }
-
-    // 포인트 보상 지급
     return res.status(200).json({
-      message: `쿠폰이 정상적으로 등록되어 ${coupon.points}포인트가 지급되었습니다.`,
-      reward_type: 'point',
-      points_added: coupon.points,
-      new_points: redeem.new_points ?? coupon.points
+      message,
+      reward_type: rewardList.length === 1 ? rewardList[0].type : 'multiple',
+      rewards: rewardList,
+      points_added: pointsAdded,
+      new_points: redeem.new_points ?? pointsAdded
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '쿠폰 사용 실패', details: IS_PRODUCTION ? undefined : err.message });

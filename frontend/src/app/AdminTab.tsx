@@ -25,7 +25,7 @@ import {
   Ticket
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import type { AdminReport, OrphanImage, ShopItem, Coupon, Announcement } from '@/lib/types';
+import type { AdminReport, OrphanImage, ShopItem, Coupon, CouponReward, CouponRewardType, Announcement } from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
@@ -60,6 +60,14 @@ const couponExpirationFormatter = new Intl.DateTimeFormat('ko-KR', {
   minute: '2-digit',
   hour12: true
 });
+
+const emptyCouponRewardDraft = {
+  type: 'point' as CouponRewardType,
+  points: 1000,
+  channel_id: '',
+  item_id: 0,
+  quantity: 1
+};
 
 export const AdminTab: React.FC = () => {
   const { user, toast, checkMaintenanceStatus } = useApp();
@@ -146,14 +154,11 @@ export const AdminTab: React.FC = () => {
   const [couponForm, setCouponForm] = useState({
     code: '',
     coupon_type: 'single' as 'single' | 'multi',
-    reward_type: 'point' as 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket',
-    points: 1000,
-    reward_channel_id: '',
-    reward_item_id: 0,
-    reward_quantity: 1,
+    rewards: [] as CouponReward[],
     max_uses: 1,
     expires_at: ''
   });
+  const [couponRewardDraft, setCouponRewardDraft] = useState({ ...emptyCouponRewardDraft });
   // 쿠폰 코스메틱 보상용 상점 아이템 목록
   const [couponCosmetics, setCouponCosmetics] = useState<any[]>([]);
 
@@ -284,6 +289,63 @@ export const AdminTab: React.FC = () => {
   // 카드 보상 쿠폰 목록 표시용 채널ID→이름 매핑
   const streamerName = (channelId: string) =>
     couponStreamers.find((s) => s.channel_id === channelId)?.name || channelId;
+  const couponItemName = (itemId?: number | null) =>
+    couponCosmetics.find((it) => it.id === itemId)?.name || `아이템#${itemId}`;
+  const couponRewards = (coupon: Coupon): CouponReward[] => {
+    if (Array.isArray(coupon.rewards) && coupon.rewards.length > 0) return coupon.rewards;
+    if (coupon.reward_type === 'point') return [{ type: 'point', points: coupon.points || 0 }];
+    if (coupon.reward_type === 'card') return [{ type: 'card', channel_id: coupon.reward_channel_id, quantity: coupon.reward_quantity || 0 }];
+    if (coupon.reward_type === 'cosmetic') return [{ type: 'cosmetic', item_id: coupon.reward_item_id, quantity: coupon.reward_quantity || 0 }];
+    return [{ type: coupon.reward_type, quantity: coupon.reward_quantity || 0 }];
+  };
+  const rewardText = (reward: CouponReward) => {
+    if (reward.type === 'point') return `💰 ${(reward.points || 0).toLocaleString()}P`;
+    if (reward.type === 'card') return `🃏 ${reward.label || streamerName(reward.channel_id || '')} 카드 ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'cosmetic') return `🎨 ${reward.label || couponItemName(reward.item_id)} ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'minigame_ticket') return `🎮 추가 미니게임 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
+    return `🎟 추가 무료 소환 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
+  };
+  const addCouponReward = () => {
+    const type = couponRewardDraft.type;
+    let reward: CouponReward | null = null;
+    if (type === 'point') {
+      if (!couponRewardDraft.points || couponRewardDraft.points <= 0) {
+        toast('지급할 포인트를 입력해 주세요.');
+        return;
+      }
+      reward = { type, points: Number(couponRewardDraft.points) };
+    } else if (type === 'card') {
+      if (!couponRewardDraft.channel_id) {
+        toast('지급할 스트리머 카드를 선택해 주세요.');
+        return;
+      }
+      if (!couponRewardDraft.quantity || couponRewardDraft.quantity <= 0) {
+        toast('지급할 카드 수량을 입력해 주세요.');
+        return;
+      }
+      reward = { type, channel_id: couponRewardDraft.channel_id, quantity: Number(couponRewardDraft.quantity) };
+    } else if (type === 'cosmetic') {
+      if (!couponRewardDraft.item_id) {
+        toast('지급할 코스메틱 아이템을 선택해 주세요.');
+        return;
+      }
+      if (!couponRewardDraft.quantity || couponRewardDraft.quantity <= 0) {
+        toast('지급할 코스메틱 수량을 입력해 주세요.');
+        return;
+      }
+      reward = { type, item_id: Number(couponRewardDraft.item_id), quantity: Number(couponRewardDraft.quantity) };
+    } else {
+      if (!couponRewardDraft.quantity || couponRewardDraft.quantity <= 0) {
+        toast(type === 'free_draw_ticket' ? '지급할 추가 무료 소환 티켓 수량을 입력해 주세요.' : '지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
+        return;
+      }
+      reward = { type, quantity: Number(couponRewardDraft.quantity) };
+    }
+    setCouponForm((prev) => ({ ...prev, rewards: [...prev.rewards, reward!] }));
+  };
+  const removeCouponReward = (index: number) => {
+    setCouponForm((prev) => ({ ...prev, rewards: prev.rewards.filter((_, i) => i !== index) }));
+  };
   const fetchAnnouncements = async () => {
     try {
       const res = await apiFetch('/announcements');
@@ -298,16 +360,8 @@ export const AdminTab: React.FC = () => {
   };
 
   const handleCreateCoupon = async () => {
-    if (couponForm.reward_type === 'card' && !couponForm.reward_channel_id) {
-      toast('지급할 스트리머 카드를 선택해 주세요.');
-      return;
-    }
-    if (couponForm.reward_type === 'cosmetic' && !couponForm.reward_item_id) {
-      toast('지급할 코스메틱 아이템을 선택해 주세요.');
-      return;
-    }
-    if ((couponForm.reward_type === 'minigame_ticket' || couponForm.reward_type === 'free_draw_ticket') && (!couponForm.reward_quantity || couponForm.reward_quantity <= 0)) {
-      toast(couponForm.reward_type === 'free_draw_ticket' ? '지급할 추가 무료 소환 티켓 수량을 입력해 주세요.' : '지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
+    if (couponForm.rewards.length === 0) {
+      toast('쿠폰에 지급할 보상을 1개 이상 추가해 주세요.');
       return;
     }
     // 만료 일시는 datetime-local → ISO 변환
@@ -320,7 +374,8 @@ export const AdminTab: React.FC = () => {
       const data = await res.json();
       if (res.ok) {
         toast(`쿠폰이 발급되었습니다.\n코드: ${data.code}`);
-        setCouponForm({ code: '', coupon_type: 'single', reward_type: 'point', points: 1000, reward_channel_id: '', reward_item_id: 0, reward_quantity: 1, max_uses: 1, expires_at: '' });
+        setCouponForm({ code: '', coupon_type: 'single', rewards: [], max_uses: 1, expires_at: '' });
+        setCouponRewardDraft({ ...emptyCouponRewardDraft });
         setCouponStreamerSearch('');
         fetchCoupons();
       } else {
@@ -1143,28 +1198,29 @@ export const AdminTab: React.FC = () => {
               </div>
             </div>
 
-            {/* 보상 종류 */}
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground block mb-1">보상 종류</label>
-              <select value={couponForm.reward_type}
-                onChange={(e) => setCouponForm({ ...couponForm, reward_type: e.target.value as any })}
-                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
-                <option value="point">재화 (포인트)</option>
-                <option value="card">스트리머 카드</option>
-                <option value="cosmetic">코스메틱 아이템</option>
-                <option value="minigame_ticket">추가 미니게임 티켓</option>
-                <option value="free_draw_ticket">추가 무료 소환 티켓</option>
-              </select>
-            </div>
+            {/* 보상 추가 */}
+            <div className="space-y-3 rounded-xl border border-border/70 bg-secondary/20 p-3">
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground block mb-1">추가할 보상 종류</label>
+                <select value={couponRewardDraft.type}
+                  onChange={(e) => setCouponRewardDraft({ ...emptyCouponRewardDraft, type: e.target.value as CouponRewardType })}
+                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs">
+                  <option value="point">재화 (포인트)</option>
+                  <option value="card">스트리머 카드</option>
+                  <option value="cosmetic">코스메틱 아이템</option>
+                  <option value="minigame_ticket">추가 미니게임 티켓</option>
+                  <option value="free_draw_ticket">추가 무료 소환 티켓</option>
+                </select>
+              </div>
 
-            {couponForm.reward_type === 'point' && (
-              <input type="number" min={1} placeholder="지급 포인트" value={couponForm.points}
-                onChange={(e) => setCouponForm({ ...couponForm, points: Number(e.target.value) })}
-                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
-            )}
+              {couponRewardDraft.type === 'point' && (
+                <input type="number" min={1} placeholder="지급 포인트" value={couponRewardDraft.points}
+                  onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, points: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs" />
+              )}
 
-            {couponForm.reward_type === 'card' && (
-              <div className="space-y-2 rounded-lg border border-border/60 bg-secondary/20 p-2.5">
+              {couponRewardDraft.type === 'card' && (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-card/70 p-2.5">
                 <input type="text" placeholder="스트리머 검색" value={couponStreamerSearch}
                   onChange={(e) => setCouponStreamerSearch(e.target.value)}
                   className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs" />
@@ -1174,8 +1230,8 @@ export const AdminTab: React.FC = () => {
                     .slice(0, 20)
                     .map((s) => (
                       <button key={s.channel_id}
-                        onClick={() => setCouponForm({ ...couponForm, reward_channel_id: s.channel_id })}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_channel_id === s.channel_id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
+                        onClick={() => setCouponRewardDraft({ ...couponRewardDraft, channel_id: s.channel_id })}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponRewardDraft.channel_id === s.channel_id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
                         <img src={streamerProfileImage(s)} alt={s.name} className="h-6 w-6 rounded-full object-cover" />
                         <span className="text-[11px] font-bold truncate">{s.name}</span>
                       </button>
@@ -1183,23 +1239,23 @@ export const AdminTab: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">지급 수량</span>
-                  <input type="number" min={1} value={couponForm.reward_quantity}
-                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                  <input type="number" min={1} value={couponRewardDraft.quantity}
+                    onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, quantity: Number(e.target.value) })}
                     className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-xs" />
                 </div>
               </div>
-            )}
+              )}
 
-            {couponForm.reward_type === 'cosmetic' && (
-              <div className="space-y-2 rounded-lg border border-border/60 bg-secondary/20 p-2.5">
+              {couponRewardDraft.type === 'cosmetic' && (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-card/70 p-2.5">
                 {couponCosmetics.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground py-2 text-center">등록된 코스메틱 아이템이 없습니다. 상점 관리에서 먼저 추가하세요.</p>
                 ) : (
                   <div className="max-h-40 overflow-y-auto space-y-1">
                     {couponCosmetics.map((it) => (
                       <button key={it.id}
-                        onClick={() => setCouponForm({ ...couponForm, reward_item_id: it.id })}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponForm.reward_item_id === it.id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
+                        onClick={() => setCouponRewardDraft({ ...couponRewardDraft, item_id: it.id })}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponRewardDraft.item_id === it.id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
                         {it.type === 'border' ? (
                           <div className="relative h-7 w-5 shrink-0 overflow-hidden rounded bg-gradient-to-br from-secondary to-card border border-border/70"
                             style={{
@@ -1221,14 +1277,14 @@ export const AdminTab: React.FC = () => {
                 )}
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">지급 수량</span>
-                  <input type="number" min={1} value={couponForm.reward_quantity}
-                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                  <input type="number" min={1} value={couponRewardDraft.quantity}
+                    onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, quantity: Number(e.target.value) })}
                     className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-xs" />
                 </div>
               </div>
-            )}
+              )}
 
-            {couponForm.reward_type === 'minigame_ticket' && (
+              {couponRewardDraft.type === 'minigame_ticket' && (
               <div className="overflow-hidden rounded-xl border border-sky-500/25 bg-gradient-to-br from-sky-500/10 via-secondary/20 to-primary/10 p-3">
                 <div className="flex items-start gap-3">
                   <div className="rounded-lg bg-sky-500/15 p-2 text-sky-400 ring-1 ring-sky-500/25">
@@ -1243,15 +1299,15 @@ export const AdminTab: React.FC = () => {
                 </div>
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 bg-card/70 px-3 py-2">
                   <span className="text-[11px] font-bold text-muted-foreground">지급 수량</span>
-                  <input type="number" min={1} value={couponForm.reward_quantity}
-                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                  <input type="number" min={1} value={couponRewardDraft.quantity}
+                    onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, quantity: Number(e.target.value) })}
                     className="ml-auto w-24 rounded-lg border border-border bg-secondary/40 px-2 py-1.5 text-xs font-bold" />
                   <span className="text-[10px] font-black text-sky-400">tickets</span>
                 </div>
               </div>
-            )}
+              )}
 
-            {couponForm.reward_type === 'free_draw_ticket' && (
+              {couponRewardDraft.type === 'free_draw_ticket' && (
               <div className="overflow-hidden rounded-xl border border-violet-500/25 bg-gradient-to-br from-violet-500/10 via-secondary/20 to-sky-500/10 p-3">
                 <div className="flex items-start gap-3">
                   <div className="rounded-lg bg-violet-500/15 p-2 text-violet-400 ring-1 ring-violet-500/25">
@@ -1266,13 +1322,43 @@ export const AdminTab: React.FC = () => {
                 </div>
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 bg-card/70 px-3 py-2">
                   <span className="text-[11px] font-bold text-muted-foreground">지급 수량</span>
-                  <input type="number" min={1} value={couponForm.reward_quantity}
-                    onChange={(e) => setCouponForm({ ...couponForm, reward_quantity: Number(e.target.value) })}
+                  <input type="number" min={1} value={couponRewardDraft.quantity}
+                    onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, quantity: Number(e.target.value) })}
                     className="ml-auto w-24 rounded-lg border border-border bg-secondary/40 px-2 py-1.5 text-xs font-bold" />
                   <span className="text-[10px] font-black text-violet-400">tickets</span>
                 </div>
               </div>
-            )}
+              )}
+
+              <button type="button" onClick={addCouponReward} className="w-full rounded-lg border border-primary/30 bg-primary/10 py-2 text-xs font-bold text-primary hover:bg-primary hover:text-primary-foreground">
+                보상 추가
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-border/70 bg-card p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-muted-foreground">지급될 보상 ({couponForm.rewards.length})</span>
+                {couponForm.rewards.length > 0 && (
+                  <button type="button" onClick={() => setCouponForm({ ...couponForm, rewards: [] })} className="text-[10px] font-bold text-muted-foreground hover:text-destructive">
+                    전체 비우기
+                  </button>
+                )}
+              </div>
+              {couponForm.rewards.length === 0 ? (
+                <p className="rounded-lg bg-secondary/30 px-3 py-4 text-center text-[11px] text-muted-foreground">추가된 보상이 없습니다.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {couponForm.rewards.map((reward, index) => (
+                    <div key={`${reward.type}-${index}`} className="flex items-center justify-between gap-2 rounded-lg bg-secondary/35 px-3 py-2">
+                      <span className="min-w-0 truncate text-[11px] font-bold">{index + 1}. {rewardText(reward)}</span>
+                      <button type="button" onClick={() => removeCouponReward(index)} className="shrink-0 rounded bg-background px-2 py-1 text-[10px] font-bold text-muted-foreground hover:text-destructive">
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* 사용 가능 기간 (만료 일시) */}
             <div>
@@ -1294,21 +1380,13 @@ export const AdminTab: React.FC = () => {
               {coupons.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">발급된 쿠폰이 없습니다.</p>
               ) : coupons.map((c) => {
-                const reward = c.reward_type === 'card'
-                  ? `🃏 ${streamerName(c.reward_channel_id || '')} 카드 ×${c.reward_quantity}`
-                  : c.reward_type === 'cosmetic'
-                  ? `🎨 ${couponCosmetics.find((it) => it.id === c.reward_item_id)?.name || `아이템#${c.reward_item_id}`} ×${c.reward_quantity}`
-                  : c.reward_type === 'minigame_ticket'
-                  ? `🎮 추가 미니게임 티켓 ×${c.reward_quantity}`
-                  : c.reward_type === 'free_draw_ticket'
-                  ? `🎟️ 추가 무료 소환 티켓 ×${c.reward_quantity}`
-                  : `💰 ${(c.points || 0).toLocaleString()}P`;
+                const rewards = couponRewards(c);
                 return (
                   <div key={c.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-xs font-bold font-mono truncate">{c.code}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {c.coupon_type === 'single' ? '일회성' : '다회성'} · {reward}
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        {c.coupon_type === 'single' ? '일회성' : '다회성'} · {rewards.map(rewardText).join(' · ')}
                         {c.expires_at ? ` · ~${couponExpirationFormatter.format(new Date(c.expires_at))}` : ' · 무기한'}
                       </p>
                     </div>

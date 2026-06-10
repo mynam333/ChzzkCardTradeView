@@ -87,17 +87,29 @@ export interface StreamerScheduleResult {
   last_broadcast_at?: string | null;
 }
 
+export type CouponRewardType = 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+
+export interface CouponReward {
+  type: CouponRewardType;
+  points?: number;
+  channel_id?: string | null;
+  item_id?: number | null;
+  quantity?: number;
+  label?: string;
+}
+
 export interface Coupon {
   id?: number;
   code: string;
   // single: 선착순 발급 갯수(max_uses) 제한, multi: 기간 내 1인 1회 · 총량 무제한
   coupon_type: 'single' | 'multi';
   // 보상 종류: point(재화) | card(스트리머 카드) | cosmetic(코스메틱 아이템) | minigame_ticket(추가 미니게임 티켓) | free_draw_ticket(추가 무료 소환 티켓)
-  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+  reward_type: CouponRewardType;
   points: number;                     // reward_type === 'point' 일 때 지급 재화량
   reward_channel_id: string | null;   // reward_type === 'card' 일 때 지급 스트리머 채널 ID
   reward_item_id?: number | null;     // reward_type === 'cosmetic' 일 때 지급 상점 아이템 ID
   reward_quantity: number;            // card/cosmetic/minigame_ticket/free_draw_ticket 일 때 지급 수량
+  rewards?: CouponReward[];           // 다중 보상. 비어 있으면 위 레거시 단일 보상 컬럼을 사용합니다.
   max_uses: number;                   // single: 발급 갯수, multi: 0(무제한)
   used_count: number;
   expires_at: string | null;
@@ -107,12 +119,13 @@ export interface Coupon {
 export interface CouponRedeemResult {
   ok: boolean;
   reason: string;
-  reward_type?: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+  reward_type?: CouponRewardType;
   points_added?: number;
   new_points?: number;
   reward_channel_id?: string | null;
   reward_item_id?: number | null;
   reward_quantity?: number;
+  rewards?: CouponReward[];
 }
 
 export interface CardReport {
@@ -404,8 +417,8 @@ export interface IUserCardRepository {
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
   deleteCards(userId: string, channelId: string, count: number): Promise<number>;
   count(): Promise<number>;
-  /** 대상 카드의 별을 올리고 같은 스트리머의 0성 카드 1장을 재료로 소모합니다. */
-  fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }>;
+  /** 대상 카드의 별을 올리고 같은 스트리머 카드를 재료로 소모합니다. */
+  fuse(userId: string, channelId: string, star: number, materials?: { star: number; count: number }[]): Promise<{ ok: boolean; reason: string; newStar?: number }>;
   /** 특정 스트리머 카드의 보유자·별 목록(보상 계산용). */
   findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */

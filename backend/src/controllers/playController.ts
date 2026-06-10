@@ -523,7 +523,11 @@ export const getUserProfile = async (req: Request, res: Response) => {
     if (!data) {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
-    res.set('Cache-Control', 'public, max-age=30');
+    if (typeof res.set === 'function') {
+      res.set('Cache-Control', 'public, max-age=30');
+    } else if (typeof res.setHeader === 'function') {
+      res.setHeader('Cache-Control', 'public, max-age=30');
+    }
     return res.status(200).json(data);
   } catch (err: any) {
     console.error('[PlayController] getUserProfile 에러:', err);
@@ -1236,17 +1240,46 @@ export const sellCards = async (req: Request, res: Response) => {
 export const starValueMultiplier = (star: number): number => 1 + (star || 0) * 0.8;
 
 /**
- * 카드 한계돌파: 대상 카드 별 상승 + 같은 스트리머의 0성 카드 1장 소모
- * POST /api/cards/fuse  Body: { channel_id, star }
+ * 카드 한계돌파: 대상 카드 별 상승 + 같은 스트리머 카드 재료 소모
+ * POST /api/cards/fuse  Body: { channel_id, star, materials?: [{ star, count }] }
  */
 export const fuseCards = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
 
-  const { channel_id, star } = req.body;
+  const { channel_id, star, materials } = req.body;
   const starNum = Number(star) || 0;
   if (!channel_id) return res.status(400).json({ error: 'BadRequest', message: '합성할 카드(channel_id)가 필요합니다.' });
   if (starNum < 0 || starNum >= 5) return res.status(400).json({ error: 'BadRequest', message: '0~4성 카드만 합성할 수 있습니다.' });
+
+  if (materials != null && !Array.isArray(materials)) {
+    return res.status(400).json({ error: 'BadRequest', message: '한계돌파 재료 형식이 올바르지 않습니다.' });
+  }
+
+  const materialMap = new Map<number, number>();
+  const rawMaterials = Array.isArray(materials) ? materials : [{ star: 0, count: 1 }];
+  for (const material of rawMaterials) {
+    const materialStar = Math.floor(Number(material?.star));
+    const materialCount = Math.floor(Number(material?.count));
+    if (!Number.isFinite(materialStar) || !Number.isFinite(materialCount) || materialStar < 0 || materialStar > 4 || materialCount <= 0 || materialCount > 1000) {
+      return res.status(400).json({ error: 'BadRequest', message: '한계돌파 재료는 0~4성 카드와 1개 이상의 수량만 선택할 수 있습니다.' });
+    }
+    materialMap.set(materialStar, (materialMap.get(materialStar) || 0) + materialCount);
+  }
+
+  const normalizedMaterials = Array.from(materialMap.entries()).map(([materialStar, count]) => ({ star: materialStar, count }));
+  const fuseGain = normalizedMaterials.reduce((sum, material) => sum + ((material.star + 1) * material.count), 0);
+  const resultStar = starNum + fuseGain;
+  if (fuseGain <= 0) {
+    return res.status(400).json({ error: 'BadRequest', message: '한계돌파에 사용할 재료 카드를 선택해 주세요.' });
+  }
+  if (resultStar > 5) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      reason: 'EXCEEDS_MAX_STAR',
+      message: `선택한 재료를 모두 합치면 ${resultStar}성이 되어 최고 등급(5성)을 초과합니다. 재료 수량을 줄여 주세요.`
+    });
+  }
 
   try {
     // 진행 중 거래에 예약된 카드는 합성 재료로 사용할 수 없도록 차단
@@ -1263,25 +1296,33 @@ export const fuseCards = async (req: Request, res: Response) => {
       ).length
       - (reservations.cardsByStar[key(st)] || 0);
     const targetAvailable = available(starNum);
-    const fodderAvailable = available(0) - (starNum === 0 ? 1 : 0);
-    if (targetAvailable < 1 || fodderAvailable < 1) {
+    if (targetAvailable < 1) {
       return res.status(400).json({
         error: 'FuseFailed',
         reason: 'RESERVED_OR_SHORT',
-        message: '한계돌파에 사용할 수 있는 카드가 부족합니다. 진행 중인 교환에 묶인 카드는 사용할 수 없습니다.'
+        message: `${starNum}성 대상 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.`
       });
     }
 
-    const result = await userCardRepository.fuse(userId, channel_id, starNum);
+    for (const material of normalizedMaterials) {
+      const materialAvailable = Math.max(0, available(material.star) - (material.star === starNum ? 1 : 0));
+      if (materialAvailable < material.count) {
+        return res.status(400).json({
+          error: 'FuseFailed',
+          reason: 'RESERVED_OR_SHORT',
+          message: `${material.star}성 재료 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.`
+        });
+      }
+    }
+
+    const result = await userCardRepository.fuse(userId, channel_id, starNum, normalizedMaterials);
     if (!result.ok) {
       let msg = '한계돌파에 실패했습니다.';
       if (result.reason === 'MAX_STAR') msg = '이미 최고 등급(5성)입니다.';
       else if (result.reason === 'NO_TARGET') msg = `${starNum}성 카드를 보유하고 있지 않습니다.`;
-      else if (result.reason === 'NO_FODDER') {
-        msg = starNum === 0
-          ? '한계돌파에는 같은 스트리머의 0성 카드가 2장(대상 1장 + 재료 1장) 필요합니다.'
-          : '한계돌파에는 재료로 쓸 같은 스트리머의 0성 카드가 1장 더 필요합니다.';
-      }
+      else if (result.reason === 'NO_FODDER') msg = '한계돌파에 사용할 재료 카드가 부족합니다.';
+      else if (result.reason === 'INVALID_MATERIALS') msg = '한계돌파 재료 선택이 올바르지 않습니다.';
+      else if (result.reason === 'EXCEEDS_MAX_STAR') msg = '선택한 재료를 모두 합치면 최고 등급(5성)을 초과합니다.';
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
     }
     clearUserCardsInFlight(userId);

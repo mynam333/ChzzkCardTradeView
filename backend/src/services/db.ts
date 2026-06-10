@@ -431,6 +431,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE coupons ADD COLUMN reward_item_id INTEGER;");
       }
       try {
+        sqliteDb.prepare("SELECT rewards FROM coupons LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] coupons 테이블에 rewards(다중 보상) 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE coupons ADD COLUMN rewards TEXT NOT NULL DEFAULT '[]';");
+      }
+      try {
         sqliteDb.prepare("SELECT coupon_code FROM push_notifications LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] push_notifications 테이블에 coupon_code 컬럼이 없어 추가합니다.');

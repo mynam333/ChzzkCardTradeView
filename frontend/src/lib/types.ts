@@ -98,15 +98,27 @@ export interface AdminReport {
 }
 
 /** 쿠폰 */
+export type CouponRewardType = 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+
+export interface CouponReward {
+  type: CouponRewardType;
+  points?: number;
+  channel_id?: string | null;
+  item_id?: number | null;
+  quantity?: number;
+  label?: string;
+}
+
 export interface Coupon {
   id: number;
   code: string;
   coupon_type: 'single' | 'multi';
-  reward_type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+  reward_type: CouponRewardType;
   points: number;
   reward_channel_id: string | null;
   reward_item_id?: number | null;
   reward_quantity: number;
+  rewards?: CouponReward[];
   max_uses: number;
   used_count: number;
   expires_at: string | null;

@@ -125,8 +125,15 @@ export class SqliteUserCardRepository implements IUserCardRepository {
   }
 
   // 대상 카드 별 상승 + 같은 스트리머의 0성 재료 1장 소모. better-sqlite3 트랜잭션으로 원자 처리
-  async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
+    const normalizedMaterials = materials
+      .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))
+      .filter((m) => m.star >= 0 && m.star <= 4 && m.count > 0);
+    if (normalizedMaterials.length === 0) return { ok: false, reason: 'INVALID_MATERIALS' };
+    const gain = normalizedMaterials.reduce((sum, m) => sum + ((m.star + 1) * m.count), 0);
+    const newStar = star + gain;
+    if (newStar > 5) return { ok: false, reason: 'EXCEEDS_MAX_STAR' };
     const db = this.getDb();
     const txn = db.transaction(() => {
       // 1) 업그레이드 대상: 현재 star인 카드 1장
@@ -142,26 +149,35 @@ export class SqliteUserCardRepository implements IUserCardRepository {
           LIMIT 1`
       ).get(userId, channelId, star) as any;
       if (!target) throw new Error('NO_TARGET');
-      // 2) 한계돌파 재료: 같은 스트리머의 0성 카드 1장 (대상과 다른 카드)
-      const fodder = db.prepare(
-        `SELECT uc.id
-           FROM user_cards uc
-          WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = 0 AND uc.id <> ?
-            AND NOT EXISTS (
-              SELECT 1 FROM market_listings ml
-               WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
-            )
-          ORDER BY uc.id ASC
-          LIMIT 1`
-      ).get(userId, channelId, target.id) as any;
-      if (!fodder) throw new Error('NO_FODDER');
-      // 대상 카드의 별을 1 올리고, 재료 0성 카드는 소모(삭제)
-      db.prepare('UPDATE user_cards SET star = ? WHERE id = ?').run(star + 1, target.id);
-      db.prepare('DELETE FROM user_cards WHERE id = ?').run(fodder.id);
+
+      const materialIds: number[] = [];
+      for (const material of normalizedMaterials) {
+        const excludedIds = [target.id, ...materialIds];
+        const excludePlaceholders = excludedIds.map(() => '?').join(',');
+        const rows = db.prepare(
+          `SELECT uc.id
+             FROM user_cards uc
+            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND uc.id NOT IN (${excludePlaceholders})
+              AND NOT EXISTS (
+                SELECT 1 FROM market_listings ml
+                 WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+              )
+            ORDER BY uc.id ASC
+            LIMIT ?`
+        ).all(userId, channelId, material.star, ...excludedIds, material.count) as any[];
+        if (rows.length < material.count) throw new Error('NO_FODDER');
+        materialIds.push(...rows.map((row) => Number(row.id)));
+      }
+
+      if (materialIds.length === 0) throw new Error('NO_FODDER');
+      const deletePlaceholders = materialIds.map(() => '?').join(',');
+      db.prepare('UPDATE user_cards SET star = ? WHERE id = ?').run(newStar, target.id);
+      db.prepare(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`).run(...materialIds);
     });
     try {
       txn();
-      return { ok: true, reason: 'OK', newStar: star + 1 };
+      return { ok: true, reason: 'OK', newStar };
     } catch (e: any) {
       return { ok: false, reason: e.message || 'FAILED' };
     }

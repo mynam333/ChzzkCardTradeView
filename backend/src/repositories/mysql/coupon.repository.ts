@@ -1,5 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { ICouponRepository, Coupon, CouponRedeemResult } from '../interfaces';
+import { couponToRewards, parseCouponRewards, rewardsToJson } from '../../utils/couponRewards';
 
 export class MysqlCouponRepository implements ICouponRepository {
   private getDb() {
@@ -16,6 +17,7 @@ export class MysqlCouponRepository implements ICouponRepository {
       reward_channel_id: row.reward_channel_id ?? null,
       reward_item_id: row.reward_item_id ?? null,
       reward_quantity: Number(row.reward_quantity || 0),
+      rewards: parseCouponRewards(row.rewards),
       max_uses: Number(row.max_uses || 0),
       used_count: Number(row.used_count || 0),
       expires_at: row.expires_at,
@@ -29,9 +31,10 @@ export class MysqlCouponRepository implements ICouponRepository {
   }
 
   async create(coupon: Coupon): Promise<Coupon> {
+    const rewards = couponToRewards(coupon);
     const result = await this.getDb().run(
-      `INSERT INTO coupons (code, coupon_type, reward_type, points, reward_channel_id, reward_item_id, reward_quantity, max_uses, used_count, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO coupons (code, coupon_type, reward_type, points, reward_channel_id, reward_item_id, reward_quantity, rewards, max_uses, used_count, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       coupon.code,
       coupon.coupon_type,
       coupon.reward_type,
@@ -39,6 +42,7 @@ export class MysqlCouponRepository implements ICouponRepository {
       coupon.reward_channel_id,
       coupon.reward_item_id ?? null,
       coupon.reward_quantity,
+      rewardsToJson(rewards),
       coupon.max_uses,
       coupon.used_count,
       coupon.expires_at
@@ -78,10 +82,16 @@ export class MysqlCouponRepository implements ICouponRepository {
       const coupon = this.mapCoupon(couponRow);
       if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) return { ok: false, reason: 'EXPIRED' };
       if (coupon.coupon_type === 'single' && coupon.used_count >= coupon.max_uses) return { ok: false, reason: 'SOLD_OUT' };
-      if (coupon.reward_type === 'card' && !coupon.reward_channel_id) return { ok: false, reason: 'INVALID_REWARD' };
-      if (coupon.reward_type === 'cosmetic' && !coupon.reward_item_id) return { ok: false, reason: 'INVALID_REWARD' };
-      if ((coupon.reward_type === 'minigame_ticket' || coupon.reward_type === 'free_draw_ticket') && coupon.reward_quantity <= 0) {
-        return { ok: false, reason: 'INVALID_REWARD' };
+      const rewards = couponToRewards(coupon);
+      if (rewards.length === 0) return { ok: false, reason: 'INVALID_REWARD' };
+      for (const reward of rewards) {
+        const quantity = Number(reward.quantity || 0);
+        if (reward.type === 'point' && Number(reward.points || 0) <= 0) return { ok: false, reason: 'INVALID_REWARD' };
+        if (reward.type === 'card' && (!reward.channel_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
+        if (reward.type === 'cosmetic' && (!reward.item_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
+        if ((reward.type === 'minigame_ticket' || reward.type === 'free_draw_ticket') && quantity <= 0) {
+          return { ok: false, reason: 'INVALID_REWARD' };
+        }
       }
 
       try {
@@ -93,41 +103,38 @@ export class MysqlCouponRepository implements ICouponRepository {
 
       await tx.run('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', couponId);
 
-      if (coupon.reward_type === 'card') {
-        const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', coupon.reward_channel_id);
-        const baseSn = Number(latest?.max_sn || 0);
-        for (let i = 1; i <= coupon.reward_quantity; i++) {
-          await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, coupon.reward_channel_id, baseSn + i);
+      let pointsAdded = 0;
+      for (const reward of rewards) {
+        if (reward.type === 'point') {
+          const points = Number(reward.points || 0);
+          await tx.run('UPDATE users SET point = point + ? WHERE id = ?', points, userId);
+          pointsAdded += points;
+        } else if (reward.type === 'card') {
+          const quantity = Number(reward.quantity || 0);
+          const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', reward.channel_id);
+          const baseSn = Number(latest?.max_sn || 0);
+          for (let i = 1; i <= quantity; i++) {
+            await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, baseSn + i);
+          }
+        } else if (reward.type === 'cosmetic') {
+          await tx.run(`
+            INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)
+          `, userId, reward.item_id, Number(reward.quantity || 0));
+        } else if (reward.type === 'minigame_ticket') {
+          const now = new Date().toISOString();
+          await tx.run(`
+            INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+            VALUES (?, 5, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE bonus_tickets = bonus_tickets + VALUES(bonus_tickets), updated_at = VALUES(updated_at)
+          `, userId, Number(reward.quantity || 0), now, now);
+        } else if (reward.type === 'free_draw_ticket') {
+          await tx.run('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?', Number(reward.quantity || 0), userId);
         }
-        return { ok: true, reason: 'OK', reward_type: 'card', reward_channel_id: coupon.reward_channel_id, reward_quantity: coupon.reward_quantity, points_added: 0 };
       }
 
-      if (coupon.reward_type === 'cosmetic') {
-        await tx.run(`
-          INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
-          ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)
-        `, userId, coupon.reward_item_id, coupon.reward_quantity);
-        return { ok: true, reason: 'OK', reward_type: 'cosmetic', reward_item_id: coupon.reward_item_id, reward_quantity: coupon.reward_quantity, points_added: 0 };
-      }
-
-      if (coupon.reward_type === 'minigame_ticket') {
-        const now = new Date().toISOString();
-        await tx.run(`
-          INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
-          VALUES (?, 5, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE bonus_tickets = bonus_tickets + VALUES(bonus_tickets), updated_at = VALUES(updated_at)
-        `, userId, coupon.reward_quantity, now, now);
-        return { ok: true, reason: 'OK', reward_type: 'minigame_ticket', reward_quantity: coupon.reward_quantity, points_added: 0 };
-      }
-
-      if (coupon.reward_type === 'free_draw_ticket') {
-        await tx.run('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?', coupon.reward_quantity, userId);
-        return { ok: true, reason: 'OK', reward_type: 'free_draw_ticket', reward_quantity: coupon.reward_quantity, points_added: 0 };
-      }
-
-      await tx.run('UPDATE users SET point = point + ? WHERE id = ?', coupon.points, userId);
       const updated = await tx.get('SELECT point FROM users WHERE id = ?', userId);
-      return { ok: true, reason: 'OK', reward_type: 'point', points_added: coupon.points, new_points: updated?.point ?? coupon.points };
+      return { ok: true, reason: 'OK', reward_type: rewards[0]?.type, points_added: pointsAdded, new_points: updated?.point ?? pointsAdded, rewards };
     });
   }
 }

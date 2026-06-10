@@ -87,8 +87,15 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     });
   }
 
-  async fuse(userId: string, channelId: string, star: number): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
+    const normalizedMaterials = materials
+      .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))
+      .filter((m) => m.star >= 0 && m.star <= 4 && m.count > 0);
+    if (normalizedMaterials.length === 0) return { ok: false, reason: 'INVALID_MATERIALS' };
+    const gain = normalizedMaterials.reduce((sum, m) => sum + ((m.star + 1) * m.count), 0);
+    const newStar = star + gain;
+    if (newStar > 5) return { ok: false, reason: 'EXCEEDS_MAX_STAR' };
     try {
       await this.getDb().transaction(async (tx) => {
         const target = await tx.get(
@@ -102,21 +109,32 @@ export class MysqlUserCardRepository implements IUserCardRepository {
           userId, channelId, star
         );
         if (!target) throw new Error('NO_TARGET');
-        const fodder = await tx.get(
-          `SELECT uc.id
-             FROM user_cards uc
-            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = 0 AND uc.id <> ?
-              AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
-            ORDER BY uc.id ASC
-            LIMIT 1
-            FOR UPDATE`,
-          userId, channelId, target.id
-        );
-        if (!fodder) throw new Error('NO_FODDER');
-        await tx.run('UPDATE user_cards SET star = ? WHERE id = ?', star + 1, target.id);
-        await tx.run('DELETE FROM user_cards WHERE id = ?', fodder.id);
+
+        const materialIds: number[] = [];
+        for (const material of normalizedMaterials) {
+          const excludedIds = [target.id, ...materialIds];
+          const excludePlaceholders = excludedIds.map(() => '?').join(',');
+          const rows = await tx.all<{ id: number }>(
+            `SELECT uc.id
+               FROM user_cards uc
+              WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+                AND uc.id NOT IN (${excludePlaceholders})
+                AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
+              ORDER BY uc.id ASC
+              LIMIT ?
+              FOR UPDATE`,
+            userId, channelId, material.star, ...excludedIds, material.count
+          );
+          if (rows.length < material.count) throw new Error('NO_FODDER');
+          materialIds.push(...rows.map((row) => Number(row.id)));
+        }
+
+        if (materialIds.length === 0) throw new Error('NO_FODDER');
+        const deletePlaceholders = materialIds.map(() => '?').join(',');
+        await tx.run('UPDATE user_cards SET star = ? WHERE id = ?', newStar, target.id);
+        await tx.run(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`, ...materialIds);
       });
-      return { ok: true, reason: 'OK', newStar: star + 1 };
+      return { ok: true, reason: 'OK', newStar };
     } catch (err: any) {
       return { ok: false, reason: err.message || 'FAILED' };
     }

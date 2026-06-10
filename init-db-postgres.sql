@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS coupons (
     reward_channel_id TEXT,                      -- reward_type='card' 지급 스트리머 채널 ID
     reward_item_id INTEGER,                      -- reward_type='cosmetic' 지급 상점 아이템 ID
     reward_quantity INTEGER DEFAULT 0,           -- card/cosmetic/minigame_ticket/free_draw_ticket 지급 수량
+    rewards JSONB NOT NULL DEFAULT '[]'::JSONB,  -- 다중 보상 배열. 비어 있으면 레거시 단일 보상 컬럼 사용
     max_uses INTEGER DEFAULT 1,                  -- 발급 갯수(single), multi는 0=무제한
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,
@@ -308,6 +309,7 @@ ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT '
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_channel_id TEXT;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS rewards JSONB NOT NULL DEFAULT '[]'::JSONB;
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS purchase_limit INTEGER DEFAULT 0;
 ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
@@ -829,6 +831,85 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- 카드 합성 v2: 여러 별 등급 재료를 한 번에 소모해 대상 카드 별을 상승
+CREATE OR REPLACE FUNCTION fuse_card_atomic_v2(p_user_id TEXT, p_channel_id TEXT, p_star INTEGER, p_materials JSONB)
+RETURNS TEXT AS $$
+DECLARE
+  target_id INTEGER;
+  material JSONB;
+  material_star INTEGER;
+  material_count INTEGER;
+  gain INTEGER := 0;
+  result_star INTEGER;
+  material_ids INTEGER[] := ARRAY[]::INTEGER[];
+  picked_ids INTEGER[];
+BEGIN
+  IF p_star < 0 OR p_star >= 5 THEN RETURN 'MAX_STAR'; END IF;
+  IF p_materials IS NULL OR jsonb_typeof(p_materials) <> 'array' THEN RETURN 'INVALID_MATERIALS'; END IF;
+
+  FOR material IN SELECT value FROM jsonb_array_elements(p_materials)
+  LOOP
+    material_star := COALESCE((material->>'star')::INTEGER, -1);
+    material_count := COALESCE((material->>'count')::INTEGER, 0);
+    IF material_star < 0 OR material_star > 4 OR material_count <= 0 THEN
+      RETURN 'INVALID_MATERIALS';
+    END IF;
+    gain := gain + ((material_star + 1) * material_count);
+  END LOOP;
+
+  IF gain <= 0 THEN RETURN 'NO_FODDER'; END IF;
+  result_star := p_star + gain;
+  IF result_star > 5 THEN RETURN 'EXCEEDS_MAX_STAR'; END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('fuse_card:' || p_user_id || ':' || p_channel_id));
+
+  SELECT id INTO target_id
+    FROM user_cards
+   WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = p_star
+     AND NOT EXISTS (
+       SELECT 1 FROM market_listings ml
+        WHERE ml.user_card_id = user_cards.id AND ml.status = 'PENDING'
+     )
+   ORDER BY id ASC
+   LIMIT 1
+   FOR UPDATE;
+  IF target_id IS NULL THEN RETURN 'NO_TARGET'; END IF;
+
+  FOR material IN SELECT value FROM jsonb_array_elements(p_materials)
+  LOOP
+    material_star := (material->>'star')::INTEGER;
+    material_count := (material->>'count')::INTEGER;
+
+    SELECT COALESCE(array_agg(id), ARRAY[]::INTEGER[]) INTO picked_ids
+      FROM (
+        SELECT id
+          FROM user_cards
+         WHERE user_id = p_user_id AND channel_id = p_channel_id AND COALESCE(star, 0) = material_star
+           AND id <> target_id
+           AND NOT (id = ANY(material_ids))
+           AND NOT EXISTS (
+             SELECT 1 FROM market_listings ml
+              WHERE ml.user_card_id = user_cards.id AND ml.status = 'PENDING'
+           )
+         ORDER BY id ASC
+         LIMIT material_count
+         FOR UPDATE
+      ) picked;
+
+    IF COALESCE(array_length(picked_ids, 1), 0) < material_count THEN
+      RETURN 'NO_FODDER';
+    END IF;
+    material_ids := material_ids || picked_ids;
+  END LOOP;
+
+  IF COALESCE(array_length(material_ids, 1), 0) = 0 THEN RETURN 'NO_FODDER'; END IF;
+
+  UPDATE user_cards SET star = result_star WHERE id = target_id;
+  DELETE FROM user_cards WHERE id = ANY(material_ids);
+  RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
 -- 상점 구매: 포인트 차감, 보유 수량 증가, 구매 제한 카운트를 단일 트랜잭션으로 처리
 CREATE OR REPLACE FUNCTION buy_shop_item_atomic(p_user_id TEXT, p_item_id INTEGER)
 RETURNS TEXT AS $$
@@ -1122,6 +1203,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 쿠폰 사용: 사용 로그, 사용 횟수, 보상 지급을 단일 트랜잭션으로 처리
+-- RETURNS TABLE 컬럼 변경이 있으므로 기존 배포 함수는 먼저 제거합니다.
+DROP FUNCTION IF EXISTS redeem_coupon_atomic(INTEGER, TEXT);
 CREATE OR REPLACE FUNCTION redeem_coupon_atomic(p_coupon_id INTEGER, p_user_id TEXT)
 RETURNS TABLE (
   ok BOOLEAN,
@@ -1131,93 +1214,122 @@ RETURNS TABLE (
   new_points INTEGER,
   reward_channel_id TEXT,
   reward_item_id INTEGER,
-  reward_quantity INTEGER
+  reward_quantity INTEGER,
+  rewards JSONB
 ) AS $$
 DECLARE
   c coupons%ROWTYPE;
   base_serial INTEGER;
   i INTEGER;
   updated_point INTEGER;
+  r JSONB;
+  rewards_json JSONB;
+  reward_kind TEXT;
+  reward_points INTEGER;
+  reward_quantity_value INTEGER;
+  reward_channel TEXT;
+  reward_item INTEGER;
+  total_points INTEGER := 0;
 BEGIN
   SELECT * INTO c FROM coupons WHERE id = p_coupon_id FOR UPDATE;
   IF NOT FOUND THEN
-    RETURN QUERY SELECT FALSE, 'NOT_FOUND', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN QUERY SELECT FALSE, 'NOT_FOUND', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
   IF c.expires_at IS NOT NULL AND c.expires_at < NOW() THEN
-    RETURN QUERY SELECT FALSE, 'EXPIRED', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN QUERY SELECT FALSE, 'EXPIRED', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
   IF c.coupon_type = 'single' AND c.used_count >= c.max_uses THEN
-    RETURN QUERY SELECT FALSE, 'SOLD_OUT', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN QUERY SELECT FALSE, 'SOLD_OUT', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
-  IF c.reward_type = 'card' AND c.reward_channel_id IS NULL THEN
-    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
-    RETURN;
-  END IF;
+  rewards_json := CASE
+    WHEN c.rewards IS NOT NULL AND jsonb_typeof(c.rewards) = 'array' AND jsonb_array_length(c.rewards) > 0 THEN c.rewards
+    WHEN c.reward_type = 'point' THEN jsonb_build_array(jsonb_build_object('type', 'point', 'points', COALESCE(c.points, 0)))
+    WHEN c.reward_type = 'card' THEN jsonb_build_array(jsonb_build_object('type', 'card', 'channel_id', c.reward_channel_id, 'quantity', COALESCE(c.reward_quantity, 0)))
+    WHEN c.reward_type = 'cosmetic' THEN jsonb_build_array(jsonb_build_object('type', 'cosmetic', 'item_id', c.reward_item_id, 'quantity', COALESCE(c.reward_quantity, 0)))
+    ELSE jsonb_build_array(jsonb_build_object('type', c.reward_type, 'quantity', COALESCE(c.reward_quantity, 0)))
+  END;
 
-  IF c.reward_type = 'cosmetic' AND c.reward_item_id IS NULL THEN
-    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
-    RETURN;
-  END IF;
+  FOR r IN SELECT value FROM jsonb_array_elements(rewards_json) LOOP
+    reward_kind := r->>'type';
+    reward_points := COALESCE((r->>'points')::INTEGER, 0);
+    reward_quantity_value := COALESCE((r->>'quantity')::INTEGER, 0);
+    reward_channel := NULLIF(r->>'channel_id', '');
+    reward_item := NULLIF(r->>'item_id', '')::INTEGER;
 
-  IF c.reward_type IN ('minigame_ticket', 'free_draw_ticket') AND COALESCE(c.reward_quantity, 0) <= 0 THEN
-    RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
-    RETURN;
-  END IF;
+    IF reward_kind = 'point' AND reward_points <= 0 THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN;
+    END IF;
+    IF reward_kind = 'card' AND (reward_channel IS NULL OR reward_quantity_value <= 0) THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN;
+    END IF;
+    IF reward_kind = 'cosmetic' AND (reward_item IS NULL OR reward_quantity_value <= 0) THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN;
+    END IF;
+    IF reward_kind IN ('minigame_ticket', 'free_draw_ticket') AND reward_quantity_value <= 0 THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN;
+    END IF;
+    IF reward_kind NOT IN ('point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket') THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN;
+    END IF;
+  END LOOP;
 
   BEGIN
     INSERT INTO coupon_logs (coupon_id, user_id) VALUES (p_coupon_id, p_user_id);
   EXCEPTION WHEN unique_violation THEN
-    RETURN QUERY SELECT FALSE, 'DUPLICATE', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0;
+    RETURN QUERY SELECT FALSE, 'DUPLICATE', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
     RETURN;
   END;
 
   UPDATE coupons SET used_count = used_count + 1 WHERE id = p_coupon_id;
 
-  IF c.reward_type = 'card' THEN
-    PERFORM pg_advisory_xact_lock(hashtext('user_card_serial:' || c.reward_channel_id));
-    SELECT COALESCE(MAX(user_cards.serial_number), 0) INTO base_serial
-      FROM user_cards
-     WHERE channel_id = c.reward_channel_id;
+  FOR r IN SELECT value FROM jsonb_array_elements(rewards_json) LOOP
+    reward_kind := r->>'type';
+    reward_points := COALESCE((r->>'points')::INTEGER, 0);
+    reward_quantity_value := COALESCE((r->>'quantity')::INTEGER, 0);
+    reward_channel := NULLIF(r->>'channel_id', '');
+    reward_item := NULLIF(r->>'item_id', '')::INTEGER;
 
-    FOR i IN 1..GREATEST(c.reward_quantity, 0) LOOP
-      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
-      VALUES (p_user_id, c.reward_channel_id, base_serial + i, 0);
-    END LOOP;
+    IF reward_kind = 'point' THEN
+      UPDATE users SET point = point + reward_points WHERE id = p_user_id RETURNING point INTO updated_point;
+      total_points := total_points + reward_points;
+    ELSIF reward_kind = 'card' THEN
+      PERFORM pg_advisory_xact_lock(hashtext('user_card_serial:' || reward_channel));
+      SELECT COALESCE(MAX(user_cards.serial_number), 0) INTO base_serial
+        FROM user_cards
+       WHERE channel_id = reward_channel;
 
-    RETURN QUERY SELECT TRUE, 'OK', 'card', 0, NULL::INTEGER, c.reward_channel_id, NULL::INTEGER, c.reward_quantity;
-    RETURN;
+      FOR i IN 1..reward_quantity_value LOOP
+        INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+        VALUES (p_user_id, reward_channel, base_serial + i, 0);
+      END LOOP;
+    ELSIF reward_kind = 'cosmetic' THEN
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES (p_user_id, reward_item, reward_quantity_value)
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+    ELSIF reward_kind = 'minigame_ticket' THEN
+      PERFORM add_minigame_bonus_tickets(p_user_id, reward_quantity_value);
+    ELSIF reward_kind = 'free_draw_ticket' THEN
+      PERFORM add_bonus_free_draw_tickets(p_user_id, reward_quantity_value);
+    END IF;
+  END LOOP;
+
+  IF updated_point IS NULL THEN
+    SELECT point INTO updated_point FROM users WHERE id = p_user_id;
   END IF;
 
-  IF c.reward_type = 'cosmetic' THEN
-    INSERT INTO user_cosmetics (user_id, item_id, quantity)
-    VALUES (p_user_id, c.reward_item_id, GREATEST(c.reward_quantity, 1))
-    ON CONFLICT (user_id, item_id)
-    DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
-
-    RETURN QUERY SELECT TRUE, 'OK', 'cosmetic', 0, NULL::INTEGER, NULL::TEXT, c.reward_item_id, c.reward_quantity;
-    RETURN;
-  END IF;
-
-  IF c.reward_type = 'minigame_ticket' THEN
-    PERFORM add_minigame_bonus_tickets(p_user_id, c.reward_quantity);
-    RETURN QUERY SELECT TRUE, 'OK', 'minigame_ticket', 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, c.reward_quantity;
-    RETURN;
-  END IF;
-
-  IF c.reward_type = 'free_draw_ticket' THEN
-    PERFORM add_bonus_free_draw_tickets(p_user_id, c.reward_quantity);
-    RETURN QUERY SELECT TRUE, 'OK', 'free_draw_ticket', 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, c.reward_quantity;
-    RETURN;
-  END IF;
-
-  UPDATE users SET point = point + c.points WHERE id = p_user_id RETURNING point INTO updated_point;
-  RETURN QUERY SELECT TRUE, 'OK', 'point', c.points, updated_point, NULL::TEXT, NULL::INTEGER, 0;
+  RETURN QUERY SELECT TRUE, 'OK', rewards_json->0->>'type', total_points, updated_point, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
 END;
 $$ LANGUAGE plpgsql;
 

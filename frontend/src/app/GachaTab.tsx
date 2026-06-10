@@ -55,6 +55,17 @@ interface UserCard {
   streamer?: Streamer;
 }
 
+interface FuseMaterial {
+  star: number;
+  count: number;
+}
+
+interface FuseModalState {
+  card: UserCard;
+  streamer: Streamer;
+  star: number;
+}
+
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.8;
 const cardKey = (channelId: string, star: number) => `${channelId}#${star}`;
@@ -65,6 +76,10 @@ const parseCardKey = (key: string) => {
     star: Number(key.slice(separator + 1)) || 0
   };
 };
+const FUSE_STARS = [0, 1, 2, 3, 4] as const;
+const fuseMaterialGain = (star: number) => star + 1;
+const calculateFuseResultStar = (baseStar: number, materials: FuseMaterial[]) =>
+  baseStar + materials.reduce((sum, material) => sum + (fuseMaterialGain(material.star) * material.count), 0);
 
 const CONTEXT_MENU_MARGIN = 8;
 const CONTEXT_MENU_FALLBACK_SIZE = { width: 208, height: 320 };
@@ -130,6 +145,9 @@ export const GachaTab: React.FC = () => {
 
   // 카드 확대(상세) 모달 — 테두리/이름 효과가 적용된 카드를 크게 표시
   const [zoomCard, setZoomCard] = useState<UserCard | null>(null);
+  const [fuseModal, setFuseModal] = useState<FuseModalState | null>(null);
+  const [fuseMaterials, setFuseMaterials] = useState<Record<number, number>>({});
+  const [fuseBusy, setFuseBusy] = useState(false);
 
   // ---- 오픈마켓 관련 보관함 상태 ----
   const [marketPendingCardIds, setMarketPendingCardIds] = useState<number[]>([]);
@@ -307,6 +325,42 @@ export const GachaTab: React.FC = () => {
     const reserved = reservations.cardsByStar[key] || 0;
     const pendingMarket = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
     return Math.max(0, total - reserved - pendingMarket);
+  };
+
+  const getFuseMaterialMax = (channelId: string, baseStar: number, materialStar: number) => {
+    const targetReserve = materialStar === baseStar ? 1 : 0;
+    return Math.max(0, getAvailableCount(channelId, materialStar) - targetReserve);
+  };
+
+  const getSelectedFuseMaterials = (counts = fuseMaterials): FuseMaterial[] =>
+    FUSE_STARS
+      .map((star) => ({ star, count: Math.max(0, Math.floor(Number(counts[star]) || 0)) }))
+      .filter((material) => material.count > 0);
+
+  const hasFuseMaterial = (channelId: string, baseStar: number) =>
+    FUSE_STARS.some((materialStar) => getFuseMaterialMax(channelId, baseStar, materialStar) > 0);
+
+  const openFuseModal = (card: UserCard, streamer: Streamer, star: number) => {
+    const initial: Record<number, number> = {};
+    const firstValidStar = FUSE_STARS.find((materialStar) =>
+      getFuseMaterialMax(streamer.channel_id, star, materialStar) > 0
+      && star + fuseMaterialGain(materialStar) <= 5
+    );
+    if (firstValidStar !== undefined) initial[firstValidStar] = 1;
+    setFuseMaterials(initial);
+    setFuseModal({ card, streamer, star });
+  };
+
+  const adjustFuseMaterial = (materialStar: number, delta: number) => {
+    if (!fuseModal) return;
+    const max = getFuseMaterialMax(fuseModal.streamer.channel_id, fuseModal.star, materialStar);
+    setFuseMaterials((prev) => {
+      const nextValue = Math.max(0, Math.min(max, (prev[materialStar] || 0) + delta));
+      const next = { ...prev };
+      if (nextValue <= 0) delete next[materialStar];
+      else next[materialStar] = nextValue;
+      return next;
+    });
   };
 
   const fetchMyCosmetics = async () => {
@@ -648,19 +702,26 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  // 카드 한계돌파 (대상 카드의 별 +1, 같은 스트리머의 0성 카드 1장을 재료로 소모)
-  const handleFuse = async (channelId: string, star: number) => {
+  // 카드 한계돌파 (선택한 같은 스트리머 카드들을 재료로 소모)
+  const handleFuse = async (channelId: string, star: number, materials?: FuseMaterial[]) => {
+    setFuseBusy(true);
     try {
-      const res = await apiFetch('/cards/fuse', { method: 'POST', body: JSON.stringify({ channel_id: channelId, star }) });
+      const body: any = { channel_id: channelId, star };
+      if (materials && materials.length > 0) body.materials = materials;
+      const res = await apiFetch('/cards/fuse', { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
       if (res.ok) {
         showAlert('한계돌파 성공', data.message || '한계돌파에 성공했습니다.', 'success');
+        setFuseModal(null);
+        setFuseMaterials({});
         fetchInventory();
       } else {
         showAlert('한계돌파 실패', data.message || '한계돌파에 실패했습니다.', 'error');
       }
     } catch {
       showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setFuseBusy(false);
     }
   };
 
@@ -1628,19 +1689,17 @@ export const GachaTab: React.FC = () => {
                             <span className="text-xs font-black text-emerald-400">{cardValue.toLocaleString()} P</span>
                           </div>
 
-                          {/* 한계돌파 버튼 (같은 스트리머 0성 카드를 재료로 소모해 별 +1) */}
+                          {/* 한계돌파 버튼 (같은 스트리머 카드를 재료로 소모) */}
                           {(() => {
                             if (selectionMode || star >= 5) return null;
-                            const zeroCount = getAvailableCount(streamer.channel_id, 0);
-                            // 0성 카드를 올릴 땐 대상+재료로 2장 필요, 1성 이상은 재료 0성 1장 필요
-                            const canFuse = star === 0 ? zeroCount >= 2 : avail >= 1 && zeroCount >= 1;
+                            const canFuse = avail >= 1 && hasFuseMaterial(streamer.channel_id, star);
                             if (!canFuse) return null;
                             return (
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleFuse(streamer.channel_id, star); }}
+                                onClick={(e) => { e.stopPropagation(); openFuseModal(card, streamer, star); }}
                                 className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
                               >
-                                ⭐ 한계돌파 ({star}★→{star + 1}★)
+                                ⭐ 한계돌파 강화
                               </button>
                             );
                           })()}
@@ -1654,6 +1713,208 @@ export const GachaTab: React.FC = () => {
           );
         })()}
       </section>
+
+      {/* 한계돌파 강화 모달 */}
+      {fuseModal && (() => {
+        const { card, streamer, star } = fuseModal;
+        const selectedMaterials = getSelectedFuseMaterials();
+        const resultStar = calculateFuseResultStar(star, selectedMaterials);
+        const selectedCount = selectedMaterials.reduce((sum, material) => sum + material.count, 0);
+        const exceedsMax = resultStar > 5;
+        const canSubmit = selectedCount > 0 && !exceedsMax && resultStar > star && !fuseBusy;
+        const resultValue = Math.round((streamer.base_value || 0) * starMult(Math.min(resultStar, 5)));
+
+        return (
+          <div
+            className="modal-backdrop modal-backdrop-center z-[90] bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
+            onClick={() => {
+              if (!fuseBusy) {
+                setFuseModal(null);
+                setFuseMaterials({});
+              }
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-[min(94vw,760px)] max-h-[88vh] overflow-y-auto rounded-[2rem] border border-border/80 bg-card p-4 shadow-2xl sm:p-6 animate-in zoom-in-95 duration-200"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-primary">Limit Break</p>
+                  <h3 className="mt-1 text-xl font-black text-foreground">한계돌파 강화</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    같은 스트리머 카드를 재료로 사용해 별 등급을 올립니다. 결과는 최대 5성을 넘을 수 없습니다.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!fuseBusy) {
+                      setFuseModal(null);
+                      setFuseMaterials({});
+                    }
+                  }}
+                  className="rounded-full border border-border bg-background/80 p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  disabled={fuseBusy}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-[240px,1fr]">
+                <div className="rounded-[1.5rem] border border-border/70 bg-muted/30 p-4">
+                  <p className="mb-3 text-center text-xs font-black text-foreground">결과 미리보기</p>
+                  <div className="mx-auto w-40">
+                    <div
+                      style={{
+                        height: '256px',
+                        containerType: 'inline-size',
+                        ...(borderClass(card.border) ? {} : (borderStyle(card.border) || {}))
+                      }}
+                      className={`relative flex flex-col justify-between overflow-hidden rounded-2xl border border-border/80 bg-card shadow-xl ${resultStar >= 1 && resultStar <= 5 ? `card-star card-star-${resultStar}` : ''}`}
+                    >
+                      <CosmeticFrame border={card.border} />
+                      <div className="absolute inset-0 z-0 flex items-center justify-center bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 text-7xl font-black text-slate-500 dark:from-slate-700 dark:via-slate-800 dark:to-slate-950 dark:text-slate-500">
+                        ?
+                      </div>
+                      <div className="absolute inset-0 z-10 bg-gradient-to-t from-black/85 via-black/15 to-transparent pointer-events-none" />
+                      <div className="relative z-20 flex h-full flex-col justify-between p-3 text-white">
+                        <div className="flex justify-end">
+                          <span className="rounded bg-black/45 px-1.5 py-0.5 text-[8px] font-black text-white/90">
+                            No.{String(streamer.serial_number ?? 0).padStart(4, '0')}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-0.5 drop-shadow">
+                            {Array.from({ length: Math.max(0, Math.min(resultStar, 5)) }, (_, i) => (
+                              <span key={i} className="text-amber-300 text-[11px] leading-none">★</span>
+                            ))}
+                          </div>
+                          <CosmeticName effect={card.name_effect} className="block truncate text-sm font-black drop-shadow">
+                            {streamer.name}
+                          </CosmeticName>
+                          <div className="flex items-center justify-between border-t border-white/15 pt-1">
+                            <span className="text-[8.5px] text-zinc-300">예상 가치</span>
+                            <span className="text-xs font-black text-emerald-300">{resultValue.toLocaleString()} P</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-2xl bg-background/75 p-3 text-center">
+                    <p className="text-xs font-black text-foreground">
+                      {star}성 → <span className={exceedsMax ? 'text-destructive' : 'text-primary'}>{resultStar}성</span>
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">일러스트는 한계돌파 완료 후 공개됩니다.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="rounded-[1.5rem] border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-sm font-black text-foreground">{streamer.name} {star}성 카드 강화</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      같은 별의 카드를 재료로 쓸 때는 대상 카드 1장을 제외한 수량만 선택할 수 있습니다.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {FUSE_STARS.map((materialStar) => {
+                      const max = getFuseMaterialMax(streamer.channel_id, star, materialStar);
+                      const current = fuseMaterials[materialStar] || 0;
+                      return (
+                        <div
+                          key={materialStar}
+                          className={`flex items-center justify-between gap-3 rounded-2xl border p-3 transition ${
+                            max > 0 ? 'border-border bg-background/80' : 'border-border/50 bg-muted/35 opacity-60'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-black text-foreground">{materialStar}성 재료</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              사용 가능 {max.toLocaleString()}장 · 1장당 +{fuseMaterialGain(materialStar)}성
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => adjustFuseMaterial(materialStar, -1)}
+                              disabled={current <= 0 || fuseBusy}
+                              className="h-8 w-8 rounded-full border border-border bg-muted text-sm font-black text-foreground transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                              max={max}
+                              value={current}
+                              disabled={max <= 0 || fuseBusy}
+                              onChange={(e) => {
+                                const nextValue = Math.max(0, Math.min(max, Math.floor(Number(e.target.value) || 0)));
+                                setFuseMaterials((prev) => {
+                                  const next = { ...prev };
+                                  if (nextValue <= 0) delete next[materialStar];
+                                  else next[materialStar] = nextValue;
+                                  return next;
+                                });
+                              }}
+                              className="h-8 w-16 rounded-xl border border-border bg-card text-center text-sm font-black text-foreground outline-none focus:border-primary"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => adjustFuseMaterial(materialStar, 1)}
+                              disabled={current >= max || fuseBusy}
+                              className="h-8 w-8 rounded-full border border-border bg-muted text-sm font-black text-foreground transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {(selectedCount === 0 || exceedsMax) && (
+                    <div className={`rounded-2xl border p-3 text-xs font-bold leading-relaxed ${
+                      exceedsMax
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : 'border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-200'
+                    }`}>
+                      {exceedsMax
+                        ? `현재 선택은 ${resultStar}성이 되어 최고 등급(5성)을 초과합니다. 재료 수량을 줄여 주세요.`
+                        : '한계돌파에 사용할 재료 카드를 선택해 주세요.'}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => handleFuse(streamer.channel_id, star, selectedMaterials)}
+                      disabled={!canSubmit}
+                      className="flex-1 rounded-2xl bg-primary px-4 py-3 text-sm font-black text-primary-foreground shadow-lg shadow-primary/20 transition hover:scale-[1.01] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+                    >
+                      {fuseBusy ? '한계돌파 중...' : `${Math.min(resultStar, 5)}성으로 한계돌파`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!fuseBusy) {
+                          setFuseModal(null);
+                          setFuseMaterials({});
+                        }
+                      }}
+                      disabled={fuseBusy}
+                      className="rounded-2xl border border-border bg-background px-4 py-3 text-sm font-black text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 카드 확대(상세) 모달 — 카드 외 영역 클릭 시 닫힘 */}
       {zoomCard && (() => {
