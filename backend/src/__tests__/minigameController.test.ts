@@ -151,6 +151,42 @@ describe('submitMinigameResult puzzle time limit', () => {
     }));
   });
 
+  it('parses timezone-less DB timestamp strings as KST', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'puzzle-session',
+      user_id: 'user-1',
+      game_type: 'puzzle',
+      status: 'STARTED',
+      target_data: JSON.stringify({
+        practice_mode: false,
+        correct_id: 'channel-answer',
+        correct_name: '정답 스트리머',
+        image_url: 'https://example.com/answer.png',
+        star: 3
+      }),
+      created_at: '2026-06-06 08:58:00'
+    });
+    findUserById.mockResolvedValue({ point: 5000 } as never);
+    completeSession.mockResolvedValue({ ok: true, newPoints: 6000 });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'puzzle-session',
+        payload: { success: true }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 1000);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true
+    }));
+  });
+
   it('completes a successful practice puzzle without awarding points', async () => {
     const response = await runPuzzleSubmission(124999, true);
 

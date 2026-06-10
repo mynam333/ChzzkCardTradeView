@@ -3,6 +3,13 @@ import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../int
 
 const MAX_AUTO_TICKETS = 5;
 
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+const formatKstDbTime = (dateMs = Date.now()): string => {
+  const kst = new Date(dateMs + KST_OFFSET_MS);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')} ${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}:${String(kst.getUTCSeconds()).padStart(2, '0')}`;
+};
+
 export class SqliteMinigameRepository implements IMinigameRepository {
   private getDb() {
     return getSqliteDb();
@@ -120,8 +127,8 @@ export class SqliteMinigameRepository implements IMinigameRepository {
 
       // 3. 세션 기록
       db.prepare(
-        "INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))"
-      ).run(session.id, session.user_id, session.game_type, session.status, session.target_data, ticketSpentType);
+        'INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(session.id, session.user_id, session.game_type, session.status, session.target_data, ticketSpentType, session.created_at || formatKstDbTime());
 
       return { ok: true };
     });
@@ -143,8 +150,8 @@ export class SqliteMinigameRepository implements IMinigameRepository {
 
       // 2. 세션 상태 업데이트
       db.prepare(
-        "UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = datetime('now') WHERE id = ?"
-      ).run(earnedPoints, sessionId);
+        "UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = ? WHERE id = ?"
+      ).run(earnedPoints, formatKstDbTime(), sessionId);
 
       // 3. 포인트 지급 (users 테이블)
       db.prepare(
@@ -204,19 +211,20 @@ export class SqliteMinigameRepository implements IMinigameRepository {
   async expireSessions(olderThanMinutes: number): Promise<void> {
     const db = this.getDb();
     const txn = db.transaction(() => {
+      const cutoff = formatKstDbTime(Date.now() - olderThanMinutes * 60 * 1000);
       const expired = db.prepare(`
         SELECT *
         FROM minigame_sessions
         WHERE status = 'STARTED'
-          AND strftime('%s', 'now') - strftime('%s', created_at) > ?
-      `).all(olderThanMinutes * 60) as any[];
+          AND created_at < ?
+      `).all(cutoff) as any[];
 
       for (const session of expired) {
         const update = db.prepare(`
           UPDATE minigame_sessions
-          SET status = 'EXPIRED', completed_at = datetime('now')
+          SET status = 'EXPIRED', completed_at = ?
           WHERE id = ? AND status = 'STARTED'
-        `).run(session.id);
+        `).run(formatKstDbTime(), session.id);
 
         if (update.changes <= 0) continue;
 

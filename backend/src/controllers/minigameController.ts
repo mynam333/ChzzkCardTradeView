@@ -18,6 +18,61 @@ const STARTED_SESSION_RECOVERY_MINUTES = 3;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
 
+const formatKstDbTime = (dateMs = Date.now()): string => {
+  const kst = new Date(dateMs + KST_OFFSET_MS);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')} ${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}:${String(kst.getUTCSeconds()).padStart(2, '0')}`;
+};
+
+const parseDbKstTimeMs = (value: string | undefined | null): number => {
+  if (!value) return NaN;
+  const trimmed = String(value).trim();
+  if (!trimmed) return NaN;
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed)) return new Date(trimmed).getTime();
+  const kst = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/);
+  if (kst) {
+    const ms = kst[7] ? Number(kst[7].padEnd(3, '0').slice(0, 3)) : 0;
+    return Date.UTC(Number(kst[1]), Number(kst[2]) - 1, Number(kst[3]), Number(kst[4]), Number(kst[5]), Number(kst[6]), ms) - KST_OFFSET_MS;
+  }
+  return new Date(trimmed).getTime();
+};
+
+const getGamePreplayMs = (gameType: DailyMinigameType): number => {
+  if (gameType === 'match') return COUNTDOWN_MS + MATCH_REVEAL_MS;
+  return COUNTDOWN_MS;
+};
+
+const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
+  if (gameType === 'quiz') return 15_000;
+  if (gameType === 'puzzle') return PUZZLE_TIME_LIMIT_MS;
+  return MATCH_TIME_LIMIT_MS;
+};
+
+const getGameSubmitAllowanceMs = (gameType: DailyMinigameType): number => {
+  if (gameType === 'quiz') return 20_000;
+  return getGamePreplayMs(gameType) + getGamePlayLimitMs(gameType) + SUBMISSION_GRACE_MS;
+};
+
+const getSessionTiming = (session: Pick<MinigameSession, 'game_type' | 'created_at'>) => {
+  const nowMs = Date.now();
+  const createdMs = parseDbKstTimeMs(session.created_at);
+  const elapsedMs = Number.isFinite(createdMs) ? Math.max(0, nowMs - createdMs) : 0;
+  const preplayMs = getGamePreplayMs(session.game_type);
+  const playLimitMs = getGamePlayLimitMs(session.game_type);
+  const playElapsedMs = Math.max(0, elapsedMs - preplayMs);
+  const timeRemainingMs = Math.max(0, playLimitMs - playElapsedMs);
+
+  return {
+    server_now: new Date(nowMs).toISOString(),
+    session_started_at: Number.isFinite(createdMs) ? new Date(createdMs).toISOString() : null,
+    session_started_at_kst: Number.isFinite(createdMs) ? formatKstDbTime(createdMs) : null,
+    server_elapsed_ms: elapsedMs,
+    preplay_ms: preplayMs,
+    time_limit_ms: playLimitMs,
+    time_remaining_ms: timeRemainingMs,
+    submit_allowance_ms: getGameSubmitAllowanceMs(session.game_type)
+  };
+};
+
 async function getTicketChargeIntervalMinutes(): Promise<number> {
   const value = await systemConfigRepository.get(
     'minigame_ticket_charge_interval_minutes',
@@ -278,13 +333,21 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
         const recoveredGameData = await buildRecoverableGameData(activeSession.game_type, activeTarget);
         if (recoveredGameData) {
-          return res.status(200).json({
-            session_id: activeSession.id,
-            game_type,
-            practice_mode: false,
-            resumed: true,
-            message: '끊긴 미니게임 세션을 이어서 시작합니다.',
-            game_data: recoveredGameData
+          const timing = getSessionTiming(activeSession);
+          if (timing.time_remaining_ms > 0 && timing.server_elapsed_ms <= timing.submit_allowance_ms + CLIENT_REPORTED_GRACE_MS) {
+            return res.status(200).json({
+              session_id: activeSession.id,
+              game_type,
+              practice_mode: false,
+              resumed: true,
+              message: '끊긴 미니게임 세션을 이어서 시작합니다.',
+              game_data: recoveredGameData,
+              timing
+            });
+          }
+
+          await minigameRepository.completeSession(activeSession.id, 0).catch((err) => {
+            console.warn('[MinigameController] expired active session close failed:', err);
           });
         }
       }
@@ -389,12 +452,14 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
     targetData.practice_mode = practiceMode;
 
+    const sessionStartedAt = formatKstDbTime();
     const newSession: MinigameSession = {
       id: sessionId,
       user_id: userId,
       game_type: game_type as any,
       status: 'STARTED',
-      target_data: JSON.stringify(targetData)
+      target_data: JSON.stringify(targetData),
+      created_at: sessionStartedAt
     };
 
     const startResult = await minigameRepository.startSession(newSession);
@@ -408,7 +473,11 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       session_id: sessionId,
       game_type,
       practice_mode: practiceMode,
-      game_data: gameData
+      game_data: gameData,
+      timing: getSessionTiming({
+        ...newSession,
+        created_at: sessionStartedAt
+      })
     });
 
   } catch (err: any) {
@@ -462,8 +531,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     }
 
     // 서버 사이드 시간 경과 체크 (치팅 패킷 변조 차단)
-    const sessionCreatedMs = new Date(session.created_at || '').getTime();
-    const serverElapsedMs = Date.now() - sessionCreatedMs;
+    const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
+    const serverElapsedMs = Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0;
     const clientRemainingMs = Math.max(0, Math.floor(Number(payload?.client_remaining_ms || 0)));
     const exceededTimeLimit = (allowedMs: number) => {
       if (serverElapsedMs <= allowedMs + SUBMISSION_GRACE_MS) return false;

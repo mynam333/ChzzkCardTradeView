@@ -3,6 +3,13 @@ import { IMinigameRepository, UserMinigameTicket, MinigameSession } from '../int
 
 const MAX_AUTO_TICKETS = 5;
 
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+const formatKstDbTime = (dateMs = Date.now()): string => {
+  const kst = new Date(dateMs + KST_OFFSET_MS);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')} ${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}:${String(kst.getUTCSeconds()).padStart(2, '0')}`;
+};
+
 export class MysqlMinigameRepository implements IMinigameRepository {
   private getDb() {
     return getMysqlDb();
@@ -97,8 +104,8 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       }
 
       await tx.run(
-        'INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
-        session.id, session.user_id, session.game_type, session.status, session.target_data, ticketSpentType
+        'INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        session.id, session.user_id, session.game_type, session.status, session.target_data, ticketSpentType, session.created_at || formatKstDbTime()
       );
       return { ok: true };
     });
@@ -109,7 +116,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       const session = await tx.get('SELECT * FROM minigame_sessions WHERE id = ? FOR UPDATE', sessionId);
       if (!session) return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
       if (session.status !== 'STARTED') return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
-      await tx.run("UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = UTC_TIMESTAMP() WHERE id = ?", earnedPoints, sessionId);
+      await tx.run("UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = ? WHERE id = ?", earnedPoints, formatKstDbTime(), sessionId);
       await tx.run('UPDATE users SET point = point + ? WHERE id = ?', earnedPoints, session.user_id);
       const user = await tx.get('SELECT point FROM users WHERE id = ?', session.user_id);
       return { ok: true, newPoints: user?.point ?? 0 };
@@ -137,15 +144,16 @@ export class MysqlMinigameRepository implements IMinigameRepository {
 
   async expireSessions(olderThanMinutes: number): Promise<void> {
     await this.getDb().transaction(async (tx) => {
+      const cutoff = formatKstDbTime(Date.now() - olderThanMinutes * 60 * 1000);
       const expired = await tx.all(`
         SELECT *
         FROM minigame_sessions
         WHERE status = 'STARTED'
-          AND TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) > ?
+          AND created_at < ?
         FOR UPDATE
-      `, olderThanMinutes * 60);
+      `, cutoff);
       for (const session of expired) {
-        const update = await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'STARTED'", session.id);
+        const update = await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND status = 'STARTED'", formatKstDbTime(), session.id);
         if (update.changes <= 0) continue;
         let practiceMode = false;
         try { practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true; } catch { practiceMode = false; }

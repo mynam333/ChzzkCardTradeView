@@ -91,6 +91,16 @@ type StartGameResponse = {
   message?: string;
   practice_mode?: boolean;
   resumed?: boolean;
+  timing?: {
+    server_now: string;
+    session_started_at: string | null;
+    session_started_at_kst?: string | null;
+    server_elapsed_ms: number;
+    preplay_ms: number;
+    time_limit_ms: number;
+    time_remaining_ms: number;
+    submit_allowance_ms: number;
+  };
   today_game?: GameType;
   kst_date?: string;
   next_game_at?: string;
@@ -147,6 +157,7 @@ const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const PUZZLE_HINT_PENALTY_SECONDS = 10;
 const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
+const QUIZ_TIME_LIMIT_SECONDS = 15;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 // 방향형(모션) 블러: 한 방향으로 강하게 밀린 듯한 선형 모션 스미어.
@@ -745,6 +756,7 @@ export const ArcadeTab: React.FC = () => {
   const [quizBlurAngle, setQuizBlurAngle] = useState<number>(0);
   const [quizIntensity, setQuizIntensity] = useState<number>(100);
   const [quizTimeLeft, setQuizTimeLeft] = useState<number>(15);
+  const quizDeadlineRef = useRef<number | null>(null);
 
   // 2. 카드 퍼즐 전용 상태
   const [puzzlePieces, setPuzzlePieces] = useState<PuzzlePiece[]>([]);
@@ -753,6 +765,7 @@ export const ArcadeTab: React.FC = () => {
   const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_TIME_LIMIT_SECONDS);
   const [puzzleHintUsed, setPuzzleHintUsed] = useState(false);
   const [showPuzzleHint, setShowPuzzleHint] = useState(false);
+  const puzzleDeadlineRef = useRef<number | null>(null);
   const puzzleDragRef = React.useRef<{ index: number; startX: number; startY: number; dragging: boolean } | null>(null);
   const puzzleHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -770,6 +783,7 @@ export const ArcadeTab: React.FC = () => {
   const [revealActive, setRevealActive] = useState(false); // 시작 시 2초 공개 중인지 여부
   const [gameTimeLeft, setGameTimeLeft] = useState(MATCH_TIME_LIMIT_SECONDS);
   const [isGameOver, setIsGameOver] = useState(false);
+  const matchDeadlineRef = useRef<number | null>(null);
 
   // 티켓 상태 조회 API 호출
   const fetchStatus = useCallback(async () => {
@@ -803,6 +817,9 @@ export const ArcadeTab: React.FC = () => {
     setIsPracticeMode(false);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    quizDeadlineRef.current = null;
+    puzzleDeadlineRef.current = null;
+    matchDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -930,8 +947,10 @@ export const ArcadeTab: React.FC = () => {
           const now = Date.now();
           if (activeGame === 'quiz') {
             setQuizStartTime(now);
-            setQuizTimeLeft(15);
+            quizDeadlineRef.current = now + QUIZ_TIME_LIMIT_SECONDS * 1000;
+            setQuizTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
           } else if (activeGame === 'puzzle') {
+            puzzleDeadlineRef.current = now + PUZZLE_TIME_LIMIT_SECONDS * 1000;
             // 카운트다운 종료 후 바로 퍼즐 조작을 허용합니다.
           } else if (activeGame === 'match') {
             setRevealActive(true);
@@ -939,6 +958,7 @@ export const ArcadeTab: React.FC = () => {
               setMatchCards(prevDeck =>
                 prevDeck.map(c => ({ ...c, isFlipped: false }))
               );
+              matchDeadlineRef.current = Date.now() + MATCH_TIME_LIMIT_SECONDS * 1000;
               setRevealActive(false);
             }, 2000);
           }
@@ -963,7 +983,11 @@ export const ArcadeTab: React.FC = () => {
       return () => window.clearTimeout(timeout);
     }
     const timer = setInterval(() => {
-      setGameTimeLeft(prev => prev - 1);
+      setGameTimeLeft(prev => {
+        const deadline = matchDeadlineRef.current;
+        if (!deadline) return Math.max(0, prev - 1);
+        return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [activeGame, revealActive, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
@@ -979,7 +1003,11 @@ export const ArcadeTab: React.FC = () => {
       return () => window.clearTimeout(timeout);
     }
     const timer = window.setInterval(() => {
-      setPuzzleTimeLeft(prev => prev - 1);
+      setPuzzleTimeLeft(prev => {
+        const deadline = puzzleDeadlineRef.current;
+        if (!deadline) return Math.max(0, prev - 1);
+        return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      });
     }, 1000);
     return () => window.clearInterval(timer);
   }, [activeGame, countdownLeft, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
@@ -994,7 +1022,11 @@ export const ArcadeTab: React.FC = () => {
       return () => window.clearTimeout(timeout);
     }
     const timer = setInterval(() => {
-      setQuizTimeLeft(prev => prev - 1);
+      setQuizTimeLeft(prev => {
+        const deadline = quizDeadlineRef.current;
+        if (!deadline) return Math.max(0, prev - 1);
+        return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [activeGame, countdownLeft, quizTimeLeft, gameResult, selectedQuizChoice, submitResult]);
@@ -1054,6 +1086,9 @@ export const ArcadeTab: React.FC = () => {
     setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    quizDeadlineRef.current = null;
+    puzzleDeadlineRef.current = null;
+    matchDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -1087,12 +1122,20 @@ export const ArcadeTab: React.FC = () => {
         toast(data.message || '끊긴 미니게임 세션을 이어서 시작합니다.', 'info');
       }
 
+      const isResumed = data.resumed === true;
+      const remainingSeconds = data.timing?.time_remaining_ms !== undefined
+        ? Math.max(0, Math.ceil(data.timing.time_remaining_ms / 1000))
+        : null;
+
       // 게임별 초기 세팅값 설정
       if (type === 'quiz') {
-        setQuizStartTime(Date.now());
-        setQuizIntensity(100);
+        const quizRemaining = remainingSeconds ?? QUIZ_TIME_LIMIT_SECONDS;
+        const elapsedPlayMs = Math.max(0, (data.timing?.time_limit_ms ?? QUIZ_TIME_LIMIT_SECONDS * 1000) - quizRemaining * 1000);
+        setQuizStartTime(Date.now() - elapsedPlayMs);
+        setQuizIntensity(Math.max(0, 100 - (elapsedPlayMs / 10_000) * 100));
         setSelectedQuizChoice(null);
-        setQuizTimeLeft(15);
+        setQuizTimeLeft(quizRemaining);
+        quizDeadlineRef.current = isResumed ? Date.now() + quizRemaining * 1000 : null;
 
         // 4가지 블러 종류 중 랜덤 선택 (연습 모드에서 override.blur로 강제 지정 가능)
         const blurTypes: ('gaussian' | 'mosaic' | 'motion' | 'radial')[] = ['gaussian', 'mosaic', 'motion', 'radial'];
@@ -1104,9 +1147,14 @@ export const ArcadeTab: React.FC = () => {
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
         setPuzzlePieces(createInitialPuzzlePieces());
-        setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
+        const puzzleRemaining = remainingSeconds ?? PUZZLE_TIME_LIMIT_SECONDS;
+        setPuzzleTimeLeft(puzzleRemaining);
+        puzzleDeadlineRef.current = isResumed ? Date.now() + puzzleRemaining * 1000 : null;
       } else if (type === 'match') {
-        setRevealActive(true); // 2초 선공개 활성화
+        setRevealActive(!isResumed); // 재개 세션은 이미 선공개 시간이 지났다고 보고 바로 플레이로 복귀합니다.
+        const matchRemaining = remainingSeconds ?? MATCH_TIME_LIMIT_SECONDS;
+        setGameTimeLeft(matchRemaining);
+        matchDeadlineRef.current = isResumed ? Date.now() + matchRemaining * 1000 : null;
 
         const rawCards = data.game_data.cards ?? [];
         const deck: MatchCard[] = [...rawCards, ...rawCards]
@@ -1115,7 +1163,7 @@ export const ArcadeTab: React.FC = () => {
             channel_id: card.channel_id,
             name: card.name,
             logo_url: card.logo_url,
-            isFlipped: true, // 2초 공개를 위해 처음에 flipped로 시작
+            isFlipped: !isResumed, // 2초 공개를 위해 처음에 flipped로 시작
             isMatched: false
           }))
           .sort(() => 0.5 - Math.random()); // 셔플
@@ -1123,7 +1171,7 @@ export const ArcadeTab: React.FC = () => {
       }
 
       // 3초 카운트다운 가동
-      setCountdownLeft(3);
+      setCountdownLeft(isResumed ? 0 : 3);
 
       if (!practiceMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
 
@@ -1191,6 +1239,9 @@ export const ArcadeTab: React.FC = () => {
 
     setPuzzleHintUsed(true);
     setShowPuzzleHint(true);
+    if (puzzleDeadlineRef.current !== null) {
+      puzzleDeadlineRef.current = Math.max(Date.now(), puzzleDeadlineRef.current - PUZZLE_HINT_PENALTY_SECONDS * 1000);
+    }
     setPuzzleTimeLeft((prev) => Math.max(0, prev - PUZZLE_HINT_PENALTY_SECONDS));
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
