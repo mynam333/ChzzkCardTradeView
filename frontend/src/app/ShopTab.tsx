@@ -1913,14 +1913,15 @@ export const ShopTab: React.FC = () => {
           >
             <div
               style={{
-                width: 'min(92vw, calc(82vh / 1.6), 360px)',
-                aspectRatio: '5 / 8'
+                width: '224px',
+                height: '358.4px',
+                transform: 'scale(min(calc(82vh / 358.4px), calc(92vw / 224px)))',
+                transformOrigin: 'center'
               }}
             >
               <CardPreview
                 border={previewCosmetic.type === 'border' ? previewCosmetic : null}
                 nameEffect={previewCosmetic.type === 'name_effect' ? previewCosmetic : null}
-                width="100%"
                 withComet
               />
             </div>

@@ -23,7 +23,6 @@ type CardPreviewProps = {
   star?: number;
   statusLabel?: string;
   className?: string;
-  width?: number | string;
   withComet?: boolean;
 };
 
@@ -36,13 +35,12 @@ const CardShell: React.FC<CardPreviewProps> = ({
   value = 67890,
   star = 0,
   statusLabel = 'PREVIEW',
-  className,
-  width = 224
+  className
 }) => (
   <div
     style={{
-      width: typeof width === 'number' ? `${width}px` : width,
-      aspectRatio: '5 / 8',
+      width: '224px',
+      height: '358.4px',
       containerType: 'inline-size',
       ...(borderClass(border) ? {} : (borderStyle(border) || {}))
     }}
@@ -90,7 +88,14 @@ const CardShell: React.FC<CardPreviewProps> = ({
 export const CardPreview: React.FC<CardPreviewProps> = ({ withComet = false, ...props }) => {
   if (!withComet) return <CardShell {...props} />;
   return (
-    <CometCard rotateDepth={8} translateDepth={10} className="h-full w-full">
+    <CometCard
+      rotateDepth={8}
+      translateDepth={10}
+      hoverScale={1}
+      hoverZ={0}
+      showGlare={false}
+      className="h-full w-full"
+    >
       <CardShell {...props} />
     </CometCard>
   );
