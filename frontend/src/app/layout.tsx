@@ -76,7 +76,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className="h-full antialiased" style={{ fontSize: "16px" }}>
+    <html lang="ko-KR" className="h-full antialiased" style={{ fontSize: "16px" }}>
       <head>
         {/* Google Search Console 소유권 인증 */}
         <meta name="google-site-verification" content="KQ4i9w640cJZF6iM9Tw5k5XthFvOwq78L8QOoQHWdxk" />
@@ -85,7 +85,7 @@ export default function RootLayout({
         <WebsiteJsonLd />
         <WebAppJsonLd />
       </head>
-      <body className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
+      <body lang="ko-KR" className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
         <AppProvider>
           {children}
           {/* 튜토리얼은 라우트(탭) 전환 시에도 유지되도록 루트 레이아웃에 마운트 */}

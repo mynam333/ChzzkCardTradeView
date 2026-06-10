@@ -174,7 +174,6 @@ export const MyInfoTab: React.FC = () => {
 
     const timer = window.setTimeout(() => {
       couponSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      couponInputRef.current?.focus({ preventScroll: true });
       localStorage.removeItem(PENDING_COUPON_STORAGE_KEY);
       localStorage.removeItem(LEGACY_PENDING_COUPON_STORAGE_KEY);
       pendingCouponRef.current = '';
@@ -937,7 +936,7 @@ export const MyInfoTab: React.FC = () => {
         <h3 className="text-base font-bold flex items-center gap-2"><Tag className="h-4.5 w-4.5 text-primary" /> 리딤 쿠폰 등록</h3>
         <p className="text-xs text-muted-foreground">발급된 쿠폰 코드를 입력하시면 설정된 보상이 한 번에 지급됩니다.</p>
         <div className="flex gap-2">
-          <input ref={couponInputRef} type="text" placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
+          <input ref={couponInputRef} type="text" lang="ko-KR" inputMode="text" autoCapitalize="none" spellCheck={false} placeholder="쿠폰 키 입력 (예: WELCOME2026)" value={couponCode}
             onChange={(e) => setCouponCode(e.target.value)}
             className="flex-1 rounded-2xl border border-border bg-secondary/50 px-3 py-2 text-xs focus:border-primary focus:outline-none" />
           <button onClick={handleClaimCoupon} className="cute-wiggle-hover rounded-2xl bg-primary px-5 py-2 text-xs font-black text-primary-foreground">등록</button>

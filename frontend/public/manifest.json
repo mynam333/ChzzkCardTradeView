@@ -1,6 +1,8 @@
 {
   "name": "치카포 : 치지직 카드 포럼",
   "short_name": "치카포",
+  "lang": "ko-KR",
+  "dir": "ltr",
   "background_color": "#09090b",
   "display": "standalone",
   "orientation": "portrait",
