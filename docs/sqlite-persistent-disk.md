@@ -1,12 +1,12 @@
 # Persistent Disk SQLite 운영 가이드
 
-이 백엔드는 Supabase 환경 변수가 없거나 `SUPABASE_REQUIRED=false`인 상태에서 SQLite repository로 동작한다.
+이 백엔드는 `DB_MODE=sqlite`일 때 SQLite repository로 동작한다.
 운영에서는 SQLite 파일과 업로드 파일을 반드시 persistent disk/volume 안에 둔다.
 
 ## 필수 환경 변수
 
 ```env
-SUPABASE_REQUIRED=false
+DB_MODE=sqlite
 SQLITE_DB_PATH=/var/data/chikapo.sqlite
 SQLITE_REQUIRE_PERSISTENT_PATH=true
 UPLOADS_DIR=/var/data/uploads
@@ -42,7 +42,7 @@ Fly Volume을 만들고 앱에 `/data`로 마운트한다.
 1. 현재 서비스를 쓰기 중지 또는 점검 모드로 전환한다.
 2. Supabase 데이터를 SQLite 파일로 export한다. 이미 생성된 `supabase.sqlite`가 있다면 그 파일을 persistent disk의 `SQLITE_DB_PATH` 위치로 복사한다.
 3. `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 운영 환경 변수에서 제거한다.
-4. `SUPABASE_REQUIRED=false`, `SQLITE_DB_PATH`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`, `UPLOADS_DIR`를 설정한다.
+4. `DB_MODE=sqlite`, `SQLITE_DB_PATH`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`, `UPLOADS_DIR`를 설정한다.
 5. 서버를 재시작하고 `/api/health` 및 로그인/인벤토리/랭킹/마켓 기능을 확인한다.
 
 ## 백업

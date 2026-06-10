@@ -1,6 +1,6 @@
 # SQLite to MySQL Migration
 
-현재 백엔드는 `DB_CLIENT=mysql` 또는 `MYSQL_REQUIRED=true`일 때 MySQL 리포지토리로 동작한다. 이 문서는 운영 SQLite 파일을 MySQL 8 스키마로 이전하고 런타임을 MySQL로 전환하는 절차다.
+현재 백엔드는 `DB_MODE=mysql`일 때 MySQL 리포지토리로 동작한다. 이 문서는 운영 SQLite 파일을 MySQL 8 스키마로 이전하고 런타임을 MySQL로 전환하는 절차다.
 
 ## 준비
 
@@ -20,7 +20,7 @@ MYSQL_PORT=3306
 MYSQL_USER=chikapo
 MYSQL_PASSWORD=change_me
 MYSQL_DATABASE=chzzk_card_trade_view
-DB_CLIENT=mysql
+DB_MODE=mysql
 ```
 
 또는 URL 하나로 지정할 수 있다.
@@ -67,7 +67,7 @@ npm run migrate:sqlite-to-mysql -- --data-only
 
 ## MySQL 데이터를 SQLite로 자동 백업
 
-MySQL 런타임(`DB_CLIENT=mysql`)에서는 백엔드가 하루 1회 SQLite 스냅샷을 자동 생성할 수 있다. 기본값은 활성화이며, 매 30분마다 백업 가능 여부를 확인한다. 이미 오늘 백업이 있으면 건너뛴다.
+MySQL 런타임(`DB_MODE=mysql`)에서는 백엔드가 하루 1회 SQLite 스냅샷을 자동 생성할 수 있다. 기본값은 활성화이며, 매 30분마다 백업 가능 여부를 확인한다. 이미 오늘 백업이 있으면 건너뛴다.
 
 ```env
 MYSQL_SQLITE_BACKUP_ENABLED=true
@@ -97,4 +97,4 @@ MYSQL_SQLITE_BACKUP_MAX_RECONNECT_TIMERS=30
 
 - `market_listings`의 SQLite 부분 UNIQUE 인덱스(`status = 'PENDING'`)는 MySQL 생성 컬럼 `pending_user_card_id`와 UNIQUE 인덱스로 변환했다.
 - 날짜 컬럼은 기존 코드와 SQLite 데이터를 그대로 보존하기 위해 `VARCHAR(64)`로 둔다.
-- MySQL 런타임은 `DB_CLIENT=mysql` 또는 `MYSQL_REQUIRED=true`를 설정해야 활성화된다. 이 값이 없으면 기존처럼 Supabase 필수 모드 또는 SQLite 모드로 동작한다.
+- MySQL 런타임은 `DB_MODE=mysql`을 설정해야 활성화된다. 기존 호환용으로 `DB_CLIENT=mysql` 또는 `MYSQL_REQUIRED=true`도 인식하지만 신규 배포에서는 `DB_MODE`를 사용한다.

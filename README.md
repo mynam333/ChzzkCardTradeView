@@ -155,9 +155,13 @@
   * SQLite의 `-wal`, `-shm` 파일도 같은 디렉터리에 생성되므로 DB 파일이 위치한 디렉터리 전체가 persistent disk여야 합니다.
   * 운영에서는 `SQLITE_REQUIRE_PERSISTENT_PATH=true`를 설정해 경로 누락 시 서버가 기동되지 않게 하는 것을 권장합니다.
   * 커스텀 카드 이미지도 보존하려면 `UPLOADS_DIR` 역시 같은 persistent volume 내부 경로로 지정합니다.
-* **Supabase 필수 모드:** `SUPABASE_REQUIRED=true`일 때만 백엔드 구동 시 Supabase DB에 대한 PING 및 인증 연결 상태를 감지합니다.
+* **DB 모드 지정:** `.env`의 `DB_MODE`로 `sqlite`, `mysql`, `supabase` 중 하나를 명시합니다.
+  * `DB_MODE=sqlite`: Supabase URL/Key가 남아 있어도 연결 검사를 건너뛰고 SQLite 모드로 바로 동작합니다.
+  * `DB_MODE=mysql`: MySQL 리포지토리로 동작하며, `MYSQL_URL` 또는 개별 MySQL 접속 환경 변수가 필요합니다.
+  * `DB_MODE=supabase`: 백엔드 구동 시 Supabase DB에 대한 PING 및 인증 연결 상태를 검사하고 실패 시 기동을 중단합니다.
+* **Legacy 호환:** `DB_MODE`가 없을 때만 기존 `DB_CLIENT`, `DATABASE_CLIENT`, `MYSQL_REQUIRED`, `SUPABASE_REQUIRED` 값을 보조적으로 인식합니다.
 * **SQLite 폴백:** 
-  * `SUPABASE_REQUIRED=true`가 아니라면 Supabase URL/Key가 남아 있어도 연결 검사를 건너뛰고 SQLite 모드로 바로 동작합니다.
+  * `DB_MODE`가 지정되지 않은 경우에는 기존 개발 편의를 위해 SQLite 모드로 바로 동작합니다.
   * 레포지토리 패턴(Repository Pattern)을 기반으로 데이터 액세스 레이어를 추상화하여, 상위 비즈니스 로직(Service 레이어)의 코드 수정 없이 투명한 데이터 읽기/쓰기 분기를 보장합니다.
 
 ---
@@ -401,11 +405,11 @@ PORT=5000
 SQLITE_DB_PATH=./local.sqlite
 SQLITE_REQUIRE_PERSISTENT_PATH=false
 UPLOADS_DIR=./public/uploads
-SUPABASE_REQUIRED=false
+DB_MODE=sqlite
 # SQLite 파일을 MySQL로 이전할 때만 설정
 # MYSQL_URL=mysql://user:password@127.0.0.1:3306/chzzk_card_trade_view
 # 백엔드를 MySQL 런타임으로 실행할 때 설정
-# DB_CLIENT=mysql
+# DB_MODE=mysql
 # MySQL 런타임에서 하루 1회 SQLite 백업을 만들 때 설정
 # MYSQL_SQLITE_BACKUP_DIR=./backups/mysql-sqlite
 # MYSQL_SQLITE_BACKUP_RETENTION_DAYS=7
@@ -457,7 +461,8 @@ npm run dev
   * Render 예시: disk mount path `/var/data`, `SQLITE_DB_PATH=/var/data/chikapo.sqlite`, `UPLOADS_DIR=/var/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
   * Fly.io 예시: volume mount path `/data`, `SQLITE_DB_PATH=/data/chikapo.sqlite`, `UPLOADS_DIR=/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
 * SQLite 파일을 MySQL 8로 이전하려면 [docs/mysql-migration.md](docs/mysql-migration.md)를 참고합니다.
-* Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `SUPABASE_REQUIRED=false`로 둡니다.
+* DB 모드는 `DB_MODE=sqlite`, `DB_MODE=mysql`, `DB_MODE=supabase` 중 하나로 명시합니다.
+* Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `DB_MODE=sqlite` 또는 `DB_MODE=mysql`로 둡니다.
 * Supabase 운영 시에는 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
 * `SUPABASE_SERVICE_ROLE_KEY`에는 브라우저용 publishable/anon key가 아니라 서버 전용 `sb_secret_*` 또는 legacy `service_role` key만 설정합니다.
 * Supabase 직접 접근 차단은 [docs/supabase-hardening.md](docs/supabase-hardening.md)와 [supabase-hardening.sql](supabase-hardening.sql)을 적용합니다.

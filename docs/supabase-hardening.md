@@ -31,7 +31,8 @@
 2. 운영 백엔드 `.env`를 확인한다.
    - `SUPABASE_URL`: Supabase project URL
    - `SUPABASE_SERVICE_ROLE_KEY`: `sb_secret_*` 또는 legacy service_role JWT
-   - `SUPABASE_REQUIRED=true`: 운영에서 Supabase 연결 실패 시 SQLite fallback 금지
+   - `DB_MODE=supabase`: 운영에서 Supabase 연결 실패 시 SQLite fallback 금지
+   - `SUPABASE_REQUIRED=true`: 기존 호환용 설정. 신규 배포에서는 `DB_MODE=supabase`를 우선 사용
    - `CORS_ALLOWED_ORIGINS`: 실제 프론트 도메인만 콤마로 등록
 
 3. 프론트 `.env`에서 제거한다.

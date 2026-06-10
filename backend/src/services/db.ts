@@ -11,6 +11,27 @@ let mysqlDb: MysqlDb | null = null;
 export type DbMode = 'LOCAL_SQL' | 'SUPABASE' | 'MYSQL';
 let dbMode: DbMode = 'LOCAL_SQL';
 
+type ConfiguredDbMode = 'sqlite' | 'supabase' | 'mysql' | null;
+
+const normalizeConfiguredDbMode = (value: string | undefined): ConfiguredDbMode => {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (['sqlite', 'local_sql', 'local-sql', 'local', 'file'].includes(normalized)) return 'sqlite';
+  if (['mysql', 'mariadb'].includes(normalized)) return 'mysql';
+  if (['supabase', 'postgres', 'postgresql'].includes(normalized)) return 'supabase';
+  throw new Error(`[DB] DB_MODE 값이 올바르지 않습니다: ${value}. 허용값: sqlite, mysql, supabase`);
+};
+
+const getConfiguredDbMode = (): ConfiguredDbMode => {
+  const explicit = normalizeConfiguredDbMode(process.env.DB_MODE);
+  if (explicit) return explicit;
+  const legacyClient = normalizeConfiguredDbMode(process.env.DB_CLIENT || process.env.DATABASE_CLIENT);
+  if (legacyClient) return legacyClient;
+  if (process.env.MYSQL_REQUIRED === 'true') return 'mysql';
+  if (process.env.SUPABASE_REQUIRED === 'true') return 'supabase';
+  return null;
+};
+
 /**
  * Supabase(PostgREST) 호출용 fetch 래퍼.
  * Node(undici)의 keep-alive 소켓이 서버측에서 끊기거나 일시적 네트워크
@@ -179,9 +200,8 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
 export const initDatabaseConnection = async (): Promise<void> => {
-  const requestedDbClient = String(process.env.DB_CLIENT || process.env.DATABASE_CLIENT || '').trim().toLowerCase();
-  const mysqlRequired = process.env.MYSQL_REQUIRED === 'true' || requestedDbClient === 'mysql';
-  if (mysqlRequired) {
+  const configuredDbMode = getConfiguredDbMode();
+  if (configuredDbMode === 'mysql') {
     mysqlDb = createMysqlDb();
     await mysqlDb.get('SELECT 1 AS ok');
     dbMode = 'MYSQL';
@@ -191,11 +211,11 @@ export const initDatabaseConnection = async (): Promise<void> => {
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseRequired = process.env.SUPABASE_REQUIRED === 'true';
 
-  if (!supabaseRequired) {
-    console.log('[DB] SUPABASE_REQUIRED=true가 아니므로 Supabase 연결 검사를 건너뛰고 SQLite 모드로 동작합니다.');
-  } else if (supabaseUrl && supabaseKey) {
+  if (configuredDbMode === 'supabase') {
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('[DB] DB_MODE=supabase 이지만 SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY가 누락되었습니다.');
+    }
     try {
       assertServerSupabaseKey(supabaseKey);
       // Supabase 클라이언트 인스턴스화 (일시 네트워크 오류 재시도 fetch 주입)
@@ -214,15 +234,18 @@ export const initDatabaseConnection = async (): Promise<void> => {
       console.log('[DB] Supabase 클라우드 데이터베이스와 연동되었습니다. (SUPABASE MODE)');
       return;
     } catch (err: any) {
-      throw new Error(`[DB] Supabase 필수 모드 초기화 실패: ${err.message || err}`);
+      throw new Error(`[DB] Supabase 모드 초기화 실패: ${err.message || err}`);
     }
-  } else {
-    throw new Error('[DB] SUPABASE_REQUIRED=true 이지만 SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY가 누락되었습니다.');
   }
 
   // 로컬 SQLite로 Fallback 처리
   try {
     dbMode = 'LOCAL_SQL';
+    if (configuredDbMode === 'sqlite') {
+      console.log('[DB] DB_MODE=sqlite 설정에 따라 SQLite 모드로 동작합니다.');
+    } else {
+      console.log('[DB] DB_MODE가 지정되지 않아 SQLite 모드로 동작합니다. (legacy fallback)');
+    }
     const dbPath = getSqliteDbPath();
     if (process.env.SQLITE_REQUIRE_PERSISTENT_PATH === 'true' && !process.env.SQLITE_DB_PATH?.trim()) {
       throw new Error('[DB] SQLITE_REQUIRE_PERSISTENT_PATH=true 이지만 SQLITE_DB_PATH가 설정되지 않았습니다.');
