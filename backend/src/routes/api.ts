@@ -6,6 +6,7 @@ import { getLogFilePath } from '../services/fileLogger';
 import { authMiddleware } from '../middlewares/auth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
+import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { uploadCustomImage, deleteOwnCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
 import { getResetInfo, resetData, listOrphanImages, deleteOrphanImages } from '../controllers/adminMaintenanceController';
@@ -232,23 +233,23 @@ router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, get
 router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);
 router.get('/tutorial/progress', authMiddleware, banCheckMiddleware, getTutorialProgress);
 router.post('/tutorial/progress', authMiddleware, banCheckMiddleware, markTutorialCompleted);
-router.post('/tutorial/rewards/gacha-ticket', authMiddleware, banCheckMiddleware, claimTutorialGachaTicket);
+router.post('/tutorial/rewards/gacha-ticket', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, claimTutorialGachaTicket);
 // 유저 차단 관리
 router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
 router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
 router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
-router.post('/cards/draw', authMiddleware, banCheckMiddleware, drawLimiter, drawCard);
-router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, drawLimiter, drawCards);
+router.post('/cards/draw', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCard);
+router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCards);
 router.patch('/cards/:card_id/visibility', authMiddleware, banCheckMiddleware, updateMyCardVisibility);
 router.patch('/cards/:card_id/favorite', authMiddleware, banCheckMiddleware, updateMyCardFavorite);
-router.post('/cards/sell', authMiddleware, banCheckMiddleware, sellCards);
-router.post('/cards/fuse', authMiddleware, banCheckMiddleware, fuseCards);
+router.post('/cards/sell', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, sellCards);
+router.post('/cards/fuse', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, fuseCards);
 
 // 상점 (코스메틱: 테두리 / 이름 이펙트)
 router.get('/shop/items', authMiddleware, getShopItems);
 router.get('/shop/inventory', authMiddleware, getMyCosmetics);
 router.get('/shop/purchases', authMiddleware, getMyPurchases);
-router.post('/shop/buy', authMiddleware, banCheckMiddleware, buyShopItem);
+router.post('/shop/buy', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, buyShopItem);
 router.post('/cards/:card_id/equip', authMiddleware, banCheckMiddleware, equipToCard);
 router.post('/cards/:card_id/unequip', authMiddleware, banCheckMiddleware, unequipFromCard);
 // 관리자 상점 관리
@@ -259,7 +260,7 @@ router.post('/admin/shop/items/:id', authMiddleware, adminMiddleware, adminUpdat
 
 // 신규 스트리머 검색 및 카드 등록 API
 router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchLimiter, searchChzzkStreamer);
-router.post('/streamers/register', authMiddleware, banCheckMiddleware, registerLimiter, registerStreamer);
+router.post('/streamers/register', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, registerLimiter, registerStreamer);
 
 // 대표 카드 설정
 router.post('/users/me/representative', authMiddleware, banCheckMiddleware, setRepresentativeCard);
@@ -272,12 +273,12 @@ router.post('/notifications/:id/read', authMiddleware, banCheckMiddleware, markN
 router.delete('/notifications/:id', authMiddleware, banCheckMiddleware, hideReadNotification);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
-router.post('/trades', authMiddleware, banCheckMiddleware, tradeLimiter, createTrade);
+router.post('/trades', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, tradeLimiter, createTrade);
 router.get('/trades/active', authMiddleware, banCheckMiddleware, getActiveTrades);
 router.get('/trades/history', authMiddleware, banCheckMiddleware, getTradeHistory);
-router.post('/trades/:trade_id/confirm', authMiddleware, banCheckMiddleware, confirmTrade);
-router.post('/trades/:trade_id/finalize', authMiddleware, banCheckMiddleware, finalizeTrade);
-router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, rejectTrade);
+router.post('/trades/:trade_id/confirm', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, confirmTrade);
+router.post('/trades/:trade_id/finalize', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, finalizeTrade);
+router.post('/trades/:trade_id/reject', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, rejectTrade);
 
 // 오픈마켓 API
 router.get('/market/listings', authMiddleware, listActiveListings);
@@ -285,19 +286,19 @@ router.get('/market/my', authMiddleware, listMyListings);
 router.delete('/market/my/:id', authMiddleware, banCheckMiddleware, hideMyListing);
 router.get('/market/history', authMiddleware, listMarketHistory);
 router.get('/market/watches', authMiddleware, banCheckMiddleware, listMarketWatches);
-router.post('/market/watches', authMiddleware, banCheckMiddleware, upsertMarketWatch);
-router.delete('/market/watches/:id', authMiddleware, banCheckMiddleware, deleteMarketWatch);
-router.post('/market/list', authMiddleware, banCheckMiddleware, createListing);
-router.post('/market/cancel/:id', authMiddleware, banCheckMiddleware, cancelListing);
-router.post('/market/buy/:id', authMiddleware, banCheckMiddleware, purchaseListing);
-router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, placeBid);
+router.post('/market/watches', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, upsertMarketWatch);
+router.delete('/market/watches/:id', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, deleteMarketWatch);
+router.post('/market/list', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, createListing);
+router.post('/market/cancel/:id', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, cancelListing);
+router.post('/market/buy/:id', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, purchaseListing);
+router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, placeBid);
 
 // ==========================================
 // 미니게임 API (티켓 충전식 포인트 획득 기능)
 // ==========================================
 router.get('/minigames/status', authMiddleware, banCheckMiddleware, getMinigameStatus);
-router.post('/minigames/start', authMiddleware, banCheckMiddleware, startMinigame);
-router.post('/minigames/submit', authMiddleware, banCheckMiddleware, submitMinigameResult);
+router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, startMinigame);
+router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, submitMinigameResult);
 
 // ==========================================
 
@@ -404,9 +405,9 @@ router.get('/streamers', async (req, res) => {
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
 router.get('/streamers/ranking', getStreamerRankings);
-router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, uploadSingleImage, uploadCustomImage);
+router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, uploadSingleImage, uploadCustomImage);
 // 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제
-router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, deleteOwnCustomImage);
+router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, deleteOwnCustomImage);
 
 // 특정 스트리머 상세 + 시세 변화 그래프 데이터 (공개) — /streamers/search, /streamers/register 보다 뒤에 위치
 router.get('/streamers/:channel_id', getStreamerDetail);
@@ -415,10 +416,10 @@ router.get('/streamers/:channel_id', getStreamerDetail);
 // 2. 일반 유저 및 공용 기능
 // ==========================================
 // 스트리머 부적절 카드 신고 (스냅샷 보존형) — 분당 10회 제한 + 컨트롤러에서 중복 신고 차단
-router.post('/cards/:channel_id/report', authMiddleware, banCheckMiddleware, reportLimiter, reportStreamerCard);
+router.post('/cards/:channel_id/report', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, reportLimiter, reportStreamerCard);
 
 // 쿠폰 등록(사용) API
-router.post('/coupons/claim', authMiddleware, banCheckMiddleware, couponLimiter, claimCoupon);
+router.post('/coupons/claim', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, couponLimiter, claimCoupon);
 
 // 공지사항 전체 조회
 router.get('/announcements', getAnnouncements);

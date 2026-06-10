@@ -22,6 +22,12 @@ import {
   AppNotification
 } from '../interfaces';
 
+const isActiveBan = (user: Pick<User, 'banned_until'>): boolean => {
+  if (!user.banned_until) return false;
+  const expiresAt = new Date(user.banned_until).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+};
+
 export class SupabaseUserRepository implements IUserRepository {
   private getClient() {
     return getSupabaseClient();
@@ -264,6 +270,11 @@ export class SupabaseUserRepository implements IUserRepository {
 
     console.warn('[Supabase] delete_user_account RPC 실패, 폴백 사용:', error.message);
     const client = this.getClient();
+    const { data: deletingUser } = await client
+      .from('users')
+      .select('username, avatar_url, point')
+      .eq('id', id)
+      .maybeSingle();
     const deleteEq = async (table: string, column: string) => {
       const { error: deleteError } = await client.from(table).delete().eq(column, id);
       if (deleteError) throw deleteError;
@@ -271,9 +282,19 @@ export class SupabaseUserRepository implements IUserRepository {
 
     await client.from('deleted_user_accounts').upsert({
       user_id: id,
-      deleted_at: new Date().toISOString()
+      deleted_at: new Date().toISOString(),
+      username_snapshot: deletingUser?.username || null,
+      avatar_url_snapshot: deletingUser?.avatar_url || null,
+      point_at_deletion: deletingUser?.point ?? null
     }).then(({ error }) => {
-      if (error) console.warn('[Supabase] deleted_user_accounts 기록 실패:', error.message);
+      if (!error) return;
+      console.warn('[Supabase] deleted_user_accounts 스냅샷 기록 실패, 기본 tombstone으로 재시도:', error.message);
+      return client.from('deleted_user_accounts').upsert({
+        user_id: id,
+        deleted_at: new Date().toISOString()
+      }).then(({ error: fallbackError }) => {
+        if (fallbackError) console.warn('[Supabase] deleted_user_accounts 기록 실패:', fallbackError.message);
+      });
     });
 
     await client.from('market_listings').update({ buyer_id: null }).eq('buyer_id', id);
@@ -299,7 +320,7 @@ export class SupabaseUserRepository implements IUserRepository {
   async findDeletedAccount(id: string): Promise<DeletedUserAccount | null> {
     const { data, error } = await this.getClient()
       .from('deleted_user_accounts')
-      .select('user_id, deleted_at')
+      .select('user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion')
       .eq('user_id', id)
       .maybeSingle();
     if (error) {
@@ -431,7 +452,10 @@ export class SupabaseUserRepository implements IUserRepository {
         total_asset: Number(row.total_asset) || row.point,
         rank: Number(row.rank)
       }));
-      return mapped;
+      return mapped
+        .filter((user: UserRanking) => !isActiveBan(user))
+        .map((user: UserRanking, index: number) => ({ ...user, rank: index + 1 }))
+        .slice(0, limit);
     }
 
     // 폴백: RPC가 실제로 실패한 경우에만 도달. 포인트 상위 후보를 가져와 보유 카드 시세를 합산 후 정렬.
@@ -448,7 +472,7 @@ export class SupabaseUserRepository implements IUserRepository {
     }
     const { data: users, error: uErr } = await userQuery;
     if (uErr) throw uErr;
-    const candidates = (users || []) as User[];
+    const candidates = ((users || []) as User[]).filter((user) => !isActiveBan(user));
     if (candidates.length === 0) return [];
 
     // 후보 유저들의 보유 카드를 한 번에 조회해 N+1을 제거합니다.
@@ -516,7 +540,7 @@ export class SupabaseUserRepository implements IUserRepository {
 
       if (error) throw error;
       const page = (data || []) as User[];
-      users.push(...page);
+      users.push(...page.filter((user) => !isActiveBan(user)));
       if (page.length < pageSize) break;
     }
 

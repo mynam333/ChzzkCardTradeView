@@ -26,7 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     user_id VARCHAR(191) PRIMARY KEY,
-    deleted_at VARCHAR(64) NOT NULL DEFAULT (UTC_TIMESTAMP())
+    deleted_at VARCHAR(64) NOT NULL DEFAULT (UTC_TIMESTAMP()),
+    username_snapshot VARCHAR(191),
+    avatar_url_snapshot TEXT,
+    point_at_deletion BIGINT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS point_ledger_entries (

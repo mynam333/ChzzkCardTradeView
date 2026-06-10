@@ -154,6 +154,11 @@ export class MysqlUserRepository implements IUserRepository {
 
   async deleteAccount(id: string): Promise<void> {
     await this.getDb().transaction(async (tx) => {
+      const deletingUser = await tx.get<{
+        username?: string | null;
+        avatar_url?: string | null;
+        point?: number | null;
+      }>('SELECT username, avatar_url, point FROM users WHERE id = ?', id);
       await tx.run(`
         INSERT IGNORE INTO market_transaction_audit_logs
           (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
@@ -185,10 +190,15 @@ export class MysqlUserRepository implements IUserRepository {
         WHERE ml.seller_id = ? OR ml.buyer_id = ? OR ml.current_bidder_id = ?
       `, id, id, id, id, id);
       await tx.run(`
-        INSERT INTO deleted_user_accounts (user_id, deleted_at)
-        VALUES (?, UTC_TIMESTAMP())
-        ON DUPLICATE KEY UPDATE deleted_at = VALUES(deleted_at)
-      `, id);
+        INSERT INTO deleted_user_accounts
+          (user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion)
+        VALUES (?, UTC_TIMESTAMP(), ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          deleted_at = VALUES(deleted_at),
+          username_snapshot = VALUES(username_snapshot),
+          avatar_url_snapshot = VALUES(avatar_url_snapshot),
+          point_at_deletion = VALUES(point_at_deletion)
+      `, id, deletingUser?.username || null, deletingUser?.avatar_url || null, deletingUser?.point ?? null);
       await tx.run(`
         UPDATE users
            SET point = point + COALESCE((
@@ -258,7 +268,7 @@ export class MysqlUserRepository implements IUserRepository {
 
   async findDeletedAccount(id: string): Promise<DeletedUserAccount | null> {
     const row = await this.getDb().get<DeletedUserAccount>(
-      'SELECT user_id, deleted_at FROM deleted_user_accounts WHERE user_id = ?',
+      'SELECT user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion FROM deleted_user_accounts WHERE user_id = ?',
       id
     );
     return row || null;
@@ -369,6 +379,7 @@ export class MysqlUserRepository implements IUserRepository {
         FROM users u
         LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
         LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+        WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
         GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
       ),
       RankedUsers AS (

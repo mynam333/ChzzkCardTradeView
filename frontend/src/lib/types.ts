@@ -102,8 +102,10 @@ export interface PointLedgerEntry {
   id: number;
   user_id: string;
   username?: string | null;
+  user_deleted_at?: string | null;
   counterparty_user_id: string | null;
   counterparty_username?: string | null;
+  counterparty_deleted_at?: string | null;
   amount: number;
   balance_after: number | null;
   source_type: PointLedgerSourceType;
@@ -121,6 +123,8 @@ export interface PointAuditResponse {
     avatar_url: string | null;
     point: number | null;
     role: AdminUser['role'] | null;
+    deleted_at?: string | null;
+    identity_source?: 'current' | 'rejoined' | 'deleted_snapshot' | 'unknown';
   };
   entries: PointLedgerEntry[];
   page_summary: {

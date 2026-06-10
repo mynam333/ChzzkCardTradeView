@@ -26,7 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     user_id TEXT PRIMARY KEY,
-    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    username_snapshot TEXT,
+    avatar_url_snapshot TEXT,
+    point_at_deletion INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS point_ledger_entries (

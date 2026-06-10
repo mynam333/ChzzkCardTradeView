@@ -66,6 +66,13 @@ const pointClass = (amount: number) => (
   amount > 0 ? 'text-emerald-500' : amount < 0 ? 'text-rose-500' : 'text-muted-foreground'
 );
 
+const identityLabel = (source?: PointAuditResponse['user']['identity_source']) => {
+  if (source === 'rejoined') return '재가입 계정';
+  if (source === 'deleted_snapshot') return '탈퇴 스냅샷';
+  if (source === 'unknown') return '알 수 없음';
+  return '현재 계정';
+};
+
 /**
  * 관리자 > 유저 목록 탭.
  * 닉네임/채널ID 서버 검색 + 페이지네이션, 클릭 시 닉네임/ID 복사.
@@ -199,7 +206,10 @@ export const AdminUsersTab: React.FC = () => {
   };
 
   const flowLabel = (entry: PointLedgerEntry, targetUserId: string) => {
-    const source = entry.counterparty_username || entry.counterparty_user_id || pointSourceLabels[entry.source_type] || entry.source_type;
+    const counterpartyName = entry.counterparty_username
+      ? `${entry.counterparty_username}${entry.counterparty_deleted_at ? ' (탈퇴)' : ''}`
+      : entry.counterparty_user_id;
+    const source = counterpartyName || pointSourceLabels[entry.source_type] || entry.source_type;
     const target = audit?.user.username || targetUserId;
     if (entry.amount > 0) return { from: source, to: target };
     if (entry.amount < 0) return { from: target, to: source };
@@ -228,6 +238,16 @@ export const AdminUsersTab: React.FC = () => {
                   >
                     {audit.user.id}
                   </button>
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                      {identityLabel(audit.user.identity_source)}
+                    </span>
+                    {audit.user.deleted_at && (
+                      <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-500">
+                        탈퇴 기록 {formatLocalDateTime(audit.user.deleted_at, { hour12: false })}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               {auditTrail.length > 1 && (

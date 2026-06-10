@@ -13,6 +13,7 @@ import { computeValueDrawWeights } from '../utils/gachaWeights';
 import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
+import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -223,6 +224,10 @@ export const getUserMe = async (req: Request, res: Response) => {
     const bonusFreeDrawTickets = Number(effectiveUser.bonus_free_draw_tickets || 0);
     const isFreeDrawEligible = segmentStartIso === null || freeDrawTickets + bonusFreeDrawTickets > 0;
 
+    const [deletedAccount] = await Promise.all([
+      userRepository.findDeletedAccount(user.id)
+    ]);
+    const interactionRestrictedUntil = getActiveAccountInteractionRestriction(deletedAccount);
     const titles = ownedTitles.filter((title) => title.is_equipped);
 
     return res.status(200).json({
@@ -243,7 +248,8 @@ export const getUserMe = async (req: Request, res: Response) => {
       drawCost,
       freeDrawInterval: intervalHours,
       isFreeDrawEligible,
-      nextFreeDrawAt
+      nextFreeDrawAt,
+      interactionRestrictedUntil: interactionRestrictedUntil?.toISOString() || null
     });
   } catch (err: any) {
     console.error('[PlayController] getUserMe 에러:', err);
@@ -263,11 +269,23 @@ export const deleteMyAccount = async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'NotFound', message: '이미 삭제되었거나 존재하지 않는 계정입니다.' });
   }
 
-  const { confirmationText, userIdConfirm, irreversible } = req.body || {};
-  if (confirmationText !== '회원 탈퇴' || userIdConfirm !== user.id || irreversible !== true) {
+  const {
+    confirmationText,
+    userIdConfirm,
+    irreversible,
+    interactionRestrictionAccepted,
+    rejoinCooldownAccepted
+  } = req.body || {};
+  const acceptedInteractionRestriction = interactionRestrictionAccepted === true || rejoinCooldownAccepted === true;
+  if (
+    confirmationText !== '회원 탈퇴'
+    || userIdConfirm !== user.id
+    || irreversible !== true
+    || !acceptedInteractionRestriction
+  ) {
     return res.status(400).json({
       error: 'BadRequest',
-      message: '탈퇴 확인 문구, 계정 ID, 복구 불가 동의를 모두 정확히 입력해야 합니다.'
+      message: '탈퇴 확인 문구, 계정 ID, 복구 불가 동의, 24시간 상호작용 제한 동의를 모두 정확히 입력해야 합니다.'
     });
   }
 

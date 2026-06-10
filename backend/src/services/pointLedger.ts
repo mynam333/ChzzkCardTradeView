@@ -31,8 +31,10 @@ export type PointLedgerEntry = {
   id: number;
   user_id: string;
   username?: string | null;
+  user_deleted_at?: string | null;
   counterparty_user_id: string | null;
   counterparty_username?: string | null;
+  counterparty_deleted_at?: string | null;
   amount: number;
   balance_after: number | null;
   source_type: PointLedgerSourceType;
@@ -111,8 +113,10 @@ const mapLedgerRow = (row: any): PointLedgerEntry => ({
   id: Number(row.id),
   user_id: row.user_id,
   username: row.username ?? null,
+  user_deleted_at: row.user_deleted_at ?? null,
   counterparty_user_id: row.counterparty_user_id ?? null,
   counterparty_username: row.counterparty_username ?? null,
+  counterparty_deleted_at: row.counterparty_deleted_at ?? null,
   amount: Number(row.amount || 0),
   balance_after: row.balance_after == null ? null : Number(row.balance_after),
   source_type: row.source_type || 'unknown',
@@ -132,10 +136,16 @@ export const listPointLedgerForUser = async (
   const where = beforeId ? 'WHERE ple.user_id = ? AND ple.id < ?' : 'WHERE ple.user_id = ?';
   const params = beforeId ? [userId, beforeId, limit + 1] : [userId, limit + 1];
   const sql = `
-    SELECT ple.*, u.username, cu.username AS counterparty_username
+    SELECT ple.*,
+           COALESCE(u.username, du.username_snapshot) AS username,
+           du.deleted_at AS user_deleted_at,
+           COALESCE(cu.username, cdu.username_snapshot) AS counterparty_username,
+           cdu.deleted_at AS counterparty_deleted_at
       FROM point_ledger_entries ple
       LEFT JOIN users u ON u.id = ple.user_id
+      LEFT JOIN deleted_user_accounts du ON du.user_id = ple.user_id
       LEFT JOIN users cu ON cu.id = ple.counterparty_user_id
+      LEFT JOIN deleted_user_accounts cdu ON cdu.user_id = ple.counterparty_user_id
       ${where}
      ORDER BY ple.id DESC
      LIMIT ?

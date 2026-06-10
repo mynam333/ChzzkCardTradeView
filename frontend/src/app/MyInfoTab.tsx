@@ -108,6 +108,7 @@ export const MyInfoTab: React.FC = () => {
   const [withdrawText, setWithdrawText] = useState('');
   const [withdrawUserId, setWithdrawUserId] = useState('');
   const [withdrawIrreversible, setWithdrawIrreversible] = useState(false);
+  const [withdrawInteractionRestrictionAccepted, setWithdrawInteractionRestrictionAccepted] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
@@ -483,7 +484,8 @@ export const MyInfoTab: React.FC = () => {
   const canWithdraw =
     withdrawText === '회원 탈퇴'
     && withdrawUserId === user.id
-    && withdrawIrreversible;
+    && withdrawIrreversible
+    && withdrawInteractionRestrictionAccepted;
 
   const handleWithdrawAccount = async () => {
     if (!canWithdraw || withdrawing) return;
@@ -494,7 +496,8 @@ export const MyInfoTab: React.FC = () => {
         body: JSON.stringify({
           confirmationText: withdrawText,
           userIdConfirm: withdrawUserId,
-          irreversible: withdrawIrreversible
+          irreversible: withdrawIrreversible,
+          interactionRestrictionAccepted: withdrawInteractionRestrictionAccepted
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -1044,7 +1047,7 @@ export const MyInfoTab: React.FC = () => {
             </h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
               회원 탈퇴 시 계정, 보유 카드, 코스메틱, 쿠폰 사용 기록, 차단 정보, 알림, 미니게임 기록 등 개인 데이터가 삭제됩니다.
-              완료 후에는 복구할 수 없습니다.
+              완료 후에는 복구할 수 없으며, 같은 치지직 계정으로 재가입하더라도 24시간 동안 오픈마켓·교환·보상 수령 등 상호작용이 제한됩니다.
             </p>
           </div>
           <button
@@ -1063,6 +1066,9 @@ export const MyInfoTab: React.FC = () => {
               <p className="mt-1">
                 판매 중인 매물과 진행 중인 교환 정보도 정리됩니다. 구매 이력에서 회원님을 식별하는 정보는 제거되며,
                 탈퇴 직후 같은 세션으로는 서비스를 이용할 수 없습니다.
+              </p>
+              <p className="mt-1 font-black">
+                어뷰징 방지를 위해 탈퇴 후 같은 치지직 계정으로 재가입하더라도 24시간 동안 오픈마켓, 교환, 보상 수령 등 유저·경제 상호작용이 제한됩니다.
               </p>
             </div>
 
@@ -1100,6 +1106,18 @@ export const MyInfoTab: React.FC = () => {
               />
               <span className="text-[11px] font-bold leading-relaxed text-foreground/90">
                 탈퇴 후 데이터 복구가 불가능하며, 보유 자산과 서비스 기록이 삭제되는 것을 이해했습니다.
+              </span>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-3">
+              <input
+                type="checkbox"
+                checked={withdrawInteractionRestrictionAccepted}
+                onChange={(e) => setWithdrawInteractionRestrictionAccepted(e.target.checked)}
+                className="mt-0.5 rounded border-border"
+              />
+              <span className="text-[11px] font-bold leading-relaxed text-rose-600 dark:text-rose-200">
+                탈퇴 후 재가입하더라도 24시간 동안 유저·경제 상호작용이 제한되며, 제한 확인과 감사 추적을 위해 탈퇴 계정 ID, 탈퇴 시각, 탈퇴 당시 닉네임·프로필·포인트 스냅샷이 최소한으로 보관되는 것을 이해했습니다.
               </span>
             </label>
 
@@ -1189,13 +1207,13 @@ const PRIVACY_POLICY_CONTENT = `
 * **네이버 치지직 연동 필수 항목**: 채널 ID, 닉네임, 프로필 이미지 URL
 * **게임 플레이 관련 정보**: 포인트 현황, 카드 보유 내역, 카드 교환 제안 및 거래 승인/거절 로그, 오픈마켓 등록·구매·판매·경매 입찰·정산·환불 내역, 쿠폰 사용 내역, 상점 구매 내역, 미니게임 보상 내역, 유저 차단 목록
 * **포인트 감사 정보**: 포인트 증감 금액, 증감 후 잔액, 변동 사유, 관련 거래·쿠폰·상점·카드·경매 식별자, 거래 상대방 채널 ID, 처리 시각
-* **부정 이용 방지 정보**: 접속 요청 기록, 비정상 요청 탐지 및 제한 기록, 제재 사유와 제재 만료 시각, 탈퇴 및 재가입 제한 확인을 위한 탈퇴 채널 ID와 탈퇴 시각
+* **부정 이용 방지 정보**: 접속 요청 기록, 비정상 요청 탐지 및 제한 기록, 제재 사유와 제재 만료 시각, 탈퇴 후 재가입 계정의 상호작용 제한 및 감사 추적을 위한 탈퇴 채널 ID, 탈퇴 시각, 탈퇴 당시 닉네임·프로필 이미지 URL·포인트 스냅샷
 
 ## 3. 개인정보의 보유 및 이용 기간
 이용자의 개인정보 및 게임 데이터는 서비스 이용 기간 동안 원칙적으로 안전하게 보관됩니다.
 * **이용 유지 기간**: 원활한 카드 마켓 운영 및 거래 무결성 확인을 위해 이용자가 명시적으로 탈퇴(데이터 삭제)를 요구하지 않는 한, 로그아웃 혹은 세션 종료 이후에도 데이터베이스에 유지됩니다.
 * **탈퇴 시 파기**: 이용자가 서비스 내 탈퇴 기능 또는 개발자 채널을 통해 본인 확인 후 탈퇴를 요청하는 경우, 계정 프로필, 보유 카드, 알림, 구독 정보 등 서비스 제공에 필요한 일반 개인정보는 지체 없이 파기합니다.
-* **탈퇴 후 최소 보관**: 재가입 제한, 부정 이용 방지, 거래 무결성 확인, 분쟁 대응을 위해 탈퇴 채널 ID, 탈퇴 시각, 거래 감사 로그, 포인트 감사 원장 등 최소한의 기록은 필요한 기간 동안 별도 보관될 수 있습니다. 이 정보는 일반 서비스 표시 목적이 아니라 보안·감사·정산 확인 목적으로만 사용됩니다.
+* **탈퇴 후 최소 보관**: 재가입 계정의 상호작용 제한, 부정 이용 방지, 거래 무결성 확인, 분쟁 대응을 위해 탈퇴 채널 ID, 탈퇴 시각, 탈퇴 당시 닉네임·프로필 이미지 URL·포인트 스냅샷, 거래 감사 로그, 포인트 감사 원장 등 최소한의 기록은 필요한 기간 동안 별도 보관될 수 있습니다. 이 정보는 일반 서비스 표시 목적이 아니라 보안·감사·정산 확인 목적으로만 사용됩니다.
 * **법령상 보관**: 관계 법령에 따라 보존할 필요가 있는 경우 해당 법령에서 정한 기간 동안 보관할 수 있습니다.
 
 ## 4. 개인정보의 제3자 제공

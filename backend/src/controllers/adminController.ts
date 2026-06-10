@@ -346,6 +346,7 @@ export const bulkUpdateBans = async (req: Request, res: Response) => {
         results.push(userId);
       }
     }
+    if (results.length > 0) clearUserRankingCaches();
 
     return res.status(200).json({
       message: `${results.length}명의 사용자 제재가 수정되었습니다.`,
@@ -404,6 +405,7 @@ export const banUser = async (req: Request, res: Response) => {
 
     const bannedUntilIso = banDate.toISOString();
     await userRepository.updateBanStatus(user_id, bannedUntilIso, reason);
+    clearUserRankingCaches();
 
     return res.status(200).json({
       message: `사용자(${targetUser.username})가 제재 처리되었습니다.`,
@@ -432,6 +434,7 @@ export const unbanUser = async (req: Request, res: Response) => {
     }
 
     await userRepository.updateBanStatus(user_id, null);
+    clearUserRankingCaches();
 
     return res.status(200).json({
       message: `사용자(${targetUser.username})의 제재가 해제되어 정상 정상 활동이 가능합니다.`,
@@ -616,6 +619,7 @@ export const getUserPointAudit = async (req: Request, res: Response) => {
 
   try {
     const targetUser = await userRepository.findById(user_id);
+    const deletedAccount = await userRepository.findDeletedAccount(user_id);
     const { entries, next_before_id } = await listPointLedgerForUser(user_id, { limit, beforeId });
     const totals = entries.reduce((acc, entry) => {
       if (entry.amount > 0) acc.income += entry.amount;
@@ -629,13 +633,17 @@ export const getUserPointAudit = async (req: Request, res: Response) => {
         username: targetUser.username,
         avatar_url: targetUser.avatar_url,
         point: targetUser.point,
-        role: targetUser.role
+        role: targetUser.role,
+        deleted_at: deletedAccount?.deleted_at || null,
+        identity_source: deletedAccount ? 'rejoined' : 'current'
       } : {
         id: user_id,
-        username: null,
-        avatar_url: null,
-        point: null,
-        role: null
+        username: deletedAccount?.username_snapshot || null,
+        avatar_url: deletedAccount?.avatar_url_snapshot || null,
+        point: deletedAccount?.point_at_deletion ?? null,
+        role: null,
+        deleted_at: deletedAccount?.deleted_at || null,
+        identity_source: deletedAccount ? 'deleted_snapshot' : 'unknown'
       },
       entries,
       page_summary: {

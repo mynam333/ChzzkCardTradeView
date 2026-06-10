@@ -16,6 +16,7 @@ import {
 } from '../repositories';
 import { getUserProfile } from '../controllers/playController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
+import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 
 /**
  * 실제 in-memory SQLite( better-sqlite3 )에 init-db.sql 스키마를 적재하여
@@ -109,6 +110,85 @@ describe('findByIds 배치 조회', () => {
     seedStreamer(db, 'c2', 'B');
     const streamers = await streamerRepository.findByIds(['c2', 'c1']);
     expect(streamers.map((s) => s.channel_id).sort()).toEqual(['c1', 'c2']);
+  });
+});
+
+describe('UserRepository rankings', () => {
+  it('활성 제재 유저는 유저 랭킹에서 제외하고 제재 만료 유저는 포함한다', async () => {
+    seedUser(db, 'ranking-active-ban', 999999);
+    seedUser(db, 'ranking-normal', 1000);
+    seedUser(db, 'ranking-expired-ban', 5000);
+    db.prepare("UPDATE users SET banned_until = datetime('now', '+1 day') WHERE id = ?").run('ranking-active-ban');
+    db.prepare("UPDATE users SET banned_until = datetime('now', '-1 day') WHERE id = ?").run('ranking-expired-ban');
+
+    const rankings = await userRepository.findRankings(10);
+
+    expect(rankings.map((user) => user.id)).not.toContain('ranking-active-ban');
+    expect(rankings.map((user) => user.id)).toContain('ranking-normal');
+    expect(rankings.map((user) => user.id)).toContain('ranking-expired-ban');
+  });
+
+  it('활성 제재 유저는 카드 가치 랭킹에서도 제외한다', async () => {
+    seedUser(db, 'ranking-card-banned', 100);
+    seedUser(db, 'ranking-card-normal', 100);
+    seedStreamer(db, 'ranking-card-channel', '랭킹 카드 스트리머');
+    db.prepare("UPDATE streamers SET base_value = 10000 WHERE channel_id = 'ranking-card-channel'").run();
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('ranking-card-banned', 'ranking-card-channel', 1, 5),
+             ('ranking-card-normal', 'ranking-card-channel', 2, 0)
+    `).run();
+    db.prepare("UPDATE users SET banned_until = datetime('now', '+1 day') WHERE id = ?").run('ranking-card-banned');
+
+    const rankings = await userRepository.findRankings(10, '', { mode: 'cards' });
+    const holderRankings = await userRepository.findRankings(10, '', { mode: 'cards', channelId: 'ranking-card-channel' });
+
+    expect(rankings.map((user) => user.id)).not.toContain('ranking-card-banned');
+    expect(holderRankings.map((user) => user.id)).toEqual(['ranking-card-normal']);
+  });
+});
+
+describe('accountInteractionRestrictionMiddleware', () => {
+  it('탈퇴 후 24시간 이내 재가입 계정의 상호작용 요청을 차단한다', async () => {
+    seedUser(db, 'recent-rejoin-user');
+    db.prepare(`
+      INSERT INTO deleted_user_accounts (user_id, deleted_at)
+      VALUES ('recent-rejoin-user', datetime('now', '-1 hour'))
+    `).run();
+    const res = createJsonResponse();
+    let nextCalled = false;
+
+    await accountInteractionRestrictionMiddleware(
+      { user: { id: 'recent-rejoin-user' } } as any,
+      res as any,
+      (() => { nextCalled = true; }) as any
+    );
+
+    expect(nextCalled).toBe(false);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toMatchObject({
+      error: 'PostRejoinInteractionRestricted',
+      interaction_restricted_until: expect.any(String)
+    });
+  });
+
+  it('탈퇴 후 24시간이 지난 재가입 계정의 상호작용 요청은 허용한다', async () => {
+    seedUser(db, 'old-rejoin-user');
+    db.prepare(`
+      INSERT INTO deleted_user_accounts (user_id, deleted_at)
+      VALUES ('old-rejoin-user', datetime('now', '-25 hours'))
+    `).run();
+    const res = createJsonResponse();
+    let nextCalled = false;
+
+    await accountInteractionRestrictionMiddleware(
+      { user: { id: 'old-rejoin-user' } } as any,
+      res as any,
+      (() => { nextCalled = true; }) as any
+    );
+
+    expect(nextCalled).toBe(true);
+    expect(res.statusCode).toBe(0);
   });
 });
 
@@ -472,7 +552,10 @@ describe('MarketRepository 재등록 제약', () => {
 
     expect(await userRepository.findDeletedAccount('audit-seller')).toEqual({
       user_id: 'audit-seller',
-      deleted_at: expect.any(String)
+      deleted_at: expect.any(String),
+      username_snapshot: 'user_audit-seller',
+      avatar_url_snapshot: null,
+      point_at_deletion: 1425
     });
     expect(db.prepare('SELECT id FROM users WHERE id = ?').get('audit-seller')).toBeUndefined();
     expect(db.prepare('SELECT id FROM market_listings WHERE id = ?').get(listing.id)).toBeUndefined();

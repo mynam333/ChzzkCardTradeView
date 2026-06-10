@@ -223,9 +223,15 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await db.run(`
     CREATE TABLE IF NOT EXISTS deleted_user_accounts (
       user_id VARCHAR(191) PRIMARY KEY,
-      deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      username_snapshot VARCHAR(191) NULL,
+      avatar_url_snapshot TEXT NULL,
+      point_at_deletion BIGINT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await ensureMysqlColumn(db, 'deleted_user_accounts', 'username_snapshot', 'username_snapshot VARCHAR(191) NULL AFTER deleted_at');
+  await ensureMysqlColumn(db, 'deleted_user_accounts', 'avatar_url_snapshot', 'avatar_url_snapshot TEXT NULL AFTER username_snapshot');
+  await ensureMysqlColumn(db, 'deleted_user_accounts', 'point_at_deletion', 'point_at_deletion BIGINT NULL AFTER avatar_url_snapshot');
   await db.run(`
     CREATE TABLE IF NOT EXISTS point_ledger_entries (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -463,8 +469,29 @@ export const initDatabaseConnection = async (): Promise<void> => {
       }
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS deleted_user_accounts (
         user_id TEXT PRIMARY KEY,
-        deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+        deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+        username_snapshot TEXT,
+        avatar_url_snapshot TEXT,
+        point_at_deletion INTEGER
       );`);
+      try {
+        sqliteDb.prepare("SELECT username_snapshot FROM deleted_user_accounts LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] deleted_user_accounts 테이블에 username_snapshot 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE deleted_user_accounts ADD COLUMN username_snapshot TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT avatar_url_snapshot FROM deleted_user_accounts LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] deleted_user_accounts 테이블에 avatar_url_snapshot 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE deleted_user_accounts ADD COLUMN avatar_url_snapshot TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT point_at_deletion FROM deleted_user_accounts LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] deleted_user_accounts 테이블에 point_at_deletion 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE deleted_user_accounts ADD COLUMN point_at_deletion INTEGER;");
+      }
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS point_ledger_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,

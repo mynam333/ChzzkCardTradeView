@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     user_id TEXT PRIMARY KEY,                  -- 탈퇴한 치지직 채널 ID
-    deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    username_snapshot TEXT,
+    avatar_url_snapshot TEXT,
+    point_at_deletion INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS point_ledger_entries (

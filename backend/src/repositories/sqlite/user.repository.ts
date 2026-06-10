@@ -240,6 +240,11 @@ export class SqliteUserRepository implements IUserRepository {
   async deleteAccount(id: string): Promise<void> {
     const db = this.getDb();
     const txn = db.transaction(() => {
+      const deletingUser = db.prepare('SELECT username, avatar_url, point FROM users WHERE id = ?').get(id) as {
+        username?: string | null;
+        avatar_url?: string | null;
+        point?: number | null;
+      } | undefined;
       db.prepare(`
         INSERT OR IGNORE INTO market_transaction_audit_logs
           (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
@@ -271,10 +276,15 @@ export class SqliteUserRepository implements IUserRepository {
         WHERE ml.seller_id = ? OR ml.buyer_id = ? OR ml.current_bidder_id = ?
       `).run(id, id, id, id, id);
       db.prepare(`
-        INSERT INTO deleted_user_accounts (user_id, deleted_at)
-        VALUES (?, datetime('now'))
-        ON CONFLICT(user_id) DO UPDATE SET deleted_at = excluded.deleted_at
-      `).run(id);
+        INSERT INTO deleted_user_accounts
+          (user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion)
+        VALUES (?, datetime('now'), ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          deleted_at = excluded.deleted_at,
+          username_snapshot = excluded.username_snapshot,
+          avatar_url_snapshot = excluded.avatar_url_snapshot,
+          point_at_deletion = excluded.point_at_deletion
+      `).run(id, deletingUser?.username || null, deletingUser?.avatar_url || null, deletingUser?.point ?? null);
       db.prepare(`
         UPDATE users
            SET point = point + COALESCE((
@@ -346,7 +356,7 @@ export class SqliteUserRepository implements IUserRepository {
 
   async findDeletedAccount(id: string): Promise<DeletedUserAccount | null> {
     const row = this.getDb()
-      .prepare('SELECT user_id, deleted_at FROM deleted_user_accounts WHERE user_id = ?')
+      .prepare('SELECT user_id, deleted_at, username_snapshot, avatar_url_snapshot, point_at_deletion FROM deleted_user_accounts WHERE user_id = ?')
       .get(id) as DeletedUserAccount | undefined;
     return row || null;
   }
@@ -430,6 +440,7 @@ export class SqliteUserRepository implements IUserRepository {
         FROM users u
         LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
         LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+        WHERE u.banned_until IS NULL OR datetime(u.banned_until) <= datetime('now')
         GROUP BY u.id
       ),
       RankedUsers AS (

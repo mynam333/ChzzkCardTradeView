@@ -457,6 +457,7 @@ interface AppContextType {
     freeDrawInterval: number;
     isFreeDrawEligible: boolean;
     nextFreeDrawAt: string | null;
+    interactionRestrictedUntil: string | null;
   } | null;
   authLoading: boolean;
   setUser: React.Dispatch<React.SetStateAction<AppContextType['user']>>;
@@ -711,7 +712,8 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
           drawCost: data.drawCost ?? 10000,
           freeDrawInterval: data.freeDrawInterval ?? 24,
           isFreeDrawEligible: !!data.isFreeDrawEligible,
-          nextFreeDrawAt: data.nextFreeDrawAt ?? null
+          nextFreeDrawAt: data.nextFreeDrawAt ?? null,
+          interactionRestrictedUntil: data.interactionRestrictedUntil ?? null
         });
       } else if (response.status === 401) {
         clearAuthFlag();

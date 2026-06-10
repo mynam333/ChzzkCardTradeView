@@ -23,6 +23,9 @@ export interface User {
 export interface DeletedUserAccount {
   user_id: string;
   deleted_at: string;
+  username_snapshot?: string | null;
+  avatar_url_snapshot?: string | null;
+  point_at_deletion?: number | null;
 }
 
 export interface UserTitle {
@@ -203,7 +206,7 @@ export interface IUserRepository {
   addBonusFreeDrawTickets(id: string, amount: number): Promise<void>;
   /** 회원 탈퇴: 계정과 계정에 종속된 개인 데이터를 삭제/비식별 처리합니다. */
   deleteAccount(id: string): Promise<void>;
-  /** 탈퇴 후 재가입 제한 및 감사 추적용 tombstone 조회. */
+  /** 탈퇴 후 재가입 계정의 상호작용 제한 및 감사 추적용 tombstone 조회. */
   findDeletedAccount(id: string): Promise<DeletedUserAccount | null>;
   updateLastFreeDraw(id: string, time: string): Promise<void>;
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
