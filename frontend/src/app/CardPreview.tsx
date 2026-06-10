@@ -23,6 +23,7 @@ type CardPreviewProps = {
   star?: number;
   statusLabel?: string;
   className?: string;
+  width?: number | string;
   withComet?: boolean;
 };
 
@@ -35,12 +36,13 @@ const CardShell: React.FC<CardPreviewProps> = ({
   value = 67890,
   star = 0,
   statusLabel = 'PREVIEW',
-  className
+  className,
+  width = 224
 }) => (
   <div
     style={{
-      width: '224px',
-      height: '358.4px',
+      width: typeof width === 'number' ? `${width}px` : width,
+      aspectRatio: '5 / 8',
       containerType: 'inline-size',
       ...(borderClass(border) ? {} : (borderStyle(border) || {}))
     }}
