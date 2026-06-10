@@ -126,6 +126,8 @@ const shouldSkipForLoad = (): string | null => {
   const maxHeapUsedMb = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_HEAP_USED_MB', 450, 64);
   const maxRealtimeClients = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_REALTIME_CLIENTS', 100, 0);
   const maxNotificationClients = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_NOTIFICATION_CLIENTS', 100, 0);
+  const maxChatConnections = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_CHAT_CONNECTIONS', 20, 0);
+  const maxDesiredChatConnections = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_DESIRED_CHAT_CONNECTIONS', 20, 0);
   const maxChatPending = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_CHAT_PENDING', 200, 0);
   const maxReconnectTimers = getNumberEnv('MYSQL_SQLITE_BACKUP_MAX_RECONNECT_TIMERS', 30, 0);
 
@@ -137,6 +139,12 @@ const shouldSkipForLoad = (): string | null => {
   }
   if ((stats.streams?.notifications?.clients || 0) > maxNotificationClients) {
     return `notification clients ${stats.streams.notifications.clients} > ${maxNotificationClients}`;
+  }
+  if ((stats.chat?.connections || 0) > maxChatConnections) {
+    return `chat connections ${stats.chat.connections} > ${maxChatConnections}`;
+  }
+  if ((stats.chat?.desired || 0) > maxDesiredChatConnections) {
+    return `desired chat connections ${stats.chat.desired} > ${maxDesiredChatConnections}`;
   }
   if ((stats.chat?.pendingChatTotal || 0) > maxChatPending) return `pending chat ${stats.chat.pendingChatTotal} > ${maxChatPending}`;
   if ((stats.chat?.reconnectTimers || 0) > maxReconnectTimers) {

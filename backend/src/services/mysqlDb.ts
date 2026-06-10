@@ -119,6 +119,7 @@ const prepareMysqlStatement = (sql: string, params: any[]): { sql: string; param
   normalizeLimitOffsetPlaceholders(normalizeMysqlSql(sql), params);
 
 const MYSQL_TRANSACTION_MAX_ATTEMPTS = Math.max(1, Number(process.env.MYSQL_TRANSACTION_MAX_ATTEMPTS || 3));
+const MYSQL_LOCK_WAIT_TIMEOUT_SECONDS = Math.max(1, Number(process.env.MYSQL_LOCK_WAIT_TIMEOUT_SECONDS || 5));
 
 const isRetryableMysqlTransactionError = (err: any): boolean => {
   const code = String(err?.code || '');
@@ -165,6 +166,7 @@ export class MysqlDb {
       const conn = await this.pool.getConnection();
       const tx = new MysqlTx(conn);
       try {
+        await conn.query('SET SESSION innodb_lock_wait_timeout = ?', [MYSQL_LOCK_WAIT_TIMEOUT_SECONDS]);
         await conn.beginTransaction();
         const result = await task(tx);
         await conn.commit();

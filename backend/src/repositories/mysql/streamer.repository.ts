@@ -209,13 +209,38 @@ export class MysqlStreamerRepository implements IStreamerRepository {
 
   async bulkIncrementChatCounts(counts: { channel_id: string; count: number }[]): Promise<void> {
     if (counts.length === 0) return;
-    await this.getDb().transaction(async (tx) => {
-      for (const item of counts) {
-        if (item.count > 0) {
-          await tx.run('UPDATE streamers SET chat_count = chat_count + ?, updated_at = UTC_TIMESTAMP() WHERE channel_id = ?', item.count, item.channel_id);
-        }
+    const merged = new Map<string, number>();
+    for (const item of counts) {
+      const channelId = String(item.channel_id || '').trim();
+      const count = Math.max(0, Math.floor(Number(item.count || 0)));
+      if (!channelId || count <= 0) continue;
+      merged.set(channelId, (merged.get(channelId) || 0) + count);
+    }
+
+    const rows = Array.from(merged.entries())
+      .map(([channel_id, count]) => ({ channel_id, count }))
+      .sort((a, b) => a.channel_id.localeCompare(b.channel_id));
+
+    const chunkSize = Math.max(1, Number(process.env.MYSQL_CHAT_FLUSH_CHUNK_SIZE || 100));
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const caseParts: string[] = [];
+      const params: any[] = [];
+      for (const item of chunk) {
+        caseParts.push('WHEN ? THEN ?');
+        params.push(item.channel_id, item.count);
       }
-    });
+      const ids = chunk.map((item) => item.channel_id);
+      await this.getDb().transaction(async (tx) => {
+        await tx.run(
+          `UPDATE streamers
+              SET chat_count = chat_count + CASE channel_id ${caseParts.join(' ')} ELSE 0 END,
+                  updated_at = UTC_TIMESTAMP()
+            WHERE channel_id IN (${ids.map(() => '?').join(',')})`,
+          [...params, ...ids]
+        );
+      });
+    }
   }
 
   async updateValueMetrics(channelId: string, prevValue: number, baseValue: number, activityScore: number, multiplier: number): Promise<void> {
@@ -239,8 +264,9 @@ export class MysqlStreamerRepository implements IStreamerRepository {
 
   async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
     if (results.length === 0) return;
+    const orderedResults = [...results].sort((a, b) => a.channel_id.localeCompare(b.channel_id));
     await this.getDb().transaction(async (tx) => {
-      for (const r of results) {
+      for (const r of orderedResults) {
         if (r.polled) {
           await tx.run(
             `UPDATE streamers SET
