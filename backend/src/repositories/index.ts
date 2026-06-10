@@ -41,6 +41,20 @@ import {
   SupabaseMinigameRepository,
   SupabaseTitleRepository
 } from './supabaseRepository';
+import {
+  MysqlUserRepository,
+  MysqlStreamerRepository,
+  MysqlCouponRepository,
+  MysqlReportRepository,
+  MysqlAnnouncementRepository,
+  MysqlUserCardRepository,
+  MysqlTradeRepository,
+  MysqlNotificationRepository,
+  MysqlSystemConfigRepository,
+  MysqlMarketRepository,
+  MysqlMinigameRepository,
+  MysqlTitleRepository
+} from './mysqlRepository';
 
 // 전역 싱글톤 리포지토리 변수 선언
 export let userRepository: IUserRepository;
@@ -76,6 +90,20 @@ export const initRepositories = (): void => {
     minigameRepository = new SupabaseMinigameRepository();
     titleRepository = new SupabaseTitleRepository();
     console.log('[Repository] Supabase 리포지토리 레이어가 활성화되었습니다.');
+  } else if (mode === 'MYSQL') {
+    userRepository = new MysqlUserRepository();
+    streamerRepository = new MysqlStreamerRepository();
+    couponRepository = new MysqlCouponRepository();
+    reportRepository = new MysqlReportRepository();
+    announcementRepository = new MysqlAnnouncementRepository();
+    userCardRepository = new MysqlUserCardRepository();
+    tradeRepository = new MysqlTradeRepository();
+    notificationRepository = new MysqlNotificationRepository();
+    systemConfigRepository = new MysqlSystemConfigRepository();
+    marketRepository = new MysqlMarketRepository();
+    minigameRepository = new MysqlMinigameRepository();
+    titleRepository = new MysqlTitleRepository();
+    console.log('[Repository] MySQL 리포지토리 레이어가 활성화되었습니다.');
   } else {
     userRepository = new SqliteUserRepository();
     streamerRepository = new SqliteStreamerRepository();
@@ -96,3 +124,4 @@ export const initRepositories = (): void => {
 export * from './interfaces';
 export * from './sqliteRepository';
 export * from './supabaseRepository';
+export * from './mysqlRepository';

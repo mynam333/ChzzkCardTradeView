@@ -404,6 +404,8 @@ UPLOADS_DIR=./public/uploads
 SUPABASE_REQUIRED=false
 # SQLite 파일을 MySQL로 이전할 때만 설정
 # MYSQL_URL=mysql://user:password@127.0.0.1:3306/chzzk_card_trade_view
+# 백엔드를 MySQL 런타임으로 실행할 때 설정
+# DB_CLIENT=mysql
 JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret

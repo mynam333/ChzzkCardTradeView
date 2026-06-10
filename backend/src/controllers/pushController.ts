@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import webpush from 'web-push';
 import cron from 'node-cron';
-import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from '../config';
 import { couponRepository } from '../repositories';
@@ -173,6 +173,16 @@ export const subscribePush = async (req: AuthenticatedRequest, res: Response) =>
           p256dh_key: p256dhKey,
           origin: subscriptionOrigin
         });
+      } else if (dbMode === 'MYSQL') {
+        await getMysqlDb().run(`
+          INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key, origin, created_at)
+          VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            auth_key = VALUES(auth_key),
+            p256dh_key = VALUES(p256dh_key),
+            origin = VALUES(origin)
+        `, userId, endpoint, authKey, p256dhKey, subscriptionOrigin);
       } else {
         const db = getSqliteDb();
         db.prepare(`
@@ -213,6 +223,15 @@ const deleteExpiredSubscriptions = async (dbMode: string, ids: any[]) => {
     const client = getSupabaseClient();
     for (let i = 0; i < uniqueIds.length; i += 500) {
       await client.from('push_subscriptions').delete().in('id', uniqueIds.slice(i, i + 500));
+    }
+    return;
+  }
+
+  if (dbMode === 'MYSQL') {
+    for (let i = 0; i < uniqueIds.length; i += 500) {
+      const group = uniqueIds.slice(i, i + 500);
+      const placeholders = group.map(() => '?').join(',');
+      await getMysqlDb().run(`DELETE FROM push_subscriptions WHERE id IN (${placeholders})`, group);
     }
     return;
   }
@@ -314,6 +333,11 @@ export const scheduleNotification = async (req: Request, res: Response) => {
         }]);
 
       if (error) throw error;
+    } else if (dbMode === 'MYSQL') {
+      await getMysqlDb().run(`
+        INSERT INTO push_notifications (title, body, coupon_code, status, scheduled_at)
+        VALUES (?, ?, ?, 'pending', ?)
+      `, title, body, couponCode || null, scheduledTime);
     } else {
       const db = getSqliteDb();
       db.prepare(`
@@ -346,6 +370,8 @@ const sendPushToAll = async (title: string, body: string, url = '/') => {
       if (!error && data) {
         subscriptions = data;
       }
+    } else if (dbMode === 'MYSQL') {
+      subscriptions = await getMysqlDb().all('SELECT * FROM push_subscriptions');
     } else {
       const db = getSqliteDb();
       subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
@@ -375,6 +401,8 @@ export const sendPushToUser = async (userId: string, title: string, body: string
       const { data, error } = await getSupabaseClient()
         .from('push_subscriptions').select('*').eq('user_id', userId);
       if (!error && data) subscriptions = data;
+    } else if (dbMode === 'MYSQL') {
+      subscriptions = await getMysqlDb().all('SELECT * FROM push_subscriptions WHERE user_id = ?', userId);
     } else {
       subscriptions = getSqliteDb().prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId);
     }
@@ -401,6 +429,9 @@ export const sendPushToAdmins = async (title: string, body: string, url = '/admi
         .select('id')
         .eq('role', 'ADMIN');
       if (!error && data) adminIds = data.map((row: any) => row.id);
+    } else if (dbMode === 'MYSQL') {
+      const rows = await getMysqlDb().all("SELECT id FROM users WHERE role = 'ADMIN'") as { id: string }[];
+      adminIds = rows.map((row) => row.id);
     } else {
       const rows = getSqliteDb().prepare("SELECT id FROM users WHERE role = 'ADMIN'").all() as { id: string }[];
       adminIds = rows.map((row) => row.id);
@@ -428,6 +459,8 @@ export const sendTestPush = async (req: AuthenticatedRequest, res: Response) => 
         .select('*')
         .eq('user_id', userId);
       subscriptions = data || [];
+    } else if (dbMode === 'MYSQL') {
+      subscriptions = await getMysqlDb().all('SELECT * FROM push_subscriptions WHERE user_id = ?', userId);
     } else {
       subscriptions = getSqliteDb().prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId);
     }
@@ -489,6 +522,19 @@ export const startPushNotificationScheduler = () => {
         if (!error && data) {
           pendingNotifs = data;
         }
+      } else if (dbMode === 'MYSQL') {
+        pendingNotifs = await getMysqlDb().transaction(async (tx) => {
+          const rows = await tx.all(`
+            SELECT * FROM push_notifications
+            WHERE status = 'pending'
+              AND (scheduled_at IS NULL OR scheduled_at <= ?)
+            FOR UPDATE
+          `, nowIso) as any[];
+          if (rows.length === 0) return rows;
+          const placeholders = rows.map(() => '?').join(',');
+          await tx.run(`UPDATE push_notifications SET status = 'sending' WHERE id IN (${placeholders}) AND status = 'pending'`, rows.map((r) => r.id));
+          return rows;
+        });
       } else {
         const db = getSqliteDb();
         pendingNotifs = db.transaction(() => {
@@ -521,6 +567,8 @@ export const startPushNotificationScheduler = () => {
             .from('push_notifications')
             .update({ status: 'sent', sent_at: sentAtIso })
             .eq('id', notif.id);
+        } else if (dbMode === 'MYSQL') {
+          await getMysqlDb().run("UPDATE push_notifications SET status = 'sent', sent_at = ? WHERE id = ?", sentAtIso, notif.id);
         } else {
           getSqliteDb().prepare('UPDATE push_notifications SET status = \'sent\', sent_at = ? WHERE id = ?').run(sentAtIso, notif.id);
         }
@@ -551,6 +599,12 @@ export const getScheduledNotifications = async (req: Request, res: Response) => 
         .order('scheduled_at', { ascending: true });
       if (error) throw error;
       list = data || [];
+    } else if (dbMode === 'MYSQL') {
+      list = await getMysqlDb().all(`
+        SELECT * FROM push_notifications
+        WHERE status = 'pending'
+        ORDER BY scheduled_at ASC
+      `);
     } else {
       const db = getSqliteDb();
       list = db.prepare(`
@@ -602,6 +656,18 @@ export const getSentNotifications = async (req: Request, res: Response) => {
 
       if (error) throw error;
       list = data || [];
+    } else if (dbMode === 'MYSQL') {
+      const countRes = await getMysqlDb().get(`
+        SELECT COUNT(*) as cnt FROM push_notifications
+        WHERE status = 'sent'
+      `) as any;
+      total = countRes ? countRes.cnt : 0;
+      list = await getMysqlDb().all(`
+        SELECT * FROM push_notifications
+        WHERE status = 'sent'
+        ORDER BY COALESCE(sent_at, created_at) DESC
+        LIMIT ? OFFSET ?
+      `, limit, offset);
     } else {
       const db = getSqliteDb();
       
@@ -682,6 +748,19 @@ export const updateScheduledNotification = async (req: Request, res: Response) =
         .eq('id', id);
 
       if (error) throw error;
+    } else if (dbMode === 'MYSQL') {
+      const existing = await getMysqlDb().get('SELECT status FROM push_notifications WHERE id = ?', id) as any;
+      if (!existing) {
+        return res.status(404).json({ error: 'NotFound', message: '수정할 푸시 알림을 찾을 수 없습니다.' });
+      }
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송된 푸시 알림은 수정할 수 없습니다.' });
+      }
+      await getMysqlDb().run(`
+        UPDATE push_notifications
+        SET title = ?, body = ?, coupon_code = ?, scheduled_at = ?
+        WHERE id = ?
+      `, title, body, couponCode || null, scheduledTime, id);
     } else {
       const db = getSqliteDb();
       const existing = db.prepare('SELECT status FROM push_notifications WHERE id = ?').get(id) as any;
@@ -736,6 +815,15 @@ export const deleteScheduledNotification = async (req: Request, res: Response) =
         .eq('id', id);
 
       if (error) throw error;
+    } else if (dbMode === 'MYSQL') {
+      const existing = await getMysqlDb().get('SELECT status FROM push_notifications WHERE id = ?', id) as any;
+      if (!existing) {
+        return res.status(404).json({ error: 'NotFound', message: '취소할 푸시 알림을 찾을 수 없습니다.' });
+      }
+      if (existing.status !== 'pending') {
+        return res.status(400).json({ error: 'BadRequest', message: '이미 전송 완료된 푸시 알림은 취소할 수 없습니다.' });
+      }
+      await getMysqlDb().run('DELETE FROM push_notifications WHERE id = ?', id);
     } else {
       const db = getSqliteDb();
       const existing = db.prepare('SELECT status FROM push_notifications WHERE id = ?').get(id) as any;

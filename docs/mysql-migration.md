@@ -1,6 +1,6 @@
 # SQLite to MySQL Migration
 
-현재 백엔드 런타임은 SQLite/Supabase 리포지토리를 사용한다. 이 문서는 운영 SQLite 파일을 MySQL 8 스키마로 이전하는 절차다.
+현재 백엔드는 `DB_CLIENT=mysql` 또는 `MYSQL_REQUIRED=true`일 때 MySQL 리포지토리로 동작한다. 이 문서는 운영 SQLite 파일을 MySQL 8 스키마로 이전하고 런타임을 MySQL로 전환하는 절차다.
 
 ## 준비
 
@@ -20,6 +20,7 @@ MYSQL_PORT=3306
 MYSQL_USER=chikapo
 MYSQL_PASSWORD=change_me
 MYSQL_DATABASE=chzzk_card_trade_view
+DB_CLIENT=mysql
 ```
 
 또는 URL 하나로 지정할 수 있다.
@@ -47,7 +48,8 @@ npm run migrate:sqlite-to-mysql -- --reset
 동작:
 
 - `init-db-mysql.sql`을 적용해 테이블과 인덱스를 만든다.
-- `--reset`이 있으면 대상 MySQL 테이블 데이터를 비운 뒤 다시 넣는다.
+- `--reset`이 있으면 대상 MySQL 테이블을 드롭하고 `init-db-mysql.sql`로 utf8mb4 스키마를 다시 만든 뒤 데이터를 넣는다.
+- `--data-only --reset` 조합은 기존 스키마를 유지하고 대상 테이블 데이터만 비운 뒤 다시 넣는다.
 - SQLite에만 있는 컬럼과 MySQL 생성 컬럼은 자동으로 제외한다.
 - 대량 데이터는 `MYSQL_IMPORT_BATCH_SIZE` 단위로 bulk insert한다. 기본값은 `500`이다.
 
@@ -67,4 +69,4 @@ npm run migrate:sqlite-to-mysql -- --data-only
 
 - `market_listings`의 SQLite 부분 UNIQUE 인덱스(`status = 'PENDING'`)는 MySQL 생성 컬럼 `pending_user_card_id`와 UNIQUE 인덱스로 변환했다.
 - 날짜 컬럼은 기존 코드와 SQLite 데이터를 그대로 보존하기 위해 `VARCHAR(64)`로 둔다.
-- 이 단계는 데이터 이전 지원이다. 백엔드 런타임을 MySQL로 직접 구동하려면 MySQL용 리포지토리 레이어를 추가로 포팅해야 한다.
+- MySQL 런타임은 `DB_CLIENT=mysql` 또는 `MYSQL_REQUIRED=true`를 설정해야 활성화된다. 이 값이 없으면 기존처럼 Supabase 필수 모드 또는 SQLite 모드로 동작한다.

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 import { streamerRepository } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { ensureDirectory, getUploadsDir } from '../services/storagePaths';
@@ -16,6 +16,8 @@ const wipeTable = async (table: string, col: string = 'id'): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const { error } = await getSupabaseClient().from(table).delete().not(col, 'is', null);
     if (error) throw error;
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run(`DELETE FROM ${table}`);
   } else {
     getSqliteDb().prepare(`DELETE FROM ${table}`).run();
   }
@@ -25,6 +27,8 @@ const clearCardCosmeticSlots = async (): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const { error } = await getSupabaseClient().from('user_cards').update({ border_item_id: null, name_effect_item_id: null }).not('id', 'is', null);
     if (error) throw error;
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run('UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL');
   } else {
     getSqliteDb().prepare('UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL').run();
   }
@@ -34,6 +38,8 @@ const resetAllPoints = async (): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const { error } = await getSupabaseClient().from('users').update({ point: 0 }).not('id', 'is', null);
     if (error) throw error;
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run('UPDATE users SET point = 0');
   } else {
     getSqliteDb().prepare('UPDATE users SET point = 0').run();
   }
@@ -52,6 +58,8 @@ const resetStreamerValuesToFollowers = async (): Promise<void> => {
         .eq('channel_id', (s as any).channel_id);
       if (uErr) throw uErr;
     }
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run('UPDATE streamers SET base_value = follower_count, prev_value = follower_count, updated_at = UTC_TIMESTAMP()');
   } else {
     getSqliteDb().prepare(
       "UPDATE streamers SET base_value = follower_count, prev_value = follower_count, updated_at = datetime('now')"
@@ -63,6 +71,10 @@ const countTable = async (table: string): Promise<number> => {
   if (getDbMode() === 'SUPABASE') {
     const { count } = await getSupabaseClient().from(table).select('*', { count: 'exact', head: true });
     return count || 0;
+  }
+  if (getDbMode() === 'MYSQL') {
+    const r = await getMysqlDb().get(`SELECT COUNT(*) AS c FROM ${table}`) as any;
+    return r?.c || 0;
   }
   const r = getSqliteDb().prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as any;
   return r?.c || 0;

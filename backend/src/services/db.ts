@@ -3,10 +3,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
 import { ensureParentDirectory, getSqliteDbPath } from './storagePaths';
+import { createMysqlDb, MysqlDb } from './mysqlDb';
 
 let sqliteDb: Database.Database | null = null;
 let supabaseClient: SupabaseClient | null = null;
-let dbMode: 'LOCAL_SQL' | 'SUPABASE' = 'LOCAL_SQL';
+let mysqlDb: MysqlDb | null = null;
+export type DbMode = 'LOCAL_SQL' | 'SUPABASE' | 'MYSQL';
+let dbMode: DbMode = 'LOCAL_SQL';
 
 /**
  * Supabase(PostgREST) 호출용 fetch 래퍼.
@@ -176,6 +179,16 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
 export const initDatabaseConnection = async (): Promise<void> => {
+  const requestedDbClient = String(process.env.DB_CLIENT || process.env.DATABASE_CLIENT || '').trim().toLowerCase();
+  const mysqlRequired = process.env.MYSQL_REQUIRED === 'true' || requestedDbClient === 'mysql';
+  if (mysqlRequired) {
+    mysqlDb = createMysqlDb();
+    await mysqlDb.get('SELECT 1 AS ok');
+    dbMode = 'MYSQL';
+    console.log('[DB] MySQL 데이터베이스와 연동되었습니다. (MYSQL MODE)');
+    return;
+  }
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const supabaseRequired = process.env.SUPABASE_REQUIRED === 'true';
@@ -691,7 +704,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
 /**
  * 현재 활성화된 데이터베이스 모드를 반환합니다.
  */
-export const getDbMode = (): 'LOCAL_SQL' | 'SUPABASE' => {
+export const getDbMode = (): DbMode => {
   return dbMode;
 };
 
@@ -713,6 +726,13 @@ export const getSupabaseClient = (): SupabaseClient => {
     throw new Error('현재 데이터베이스 모드가 SUPABASE가 아닙니다.');
   }
   return supabaseClient;
+};
+
+export const getMysqlDb = (): MysqlDb => {
+  if (dbMode !== 'MYSQL' || !mysqlDb) {
+    throw new Error('현재 데이터베이스 모드가 MYSQL이 아닙니다.');
+  }
+  return mysqlDb;
 };
 
 /**

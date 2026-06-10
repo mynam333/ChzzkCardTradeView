@@ -157,6 +157,12 @@ const getMysqlColumns = async (conn, table) => {
     .map((row) => row.Field);
 };
 
+const sqlPreview = (statement) =>
+  statement
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+
 const tableExists = (db, table) => {
   const row = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -164,16 +170,30 @@ const tableExists = (db, table) => {
   return !!row;
 };
 
+const dropTables = async (conn) => {
+  if (!shouldReset || shouldDataOnly) return;
+  await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+  for (const table of [...TABLES].reverse()) {
+    await conn.query(`DROP TABLE IF EXISTS ${quoteIdent(table)}`);
+  }
+  await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+};
+
 const runSchema = async (conn) => {
   if (shouldDataOnly) return;
   const schema = fs.readFileSync(schemaPath, 'utf8');
   for (const statement of splitSqlStatements(schema)) {
-    await conn.query(statement);
+    try {
+      await conn.query(statement);
+    } catch (err) {
+      err.message = `${err.message}\n[SQL] ${sqlPreview(statement)}`;
+      throw err;
+    }
   }
 };
 
 const resetTables = async (conn) => {
-  if (!shouldReset || shouldSchemaOnly) return;
+  if (!shouldReset || shouldSchemaOnly || !shouldDataOnly) return;
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
   for (const table of [...TABLES].reverse()) {
     await conn.query(`DELETE FROM ${quoteIdent(table)}`);
@@ -210,6 +230,14 @@ const importTable = async (sqlite, conn, table) => {
   return imported;
 };
 
+const runPostImportFixups = async (conn) => {
+  if (shouldSchemaOnly) return;
+  await conn.query(`
+    UPDATE market_listings
+       SET pending_user_card_id = CASE WHEN status = 'PENDING' THEN user_card_id ELSE NULL END
+  `);
+};
+
 const main = async () => {
   if (!fs.existsSync(sqlitePath)) {
     throw new Error(`SQLite 파일을 찾을 수 없습니다: ${sqlitePath}`);
@@ -230,6 +258,7 @@ const main = async () => {
 
   try {
     await conn.query('SET NAMES utf8mb4');
+    await dropTables(conn);
     await runSchema(conn);
     await resetTables(conn);
 
@@ -238,6 +267,7 @@ const main = async () => {
     for (const table of TABLES) {
       total += await importTable(sqlite, conn, table);
     }
+    await runPostImportFixups(conn);
     await conn.query('SET FOREIGN_KEY_CHECKS = 1');
 
     console.log(`[MySQL Import] 완료: ${total} rows imported from ${sqlitePath}`);

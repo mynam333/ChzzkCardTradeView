@@ -2,7 +2,7 @@
  * shopService.ts - 상점(코스메틱) 데이터 액세스. SQLite/Supabase 양 모드를 인라인 처리합니다.
  * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트). 카드당 각 1개 장착, 해제 시 보유로 반환.
  */
-import { getDbMode, getSqliteDb, getSupabaseClient } from './db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 
 export interface ShopItem {
   id: number;
@@ -30,6 +30,10 @@ export const getActiveItems = async (): Promise<ShopItem[]> => {
     const { data } = await getSupabaseClient().from('shop_items').select('*').eq('active', true).order('id', { ascending: true });
     return (data || []) as ShopItem[];
   }
+  if (getDbMode() === 'MYSQL') {
+    const rows = await getMysqlDb().all('SELECT * FROM shop_items WHERE active = 1 ORDER BY id ASC');
+    return rows.map(mapSqliteItem);
+  }
   return getSqliteDb().prepare('SELECT * FROM shop_items WHERE active = 1 ORDER BY id ASC').all().map(mapSqliteItem);
 };
 
@@ -38,6 +42,10 @@ export const getAllItems = async (): Promise<ShopItem[]> => {
     const { data } = await getSupabaseClient().from('shop_items').select('*').order('id', { ascending: false });
     return (data || []) as ShopItem[];
   }
+  if (getDbMode() === 'MYSQL') {
+    const rows = await getMysqlDb().all('SELECT * FROM shop_items ORDER BY id DESC');
+    return rows.map(mapSqliteItem);
+  }
   return getSqliteDb().prepare('SELECT * FROM shop_items ORDER BY id DESC').all().map(mapSqliteItem);
 };
 
@@ -45,6 +53,10 @@ export const getItem = async (id: number): Promise<ShopItem | null> => {
   if (getDbMode() === 'SUPABASE') {
     const { data } = await getSupabaseClient().from('shop_items').select('*').eq('id', id).maybeSingle();
     return (data as ShopItem) || null;
+  }
+  if (getDbMode() === 'MYSQL') {
+    const r = await getMysqlDb().get('SELECT * FROM shop_items WHERE id = ?', id);
+    return r ? mapSqliteItem(r) : null;
   }
   const r = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id);
   return r ? mapSqliteItem(r) : null;
@@ -58,6 +70,11 @@ export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { activ
       type: item.type, name: item.name, description: item.description ?? null, price: item.price,
       style_json: item.style_json ?? null, font_url: item.font_url ?? null, font_family: item.font_family ?? null, active, purchase_limit: limit
     }]);
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run(
+      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit) VALUES (?,?,?,?,?,?,?,?,?)',
+      item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit
+    );
   } else {
     getSqliteDb().prepare(
       'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit) VALUES (?,?,?,?,?,?,?,?,?)'
@@ -72,6 +89,20 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       if (item[k] !== undefined) payload[k] = item[k];
     }
     await getSupabaseClient().from('shop_items').update(payload).eq('id', id);
+  } else if (getDbMode() === 'MYSQL') {
+    const cur = await getMysqlDb().get('SELECT * FROM shop_items WHERE id = ?', id) as any;
+    if (!cur) return;
+    const merged = {
+      type: item.type ?? cur.type, name: item.name ?? cur.name, description: item.description ?? cur.description,
+      price: item.price ?? cur.price, style_json: item.style_json ?? cur.style_json,
+      font_url: item.font_url ?? cur.font_url, font_family: item.font_family ?? cur.font_family,
+      active: item.active !== undefined ? (item.active ? 1 : 0) : cur.active,
+      purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0)
+    };
+    await getMysqlDb().run(
+      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=? WHERE id=?',
+      merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, id
+    );
   } else {
     const cur = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id) as any;
     if (!cur) return;
@@ -104,6 +135,19 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
     return (data || []).map((r: any) => ({ ...(r.item), quantity: r.quantity }));
   }
 
+  if (getDbMode() === 'MYSQL') {
+    const rows = await getMysqlDb().all(`
+      SELECT
+        si.id, si.type, si.name, si.description, si.price,
+        si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+        uc.quantity
+      FROM user_cosmetics uc
+      JOIN shop_items si ON uc.item_id = si.id
+      WHERE uc.user_id = ? AND uc.quantity > 0
+    `, userId) as any[];
+    return rows.map((r) => ({ ...mapSqliteItem(r), quantity: r.quantity }));
+  }
+
   // SQLite 모드: uc.id와 si.id 컬럼명 충돌로 인해 si.id가 uc.id로 덮어씌워지는 현상을 해결하기 위해 컬럼을 명시적으로 SELECT
   const rows = getSqliteDb().prepare(`
     SELECT 
@@ -123,6 +167,11 @@ const addCosmetic = async (userId: string, itemId: number, delta: number): Promi
     const { data } = await client.from('user_cosmetics').select('quantity').eq('user_id', userId).eq('item_id', itemId).maybeSingle();
     const next = Math.max(0, (data?.quantity || 0) + delta);
     await client.from('user_cosmetics').upsert({ user_id: userId, item_id: itemId, quantity: next }, { onConflict: 'user_id,item_id' });
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE quantity = GREATEST(0, quantity + ?)
+    `, userId, itemId, Math.max(0, delta), delta);
   } else {
     getSqliteDb().prepare(`
       INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
@@ -139,6 +188,11 @@ export const getUserPurchases = async (userId: string): Promise<Record<number, n
     for (const r of data || []) map[r.item_id] = (map[r.item_id] || 0) + (r.count || 0);
     return map;
   }
+  if (getDbMode() === 'MYSQL') {
+    const rows = await getMysqlDb().all('SELECT item_id, count FROM shop_purchases WHERE user_id = ?', userId) as any[];
+    for (const r of rows) map[r.item_id] = (map[r.item_id] || 0) + (r.count || 0);
+    return map;
+  }
   const rows = getSqliteDb().prepare('SELECT item_id, count FROM shop_purchases WHERE user_id = ?').all(userId) as any[];
   for (const r of rows) map[r.item_id] = (map[r.item_id] || 0) + (r.count || 0);
   return map;
@@ -148,6 +202,8 @@ export const getUserPurchases = async (userId: string): Promise<Record<number, n
 export const resetPurchases = async (itemId: number): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     await getSupabaseClient().from('shop_purchases').delete().eq('item_id', itemId);
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run('DELETE FROM shop_purchases WHERE item_id = ?', itemId);
   } else {
     getSqliteDb().prepare('DELETE FROM shop_purchases WHERE item_id = ?').run(itemId);
   }
@@ -175,6 +231,30 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
     }
     const reason = String(data);
     return { ok: reason === 'OK', reason };
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    return getMysqlDb().transaction(async (tx) => {
+      const item = await tx.get('SELECT * FROM shop_items WHERE id = ? AND active = 1', itemId) as any;
+      if (!item) return { ok: false, reason: 'NOT_FOUND' };
+      if ((item.purchase_limit || 0) > 0) {
+        const boughtRow = await tx.get('SELECT COALESCE(count, 0) AS c FROM shop_purchases WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId) as any;
+        if ((boughtRow?.c || 0) >= item.purchase_limit) return { ok: false, reason: 'LIMIT_REACHED' };
+      }
+      const paid = await tx.run('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?', item.price, userId, item.price);
+      if (paid.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+      await tx.run(`
+        INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+        ON DUPLICATE KEY UPDATE quantity = quantity + 1
+      `, userId, itemId);
+      if ((item.purchase_limit || 0) > 0) {
+        await tx.run(`
+          INSERT INTO shop_purchases (user_id, item_id, count) VALUES (?, ?, 1)
+          ON DUPLICATE KEY UPDATE count = count + 1
+        `, userId, itemId);
+      }
+      return { ok: true, reason: 'OK' };
+    });
   }
 
   const db = getSqliteDb();
@@ -227,6 +307,28 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
     return { ok: reason === 'OK', reason };
   }
 
+  if (getDbMode() === 'MYSQL') {
+    return getMysqlDb().transaction(async (tx) => {
+      const item = await tx.get('SELECT * FROM shop_items WHERE id = ?', itemId) as any;
+      if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
+      const col = slotColumn(item.type);
+      const card = await tx.get(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
+      if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+      if (card.current === itemId) return { ok: true, reason: 'OK' };
+      const owned = await tx.get('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId) as any;
+      if ((owned?.q || 0) < 1) return { ok: false, reason: 'NOT_OWNED' };
+      if (card.current) {
+        await tx.run(`
+          INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+          ON DUPLICATE KEY UPDATE quantity = quantity + 1
+        `, userId, card.current);
+      }
+      await tx.run('UPDATE user_cosmetics SET quantity = GREATEST(0, quantity - 1) WHERE user_id = ? AND item_id = ?', userId, itemId);
+      await tx.run(`UPDATE user_cards SET ${col} = ? WHERE id = ? AND user_id = ?`, itemId, cardId, userId);
+      return { ok: true, reason: 'OK' };
+    });
+  }
+
   const db = getSqliteDb();
   return db.transaction(() => {
     const item = db.prepare('SELECT * FROM shop_items WHERE id = ?').get(itemId) as any;
@@ -269,6 +371,21 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
     }
     const reason = String(data);
     return { ok: reason === 'OK', reason };
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    return getMysqlDb().transaction(async (tx) => {
+      const col = slotColumn(type);
+      const card = await tx.get(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
+      if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+      if (!card.current) return { ok: true, reason: 'OK' };
+      await tx.run(`
+        INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+        ON DUPLICATE KEY UPDATE quantity = quantity + 1
+      `, userId, card.current);
+      await tx.run(`UPDATE user_cards SET ${col} = NULL WHERE id = ? AND user_id = ?`, cardId, userId);
+      return { ok: true, reason: 'OK' };
+    });
   }
 
   const db = getSqliteDb();

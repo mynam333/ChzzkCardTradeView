@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getDbMode, getSqliteDb, getSupabaseClient } from './db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 
 type ReleaseLock = () => Promise<void>;
 
@@ -47,6 +47,33 @@ export const acquireSchedulerLock = async (key: string, ttlMs: number): Promise<
       } catch {
         // release 실패는 TTL 만료로 복구됩니다.
       }
+    };
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    const db = getMysqlDb();
+    const acquired = await db.transaction(async (tx) => {
+      const row = await tx.get('SELECT value FROM system_configs WHERE `key` = ? FOR UPDATE', key);
+      const current = parseLockValue(row?.value);
+      const currentExpires = current.expiresAt ? new Date(current.expiresAt).getTime() : 0;
+      if (current.token && currentExpires > Date.now()) return false;
+      await tx.run(`
+        INSERT INTO system_configs (\`key\`, value) VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE value = VALUES(value)
+      `, key, encodeLockValue(token, expiresAt));
+      return true;
+    });
+
+    if (!acquired) return null;
+
+    return async () => {
+      await db.transaction(async (tx) => {
+        const row = await tx.get('SELECT value FROM system_configs WHERE `key` = ? FOR UPDATE', key);
+        const current = parseLockValue(row?.value);
+        if (current.token === token) {
+          await tx.run('DELETE FROM system_configs WHERE `key` = ?', key);
+        }
+      });
     };
   }
 

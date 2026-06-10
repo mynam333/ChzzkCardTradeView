@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { userRepository } from '../repositories';
-import { getDbMode, getSqliteDb, getSupabaseClient } from '../services/db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 import { IS_PRODUCTION } from '../config';
 
 const GACHA_REWARD_KEY = 'tutorial:gacha-free-draw-ticket:v1';
@@ -64,6 +64,16 @@ const claimRewardOnce = async (userId: string, rewardKey: string): Promise<boole
     throw error;
   }
 
+  if (getDbMode() === 'MYSQL') {
+    const result = await getMysqlDb()
+      .run(`
+        INSERT IGNORE INTO tutorial_rewards
+          (user_id, reward_key, reward_type, reward_amount, created_at)
+        VALUES (?, ?, 'free_draw_ticket', 1, ?)
+      `, userId, rewardKey, nowIso);
+    return result.changes > 0;
+  }
+
   const result = getSqliteDb()
     .prepare(`
       INSERT OR IGNORE INTO tutorial_rewards
@@ -88,6 +98,12 @@ const findTutorialCompletion = async (userId: string, version: string): Promise<
 
     if (error) throw error;
     return data?.created_at || null;
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    const row = await getMysqlDb()
+      .get('SELECT created_at FROM tutorial_rewards WHERE user_id = ? AND reward_key = ? LIMIT 1', userId, rewardKey) as { created_at?: string } | undefined;
+    return row?.created_at || null;
   }
 
   const row = getSqliteDb()
@@ -115,6 +131,20 @@ const markTutorialCompletedOnce = async (userId: string, version: string): Promi
     if (!error) return { completedAt: nowIso, newlyCompleted: true };
     if (error.code !== '23505') throw error;
 
+    return {
+      completedAt: await findTutorialCompletion(userId, version) || nowIso,
+      newlyCompleted: false
+    };
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    const result = await getMysqlDb()
+      .run(`
+        INSERT IGNORE INTO tutorial_rewards
+          (user_id, reward_key, reward_type, reward_amount, created_at)
+        VALUES (?, ?, 'tutorial_progress', 0, ?)
+      `, userId, rewardKey, nowIso);
+    if (result.changes > 0) return { completedAt: nowIso, newlyCompleted: true };
     return {
       completedAt: await findTutorialCompletion(userId, version) || nowIso,
       newlyCompleted: false
