@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { formatLocalDateTime } from '@/lib/time';
 
+const CONSTRUCTION_IMAGES = ['01.png', '02.png', '03.png'];
+
 export default function MaintenancePage() {
   const [maintenanceInfo, setMaintenanceInfo] = useState<{ startAt: string | null; endAt: string | null } | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('/construction/01.png');
@@ -22,24 +24,10 @@ export default function MaintenancePage() {
       }
     };
 
-    // 공사중 랜덤 이미지 조회
-    const fetchImages = async () => {
-      try {
-        const res = await fetch('/api/maintenance/images');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.images && data.images.length > 0) {
-            const randomIndex = Math.floor(Math.random() * data.images.length);
-            setImageUrl(`/construction/${data.images[randomIndex]}`);
-          }
-        }
-      } catch (err) {
-        console.error('공사중 이미지 로드 실패:', err);
-      }
-    };
-
     fetchStatus();
-    fetchImages();
+
+    const randomIndex = Math.floor(Math.random() * CONSTRUCTION_IMAGES.length);
+    setImageUrl(`/construction/${CONSTRUCTION_IMAGES[randomIndex]}`);
   }, []);
 
   const formatDate = (isoStr: string | null) => {

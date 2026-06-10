@@ -1,5 +1,7 @@
 import { MetadataRoute } from 'next';
 
+export const dynamic = 'force-static';
+
 /**
  * Next.js App Router 방식의 동적 sitemap.xml 생성
  * 검색엔진이 사이트 구조를 쉽게 파악할 수 있도록 주요 페이지를 명시합니다.

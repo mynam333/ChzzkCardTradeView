@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const isCloudflarePages = process.env.DEPLOY_TARGET === 'cloudflare-pages';
+
 const uniq = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
 const originFromUrl = (value?: string) => {
@@ -59,35 +61,44 @@ const contentSecurityPolicy = [
   "form-action 'self'"
 ].join('; ');
 
-const nextConfig: NextConfig = {
-  async headers() {
-    return [
+const securityHeaders = [
+  {
+    source: "/:path*",
+    headers: [
       {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Content-Security-Policy",
-            value: contentSecurityPolicy
-          },
-          {
-            key: "X-Frame-Options",
-            value: "DENY"
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff"
-          },
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin"
-          },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()"
-          }
-        ]
+        key: "Content-Security-Policy",
+        value: contentSecurityPolicy
+      },
+      {
+        key: "X-Frame-Options",
+        value: "DENY"
+      },
+      {
+        key: "X-Content-Type-Options",
+        value: "nosniff"
+      },
+      {
+        key: "Referrer-Policy",
+        value: "strict-origin-when-cross-origin"
+      },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=()"
       }
-    ];
+    ]
+  }
+];
+
+const cloudflarePagesConfig: NextConfig = {
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
+};
+
+const standardNextConfig: NextConfig = {
+  async headers() {
+    return securityHeaders;
   },
   async rewrites() {
     const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://localhost:5000';
@@ -103,5 +114,7 @@ const nextConfig: NextConfig = {
     ];
   }
 };
+
+const nextConfig: NextConfig = isCloudflarePages ? cloudflarePagesConfig : standardNextConfig;
 
 export default nextConfig;
