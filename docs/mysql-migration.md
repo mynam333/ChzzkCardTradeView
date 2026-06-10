@@ -65,6 +65,34 @@ npm run migrate:sqlite-to-mysql -- --schema-only
 npm run migrate:sqlite-to-mysql -- --data-only
 ```
 
+## MySQL 데이터를 SQLite로 자동 백업
+
+MySQL 런타임(`DB_CLIENT=mysql`)에서는 백엔드가 하루 1회 SQLite 스냅샷을 자동 생성할 수 있다. 기본값은 활성화이며, 매 30분마다 백업 가능 여부를 확인한다. 이미 오늘 백업이 있으면 건너뛴다.
+
+```env
+MYSQL_SQLITE_BACKUP_ENABLED=true
+MYSQL_SQLITE_BACKUP_DIR=./backups/mysql-sqlite
+MYSQL_SQLITE_BACKUP_RETENTION_DAYS=7
+MYSQL_SQLITE_BACKUP_CRON=*/30 * * * *
+MYSQL_SQLITE_BACKUP_BATCH_SIZE=1000
+```
+
+백업 파일 이름은 `mysql-backup-YYYY-MM-DD-HHMMSS.sqlite` 형식이다. 생성 중에는 임시 파일에 쓰고 완료 후 rename하므로, 중간 실패로 깨진 `.sqlite` 백업이 남지 않는다. 보관 기간이 지난 백업 파일과 하루 이상 지난 임시 파일은 자동 삭제한다.
+
+부하가 높으면 해당 회차를 건너뛴다. 기준은 환경변수로 조정할 수 있다.
+
+```env
+MYSQL_SQLITE_BACKUP_MIN_UPTIME_SECONDS=300
+MYSQL_SQLITE_BACKUP_MAX_RSS_MB=700
+MYSQL_SQLITE_BACKUP_MAX_HEAP_USED_MB=450
+MYSQL_SQLITE_BACKUP_MAX_REALTIME_CLIENTS=100
+MYSQL_SQLITE_BACKUP_MAX_NOTIFICATION_CLIENTS=100
+MYSQL_SQLITE_BACKUP_MAX_CHAT_PENDING=200
+MYSQL_SQLITE_BACKUP_MAX_RECONNECT_TIMERS=30
+```
+
+여러 백엔드 인스턴스가 떠 있는 경우 `system_configs` 기반 scheduler lock을 사용해 한 인스턴스만 백업한다.
+
 ## 주의
 
 - `market_listings`의 SQLite 부분 UNIQUE 인덱스(`status = 'PENDING'`)는 MySQL 생성 컬럼 `pending_user_card_id`와 UNIQUE 인덱스로 변환했다.

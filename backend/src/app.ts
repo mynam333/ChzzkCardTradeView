@@ -20,6 +20,7 @@ import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
 import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
+import { startMysqlSqliteBackupScheduler } from './services/mysqlSqliteBackup';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -254,6 +255,7 @@ const startServer = async () => {
     startPushNotificationScheduler(); // PWA 푸시 알림 예약 크론 가동
     startMarketSettlementScheduler(); // 오픈마켓 만료 경매 정산 크론 가동
     startStreamerLiveStatusScheduler(); // 치지직 실시간 방송 상태 폴링 크론 가동
+    startMysqlSqliteBackupScheduler(); // MySQL 모드에서만 일일 SQLite 백업 스케줄러 가동
 
     const useHttps = process.env.USE_HTTPS === 'true';
     const { keyPath, certPath, source } = getHttpsCertificatePaths();

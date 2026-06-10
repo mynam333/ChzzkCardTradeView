@@ -406,6 +406,9 @@ SUPABASE_REQUIRED=false
 # MYSQL_URL=mysql://user:password@127.0.0.1:3306/chzzk_card_trade_view
 # 백엔드를 MySQL 런타임으로 실행할 때 설정
 # DB_CLIENT=mysql
+# MySQL 런타임에서 하루 1회 SQLite 백업을 만들 때 설정
+# MYSQL_SQLITE_BACKUP_DIR=./backups/mysql-sqlite
+# MYSQL_SQLITE_BACKUP_RETENTION_DAYS=7
 JWT_SECRET=your_session_jwt_secret
 CHZZK_CLIENT_ID=your_chzzk_client_id
 CHZZK_CLIENT_SECRET=your_chzzk_client_secret

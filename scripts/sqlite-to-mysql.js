@@ -214,7 +214,10 @@ const importTable = async (sqlite, conn, table) => {
   if (total === 0) return 0;
 
   const selectSql = `SELECT ${columns.map(quoteIdent).join(', ')} FROM ${quoteIdent(table)} LIMIT ? OFFSET ?`;
-  const insertSql = `INSERT INTO ${quoteIdent(table)} (${columns.map(quoteIdent).join(', ')}) VALUES ?`;
+  const insertSql =
+    table === 'system_configs' && columns.includes('value')
+      ? `INSERT INTO ${quoteIdent(table)} (${columns.map(quoteIdent).join(', ')}) VALUES ? ON DUPLICATE KEY UPDATE ${quoteIdent('value')} = VALUES(${quoteIdent('value')})`
+      : `INSERT INTO ${quoteIdent(table)} (${columns.map(quoteIdent).join(', ')}) VALUES ?`;
   const select = sqlite.prepare(selectSql);
   let imported = 0;
 
