@@ -55,3 +55,10 @@ logs/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deployment backups
+backups/
+*.sql
+
+# possible runtime/domain data
+backend/yuaru.com/
