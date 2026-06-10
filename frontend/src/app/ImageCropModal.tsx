@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useRef, useCallback } from 'react';
-import { Cropper, CropperRef } from 'react-advanced-cropper';
-import { ImageRestriction } from 'advanced-cropper';
+import { Cropper, CropperRef, ImageRestriction } from 'react-advanced-cropper';
 import 'react-advanced-cropper/dist/style.css';
 import { X, Crop, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
