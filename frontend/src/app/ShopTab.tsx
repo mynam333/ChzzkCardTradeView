@@ -10,6 +10,7 @@ import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage, strea
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel } from 'lucide-react';
+import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 
 interface ShopItem {
   id: number;
@@ -1392,7 +1393,7 @@ export const ShopTab: React.FC = () => {
                     const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
                     const hasActiveBid = Boolean(listing.current_bidder_id);
                     const minBid = hasActiveBid ? currentBid + 100 : currentBid;
-                    const endsAt = listing.auction_ends_at ? new Date(listing.auction_ends_at) : null;
+                    const endsAt = parseAppDate(listing.auction_ends_at);
                     const remainingMs = endsAt ? endsAt.getTime() - nowTs : 0;
                     const isEnded = !!endsAt && remainingMs <= 0;
                     const isUrgent = isAuction && !isEnded && remainingMs < 60_000;     // 1분 미만
@@ -1469,7 +1470,7 @@ export const ShopTab: React.FC = () => {
                                         ? 'bg-amber-400 text-amber-950'
                                         : 'bg-violet-500/15 text-violet-700 dark:bg-violet-400/15 dark:text-violet-100'
                                 }`}
-                                title={endsAt ? endsAt.toLocaleString('ko-KR') : ''}
+                                title={endsAt ? formatLocalDateTime(endsAt) : ''}
                               >
                                 <Clock className="h-3 w-3 shrink-0" />
                                 {isEnded ? '마감 처리 중' : `${formatRemaining(remainingMs)} 남음`}
@@ -1655,7 +1656,7 @@ export const ShopTab: React.FC = () => {
                                 <div className="flex flex-col items-start gap-0.5">
                                   <span className="rounded bg-sky-500/10 px-2 py-0.5 font-bold text-sky-500 text-[10px]">판매 중</span>
                                   {isAuction && l.auction_ends_at && (() => {
-                                    const rem = new Date(l.auction_ends_at).getTime() - nowTs;
+                                    const rem = (parseAppDate(l.auction_ends_at)?.getTime() ?? 0) - nowTs;
                                     return (
                                       <span className={`text-[9px] font-black tabular-nums ${rem <= 0 ? 'text-zinc-400' : rem < 60_000 ? 'text-red-500' : 'text-violet-500'}`}>
                                         {rem <= 0 ? '마감 처리 중' : `${formatRemaining(rem)} 남음`}
@@ -1805,7 +1806,7 @@ export const ShopTab: React.FC = () => {
                           }
 
                           const formattedDate = l.updated_at
-                            ? new Date(l.updated_at).toLocaleString('ko-KR')
+                            ? formatLocalDateTime(l.updated_at)
                             : '-';
 
                           return (

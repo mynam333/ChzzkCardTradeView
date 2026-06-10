@@ -17,6 +17,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/deploy-backend.yml'
+      - '!frontend/**'
 
 concurrency:
   group: production-backend

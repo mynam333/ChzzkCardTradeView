@@ -27,6 +27,7 @@ import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { ReportCardModal } from './ReportCardModal';
 import { CometCard } from '@/components/ui/comet-card';
+import { formatLocalDate } from '@/lib/time';
 
 interface Streamer {
   channel_id: string;
@@ -1218,9 +1219,7 @@ export const GachaTab: React.FC = () => {
         const page = Math.min(historyPage, totalPages);
         const paged = tradeHistory.slice((page - 1) * PER, page * PER);
         const fmtDate = (iso?: string) => {
-          if (!iso) return '';
-          const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
-          return d.toLocaleDateString('ko-KR', { year: '2-digit', month: 'numeric', day: 'numeric' });
+          return formatLocalDate(iso, '');
         };
         return (
           <div className="modal-backdrop z-[80] bg-black/60 backdrop-blur-sm" onClick={() => setHistoryModalOpen(false)}>

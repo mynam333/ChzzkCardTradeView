@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch } from '@/lib/api';
 import { streamerProfileImage } from '@/lib/cosmetics';
+import { formatLocal } from '@/lib/time';
 import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
 
@@ -212,11 +213,10 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               };
               const hovered = hover !== null && hover < n ? hover : null;
               const fmtTime = (iso: string) => {
-                const d = new Date(parseTime(iso));
-                return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                return formatLocal(parseTime(iso), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
               };
-              const fmtAxis = (ts: number) => new Date(ts).toLocaleString(
-                'ko-KR',
+              const fmtAxis = (ts: number) => formatLocal(
+                ts,
                 range === '24h'
                   ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
                   : { month: 'numeric', day: 'numeric' }

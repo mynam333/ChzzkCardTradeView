@@ -1,11 +1,5 @@
 import { marked } from 'marked';
-
-const announcementDateFormatter = new Intl.DateTimeFormat('ko-KR', {
-  timeZone: 'Asia/Seoul',
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-});
+import { formatLocalDate } from './time';
 
 type MarkdownNode = {
   type?: string;
@@ -44,10 +38,5 @@ export const getAnnouncementPreview = (content: string, maxLength = 120) => {
 };
 
 export const formatAnnouncementDate = (value?: string) => {
-  if (!value) return '작성일 정보 없음';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '작성일 정보 없음';
-
-  return announcementDateFormatter.format(date);
+  return formatLocalDate(value, '작성일 정보 없음');
 };

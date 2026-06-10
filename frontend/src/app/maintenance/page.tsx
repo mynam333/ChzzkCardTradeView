@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { formatLocalDateTime } from '@/lib/time';
 
 export default function MaintenancePage() {
   const [maintenanceInfo, setMaintenanceInfo] = useState<{ startAt: string | null; endAt: string | null } | null>(null);
@@ -43,15 +44,13 @@ export default function MaintenancePage() {
 
   const formatDate = (isoStr: string | null) => {
     if (!isoStr) return '점검 완료 시까지';
-    const d = new Date(isoStr);
-    return d.toLocaleString('ko-KR', {
+    return formatLocalDateTime(isoStr, {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Seoul'
-    });
+      minute: '2-digit'
+    }, '점검 완료 시까지');
   };
 
   // 화면 90%를 채우면서 내부 비율 유지하는 동적 스케일링

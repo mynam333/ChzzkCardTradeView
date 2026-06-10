@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, CheckCheck, Trash2 } from 'lucide-react';
 import { useApp, useNotifications } from './AppContext';
+import { parseAppDate } from '@/lib/time';
 
 export const NotificationBell: React.FC<{ className?: string; align?: 'left' | 'right' }> = ({ className, align = 'right' }) => {
   const { user } = useApp();
@@ -49,7 +50,8 @@ export const NotificationBell: React.FC<{ className?: string; align?: 'left' | '
 
   const formatTime = (iso?: string) => {
     if (!iso) return '';
-    const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
+    const d = parseAppDate(iso);
+    if (!d) return '';
     const diff = Date.now() - d.getTime();
     const m = Math.floor(diff / 60000);
     if (m < 1) return '방금';

@@ -31,6 +31,7 @@ import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileIma
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
+import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
 
 type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
@@ -50,16 +51,6 @@ const emptyPushForm: PushFormState = {
   target_type: 'default',
   coupon_code: ''
 };
-
-const couponExpirationFormatter = new Intl.DateTimeFormat('ko-KR', {
-  timeZone: 'Asia/Seoul',
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-  hour12: true
-});
 
 const emptyCouponRewardDraft = {
   type: 'point' as CouponRewardType,
@@ -367,7 +358,7 @@ export const AdminTab: React.FC = () => {
     // 만료 일시는 datetime-local → ISO 변환
     const payload = {
       ...couponForm,
-      expires_at: couponForm.expires_at ? new Date(couponForm.expires_at).toISOString() : null
+      expires_at: localDateTimeInputToIso(couponForm.expires_at)
     };
     try {
       const res = await apiFetch('/admin/coupons', { method: 'POST', body: JSON.stringify(payload) });
@@ -490,7 +481,7 @@ export const AdminTab: React.FC = () => {
       const payload = {
         title: pushForm.title,
         body: pushForm.body,
-        scheduled_at: pushForm.scheduled_at,
+        scheduled_at: localDateTimeInputToIso(pushForm.scheduled_at),
         coupon_code: pushForm.target_type === 'coupon' ? pushForm.coupon_code : ''
       };
       const res = await apiFetch('/admin/push/schedule', { method: 'POST', body: JSON.stringify(payload) });
@@ -535,7 +526,7 @@ export const AdminTab: React.FC = () => {
       const payload = {
         title: editingForm.title,
         body: editingForm.body,
-        scheduled_at: editingForm.scheduled_at ? new Date(editingForm.scheduled_at).toISOString() : null,
+        scheduled_at: localDateTimeInputToIso(editingForm.scheduled_at),
         coupon_code: editingForm.target_type === 'coupon' ? editingForm.coupon_code : ''
       };
       const res = await apiFetch(`/admin/push/${id}`, {
@@ -570,16 +561,10 @@ export const AdminTab: React.FC = () => {
 
   const startEditPush = (push: any) => {
     setEditingPushId(push.id);
-    let localTime = '';
-    if (push.scheduled_at) {
-      const d = new Date(push.scheduled_at);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      localTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
     setEditingForm({
       title: push.title,
       body: push.body,
-      scheduled_at: localTime,
+      scheduled_at: formatLocalDateTimeInput(push.scheduled_at),
       target_type: push.coupon_code ? 'coupon' : 'default',
       coupon_code: push.coupon_code || ''
     });
@@ -969,16 +954,8 @@ export const AdminTab: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setMActive(!!data.active);
-
-        const formatForInput = (isoStr: string | null) => {
-          if (!isoStr) return '';
-          const d = new Date(isoStr);
-          const pad = (n: number) => String(n).padStart(2, '0');
-          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        };
-
-        setMStartAt(formatForInput(data.startAt));
-        setMEndAt(formatForInput(data.endAt));
+        setMStartAt(formatLocalDateTimeInput(data.startAt));
+        setMEndAt(formatLocalDateTimeInput(data.endAt));
       }
     } catch { /* noop */ }
   };
@@ -986,8 +963,8 @@ export const AdminTab: React.FC = () => {
   const saveMaintenanceStatus = async (active: boolean) => {
     setIsSavingMaintenance(true);
     try {
-      const startAtIso = mStartAt ? new Date(mStartAt).toISOString() : null;
-      const endAtIso = mEndAt ? new Date(mEndAt).toISOString() : null;
+      const startAtIso = localDateTimeInputToIso(mStartAt);
+      const endAtIso = localDateTimeInputToIso(mEndAt);
 
       const res = await apiFetch('/admin/maintenance/status', {
         method: 'POST',
@@ -1403,7 +1380,7 @@ export const AdminTab: React.FC = () => {
                       <p className="text-xs font-bold font-mono truncate">{c.code}</p>
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {c.coupon_type === 'single' ? '일회성' : '다회성'} · {rewards.map(rewardText).join(' · ')}
-                        {c.expires_at ? ` · ~${couponExpirationFormatter.format(new Date(c.expires_at))}` : ' · 무기한'}
+                        {c.expires_at ? ` · ~${formatLocalDateTime(c.expires_at, { hour12: true })}` : ' · 무기한'}
                       </p>
                     </div>
                     <span className="shrink-0 text-[11px] font-bold text-primary ml-2">
@@ -1561,7 +1538,7 @@ export const AdminTab: React.FC = () => {
                   scheduledPushes.map((p) => {
                     const isEditing = editingPushId === p.id;
                     const dateStr = p.scheduled_at
-                      ? new Date(p.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                      ? formatLocalDateTime(p.scheduled_at)
                       : '즉시 발송 예정';
                     return (
                       <div key={p.id} className="p-3 bg-secondary/25 border border-border/40 rounded-xl space-y-2">
@@ -1659,7 +1636,7 @@ export const AdminTab: React.FC = () => {
                     // 등록 시각이 아닌 실제 발송 시각(sent_at)을 우선 표시 (과거 데이터는 created_at로 폴백)
                     const sentTimeSource = p.sent_at || p.created_at;
                     const sentTimeStr = sentTimeSource
-                      ? new Date(sentTimeSource).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                      ? formatLocalDateTime(sentTimeSource)
                       : '기록 없음';
                     return (
                       <div key={p.id} className="p-3 bg-secondary/15 border border-border/20 rounded-xl space-y-1">
@@ -1916,7 +1893,7 @@ export const AdminTab: React.FC = () => {
                       const formattedExp = expiration
                         ? isPermanent
                           ? '영구 정지'
-                          : expiration.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                          : formatLocalDateTime(expiration)
                         : '-';
 
                       let timeLeftStr = '';
