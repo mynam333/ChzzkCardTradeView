@@ -3,9 +3,15 @@ set -euo pipefail
 
 cd /home/ubuntu/ChzzkCardTradeView
 
-# 1. .env 파일이 있으면 로드합니다.
+# lock
+exec 9>/tmp/deploy.lock
+flock -n 9 || { echo "[deploy] already running"; exit 1; }
+
+# env (더 안전한 방식)
 if [ -f .env ]; then
-  export $(echo $(grep -v '^#' .env | xargs))
+  set -a
+  . ./.env
+  set +a
 else
   echo "[Error] .env file not found!"
   exit 1
@@ -14,25 +20,25 @@ fi
 mkdir -p backups
 
 echo "[deploy] backup mysql"
-# 2. 하드코딩된 정보 대신 환경변수($DB_...)를 사용합니다.
 mysqldump -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" \
-  --single-transaction \
-  --routines \
-  --triggers \
+  --single-transaction --routines --triggers \
   "$DB_NAME" > backups/mysql-before-update-$(date +%F-%H%M%S).sql
 
 echo "[deploy] pull"
-git pull
+git pull --ff-only
 
-echo "[deploy] install"
-# 이전 에러 해결을 위해 --no-frozen-lockfile 로 변경하는 것을 추천합니다.
-pnpm install --no-frozen-lockfile
+echo "[deploy] install (throttled)"
+nice -n 15 ionice -c2 -n7 pnpm fetch
+nice -n 15 ionice -c2 -n7 pnpm install \
+  --offline \
+  --frozen-lockfile \
+  --child-concurrency=1 \
+  --network-concurrency=8
 
 echo "[deploy] build backend"
-pnpm --filter backend build
+nice -n 15 ionice -c2 -n7 pnpm --filter backend build
 
 echo "[deploy] apply schema"
-# 3. 스키마 적용 부분도 환경변수로 대체합니다.
 mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < init-db-mysql.sql
 
 echo "[deploy] reload pm2"
