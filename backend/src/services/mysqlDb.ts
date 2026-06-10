@@ -118,6 +118,16 @@ const normalizeLimitOffsetPlaceholders = (sql: string, params: any[]): { sql: st
 const prepareMysqlStatement = (sql: string, params: any[]): { sql: string; params: any[] } =>
   normalizeLimitOffsetPlaceholders(normalizeMysqlSql(sql), params);
 
+const MYSQL_TRANSACTION_MAX_ATTEMPTS = Math.max(1, Number(process.env.MYSQL_TRANSACTION_MAX_ATTEMPTS || 3));
+
+const isRetryableMysqlTransactionError = (err: any): boolean => {
+  const code = String(err?.code || '');
+  const errno = Number(err?.errno || err?.sqlState || 0);
+  return code === 'ER_LOCK_DEADLOCK' || code === 'ER_LOCK_WAIT_TIMEOUT' || errno === 1213 || errno === 1205;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class MysqlDb {
   constructor(private readonly pool: Pool) {}
 
@@ -150,19 +160,33 @@ export class MysqlDb {
   }
 
   async transaction<T>(task: (tx: MysqlTx) => Promise<T>): Promise<T> {
-    const conn = await this.pool.getConnection();
-    const tx = new MysqlTx(conn);
-    try {
-      await conn.beginTransaction();
-      const result = await task(tx);
-      await conn.commit();
-      return result;
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
+    let lastError: any;
+    for (let attempt = 1; attempt <= MYSQL_TRANSACTION_MAX_ATTEMPTS; attempt += 1) {
+      const conn = await this.pool.getConnection();
+      const tx = new MysqlTx(conn);
+      try {
+        await conn.beginTransaction();
+        const result = await task(tx);
+        await conn.commit();
+        return result;
+      } catch (err: any) {
+        lastError = err;
+        try {
+          await conn.rollback();
+        } catch (rollbackErr: any) {
+          console.warn('[MySQL] 트랜잭션 rollback 실패:', rollbackErr?.message || rollbackErr);
+        }
+        if (!isRetryableMysqlTransactionError(err) || attempt >= MYSQL_TRANSACTION_MAX_ATTEMPTS) {
+          throw err;
+        }
+        const delayMs = 25 * attempt * attempt;
+        console.warn(`[MySQL] 트랜잭션 deadlock/timeout 감지, 재시도합니다. (${attempt}/${MYSQL_TRANSACTION_MAX_ATTEMPTS})`, err?.message || err);
+        await sleep(delayMs);
+      } finally {
+        conn.release();
+      }
     }
+    throw lastError;
   }
 
   async close(): Promise<void> {

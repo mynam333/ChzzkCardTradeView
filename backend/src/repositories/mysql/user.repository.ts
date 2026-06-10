@@ -254,7 +254,7 @@ export class MysqlUserRepository implements IUserRepository {
       ),
       RankedUsers AS (
         SELECT *,
-               ROW_NUMBER() OVER (ORDER BY ${orderExpr} DESC, id ASC) AS rank
+               ROW_NUMBER() OVER (ORDER BY ${orderExpr} DESC, id ASC) AS user_rank
         FROM UserCardValues
       )
       SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
@@ -287,7 +287,7 @@ export class MysqlUserRepository implements IUserRepository {
       card_count: Number(row.card_count || 0),
       cards_value: Math.round(Number(row.cards_value || 0)),
       total_asset: Number(row.point || 0) + Math.round(Number(row.cards_value || 0)),
-      rank: Number(row.rank || 0)
+      rank: Number(row.user_rank || 0)
     }));
   }
 }
