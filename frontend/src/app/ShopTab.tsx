@@ -1911,15 +1911,6 @@ export const ShopTab: React.FC = () => {
             className="relative animate-in zoom-in-95 duration-200"
             onClick={(event) => event.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => setPreviewCosmetic(null)}
-              className="absolute -right-3 -top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-zinc-950/85 text-white shadow-xl transition hover:bg-zinc-800"
-              aria-label="미리보기 닫기"
-              title="미리보기 닫기"
-            >
-              <X className="h-4.5 w-4.5" />
-            </button>
             <div
               style={{
                 width: '224px',
