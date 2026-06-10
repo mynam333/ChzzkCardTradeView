@@ -156,7 +156,7 @@ export const ShopTab: React.FC = () => {
   const [marketTotal, setMarketTotal] = useState(0);
   const [marketSearch, setMarketSearch] = useState('');
   const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc'>('latest');
-  const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction'>('all');
+  const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction' | 'bidding'>('all');
   const [marketPage, setMarketPage] = useState(1);
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
@@ -1281,6 +1281,7 @@ export const ShopTab: React.FC = () => {
                 <option value="all">전체 매물</option>
                 <option value="fixed">즉시 판매</option>
                 <option value="auction">경매</option>
+                <option value="bidding">입찰중</option>
               </select>
             </div>
 

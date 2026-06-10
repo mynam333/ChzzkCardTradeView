@@ -457,6 +457,26 @@ describe('MarketRepository 재등록 제약', () => {
       current_bid: 2000,
       bid_reserved: 2000
     });
+    await expect(marketRepository.listActive({
+      page: 1,
+      limit: 12,
+      sort: 'latest',
+      type: 'bidding',
+      bidderId: 'auction-bidder-a'
+    })).resolves.toMatchObject({ listings: [], total: 0 });
+    const bidderBActive = await marketRepository.listActive({
+      page: 1,
+      limit: 12,
+      sort: 'latest',
+      type: 'bidding',
+      bidderId: 'auction-bidder-b'
+    });
+    expect(bidderBActive.total).toBe(1);
+    expect(bidderBActive.listings[0]).toMatchObject({
+      id: listing.id,
+      current_bidder_id: 'auction-bidder-b',
+      bid_reserved: 2000
+    });
 
     db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(listing.id);
     const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());

@@ -154,7 +154,8 @@ export class SqliteMarketRepository implements IMarketRepository {
     limit: number;
     search?: string;
     sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
-    type?: 'all' | 'fixed' | 'auction';
+    type?: 'all' | 'fixed' | 'auction' | 'bidding';
+    bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
     const db = this.getDb();
     const rows = db.prepare(`
@@ -181,7 +182,15 @@ export class SqliteMarketRepository implements IMarketRepository {
     `).all() as any[];
 
     let listings = rows.map(r => this.mapRow(r));
-    if (options.type && options.type !== 'all') {
+    if (options.type === 'bidding') {
+      listings = options.bidderId
+        ? listings.filter(item =>
+            (item.listing_type || 'fixed') === 'auction' &&
+            item.current_bidder_id === options.bidderId &&
+            Number(item.bid_reserved || 0) > 0
+          )
+        : [];
+    } else if (options.type && options.type !== 'all') {
       listings = listings.filter(item => (item.listing_type || 'fixed') === options.type);
     }
 

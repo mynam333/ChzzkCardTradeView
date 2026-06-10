@@ -495,7 +495,8 @@ export interface IMarketRepository {
     limit: number;
     search?: string;
     sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
-    type?: 'all' | 'fixed' | 'auction';
+    type?: 'all' | 'fixed' | 'auction' | 'bidding';
+    bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }>;
   /** 내 판매 목록 관리 */
   listByUser(userId: string): Promise<MarketListing[]>;

@@ -176,13 +176,20 @@ export class SupabaseMarketRepository implements IMarketRepository {
     limit: number;
     search?: string;
     sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
-    type?: 'all' | 'fixed' | 'auction';
+    type?: 'all' | 'fixed' | 'auction' | 'bidding';
+    bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
     let query = this.getClient()
       .from('market_listings')
       .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('status', 'PENDING');
-    if (options.type && options.type !== 'all') {
+    if (options.type === 'bidding') {
+      if (!options.bidderId) return { listings: [], total: 0 };
+      query = query
+        .eq('listing_type', 'auction')
+        .eq('current_bidder_id', options.bidderId)
+        .gt('bid_reserved', 0);
+    } else if (options.type && options.type !== 'all') {
       query = query.eq('listing_type', options.type);
     }
     const { data: listingsData, error } = await query;

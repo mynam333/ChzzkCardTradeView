@@ -74,8 +74,10 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 12)));
   const search = req.query.search ? String(req.query.search) : undefined;
   const sort = (req.query.sort || 'latest') as 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
-  const type = (req.query.type || 'all') as 'all' | 'fixed' | 'auction';
-  const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type });
+  const rawType = String(req.query.type || 'all');
+  const type = (['all', 'fixed', 'auction', 'bidding'].includes(rawType) ? rawType : 'all') as 'all' | 'fixed' | 'auction' | 'bidding';
+  const bidderId = type === 'bidding' ? req.user?.id : undefined;
+  const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type, bidderId: bidderId || '' });
   const now = Date.now();
   const cached = marketListCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
@@ -85,7 +87,7 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
 
   try {
     await settleExpiredAuctions();
-    const result = await marketRepository.listActive({ page, limit, search, sort, type });
+    const result = await marketRepository.listActive({ page, limit, search, sort, type, bidderId });
     marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
     if (marketListCache.size > 200) {
       for (const [key, value] of marketListCache) {
