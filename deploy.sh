@@ -27,6 +27,29 @@ if [ ! -f "${RELEASE_ARCHIVE}" ]; then
   exit 1
 fi
 
+assert_can_write_path() {
+  local target="$1"
+  local parent
+
+  if [ -e "${target}" ]; then
+    if [ ! -w "${target}" ]; then
+      echo "[deploy] permission denied: ${target}"
+      echo "[deploy] fix ownership on the server, for example:"
+      echo "[deploy]   sudo chown -R \$(whoami):\$(id -gn) '${PROJECT_DIR}'"
+      exit 1
+    fi
+    return
+  fi
+
+  parent="$(dirname "${target}")"
+  if [ ! -w "${parent}" ]; then
+    echo "[deploy] permission denied: cannot create ${target}"
+    echo "[deploy] fix ownership on the server, for example:"
+    echo "[deploy]   sudo chown -R \$(whoami):\$(id -gn) '${PROJECT_DIR}'"
+    exit 1
+  fi
+}
+
 read_env_value() {
   local key="$1"
   local result=""
@@ -97,6 +120,10 @@ for required in backend/dist backend/package.json package.json pnpm-lock.yaml pn
     echo "[deploy] invalid release archive. missing: ${required}"
     exit 1
   fi
+done
+
+for writable in package.json pnpm-lock.yaml pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql deploy.sh backend/dist backend; do
+  assert_can_write_path "${writable}"
 done
 
 if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2>&1; then
