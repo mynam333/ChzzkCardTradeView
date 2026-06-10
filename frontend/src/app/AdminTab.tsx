@@ -585,9 +585,20 @@ export const AdminTab: React.FC = () => {
     });
   };
 
-  const handleResolveReport = async (reportId: number, status: 'resolved' | 'rejected') => {
+  const handleResolveReport = async (
+    reportId: number,
+    status: 'resolved' | 'rejected',
+    resolution?: { action?: string; detail?: string }
+  ) => {
     try {
-      const res = await apiFetch(`/admin/reports/${reportId}/resolve`, { method: 'POST', body: JSON.stringify({ status }) });
+      const res = await apiFetch(`/admin/reports/${reportId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({
+          status,
+          resolution_action: resolution?.action,
+          resolution_detail: resolution?.detail
+        })
+      });
       if (res.ok) {
         toast(`신고가 ${status === 'resolved' ? '처리' : '기각'}되었습니다.`);
         fetchReports();
@@ -617,7 +628,7 @@ export const AdminTab: React.FC = () => {
         return;
       }
       toast(data.message || '카드 삭제 요청을 처리했습니다.', 'success');
-      await handleResolveReport(report.id, 'resolved');
+      fetchReports();
       setPreventReregistrationByReport((prev) => {
         const next = { ...prev };
         delete next[report.id];
@@ -648,7 +659,12 @@ export const AdminTab: React.FC = () => {
         return;
       }
       toast(data.message || '이미지 조치를 완료했습니다.', 'success');
-      await handleResolveReport(report.id, 'resolved');
+      await handleResolveReport(report.id, 'resolved', {
+        action: label,
+        detail: action === 'reset'
+          ? `${report.star || 0}성 신고 이미지가 기본 이미지로 초기화되었습니다.`
+          : '해당 스트리머의 이미지 업로드 권한이 차단되었고 등록된 카드 이미지가 초기화되었습니다.'
+      });
       fetchCouponStreamers(true);
     } catch {
       toast('서버 통신 에러', 'error');
@@ -1745,7 +1761,7 @@ export const AdminTab: React.FC = () => {
                         <button onClick={() => handleReportedImageAction(rep, 'ban')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">이미지 차단</button>
                       </>
                     ) : null}
-                    <button onClick={() => handleResolveReport(rep.id, 'resolved')} className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20">검토 완료</button>
+                    <button onClick={() => handleResolveReport(rep.id, 'resolved', { detail: '관리자가 신고 내용을 확인했으며 별도 이미지 조치 없이 검토 완료 처리했습니다.' })} className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20">검토 완료</button>
                     <button onClick={() => handleResolveReport(rep.id, 'rejected')} className="rounded bg-secondary px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary/80">기각</button>
                   </div>
                 </div>

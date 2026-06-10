@@ -16,6 +16,71 @@ import { sendPushToUser } from './pushController';
 import { deleteLocalUploadByUrl } from '../services/imageService';
 import { clearUserRankingCaches } from './playController';
 import { publishRealtimeEvent } from '../services/realtimeStream';
+import { CardReport } from '../repositories/interfaces';
+
+const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
+
+const reportTargetLabel = async (report: CardReport) => {
+  const streamer = await streamerRepository.findById(report.channel_id).catch(() => null);
+  return streamer?.name || report.channel_id;
+};
+
+const truncateReportReason = (reason: string) => {
+  const trimmed = reason.trim();
+  return trimmed.length > 120 ? `${trimmed.slice(0, 120)}...` : trimmed;
+};
+
+const findReportTargetUserIds = async (report: CardReport) => {
+  const streamer = await streamerRepository.findById(report.channel_id).catch(() => null);
+  const candidateIds = [streamer?.registered_by, report.channel_id].filter(Boolean) as string[];
+  const uniqueIds = [...new Set(candidateIds)];
+  if (uniqueIds.length === 0) return { targetName: streamer?.name || report.channel_id, userIds: [] as string[] };
+
+  const users = await userRepository.findByIds(uniqueIds).catch(() => []);
+  return {
+    targetName: streamer?.name || report.channel_id,
+    userIds: users.map((user) => user.id)
+  };
+};
+
+const notifyReportResult = async (
+  report: CardReport,
+  status: 'resolved' | 'rejected',
+  options: { targetName?: string; actionLabel?: string; detail?: string } = {}
+) => {
+  const targetName = options.targetName || await reportTargetLabel(report);
+  const target = `'${targetName}' ${reportStarLabel(report)} 카드`;
+  const reason = truncateReportReason(report.reason);
+  const title = status === 'resolved' ? '신고 처리 완료' : '신고 기각 안내';
+  const body = status === 'rejected'
+    ? `신고하신 ${target} 신고가 기각되었습니다. 신고 사유: "${reason}". 검토 결과 별도 조치가 필요하지 않은 것으로 판단되었습니다.`
+    : `신고하신 ${target} 신고가 처리되었습니다. 신고 사유: "${reason}". 처리 내용: ${options.detail || options.actionLabel || '관리자 검토 완료'}.`;
+
+  await notificationRepository.create({
+    user_id: report.reporter_id,
+    title,
+    body,
+    link: 'my-info'
+  });
+  sendPushToUser(report.reporter_id, title, body, '/my-info').catch(() => { /* 푸시 실패는 처리 결과 저장을 막지 않습니다. */ });
+
+  if (status !== 'resolved') return;
+
+  const { userIds: targetUserIds } = await findReportTargetUserIds(report);
+  if (targetUserIds.length === 0) return;
+
+  const targetTitle = '카드 이미지 신고 처리 안내';
+  const targetBody = `${target}에 "${reason}" 사유로 접수된 신고가 처리되었습니다. 처리 내용: ${options.detail || options.actionLabel || '관리자 검토 완료'}.`;
+  for (const userId of targetUserIds) {
+    await notificationRepository.create({
+      user_id: userId,
+      title: targetTitle,
+      body: targetBody,
+      link: 'my-info'
+    });
+    sendPushToUser(userId, targetTitle, targetBody, '/my-info').catch(() => { /* 푸시 실패는 처리 결과 저장을 막지 않습니다. */ });
+  }
+};
 
 /**
  * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 추가 무료 소환 티켓 보상 지급
@@ -38,6 +103,8 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
     }
 
     const cards = await userCardRepository.findByChannel(channel_id);
+    const pendingReports = (await reportRepository.findAll().catch(() => []))
+      .filter((report) => report.channel_id === channel_id && report.status === 'pending');
 
     // 보유자별 삭제 카드 수 집계. 보상은 유저당 추가 무료 소환 티켓 1장입니다.
     const cardsByUser: Record<string, number> = {};
@@ -66,6 +133,14 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
         (req as AuthenticatedRequest).user?.id || null
       );
     }
+
+    for (const report of pendingReports) {
+      await notifyReportResult(report, 'resolved', {
+        targetName: streamer.name,
+        detail: `신고 대상 카드가 삭제되었고 보유자에게 추가 무료 소환 티켓 보상이 지급되었습니다.${preventReregistration ? ' 해당 채널의 카드 재등록도 차단되었습니다.' : ''}`
+      }).catch(() => { /* 알림 실패는 카드 삭제 처리를 막지 않습니다. */ });
+    }
+
     await streamerRepository.delete(channel_id);
 
     return res.status(200).json({
@@ -399,14 +474,30 @@ export const getReports = async (req: Request, res: Response) => {
  */
 export const resolveReport = async (req: Request, res: Response) => {
   const { report_id } = req.params;
-  const { status } = req.body; // 'resolved' or 'rejected'
+  const { status, resolution_action, resolution_detail } = req.body; // 'resolved' or 'rejected'
 
   if (!report_id || !['resolved', 'rejected'].includes(status)) {
     return res.status(400).json({ error: 'BadRequest', message: '유효한 신고 ID 및 처리 상태(status: resolved | rejected)가 필요합니다.' });
   }
 
   try {
-    await reportRepository.updateStatus(Number(report_id), status);
+    const reportId = Number(report_id);
+    const report = (await reportRepository.findAll()).find((item) => item.id === reportId);
+    if (!report) {
+      return res.status(404).json({ error: 'NotFound', message: '처리할 신고를 찾을 수 없습니다.' });
+    }
+    if (report.status !== 'pending') {
+      return res.status(400).json({ error: 'BadRequest', message: '이미 처리된 신고입니다.' });
+    }
+
+    await reportRepository.updateStatus(reportId, status);
+    await notifyReportResult(report, status, {
+      actionLabel: typeof resolution_action === 'string' ? resolution_action : undefined,
+      detail: typeof resolution_detail === 'string' ? resolution_detail : undefined
+    }).catch((notifyErr) => {
+      console.warn('[AdminController] 신고 처리 알림 생성 실패:', notifyErr?.message || notifyErr);
+    });
+
     return res.status(200).json({
       message: `신고(${report_id}) 건이 성공적으로 처리(${status})되었습니다.`,
       report_id,
