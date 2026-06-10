@@ -166,7 +166,7 @@ export class MysqlDb {
       const conn = await this.pool.getConnection();
       const tx = new MysqlTx(conn);
       try {
-        await conn.query('SET SESSION innodb_lock_wait_timeout = ?', [MYSQL_LOCK_WAIT_TIMEOUT_SECONDS]);
+        await conn.query(`SET SESSION innodb_lock_wait_timeout = ${MYSQL_LOCK_WAIT_TIMEOUT_SECONDS}`);
         await conn.beginTransaction();
         const result = await task(tx);
         await conn.commit();

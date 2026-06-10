@@ -462,6 +462,7 @@ npm run dev
   * Fly.io 예시: volume mount path `/data`, `SQLITE_DB_PATH=/data/chikapo.sqlite`, `UPLOADS_DIR=/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
 * SQLite 파일을 MySQL 8로 이전하려면 [docs/mysql-migration.md](docs/mysql-migration.md)를 참고합니다.
 * DB 모드는 `DB_MODE=sqlite`, `DB_MODE=mysql`, `DB_MODE=supabase` 중 하나로 명시합니다.
+* 한 대의 Ubuntu 서버에서 API/라이브·채팅/백업/이미지 프록시를 프로세스별로 분리하려면 [docs/process-workers.md](docs/process-workers.md)를 참고합니다.
 * Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `DB_MODE=sqlite` 또는 `DB_MODE=mysql`로 둡니다.
 * Supabase 운영 시에는 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.
 * `SUPABASE_SERVICE_ROLE_KEY`에는 브라우저용 publishable/anon key가 아니라 서버 전용 `sb_secret_*` 또는 legacy `service_role` key만 설정합니다.

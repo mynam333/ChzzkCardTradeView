@@ -10,8 +10,6 @@ import { initDatabaseConnection } from './services/db';
 import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
-import { startStreamerLiveStatusScheduler } from './cron/streamerScheduler';
-import { startMarketSettlementScheduler } from './cron/marketScheduler';
 import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
 import { rateLimit } from './middlewares/rateLimit';
@@ -20,7 +18,12 @@ import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
 import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
-import { startMysqlSqliteBackupScheduler } from './services/mysqlSqliteBackup';
+import {
+  isAllInOneProcess,
+  PROCESS_ROLE,
+  shouldRunMarketScheduler,
+  shouldRunPushScheduler
+} from './services/processRole';
 
 // VAPID 초기화 (dotenv.config() 이후 실행 보장)
 initVapid();
@@ -252,10 +255,20 @@ const startServer = async () => {
   try {
     await initDatabaseConnection();
     initRepositories(); // 레포지토리 초기화 추가
-    startPushNotificationScheduler(); // PWA 푸시 알림 예약 크론 가동
-    startMarketSettlementScheduler(); // 오픈마켓 만료 경매 정산 크론 가동
-    startStreamerLiveStatusScheduler(); // 치지직 실시간 방송 상태 폴링 크론 가동
-    startMysqlSqliteBackupScheduler(); // MySQL 모드에서만 일일 SQLite 백업 스케줄러 가동
+    if (shouldRunPushScheduler()) {
+      startPushNotificationScheduler(); // PWA 푸시 알림 예약 크론 가동
+    }
+    if (shouldRunMarketScheduler()) {
+      const { startMarketSettlementScheduler } = await import('./cron/marketScheduler');
+      startMarketSettlementScheduler(); // 오픈마켓 만료 경매 정산 크론 가동
+    }
+    if (isAllInOneProcess()) {
+      const { startStreamerLiveStatusScheduler } = await import('./cron/streamerScheduler');
+      const { startMysqlSqliteBackupScheduler } = await import('./services/mysqlSqliteBackup');
+      startStreamerLiveStatusScheduler();
+      startMysqlSqliteBackupScheduler();
+    }
+    console.log(`[Server] PROCESS_ROLE=${PROCESS_ROLE} API 서버 모드로 기동합니다.`);
 
     const useHttps = process.env.USE_HTTPS === 'true';
     const { keyPath, certPath, source } = getHttpsCertificatePaths();

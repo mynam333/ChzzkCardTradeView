@@ -46,8 +46,8 @@ logs/
 /backend/logs/
 
 # local env files
-.env*.local
-.env
+.env*
+!.env*.example
 
 # vercel
 .vercel

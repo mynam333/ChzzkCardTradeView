@@ -1,8 +1,32 @@
-import { chatManager } from './chatManager';
 import { getNotificationStreamStats } from './notificationStream';
 import { getRealtimeStreamStats } from './realtimeStream';
 import { getPlayControllerStats } from '../controllers/playController';
 import { getSoftBanStats } from '../middlewares/softBan';
+import { isLiveWorkerProcess } from './processRole';
+
+let chatStatsProvider: (() => any) | null = null;
+
+const getChatStats = () => {
+  if (!isLiveWorkerProcess()) {
+    return {
+      connections: 0,
+      desired: 0,
+      reconnectTimers: 0,
+      backedOff: 0,
+      pendingChatChannels: 0,
+      pendingChatTotal: 0,
+      isFlushing: false,
+      disabled: true
+    };
+  }
+
+  if (!chatStatsProvider) {
+    const { chatManager } = require('./chatManager') as typeof import('./chatManager');
+    chatStatsProvider = () => chatManager.getStats();
+  }
+
+  return chatStatsProvider();
+};
 
 export const getRuntimeStats = () => {
   const memory = process.memoryUsage();
@@ -18,7 +42,7 @@ export const getRuntimeStats = () => {
       realtime: getRealtimeStreamStats(),
       notifications: getNotificationStreamStats()
     },
-    chat: chatManager.getStats(),
+    chat: getChatStats(),
     caches: {
       play: getPlayControllerStats()
     },

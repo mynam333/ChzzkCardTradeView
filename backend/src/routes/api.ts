@@ -8,7 +8,6 @@ import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
 import { uploadCustomImage, deleteOwnCustomImage } from '../controllers/streamerController';
 import { reportStreamerCard } from '../controllers/reportController';
-import { proxyImage } from '../controllers/imageProxyController';
 import { getResetInfo, resetData, listOrphanImages, deleteOrphanImages } from '../controllers/adminMaintenanceController';
 import { getChzzkAuthUrl, handleChzzkCallback, logout } from '../controllers/chzzkAuthController';
 import {
@@ -144,6 +143,7 @@ import { streamerRepository, titleRepository } from '../repositories';
 
 import { rateLimit } from '../middlewares/rateLimit';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
+import { shouldServeImageProxyInApi } from '../services/processRole';
 
 const router = Router();
 router.use(maintenanceCheckMiddleware);
@@ -206,7 +206,20 @@ router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 // 로그아웃 — httpOnly 세션 쿠키 제거
 router.post('/auth/logout', logout);
-router.get('/image-proxy', proxyImage);
+router.get('/image-proxy', async (req, res, next) => {
+  if (!shouldServeImageProxyInApi()) {
+    return res.status(503).json({
+      error: 'ImageProxyDisabled',
+      message: '이미지 프록시는 별도 image-worker 프로세스에서 처리됩니다.'
+    });
+  }
+  try {
+    const { proxyImage } = await import('../controllers/imageProxyController');
+    return proxyImage(req, res);
+  } catch (err) {
+    return next(err);
+  }
+});
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
 router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
 router.delete('/users/me', authMiddleware, deleteMyAccount);
