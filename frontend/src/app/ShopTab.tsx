@@ -6,9 +6,10 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { fuzzySearch } from '@/lib/search';
-import { parseStyle, nameEffectStyle, borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib/cosmetics';
+import { borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
+import { CardPreview } from './CardPreview';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 
@@ -148,6 +149,7 @@ export const ShopTab: React.FC = () => {
   const [owned, setOwned] = useState<Record<number, number>>({});
   const [purchased, setPurchased] = useState<Record<number, number>>({});
   const [cosmeticPage, setCosmeticPage] = useState(1);
+  const [previewCosmetic, setPreviewCosmetic] = useState<ShopItem | null>(null);
 
   // ---- 오픈마켓 ----
   const [marketListings, setMarketListings] = useState<any[]>([]);
@@ -1115,57 +1117,68 @@ export const ShopTab: React.FC = () => {
               <p className="text-center text-xs text-muted-foreground py-10">판매 중인 {shopType === 'border' ? '테두리' : '이름 이펙트'}가 없습니다.</p>
             ) : (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                <div className="grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3 lg:grid-cols-4">
                   {paginatedCosmetics.map((item) => {
                     const limited = item.purchase_limit > 0;
                     const bought = purchased[item.id] || 0;
                     const soldOut = limited && bought >= item.purchase_limit;
                     return (
-                      <div key={item.id} className="cute-card-pop grid min-h-[25.75rem] grid-rows-[7.5rem_minmax(4.25rem,auto)_1fr_auto] rounded-[1.75rem] border border-border bg-secondary/25 p-4 text-center hover:border-primary/30">
+                      <div
+                        key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setPreviewCosmetic(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setPreviewCosmetic(item);
+                          }
+                        }}
+                        className="cute-card-pop grid min-h-[17.25rem] cursor-pointer grid-rows-[5.5rem_minmax(3.25rem,auto)_1fr_auto] rounded-[1.25rem] border border-border bg-secondary/25 p-3 text-center transition hover:border-primary/40 hover:bg-secondary/35"
+                      >
                         {/* 미리보기 */}
-                        <div className="flex h-[7.5rem] items-center justify-center">
-                          {item.type === 'border' ? (
-                            <div className="relative overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-secondary to-card" style={{ width: '64px', height: '102.4px' }}>
-                              <div style={{
+                        <div className="flex h-[5.5rem] items-center justify-center">
+                          <div className="relative h-[5.2rem] w-[3.25rem] overflow-visible">
+                            <div
+                              className="pointer-events-none absolute left-0 top-0"
+                              style={{
                                 width: '224px',
                                 height: '358.4px',
-                                transform: 'scale(calc(64 / 224))',
-                                transformOrigin: 'top left',
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                pointerEvents: 'none',
-                                containerType: 'inline-size',
-                                ...(borderClass(item) ? {} : (borderStyle(item) || {}))
-                              }}>
-                                <CosmeticFrame border={item} />
-                              </div>
+                                transform: 'scale(calc(52 / 224))',
+                                transformOrigin: 'top left'
+                              }}
+                            >
+                              <CardPreview
+                                border={item.type === 'border' ? item : null}
+                                nameEffect={item.type === 'name_effect' ? item : null}
+                              />
                             </div>
-                          ) : (
-                            <CosmeticName effect={item} className="max-w-full break-words text-lg font-black leading-tight">{item.name}</CosmeticName>
-                          )}
+                          </div>
                         </div>
-                        <div className="flex min-h-[4.25rem] flex-col items-center justify-start px-1 pt-2">
+                        <div className="flex min-h-[3.25rem] flex-col items-center justify-start px-0.5 pt-1.5">
                           <p className="w-full truncate text-xs font-bold leading-5">{item.name}</p>
-                          <p className="mt-1 line-clamp-2 min-h-[2.5rem] text-[10px] leading-5 text-muted-foreground">
+                          <p className="mt-0.5 line-clamp-2 min-h-[2rem] text-[9px] leading-4 text-muted-foreground">
                             {item.description || ''}
                           </p>
                         </div>
-                        <div className="flex flex-col items-center justify-end gap-2 pb-2">
-                          <div className="cute-number-font flex h-5 items-center justify-center gap-1 text-xs font-black text-primary"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
+                        <div className="flex flex-col items-center justify-end gap-1.5 pb-1.5">
+                          <div className="cute-number-font flex h-5 items-center justify-center gap-1 text-[11px] font-black text-primary"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
                           <div className="flex h-4 items-center justify-center gap-2">
                             {owned[item.id] ? (
-                              <span className="text-[10px] font-bold text-emerald-500">보유 {owned[item.id]}개</span>
+                              <span className="text-[9px] font-bold text-emerald-500">보유 {owned[item.id]}개</span>
                             ) : null}
                             {limited && (
-                              <span className={`text-[10px] font-bold ${soldOut ? 'text-rose-500' : 'text-muted-foreground'}`}>구매 {bought}/{item.purchase_limit}</span>
+                              <span className={`text-[9px] font-bold ${soldOut ? 'text-rose-500' : 'text-muted-foreground'}`}>구매 {bought}/{item.purchase_limit}</span>
                             )}
                           </div>
                         </div>
                         <button
-                          onClick={() => handleBuy(item)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleBuy(item);
+                          }}
                           disabled={buying === item.id || soldOut}
-                          className="cute-wiggle-hover flex h-10 w-full items-center justify-center gap-1 rounded-2xl bg-primary text-xs font-bold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                          className="cute-wiggle-hover flex h-8 w-full items-center justify-center gap-1 rounded-xl bg-primary text-[11px] font-bold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                         >
                           <ShoppingBag className="h-3.5 w-3.5" /> {soldOut ? '구매 완료' : buying === item.id ? '구매 중...' : '구매'}
                         </button>
@@ -1886,6 +1899,42 @@ export const ShopTab: React.FC = () => {
               );
             })()}
           </section>
+        </div>
+      )}
+
+      {previewCosmetic && (
+        <div
+          className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setPreviewCosmetic(null)}
+        >
+          <div
+            className="relative animate-in zoom-in-95 duration-200"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewCosmetic(null)}
+              className="absolute -right-3 -top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-zinc-950/85 text-white shadow-xl transition hover:bg-zinc-800"
+              aria-label="미리보기 닫기"
+              title="미리보기 닫기"
+            >
+              <X className="h-4.5 w-4.5" />
+            </button>
+            <div
+              style={{
+                width: '224px',
+                height: '358.4px',
+                transform: 'scale(min(calc(82vh / 358.4px), calc(92vw / 224px)))',
+                transformOrigin: 'center'
+              }}
+            >
+              <CardPreview
+                border={previewCosmetic.type === 'border' ? previewCosmetic : null}
+                nameEffect={previewCosmetic.type === 'name_effect' ? previewCosmetic : null}
+                withComet
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
