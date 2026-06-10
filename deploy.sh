@@ -11,8 +11,46 @@ API_APP_NAME="${API_APP_NAME:-chikapo-api}"
 WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
+resolve_command() {
+  local command_name="$1"
+  local candidate
+
+  if command -v "${command_name}" >/dev/null 2>&1; then
+    command -v "${command_name}"
+    return
+  fi
+
+  for candidate in \
+    "${HOME:-}/.local/bin/${command_name}" \
+    "${HOME:-}/.npm-global/bin/${command_name}" \
+    "${HOME:-}/.nvm/versions/node"/*"/bin/${command_name}" \
+    "/usr/local/bin/${command_name}" \
+    "/usr/bin/${command_name}"; do
+    if [ -x "${candidate}" ]; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
+
+  return 1
+}
+
+PM2_BIN="${PM2_BIN:-}"
+if [ -z "${PM2_BIN}" ]; then
+  PM2_BIN="$(resolve_command pm2 || true)"
+fi
+
 if [ -z "${RELEASE_ARCHIVE}" ]; then
   echo "[deploy] usage: ./deploy.sh /path/to/backend-release.tar.gz"
+  exit 1
+fi
+
+if [ -z "${PM2_BIN}" ]; then
+  echo "[deploy] pm2 command not found in non-interactive SSH PATH"
+  echo "[deploy] install pm2 globally for the deploy user, or set PM2_BIN in the server environment."
+  echo "[deploy] examples:"
+  echo "[deploy]   npm install -g pm2"
+  echo "[deploy]   echo 'PM2_BIN=\$(command -v pm2)' >> ~/.profile"
   exit 1
 fi
 
@@ -187,7 +225,7 @@ if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; th
 fi
 
 echo "[deploy] reload api without downtime"
-pm2 startOrReload ecosystem.config.cjs --only "${API_APP_NAME}" --update-env
+"${PM2_BIN}" startOrReload ecosystem.config.cjs --only "${API_APP_NAME}" --update-env
 
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
 if [ -z "${HEALTHCHECK_URL}" ]; then
@@ -206,7 +244,7 @@ for attempt in $(seq 1 30); do
   fi
   if [ "${attempt}" = "30" ]; then
     echo "[deploy] api health check failed"
-    pm2 status
+    "${PM2_BIN}" status
     exit 1
   fi
   sleep 1
@@ -214,7 +252,7 @@ done
 
 echo "[deploy] reload workers sequentially"
 for app_name in ${WORKER_APP_NAMES}; do
-  pm2 startOrReload ecosystem.config.cjs --only "${app_name}" --update-env
+  "${PM2_BIN}" startOrReload ecosystem.config.cjs --only "${app_name}" --update-env
   sleep 2
 done
 
@@ -222,4 +260,4 @@ echo "[deploy] prune old releases"
 find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n +"$((KEEP_RELEASES + 1))" | xargs -r rm -rf
 
 echo "[deploy] status"
-pm2 status
+"${PM2_BIN}" status
