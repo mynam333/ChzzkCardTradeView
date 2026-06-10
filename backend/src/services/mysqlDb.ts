@@ -86,16 +86,50 @@ const toParams = (args: any[]): any[] => {
   return args;
 };
 
+const coerceLimitOffsetValue = (value: any, keyword: string): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`[MySQL] ${keyword} 값이 유효한 숫자가 아닙니다: ${value}`);
+  }
+  return Math.max(0, Math.floor(numeric));
+};
+
+const normalizeLimitOffsetPlaceholders = (sql: string, params: any[]): { sql: string; params: any[] } => {
+  let paramIndex = 0;
+  const nextParams: any[] = [];
+  const rewritten = sql.replace(/\?/g, (placeholder, offset) => {
+    const value = params[paramIndex++];
+    const prefix = sql.slice(Math.max(0, offset - 32), offset);
+    const match = prefix.match(/\b(LIMIT|OFFSET)\s*$/i);
+    if (!match) {
+      nextParams.push(value);
+      return placeholder;
+    }
+    return String(coerceLimitOffsetValue(value, match[1].toUpperCase()));
+  });
+
+  for (; paramIndex < params.length; paramIndex += 1) {
+    nextParams.push(params[paramIndex]);
+  }
+
+  return { sql: rewritten, params: nextParams };
+};
+
+const prepareMysqlStatement = (sql: string, params: any[]): { sql: string; params: any[] } =>
+  normalizeLimitOffsetPlaceholders(normalizeMysqlSql(sql), params);
+
 export class MysqlDb {
   constructor(private readonly pool: Pool) {}
 
   async query<T extends RowDataPacket[] = RowDataPacket[]>(sql: string, params: any[] = []): Promise<T> {
-    const [rows] = await this.pool.execute<T>(normalizeMysqlSql(sql), params);
+    const statement = prepareMysqlStatement(sql, params);
+    const [rows] = await this.pool.execute<T>(statement.sql, statement.params);
     return rows;
   }
 
   async all<T = any>(sql: string, ...args: any[]): Promise<T[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(normalizeMysqlSql(sql), toParams(args));
+    const statement = prepareMysqlStatement(sql, toParams(args));
+    const [rows] = await this.pool.execute<RowDataPacket[]>(statement.sql, statement.params);
     return rows as T[];
   }
 
@@ -105,7 +139,8 @@ export class MysqlDb {
   }
 
   async run(sql: string, ...args: any[]): Promise<MysqlRunResult> {
-    const [result] = await this.pool.execute<ResultSetHeader>(normalizeMysqlSql(sql), toParams(args));
+    const statement = prepareMysqlStatement(sql, toParams(args));
+    const [result] = await this.pool.execute<ResultSetHeader>(statement.sql, statement.params);
     return {
       changes: result.affectedRows,
       affectedRows: result.affectedRows,
@@ -139,7 +174,8 @@ export class MysqlTx {
   constructor(private readonly conn: PoolConnection) {}
 
   async all<T = any>(sql: string, ...args: any[]): Promise<T[]> {
-    const [rows] = await this.conn.execute<RowDataPacket[]>(normalizeMysqlSql(sql), toParams(args));
+    const statement = prepareMysqlStatement(sql, toParams(args));
+    const [rows] = await this.conn.execute<RowDataPacket[]>(statement.sql, statement.params);
     return rows as T[];
   }
 
@@ -149,7 +185,8 @@ export class MysqlTx {
   }
 
   async run(sql: string, ...args: any[]): Promise<MysqlRunResult> {
-    const [result] = await this.conn.execute<ResultSetHeader>(normalizeMysqlSql(sql), toParams(args));
+    const statement = prepareMysqlStatement(sql, toParams(args));
+    const [result] = await this.conn.execute<ResultSetHeader>(statement.sql, statement.params);
     return {
       changes: result.affectedRows,
       affectedRows: result.affectedRows,
