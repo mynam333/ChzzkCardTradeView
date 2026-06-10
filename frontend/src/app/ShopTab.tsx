@@ -1617,6 +1617,7 @@ export const ShopTab: React.FC = () => {
                         const isAuction = l.listing_type === 'auction';
                         const currentBid = Number(l.current_bid || l.starting_bid || l.price || 0);
                         const feeRate = Number(l.fee_rate ?? 5);
+                        const hasActiveBid = isAuction && Boolean(l.current_bidder_id) && Number(l.bid_reserved || 0) > 0;
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
                             <td className="py-3 flex items-center gap-2">
@@ -1675,13 +1676,21 @@ export const ShopTab: React.FC = () => {
                             </td>
                             <td className="py-3 text-right">
                               {l.status === 'PENDING' ? (
-                                <button
-                                  onClick={() => handleCancelMarketItem(l.id)}
-                                  disabled={cancellingListingId === l.id}
-                                  className="rounded-lg bg-rose-600/10 hover:bg-rose-600/20 px-2.5 py-1 text-[10px] font-bold text-rose-500 transition disabled:opacity-50"
-                                >
-                                  등록 취소
-                                </button>
+                                <div className="flex flex-col items-end gap-1">
+                                  <button
+                                    onClick={() => handleCancelMarketItem(l.id)}
+                                    disabled={cancellingListingId === l.id || hasActiveBid}
+                                    title={hasActiveBid ? '이미 입찰자가 있는 경매는 취소할 수 없습니다.' : undefined}
+                                    className="rounded-lg bg-rose-600/10 px-2.5 py-1 text-[10px] font-bold text-rose-500 transition hover:bg-rose-600/20 disabled:pointer-events-none disabled:opacity-45"
+                                  >
+                                    {cancellingListingId === l.id ? '취소 중...' : '등록 취소'}
+                                  </button>
+                                  {hasActiveBid && (
+                                    <span className="max-w-[8rem] text-right text-[9px] font-bold leading-tight text-muted-foreground">
+                                      입찰 후 취소 불가
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <button
                                   onClick={() => handleHideMyListing(l.id)}

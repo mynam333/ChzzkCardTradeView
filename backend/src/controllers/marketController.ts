@@ -241,6 +241,13 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: 'BadRequest', message: '판매 중인 매물만 취소할 수 있습니다.' });
     }
 
+    if (listing.listing_type === 'auction' && listing.current_bidder_id && Number(listing.bid_reserved || 0) > 0) {
+      return res.status(400).json({
+        error: 'BadRequest',
+        message: '이미 입찰자가 있는 경매는 등록자가 취소할 수 없습니다.'
+      });
+    }
+
     await marketRepository.updateStatus(id, 'CANCELLED');
     publishMarketUpdated('listing_cancelled', { ...listing, status: 'CANCELLED' });
     return res.json({ ok: true });
