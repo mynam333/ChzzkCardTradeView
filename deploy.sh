@@ -27,24 +27,66 @@ if [ ! -f "${RELEASE_ARCHIVE}" ]; then
   exit 1
 fi
 
-load_env_file() {
-  local file="$1"
-  if [ -f "${file}" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "${file}"
-    set +a
+read_env_value() {
+  local key="$1"
+  local result=""
+  local file line value
+
+  for file in ".env" "backend/.env"; do
+    [ -f "${file}" ] || continue
+    while IFS= read -r line || [ -n "${line}" ]; do
+      line="${line%$'\r'}"
+      case "${line}" in
+        ""|\#*) continue ;;
+        export\ *) line="${line#export }" ;;
+      esac
+      case "${line}" in
+        "${key}="*)
+          value="${line#*=}"
+          if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+          elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+          fi
+          result="${value}"
+          ;;
+      esac
+    done < "${file}"
+  done
+
+  printf '%s' "${result}"
+}
+
+env_value() {
+  local key="$1"
+  local fallback="${2:-}"
+  local existing="${!key-}"
+  local parsed=""
+
+  if [ -n "${existing}" ]; then
+    printf '%s' "${existing}"
+    return
+  fi
+
+  parsed="$(read_env_value "${key}")"
+  if [ -n "${parsed}" ]; then
+    printf '%s' "${parsed}"
+  else
+    printf '%s' "${fallback}"
   fi
 }
 
-load_env_file ".env"
-load_env_file "backend/.env"
-
-DB_HOST_VALUE="${MYSQL_HOST:-${DB_HOST:-}}"
-DB_PORT_VALUE="${MYSQL_PORT:-${DB_PORT:-3306}}"
-DB_USER_VALUE="${MYSQL_USER:-${DB_USER:-}}"
-DB_PASSWORD_VALUE="${MYSQL_PASSWORD:-${DB_PASSWORD:-}}"
-DB_NAME_VALUE="${MYSQL_DATABASE:-${DB_NAME:-}}"
+DB_HOST_VALUE="$(env_value MYSQL_HOST)"
+if [ -z "${DB_HOST_VALUE}" ]; then DB_HOST_VALUE="$(env_value DB_HOST)"; fi
+DB_PORT_VALUE="$(env_value MYSQL_PORT "$(env_value DB_PORT 3306)")"
+DB_USER_VALUE="$(env_value MYSQL_USER)"
+if [ -z "${DB_USER_VALUE}" ]; then DB_USER_VALUE="$(env_value DB_USER)"; fi
+DB_PASSWORD_VALUE="$(env_value MYSQL_PASSWORD)"
+if [ -z "${DB_PASSWORD_VALUE}" ]; then DB_PASSWORD_VALUE="$(env_value DB_PASSWORD)"; fi
+DB_NAME_VALUE="$(env_value MYSQL_DATABASE)"
+if [ -z "${DB_NAME_VALUE}" ]; then DB_NAME_VALUE="$(env_value DB_NAME)"; fi
+USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
+PORT_VALUE="$(env_value PORT 5000)"
 
 echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
 mkdir -p "${RELEASE_DIR}"
@@ -123,10 +165,10 @@ pm2 startOrReload ecosystem.config.cjs --only "${API_APP_NAME}" --update-env
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
 if [ -z "${HEALTHCHECK_URL}" ]; then
   HEALTHCHECK_SCHEME="http"
-  if [ "${USE_HTTPS:-false}" = "true" ]; then
+  if [ "${USE_HTTPS_VALUE}" = "true" ]; then
     HEALTHCHECK_SCHEME="https"
   fi
-  HEALTHCHECK_URL="${HEALTHCHECK_SCHEME}://127.0.0.1:${PORT:-5000}/health"
+  HEALTHCHECK_URL="${HEALTHCHECK_SCHEME}://127.0.0.1:${PORT_VALUE}/health"
 fi
 
 echo "[deploy] health check: ${HEALTHCHECK_URL}"
