@@ -125,6 +125,17 @@ export const areFriends = async (a: string, b: string): Promise<boolean> => {
 
 export const listFriends = async (userId: string): Promise<ChatUserSummary[]> => {
   const mode = getDbMode();
+  const mysqlSql = `
+    SELECT u.id, u.username, u.avatar_url, u.role
+      FROM friendships f
+      JOIN users u
+        ON u.id COLLATE utf8mb4_unicode_ci = (
+          CASE WHEN f.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN f.user_b_id ELSE f.user_a_id END
+        ) COLLATE utf8mb4_unicode_ci
+     WHERE f.user_a_id = ? COLLATE utf8mb4_unicode_ci
+        OR f.user_b_id = ? COLLATE utf8mb4_unicode_ci
+     ORDER BY u.username ASC
+  `;
   const sql = `
     SELECT u.id, u.username, u.avatar_url, u.role
       FROM friendships f
@@ -132,7 +143,7 @@ export const listFriends = async (userId: string): Promise<ChatUserSummary[]> =>
      WHERE f.user_a_id = ? OR f.user_b_id = ?
      ORDER BY u.username ASC
   `;
-  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(sql, userId, userId, userId)).map(mapUser);
+  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(mysqlSql, userId, userId, userId)).map(mapUser);
   if (mode === 'SUPABASE') {
     const { data } = await getSupabaseClient()
       .from('friendships')
@@ -161,6 +172,21 @@ const listRequestsSql = (where: string) => `
    ORDER BY fr.id DESC
 `;
 
+const listRequestsMysqlSql = (where: string) => `
+  SELECT fr.*,
+         requester.username AS requester_username,
+         requester.avatar_url AS requester_avatar_url,
+         requester.role AS requester_role,
+         receiver.username AS receiver_username,
+         receiver.avatar_url AS receiver_avatar_url,
+         receiver.role AS receiver_role
+    FROM friend_requests fr
+    JOIN users requester ON requester.id COLLATE utf8mb4_unicode_ci = fr.requester_id COLLATE utf8mb4_unicode_ci
+    JOIN users receiver ON receiver.id COLLATE utf8mb4_unicode_ci = fr.receiver_id COLLATE utf8mb4_unicode_ci
+   WHERE ${where}
+   ORDER BY fr.id DESC
+`;
+
 const mapRequest = (row: any): FriendRequestRow => ({
   id: Number(row.id),
   requester_id: row.requester_id,
@@ -176,10 +202,12 @@ export const listFriendRequests = async (userId: string) => {
   const mode = getDbMode();
   const incomingSql = listRequestsSql("fr.receiver_id = ? AND fr.status = 'pending'");
   const outgoingSql = listRequestsSql("fr.requester_id = ? AND fr.status = 'pending'");
+  const incomingMysqlSql = listRequestsMysqlSql("fr.receiver_id = ? COLLATE utf8mb4_unicode_ci AND fr.status = 'pending'");
+  const outgoingMysqlSql = listRequestsMysqlSql("fr.requester_id = ? COLLATE utf8mb4_unicode_ci AND fr.status = 'pending'");
   if (mode === 'MYSQL') {
     const [incoming, outgoing] = await Promise.all([
-      getMysqlDb().all<any>(incomingSql, userId),
-      getMysqlDb().all<any>(outgoingSql, userId)
+      getMysqlDb().all<any>(incomingMysqlSql, userId),
+      getMysqlDb().all<any>(outgoingMysqlSql, userId)
     ]);
     return { incoming: incoming.map(mapRequest), outgoing: outgoing.map(mapRequest) };
   }
@@ -355,6 +383,26 @@ const roomSelectSql = (viewerId: string) => `
     LEFT JOIN chat_messages lm ON lm.id = (SELECT id FROM chat_messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1)
 `;
 
+const roomSelectMysqlSql = (viewerId: string) => `
+  SELECT cr.*,
+         CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.user_b_id ELSE cr.user_a_id END AS other_id,
+         u.username AS other_username,
+         u.avatar_url AS other_avatar_url,
+         u.role AS other_role,
+         lm.id AS last_message_id,
+         lm.sender_id AS last_sender_id,
+         lm.body AS last_body,
+         lm.created_at AS last_created_at,
+         lm.read_at AS last_read_at,
+         (SELECT COUNT(*) FROM chat_messages unread WHERE unread.room_id = cr.id AND unread.sender_id <> ? COLLATE utf8mb4_unicode_ci AND unread.read_at IS NULL) AS unread_count
+    FROM chat_rooms cr
+    JOIN users u
+      ON u.id COLLATE utf8mb4_unicode_ci = (
+        CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.user_b_id ELSE cr.user_a_id END
+      ) COLLATE utf8mb4_unicode_ci
+    LEFT JOIN chat_messages lm ON lm.id = (SELECT id FROM chat_messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1)
+`;
+
 export const listChatRooms = async (userId: string, options: { includeEmpty?: boolean } = {}): Promise<ChatRoomRow[]> => {
   const mode = getDbMode();
   const emptyRoomCondition = options.includeEmpty
@@ -364,7 +412,11 @@ export const listChatRooms = async (userId: string, options: { includeEmpty?: bo
    WHERE ((cr.user_a_id = ? AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? AND cr.deleted_for_b = 0))
      ${emptyRoomCondition}
    ORDER BY cr.updated_at DESC, cr.id DESC`;
-  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(sql, userId, userId, userId, userId, userId)).map(mapRoom);
+  const mysqlSql = `${roomSelectMysqlSql(userId)}
+   WHERE ((cr.user_a_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_b = 0))
+     ${emptyRoomCondition}
+   ORDER BY cr.updated_at DESC, cr.id DESC`;
+  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(mysqlSql, userId, userId, userId, userId, userId)).map(mapRoom);
   if (mode === 'SUPABASE') return [];
   return (getSqliteDb().prepare(sql).all(userId, userId, userId, userId, userId) as any[]).map(mapRoom);
 };
