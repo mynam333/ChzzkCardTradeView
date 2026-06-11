@@ -56,7 +56,7 @@ const contentSecurityPolicy = [
   "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
-  "media-src 'self' blob: data:",
+  "media-src 'self' blob: data: https://api.yuaru.com",
   "base-uri 'self'",
   "form-action 'self'"
 ].join('; ');
