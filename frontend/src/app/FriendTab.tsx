@@ -243,6 +243,15 @@ export const FriendTab: React.FC = () => {
         toast(data.message || '친구 신청을 보낼 수 없습니다.', 'error');
         return;
       }
+      if (data.request) {
+        const request = data.request as FriendRequest;
+        setFriendRequests((prev) => ({
+          ...prev,
+          outgoing: prev.outgoing.some((item) => item.id === request.id || item.receiver_id === request.receiver_id)
+            ? prev.outgoing
+            : [request, ...prev.outgoing]
+        }));
+      }
       toast(data.already_friends || data.already_pending ? data.message : '친구 신청을 보냈습니다.', data.already_friends || data.already_pending ? 'info' : 'success');
       await fetchFriends(false);
     } catch {
@@ -548,13 +557,6 @@ export const FriendTab: React.FC = () => {
   const renderCandidateAction = (candidate: FriendUser) => {
     const incoming = incomingRequestByUserId.get(candidate.id);
     const outgoing = outgoingRequestByUserId.get(candidate.id);
-    if (user.role === 'ADMIN') {
-      return (
-        <button type="button" onClick={() => openDraftChat(candidate)} className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[10px] font-black text-primary-foreground">
-          <Shield className="h-3.5 w-3.5" /> 톡 열기
-        </button>
-      );
-    }
     if (friendIdSet.has(candidate.id)) {
       return (
         <button type="button" onClick={() => openDraftChat(candidate)} className="rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary">
@@ -562,25 +564,37 @@ export const FriendTab: React.FC = () => {
         </button>
       );
     }
+    let friendAction: React.ReactNode;
     if (incoming) {
-      return (
-        <div className="flex gap-1">
+      friendAction = (
+        <>
           <button type="button" onClick={() => respondFriendInvite(incoming.id, true)} className="rounded-full bg-primary px-2.5 py-1 text-[10px] font-black text-primary-foreground">수락</button>
           <button type="button" onClick={() => respondFriendInvite(incoming.id, false)} className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-black text-muted-foreground">거절</button>
-        </div>
+        </>
       );
-    }
-    if (outgoing) {
-      return (
+    } else if (outgoing) {
+      friendAction = (
         <button type="button" onClick={() => cancelFriendInvite(outgoing.id)} className="rounded-full bg-rose-500/10 px-3 py-1.5 text-[10px] font-black text-rose-500">
           신청 취소
         </button>
       );
+    } else {
+      friendAction = (
+        <button type="button" onClick={() => sendFriendInvite(candidate.id)} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary">
+          <UserPlus className="h-3.5 w-3.5" /> 신청
+        </button>
+      );
     }
+
     return (
-      <button type="button" onClick={() => sendFriendInvite(candidate.id)} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary">
-        <UserPlus className="h-3.5 w-3.5" /> 신청
-      </button>
+      <div className="flex flex-wrap justify-end gap-1">
+        {friendAction}
+        {user.role === 'ADMIN' && (
+          <button type="button" onClick={() => openDraftChat(candidate)} className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[10px] font-black text-primary-foreground">
+            <Shield className="h-3.5 w-3.5" /> 톡 열기
+          </button>
+        )}
+      </div>
     );
   };
 

@@ -95,7 +95,11 @@ export const sendFriendRequest = async (req: AuthenticatedRequest, res: Response
     }
 
     const request = await createFriendRequest(user.id, targetId);
-    await notifyUser(targetId, '친구 신청 도착', `${user.username}님이 친구 신청을 보냈습니다.`, 'friends');
+    try {
+      await notifyUser(targetId, '친구 신청 도착', `${user.username}님이 친구 신청을 보냈습니다.`, 'friends');
+    } catch (notifyErr: any) {
+      console.error('[FriendController] 친구 신청 알림 발송 실패:', notifyErr?.message || notifyErr);
+    }
     return res.status(201).json({ request, message: '친구 신청을 보냈습니다.' });
   } catch (err: any) {
     if (err.message === 'AlreadyFriends') {

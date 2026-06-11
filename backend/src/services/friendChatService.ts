@@ -244,7 +244,7 @@ export const createFriendRequest = async (requesterId: string, receiverId: strin
       "INSERT INTO friend_requests (requester_id, receiver_id, status, created_at) VALUES (?, ?, 'pending', UTC_TIMESTAMP())",
       requesterId, receiverId
     );
-    const row = await db.get<any>(listRequestsSql('fr.id = ?'), result.insertId);
+    const row = await db.get<any>(listRequestsMysqlSql('fr.id = ?'), result.insertId);
     return mapRequest(row);
   }
   if (mode === 'SUPABASE') {
