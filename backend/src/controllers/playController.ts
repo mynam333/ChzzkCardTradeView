@@ -1319,14 +1319,12 @@ export const fuseCards = async (req: Request, res: Response) => {
     // 진행 중 거래에 예약된 카드는 합성 재료로 사용할 수 없도록 차단
     const cards = await userCardRepository.findByUserId(userId);
     const reservations = await getUserReservations(userId);
-    const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
     const key = (st: number) => `${channel_id}#${st}`;
     const available = (st: number) =>
       cards.filter((c) =>
         c.channel_id === channel_id
         && (c.star || 0) === st
         && c.id != null
-        && !pendingMarketIds.has(c.id)
       ).length
       - (reservations.cardsByStar[key(st)] || 0);
     const targetAvailable = available(starNum);
