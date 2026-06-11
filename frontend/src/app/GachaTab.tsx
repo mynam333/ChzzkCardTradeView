@@ -107,8 +107,12 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
+  const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
+  const broadcastModeLoadedKeyRef = React.useRef<string | null>(null);
+  const skipNextBroadcastModeSaveRef = React.useRef(false);
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
+  const [broadcastMode, setBroadcastMode] = useState(false);
   // 코스메틱 장착
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
   const [equipCard, setEquipCard] = useState<UserCard | null>(null);
@@ -221,6 +225,27 @@ export const GachaTab: React.FC = () => {
     }
     longPressStartPoint.current = null;
   };
+
+  const inventoryCardImage = (streamer?: Streamer | null, star: number = 0) =>
+    cardImage(streamer, broadcastMode ? 0 : star);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(broadcastModeStorageKey);
+    skipNextBroadcastModeSaveRef.current = true;
+    setBroadcastMode(saved === 'true');
+    broadcastModeLoadedKeyRef.current = broadcastModeStorageKey;
+  }, [broadcastModeStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (broadcastModeLoadedKeyRef.current !== broadcastModeStorageKey) return;
+    if (skipNextBroadcastModeSaveRef.current) {
+      skipNextBroadcastModeSaveRef.current = false;
+      return;
+    }
+    window.localStorage.setItem(broadcastModeStorageKey, broadcastMode ? 'true' : 'false');
+  }, [broadcastMode, broadcastModeStorageKey]);
 
   // 전역 클릭 시 컨텍스트 메뉴 닫기
   useEffect(() => {
@@ -1045,7 +1070,7 @@ export const GachaTab: React.FC = () => {
                     .map((c) => (
                       <div key={c.key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                         <div className="flex items-center gap-2 min-w-0">
-                          <img src={cardImage(c.streamer, c.star)} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                          <img src={inventoryCardImage(c.streamer, c.star)} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
                           <span className="text-[11px] font-bold truncate">{c.streamer.name}</span>
                           {c.star > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
                           <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
@@ -1090,7 +1115,7 @@ export const GachaTab: React.FC = () => {
                           return (
                           <div key={key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                             <div className="flex items-center gap-2 min-w-0">
-                              <img src={cardImage(c.streamer, c.star || 0)} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                              <img src={inventoryCardImage(c.streamer, c.star || 0)} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
                               <span className="text-[11px] font-bold truncate">{c.streamer?.name}</span>
                               {(c.star || 0) > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
                               <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
@@ -1319,9 +1344,27 @@ export const GachaTab: React.FC = () => {
       <section data-tour="inventory-list" className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full sm:w-auto">
-            <h3 className="text-base font-bold flex items-center gap-2">
-              <Layers className="h-4.5 w-4.5 text-primary" /> 나의 카드 보관함 ({inventory.length}장)
-            </h3>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <h3 className="text-base font-bold flex items-center gap-2">
+                <Layers className="h-4.5 w-4.5 text-primary" /> 나의 카드 보관함 ({inventory.length}장)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setBroadcastMode((prev) => !prev)}
+                className={`group inline-flex shrink-0 items-center gap-1.5 rounded-full border px-1.5 py-1 text-[10px] font-black shadow-sm transition ${
+                  broadcastMode
+                    ? 'border-sky-300/70 bg-sky-400/15 text-sky-600 shadow-sky-500/10 dark:border-sky-400/30 dark:bg-sky-400/12 dark:text-sky-200'
+                    : 'border-border bg-card/80 text-muted-foreground hover:bg-secondary/70'
+                }`}
+                aria-pressed={broadcastMode}
+                title="방송 모드: 보유 카드를 모두 0성 이미지로 표시합니다"
+              >
+                <span>방송</span>
+                <span className={`relative h-4 w-7 rounded-full transition ${broadcastMode ? 'bg-sky-500' : 'bg-muted-foreground/25'}`}>
+                  <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${broadcastMode ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                </span>
+              </button>
+            </div>
             <div className="flex items-center gap-2 sm:hidden">
               <button
                 onClick={handleOpenTrade}
@@ -1663,7 +1706,7 @@ export const GachaTab: React.FC = () => {
                       {/* 카드 이미지 배경 */}
                       <div className="absolute inset-0 z-0">
                         <img
-                          src={cardImage(streamer, star)}
+                          src={inventoryCardImage(streamer, star)}
                           alt={streamer.name}
                           loading="lazy"
                           className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
@@ -1986,7 +2029,7 @@ export const GachaTab: React.FC = () => {
 
                   {/* 카드 이미지 배경 */}
                   <div className="absolute inset-0 z-0">
-                    <img src={cardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
+                    <img src={inventoryCardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
                   </div>
                   
                   {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2263,7 +2306,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={live.border} />
                     <div className="absolute inset-0 z-0">
-                      <img src={cardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
+                      <img src={inventoryCardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
                     </div>
                     
                     {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2324,7 +2367,7 @@ export const GachaTab: React.FC = () => {
 
             <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
               <img
-                src={cardImage(sellingStreamer, sellingStar)}
+                src={inventoryCardImage(sellingStreamer, sellingStar)}
                 alt={sellingStreamer.name}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
               />
@@ -2456,7 +2499,7 @@ export const GachaTab: React.FC = () => {
                   <div key={key} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
-                        src={cardImage(streamer, star)}
+                        src={inventoryCardImage(streamer, star)}
                         alt={streamer.name}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
                       />
@@ -2610,7 +2653,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={marketRegisterCard.border} />
                     <div className="absolute inset-0 z-0">
-                      <img src={cardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
+                      <img src={inventoryCardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
                   </div>
