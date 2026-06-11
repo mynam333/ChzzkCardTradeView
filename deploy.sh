@@ -211,14 +211,14 @@ echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
 mkdir -p "${RELEASE_DIR}"
 tar -xzf "${RELEASE_ARCHIVE}" -C "${RELEASE_DIR}"
 
-for required in backend/dist backend/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml ecosystem.config.cjs init-db-mysql.sql; do
+for required in backend/dist backend/package.json package.json pnpm-workspace.yaml ecosystem.config.cjs init-db-mysql.sql; do
   if [ ! -e "${RELEASE_DIR}/${required}" ]; then
     echo "[deploy] invalid release archive. missing: ${required}"
     exit 1
   fi
 done
 
-for writable in package.json pnpm-lock.yaml pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql deploy.sh backend/dist backend; do
+for writable in package.json pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql deploy.sh backend/dist backend; do
   assert_can_write_path "${writable}"
 done
 
@@ -241,15 +241,12 @@ fi
 NEED_INSTALL=false
 if [ ! -d "node_modules" ] || [ ! -d "backend/node_modules" ]; then
   NEED_INSTALL=true
-elif ! cmp -s "pnpm-lock.yaml" "${RELEASE_DIR}/pnpm-lock.yaml"; then
-  NEED_INSTALL=true
 elif ! cmp -s "backend/package.json" "${RELEASE_DIR}/backend/package.json"; then
   NEED_INSTALL=true
 fi
 
 echo "[deploy] update metadata"
 cp "${RELEASE_DIR}/package.json" package.json
-cp "${RELEASE_DIR}/pnpm-lock.yaml" pnpm-lock.yaml
 cp "${RELEASE_DIR}/pnpm-workspace.yaml" pnpm-workspace.yaml
 cp "${RELEASE_DIR}/backend/package.json" backend/package.json
 cp "${RELEASE_DIR}/ecosystem.config.cjs" ecosystem.config.cjs
@@ -277,7 +274,7 @@ if [ "${NEED_INSTALL}" = "true" ]; then
     exit 1
   fi
   echo "[deploy] install production dependencies because package metadata changed"
-  nice -n 15 ionice -c2 -n7 pnpm install --prod --frozen-lockfile --filter backend...
+  nice -n 15 ionice -c2 -n7 pnpm install --prod --no-frozen-lockfile --filter backend...
 else
   echo "[deploy] dependencies unchanged; skip install"
 fi

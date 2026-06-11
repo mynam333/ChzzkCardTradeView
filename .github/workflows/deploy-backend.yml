@@ -14,7 +14,6 @@ on:
       - 'ecosystem.config.cjs'
       - 'deploy.sh'
       - 'package.json'
-      - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/deploy-backend.yml'
       - '!frontend/**'
@@ -40,30 +39,13 @@ jobs:
         with:
           version: 10.10.0
 
-      - name: Setup Node.js with pnpm cache
-        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Setup Node.js without dependency cache
-        if: ${{ hashFiles('pnpm-lock.yaml') == '' }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install dependencies
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile || {
-              echo "::error::pnpm-lock.yaml이 package.json과 맞지 않습니다. 로컬에서 pnpm install 후 pnpm-lock.yaml을 커밋하세요."
-              exit 1
-            }
-          else
-            echo "::warning::pnpm-lock.yaml이 없어 초기 lockfile을 생성합니다. 생성된 pnpm-lock.yaml은 반드시 커밋하세요."
-            pnpm install
-          fi
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build backend
         run: pnpm --filter backend build
@@ -74,7 +56,6 @@ jobs:
             backend/dist \
             backend/package.json \
             package.json \
-            pnpm-lock.yaml \
             pnpm-workspace.yaml \
             ecosystem.config.cjs \
             init-db-mysql.sql \
