@@ -149,6 +149,7 @@ export const FriendTab: React.FC = () => {
   const [scrollDateBubble, setScrollDateBubble] = useState('');
   const [showScrollDateBubble, setShowScrollDateBubble] = useState(false);
   const [embeddedPreviewId, setEmbeddedPreviewId] = useState<number | null>(null);
+  const [chatDragActive, setChatDragActive] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
@@ -157,6 +158,7 @@ export const FriendTab: React.FC = () => {
   const activeChatRoomRef = useRef<ActiveChatRoom | null>(null);
   const skipNextAutoScrollRef = useRef(false);
   const scrollDateTimerRef = useRef<number | null>(null);
+  const chatDragDepthRef = useRef(0);
 
   const pendingCount = friendRequests.incoming.length + friendRequests.outgoing.length;
   const friendIdSet = useMemo(() => new Set(friends.map((friend) => friend.id)), [friends]);
@@ -528,6 +530,46 @@ export const FriendTab: React.FC = () => {
     }
   };
 
+  const isImageDrag = (event: React.DragEvent) => {
+    const items = Array.from(event.dataTransfer.items || []);
+    if (items.length > 0) return items.some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    return Array.from(event.dataTransfer.files || []).some((file) => file.type.startsWith('image/'));
+  };
+
+  const handleChatDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!activeChatRoom?.can_send || chatImageUploading || !isImageDrag(event)) return;
+    event.preventDefault();
+    chatDragDepthRef.current += 1;
+    setChatDragActive(true);
+  };
+
+  const handleChatDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!activeChatRoom?.can_send || chatImageUploading || !isImageDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setChatDragActive(true);
+  };
+
+  const handleChatDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!chatDragActive) return;
+    event.preventDefault();
+    chatDragDepthRef.current = Math.max(0, chatDragDepthRef.current - 1);
+    if (chatDragDepthRef.current === 0) setChatDragActive(false);
+  };
+
+  const handleChatDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!activeChatRoom?.can_send || chatImageUploading) return;
+    event.preventDefault();
+    chatDragDepthRef.current = 0;
+    setChatDragActive(false);
+    const imageFile = Array.from(event.dataTransfer.files || []).find((file) => file.type.startsWith('image/'));
+    if (!imageFile) {
+      toast('이미지 파일만 첨부할 수 있습니다.', 'error');
+      return;
+    }
+    void sendChatImage(imageFile);
+  };
+
   const removeFriendUser = async (targetId: string) => {
     if (!window.confirm('친구를 삭제할까요? 내 채팅방 목록에서는 사라지고, 상대방 방은 읽기 전용으로 남습니다.')) return;
     try {
@@ -608,6 +650,36 @@ export const FriendTab: React.FC = () => {
       setShowScrollDateBubble(false);
       scrollDateTimerRef.current = null;
     }, 900);
+  };
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = 'auto', settle = false) => {
+    const scroll = (nextBehavior: ScrollBehavior = behavior) => {
+      const container = chatScrollRef.current;
+      if (!container) return;
+      container.scrollTo({ top: container.scrollHeight, behavior: nextBehavior });
+    };
+
+    scroll();
+    if (!settle) return;
+
+    let frame = 0;
+    const settleFrame = () => {
+      scroll('auto');
+      frame += 1;
+      if (frame < 8) window.requestAnimationFrame(settleFrame);
+    };
+
+    window.requestAnimationFrame(settleFrame);
+    window.setTimeout(() => scroll('auto'), 120);
+    window.setTimeout(() => scroll('auto'), 360);
+    window.setTimeout(() => scroll('auto'), 720);
+  };
+
+  const keepChatBottomIfNeeded = () => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 160) scrollChatToBottom('auto', true);
   };
 
   useEffect(() => {
@@ -720,7 +792,7 @@ export const FriendTab: React.FC = () => {
       skipNextAutoScrollRef.current = false;
       return;
     }
-    chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+    scrollChatToBottom('auto', true);
   }, [chatMessages.length, activeChatRoom?.id]);
 
   useEffect(() => {
@@ -757,6 +829,7 @@ export const FriendTab: React.FC = () => {
           loop
           playsInline
           controls={false}
+          onLoadedMetadata={keepChatBottomIfNeeded}
           onClick={(event) => {
             const video = event.currentTarget;
             if (video.paused) video.play().catch(() => { /* noop */ });
@@ -765,7 +838,7 @@ export const FriendTab: React.FC = () => {
         />
       );
     }
-    return <img src={message.attachment_url} alt="채팅 첨부 이미지" className={mediaClass} loading="lazy" />;
+    return <img src={message.attachment_url} alt="채팅 첨부 이미지" className={mediaClass} loading="lazy" onLoad={keepChatBottomIfNeeded} />;
   };
 
   const renderLinkPreview = (message: ChatMessage) => {
@@ -798,7 +871,7 @@ export const FriendTab: React.FC = () => {
           >
             {preview.image_url && (
               <div className="relative aspect-video w-full overflow-hidden bg-secondary">
-                <img src={preview.image_url} alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" loading="lazy" />
+                <img src={preview.image_url} alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" loading="lazy" onLoad={keepChatBottomIfNeeded} />
                 {isYoutube && (
                   <span className="absolute inset-0 flex items-center justify-center bg-black/15">
                     <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur">
@@ -1040,7 +1113,7 @@ export const FriendTab: React.FC = () => {
   );
 
   return (
-    <div className="relative flex h-[calc(100dvh-9rem)] max-h-[calc(100dvh-9rem)] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
+    <div className="relative flex h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] max-h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)]">
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
 
@@ -1065,7 +1138,13 @@ export const FriendTab: React.FC = () => {
       <div className="grid min-h-0 flex-1 lg:h-full lg:grid-cols-[18rem_minmax(0,1fr)]">
         {chatRoomRail}
 
-        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} min-h-0 flex-col lg:h-full`}>
+        <div
+          onDragEnter={handleChatDragEnter}
+          onDragOver={handleChatDragOver}
+          onDragLeave={handleChatDragLeave}
+          onDrop={handleChatDrop}
+          className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} relative min-h-0 flex-col lg:h-full`}
+        >
         <header className="hidden items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5 lg:flex">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -1095,6 +1174,17 @@ export const FriendTab: React.FC = () => {
 
         {activeChatRoom ? (
           <>
+            {chatDragActive && activeChatRoom.can_send && (
+              <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-[1.75rem] border-2 border-dashed border-primary/60 bg-card/75 shadow-2xl backdrop-blur-md">
+                <div className="flex flex-col items-center rounded-[1.5rem] bg-card/95 px-6 py-5 text-center shadow-lg ring-1 ring-border">
+                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-primary/10 text-primary">
+                    <ImagePlus className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-black">이미지를 여기에 놓아주세요</p>
+                  <p className="mt-1 text-[11px] font-bold text-muted-foreground">자동으로 최적화해서 말풍선에 첨부합니다.</p>
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-secondary/15 px-4 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
                 <button type="button" onClick={returnToRoomList} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-sm ring-1 ring-border lg:hidden" aria-label="톡방 목록으로 돌아가기">
@@ -1138,49 +1228,51 @@ export const FriendTab: React.FC = () => {
                   updateScrollDateBubble(target);
                   if (target.scrollTop < 48 && activeRoomIsReal) fetchChatMessages(activeChatRoom.id, 'older', false);
                 }}
-                className="h-full min-h-0 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
+                className="h-full min-h-0 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
               >
-                {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
-                {chatMessages.length === 0 && (
-                  <div className="flex min-h-[18rem] flex-col items-center justify-center text-center">
-                    <MessageCircle className="mb-3 h-10 w-10 text-primary/70" />
-                    <p className="text-sm font-black">아직 메시지가 없습니다</p>
-                    <p className="mt-1 text-xs text-muted-foreground">첫 메시지를 보내면 이 대화가 톡방 목록에 남습니다.</p>
-                  </div>
-                )}
-                {chatMessages.map((message, index) => {
-                  const mine = message.sender_id === user.id;
-                  const previous = chatMessages[index - 1];
-                  const messageDate = formatChatDate(message.created_at);
-                  const showDate = Boolean(previous && formatChatDate(previous.created_at) !== messageDate);
-                  return (
-                    <React.Fragment key={message.id}>
-                      {showDate && (
-                        <div className="mx-auto w-fit rounded-full border border-border bg-card/90 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
-                          {messageDate}
-                        </div>
-                      )}
-                      <div data-chat-date={messageDate} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[72%] ${mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-card text-foreground'}`}>
-                          {message.message_type === 'image' ? renderChatAttachment(message) : (
-                            <>
-                              <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.body}</p>
-                              {renderLinkPreview(message)}
-                            </>
-                          )}
-                          <div className={`mt-1 flex items-center gap-1 text-[9px] ${mine ? 'justify-end text-primary-foreground/75' : 'text-muted-foreground'}`}>
-                            {mine && <span>{message.read_at ? '읽음' : '안읽음'}</span>}
-                            <span>{formatChatTime(message.created_at)}</span>
+                <div className="flex min-h-full flex-col justify-end space-y-3">
+                  {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
+                  {chatMessages.length === 0 && (
+                    <div className="flex min-h-[18rem] flex-col items-center justify-center text-center">
+                      <MessageCircle className="mb-3 h-10 w-10 text-primary/70" />
+                      <p className="text-sm font-black">아직 메시지가 없습니다</p>
+                      <p className="mt-1 text-xs text-muted-foreground">첫 메시지를 보내면 이 대화가 톡방 목록에 남습니다.</p>
+                    </div>
+                  )}
+                  {chatMessages.map((message, index) => {
+                    const mine = message.sender_id === user.id;
+                    const previous = chatMessages[index - 1];
+                    const messageDate = formatChatDate(message.created_at);
+                    const showDate = Boolean(previous && formatChatDate(previous.created_at) !== messageDate);
+                    return (
+                      <React.Fragment key={message.id}>
+                        {showDate && (
+                          <div className="mx-auto w-fit rounded-full border border-border bg-card/90 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
+                            {messageDate}
+                          </div>
+                        )}
+                        <div data-chat-date={messageDate} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[72%] ${mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-card text-foreground'}`}>
+                            {message.message_type === 'image' ? renderChatAttachment(message) : (
+                              <>
+                                <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.body}</p>
+                                {renderLinkPreview(message)}
+                              </>
+                            )}
+                            <div className={`mt-1 flex items-center gap-1 text-[9px] ${mine ? 'justify-end text-primary-foreground/75' : 'text-muted-foreground'}`}>
+                              {mine && <span>{message.read_at ? '읽음' : '안읽음'}</span>}
+                              <span>{formatChatTime(message.created_at)}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            <div className="border-t border-border/70 bg-card/90 p-3">
+            <div className="border-t border-border/70 bg-card/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3">
               {!activeChatRoom.can_send && <p className="mb-2 rounded-2xl bg-secondary/60 px-3 py-2 text-[11px] font-bold text-muted-foreground">이 톡방은 닫혀 있어 새 메시지를 보낼 수 없습니다.</p>}
               <div className="flex gap-2">
                 <input
