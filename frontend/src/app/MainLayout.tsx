@@ -34,6 +34,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const [dockPressedId, setDockPressedId] = React.useState<TabId | null>(null);
   const [dockIsDragging, setDockIsDragging] = React.useState(false);
   const [dockIsSettling, setDockIsSettling] = React.useState(false);
+  const [dockVisualTab, setDockVisualTab] = React.useState<{ tab: TabId; from: TabId } | null>(null);
 
   React.useEffect(() => () => {
     if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
@@ -70,7 +71,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const mobileNavItems = mobileNavOrder
     .map((id) => navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));
-  const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === activeTab));
+  const visualTab = dockVisualTab?.from === activeTab ? dockVisualTab.tab : activeTab;
+  const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === visualTab));
   const dockSlotWidth = 62;
   const dockRenderedSideSlots = Math.max(8, mobileNavItems.length * 2);
   const dockDragProgress = dockDragDelta / dockSlotWidth;
@@ -101,6 +103,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     }, 240);
 
     dockSnapTimer.current = window.setTimeout(() => {
+      setDockVisualTab({ tab: nextItem.id, from: activeTab });
       setActiveTab(nextItem.id);
       setDockDragDelta(0);
       setDockIsSettling(false);
@@ -114,6 +117,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       window.clearTimeout(dockSnapTimer.current);
       dockSnapTimer.current = null;
     }
+    setDockVisualTab(null);
     dockTouchStartX.current = event.clientX;
     dockTouchStartY.current = event.clientY;
     setDockIsSettling(false);
@@ -327,13 +331,13 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         style={{ touchAction: 'pan-y' }}
       >
         <div
-          className="cute-surface relative mx-auto max-w-md overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+          className="cute-surface relative mx-auto w-full max-w-md overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
           style={{
             height: 'calc(5.95rem + env(safe-area-inset-bottom))',
-            borderRadius: '50% 50% 2.15rem 2.15rem / 36% 36% 1.85rem 1.85rem'
+            borderRadius: '58% 58% 2.15rem 2.15rem / 46% 46% 1.85rem 1.85rem'
           }}
         >
-          <div className="pointer-events-none absolute inset-x-7 top-1.5 h-9 rounded-[50%] border-t border-primary/20" />
+          <div className="pointer-events-none absolute inset-x-5 top-1 h-11 rounded-[50%] border-t border-primary/20" />
           <div className="pointer-events-none absolute inset-x-6 bottom-[calc(0.45rem+env(safe-area-inset-bottom))] h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
           {mobileDockItems.map(({ item, offset }) => {
             const Icon = item.icon;
