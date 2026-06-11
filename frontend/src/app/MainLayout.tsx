@@ -29,8 +29,15 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const dockTouchStartX = React.useRef<number | null>(null);
   const dockTouchStartY = React.useRef<number | null>(null);
   const dockClickSuppressed = React.useRef(false);
+  const dockSnapTimer = React.useRef<number | null>(null);
   const [dockDragDelta, setDockDragDelta] = React.useState(0);
   const [dockPressedId, setDockPressedId] = React.useState<TabId | null>(null);
+  const [dockIsDragging, setDockIsDragging] = React.useState(false);
+  const [dockIsSettling, setDockIsSettling] = React.useState(false);
+
+  React.useEffect(() => () => {
+    if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
+  }, []);
 
   const handleLogin = async () => {
     try {
@@ -65,8 +72,9 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     .filter((item): item is NavItem => Boolean(item));
   const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === activeTab));
   const dockSlotWidth = 62;
-  const dockDragProgress = clamp(dockDragDelta / dockSlotWidth, -1, 1);
-  const mobileDockItems = [-3, -2, -1, 0, 1, 2, 3].map((offset) => ({
+  const dockRenderedSideSlots = Math.max(8, mobileNavItems.length * 2);
+  const dockDragProgress = dockDragDelta / dockSlotWidth;
+  const mobileDockItems = Array.from({ length: dockRenderedSideSlots * 2 + 1 }, (_, index) => index - dockRenderedSideSlots).map((offset) => ({
     offset,
     item: mobileNavItems[loopIndex(activeNavIndex + offset, mobileNavItems.length)]
   }));
@@ -77,17 +85,39 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  const shiftMobileDock = (direction: -1 | 1) => {
-    const nextItem = mobileNavItems[loopIndex(activeNavIndex + direction, mobileNavItems.length)];
+  const settleMobileDockToOffset = (offset: number) => {
+    const targetOffset = offset;
+    const nextItem = mobileNavItems[loopIndex(activeNavIndex + targetOffset, mobileNavItems.length)];
     if (!nextItem || nextItem.id === activeTab) return;
+
+    if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
+    dockClickSuppressed.current = true;
+    setDockIsDragging(false);
+    setDockIsSettling(true);
+    setDockDragDelta(-targetOffset * dockSlotWidth);
     triggerLightHaptic();
-    setActiveTab(nextItem.id);
+    window.setTimeout(() => {
+      dockClickSuppressed.current = false;
+    }, 240);
+
+    dockSnapTimer.current = window.setTimeout(() => {
+      setActiveTab(nextItem.id);
+      setDockDragDelta(0);
+      setDockIsSettling(false);
+      dockSnapTimer.current = null;
+    }, 220);
   };
 
   const handleDockPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (dockSnapTimer.current !== null) {
+      window.clearTimeout(dockSnapTimer.current);
+      dockSnapTimer.current = null;
+    }
     dockTouchStartX.current = event.clientX;
     dockTouchStartY.current = event.clientY;
+    setDockIsSettling(false);
+    setDockIsDragging(true);
     setDockDragDelta(0);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -97,7 +127,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     const dx = event.clientX - dockTouchStartX.current;
     const dy = event.clientY - dockTouchStartY.current;
     if (Math.abs(dy) > Math.abs(dx) * 1.35) return;
-    setDockDragDelta(clamp(dx, -dockSlotWidth, dockSlotWidth));
+    setDockDragDelta(dx);
   };
 
   const finishDockPointer = (event: React.PointerEvent<HTMLElement>) => {
@@ -106,16 +136,28 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     const dy = event.clientY - dockTouchStartY.current;
     dockTouchStartX.current = null;
     dockTouchStartY.current = null;
-    setDockDragDelta(0);
+    setDockIsDragging(false);
+    setDockPressedId(null);
     event.currentTarget.releasePointerCapture?.(event.pointerId);
 
-    if (Math.abs(dx) >= 38 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+    if (Math.abs(dx) >= 24 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      const targetOffset = Math.round(-dx / dockSlotWidth);
       dockClickSuppressed.current = true;
       window.setTimeout(() => {
         dockClickSuppressed.current = false;
-      }, 220);
-      shiftMobileDock(dx < 0 ? 1 : -1);
+      }, 240);
+      if (targetOffset !== 0) {
+        settleMobileDockToOffset(targetOffset);
+        return;
+      }
     }
+
+    setDockIsSettling(true);
+    setDockDragDelta(0);
+    dockSnapTimer.current = window.setTimeout(() => {
+      setDockIsSettling(false);
+      dockSnapTimer.current = null;
+    }, 180);
   };
 
   return (
@@ -287,11 +329,11 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         <div
           className="cute-surface relative mx-auto max-w-md overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
           style={{
-            height: 'calc(6.7rem + env(safe-area-inset-bottom))',
-            borderRadius: '44% 44% 2.15rem 2.15rem / 24% 24% 2rem 2rem'
+            height: 'calc(5.95rem + env(safe-area-inset-bottom))',
+            borderRadius: '50% 50% 2.15rem 2.15rem / 36% 36% 1.85rem 1.85rem'
           }}
         >
-          <div className="pointer-events-none absolute inset-x-8 top-2 h-8 rounded-[50%] border-t border-primary/20" />
+          <div className="pointer-events-none absolute inset-x-7 top-1.5 h-9 rounded-[50%] border-t border-primary/20" />
           <div className="pointer-events-none absolute inset-x-6 bottom-[calc(0.45rem+env(safe-area-inset-bottom))] h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
           {mobileDockItems.map(({ item, offset }) => {
             const Icon = item.icon;
@@ -315,10 +357,16 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                 onPointerCancel={() => setDockPressedId(null)}
                 onClick={() => {
                   if (dockClickSuppressed.current) return;
-                  triggerLightHaptic();
-                  setActiveTab(item.id);
+                  if (offset === 0) {
+                    triggerLightHaptic();
+                    setActiveTab(item.id);
+                    return;
+                  }
+                  settleMobileDockToOffset(offset);
                 }}
-                className="group absolute left-1/2 top-2 flex w-16 -translate-x-1/2 flex-col items-center gap-1 rounded-[1.45rem] px-1 pb-1 pt-1.5 transition-[transform,opacity] duration-200"
+                className={`group absolute left-1/2 top-1.5 flex w-16 -translate-x-1/2 flex-col items-center gap-1 rounded-[1.45rem] px-1 pb-1 pt-1.5 ${
+                  dockIsDragging ? '' : dockIsSettling ? 'transition-[transform,opacity] duration-200 ease-out' : 'transition-[transform,opacity] duration-150 ease-out'
+                }`}
                 style={{
                   transform: `translate3d(calc(-50% + ${x}px), ${y}px, 0) scale(${pressScale})`,
                   opacity: visibleWeight,
