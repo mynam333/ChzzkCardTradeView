@@ -73,7 +73,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     .filter((item): item is NavItem => Boolean(item));
   const visualTab = dockVisualTab?.from === activeTab ? dockVisualTab.tab : activeTab;
   const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === visualTab));
-  const dockSlotWidth = 62;
+  const dockSlotWidth = 72;
   const dockRenderedSideSlots = Math.max(8, mobileNavItems.length * 2);
   const dockDragProgress = dockDragDelta / dockSlotWidth;
   const mobileDockItems = Array.from({ length: dockRenderedSideSlots * 2 + 1 }, (_, index) => index - dockRenderedSideSlots).map((offset) => ({
@@ -322,7 +322,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       {/* 모바일 루프형 하단 도크 */}
       <nav
-        className="fixed bottom-3 left-0 right-0 z-50 px-3 md:hidden"
+        className="fixed bottom-2 left-0 right-0 z-50 px-3 md:hidden"
         aria-label="모바일 주요 메뉴"
         onPointerDown={handleDockPointerDown}
         onPointerMove={handleDockPointerMove}
@@ -331,14 +331,23 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         style={{ touchAction: 'pan-y' }}
       >
         <div
-          className="cute-surface relative mx-auto w-full overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+          className="relative mx-auto w-full overflow-visible"
           style={{
-            height: 'calc(5.95rem + env(safe-area-inset-bottom))',
-            borderRadius: '58% 58% 2.15rem 2.15rem / 46% 46% 1.85rem 1.85rem'
+            height: 'calc(7.15rem + env(safe-area-inset-bottom))'
           }}
         >
-          <div className="pointer-events-none absolute inset-x-5 top-1 h-11 rounded-[50%] border-t border-primary/20" />
-          <div className="pointer-events-none absolute inset-x-6 bottom-[calc(0.45rem+env(safe-area-inset-bottom))] h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
+          <div
+            className="cute-surface pointer-events-none absolute inset-x-0 bottom-0 z-0 overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+            style={{
+              height: 'calc(5.15rem + env(safe-area-inset-bottom))',
+              borderRadius: '58% 58% 2.35rem 2.35rem / 46% 46% 2.15rem 2.15rem',
+              WebkitMaskImage: 'radial-gradient(140% 2.15rem at 50% calc(100% + 1.35rem), transparent 0 54%, #000 56%)',
+              maskImage: 'radial-gradient(140% 2.15rem at 50% calc(100% + 1.35rem), transparent 0 54%, #000 56%)'
+            }}
+          >
+            <div className="pointer-events-none absolute inset-x-5 top-1 h-11 rounded-[50%] border-t border-primary/20" />
+            <div className="pointer-events-none absolute inset-x-8 bottom-[calc(0.35rem+env(safe-area-inset-bottom))] h-5 rounded-[50%] border-b border-primary/15" />
+          </div>
           {mobileDockItems.map(({ item, offset }) => {
             const Icon = item.icon;
             const curvePosition = offset + dockDragProgress;
@@ -346,7 +355,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             const centerWeight = clamp(1 - distance / 0.95, 0, 1);
             const visibleWeight = clamp(1 - Math.max(0, distance - 2.15) / 0.55, 0, 1);
             const x = curvePosition * dockSlotWidth;
-            const y = 4 + Math.pow(Math.min(distance, 2.55), 2) * 6.2;
+            const y = 5 + Math.pow(Math.min(distance, 2.55), 2) * 5.4;
             const iconSize = 40 + centerWeight * 18;
             const iconColorMix = Math.round(centerWeight * 100);
             const iconBgMix = Math.round(18 + centerWeight * 82);
@@ -368,7 +377,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                   }
                   settleMobileDockToOffset(offset);
                 }}
-                className={`group absolute left-1/2 top-1.5 flex w-16 flex-col items-center gap-1 rounded-[1.45rem] px-1 pb-1 pt-1.5 ${
+                className={`group absolute left-1/2 top-0.5 flex w-16 flex-col items-center gap-1 rounded-[1.45rem] px-1 pb-1 pt-1.5 ${
                   dockIsDragging ? '' : dockIsSettling ? 'transition-[transform,opacity] duration-200 ease-out' : 'transition-[transform,opacity] duration-150 ease-out'
                 }`}
                 style={{
