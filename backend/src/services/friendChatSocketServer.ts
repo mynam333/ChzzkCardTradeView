@@ -163,6 +163,8 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
 
   const payload = { type: 'message', room_id: roomId, message: result.message };
   const delivered = new Set<ChatSocket>();
+  sendJson(socket, payload);
+  delivered.add(socket);
   for (const client of clientsByRoom.get(roomId) || []) {
     sendJson(client, payload);
     delivered.add(client);

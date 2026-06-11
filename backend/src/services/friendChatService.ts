@@ -51,6 +51,14 @@ const bool = (value: any) => value === true || value === 1 || value === '1';
 
 const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(id)}`;
 
+const normalizeUtcDateTime = (value: any): string => {
+  if (!value) return value;
+  if (value instanceof Date) return value.toISOString();
+  const raw = String(value);
+  const timezoneLessDateTime = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+  return timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+};
+
 const mapUser = (row: any): ChatUserSummary => ({
   id: row.id,
   username: row.username,
@@ -63,8 +71,8 @@ const mapMessage = (row: any): ChatMessageRow => ({
   room_id: Number(row.room_id),
   sender_id: row.sender_id,
   body: row.body,
-  created_at: row.created_at,
-  read_at: row.read_at ?? null
+  created_at: normalizeUtcDateTime(row.created_at),
+  read_at: row.read_at ? normalizeUtcDateTime(row.read_at) : null
 });
 
 const mapRoom = (row: any): ChatRoomRow => ({

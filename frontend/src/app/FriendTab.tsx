@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Ban,
   Check,
   MessageCircle,
@@ -86,6 +87,13 @@ type ContextMenuState =
 
 const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(id)}`;
 const isDraftRoom = (room: ActiveChatRoom | null): room is DraftChatRoom => Boolean(room && 'draft' in room);
+const parseChatDate = (value?: string) => {
+  if (!value) return null;
+  const timezoneLessDateTime = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+  const normalized = timezoneLessDateTime.test(value) ? `${value.replace(' ', 'T')}Z` : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
 
 export const FriendTab: React.FC = () => {
   const { user, toast } = useApp();
@@ -200,6 +208,7 @@ export const FriendTab: React.FC = () => {
     if (payload.type === 'message' || payload.type === 'sent') {
       if (!isDraftRoom(activeChatRoomRef.current) && activeChatRoomRef.current?.id === payload.room_id) {
         applyIncomingMessage(payload.message);
+        if (payload.message.sender_id !== user?.id) sendSocket({ type: 'read', room_id: payload.room_id });
       }
       fetchFriends(false);
       return;
@@ -322,6 +331,12 @@ export const FriendTab: React.FC = () => {
     setPanelOpen(false);
   };
 
+  const returnToRoomList = () => {
+    setActiveChatRoom(null);
+    setChatMessages([]);
+    setHasOlderMessages(false);
+  };
+
   const fetchChatMessages = async (roomId: number, mode: 'initial' | 'older' = 'initial', showError = true) => {
     const beforeId = mode === 'older' ? chatMessages[0]?.id : undefined;
     if (mode === 'older' && (!beforeId || loadingOlderMessages || !hasOlderMessages)) return;
@@ -371,9 +386,12 @@ export const FriendTab: React.FC = () => {
       const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
       if (!room) return;
 
-      if (!wasDraft && chatSocketStatus === 'connected' && sendSocket({ type: 'send', room_id: room.id, body: text })) {
-        setChatMessage('');
-        return;
+      if (chatSocketStatus === 'connected') {
+        if (wasDraft) sendSocket({ type: 'join', room_id: room.id });
+        if (sendSocket({ type: 'send', room_id: room.id, body: text })) {
+          setChatMessage('');
+          return;
+        }
       }
 
       const res = await apiFetch(`/friends/rooms/${room.id}/messages`, {
@@ -437,8 +455,8 @@ export const FriendTab: React.FC = () => {
     }
   };
 
-  const formatChatTime = (value?: string) => value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-  const formatChatDate = (value?: string) => value ? new Date(value).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+  const formatChatTime = (value?: string) => parseChatDate(value)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
+  const formatChatDate = (value?: string) => parseChatDate(value)?.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) || '';
 
   useEffect(() => {
     if (user) fetchFriends();
@@ -507,6 +525,7 @@ export const FriendTab: React.FC = () => {
     if (!activeChatRoom || isDraftRoom(activeChatRoom)) return;
     if (chatSocketStatus === 'connected') {
       sendSocket({ type: 'join', room_id: activeChatRoom.id });
+      sendSocket({ type: 'read', room_id: activeChatRoom.id });
       return;
     }
     fetchChatMessages(activeChatRoom.id);
@@ -703,20 +722,28 @@ export const FriendTab: React.FC = () => {
 
   const activeRoomIsReal = activeChatRoom && !isDraftRoom(activeChatRoom);
   const chatRoomRail = (
-    <aside className="min-h-0 border-b border-border/70 bg-secondary/20 p-3 lg:border-b-0 lg:border-r lg:p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground">
-          <MessageCircle className="h-3.5 w-3.5" /> 톡방 ({chatRooms.length})
-        </p>
-        <button type="button" onClick={() => fetchFriends(false)} className="rounded-full p-1.5 text-muted-foreground hover:bg-card" aria-label="톡방 새로고침">
-          <RefreshCw className="h-3.5 w-3.5" />
+    <aside className={`${activeChatRoom ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col bg-secondary/20 p-3 lg:border-r lg:border-border/70 lg:p-4`}>
+      <div className="mb-3 flex items-center justify-between gap-2 lg:mb-3">
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-black lg:text-[11px] lg:text-muted-foreground">
+            <MessageCircle className="h-4 w-4 text-primary lg:h-3.5 lg:w-3.5 lg:text-current" /> 톡방
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary">{chatRooms.length}</span>
+          </p>
+          <p className="mt-0.5 text-[11px] font-bold text-muted-foreground lg:hidden">대화를 선택하면 채팅 화면으로 넘어갑니다.</p>
+        </div>
+        <button type="button" onClick={() => fetchFriends(false)} className="flex h-9 w-9 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground hover:bg-secondary" aria-label="톡방 새로고침">
+          <RefreshCw className={`h-3.5 w-3.5 ${friendLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1 lg:max-h-[calc(100vh-14rem)] lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:pb-0">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-2">
         {chatRooms.length === 0 ? (
-          <div className="min-w-full rounded-2xl border border-dashed border-border bg-card/50 px-4 py-8 text-center lg:min-w-0">
-            <MessageCircle className="mx-auto mb-2 h-7 w-7 text-primary/60" />
-            <p className="text-[11px] font-bold text-muted-foreground">메시지를 보내면 톡방이 시작됩니다.</p>
+          <div className="rounded-[1.5rem] border border-dashed border-border bg-card/60 px-4 py-10 text-center">
+            <MessageCircle className="mx-auto mb-3 h-9 w-9 text-primary/60" />
+            <p className="text-sm font-black">아직 열린 톡방이 없어요</p>
+            <p className="mt-1 text-[11px] font-bold text-muted-foreground">친구 관리에서 친구를 선택하고 첫 메시지를 보내면 톡방이 시작됩니다.</p>
+            <button type="button" onClick={() => setPanelOpen(true)} className="mt-4 rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground">
+              친구 관리 열기
+            </button>
           </div>
         ) : chatRooms.map((room) => (
           <button
@@ -727,13 +754,13 @@ export const FriendTab: React.FC = () => {
               event.preventDefault();
               setContextMenu({ x: event.clientX, y: event.clientY, kind: 'room', room });
             }}
-            className={`min-w-[13rem] rounded-2xl px-3 py-2 text-left transition lg:min-w-0 ${!isDraftRoom(activeChatRoom) && activeChatRoom?.id === room.id ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/20' : 'bg-card/75 hover:bg-card'}`}
+            className={`w-full rounded-[1.35rem] px-3.5 py-3 text-left transition lg:px-3 lg:py-2 ${!isDraftRoom(activeChatRoom) && activeChatRoom?.id === room.id ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/20' : 'bg-card/80 shadow-sm hover:bg-card'}`}
           >
             <div className="flex items-center gap-2">
-              <img src={room.other_user.avatar_url || avatarFallback(room.other_user.id)} alt={room.other_user.username} className="h-9 w-9 shrink-0 rounded-full border border-border object-cover" />
+              <img src={room.other_user.avatar_url || avatarFallback(room.other_user.id)} alt={room.other_user.username} className="h-11 w-11 shrink-0 rounded-full border border-border object-cover lg:h-9 lg:w-9" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-black">{room.other_user.username}</p>
-                <p className="truncate text-[10px] opacity-75">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
+                <p className="truncate text-sm font-black lg:text-xs">{room.other_user.username}</p>
+                <p className="truncate text-[11px] font-bold opacity-70 lg:text-[10px]">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
               </div>
               {room.unread_count > 0 && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{room.unread_count}</span>}
             </div>
@@ -744,15 +771,33 @@ export const FriendTab: React.FC = () => {
   );
 
   return (
-    <div className="relative min-h-[calc(100vh-9rem)] overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
+    <div className="relative flex min-h-[calc(100vh-9rem)] flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
 
-      <div className="grid min-h-[calc(100vh-9rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
+      {!activeChatRoom && (
+        <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-card/90 px-4 py-3 backdrop-blur lg:hidden">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-black">친구와 1:1 톡</h2>
+            <p className="mt-0.5 text-[11px] font-bold leading-snug text-muted-foreground">친구 신청과 대화 관리는 왼쪽 버튼에서 할 수 있어요.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPanelOpen(true)}
+            className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary transition hover:bg-primary/15"
+            aria-label="친구 관리 열기"
+          >
+            <PanelLeftOpen className="h-5 w-5" />
+            {pendingCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white">{pendingCount}</span>}
+          </button>
+        </header>
+      )}
+
+      <div className="grid min-h-0 flex-1 lg:min-h-[calc(100vh-9rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
         {chatRoomRail}
 
-        <div className="flex min-h-0 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5">
+        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} min-h-0 flex-col`}>
+        <header className="hidden items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5 lg:flex">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
               type="button"
@@ -783,6 +828,9 @@ export const FriendTab: React.FC = () => {
           <>
             <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-secondary/15 px-4 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
+                <button type="button" onClick={returnToRoomList} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-sm ring-1 ring-border lg:hidden" aria-label="톡방 목록으로 돌아가기">
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
                 <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 rounded-full border border-border object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black">{activeChatRoom.other_user.username}</p>
