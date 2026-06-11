@@ -308,6 +308,64 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     CONSTRAINT fk_user_blocks_blocked FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS friend_requests (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    requester_id VARCHAR(191) NOT NULL,
+    receiver_id VARCHAR(191) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    responded_at VARCHAR(64),
+    KEY idx_friend_requests_requester (requester_id, status),
+    KEY idx_friend_requests_receiver (receiver_id, status),
+    KEY idx_friend_requests_pair_status (requester_id, receiver_id, status),
+    CONSTRAINT fk_friend_requests_requester FOREIGN KEY(requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_friend_requests_receiver FOREIGN KEY(receiver_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a_id VARCHAR(191) NOT NULL,
+    user_b_id VARCHAR(191) NOT NULL,
+    created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    PRIMARY KEY(user_a_id, user_b_id),
+    KEY idx_friendships_user_b (user_b_id),
+    CONSTRAINT fk_friendships_user_a FOREIGN KEY(user_a_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_friendships_user_b FOREIGN KEY(user_b_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_rooms (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_a_id VARCHAR(191) NOT NULL,
+    user_b_id VARCHAR(191) NOT NULL,
+    is_admin_room TINYINT DEFAULT 0,
+    closed_at VARCHAR(64),
+    closed_by_user_id VARCHAR(191),
+    deleted_for_a TINYINT DEFAULT 0,
+    deleted_for_b TINYINT DEFAULT 0,
+    created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    updated_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    UNIQUE KEY idx_chat_rooms_pair (user_a_id, user_b_id),
+    KEY idx_chat_rooms_user_a (user_a_id, deleted_for_a, updated_at),
+    KEY idx_chat_rooms_user_b (user_b_id, deleted_for_b, updated_at),
+    KEY idx_chat_rooms_closed_by (closed_by_user_id),
+    CONSTRAINT fk_chat_rooms_user_a FOREIGN KEY(user_a_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_chat_rooms_user_b FOREIGN KEY(user_b_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_chat_rooms_closed_by FOREIGN KEY(closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    room_id BIGINT NOT NULL,
+    sender_id VARCHAR(191) NOT NULL,
+    body TEXT NOT NULL,
+    read_at VARCHAR(64),
+    created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+    KEY idx_chat_messages_room_id (room_id, id),
+    KEY idx_chat_messages_unread (room_id, sender_id, read_at),
+    KEY idx_chat_messages_sender (sender_id),
+    CONSTRAINT fk_chat_messages_room FOREIGN KEY(room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_chat_messages_sender FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS system_configs (
     `key` VARCHAR(191) PRIMARY KEY,
     value TEXT NOT NULL
