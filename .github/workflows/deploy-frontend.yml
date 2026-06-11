@@ -1,0 +1,85 @@
+name: Deploy Frontend
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/deploy-frontend.yml'
+
+concurrency:
+  group: production-frontend
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.yuaru.com' }}
+      NEXT_PUBLIC_CHAT_WS_URL: ${{ vars.NEXT_PUBLIC_CHAT_WS_URL || 'wss://api.yuaru.com/chat' }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js with pnpm cache
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Node.js without dependency cache
+        if: ${{ hashFiles('pnpm-lock.yaml') == '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile || {
+              echo "::error::pnpm-lock.yaml이 package.json과 맞지 않습니다. 로컬에서 pnpm install 후 pnpm-lock.yaml을 커밋하세요."
+              exit 1
+            }
+          else
+            echo "::warning::pnpm-lock.yaml이 없어 초기 lockfile을 생성합니다. 생성된 pnpm-lock.yaml은 반드시 커밋하세요."
+            pnpm install
+          fi
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+        env:
+          DEPLOY_TARGET: cloudflare-pages
+
+      - name: Verify Cloudflare Pages settings
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_PAGES_PROJECT_NAME"
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          pnpm dlx wrangler@latest pages deploy frontend/out \
+            --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --branch "$GITHUB_REF_NAME"
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
