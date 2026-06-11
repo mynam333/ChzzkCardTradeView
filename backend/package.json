@@ -12,6 +12,7 @@
     "start:worker:scheduler": "PROCESS_ROLE=scheduler-worker ts-node src/workers/schedulerWorker.ts",
     "start:worker:backup": "PROCESS_ROLE=backup-worker ts-node src/workers/backupWorker.ts",
     "start:worker:image": "PROCESS_ROLE=image-worker ts-node src/workers/imageProxyWorker.ts",
+    "start:worker:chat": "ts-node src/workers/chatWorker.ts",
     "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
     "migrate": "ts-node scripts/migrate.ts",
     "test": "vitest run"

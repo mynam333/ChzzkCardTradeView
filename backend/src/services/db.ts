@@ -165,6 +165,10 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
       'shop_items',
       'user_cosmetics',
       'point_ledger_entries',
+      'friend_requests',
+      'friendships',
+      'chat_rooms',
+      'chat_messages',
       'market_listings',
       'market_transaction_audit_logs',
       'market_bids',
@@ -192,6 +196,11 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     ensureUniqueIndex(db, 'user_cosmetics', ['user_id', 'item_id'], 'idx_user_cosmetics_user_item_unique');
     ensureUniqueIndex(db, 'shop_purchases', ['user_id', 'item_id'], 'idx_shop_purchases_user_item_unique');
     ensureUniqueIndex(db, 'user_blocks', ['blocker_id', 'blocked_id'], 'idx_user_blocks_pair_unique');
+    ensureUniqueIndex(db, 'friend_requests', ['id'], 'idx_friend_requests_id_unique');
+    ensureUniqueIndex(db, 'friendships', ['user_a_id', 'user_b_id'], 'idx_friendships_pair_unique');
+    ensureUniqueIndex(db, 'chat_rooms', ['id'], 'idx_chat_rooms_id_unique');
+    ensureUniqueIndex(db, 'chat_rooms', ['user_a_id', 'user_b_id'], 'idx_chat_rooms_pair_unique');
+    ensureUniqueIndex(db, 'chat_messages', ['id'], 'idx_chat_messages_id_unique');
     ensureUniqueIndex(db, 'user_minigame_tickets', ['user_id'], 'idx_user_minigame_tickets_user_unique');
     ensureUniqueIndex(db, 'push_subscriptions', ['endpoint'], 'idx_push_subscriptions_endpoint');
     ensureUniqueIndex(db, 'coupon_logs', ['coupon_id', 'user_id'], 'idx_coupon_logs_coupon_user_unique');
@@ -248,6 +257,55 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_point_ledger_user_id (user_id, id),
       INDEX idx_point_ledger_counterparty (counterparty_user_id, id),
       INDEX idx_point_ledger_source (source_type, source_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      requester_id VARCHAR(191) NOT NULL,
+      receiver_id VARCHAR(191) NOT NULL,
+      status VARCHAR(24) NOT NULL DEFAULT 'pending',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      responded_at DATETIME NULL,
+      INDEX idx_friend_requests_receiver (receiver_id, status, id),
+      INDEX idx_friend_requests_requester (requester_id, status, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS friendships (
+      user_a_id VARCHAR(191) NOT NULL,
+      user_b_id VARCHAR(191) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_a_id, user_b_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_rooms (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_a_id VARCHAR(191) NOT NULL,
+      user_b_id VARCHAR(191) NOT NULL,
+      is_admin_room TINYINT NOT NULL DEFAULT 0,
+      closed_at DATETIME NULL,
+      closed_by_user_id VARCHAR(191) NULL,
+      deleted_for_a TINYINT NOT NULL DEFAULT 0,
+      deleted_for_b TINYINT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_chat_rooms_pair_unique (user_a_id, user_b_id),
+      INDEX idx_chat_rooms_user_a (user_a_id, updated_at),
+      INDEX idx_chat_rooms_user_b (user_b_id, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      room_id BIGINT NOT NULL,
+      sender_id VARCHAR(191) NOT NULL,
+      body TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      read_at DATETIME NULL,
+      INDEX idx_chat_messages_room (room_id, id),
+      INDEX idx_chat_messages_unread (room_id, sender_id, read_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
   await db.run(`

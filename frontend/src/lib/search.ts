@@ -19,15 +19,28 @@ export function getChosung(str: string): string {
   return result;
 }
 
+/** 검색 비교용 문자열을 정규화합니다. */
+export function normalizeSearchText(value: string): string {
+  return (value || '').replace(/\s+/g, '').toLowerCase();
+}
+
+/** 띄어쓰기/대소문자를 무시한 완전 일치 여부를 반환합니다. */
+export function isExactSearchMatch(target: string, query: string): boolean {
+  const cleanTarget = normalizeSearchText(target);
+  const cleanQuery = normalizeSearchText(query);
+  return !!cleanTarget && !!cleanQuery && cleanTarget === cleanQuery;
+}
+
 /**
  * 유사도 점수를 반환합니다. 낮을수록 더 좋은 일치이며, 일치하지 않으면 null.
  * 백엔드 backend/src/utils/search.ts 의 fuzzyScore 와 같은 기준입니다.
  */
 export function fuzzyScore(target: string, query: string): number | null {
-  const cleanTarget = (target || '').replace(/\s+/g, '').toLowerCase();
-  const cleanQuery = (query || '').replace(/\s+/g, '').toLowerCase();
+  const cleanTarget = normalizeSearchText(target);
+  const cleanQuery = normalizeSearchText(query);
   if (!cleanQuery) return 0;
   if (!cleanTarget) return null;
+  if (cleanTarget === cleanQuery) return -100;
 
   const directIdx = cleanTarget.indexOf(cleanQuery);
   if (directIdx !== -1) return directIdx;

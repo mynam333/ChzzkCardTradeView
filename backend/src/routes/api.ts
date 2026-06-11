@@ -16,6 +16,8 @@ import {
   banStreamerImage,
   unbanStreamerImage,
   deleteStreamerCards,
+  listMissingProfileImageStreamers,
+  deleteMissingProfileImageStreamers,
   banUser,
   unbanUser,
   getBannedUsers,
@@ -125,6 +127,21 @@ import {
   markAllNotificationsRead,
   hideReadNotification
 } from '../controllers/notificationController';
+import {
+  clearRoomViewing,
+  closeChatRoom,
+  createChatMessage,
+  deleteClosedChatRoom,
+  deleteFriend,
+  getChatMessages,
+  getChatRooms,
+  getFriendOverview,
+  markRoomViewing,
+  openChatRoom,
+  respondToFriendRequest,
+  searchFriendCandidates,
+  sendFriendRequest
+} from '../controllers/friendController';
 import {
   getShopItems,
   getMyCosmetics,
@@ -273,6 +290,21 @@ router.get('/notifications/stream', authMiddleware, banCheckMiddleware, streamNo
 router.post('/notifications/read-all', authMiddleware, banCheckMiddleware, markAllNotificationsRead);
 router.post('/notifications/:id/read', authMiddleware, banCheckMiddleware, markNotificationRead);
 router.delete('/notifications/:id', authMiddleware, banCheckMiddleware, hideReadNotification);
+
+// 친구 및 1:1 톡
+router.get('/friends/search', authMiddleware, banCheckMiddleware, searchLimiter, searchFriendCandidates);
+router.get('/friends', authMiddleware, banCheckMiddleware, getFriendOverview);
+router.post('/friends/requests', authMiddleware, banCheckMiddleware, sendFriendRequest);
+router.post('/friends/requests/:request_id/respond', authMiddleware, banCheckMiddleware, respondToFriendRequest);
+router.delete('/friends/:user_id', authMiddleware, banCheckMiddleware, deleteFriend);
+router.get('/friends/rooms', authMiddleware, banCheckMiddleware, getChatRooms);
+router.post('/friends/rooms/open', authMiddleware, banCheckMiddleware, openChatRoom);
+router.post('/friends/rooms/:room_id/close', authMiddleware, adminMiddleware, closeChatRoom);
+router.delete('/friends/rooms/:room_id', authMiddleware, banCheckMiddleware, deleteClosedChatRoom);
+router.get('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, getChatMessages);
+router.post('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, createChatMessage);
+router.post('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, markRoomViewing);
+router.delete('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, clearRoomViewing);
 
 // 1:1 교환(Trade) API (2단계 Double-Lock: confirm → finalize)
 router.post('/trades', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, tradeLimiter, createTrade);
@@ -448,6 +480,10 @@ router.post('/admin/streamers/:channel_id/image/ban', authMiddleware, adminMiddl
 
 // 특정 스트리머의 이미지 업로드 편집 권한 차단 해제 (언밴)
 router.post('/admin/streamers/:channel_id/image/unban', authMiddleware, adminMiddleware, unbanStreamerImage);
+
+// 프로필 이미지가 설정되지 않은 스트리머 목록/일괄 삭제
+router.get('/admin/streamers/missing-profile-images', authMiddleware, adminMiddleware, listMissingProfileImageStreamers);
+router.post('/admin/streamers/missing-profile-images/delete', authMiddleware, adminMiddleware, deleteMissingProfileImageStreamers);
 
 // 특정 스트리머 카드 전량 삭제(폐기) + 보유자에게 시세 보상 지급
 router.post('/admin/streamers/:channel_id/delete', authMiddleware, adminMiddleware, deleteStreamerCards);

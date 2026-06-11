@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { tradeRepository, userRepository, userCardRepository, notificationRepository, marketRepository } from '../repositories';
+import { tradeRepository, userRepository, userCardRepository, notificationRepository, marketRepository, streamerRepository } from '../repositories';
 import { TradeOffer, User, Trade } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
@@ -83,6 +83,41 @@ const normalizeOffer = (raw: any): TradeOffer => {
 };
 
 const isEmptyOffer = (offer: TradeOffer): boolean => offer.cards.length === 0 && offer.point === 0;
+
+const collectOfferChannelIds = (trade: Trade) => [
+  ...(trade.sender_offer?.cards || []),
+  ...(trade.receiver_offer?.cards || [])
+].map((card) => card.channel_id).filter(Boolean);
+
+const enrichOffer = (offer: TradeOffer, streamerMap: Map<string, { name: string; logo_url: string | null }>) => ({
+  ...offer,
+  cards: (offer.cards || []).map((card) => {
+    const streamer = streamerMap.get(card.channel_id);
+    return {
+      ...card,
+      streamer_name: streamer?.name || null,
+      streamer_logo_url: streamer?.logo_url || null
+    };
+  })
+});
+
+const enrichTradesForUser = async (trades: Trade[], userId: string) => {
+  const channelIds = [...new Set(trades.flatMap(collectOfferChannelIds))];
+  const streamers = channelIds.length > 0
+    ? await streamerRepository.findByIds(channelIds).catch(() => [])
+    : [];
+  const streamerMap = new Map(streamers.map((streamer) => [
+    streamer.channel_id,
+    { name: streamer.name, logo_url: streamer.logo_url }
+  ]));
+
+  return trades.map((trade) => ({
+    ...trade,
+    sender_offer: enrichOffer(trade.sender_offer, streamerMap),
+    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap),
+    direction: trade.sender_id === userId ? 'outgoing' : 'incoming'
+  }));
+};
 
 // 카드 식별 복합키: 채널 + 별
 const cardKey = (channelId: string, star?: number) => `${channelId}#${star ?? 0}`;
@@ -238,12 +273,7 @@ export const getActiveTrades = async (req: AuthenticatedRequest, res: Response) 
 
   try {
     const trades = await tradeRepository.findActiveByUser(user.id);
-    // 방향 표시 정보를 덧붙여 프론트가 받은/보낸 거래를 구분하기 쉽게 함
-    const mapped = trades.map((t) => ({
-      ...t,
-      direction: t.sender_id === user.id ? 'outgoing' : 'incoming'
-    }));
-    return res.status(200).json(mapped);
+    return res.status(200).json(await enrichTradesForUser(trades, user.id));
   } catch (err: any) {
     console.error('[TradeController] getActiveTrades 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '교환 목록 조회에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });
@@ -408,11 +438,7 @@ export const getTradeHistory = async (req: AuthenticatedRequest, res: Response) 
 
   try {
     const trades = await tradeRepository.findHistoryByUser(user.id, 50);
-    const mapped = trades.map((t) => ({
-      ...t,
-      direction: t.sender_id === user.id ? 'outgoing' : 'incoming'
-    }));
-    return res.status(200).json(mapped);
+    return res.status(200).json(await enrichTradesForUser(trades, user.id));
   } catch (err: any) {
     console.error('[TradeController] getTradeHistory 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '교환 이력 조회에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });

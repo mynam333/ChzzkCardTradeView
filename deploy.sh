@@ -8,7 +8,7 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 RELEASE_DIR="${RELEASE_ROOT}/${TIMESTAMP}"
 LOCK_FILE="${PROJECT_DIR}/deploy.lock"
 API_APP_NAME="${API_APP_NAME:-chikapo-api}"
-WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker}"
+WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 
 resolve_command() {
@@ -148,6 +148,7 @@ DB_NAME_VALUE="$(env_value MYSQL_DATABASE)"
 if [ -z "${DB_NAME_VALUE}" ]; then DB_NAME_VALUE="$(env_value DB_NAME)"; fi
 USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
 PORT_VALUE="$(env_value PORT 5000)"
+CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
 
 echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
 mkdir -p "${RELEASE_DIR}"
@@ -253,6 +254,22 @@ done
 echo "[deploy] reload workers sequentially"
 for app_name in ${WORKER_APP_NAMES}; do
   "${PM2_BIN}" startOrReload ecosystem.config.cjs --only "${app_name}" --update-env
+  if [ "${app_name}" = "chikapo-chat-worker" ]; then
+    CHAT_HEALTHCHECK_URL="${CHAT_HEALTHCHECK_URL:-http://127.0.0.1:${CHAT_WORKER_PORT_VALUE}/health}"
+    echo "[deploy] chat worker health check: ${CHAT_HEALTHCHECK_URL}"
+    for attempt in $(seq 1 20); do
+      if curl -fsSk "${CHAT_HEALTHCHECK_URL}" >/dev/null; then
+        echo "[deploy] chat worker is healthy"
+        break
+      fi
+      if [ "${attempt}" = "20" ]; then
+        echo "[deploy] chat worker health check failed"
+        "${PM2_BIN}" status
+        exit 1
+      fi
+      sleep 1
+    done
+  fi
   sleep 2
 done
 

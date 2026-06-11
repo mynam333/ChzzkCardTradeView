@@ -597,6 +597,61 @@ export const GachaTab: React.FC = () => {
     setDetailStreamer({ channel_id: channelId });
   };
 
+  const shortChannelId = (channelId: string) => (
+    channelId.length > 14 ? `${channelId.slice(0, 6)}...${channelId.slice(-4)}` : channelId
+  );
+
+  const tradeStreamerName = (channelId: string, serverName?: string | null) => {
+    if (serverName) return serverName;
+
+    const fromStreamers = streamers.find((s) => s.channel_id === channelId);
+    if (fromStreamers?.name) return fromStreamers.name;
+
+    const fromInventory = inventory.find((card) => card.channel_id === channelId);
+    if (fromInventory?.streamer?.name) return fromInventory.streamer.name;
+
+    const fromPartner = partnerCollection.find((card: any) => card.channel_id === channelId);
+    if (fromPartner?.streamer?.name) return fromPartner.streamer.name;
+
+    return `채널 ${shortChannelId(channelId)}`;
+  };
+
+  const renderTradeOffer = (offer: any) => {
+    const cards = Array.isArray(offer?.cards) ? offer.cards : [];
+    const items: { key: string; label: string; meta: string }[] = cards.map((c: any) => {
+      const star = Number(c.star || 0);
+      const starLabel = star > 0 ? `${star}성` : '일반';
+      return {
+        key: `${c.channel_id}#${star}`,
+        label: tradeStreamerName(String(c.channel_id || ''), c.streamer_name),
+        meta: `${starLabel} ${Number(c.count || 0).toLocaleString()}장`
+      };
+    });
+
+    if (Number(offer?.point || 0) > 0) {
+      items.push({
+        key: 'point',
+        label: `${Number(offer.point || 0).toLocaleString()} P`,
+        meta: '포인트'
+      });
+    }
+
+    if (items.length === 0) {
+      return <p className="text-muted-foreground">없음</p>;
+    }
+
+    return (
+      <div className="space-y-1">
+        {items.map((item) => (
+          <div key={item.key} className="min-w-0 rounded-md bg-background/40 px-2 py-1">
+            <p className="truncate font-bold text-foreground/85">{item.label}</p>
+            <p className="text-[10px] font-semibold text-muted-foreground">{item.meta}</p>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const resetTradeForm = () => {
     setOfferCards({});
     setOfferPoint(0);
@@ -1097,17 +1152,6 @@ export const GachaTab: React.FC = () => {
           <div className="space-y-2.5">
             {activeTrades.map((t) => {
               const incoming = t.direction === 'incoming';
-              // 채널 ID → 스트리머 이름 (보드의 전체 스트리머 목록 기준)
-              const nameOf = (cid: string) => streamers.find((s) => s.channel_id === cid)?.name || cid;
-              const summarize = (offer: any) => {
-                const parts: string[] = [];
-                for (const c of (offer?.cards || [])) {
-                  const starLabel = (c.star || 0) > 0 ? ` ${c.star}★` : '';
-                  parts.push(`${nameOf(c.channel_id)}${starLabel} ${c.count}장`);
-                }
-                if (offer?.point > 0) parts.push(`${offer.point.toLocaleString()} P`);
-                return parts.length ? parts.join(', ') : '없음';
-              };
               const counterpartName = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
               const confirmed = t.status === 'CONFIRMED';
               // 단계 안내 라벨
@@ -1116,11 +1160,11 @@ export const GachaTab: React.FC = () => {
                 : (incoming ? '검토 요청됨' : '상대 동의 대기 중');
               return (
                 <div key={t.id} className="rounded-xl border border-border/60 bg-secondary/20 p-3.5">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
                     <span className={`text-[10px] font-black rounded px-2 py-0.5 ${incoming ? 'bg-sky-500/15 text-sky-500' : 'bg-amber-500/15 text-amber-500'}`}>
                       {incoming ? '받은 교환' : '보낸 교환'}
                     </span>
-                    <span className="text-[11px] font-bold text-muted-foreground truncate">상대: {counterpartName}</span>
+                    <span className="min-w-0 truncate text-right text-[11px] font-bold text-muted-foreground">상대: {counterpartName}</span>
                   </div>
                   <p className={`text-[10px] font-bold mb-1 ${confirmed ? 'text-emerald-500' : 'text-muted-foreground'}`}>
                     [{confirmed ? '2단계' : '1단계'}] {stageLabel}
@@ -1165,14 +1209,14 @@ export const GachaTab: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2">
+                  <div className="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+                    <div className="min-w-0 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2">
                       <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
-                      <p className="text-muted-foreground">{summarize(t.sender_offer)}</p>
+                      {renderTradeOffer(t.sender_offer)}
                     </div>
-                    <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 p-2">
+                    <div className="min-w-0 rounded-lg bg-sky-500/5 border border-sky-500/20 p-2">
                       <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
-                      <p className="text-muted-foreground">{summarize(t.receiver_offer)}</p>
+                      {renderTradeOffer(t.receiver_offer)}
                     </div>
                   </div>
                   <p className="mt-2 text-[9.5px] leading-relaxed text-muted-foreground">
@@ -1204,16 +1248,6 @@ export const GachaTab: React.FC = () => {
         const accepted = tradeHistory.filter((t) => t.status === 'ACCEPTED').length;
         const rejected = tradeHistory.filter((t) => t.status === 'REJECTED').length;
         const cancelled = tradeHistory.filter((t) => t.status === 'CANCELLED').length;
-        const nameOf = (cid: string) => streamers.find((s) => s.channel_id === cid)?.name || cid;
-        const summarize = (offer: any) => {
-          const parts: string[] = [];
-          for (const c of (offer?.cards || [])) {
-            const starLabel = (c.star || 0) > 0 ? ` ${c.star}★` : '';
-            parts.push(`${nameOf(c.channel_id)}${starLabel} ${c.count}장`);
-          }
-          if (offer?.point > 0) parts.push(`${offer.point.toLocaleString()} P`);
-          return parts.length ? parts.join(', ') : '없음';
-        };
         const PER = 5;
         const totalPages = Math.max(1, Math.ceil(tradeHistory.length / PER));
         const page = Math.min(historyPage, totalPages);
@@ -1243,8 +1277,8 @@ export const GachaTab: React.FC = () => {
                   const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
                   return (
                     <div key={t.id} className="rounded-xl border border-border/60 bg-secondary/20 p-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] font-bold text-muted-foreground truncate">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-[11px] font-bold text-muted-foreground">
                           {incoming ? '받음' : '보냄'} · {counterpart}
                         </span>
                         <div className="flex items-center gap-2 shrink-0">
@@ -1252,14 +1286,14 @@ export const GachaTab: React.FC = () => {
                           <span className={`text-[11px] font-black ${statusColor[t.status]}`}>{statusLabel[t.status] || t.status}</span>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                        <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-1.5">
+                      <div className="grid grid-cols-1 gap-1.5 text-[10px] sm:grid-cols-2">
+                        <div className="min-w-0 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-1.5">
                           <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
-                          <p className="text-muted-foreground leading-snug">{summarize(t.sender_offer)}</p>
+                          {renderTradeOffer(t.sender_offer)}
                         </div>
-                        <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 p-1.5">
+                        <div className="min-w-0 rounded-lg bg-sky-500/5 border border-sky-500/20 p-1.5">
                           <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
-                          <p className="text-muted-foreground leading-snug">{summarize(t.receiver_offer)}</p>
+                          {renderTradeOffer(t.receiver_offer)}
                         </div>
                       </div>
                     </div>

@@ -62,6 +62,21 @@ module.exports = {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'image-worker'
       }
+    },
+    {
+      name: 'chikapo-chat-worker',
+      cwd: __dirname,
+      script: 'backend/dist/workers/chatWorker.js',
+      instances: 1,
+      exec_mode: 'fork',
+      wait_ready: true,
+      listen_timeout: 15000,
+      kill_timeout: 15000,
+      max_memory_restart: '600M',
+      env: {
+        NODE_ENV: 'production',
+        PROCESS_ROLE: 'chat-worker'
+      }
     }
   ]
 };

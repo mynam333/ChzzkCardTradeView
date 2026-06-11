@@ -17,6 +17,7 @@
     "start:worker:scheduler": "npm run start:worker:scheduler --workspace=backend",
     "start:worker:backup": "npm run start:worker:backup --workspace=backend",
     "start:worker:image": "npm run start:worker:image --workspace=backend",
+    "start:worker:chat": "npm run start:worker:chat --workspace=backend",
     "deploy:backend": "npm run build:backend && npm run start:backend",
     "migrate:backend": "npm run migrate --workspace=backend",
     "migrate:sqlite-to-mysql": "node scripts/sqlite-to-mysql.js"

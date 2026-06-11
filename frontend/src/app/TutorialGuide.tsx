@@ -8,6 +8,7 @@ import {
   Gamepad2,
   Home,
   Layers,
+  MessageCircle,
   MessageCircleHeart,
   PauseCircle,
   PlayCircle,
@@ -29,6 +30,7 @@ type TutorialSection =
   | 'inventory'
   | 'arcade'
   | 'ranking'
+  | 'friends'
   | 'my-info'
   | 'wrap-up';
 
@@ -55,7 +57,7 @@ type HighlightRect = {
   height: number;
 };
 
-const TUTORIAL_VERSION = '2026-06-09-v2';
+const TUTORIAL_VERSION = '2026-06-11-v3';
 const MANUAL_START_EVENT = 'chikapo-start-tutorial';
 const UARU_CHANNEL_ID = '6d395c84c99777272f872171b4dfc122';
 
@@ -66,6 +68,7 @@ const sectionLabels: Record<TutorialSection, string> = {
   inventory: '보관함',
   arcade: '미니게임',
   ranking: '랭킹',
+  friends: '친구',
   'my-info': '내 정보',
   'wrap-up': '마무리'
 };
@@ -77,11 +80,134 @@ const sectionIcons: Record<TutorialSection, typeof Sparkles> = {
   inventory: Layers,
   arcade: Gamepad2,
   ranking: TrendingUp,
+  friends: MessageCircle,
   'my-info': User,
   'wrap-up': CheckCircle2
 };
 
 const tutorialSteps: TutorialStep[] = [
+  {
+    id: 'hello',
+    section: 'welcome',
+    tab: 'main',
+    title: '치카포, 딱 필요한 것만 볼게요',
+    lines: [
+      '기능이 많아졌으니 이번 안내는 핵심만 짧게 지나갈게요.',
+      '제가 화면을 옮겨 드릴 테니, 어디서 무엇을 하면 되는지만 감 잡으면 됩니다.'
+    ],
+    tip: '이미 튜토리얼을 봤던 계정은 새 버전이어도 자동으로 다시 켜지지 않아요.'
+  },
+  {
+    id: 'main-overview',
+    section: 'main',
+    tab: 'main',
+    title: '메인은 오늘의 현황판이에요',
+    lines: [
+      '공지, 실시간 흐름, 서비스 통계를 먼저 확인하는 출발점입니다.',
+      '뭔가 달라졌나 싶을 때는 메인에서 분위기를 보고 움직이면 좋아요.'
+    ],
+    actionLabel: '메인 확인',
+    target: 'main-landing'
+  },
+  {
+    id: 'shop-gacha',
+    section: 'shop',
+    tab: 'shop',
+    title: '상점에서는 카드를 뽑고 거래해요',
+    lines: [
+      '상점은 카드 소환, 코스메틱 구매, 오픈마켓 거래가 모인 곳이에요.',
+      '처음이라면 무료 소환부터 눌러 보고, 사고팔기 전에는 가격과 수수료를 한 번 더 확인해 주세요.'
+    ],
+    tip: '체험용 무료 소환 티켓을 받을 수 있으면 제가 한 장 준비해 둘게요.',
+    target: 'shop-gacha-button',
+    grantGachaTicket: true,
+    waitForEvent: 'chikapo:gacha-result',
+    shopSubTab: 'gacha_shop',
+    actionLabel: '소환 결과 기다리는 중'
+  },
+  {
+    id: 'shop-market',
+    section: 'shop',
+    tab: 'shop',
+    title: '오픈마켓은 상태를 보고 움직이면 돼요',
+    lines: [
+      '전체 매물, 즉시 판매, 경매, 입찰중 같은 보기로 원하는 거래만 좁혀 볼 수 있어요.',
+      '관심 매물이나 입찰 변화는 알림으로 이어질 수 있으니, 중요한 거래는 알림 설정을 켜두면 편합니다.'
+    ],
+    target: 'shop-market',
+    shopSubTab: 'market'
+  },
+  {
+    id: 'inventory-core',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '보관함은 내 카드의 작업대예요',
+    lines: [
+      '카드를 정렬하고, 즐겨찾기하고, 코스메틱을 입히고, 거래나 판매 등록을 시작하는 곳입니다.',
+      '카드를 길게 보거나 메뉴를 열 때는 지금 이 카드가 거래 중인지 먼저 확인해 주세요.'
+    ],
+    target: 'inventory-list'
+  },
+  {
+    id: 'friends-core',
+    section: 'friends',
+    tab: 'friends',
+    title: '친구 탭에서 1:1 톡을 써요',
+    lines: [
+      '닉네임으로 친구를 검색하고 신청하면, 수락된 친구끼리 1:1 톡을 열 수 있어요.',
+      '톡방을 보고 있을 때 새 메시지가 바로 읽히면 알림은 보내지 않고, 보고 있지 않을 때만 사이트 알림과 푸시 알림이 갑니다.'
+    ],
+    tip: '원하지 않는 유저는 내 정보의 차단에서 친구 신청도 함께 막을 수 있어요.',
+    target: 'friends-search'
+  },
+  {
+    id: 'arcade-points',
+    section: 'arcade',
+    tab: 'arcade',
+    title: '미니게임은 포인트 보충용이에요',
+    lines: [
+      '하루에 도전할 수 있는 게임과 연습용 게임이 나뉘어 있어요.',
+      '카드를 사고 싶을 때 포인트를 조금씩 모으는 보조 루트라고 생각하면 됩니다.'
+    ],
+    target: 'arcade-daily-game'
+  },
+  {
+    id: 'ranking-read',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '랭킹은 시세와 흐름을 보는 곳이에요',
+    lines: [
+      '스트리머 카드 가치, 등락률, 유저 랭킹을 보며 어떤 카드가 움직이는지 확인할 수 있어요.',
+      '거래 전에는 랭킹과 마켓 가격을 같이 보면 실수를 줄이기 좋습니다.'
+    ],
+    target: 'ranking-list',
+    rankingSubTab: 'value'
+  },
+  {
+    id: 'my-info-settings',
+    section: 'my-info',
+    tab: 'my-info',
+    title: '내 정보에는 안전장치가 모여 있어요',
+    lines: [
+      '대표 카드, 상태 메시지, 쿠폰, 푸시 알림, 차단, 개인정보와 탈퇴 설정을 관리합니다.',
+      '특히 알림과 차단은 거래와 친구 기능을 편하게 쓰는 데 꽤 중요해요.'
+    ],
+    target: 'my-info-push'
+  },
+  {
+    id: 'wrap-up-done',
+    section: 'wrap-up',
+    tab: 'main',
+    title: '이 정도만 알면 충분해요',
+    lines: [
+      '메인에서 흐름을 보고, 상점과 보관함에서 카드를 움직이고, 친구 탭에서 대화하면 됩니다.',
+      '더 궁금해지면 내 정보에서 이 튜토리얼을 다시 열어 천천히 둘러봐도 좋아요.'
+    ],
+    actionLabel: '튜토리얼 완료'
+  }
+];
+
+const legacyTutorialSteps: TutorialStep[] = [
   {
     id: 'hello',
     section: 'welcome',
@@ -695,6 +821,17 @@ const tutorialSteps: TutorialStep[] = [
 
 const completedStorageKey = (userId: string | number) => `chikapo_tutorial_completed:${TUTORIAL_VERSION}:${userId}`;
 const sessionStorageKey = (userId: string | number) => `chikapo_tutorial_session_seen:${TUTORIAL_VERSION}:${userId}`;
+const completedAnyVersionStorageKey = (userId: string | number) => `chikapo_tutorial_completed:any:${userId}`;
+const hasAnyLocalTutorialCompletion = (userId: string | number) => {
+  if (localStorage.getItem(completedAnyVersionStorageKey(userId)) === '1') return true;
+  if (localStorage.getItem(completedStorageKey(userId)) === '1') return true;
+  const suffix = `:${userId}`;
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith('chikapo_tutorial_completed:') && key.endsWith(suffix)) return true;
+  }
+  return false;
+};
 
 export const TutorialGuide: React.FC = () => {
   const { user, activeTab, setActiveTab, refreshUserData, toast, theme } = useApp();
@@ -743,6 +880,7 @@ export const TutorialGuide: React.FC = () => {
   const markCompleted = () => {
     if (!user?.id) return;
     localStorage.setItem(completedStorageKey(user.id), '1');
+    localStorage.setItem(completedAnyVersionStorageKey(user.id), '1');
     sessionStorage.setItem(sessionStorageKey(user.id), '1');
     setTutorialCompletedOnBackend(true);
     void apiFetch('/tutorial/progress', {
@@ -795,18 +933,23 @@ export const TutorialGuide: React.FC = () => {
     setTutorialCompletedOnBackend(false);
 
     const localCompleted = localStorage.getItem(completedStorageKey(user.id)) === '1';
+    const localCompletedAnyVersion = hasAnyLocalTutorialCompletion(user.id);
     apiFetch(`/tutorial/progress?version=${encodeURIComponent(TUTORIAL_VERSION)}`)
       .then(async (res) => {
-        if (!res.ok) return { completed: localCompleted };
+        if (!res.ok) return { completed: localCompleted, completed_any_version: localCompletedAnyVersion };
         return res.json();
       })
       .then((data) => {
         if (cancelled) return;
-        const completed = !!data?.completed || localCompleted;
+        const completedAnyVersion = !!data?.completed_any_version || !!data?.completed || localCompletedAnyVersion;
+        const completed = !!data?.completed || localCompleted || completedAnyVersion;
         setTutorialCompletedOnBackend(completed);
         if (completed) {
           localStorage.setItem(completedStorageKey(user.id), '1');
           sessionStorage.setItem(sessionStorageKey(user.id), '1');
+        }
+        if (completedAnyVersion) {
+          localStorage.setItem(completedAnyVersionStorageKey(user.id), '1');
         }
         if (!data?.completed && localCompleted) {
           void apiFetch('/tutorial/progress', {
@@ -821,7 +964,7 @@ export const TutorialGuide: React.FC = () => {
       .catch((err) => {
         if (cancelled) return;
         console.warn('[TutorialGuide] 튜토리얼 진행 상태 조회 실패:', err);
-        setTutorialCompletedOnBackend(localCompleted);
+        setTutorialCompletedOnBackend(localCompleted || localCompletedAnyVersion);
       })
       .finally(() => {
         if (!cancelled) setTutorialProgressCheckedFor(userId);
@@ -836,6 +979,7 @@ export const TutorialGuide: React.FC = () => {
     if (!user?.id || open) return;
     if (tutorialProgressCheckedFor !== String(user.id)) return;
     if (tutorialCompletedOnBackend) return;
+    if (hasAnyLocalTutorialCompletion(user.id)) return;
     if (localStorage.getItem(completedStorageKey(user.id)) === '1') return;
     if (sessionStorage.getItem(sessionStorageKey(user.id)) === '1') return;
 

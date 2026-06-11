@@ -7,6 +7,7 @@ import {
   Layers,
   TrendingUp,
   User,
+  MessageCircle,
   Sun,
   Moon,
   Coins,
@@ -61,13 +62,14 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     { id: 'inventory', label: '보관함', icon: Layers },
     { id: 'arcade', label: '미니게임', icon: Gamepad2 },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
+    { id: 'friends', label: '친구', icon: MessageCircle },
     { id: 'my-info', label: '내 정보', icon: User },
     ...(user?.role === 'ADMIN'
       ? [{ id: 'admin' as TabId, label: '관리자', icon: Shield }]
       : []),
   ];
 
-  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'ranking', 'arcade', 'my-info', 'admin'];
+  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
   const mobileNavItems = mobileNavOrder
     .map((id) => navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));

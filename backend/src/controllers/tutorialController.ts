@@ -113,6 +113,34 @@ const findTutorialCompletion = async (userId: string, version: string): Promise<
   return row?.created_at || null;
 };
 
+const findAnyTutorialCompletion = async (userId: string): Promise<string | null> => {
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient()
+      .from('tutorial_rewards')
+      .select('created_at')
+      .eq('user_id', userId)
+      .like('reward_key', `${TUTORIAL_COMPLETED_PREFIX}%`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data?.created_at || null;
+  }
+
+  if (getDbMode() === 'MYSQL') {
+    const row = await getMysqlDb()
+      .get('SELECT created_at FROM tutorial_rewards WHERE user_id = ? AND reward_key LIKE ? ORDER BY created_at DESC LIMIT 1', userId, `${TUTORIAL_COMPLETED_PREFIX}%`) as { created_at?: string } | undefined;
+    return row?.created_at || null;
+  }
+
+  const row = getSqliteDb()
+    .prepare('SELECT created_at FROM tutorial_rewards WHERE user_id = ? AND reward_key LIKE ? ORDER BY created_at DESC LIMIT 1')
+    .get(userId, `${TUTORIAL_COMPLETED_PREFIX}%`) as { created_at?: string } | undefined;
+
+  return row?.created_at || null;
+};
+
 const markTutorialCompletedOnce = async (userId: string, version: string): Promise<{ completedAt: string; newlyCompleted: boolean }> => {
   const rewardKey = completedRewardKey(version);
   const nowIso = new Date().toISOString();
@@ -174,11 +202,16 @@ export const getTutorialProgress = async (req: Request, res: Response) => {
 
   try {
     const version = normalizeTutorialVersion(req.query.version);
-    const completedAt = await findTutorialCompletion(String(userId), version);
+    const [completedAt, anyCompletedAt] = await Promise.all([
+      findTutorialCompletion(String(userId), version),
+      findAnyTutorialCompletion(String(userId))
+    ]);
     return res.status(200).json({
       version,
       completed: !!completedAt,
-      completed_at: completedAt
+      completed_at: completedAt,
+      completed_any_version: !!anyCompletedAt,
+      completed_any_version_at: anyCompletedAt
     });
   } catch (err: any) {
     if (err?.message === 'INVALID_TUTORIAL_VERSION') {

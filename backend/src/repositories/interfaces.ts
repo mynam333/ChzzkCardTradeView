@@ -260,7 +260,7 @@ export interface UserRanking extends User {
 export interface IStreamerRepository {
   findAll(): Promise<Streamer[]>;
   /** 랭킹·검색 목록용 최소 필드만 조회합니다(커스텀 별 이미지 등 무거운 필드 제외). */
-  findRankingBase(): Promise<Streamer[]>;
+  findRankingBase(limit?: number): Promise<Streamer[]>;
   findById(channelId: string): Promise<Streamer | null>;
   /** 여러 스트리머를 channel_id 배열로 한 번에 조회합니다(N+1 방지). */
   findByIds(channelIds: string[]): Promise<Streamer[]>;
@@ -301,8 +301,12 @@ export interface IStreamerRepository {
   pruneValueHistory(olderThanDays: number): Promise<void>;
   /** 채널별 약 24시간 전 시세 맵을 반환합니다(등락률 계산용). */
   getValue24hAgoMap(): Promise<Record<string, number>>;
+  /** 지정 채널들의 약 24시간 전 시세 맵을 반환합니다(랭킹 목록 최적화용). */
+  getValue24hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>>;
   /** 채널별 약 1시간 전 시세 맵을 반환합니다(1시간 등락 랭킹용). */
   getValue1hAgoMap(): Promise<Record<string, number>>;
+  /** 지정 채널들의 약 1시간 전 시세 맵을 반환합니다(랭킹 목록 최적화용). */
+  getValue1hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>>;
   /** 스트리머를 삭제합니다(연관 카드/시세이력/신고는 FK CASCADE로 함께 제거). */
   delete(channelId: string): Promise<void>;
 }

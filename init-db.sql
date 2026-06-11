@@ -303,6 +303,63 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 친구 신청
+CREATE TABLE IF NOT EXISTS friend_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requester_id TEXT NOT NULL,
+    receiver_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    responded_at TEXT,
+    FOREIGN KEY(requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(receiver_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests(receiver_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_requester ON friend_requests(requester_id, status, id);
+
+-- 친구 관계: user_a_id < user_b_id 정렬쌍
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a_id TEXT NOT NULL,
+    user_b_id TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(user_a_id, user_b_id),
+    FOREIGN KEY(user_a_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_b_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 1:1 채팅방
+CREATE TABLE IF NOT EXISTS chat_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_a_id TEXT NOT NULL,
+    user_b_id TEXT NOT NULL,
+    is_admin_room INTEGER NOT NULL DEFAULT 0,
+    closed_at TEXT,
+    closed_by_user_id TEXT,
+    deleted_for_a INTEGER NOT NULL DEFAULT 0,
+    deleted_for_b INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_a_id, user_b_id),
+    FOREIGN KEY(user_a_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_b_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_a ON chat_rooms(user_a_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_b ON chat_rooms(user_b_id, updated_at);
+
+-- 1:1 채팅 메시지
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL,
+    sender_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    read_at TEXT,
+    FOREIGN KEY(room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_room ON chat_messages(room_id, id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at);
+
 -- 15. 시스템 설정 테이블
 CREATE TABLE IF NOT EXISTS system_configs (
     key TEXT PRIMARY KEY,

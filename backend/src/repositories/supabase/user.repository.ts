@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "../../services/db";
-import { fuzzyScore } from "../../utils/search";
+import { fuzzyScore, isExactSearchMatch } from "../../utils/search";
 import {
   IUserRepository,
   IStreamerRepository, 
@@ -72,12 +72,18 @@ export class SupabaseUserRepository implements IUserRepository {
     // 2) 최근 유저 후보 풀 — 초성/띄어쓰기 유사 매칭용 (PostgREST max-rows 보호 위해 캡)
     const POOL_CAP = 2000;
     const safeLike = kw.replace(/[,()%]/g, ' ');
-    const [likeRes, poolRes] = await Promise.all([
+    const [exactRes, likeRes, poolRes] = await Promise.all([
+      this.getClient().from('users').select('*').ilike('username', kw).limit(limit),
       this.getClient().from('users').select('*').ilike('username', `%${safeLike}%`).limit(limit),
       this.getClient().from('users').select('*').order('created_at', { ascending: false }).limit(POOL_CAP)
     ]);
 
     const byId = new Map<string, any>();
+    const exactUsers = (exactRes.data || [])
+      .filter((u) => isExactSearchMatch(u.username || '', kw))
+      .sort((a, b) => String(a.username).localeCompare(String(b.username)) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    if (exactUsers.length > 0) return exactUsers.slice(0, limit) as User[];
+
     for (const u of (likeRes.data || [])) byId.set(u.id, u);
     for (const u of (poolRes.data || [])) if (!byId.has(u.id)) byId.set(u.id, u);
 
@@ -352,6 +358,20 @@ export class SupabaseUserRepository implements IUserRepository {
     await deleteEq('market_listings', 'seller_id');
     await client.from('trades').delete().or(`sender_id.eq.${id},receiver_id.eq.${id}`);
     await client.from('user_blocks').delete().or(`blocker_id.eq.${id},blocked_id.eq.${id}`);
+    await client.from('friend_requests').delete().or(`requester_id.eq.${id},receiver_id.eq.${id}`);
+    await client.from('friendships').delete().or(`user_a_id.eq.${id},user_b_id.eq.${id}`);
+    await client.from('chat_rooms').update({
+      closed_at: new Date().toISOString(),
+      closed_by_user_id: id,
+      deleted_for_a: true,
+      updated_at: new Date().toISOString()
+    }).eq('user_a_id', id);
+    await client.from('chat_rooms').update({
+      closed_at: new Date().toISOString(),
+      closed_by_user_id: id,
+      deleted_for_b: true,
+      updated_at: new Date().toISOString()
+    }).eq('user_b_id', id);
     await deleteEq('notifications', 'user_id');
     await deleteEq('push_subscriptions', 'user_id');
     await deleteEq('coupon_logs', 'user_id');

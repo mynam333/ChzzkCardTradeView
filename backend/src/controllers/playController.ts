@@ -397,7 +397,7 @@ export const blockUser = async (req: Request, res: Response) => {
     }
     await userRepository.blockUser(userId, target.id);
     return res.status(200).json({
-      message: `${target.username}님을 차단했습니다. 해당 사용자는 회원님에게 교환을 제안할 수 없습니다.`,
+      message: `${target.username}님을 차단했습니다. 해당 사용자는 회원님에게 교환 제안과 친구 신청을 보낼 수 없습니다.`,
       blocked: { id: target.id, username: target.username }
     });
   } catch (err: any) {
@@ -723,11 +723,11 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     }
 
     const request = (async () => {
-      const streamers = await streamerRepository.findRankingBase();
-      const [value24hMap, value1hMap] = await Promise.all([
-        mode === 'value' ? streamerRepository.getValue24hAgoMap() : Promise.resolve({} as Record<string, number>),
-        mode === 'change' ? streamerRepository.getValue1hAgoMap() : Promise.resolve({} as Record<string, number>)
-      ]);
+      const needsFullStreamerPool = mode === 'change' || !!keyword;
+      const streamers = await streamerRepository.findRankingBase(needsFullStreamerPool ? undefined : limit);
+      const value1hMap = mode === 'change'
+        ? await streamerRepository.getValue1hAgoMap()
+        : {} as Record<string, number>;
 
       const scoreChange = (streamer: any) => {
         const current = Number(streamer.base_value || 0);
@@ -754,7 +754,12 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
 
       const sliced = ranked.slice(0, limit);
       const channelIds = sliced.map((item) => item.streamer.channel_id);
-      const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
+      const [titlesByUser, value24hMap] = await Promise.all([
+        titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>)),
+        mode === 'value'
+          ? streamerRepository.getValue24hAgoMapForChannels(channelIds)
+          : Promise.resolve({} as Record<string, number>)
+      ]);
 
       const data = sliced.map(({ streamer, rank }) => ({
         channel_id: streamer.channel_id,
@@ -1095,6 +1100,13 @@ export const registerStreamer = async (req: Request, res: Response) => {
     const verifiedName = profile.name;
     const verifiedFollowerCount = profile.followerCount;
     const verifiedLogoUrl = profile.logoUrl;
+
+    if (!verifiedLogoUrl || String(verifiedLogoUrl).trim().length === 0) {
+      return res.status(400).json({
+        error: 'MissingProfileImage',
+        message: '프로필 이미지가 설정되지 않은 스트리머는 카드로 등록할 수 없습니다.'
+      });
+    }
 
     if (!profile.openLive && isInactiveForThreeMonths(profile.lastLiveAt)) {
       return res.status(400).json({

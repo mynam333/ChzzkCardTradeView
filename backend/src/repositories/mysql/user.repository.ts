@@ -1,6 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { MysqlTx } from '../../services/mysqlDb';
-import { fuzzyScore } from '../../utils/search';
+import { fuzzyScore, isExactSearchMatch } from '../../utils/search';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { DeletedUserAccount, IUserRepository, User, UserRanking } from '../interfaces';
 
@@ -55,6 +55,11 @@ export class MysqlUserRepository implements IUserRepository {
     const kw = (keyword || '').trim();
     if (!kw) return [];
     const rows = await this.getDb().all('SELECT * FROM users');
+    const exactRows = rows
+      .filter((r) => isExactSearchMatch(r.username || '', kw))
+      .sort((a, b) => String(a.username).localeCompare(String(b.username)) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    if (exactRows.length > 0) return exactRows.slice(0, limit).map((r) => this.mapUser(r));
+
     return rows
       .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
       .filter((x): x is { r: any; score: number } => x.score !== null)
@@ -254,6 +259,17 @@ export class MysqlUserRepository implements IUserRepository {
       await tx.run('DELETE FROM market_listings WHERE seller_id = ?', id);
       await tx.run('DELETE FROM trades WHERE sender_id = ? OR receiver_id = ?', id, id);
       await tx.run('DELETE FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?', id, id);
+      await tx.run('DELETE FROM friend_requests WHERE requester_id = ? OR receiver_id = ?', id, id);
+      await tx.run('DELETE FROM friendships WHERE user_a_id = ? OR user_b_id = ?', id, id);
+      await tx.run(`
+        UPDATE chat_rooms
+           SET closed_at = COALESCE(closed_at, UTC_TIMESTAMP()),
+               closed_by_user_id = ?,
+               deleted_for_a = CASE WHEN user_a_id = ? THEN 1 ELSE deleted_for_a END,
+               deleted_for_b = CASE WHEN user_b_id = ? THEN 1 ELSE deleted_for_b END,
+               updated_at = UTC_TIMESTAMP()
+         WHERE user_a_id = ? OR user_b_id = ?
+      `, id, id, id, id, id);
       await tx.run('DELETE FROM notifications WHERE user_id = ?', id);
       await tx.run('DELETE FROM push_subscriptions WHERE user_id = ?', id);
       await tx.run('DELETE FROM coupon_logs WHERE user_id = ?', id);

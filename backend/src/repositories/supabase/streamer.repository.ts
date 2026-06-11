@@ -69,11 +69,15 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     return (data || []).map(withStarImages);
   }
 
-  async findRankingBase(): Promise<Streamer[]> {
-    const { data, error } = await this.getClient()
+  async findRankingBase(limit?: number): Promise<Streamer[]> {
+    let query = this.getClient()
       .from('streamers')
       .select('channel_id, name, logo_url, custom_image_url, follower_count, base_value, is_active, serial_number, prev_value')
       .order('base_value', { ascending: false });
+    if (limit && Number.isFinite(limit)) {
+      query = query.limit(Math.max(1, Math.floor(limit)));
+    }
+    const { data, error } = await query;
 
     if (error) throw error;
     return (data || []).map((row: any) => ({
@@ -481,12 +485,47 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     return map;
   }
 
+  private async loadValueAgoMapForChannels(hours: number, channelIds: string[]): Promise<Record<string, number>> {
+    const uniqueChannelIds = Array.from(new Set(channelIds.filter(Boolean)));
+    if (uniqueChannelIds.length === 0) return {};
+
+    const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+    const cutoff = new Date(cutoffMs).toISOString();
+    const windowStart = new Date(
+      cutoffMs - SupabaseStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000
+    ).toISOString();
+    const { data, error } = await this.getClient()
+      .from('value_history')
+      .select('channel_id, value, recorded_at')
+      .in('channel_id', uniqueChannelIds)
+      .gte('recorded_at', windowStart)
+      .lte('recorded_at', cutoff)
+      .order('recorded_at', { ascending: false });
+    if (error || !data) return {};
+
+    const map: Record<string, number> = {};
+    for (const row of data as any[]) {
+      if (map[row.channel_id] === undefined) {
+        map[row.channel_id] = row.value;
+      }
+    }
+    return map;
+  }
+
   async getValue24hAgoMap(): Promise<Record<string, number>> {
     return this.valueAgoMap(24);
   }
 
+  async getValue24hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>> {
+    return this.loadValueAgoMapForChannels(24, channelIds);
+  }
+
   async getValue1hAgoMap(): Promise<Record<string, number>> {
     return this.valueAgoMap(1);
+  }
+
+  async getValue1hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>> {
+    return this.loadValueAgoMapForChannels(1, channelIds);
   }
 }
 // 3. Supabase 쿠폰 레포지토리

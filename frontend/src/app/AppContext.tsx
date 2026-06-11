@@ -9,10 +9,10 @@ import { AlertModal } from './AlertModal';
 import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
-export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'my-info' | 'admin' | 'arcade';
+export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'friends' | 'my-info' | 'admin' | 'arcade';
 type ShopSubTabId = 'gacha_shop' | 'market' | 'my_listings' | 'history';
 
-const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'my-info', 'admin', 'arcade'];
+const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'friends', 'my-info', 'admin', 'arcade'];
 const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'my_listings', 'history'];
 
 const parseNotificationLink = (link: string | null): { tab: TabId; shopSubTab?: ShopSubTabId } | null => {
@@ -483,6 +483,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     if (pathname.startsWith('/shop')) return 'shop';
     if (pathname.startsWith('/inventory')) return 'inventory';
     if (pathname.startsWith('/ranking')) return 'ranking';
+    if (pathname.startsWith('/friends')) return 'friends';
     if (pathname.startsWith('/my-info')) return 'my-info';
     if (pathname.startsWith('/admin')) return 'admin';
     if (pathname.startsWith('/arcade')) return 'arcade';

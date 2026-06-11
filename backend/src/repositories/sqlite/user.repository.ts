@@ -1,5 +1,5 @@
 import { getSqliteDb } from "../../services/db";
-import { fuzzyScore } from "../../utils/search";
+import { fuzzyScore, isExactSearchMatch } from "../../utils/search";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
 import {
   IUserRepository,
@@ -76,6 +76,11 @@ export class SqliteUserRepository implements IUserRepository {
     // 초성/띄어쓰기 무시 유사도 검색: 전체 유저를 스캔해 점수순으로 상위 N명 반환
     // (정확한 부분일치를 초성 일치보다 우선 노출)
     const rows = this.getDb().prepare('SELECT * FROM users').all() as any[];
+    const exactRows = rows
+      .filter((r) => isExactSearchMatch(r.username || '', kw))
+      .sort((a, b) => String(a.username).localeCompare(String(b.username)) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    if (exactRows.length > 0) return exactRows.slice(0, limit).map((r) => this.mapUser(r));
+
     return rows
       .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
       .filter((x): x is { r: any; score: number } => x.score !== null)
@@ -381,6 +386,17 @@ export class SqliteUserRepository implements IUserRepository {
       db.prepare('DELETE FROM market_listings WHERE seller_id = ?').run(id);
       db.prepare('DELETE FROM trades WHERE sender_id = ? OR receiver_id = ?').run(id, id);
       db.prepare('DELETE FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?').run(id, id);
+      db.prepare('DELETE FROM friend_requests WHERE requester_id = ? OR receiver_id = ?').run(id, id);
+      db.prepare('DELETE FROM friendships WHERE user_a_id = ? OR user_b_id = ?').run(id, id);
+      db.prepare(`
+        UPDATE chat_rooms
+           SET closed_at = COALESCE(closed_at, datetime('now')),
+               closed_by_user_id = ?,
+               deleted_for_a = CASE WHEN user_a_id = ? THEN 1 ELSE deleted_for_a END,
+               deleted_for_b = CASE WHEN user_b_id = ? THEN 1 ELSE deleted_for_b END,
+               updated_at = datetime('now')
+         WHERE user_a_id = ? OR user_b_id = ?
+      `).run(id, id, id, id, id);
       db.prepare('DELETE FROM notifications WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM coupon_logs WHERE user_id = ?').run(id);

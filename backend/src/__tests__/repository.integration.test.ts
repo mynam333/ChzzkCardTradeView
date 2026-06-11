@@ -113,6 +113,32 @@ describe('findByIds 배치 조회', () => {
   });
 });
 
+describe('UserRepository searchByUsername', () => {
+  it('닉네임을 정확히 입력하면 유사 닉네임을 제외하고 정확 일치 유저만 반환한다', async () => {
+    db.prepare("INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, 'USER', ?)")
+      .run('search-exact', '치카포', null, 0);
+    db.prepare("INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, 'USER', ?)")
+      .run('search-prefix', '치카포팬', null, 0);
+    db.prepare("INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, 'USER', ?)")
+      .run('search-middle', '슈퍼치카포', null, 0);
+
+    const users = await userRepository.searchByUsername('치카포', 12);
+
+    expect(users.map((u) => u.id)).toEqual(['search-exact']);
+  });
+
+  it('정확 일치가 없으면 기존처럼 유사 검색을 반환한다', async () => {
+    db.prepare("INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, 'USER', ?)")
+      .run('search-prefix', '치카포팬', null, 0);
+    db.prepare("INSERT INTO users (id, username, avatar_url, role, point) VALUES (?, ?, ?, 'USER', ?)")
+      .run('search-middle', '슈퍼치카포', null, 0);
+
+    const users = await userRepository.searchByUsername('치카포', 12);
+
+    expect(users.map((u) => u.id)).toEqual(['search-prefix', 'search-middle']);
+  });
+});
+
 describe('UserRepository rankings', () => {
   it('활성 제재 유저는 유저 랭킹에서 제외하고 제재 만료 유저는 포함한다', async () => {
     seedUser(db, 'ranking-active-ban', 999999);

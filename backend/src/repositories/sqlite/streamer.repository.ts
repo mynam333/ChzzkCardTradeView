@@ -73,12 +73,14 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     }));
   }
 
-  async findRankingBase(): Promise<Streamer[]> {
+  async findRankingBase(limit?: number): Promise<Streamer[]> {
+    const safeLimit = limit && Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : null;
     const rows = this.getDb().prepare(`
       SELECT channel_id, name, logo_url, custom_image_url, follower_count, base_value, is_active, serial_number, prev_value
         FROM streamers
        ORDER BY base_value DESC
-    `).all() as any[];
+       ${safeLimit ? 'LIMIT ?' : ''}
+    `).all(...(safeLimit ? [safeLimit] : [])) as any[];
     return rows.map((row: any) => ({
       channel_id: row.channel_id,
       name: row.name,
@@ -417,12 +419,52 @@ export class SqliteStreamerRepository implements IStreamerRepository {
     return map;
   }
 
+  private loadValueAgoMapForChannels(hours: number, channelIds: string[]): Record<string, number> {
+    const uniqueChannelIds = Array.from(new Set(channelIds.filter(Boolean)));
+    if (uniqueChannelIds.length === 0) return {};
+
+    const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
+    const cutoff = this.toSqliteUtcString(new Date(cutoffMs));
+    const windowStart = this.toSqliteUtcString(
+      new Date(cutoffMs - SqliteStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000)
+    );
+    const placeholders = uniqueChannelIds.map(() => '?').join(',');
+    const rows = this.getDb().prepare(
+      `SELECT vh.channel_id, vh.value, vh.recorded_at
+         FROM value_history vh
+         JOIN (
+           SELECT channel_id, MAX(recorded_at) AS recorded_at
+             FROM value_history
+            WHERE channel_id IN (${placeholders})
+              AND recorded_at >= ?
+              AND recorded_at <= ?
+            GROUP BY channel_id
+         ) latest
+           ON latest.channel_id = vh.channel_id
+          AND latest.recorded_at = vh.recorded_at`
+    ).all(...uniqueChannelIds, windowStart, cutoff) as any[];
+
+    const map: Record<string, number> = {};
+    for (const row of rows) {
+      if (map[row.channel_id] === undefined) map[row.channel_id] = Number(row.value);
+    }
+    return map;
+  }
+
   async getValue24hAgoMap(): Promise<Record<string, number>> {
     return this.valueAgoMap(24);
   }
 
+  async getValue24hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>> {
+    return this.loadValueAgoMapForChannels(24, channelIds);
+  }
+
   async getValue1hAgoMap(): Promise<Record<string, number>> {
     return this.valueAgoMap(1);
+  }
+
+  async getValue1hAgoMapForChannels(channelIds: string[]): Promise<Record<string, number>> {
+    return this.loadValueAgoMapForChannels(1, channelIds);
   }
 }
 // 3. SQLite 쿠폰 레포지토리

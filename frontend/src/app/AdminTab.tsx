@@ -176,6 +176,14 @@ export const AdminTab: React.FC = () => {
 
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
+  const [missingProfileStreamers, setMissingProfileStreamers] = useState<any[]>([]);
+  const [missingProfileSummary, setMissingProfileSummary] = useState({
+    count: 0,
+    total_cards: 0,
+    total_affected_users: 0
+  });
+  const [missingProfileLoading, setMissingProfileLoading] = useState(false);
+  const [deletingMissingProfiles, setDeletingMissingProfiles] = useState(false);
 
   // 서비스 점검 설정 상태
   const [mStartAt, setMStartAt] = useState('');
@@ -207,7 +215,10 @@ export const AdminTab: React.FC = () => {
       fetchReports();
       fetchBannedUsers(1, bannedSearch, bannedSortBy, bannedSortOrder);
     }
-    if (subTab === 'streamers') fetchCouponStreamers(true);
+    if (subTab === 'streamers') {
+      fetchCouponStreamers(true);
+      fetchMissingProfileStreamers();
+    }
     if (subTab === 'shop') {
       fetchShopItems();
       fetchFreeDrawInterval();
@@ -277,6 +288,21 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setCouponStreamers(await res.json());
     } catch { /* noop */ }
   };
+  async function fetchMissingProfileStreamers() {
+    setMissingProfileLoading(true);
+    try {
+      const res = await apiFetch('/admin/streamers/missing-profile-images');
+      if (res.ok) {
+        const data = await res.json();
+        setMissingProfileStreamers(data.streamers || []);
+        setMissingProfileSummary({
+          count: data.count || 0,
+          total_cards: data.total_cards || 0,
+          total_affected_users: data.total_affected_users || 0
+        });
+      }
+    } catch { /* noop */ } finally { setMissingProfileLoading(false); }
+  }
   // 카드 보상 쿠폰 목록 표시용 채널ID→이름 매핑
   const streamerName = (channelId: string) =>
     couponStreamers.find((s) => s.channel_id === channelId)?.name || channelId;
@@ -1074,6 +1100,39 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러', 'error');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleDeleteMissingProfileStreamers = async () => {
+    if (missingProfileStreamers.length === 0) {
+      toast('프로필 이미지가 설정되지 않은 스트리머가 없습니다.', 'info');
+      return;
+    }
+    const confirmation = window.prompt('프로필 이미지가 없는 스트리머 카드를 모두 삭제하고 보상 지급을 진행하려면 DELETE_MISSING_PROFILE_IMAGES 를 입력하세요.');
+    if (confirmation !== 'DELETE_MISSING_PROFILE_IMAGES') {
+      toast('확인 값이 일치하지 않아 취소했습니다.', 'warning');
+      return;
+    }
+
+    setDeletingMissingProfiles(true);
+    try {
+      const res = await apiFetch('/admin/streamers/missing-profile-images/delete', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(data.message || '프로필 이미지 미설정 스트리머를 삭제했습니다.', 'success');
+        fetchCouponStreamers(true);
+        fetchMissingProfileStreamers();
+        fetchStats();
+      } else {
+        toast(data.message || '일괄 삭제 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setDeletingMissingProfiles(false);
     }
   };
 
@@ -2081,6 +2140,70 @@ export const AdminTab: React.FC = () => {
                   >다음</button>
                 </div>
               )}
+            </div>
+
+            {/* 프로필 이미지 미설정 스트리머 정리 */}
+            <div className="rounded-2xl border border-amber-500/30 bg-card p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-bold flex items-center gap-1.5 text-amber-500">
+                    <AlertTriangle className="h-4 w-4" /> 프로필 이미지 미설정 스트리머
+                  </h3>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    치지직 프로필 이미지가 없는 스트리머는 신규 등록이 차단됩니다. 기존 등록분은 보유자에게 추가 무료 소환 티켓 1장씩 지급한 뒤 한 번에 삭제할 수 있습니다.
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    onClick={fetchMissingProfileStreamers}
+                    disabled={missingProfileLoading || deletingMissingProfiles}
+                    className="rounded-lg bg-secondary px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    {missingProfileLoading ? '조회 중...' : '새로고침'}
+                  </button>
+                  <button
+                    onClick={handleDeleteMissingProfileStreamers}
+                    disabled={deletingMissingProfiles || missingProfileLoading || missingProfileStreamers.length === 0}
+                    className="rounded-lg bg-red-500 px-3 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {deletingMissingProfiles ? '삭제 중...' : '전체 삭제·보상'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg bg-secondary/40 px-3 py-2">
+                  <p className="text-[10px] font-bold text-muted-foreground">대상 스트리머</p>
+                  <p className="text-sm font-black">{missingProfileSummary.count.toLocaleString()}명</p>
+                </div>
+                <div className="rounded-lg bg-secondary/40 px-3 py-2">
+                  <p className="text-[10px] font-bold text-muted-foreground">삭제될 카드</p>
+                  <p className="text-sm font-black">{missingProfileSummary.total_cards.toLocaleString()}장</p>
+                </div>
+                <div className="rounded-lg bg-secondary/40 px-3 py-2">
+                  <p className="text-[10px] font-bold text-muted-foreground">보상 대상</p>
+                  <p className="text-sm font-black">{missingProfileSummary.total_affected_users.toLocaleString()}건</p>
+                </div>
+              </div>
+
+              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                {missingProfileStreamers.length === 0 ? (
+                  <p className="py-5 text-center text-xs text-muted-foreground">
+                    {missingProfileLoading ? '조회 중입니다.' : '프로필 이미지가 설정되지 않은 스트리머가 없습니다.'}
+                  </p>
+                ) : missingProfileStreamers.map((s) => (
+                  <div key={s.channel_id} className="flex items-center justify-between gap-3 rounded-lg bg-secondary/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-bold">{s.name}</p>
+                      <p className="truncate text-[10px] text-muted-foreground">{s.channel_id}</p>
+                    </div>
+                    <div className="shrink-0 text-right text-[10px] font-bold text-muted-foreground">
+                      <p>카드 {(s.card_count || 0).toLocaleString()}장</p>
+                      <p>보상 {(s.affected_users || 0).toLocaleString()}건</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* 수동 채널 ID 직접 제어 (보조) */}
