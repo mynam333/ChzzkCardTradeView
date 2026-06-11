@@ -113,6 +113,8 @@ export const respondToFriendRequest = async (req: AuthenticatedRequest, res: Res
     const responderName = user.username;
     if (accept) {
       await notifyUser(request.requester_id, '친구 신청 수락', `${responderName}님이 친구 신청을 수락했습니다. 이제 1:1 톡을 사용할 수 있습니다.`, 'friends');
+    } else {
+      await notifyUser(request.requester_id, '친구 신청 거절', `${responderName}님이 친구 신청을 거절했습니다.`, 'friends');
     }
     return res.status(200).json({ ok: true, accepted: accept, room });
   } catch (err: any) {
@@ -208,7 +210,9 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
   const roomId = Number(req.params.room_id);
   try {
     markChatRoomViewing(roomId, user.id);
-    const messages = await listMessages(roomId, user.id);
+    const beforeId = req.query.before_id ? Number(req.query.before_id) : null;
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const messages = await listMessages(roomId, user.id, { beforeId, limit });
     return res.status(200).json(messages);
   } catch (err: any) {
     return jsonError(res, 404, '채팅방을 찾을 수 없습니다.', err.message);

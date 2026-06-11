@@ -266,8 +266,9 @@ export const respondFriendRequest = async (requestId: number, userId: string, ac
     db.prepare("UPDATE friend_requests SET status = ?, responded_at = datetime('now') WHERE id = ?").run(status, requestId);
     if (accept) db.prepare("INSERT OR IGNORE INTO friendships (user_a_id, user_b_id, created_at) VALUES (?, ?, datetime('now'))").run(userA, userB);
   }
-  const room = accept ? await getOrCreateChatRoom(request.requester_id, request.receiver_id, false) : null;
-  return { request, room };
+  // 채팅방은 친구 수락 시점이 아니라 첫 메시지를 보낼 때 생성합니다.
+  // 대화창을 잠깐 열어본 것만으로 빈 방이 목록에 남지 않게 하기 위함입니다.
+  return { request, room: null };
 };
 
 export const cancelFriendRequest = async (requestId: number, userId: string) => {
@@ -333,7 +334,7 @@ export const removeFriend = async (userId: string, friendId: string) => {
 
 export const getRoomByUsers = async (a: string, b: string): Promise<ChatRoomRow | null> => {
   const [userA, userB] = pair(a, b);
-  const rooms = await listChatRooms(a);
+  const rooms = await listChatRooms(a, { includeEmpty: true });
   return rooms.find((room) => room.user_a_id === userA && room.user_b_id === userB) || null;
 };
 
@@ -354,10 +355,14 @@ const roomSelectSql = (viewerId: string) => `
     LEFT JOIN chat_messages lm ON lm.id = (SELECT id FROM chat_messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1)
 `;
 
-export const listChatRooms = async (userId: string): Promise<ChatRoomRow[]> => {
+export const listChatRooms = async (userId: string, options: { includeEmpty?: boolean } = {}): Promise<ChatRoomRow[]> => {
   const mode = getDbMode();
+  const emptyRoomCondition = options.includeEmpty
+    ? ''
+    : 'AND (lm.id IS NOT NULL OR cr.is_admin_room = 1 OR cr.closed_at IS NOT NULL)';
   const sql = `${roomSelectSql(userId)}
    WHERE ((cr.user_a_id = ? AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? AND cr.deleted_for_b = 0))
+     ${emptyRoomCondition}
    ORDER BY cr.updated_at DESC, cr.id DESC`;
   if (mode === 'MYSQL') return (await getMysqlDb().all<any>(sql, userId, userId, userId, userId, userId)).map(mapRoom);
   if (mode === 'SUPABASE') return [];
@@ -399,7 +404,7 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
         .run(isAdminRoom ? 1 : 0, existing.id);
     }
   }
-  const room = (await listChatRooms(a)).find((r) => r.user_a_id === userA && r.user_b_id === userB);
+  const room = (await listChatRooms(a, { includeEmpty: true })).find((r) => r.user_a_id === userA && r.user_b_id === userB);
   if (!room) throw new Error('RoomCreateFailed');
   return room;
 };
@@ -429,25 +434,44 @@ export const hideClosedChatRoom = async (roomId: number, userId: string) => {
 };
 
 export const getRoomForUser = async (roomId: number, userId: string): Promise<ChatRoomRow | null> => {
-  return (await listChatRooms(userId)).find((room) => room.id === roomId) || null;
+  return (await listChatRooms(userId, { includeEmpty: true })).find((room) => room.id === roomId) || null;
 };
 
-export const listMessages = async (roomId: number, userId: string): Promise<ChatMessageRow[]> => {
+export const listMessages = async (
+  roomId: number,
+  userId: string,
+  options: { beforeId?: number | null; limit?: number } = {}
+): Promise<ChatMessageRow[]> => {
   const room = await getRoomForUser(roomId, userId);
   if (!room) throw new Error('RoomNotFound');
+  const limit = Math.min(Math.max(Math.floor(Number(options.limit || 50)), 1), 100);
+  const beforeId = options.beforeId && Number.isFinite(options.beforeId) ? Math.floor(Number(options.beforeId)) : null;
   const mode = getDbMode();
   if (mode === 'MYSQL') {
     await getMysqlDb().run('UPDATE chat_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL', roomId, userId);
-    return (await getMysqlDb().all<any>('SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id ASC LIMIT 300', roomId)).map(mapMessage);
+    const rows = beforeId
+      ? await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, beforeId, limit)
+      : await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, limit);
+    return rows.map(mapMessage);
   }
   if (mode === 'SUPABASE') {
     await getSupabaseClient().from('chat_messages').update({ read_at: new Date().toISOString() }).eq('room_id', roomId).neq('sender_id', userId).is('read_at', null);
-    const { data } = await getSupabaseClient().from('chat_messages').select('*').eq('room_id', roomId).order('id', { ascending: true }).limit(300);
-    return (data || []).map(mapMessage);
+    let query = getSupabaseClient()
+      .from('chat_messages')
+      .select('*')
+      .eq('room_id', roomId)
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (beforeId) query = query.lt('id', beforeId);
+    const { data } = await query;
+    return (data || []).reverse().map(mapMessage);
   }
   const db = getSqliteDb();
   db.prepare("UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL").run(roomId, userId);
-  return (db.prepare('SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id ASC LIMIT 300').all(roomId) as any[]).map(mapMessage);
+  const rows = beforeId
+    ? db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, beforeId, limit)
+    : db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, limit);
+  return (rows as any[]).map(mapMessage);
 };
 
 export const sendChatMessage = async (roomId: number, senderId: string, body: string, markReadForReceiver: boolean): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
