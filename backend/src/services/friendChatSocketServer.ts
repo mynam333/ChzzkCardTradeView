@@ -7,8 +7,12 @@ import { sendPushToUser } from '../controllers/pushController';
 import { userRepository } from '../repositories';
 import { SESSION_COOKIE_NAMES } from './sessionCookie';
 import {
+  getOrCreateChatRoom,
+  getChatMessageForRoom,
   getRoomForUser,
+  listFriends,
   listMessages,
+  registerChatMessageUpdateNotifier,
   sendChatMessage,
   type ChatMessageRow,
   type ChatRoomRow
@@ -30,6 +34,8 @@ type ChatSocket = WebSocket & {
 type ClientMessage =
   | { type: 'join'; room_id: number }
   | { type: 'leave'; room_id?: number }
+  | { type: 'announce'; room_id: number; message_id: number }
+  | { type: 'open_send'; user_id: string; body: string }
   | { type: 'read'; room_id: number }
   | { type: 'send'; room_id: number; body: string }
   | { type: 'ping' };
@@ -60,6 +66,21 @@ const broadcastRoom = (roomId: number, payload: unknown) => {
   if (!clients) return;
   for (const client of clients) sendJson(client, payload);
 };
+
+const sendUser = (userId: string, payload: unknown) => {
+  const clients = clientsByUser.get(userId);
+  if (!clients) return;
+  for (const client of clients) sendJson(client, payload);
+};
+
+const sendRoomState = async (userId: string, roomId: number) => {
+  const room = await getRoomForUser(roomId, userId);
+  if (room) sendUser(userId, { type: 'room_state', room });
+};
+
+registerChatMessageUpdateNotifier((roomId, message) => {
+  broadcastRoom(roomId, { type: 'message_updated', room_id: roomId, message });
+});
 
 const addClient = (socket: ChatSocket, userId: string) => {
   const set = clientsByUser.get(userId) || new Set<ChatSocket>();
@@ -126,15 +147,20 @@ const joinRoom = async (socket: ChatSocket, roomId: number) => {
   const messages = await listMessages(roomId, socket.user.id);
   sendJson(socket, { type: 'joined', room, messages });
   broadcastRoom(roomId, { type: 'read', room_id: roomId, reader_id: socket.user.id });
+  await Promise.all([
+    sendRoomState(room.user_a_id, roomId),
+    sendRoomState(room.user_b_id, roomId)
+  ]);
 };
 
 const notifyIfNeeded = async (
   receiverId: string,
   senderName: string,
   body: string,
-  receiverViewing: boolean
+  receiverViewing: boolean,
+  receiverMuted: boolean
 ) => {
-  if (receiverViewing) return;
+  if (receiverViewing || receiverMuted) return;
   const preview = body.length > 80 ? `${body.slice(0, 80)}...` : body;
   await createRealtimeNotification({
     user_id: receiverId,
@@ -157,9 +183,10 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
   const receiverInWorkerRoom = Array.from(clientsByRoom.get(roomId) || [])
     .some((client) => client.user?.id === receiverId && client.readyState === WebSocket.OPEN);
   const receiverViewing = receiverInWorkerRoom || isChatRoomViewing(roomId, receiverId);
+  const receiverMuted = room.user_a_id === receiverId ? room.muted_for_a : room.muted_for_b;
 
   const result = await sendChatMessage(roomId, socket.user.id, text, receiverViewing);
-  await notifyIfNeeded(result.receiverId, socket.user.username, text, receiverViewing);
+  await notifyIfNeeded(result.receiverId, socket.user.username, text, receiverViewing, receiverMuted);
 
   const payload = { type: 'message', room_id: roomId, message: result.message };
   const delivered = new Set<ChatSocket>();
@@ -173,15 +200,70 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
   receiverClients?.forEach((client) => {
     if (!delivered.has(client)) sendJson(client, payload);
   });
+  await Promise.all([
+    sendRoomState(socket.user.id, roomId),
+    sendRoomState(receiverId, roomId)
+  ]);
+};
+
+const broadcastMessage = async (socket: ChatSocket, roomId: number, message: ChatMessageRow, receiverId: string) => {
+  if (!socket.user) throw new Error('Unauthorized');
+  const payload = { type: 'message', room_id: roomId, message };
+  const delivered = new Set<ChatSocket>();
+  sendJson(socket, payload);
+  delivered.add(socket);
+  for (const client of clientsByRoom.get(roomId) || []) {
+    sendJson(client, payload);
+    delivered.add(client);
+  }
+  const receiverClients = clientsByUser.get(receiverId);
+  receiverClients?.forEach((client) => {
+    if (!delivered.has(client)) sendJson(client, payload);
+  });
+  await Promise.all([
+    sendRoomState(socket.user.id, roomId),
+    sendRoomState(receiverId, roomId)
+  ]);
+};
+
+const handleAnnounce = async (socket: ChatSocket, roomId: number, messageId: number) => {
+  if (!socket.user) throw new Error('Unauthorized');
+  const room = await assertRoomAccess(socket, roomId);
+  const message = await getChatMessageForRoom(roomId, messageId, socket.user.id);
+  if (!message || message.sender_id !== socket.user.id) throw new Error('MessageNotFound');
+  const receiverId = room.user_a_id === socket.user.id ? room.user_b_id : room.user_a_id;
+  await broadcastMessage(socket, roomId, message, receiverId);
+};
+
+const handleOpenAndSend = async (socket: ChatSocket, targetUserId: string, body: string) => {
+  if (!socket.user) throw new Error('Unauthorized');
+  const targetId = String(targetUserId || '').trim();
+  if (!targetId || targetId === socket.user.id) throw new Error('InvalidTarget');
+  const text = String(body || '').trim();
+  if (!text || text.length > 1000) throw new Error('InvalidMessage');
+
+  const isAdminOpen = socket.user.role === 'ADMIN';
+  if (!isAdminOpen) {
+    const friends = await listFriends(socket.user.id);
+    if (!friends.some((friend) => friend.id === targetId)) throw new Error('FriendsOnly');
+  }
+
+  const room = await getOrCreateChatRoom(socket.user.id, targetId, isAdminOpen);
+  await joinRoom(socket, room.id);
+  await handleSend(socket, room.id, text);
 };
 
 const handleRead = async (socket: ChatSocket, roomId: number) => {
   if (!socket.user) throw new Error('Unauthorized');
-  await assertRoomAccess(socket, roomId);
+  const room = await assertRoomAccess(socket, roomId);
   markChatRoomViewing(roomId, socket.user.id);
   const messages = await listMessages(roomId, socket.user.id);
   sendJson(socket, { type: 'messages', room_id: roomId, messages });
   broadcastRoom(roomId, { type: 'read', room_id: roomId, reader_id: socket.user.id });
+  await Promise.all([
+    sendRoomState(room.user_a_id, roomId),
+    sendRoomState(room.user_b_id, roomId)
+  ]);
 };
 
 const handleClientMessage = async (socket: ChatSocket, raw: WebSocket.RawData) => {
@@ -207,6 +289,14 @@ const handleClientMessage = async (socket: ChatSocket, raw: WebSocket.RawData) =
   }
   if (message.type === 'read') {
     await handleRead(socket, Number(message.room_id));
+    return;
+  }
+  if (message.type === 'announce') {
+    await handleAnnounce(socket, Number(message.room_id), Number(message.message_id));
+    return;
+  }
+  if (message.type === 'open_send') {
+    await handleOpenAndSend(socket, message.user_id, message.body);
     return;
   }
   if (message.type === 'send') {

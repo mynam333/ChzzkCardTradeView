@@ -227,6 +227,23 @@ const ensureMysqlColumn = async (db: MysqlDb, table: string, column: string, ddl
   await db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 };
 
+const ensureMysqlIndex = async (db: MysqlDb, table: string, indexName: string, ddl: string) => {
+  const existing = await db.get<{ present: number }>(
+    `SELECT 1 AS present
+       FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
+      LIMIT 1`,
+    table,
+    indexName
+  );
+  if (existing) return;
+
+  console.log(`[DB Migration] MySQL ${table}.${indexName} 인덱스가 없어 추가합니다.`);
+  await db.run(`ALTER TABLE ${table} ADD INDEX ${indexName} ${ddl}`);
+};
+
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
   await db.run(`
@@ -291,6 +308,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       deleted_for_b TINYINT NOT NULL DEFAULT 0,
       hidden_after_a DATETIME NULL,
       hidden_after_b DATETIME NULL,
+      muted_for_a TINYINT NOT NULL DEFAULT 0,
+      muted_for_b TINYINT NOT NULL DEFAULT 0,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY idx_chat_rooms_pair_unique (user_a_id, user_b_id),
@@ -300,16 +319,51 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   `);
   await ensureMysqlColumn(db, 'chat_rooms', 'hidden_after_a', 'hidden_after_a DATETIME NULL AFTER deleted_for_b');
   await ensureMysqlColumn(db, 'chat_rooms', 'hidden_after_b', 'hidden_after_b DATETIME NULL AFTER hidden_after_a');
+  await ensureMysqlColumn(db, 'chat_rooms', 'muted_for_a', 'muted_for_a TINYINT NOT NULL DEFAULT 0 AFTER hidden_after_b');
+  await ensureMysqlColumn(db, 'chat_rooms', 'muted_for_b', 'muted_for_b TINYINT NOT NULL DEFAULT 0 AFTER muted_for_a');
   await db.run(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       room_id BIGINT NOT NULL,
       sender_id VARCHAR(191) NOT NULL,
       body TEXT NOT NULL,
+      message_type VARCHAR(16) NOT NULL DEFAULT 'text',
+      attachment_url VARCHAR(512) NULL,
+      attachment_mime VARCHAR(64) NULL,
+      attachment_size_bytes BIGINT NULL,
+      attachment_width INT NULL,
+      attachment_height INT NULL,
+      attachment_expires_at DATETIME NULL,
+      attachment_deleted_at DATETIME NULL,
+      link_preview_json JSON NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       read_at DATETIME NULL,
       INDEX idx_chat_messages_room (room_id, id),
-      INDEX idx_chat_messages_unread (room_id, sender_id, read_at)
+      INDEX idx_chat_messages_unread (room_id, sender_id, read_at),
+      INDEX idx_chat_messages_attachment_expiry (message_type, attachment_expires_at, attachment_deleted_at),
+      INDEX idx_chat_messages_sender_attachments (sender_id, message_type, attachment_deleted_at, attachment_expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await ensureMysqlColumn(db, 'chat_messages', 'message_type', "message_type VARCHAR(16) NOT NULL DEFAULT 'text' AFTER body");
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_url', 'attachment_url VARCHAR(512) NULL AFTER message_type');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_mime', 'attachment_mime VARCHAR(64) NULL AFTER attachment_url');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_size_bytes', 'attachment_size_bytes BIGINT NULL AFTER attachment_mime');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_width', 'attachment_width INT NULL AFTER attachment_size_bytes');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_height', 'attachment_height INT NULL AFTER attachment_width');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_expires_at', 'attachment_expires_at DATETIME NULL AFTER attachment_height');
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_deleted_at', 'attachment_deleted_at DATETIME NULL AFTER attachment_expires_at');
+  await ensureMysqlColumn(db, 'chat_messages', 'link_preview_json', 'link_preview_json JSON NULL AFTER attachment_deleted_at');
+  await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_attachment_expiry', '(message_type, attachment_expires_at, attachment_deleted_at)');
+  await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_sender_attachments', '(sender_id, message_type, attachment_deleted_at, attachment_expires_at)');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS link_previews (
+      url_hash CHAR(64) PRIMARY KEY,
+      normalized_url TEXT NOT NULL,
+      preview_json JSON NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'success',
+      fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      INDEX idx_link_previews_expires (expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
   await db.run(`
@@ -586,6 +640,45 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN hidden_after_a TEXT;");
         sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN hidden_after_b TEXT;");
       }
+      try {
+        sqliteDb.prepare("SELECT muted_for_a FROM chat_rooms LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] chat_rooms 테이블에 사용자별 알림 끄기 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN muted_for_a INTEGER NOT NULL DEFAULT 0;");
+        sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN muted_for_b INTEGER NOT NULL DEFAULT 0;");
+      }
+      try {
+        sqliteDb.prepare("SELECT message_type FROM chat_messages LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] chat_messages 테이블에 이미지 첨부 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text';");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_url TEXT;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_mime TEXT;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_size_bytes INTEGER;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_width INTEGER;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_height INTEGER;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_expires_at TEXT;");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_deleted_at TEXT;");
+      }
+      try {
+        sqliteDb.prepare("SELECT link_preview_json FROM chat_messages LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] chat_messages 테이블에 링크 프리뷰 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN link_preview_json TEXT;");
+      }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_expiry ON chat_messages(message_type, attachment_expires_at, attachment_deleted_at);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_attachments ON chat_messages(sender_id, message_type, attachment_deleted_at, attachment_expires_at);");
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS link_previews (
+          url_hash TEXT PRIMARY KEY,
+          normalized_url TEXT NOT NULL,
+          preview_json TEXT,
+          status TEXT NOT NULL DEFAULT 'success',
+          fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT NOT NULL
+        );
+      `);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_link_previews_expires ON link_previews(expires_at);");
       try {
         sqliteDb.prepare("SELECT star FROM user_cards LIMIT 1").get();
       } catch (e) {

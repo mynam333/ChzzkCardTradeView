@@ -130,6 +130,7 @@ import {
 import {
   clearRoomViewing,
   closeChatRoom,
+  createChatImageMessage,
   createChatMessage,
   cancelOutgoingFriendRequest,
   deleteClosedChatRoom,
@@ -141,7 +142,8 @@ import {
   openChatRoom,
   respondToFriendRequest,
   searchFriendCandidates,
-  sendFriendRequest
+  sendFriendRequest,
+  setChatRoomMute
 } from '../controllers/friendController';
 import {
   getShopItems,
@@ -177,6 +179,7 @@ const couponLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'coupon' });
 const authLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'auth' });
 const registerLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'register' });
 const reportLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'report' });
+const chatImageLimiter = rateLimit({ windowMs: 60_000, max: 12, key: 'chat-image' });
 
 // Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한 + 이미지 MIME 사전 필터)
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -197,6 +200,27 @@ const uploadSingleImage = (req: any, res: any, next: any) => {
       const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
         ? '이미지 용량은 5MB 이하만 업로드할 수 있습니다.'
         : (err.message || '파일 업로드 중 오류가 발생했습니다.');
+      return res.status(400).json({ error: 'BadRequest', message: msg });
+    }
+    next();
+  });
+};
+
+const chatImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
+    else cb(new Error('이미지 파일(JPEG/PNG/WebP/GIF/AVIF)만 첨부할 수 있습니다.'));
+  }
+});
+
+const uploadChatImage = (req: any, res: any, next: any) => {
+  chatImageUpload.single('image')(req, res, (err: any) => {
+    if (err) {
+      const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
+        ? '채팅 이미지는 12MB 이하만 첨부할 수 있습니다.'
+        : (err.message || '이미지 첨부 중 오류가 발생했습니다.');
       return res.status(400).json({ error: 'BadRequest', message: msg });
     }
     next();
@@ -302,9 +326,11 @@ router.delete('/friends/:user_id', authMiddleware, banCheckMiddleware, deleteFri
 router.get('/friends/rooms', authMiddleware, banCheckMiddleware, getChatRooms);
 router.post('/friends/rooms/open', authMiddleware, banCheckMiddleware, openChatRoom);
 router.post('/friends/rooms/:room_id/close', authMiddleware, adminMiddleware, closeChatRoom);
+router.post('/friends/rooms/:room_id/mute', authMiddleware, banCheckMiddleware, setChatRoomMute);
 router.delete('/friends/rooms/:room_id', authMiddleware, banCheckMiddleware, deleteClosedChatRoom);
 router.get('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, getChatMessages);
 router.post('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, createChatMessage);
+router.post('/friends/rooms/:room_id/attachments', authMiddleware, banCheckMiddleware, chatImageLimiter, uploadChatImage, createChatImageMessage);
 router.post('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, markRoomViewing);
 router.delete('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, clearRoomViewing);
 

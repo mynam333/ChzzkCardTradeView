@@ -339,6 +339,8 @@ CREATE TABLE IF NOT EXISTS chat_rooms (
     deleted_for_b INTEGER NOT NULL DEFAULT 0,
     hidden_after_a TEXT,
     hidden_after_b TEXT,
+    muted_for_a INTEGER NOT NULL DEFAULT 0,
+    muted_for_b INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE(user_a_id, user_b_id),
@@ -354,6 +356,15 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     room_id INTEGER NOT NULL,
     sender_id TEXT NOT NULL,
     body TEXT NOT NULL,
+    message_type TEXT NOT NULL DEFAULT 'text',
+    attachment_url TEXT,
+    attachment_mime TEXT,
+    attachment_size_bytes INTEGER,
+    attachment_width INTEGER,
+    attachment_height INTEGER,
+    attachment_expires_at TEXT,
+    attachment_deleted_at TEXT,
+    link_preview_json TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     read_at TEXT,
     FOREIGN KEY(room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
@@ -361,6 +372,18 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_room ON chat_messages(room_id, id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_expiry ON chat_messages(message_type, attachment_expires_at, attachment_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_attachments ON chat_messages(sender_id, message_type, attachment_deleted_at, attachment_expires_at);
+
+CREATE TABLE IF NOT EXISTS link_previews (
+    url_hash TEXT PRIMARY KEY,
+    normalized_url TEXT NOT NULL,
+    preview_json TEXT,
+    status TEXT NOT NULL DEFAULT 'success',
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_link_previews_expires ON link_previews(expires_at);
 
 -- 15. 시스템 설정 테이블
 CREATE TABLE IF NOT EXISTS system_configs (

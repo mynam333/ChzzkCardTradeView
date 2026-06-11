@@ -343,6 +343,8 @@ CREATE TABLE IF NOT EXISTS chat_rooms (
     deleted_for_b TINYINT DEFAULT 0,
     hidden_after_a VARCHAR(64),
     hidden_after_b VARCHAR(64),
+    muted_for_a TINYINT DEFAULT 0,
+    muted_for_b TINYINT DEFAULT 0,
     created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     updated_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     UNIQUE KEY idx_chat_rooms_pair (user_a_id, user_b_id),
@@ -359,13 +361,34 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     room_id BIGINT NOT NULL,
     sender_id VARCHAR(191) NOT NULL,
     body TEXT NOT NULL,
+    message_type VARCHAR(16) NOT NULL DEFAULT 'text',
+    attachment_url VARCHAR(512),
+    attachment_mime VARCHAR(64),
+    attachment_size_bytes BIGINT,
+    attachment_width INT,
+    attachment_height INT,
+    attachment_expires_at DATETIME,
+    attachment_deleted_at DATETIME,
+    link_preview_json JSON,
     read_at VARCHAR(64),
     created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     KEY idx_chat_messages_room_id (room_id, id),
     KEY idx_chat_messages_unread (room_id, sender_id, read_at),
+    KEY idx_chat_messages_attachment_expiry (message_type, attachment_expires_at, attachment_deleted_at),
+    KEY idx_chat_messages_sender_attachments (sender_id, message_type, attachment_deleted_at, attachment_expires_at),
     KEY idx_chat_messages_sender (sender_id),
     CONSTRAINT fk_chat_messages_room FOREIGN KEY(room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
     CONSTRAINT fk_chat_messages_sender FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS link_previews (
+    url_hash CHAR(64) PRIMARY KEY,
+    normalized_url TEXT NOT NULL,
+    preview_json JSON,
+    status VARCHAR(16) NOT NULL DEFAULT 'success',
+    fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    KEY idx_link_previews_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS system_configs (

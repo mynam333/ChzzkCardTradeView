@@ -1,4 +1,6 @@
+import { deleteLocalUploadByUrl, formatUploadUrl } from './imageService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { extractFirstUrl, getLinkPreviewForText, type ChatLinkPreview } from './linkPreviewService';
 
 export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'canceled';
 
@@ -31,6 +33,9 @@ export type ChatRoomRow = {
   deleted_for_b: boolean;
   hidden_after_a?: string | null;
   hidden_after_b?: string | null;
+  muted_for_a: boolean;
+  muted_for_b: boolean;
+  is_muted: boolean;
   created_at: string;
   updated_at: string;
   other_user: ChatUserSummary;
@@ -44,8 +49,27 @@ export type ChatMessageRow = {
   room_id: number;
   sender_id: string;
   body: string;
+  message_type: 'text' | 'image';
+  attachment_url?: string | null;
+  attachment_mime?: string | null;
+  attachment_size_bytes?: number | null;
+  attachment_width?: number | null;
+  attachment_height?: number | null;
+  attachment_expires_at?: string | null;
+  attachment_deleted_at?: string | null;
+  attachment_expired?: boolean;
+  link_preview?: ChatLinkPreview | null;
   created_at: string;
   read_at?: string | null;
+};
+
+export type ChatAttachmentInput = {
+  url: string;
+  mime: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  expiresAt: Date;
 };
 
 const pair = (a: string, b: string) => a.localeCompare(b) <= 0 ? [a, b] : [b, a];
@@ -69,12 +93,32 @@ const mapUser = (row: any): ChatUserSummary => ({
 });
 
 const mapMessage = (row: any): ChatMessageRow => ({
-  id: Number(row.id),
-  room_id: Number(row.room_id),
-  sender_id: row.sender_id,
-  body: row.body,
-  created_at: normalizeUtcDateTime(row.created_at),
-  read_at: row.read_at ? normalizeUtcDateTime(row.read_at) : null
+  ...(() => {
+    const expiresAt = row.attachment_expires_at ? new Date(normalizeUtcDateTime(row.attachment_expires_at)).getTime() : 0;
+    const expired = Boolean(row.attachment_deleted_at) || Boolean(expiresAt && expiresAt <= Date.now());
+    let linkPreview: ChatLinkPreview | null = null;
+    if (row.link_preview_json) {
+      try { linkPreview = JSON.parse(row.link_preview_json); } catch { linkPreview = null; }
+    }
+    return {
+      id: Number(row.id),
+      room_id: Number(row.room_id),
+      sender_id: row.sender_id,
+      body: row.body,
+      message_type: row.message_type === 'image' ? 'image' : 'text',
+      attachment_url: expired ? null : formatUploadUrl(row.attachment_url),
+      attachment_mime: row.attachment_mime ?? null,
+      attachment_size_bytes: row.attachment_size_bytes == null ? null : Number(row.attachment_size_bytes),
+      attachment_width: row.attachment_width == null ? null : Number(row.attachment_width),
+      attachment_height: row.attachment_height == null ? null : Number(row.attachment_height),
+      attachment_expires_at: row.attachment_expires_at ? normalizeUtcDateTime(row.attachment_expires_at) : null,
+      attachment_deleted_at: row.attachment_deleted_at ? normalizeUtcDateTime(row.attachment_deleted_at) : null,
+      attachment_expired: expired,
+      link_preview: linkPreview,
+      created_at: normalizeUtcDateTime(row.created_at),
+      read_at: row.read_at ? normalizeUtcDateTime(row.read_at) : null
+    };
+  })()
 });
 
 const mapRoom = (row: any): ChatRoomRow => ({
@@ -88,6 +132,9 @@ const mapRoom = (row: any): ChatRoomRow => ({
   deleted_for_b: bool(row.deleted_for_b),
   hidden_after_a: row.hidden_after_a ? normalizeUtcDateTime(row.hidden_after_a) : null,
   hidden_after_b: row.hidden_after_b ? normalizeUtcDateTime(row.hidden_after_b) : null,
+  muted_for_a: bool(row.muted_for_a),
+  muted_for_b: bool(row.muted_for_b),
+  is_muted: bool(row.is_muted),
   created_at: row.created_at,
   updated_at: row.updated_at,
   other_user: mapUser({
@@ -380,12 +427,33 @@ export const removeFriend = async (userId: string, friendId: string) => {
 
 export const getRoomByUsers = async (a: string, b: string): Promise<ChatRoomRow | null> => {
   const [userA, userB] = pair(a, b);
-  const rooms = await listChatRooms(a, { includeEmpty: true });
-  return rooms.find((room) => room.user_a_id === userA && room.user_b_id === userB) || null;
+  const mode = getDbMode();
+  const baseParams = [a, a, a, a, a, a, a, a];
+  if (mode === 'MYSQL') {
+    const row = await getMysqlDb().get<any>(
+      `${roomSelectMysqlSql(a)}
+       WHERE cr.user_a_id = ? COLLATE utf8mb4_unicode_ci
+         AND cr.user_b_id = ? COLLATE utf8mb4_unicode_ci
+         AND ((cr.user_a_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_b = 0))
+       LIMIT 1`,
+      ...baseParams, userA, userB, a, a
+    );
+    return row ? mapRoom(row) : null;
+  }
+  if (mode === 'SUPABASE') return (await listChatRooms(a, { includeEmpty: true })).find((room) => room.user_a_id === userA && room.user_b_id === userB) || null;
+  const row = getSqliteDb().prepare(
+    `${roomSelectSql(a)}
+     WHERE cr.user_a_id = ?
+       AND cr.user_b_id = ?
+       AND ((cr.user_a_id = ? AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? AND cr.deleted_for_b = 0))
+     LIMIT 1`
+  ).get(...baseParams, userA, userB, a, a) as any;
+  return row ? mapRoom(row) : null;
 };
 
 const roomSelectSql = (viewerId: string) => `
   SELECT cr.*,
+         CASE WHEN cr.user_a_id = ? THEN cr.muted_for_a ELSE cr.muted_for_b END AS is_muted,
          CASE WHEN cr.user_a_id = ? THEN cr.user_b_id ELSE cr.user_a_id END AS other_id,
          u.username AS other_username,
          u.avatar_url AS other_avatar_url,
@@ -421,6 +489,7 @@ const roomSelectSql = (viewerId: string) => `
 
 const roomSelectMysqlSql = (viewerId: string) => `
   SELECT cr.*,
+         CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.muted_for_a ELSE cr.muted_for_b END AS is_muted,
          CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.user_b_id ELSE cr.user_a_id END AS other_id,
          u.username AS other_username,
          u.avatar_url AS other_avatar_url,
@@ -470,15 +539,39 @@ export const listChatRooms = async (userId: string, options: { includeEmpty?: bo
    WHERE ((cr.user_a_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_b = 0))
      ${emptyRoomCondition}
    ORDER BY cr.updated_at DESC, cr.id DESC`;
-  const params = [userId, userId, userId, userId, userId, userId, userId, userId, userId];
+  const params = [userId, userId, userId, userId, userId, userId, userId, userId, userId, userId];
   if (mode === 'MYSQL') return (await getMysqlDb().all<any>(mysqlSql, ...params)).map(mapRoom);
   if (mode === 'SUPABASE') return [];
   return (getSqliteDb().prepare(sql).all(...params) as any[]).map(mapRoom);
 };
 
+export const getRoomForUser = async (roomId: number, userId: string): Promise<ChatRoomRow | null> => {
+  const mode = getDbMode();
+  const baseParams = [userId, userId, userId, userId, userId, userId, userId, userId];
+  if (mode === 'MYSQL') {
+    const row = await getMysqlDb().get<any>(
+      `${roomSelectMysqlSql(userId)}
+       WHERE cr.id = ?
+         AND ((cr.user_a_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_b = 0))
+       LIMIT 1`,
+      ...baseParams, roomId, userId, userId
+    );
+    return row ? mapRoom(row) : null;
+  }
+  if (mode === 'SUPABASE') return (await listChatRooms(userId, { includeEmpty: true })).find((room) => room.id === roomId) || null;
+  const row = getSqliteDb().prepare(
+    `${roomSelectSql(userId)}
+     WHERE cr.id = ?
+       AND ((cr.user_a_id = ? AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? AND cr.deleted_for_b = 0))
+     LIMIT 1`
+  ).get(...baseParams, roomId, userId, userId) as any;
+  return row ? mapRoom(row) : null;
+};
+
 export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boolean): Promise<ChatRoomRow> => {
   const [userA, userB] = pair(a, b);
   const mode = getDbMode();
+  let roomId: number | null = null;
   if (mode === 'MYSQL') {
     const db = getMysqlDb();
     let existing = await db.get<any>('SELECT id FROM chat_rooms WHERE user_a_id = ? AND user_b_id = ? LIMIT 1', userA, userB);
@@ -501,6 +594,7 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
         isAdminRoom ? 1 : 0, existing.id
       );
     }
+    roomId = Number(existing.id);
   } else if (mode === 'SUPABASE') {
     let { data } = await getSupabaseClient().from('chat_rooms').select('id').eq('user_a_id', userA).eq('user_b_id', userB).maybeSingle();
     if (!data) {
@@ -516,6 +610,7 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
       if (isAdminRoom) patch.is_admin_room = true;
       await getSupabaseClient().from('chat_rooms').update(patch).eq('id', data.id);
     }
+    roomId = data?.id ? Number(data.id) : null;
   } else {
     const db = getSqliteDb();
     let existing = db.prepare('SELECT id FROM chat_rooms WHERE user_a_id = ? AND user_b_id = ? LIMIT 1').get(userA, userB) as any;
@@ -533,8 +628,9 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
                    WHERE id = ?`)
         .run(isAdminRoom ? 1 : 0, existing.id);
     }
+    roomId = Number(existing.id);
   }
-  const room = (await listChatRooms(a, { includeEmpty: true })).find((r) => r.user_a_id === userA && r.user_b_id === userB);
+  const room = roomId ? await getRoomForUser(roomId, a) : await getRoomByUsers(a, b);
   if (!room) throw new Error('RoomCreateFailed');
   return room;
 };
@@ -554,7 +650,7 @@ export const setChatRoomClosed = async (roomId: number, actorId: string, closed:
 };
 
 export const hideClosedChatRoom = async (roomId: number, userId: string) => {
-  const room = (await listChatRooms(userId)).find((r) => r.id === roomId);
+  const room = await getRoomForUser(roomId, userId);
   if (!room || !room.closed_at) throw new Error('RoomNotClosed');
   const col = room.user_a_id === userId ? 'deleted_for_a' : 'deleted_for_b';
   const hiddenCol = room.user_a_id === userId ? 'hidden_after_a' : 'hidden_after_b';
@@ -564,8 +660,21 @@ export const hideClosedChatRoom = async (roomId: number, userId: string) => {
   else getSqliteDb().prepare(`UPDATE chat_rooms SET ${col} = 1, ${hiddenCol} = datetime('now') WHERE id = ?`).run(roomId);
 };
 
-export const getRoomForUser = async (roomId: number, userId: string): Promise<ChatRoomRow | null> => {
-  return (await listChatRooms(userId, { includeEmpty: true })).find((room) => room.id === roomId) || null;
+export const setChatRoomMuted = async (roomId: number, userId: string, muted: boolean): Promise<ChatRoomRow> => {
+  const room = await getRoomForUser(roomId, userId);
+  if (!room) throw new Error('RoomNotFound');
+  const col = room.user_a_id === userId ? 'muted_for_a' : 'muted_for_b';
+  const mode = getDbMode();
+  if (mode === 'MYSQL') {
+    await getMysqlDb().run(`UPDATE chat_rooms SET ${col} = ? WHERE id = ?`, muted ? 1 : 0, roomId);
+  } else if (mode === 'SUPABASE') {
+    await getSupabaseClient().from('chat_rooms').update({ [col]: muted }).eq('id', roomId);
+  } else {
+    getSqliteDb().prepare(`UPDATE chat_rooms SET ${col} = ? WHERE id = ?`).run(muted ? 1 : 0, roomId);
+  }
+  const updated = await getRoomForUser(roomId, userId);
+  if (!updated) throw new Error('RoomNotFound');
+  return updated;
 };
 
 export const listMessages = async (
@@ -618,6 +727,66 @@ export const listMessages = async (
   return (rows as any[]).map(mapMessage);
 };
 
+type ChatMessageUpdateNotifier = (roomId: number, message: ChatMessageRow) => void | Promise<void>;
+const chatMessageUpdateNotifiers = new Set<ChatMessageUpdateNotifier>();
+const linkPreviewQueue: Array<{ roomId: number; messageId: number; body: string }> = [];
+const queuedLinkPreviewMessageIds = new Set<number>();
+let activeLinkPreviewJobs = 0;
+const LINK_PREVIEW_CONCURRENCY = 2;
+
+export const registerChatMessageUpdateNotifier = (notifier: ChatMessageUpdateNotifier) => {
+  chatMessageUpdateNotifiers.add(notifier);
+  return () => chatMessageUpdateNotifiers.delete(notifier);
+};
+
+const notifyChatMessageUpdated = async (roomId: number, message: ChatMessageRow) => {
+  await Promise.all(Array.from(chatMessageUpdateNotifiers).map((notifier) => Promise.resolve(notifier(roomId, message)).catch(() => { /* noop */ })));
+};
+
+const updateMessageLinkPreview = async (messageId: number, preview: ChatLinkPreview | null): Promise<ChatMessageRow | null> => {
+  if (!preview) return null;
+  const previewJson = JSON.stringify(preview);
+  const mode = getDbMode();
+  let row: any;
+  if (mode === 'MYSQL') {
+    await getMysqlDb().run('UPDATE chat_messages SET link_preview_json = ? WHERE id = ? AND link_preview_json IS NULL', previewJson, messageId);
+    row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ? LIMIT 1', messageId);
+  } else if (mode === 'SUPABASE') {
+    await getSupabaseClient().from('chat_messages').update({ link_preview_json: previewJson }).eq('id', messageId).is('link_preview_json', null);
+    const { data } = await getSupabaseClient().from('chat_messages').select('*').eq('id', messageId).maybeSingle();
+    row = data;
+  } else {
+    getSqliteDb().prepare('UPDATE chat_messages SET link_preview_json = ? WHERE id = ? AND link_preview_json IS NULL').run(previewJson, messageId);
+    row = getSqliteDb().prepare('SELECT * FROM chat_messages WHERE id = ? LIMIT 1').get(messageId);
+  }
+  return row ? mapMessage(row) : null;
+};
+
+const drainLinkPreviewQueue = () => {
+  while (activeLinkPreviewJobs < LINK_PREVIEW_CONCURRENCY && linkPreviewQueue.length > 0) {
+    const job = linkPreviewQueue.shift()!;
+    activeLinkPreviewJobs += 1;
+    queuedLinkPreviewMessageIds.delete(job.messageId);
+    getLinkPreviewForText(job.body)
+      .then((preview) => updateMessageLinkPreview(job.messageId, preview))
+      .then((message) => {
+        if (message?.link_preview) return notifyChatMessageUpdated(job.roomId, message);
+      })
+      .catch((err) => console.warn('[LinkPreviewQueue] 링크 프리뷰 처리 실패:', err?.message || err))
+      .finally(() => {
+        activeLinkPreviewJobs -= 1;
+        drainLinkPreviewQueue();
+      });
+  }
+};
+
+const enqueueLinkPreviewForMessage = (roomId: number, messageId: number, body: string) => {
+  if (!extractFirstUrl(body) || queuedLinkPreviewMessageIds.has(messageId)) return;
+  queuedLinkPreviewMessageIds.add(messageId);
+  linkPreviewQueue.push({ roomId, messageId, body });
+  setTimeout(drainLinkPreviewQueue, 0);
+};
+
 export const sendChatMessage = async (roomId: number, senderId: string, body: string, markReadForReceiver: boolean): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
   const room = await getRoomForUser(roomId, senderId);
   if (!room) throw new Error('RoomNotFound');
@@ -651,5 +820,202 @@ export const sendChatMessage = async (roomId: number, senderId: string, body: st
     db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
     row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
   }
+  const message = mapMessage(row);
+  enqueueLinkPreviewForMessage(roomId, message.id, body);
+  return { message, room, receiverId };
+};
+
+const toMysqlDateTime = (value: Date) => value.toISOString().slice(0, 19).replace('T', ' ');
+
+export const getActiveChatAttachmentBytes = async (userId: string): Promise<number> => {
+  const mode = getDbMode();
+  if (mode === 'MYSQL') {
+    const row = await getMysqlDb().get<{ total: any }>(
+      `SELECT COALESCE(SUM(attachment_size_bytes), 0) AS total
+         FROM chat_messages
+        WHERE sender_id = ?
+          AND message_type = 'image'
+          AND attachment_url IS NOT NULL
+          AND attachment_deleted_at IS NULL
+          AND (attachment_expires_at IS NULL OR attachment_expires_at > UTC_TIMESTAMP())`,
+      userId
+    );
+    return Number(row?.total || 0);
+  }
+  if (mode === 'SUPABASE') {
+    const { data } = await getSupabaseClient()
+      .from('chat_messages')
+      .select('attachment_size_bytes')
+      .eq('sender_id', userId)
+      .eq('message_type', 'image')
+      .is('attachment_deleted_at', null)
+      .gt('attachment_expires_at', new Date().toISOString());
+    return (data || []).reduce((sum: number, row: any) => sum + Number(row.attachment_size_bytes || 0), 0);
+  }
+  const row = getSqliteDb().prepare(
+    `SELECT COALESCE(SUM(attachment_size_bytes), 0) AS total
+       FROM chat_messages
+      WHERE sender_id = ?
+        AND message_type = 'image'
+        AND attachment_url IS NOT NULL
+        AND attachment_deleted_at IS NULL
+        AND (attachment_expires_at IS NULL OR datetime(attachment_expires_at) > datetime('now'))`
+  ).get(userId) as any;
+  return Number(row?.total || 0);
+};
+
+export const sendChatAttachmentMessage = async (
+  roomId: number,
+  senderId: string,
+  attachment: ChatAttachmentInput,
+  markReadForReceiver: boolean
+): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
+  const room = await getRoomForUser(roomId, senderId);
+  if (!room) throw new Error('RoomNotFound');
+  const receiverId = room.user_a_id === senderId ? room.user_b_id : room.user_a_id;
+  const mode = getDbMode();
+  let row: any;
+  if (mode === 'MYSQL') {
+    if (!room.can_send) {
+      await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', roomId);
+    }
+    const result = await getMysqlDb().run(
+      `INSERT INTO chat_messages
+        (room_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at, created_at)
+       VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
+      roomId,
+      senderId,
+      '이미지',
+      attachment.url,
+      attachment.mime,
+      attachment.sizeBytes,
+      attachment.width ?? null,
+      attachment.height ?? null,
+      toMysqlDateTime(attachment.expiresAt)
+    );
+    await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP(), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?', roomId);
+    row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
+  } else if (mode === 'SUPABASE') {
+    if (!room.can_send) {
+      await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString() }).eq('id', roomId);
+    }
+    const { data } = await getSupabaseClient().from('chat_messages').insert({
+      room_id: roomId,
+      sender_id: senderId,
+      body: '이미지',
+      message_type: 'image',
+      attachment_url: attachment.url,
+      attachment_mime: attachment.mime,
+      attachment_size_bytes: attachment.sizeBytes,
+      attachment_width: attachment.width ?? null,
+      attachment_height: attachment.height ?? null,
+      attachment_expires_at: attachment.expiresAt.toISOString(),
+      read_at: markReadForReceiver ? new Date().toISOString() : null
+    }).select('*').single();
+    await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString(), deleted_for_a: false, deleted_for_b: false }).eq('id', roomId);
+    row = data;
+  } else {
+    const db = getSqliteDb();
+    if (!room.can_send) {
+      db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now') WHERE id = ?").run(roomId);
+    }
+    const result = db.prepare(
+      `INSERT INTO chat_messages
+        (room_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at)
+       VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? "datetime('now')" : 'NULL'})`
+    ).run(
+      roomId,
+      senderId,
+      '이미지',
+      attachment.url,
+      attachment.mime,
+      attachment.sizeBytes,
+      attachment.width ?? null,
+      attachment.height ?? null,
+      attachment.expiresAt.toISOString()
+    );
+    db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
+    row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
+  }
   return { message: mapMessage(row), room, receiverId };
+};
+
+export const getChatMessageForRoom = async (roomId: number, messageId: number, userId: string): Promise<ChatMessageRow | null> => {
+  const room = await getRoomForUser(roomId, userId);
+  if (!room) throw new Error('RoomNotFound');
+  const mode = getDbMode();
+  let row: any;
+  if (mode === 'MYSQL') row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ? AND room_id = ? LIMIT 1', messageId, roomId);
+  else if (mode === 'SUPABASE') {
+    const { data } = await getSupabaseClient().from('chat_messages').select('*').eq('id', messageId).eq('room_id', roomId).maybeSingle();
+    row = data;
+  } else {
+    row = getSqliteDb().prepare('SELECT * FROM chat_messages WHERE id = ? AND room_id = ? LIMIT 1').get(messageId, roomId);
+  }
+  return row ? mapMessage(row) : null;
+};
+
+export const deleteExpiredChatAttachments = async (): Promise<number> => {
+  const mode = getDbMode();
+  let rows: any[] = [];
+  if (mode === 'MYSQL') {
+    rows = await getMysqlDb().all<any>(
+      `SELECT id, attachment_url
+         FROM chat_messages
+        WHERE message_type = 'image'
+          AND attachment_url IS NOT NULL
+          AND attachment_deleted_at IS NULL
+          AND attachment_expires_at <= UTC_TIMESTAMP()
+        LIMIT 200`
+    );
+    for (const row of rows) {
+      deleteLocalUploadByUrl(row.attachment_url);
+      await getMysqlDb().run('UPDATE chat_messages SET attachment_url = NULL, attachment_deleted_at = UTC_TIMESTAMP() WHERE id = ?', row.id);
+    }
+    return rows.length;
+  }
+  if (mode === 'SUPABASE') {
+    const { data } = await getSupabaseClient()
+      .from('chat_messages')
+      .select('id, attachment_url')
+      .eq('message_type', 'image')
+      .is('attachment_deleted_at', null)
+      .not('attachment_url', 'is', null)
+      .lte('attachment_expires_at', new Date().toISOString())
+      .limit(200);
+    rows = data || [];
+    for (const row of rows) {
+      deleteLocalUploadByUrl(row.attachment_url);
+      await getSupabaseClient().from('chat_messages').update({ attachment_url: null, attachment_deleted_at: new Date().toISOString() }).eq('id', row.id);
+    }
+    return rows.length;
+  }
+  rows = getSqliteDb().prepare(
+    `SELECT id, attachment_url
+       FROM chat_messages
+      WHERE message_type = 'image'
+        AND attachment_url IS NOT NULL
+        AND attachment_deleted_at IS NULL
+        AND datetime(attachment_expires_at) <= datetime('now')
+      LIMIT 200`
+  ).all() as any[];
+  for (const row of rows) {
+    deleteLocalUploadByUrl(row.attachment_url);
+    getSqliteDb().prepare("UPDATE chat_messages SET attachment_url = NULL, attachment_deleted_at = datetime('now') WHERE id = ?").run(row.id);
+  }
+  return rows.length;
+};
+
+let attachmentCleanupTimer: NodeJS.Timeout | null = null;
+export const startChatAttachmentCleanupScheduler = () => {
+  if (attachmentCleanupTimer) return;
+  const run = () => {
+    deleteExpiredChatAttachments()
+      .then((count) => {
+        if (count > 0) console.log(`[ChatAttachmentCleanup] 만료 이미지 ${count}개를 폐기했습니다.`);
+      })
+      .catch((err) => console.warn('[ChatAttachmentCleanup] 만료 이미지 정리 실패:', err?.message || err));
+  };
+  run();
+  attachmentCleanupTimer = setInterval(run, 60 * 60 * 1000);
 };

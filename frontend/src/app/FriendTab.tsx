@@ -4,9 +4,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Ban,
+  BellOff,
   Check,
+  ExternalLink,
+  ImagePlus,
   MessageCircle,
   PanelLeftOpen,
+  PlayCircle,
   RefreshCw,
   Search,
   Send,
@@ -41,8 +45,28 @@ type ChatMessage = {
   room_id: number;
   sender_id: string;
   body: string;
+  message_type?: 'text' | 'image';
+  attachment_url?: string | null;
+  attachment_mime?: string | null;
+  attachment_width?: number | null;
+  attachment_height?: number | null;
+  attachment_expired?: boolean;
+  link_preview?: ChatLinkPreview | null;
   created_at: string;
   read_at?: string | null;
+};
+
+type ChatLinkPreview = {
+  url: string;
+  normalized_url: string;
+  kind: 'link' | 'youtube';
+  site_name?: string | null;
+  title?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  provider?: string | null;
+  video_id?: string | null;
+  embed_url?: string | null;
 };
 
 type ChatRoom = {
@@ -52,6 +76,8 @@ type ChatRoom = {
   unread_count: number;
   can_send: boolean;
   closed_at?: string | null;
+  updated_at?: string | null;
+  is_muted?: boolean;
   is_admin_room?: boolean;
 };
 
@@ -71,6 +97,8 @@ type ChatSocketPayload =
   | { type: 'joined'; room: ChatRoom; messages: ChatMessage[] }
   | { type: 'messages'; room_id: number; messages: ChatMessage[] }
   | { type: 'message' | 'sent'; room_id: number; message: ChatMessage }
+  | { type: 'message_updated'; room_id: number; message: ChatMessage }
+  | { type: 'room_state'; room: ChatRoom }
   | { type: 'read'; room_id: number; reader_id: string }
   | { type: 'error'; code?: string; message?: string };
 
@@ -94,6 +122,10 @@ const parseChatDate = (value?: string) => {
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 };
+const chatRoomSortTime = (room: ChatRoom) => parseChatDate(room.last_message?.created_at || room.updated_at || undefined)?.getTime() || 0;
+const sortChatRooms = (rooms: ChatRoom[]) => [...rooms].sort((a, b) => (
+  chatRoomSortTime(b) - chatRoomSortTime(a) || b.id - a.id
+));
 
 export const FriendTab: React.FC = () => {
   const { user, toast } = useApp();
@@ -107,17 +139,24 @@ export const FriendTab: React.FC = () => {
   const [friendLoading, setFriendLoading] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [chatSending, setChatSending] = useState(false);
+  const [chatImageUploading, setChatImageUploading] = useState(false);
   const [chatSocketStatus, setChatSocketStatus] = useState<'connecting' | 'connected' | 'fallback'>('fallback');
+  const [joinedRoomId, setJoinedRoomId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [scrollDateBubble, setScrollDateBubble] = useState('');
+  const [showScrollDateBubble, setShowScrollDateBubble] = useState(false);
+  const [embeddedPreviewId, setEmbeddedPreviewId] = useState<number | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatImageInputRef = useRef<HTMLInputElement>(null);
   const chatSocketRef = useRef<WebSocket | null>(null);
   const chatReconnectTimerRef = useRef<number | null>(null);
   const activeChatRoomRef = useRef<ActiveChatRoom | null>(null);
   const skipNextAutoScrollRef = useRef(false);
+  const scrollDateTimerRef = useRef<number | null>(null);
 
   const pendingCount = friendRequests.incoming.length + friendRequests.outgoing.length;
   const friendIdSet = useMemo(() => new Set(friends.map((friend) => friend.id)), [friends]);
@@ -160,6 +199,18 @@ export const FriendTab: React.FC = () => {
     });
   };
 
+  const upsertChatRoom = (room: ChatRoom) => {
+    setChatRooms((prev) => {
+      const without = prev.filter((item) => item.id !== room.id);
+      return sortChatRooms([room, ...without]);
+    });
+    setActiveChatRoom((current) => {
+      if (!current || isDraftRoom(current) || current.id !== room.id) return current;
+      activeChatRoomRef.current = { ...current, ...room };
+      return { ...current, ...room };
+    });
+  };
+
   const fetchFriends = async (showLoading = true) => {
     if (!user) return;
     if (showLoading) setFriendLoading(true);
@@ -167,7 +218,7 @@ export const FriendTab: React.FC = () => {
       const res = await apiFetch('/friends');
       if (res.ok) {
         const data: Partial<FriendOverview> = await res.json();
-        const nextRooms = data.rooms || [];
+        const nextRooms = sortChatRooms(data.rooms || []);
         setFriends(data.friends || []);
         setFriendRequests(data.requests || { incoming: [], outgoing: [] });
         setChatRooms(nextRooms);
@@ -191,10 +242,11 @@ export const FriendTab: React.FC = () => {
       return;
     }
     if (payload.type === 'joined') {
+      activeChatRoomRef.current = payload.room;
+      setJoinedRoomId(payload.room.id);
       setActiveChatRoom(payload.room);
       setChatMessages(payload.messages || []);
       setHasOlderMessages((payload.messages || []).length >= 50);
-      fetchFriends(false);
       return;
     }
     if (payload.type === 'messages') {
@@ -202,7 +254,6 @@ export const FriendTab: React.FC = () => {
         setChatMessages(payload.messages || []);
         setHasOlderMessages((payload.messages || []).length >= 50);
       }
-      fetchFriends(false);
       return;
     }
     if (payload.type === 'message' || payload.type === 'sent') {
@@ -210,7 +261,14 @@ export const FriendTab: React.FC = () => {
         applyIncomingMessage(payload.message);
         if (payload.message.sender_id !== user?.id) sendSocket({ type: 'read', room_id: payload.room_id });
       }
-      fetchFriends(false);
+      return;
+    }
+    if (payload.type === 'message_updated') {
+      if (!isDraftRoom(activeChatRoomRef.current) && activeChatRoomRef.current?.id === payload.room_id) {
+        setChatMessages((prev) => prev.map((message) => (
+          message.id === payload.message.id ? { ...message, ...payload.message } : message
+        )));
+      }
       return;
     }
     if (payload.type === 'read') {
@@ -222,8 +280,16 @@ export const FriendTab: React.FC = () => {
       )));
       return;
     }
+    if (payload.type === 'room_state') {
+      upsertChatRoom(payload.room);
+      return;
+    }
     if (payload.type === 'error' && payload.code === 'RoomClosed') {
       toast('닫힌 채팅방에는 메시지를 보낼 수 없습니다.', 'error');
+      return;
+    }
+    if (payload.type === 'error') {
+      toast(payload.message || '채팅 연결 처리 중 오류가 발생했습니다.', 'error');
     }
   };
 
@@ -298,14 +364,17 @@ export const FriendTab: React.FC = () => {
   };
 
   const openDraftChat = (target: FriendUser) => {
-    setActiveChatRoom({
+    const draftRoom: DraftChatRoom = {
       id: `draft-${target.id}`,
       draft: true,
       other_user: { ...target, avatar_url: target.avatar_url || avatarFallback(target.id) },
       unread_count: 0,
       can_send: true,
       last_message: null
-    });
+    };
+    activeChatRoomRef.current = draftRoom;
+    setJoinedRoomId(null);
+    setActiveChatRoom(draftRoom);
     setChatMessages([]);
     setHasOlderMessages(false);
     setPanelOpen(false);
@@ -322,16 +391,21 @@ export const FriendTab: React.FC = () => {
       return null;
     }
     setActiveChatRoom(data);
+    activeChatRoomRef.current = data;
     await fetchFriends(false);
     return data;
   };
 
   const openExistingRoom = (room: ChatRoom) => {
+    activeChatRoomRef.current = room;
+    setJoinedRoomId(null);
     setActiveChatRoom(room);
     setPanelOpen(false);
   };
 
   const returnToRoomList = () => {
+    activeChatRoomRef.current = null;
+    setJoinedRoomId(null);
     setActiveChatRoom(null);
     setChatMessages([]);
     setHasOlderMessages(false);
@@ -383,15 +457,19 @@ export const FriendTab: React.FC = () => {
     setChatSending(true);
     try {
       const wasDraft = isDraftRoom(activeChatRoom);
-      const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
-      if (!room) return;
-
-      if (chatSocketStatus === 'connected') {
-        if (wasDraft) sendSocket({ type: 'join', room_id: room.id });
-        if (sendSocket({ type: 'send', room_id: room.id, body: text })) {
+      if (wasDraft && chatSocketStatus === 'connected') {
+        if (sendSocket({ type: 'open_send', user_id: activeChatRoom.other_user.id, body: text })) {
           setChatMessage('');
           return;
         }
+      }
+
+      const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
+      if (!room) return;
+
+      if (chatSocketStatus === 'connected' && sendSocket({ type: 'send', room_id: room.id, body: text })) {
+        setChatMessage('');
+        return;
       }
 
       const res = await apiFetch(`/friends/rooms/${room.id}/messages`, {
@@ -409,6 +487,44 @@ export const FriendTab: React.FC = () => {
       toast('메시지 전송에 실패했습니다.', 'error');
     } finally {
       setChatSending(false);
+    }
+  };
+
+  const sendChatImage = async (file: File | null | undefined) => {
+    if (!file || !activeChatRoom) return;
+    if (!file.type.startsWith('image/')) {
+      toast('이미지 파일만 첨부할 수 있습니다.', 'error');
+      return;
+    }
+    setChatImageUploading(true);
+    try {
+      const wasDraft = isDraftRoom(activeChatRoom);
+      const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
+      if (!room) return;
+
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await apiFetch(`/friends/rooms/${room.id}/attachments`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.message || '이미지를 첨부하지 못했습니다.', 'error');
+        return;
+      }
+      applyIncomingMessage(data);
+      if (chatSocketStatus === 'connected') {
+        sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
+      } else {
+        await fetchChatMessages(room.id, 'initial', false);
+      }
+      await fetchFriends(false);
+    } catch {
+      toast('이미지 첨부에 실패했습니다.', 'error');
+    } finally {
+      setChatImageUploading(false);
+      if (chatImageInputRef.current) chatImageInputRef.current.value = '';
     }
   };
 
@@ -455,8 +571,44 @@ export const FriendTab: React.FC = () => {
     }
   };
 
+  const toggleRoomMuted = async (room: ChatRoom, muted = !room.is_muted) => {
+    try {
+      const res = await apiFetch(`/friends/rooms/${room.id}/mute`, {
+        method: 'POST',
+        body: JSON.stringify({ muted })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.message || '알림 설정을 변경하지 못했습니다.', 'error');
+        return;
+      }
+      const nextRoom = data?.room ? { ...room, ...data.room } : { ...room, is_muted: muted };
+      upsertChatRoom(nextRoom);
+      toast(muted ? '이 톡방 알림을 껐습니다.' : '이 톡방 알림을 켰습니다.', 'info');
+    } catch {
+      toast('알림 설정 변경에 실패했습니다.', 'error');
+    } finally {
+      setContextMenu(null);
+    }
+  };
+
   const formatChatTime = (value?: string) => parseChatDate(value)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
   const formatChatDate = (value?: string) => parseChatDate(value)?.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) || '';
+
+  const updateScrollDateBubble = (container: HTMLDivElement) => {
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-date]'));
+    if (rows.length === 0) return;
+    const anchorTop = container.scrollTop + 40;
+    const activeRow = rows.reduce((current, row) => (row.offsetTop <= anchorTop ? row : current), rows[0]);
+    const nextDate = activeRow.dataset.chatDate || '';
+    if (nextDate) setScrollDateBubble(nextDate);
+    setShowScrollDateBubble(Boolean(nextDate));
+    if (scrollDateTimerRef.current !== null) window.clearTimeout(scrollDateTimerRef.current);
+    scrollDateTimerRef.current = window.setTimeout(() => {
+      setShowScrollDateBubble(false);
+      scrollDateTimerRef.current = null;
+    }, 900);
+  };
 
   useEffect(() => {
     if (user) fetchFriends();
@@ -480,26 +632,39 @@ export const FriendTab: React.FC = () => {
       setChatSocketStatus('connecting');
       const socket = new WebSocket(buildChatSocketUrl());
       chatSocketRef.current = socket;
+      let readyTimer: number | null = null;
 
       socket.onopen = () => {
         reconnectAttempts = 0;
-        setChatSocketStatus('connected');
-        const activeRoom = activeChatRoomRef.current;
-        if (activeRoom && !isDraftRoom(activeRoom)) sendSocket({ type: 'join', room_id: activeRoom.id });
+        readyTimer = window.setTimeout(() => {
+          if (!cancelled && chatSocketRef.current === socket && socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+        }, 5000);
       };
 
       socket.onmessage = (event) => {
         try {
-          handleSocketPayload(JSON.parse(event.data));
+          const payload = JSON.parse(event.data) as ChatSocketPayload;
+          if (payload.type === 'ready' && readyTimer !== null) {
+            window.clearTimeout(readyTimer);
+            readyTimer = null;
+          }
+          handleSocketPayload(payload);
         } catch {
           // malformed socket payloads are ignored
         }
       };
 
       socket.onclose = () => {
+        if (readyTimer !== null) {
+          window.clearTimeout(readyTimer);
+          readyTimer = null;
+        }
         if (chatSocketRef.current === socket) chatSocketRef.current = null;
         if (cancelled) return;
         setChatSocketStatus('fallback');
+        setJoinedRoomId(null);
         const delay = Math.min(15_000, 1000 + reconnectAttempts * 1500);
         reconnectAttempts += 1;
         chatReconnectTimerRef.current = window.setTimeout(connect, delay);
@@ -516,6 +681,10 @@ export const FriendTab: React.FC = () => {
         window.clearTimeout(chatReconnectTimerRef.current);
         chatReconnectTimerRef.current = null;
       }
+      if (scrollDateTimerRef.current !== null) {
+        window.clearTimeout(scrollDateTimerRef.current);
+        scrollDateTimerRef.current = null;
+      }
       chatSocketRef.current?.close();
       chatSocketRef.current = null;
     };
@@ -524,6 +693,7 @@ export const FriendTab: React.FC = () => {
   useEffect(() => {
     if (!activeChatRoom || isDraftRoom(activeChatRoom)) return;
     if (chatSocketStatus === 'connected') {
+      setJoinedRoomId(null);
       sendSocket({ type: 'join', room_id: activeChatRoom.id });
       sendSocket({ type: 'read', room_id: activeChatRoom.id });
       return;
@@ -562,6 +732,97 @@ export const FriendTab: React.FC = () => {
       window.removeEventListener('scroll', close, true);
     };
   }, []);
+
+  const renderChatAttachment = (message: ChatMessage) => {
+    if (message.message_type !== 'image') return null;
+    if (message.attachment_expired || !message.attachment_url) {
+      return (
+        <div className="flex min-h-36 w-56 max-w-full flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-primary/10 px-4 py-5 text-center text-muted-foreground">
+          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-card/80 shadow-sm">
+            <ImagePlus className="h-5 w-5 text-primary/70" />
+          </div>
+          <p className="text-xs font-black text-foreground/75">이미지가 쉬러 갔어요</p>
+          <p className="mt-1 text-[10px] font-bold leading-snug">첨부 이미지는 7일 후 자동으로 폐기됩니다.</p>
+        </div>
+      );
+    }
+    const mediaClass = "block max-h-80 max-w-full rounded-2xl object-contain shadow-sm";
+    if (message.attachment_mime === 'video/webm') {
+      return (
+        <video
+          src={message.attachment_url}
+          className={mediaClass}
+          autoPlay
+          muted
+          loop
+          playsInline
+          controls={false}
+          onClick={(event) => {
+            const video = event.currentTarget;
+            if (video.paused) video.play().catch(() => { /* noop */ });
+            else video.pause();
+          }}
+        />
+      );
+    }
+    return <img src={message.attachment_url} alt="채팅 첨부 이미지" className={mediaClass} loading="lazy" />;
+  };
+
+  const renderLinkPreview = (message: ChatMessage) => {
+    const preview = message.link_preview;
+    if (!preview?.normalized_url) return null;
+    const isYoutube = preview.kind === 'youtube' && preview.embed_url;
+    const isEmbedOpen = embeddedPreviewId === message.id;
+    const openLink = () => window.open(preview.normalized_url, '_blank', 'noopener,noreferrer');
+
+    return (
+      <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-sm">
+        {isYoutube && isEmbedOpen ? (
+          <div className="aspect-video w-full bg-black">
+            <iframe
+              src={preview.embed_url || ''}
+              title={preview.title || 'YouTube preview'}
+              className="h-full w-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (isYoutube) setEmbeddedPreviewId(message.id);
+              else openLink();
+            }}
+            className="group block w-full text-left"
+          >
+            {preview.image_url && (
+              <div className="relative aspect-video w-full overflow-hidden bg-secondary">
+                <img src={preview.image_url} alt="" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" loading="lazy" />
+                {isYoutube && (
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/15">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur">
+                      <PlayCircle className="h-7 w-7" />
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+          </button>
+        )}
+        <div className="space-y-1 px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-black text-muted-foreground">
+            <span className="truncate">{preview.provider || preview.site_name || new URL(preview.normalized_url).hostname.replace(/^www\./, '')}</span>
+            {!isYoutube && <ExternalLink className="h-3 w-3 shrink-0" />}
+          </div>
+          <button type="button" onClick={isYoutube ? openLink : undefined} className="block w-full text-left">
+            <p className="line-clamp-2 text-xs font-black leading-snug">{preview.title || preview.normalized_url}</p>
+            {preview.description && <p className="mt-1 line-clamp-2 text-[11px] font-medium leading-snug text-muted-foreground">{preview.description}</p>}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   if (!user) {
     return (
@@ -721,6 +982,7 @@ export const FriendTab: React.FC = () => {
   );
 
   const activeRoomIsReal = activeChatRoom && !isDraftRoom(activeChatRoom);
+  const activeRoomRealtime = chatSocketStatus === 'connected' && (!activeRoomIsReal || joinedRoomId === activeChatRoom.id);
   const chatRoomRail = (
     <aside className={`${activeChatRoom ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col bg-secondary/20 p-3 lg:h-full lg:border-r lg:border-border/70 lg:p-4`}>
       <div className="mb-3 flex items-center justify-between gap-2 lg:mb-3">
@@ -759,7 +1021,14 @@ export const FriendTab: React.FC = () => {
             <div className="flex items-center gap-2">
               <img src={room.other_user.avatar_url || avatarFallback(room.other_user.id)} alt={room.other_user.username} className="h-11 w-11 shrink-0 rounded-full border border-border object-cover lg:h-9 lg:w-9" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-black lg:text-xs">{room.other_user.username}</p>
+                <p className="flex min-w-0 items-center gap-1.5 text-sm font-black lg:text-xs">
+                  <span className="truncate">{room.other_user.username}</span>
+                  {room.is_muted && (
+                    <span title="알림 꺼짐" className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground/80">
+                      <BellOff className="h-3 w-3" />
+                    </span>
+                  )}
+                </p>
                 <p className="truncate text-[11px] font-bold opacity-70 lg:text-[10px]">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
               </div>
               {room.unread_count > 0 && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{room.unread_count}</span>}
@@ -779,7 +1048,7 @@ export const FriendTab: React.FC = () => {
         <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-card/90 px-4 py-3 backdrop-blur lg:hidden">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-black">친구와 1:1 톡</h2>
-            <p className="mt-0.5 text-[11px] font-bold leading-snug text-muted-foreground">친구 신청과 대화 관리는 왼쪽 버튼에서 할 수 있어요.</p>
+            <p className="mt-0.5 text-[11px] font-bold leading-snug text-muted-foreground">친구 신청과 관리는 왼쪽 버튼에서 할 수 있어요.</p>
           </div>
           <button
             type="button"
@@ -810,13 +1079,13 @@ export const FriendTab: React.FC = () => {
             </button>
             <div className="min-w-0">
               <h2 className="truncate text-base font-black sm:text-lg">친구와 1:1 톡</h2>
-              <p className="truncate text-[11px] font-bold text-muted-foreground">친구 신청과 대화 관리는 왼쪽 버튼에서 할 수 있어요.</p>
+              <p className="truncate text-[11px] font-bold text-muted-foreground">친구 신청과 관리는 왼쪽 버튼에서 할 수 있어요.</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-full border border-border bg-secondary/30 px-2.5 py-1 text-[10px] font-black text-muted-foreground sm:inline-flex">
-              <span className={`h-2 w-2 rounded-full ${chatSocketStatus === 'connected' ? 'bg-emerald-400' : chatSocketStatus === 'connecting' ? 'bg-amber-400' : 'bg-muted-foreground/40'}`} />
-              {chatSocketStatus === 'connected' ? '실시간' : chatSocketStatus === 'connecting' ? '연결 중' : '폴백'}
+              <span className={`h-2 w-2 rounded-full ${activeRoomRealtime ? 'bg-emerald-400' : chatSocketStatus === 'connecting' || chatSocketStatus === 'connected' ? 'bg-amber-400' : 'bg-muted-foreground/40'}`} />
+              {activeRoomRealtime ? '실시간' : chatSocketStatus === 'connecting' || chatSocketStatus === 'connected' ? '연결 중' : '폴백'}
             </span>
             <button type="button" onClick={() => fetchFriends()} disabled={friendLoading} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground hover:bg-secondary disabled:opacity-50" aria-label="새로고침">
               <RefreshCw className={`h-4 w-4 ${friendLoading ? 'animate-spin' : ''}`} />
@@ -834,8 +1103,13 @@ export const FriendTab: React.FC = () => {
                 <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 rounded-full border border-border object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black">{activeChatRoom.other_user.username}</p>
-                  <p className="text-[10px] font-bold text-muted-foreground">
-                    {isDraftRoom(activeChatRoom) ? '첫 메시지를 보내면 톡방이 시작됩니다.' : activeChatRoom.closed_at ? '닫힌 톡방' : activeChatRoom.is_admin_room ? '관리자 1:1 톡' : '1:1 톡'}
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
+                    <span>{isDraftRoom(activeChatRoom) ? '첫 메시지를 보내면 톡방이 시작됩니다.' : activeChatRoom.closed_at ? '닫힌 톡방' : activeChatRoom.is_admin_room ? '관리자 1:1 톡' : '1:1 톡'}</span>
+                    {activeRoomIsReal && activeChatRoom.is_muted && (
+                      <span title="알림 꺼짐" className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
+                        <BellOff className="h-3 w-3" /> 알림 꺼짐
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -851,53 +1125,83 @@ export const FriendTab: React.FC = () => {
               </div>
             </div>
 
-            <div
-              ref={chatScrollRef}
-              onScroll={(event) => {
-                const target = event.currentTarget;
-                if (target.scrollTop < 48 && activeRoomIsReal) fetchChatMessages(activeChatRoom.id, 'older', false);
-              }}
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
-            >
-              {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
-              {chatMessages.length === 0 && (
-                <div className="flex min-h-[18rem] flex-col items-center justify-center text-center">
-                  <MessageCircle className="mb-3 h-10 w-10 text-primary/70" />
-                  <p className="text-sm font-black">아직 메시지가 없습니다</p>
-                  <p className="mt-1 text-xs text-muted-foreground">첫 메시지를 보내면 이 대화가 톡방 목록에 남습니다.</p>
+            <div className="relative min-h-0 flex-1">
+              {showScrollDateBubble && scrollDateBubble && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-border bg-card/95 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
+                  {scrollDateBubble}
                 </div>
               )}
-              {chatMessages.map((message, index) => {
-                const mine = message.sender_id === user.id;
-                const previous = chatMessages[index - 1];
-                const showDate = !previous || formatChatDate(previous.created_at) !== formatChatDate(message.created_at);
-                return (
-                  <React.Fragment key={message.id}>
-                    {showDate && (
-                      <div className="sticky top-0 z-10 mx-auto w-fit rounded-full border border-border bg-card/90 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
-                        {formatChatDate(message.created_at)}
-                      </div>
-                    )}
-                    <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[72%] ${mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-card text-foreground'}`}>
-                        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.body}</p>
-                        <div className={`mt-1 flex items-center gap-1 text-[9px] ${mine ? 'justify-end text-primary-foreground/75' : 'text-muted-foreground'}`}>
-                          {mine && <span>{message.read_at ? '읽음' : '안읽음'}</span>}
-                          <span>{formatChatTime(message.created_at)}</span>
+              <div
+                ref={chatScrollRef}
+                onScroll={(event) => {
+                  const target = event.currentTarget;
+                  updateScrollDateBubble(target);
+                  if (target.scrollTop < 48 && activeRoomIsReal) fetchChatMessages(activeChatRoom.id, 'older', false);
+                }}
+                className="h-full min-h-0 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
+              >
+                {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
+                {chatMessages.length === 0 && (
+                  <div className="flex min-h-[18rem] flex-col items-center justify-center text-center">
+                    <MessageCircle className="mb-3 h-10 w-10 text-primary/70" />
+                    <p className="text-sm font-black">아직 메시지가 없습니다</p>
+                    <p className="mt-1 text-xs text-muted-foreground">첫 메시지를 보내면 이 대화가 톡방 목록에 남습니다.</p>
+                  </div>
+                )}
+                {chatMessages.map((message, index) => {
+                  const mine = message.sender_id === user.id;
+                  const previous = chatMessages[index - 1];
+                  const messageDate = formatChatDate(message.created_at);
+                  const showDate = Boolean(previous && formatChatDate(previous.created_at) !== messageDate);
+                  return (
+                    <React.Fragment key={message.id}>
+                      {showDate && (
+                        <div className="mx-auto w-fit rounded-full border border-border bg-card/90 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
+                          {messageDate}
+                        </div>
+                      )}
+                      <div data-chat-date={messageDate} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[72%] ${mine ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-card text-foreground'}`}>
+                          {message.message_type === 'image' ? renderChatAttachment(message) : (
+                            <>
+                              <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{message.body}</p>
+                              {renderLinkPreview(message)}
+                            </>
+                          )}
+                          <div className={`mt-1 flex items-center gap-1 text-[9px] ${mine ? 'justify-end text-primary-foreground/75' : 'text-muted-foreground'}`}>
+                            {mine && <span>{message.read_at ? '읽음' : '안읽음'}</span>}
+                            <span>{formatChatTime(message.created_at)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </React.Fragment>
-                );
-              })}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="border-t border-border/70 bg-card/90 p-3">
               {!activeChatRoom.can_send && <p className="mb-2 rounded-2xl bg-secondary/60 px-3 py-2 text-[11px] font-bold text-muted-foreground">이 톡방은 닫혀 있어 새 메시지를 보낼 수 없습니다.</p>}
               <div className="flex gap-2">
+                <input
+                  ref={chatImageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                  className="hidden"
+                  onChange={(event) => sendChatImage(event.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  onClick={() => chatImageInputRef.current?.click()}
+                  disabled={!activeChatRoom.can_send || chatImageUploading}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary/40 text-muted-foreground transition hover:bg-secondary disabled:opacity-45"
+                  aria-label="이미지 첨부"
+                >
+                  <ImagePlus className={`h-4 w-4 ${chatImageUploading ? 'animate-pulse' : ''}`} />
+                </button>
                 <textarea
                   value={chatMessage}
-                  disabled={!activeChatRoom.can_send}
+                  disabled={!activeChatRoom.can_send || chatImageUploading}
                   onChange={(e) => setChatMessage(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -908,7 +1212,7 @@ export const FriendTab: React.FC = () => {
                   placeholder="메시지 입력"
                   className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-secondary/35 px-3 py-2 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
                 />
-                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
+                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || chatImageUploading || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
                   <Send className="h-4 w-4" />
                 </button>
               </div>
@@ -951,6 +1255,9 @@ export const FriendTab: React.FC = () => {
             <>
               <button type="button" onClick={() => openExistingRoom(contextMenu.room)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold hover:bg-secondary">
                 <MessageCircle className="h-4 w-4" /> 대화방 열기
+              </button>
+              <button type="button" onClick={() => toggleRoomMuted(contextMenu.room)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold hover:bg-secondary">
+                <BellOff className="h-4 w-4" /> {contextMenu.room.is_muted ? '알림 켜기' : '알림 끄기'}
               </button>
               {user.role === 'ADMIN' && (
                 <button type="button" onClick={() => toggleAdminRoomClosed(contextMenu.room.id, contextMenu.room.can_send)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold hover:bg-secondary">

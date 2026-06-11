@@ -19,7 +19,9 @@ import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
 import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
+import { startChatAttachmentCleanupScheduler } from './services/friendChatService';
 import {
+  isApiProcess,
   isAllInOneProcess,
   PROCESS_ROLE,
   shouldRunMarketScheduler,
@@ -302,6 +304,9 @@ const startServer = async () => {
     initRepositories(); // 레포지토리 초기화 추가
     if (shouldRunPushScheduler()) {
       startPushNotificationScheduler(); // PWA 푸시 알림 예약 크론 가동
+    }
+    if (isApiProcess() || isAllInOneProcess()) {
+      startChatAttachmentCleanupScheduler();
     }
     if (shouldRunMarketScheduler()) {
       const { startMarketSettlementScheduler } = await import('./cron/marketScheduler');
