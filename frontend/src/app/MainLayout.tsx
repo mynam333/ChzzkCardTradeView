@@ -142,7 +142,6 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       window.clearTimeout(dockSnapTimer.current);
       dockSnapTimer.current = null;
     }
-    setDockVisualTab(null);
     dockTouchStartX.current = event.clientX;
     dockTouchStartY.current = event.clientY;
     setDockIsSettling(false);

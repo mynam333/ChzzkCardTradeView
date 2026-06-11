@@ -28,6 +28,7 @@ import { apiFetch } from '@/lib/api';
 import type { AdminReport, OrphanImage, ShopItem, Coupon, CouponReward, CouponRewardType, Announcement } from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
+import { fuzzyScore } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
@@ -58,6 +59,30 @@ const emptyCouponRewardDraft = {
   channel_id: '',
   item_id: 0,
   quantity: 1
+};
+
+const getAdminStreamerSearchScore = (streamer: any, query: string): number | null => {
+  const nameScore = fuzzyScore(streamer?.name || '', query);
+  const channelScore = fuzzyScore(streamer?.channel_id || '', query);
+  if (nameScore === null && channelScore === null) return null;
+  return Math.min(
+    nameScore ?? Number.MAX_SAFE_INTEGER,
+    channelScore === null ? Number.MAX_SAFE_INTEGER : channelScore + 200
+  );
+};
+
+const filterAdminStreamers = (streamers: any[], query: string): any[] => {
+  const keyword = query.trim();
+  if (!keyword) return streamers;
+
+  return streamers
+    .map((streamer) => ({ streamer, score: getAdminStreamerSearchScore(streamer, keyword) }))
+    .filter((item): item is { streamer: any; score: number } => item.score !== null)
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return String(a.streamer?.name || '').localeCompare(String(b.streamer?.name || ''), 'ko-KR');
+    })
+    .map((item) => item.streamer);
 };
 
 export const AdminTab: React.FC = () => {
@@ -1277,8 +1302,7 @@ export const AdminTab: React.FC = () => {
                   onChange={(e) => setCouponStreamerSearch(e.target.value)}
                   className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs" />
                 <div className="max-h-32 overflow-y-auto space-y-1">
-                  {couponStreamers
-                    .filter((s) => couponStreamerSearch.trim() === '' ? true : s.name.toLowerCase().includes(couponStreamerSearch.toLowerCase()))
+                  {filterAdminStreamers(couponStreamers, couponStreamerSearch)
                     .slice(0, 20)
                     .map((s) => (
                       <button key={s.channel_id}
@@ -2049,10 +2073,8 @@ export const AdminTab: React.FC = () => {
       {subTab === 'streamers' && (() => {
         const hasAnyCustom = (s: any) => (s.custom_images && s.custom_images.some(Boolean)) || s.custom_image_url;
         const allCustom = couponStreamers.filter((s) => hasAnyCustom(s) || s.is_image_banned);
-        const kw = streamerSearch.trim().toLowerCase();
-        const customStreamers = kw
-          ? allCustom.filter((s) => (s.name || '').toLowerCase().includes(kw) || (s.channel_id || '').toLowerCase().includes(kw))
-          : allCustom;
+        const kw = streamerSearch.trim();
+        const customStreamers = filterAdminStreamers(allCustom, kw);
         const PER_PAGE = 6;
         const totalPages = Math.max(1, Math.ceil(customStreamers.length / PER_PAGE));
         const page = Math.min(streamerPage, totalPages);
@@ -2221,11 +2243,11 @@ export const AdminTab: React.FC = () => {
 
             {/* 스트리머 카드 삭제(폐기) — 보유자에게 추가 무료 소환 티켓 보상 후 카드/스트리머 제거 */}
             {(() => {
-              const kw = delSearch.trim().toLowerCase();
-              const list = (kw
-                ? couponStreamers.filter((s) => (s.name || '').toLowerCase().includes(kw) || (s.channel_id || '').toLowerCase().includes(kw))
-                : couponStreamers
-              ).slice().sort((a, b) => (b.base_value || 0) - (a.base_value || 0));
+              const list = filterAdminStreamers(couponStreamers, delSearch)
+                .slice()
+                .sort((a, b) => delSearch.trim()
+                  ? 0
+                  : (b.base_value || 0) - (a.base_value || 0));
               const PER = 8;
               const totalPages = Math.max(1, Math.ceil(list.length / PER));
               const page = Math.min(delPage, totalPages);

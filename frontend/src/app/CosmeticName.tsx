@@ -25,7 +25,7 @@ export const CosmeticName: React.FC<{ effect?: EffectLike | null; className?: st
   return (
     <span
       className={`${className || ''}${cls ? ` ${cls}` : ''}`}
-      style={cls ? nameEffectFontStyle(effect) : nameEffectStyle(effect)}
+      style={cls ? {} : nameEffectStyle(effect)}
     >
       {children}
     </span>

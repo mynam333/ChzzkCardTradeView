@@ -244,6 +244,26 @@
 
 > 간단 인라인 방식(B)만 쓸 경우엔 관리자 폼의 **웹폰트 URL / font-family** 칸으로도 폰트를 지정할 수 있습니다.
 
+### 6.3 특정 폰트의 한글 깨짐 방지 (폴백 폰트 적용)
+
+일부 서체(독립체, 학교안심 등)는 모든 한글 글자를 지원하지 않아서, 닉네임에 완성형 외의 글자(예: 뷁, 믜 등)가 포함되면 글자가 깨지거나 표시되지 않을 수 있습니다. 이때 치카포에서 공통으로 지원하는 **`GMarketSans`**를 폴백 폰트로 지정하여 깨짐을 예방할 수 있습니다.
+
+#### 단순 폴백 지정 (지원하지 않는 글자만 대체)
+`font-family` 리스트에서 주 폰트 바로 뒤에 `GMarketSans`를 배치합니다.
+```css
+@font-face {
+  font-family: 'GMarketSans';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff') format('woff');
+  font-weight: 500;
+  font-display: swap;
+}
+
+.ne-mytheme {
+  /* MyFont가 지원하지 않는 특정 글자만 GMarketSans로 렌더링되고, 그 외엔 MyFont가 적용됩니다. */
+  font-family: "MyFont", "GMarketSans", sans-serif;
+}
+```
+
 ---
 
 ## 7. 가독성 & 성능 체크리스트

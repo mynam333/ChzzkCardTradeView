@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
-import { fuzzySearch } from '@/lib/search';
+import { fuzzyScore } from '@/lib/search';
 import { borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
@@ -123,6 +123,52 @@ const getPaginationItems = (currentPage: number, totalPages: number): Array<numb
     result.push(page);
   });
   return result;
+};
+
+const mergeStreamerOptions = (prev: any[], next: any[]): any[] => {
+  if (!Array.isArray(next) || next.length === 0) return prev;
+
+  const byId = new Map<string, any>();
+  for (const streamer of prev) {
+    const key = String(streamer?.channel_id || streamer?.id || streamer?.name || '');
+    if (key) byId.set(key, streamer);
+  }
+  for (const streamer of next) {
+    const key = String(streamer?.channel_id || streamer?.id || streamer?.name || '');
+    if (!key) continue;
+    byId.set(key, { ...byId.get(key), ...streamer });
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const valueDiff = Number(b?.total_value ?? b?.base_value ?? 0) - Number(a?.total_value ?? a?.base_value ?? 0);
+    if (valueDiff !== 0) return valueDiff;
+    return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko-KR');
+  });
+};
+
+const getStreamerOptionSearchScore = (streamer: any, query: string): number | null => {
+  const nameScore = fuzzyScore(streamer?.name || '', query);
+  const channelScore = fuzzyScore(streamer?.channel_id || '', query);
+  if (nameScore === null && channelScore === null) return null;
+  return Math.min(
+    nameScore ?? Number.MAX_SAFE_INTEGER,
+    channelScore === null ? Number.MAX_SAFE_INTEGER : channelScore + 200
+  );
+};
+
+const getSortedStreamerOptionMatches = (streamers: any[], query: string, limit = 8): any[] => {
+  const keyword = query.trim();
+  if (!keyword) return [];
+
+  return streamers
+    .map((streamer) => ({ streamer, score: getStreamerOptionSearchScore(streamer, keyword) }))
+    .filter((item): item is { streamer: any; score: number } => item.score !== null)
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return String(a.streamer?.name || '').localeCompare(String(b.streamer?.name || ''), 'ko-KR');
+    })
+    .slice(0, limit)
+    .map((item) => item.streamer);
 };
 
 export const ShopTab: React.FC = () => {
@@ -412,12 +458,42 @@ export const ShopTab: React.FC = () => {
 
   // 관심 매물 알림의 스트리머 이름 검색용 목록 로드 (마켓 탭 진입 시 1회)
   useEffect(() => {
-    if (subTab !== 'market' || !user || streamerOptions.length > 0) return;
-    apiFetch('/streamers/ranking?mode=value&limit=1000')
+    if (subTab !== 'market' || !user?.id || streamerOptions.length > 0) return;
+    apiFetch('/streamers/ranking?mode=value&limit=all')
       .then((res) => (res.ok ? res.json() : []))
-      .then((data) => setStreamerOptions(Array.isArray(data) ? data : []))
+      .then((data) => setStreamerOptions((prev) => mergeStreamerOptions(prev, Array.isArray(data) ? data : [])))
       .catch(() => { /* 검색 목록 로드 실패는 무시 */ });
-  }, [subTab, user, streamerOptions.length]);
+  }, [subTab, user?.id, streamerOptions.length]);
+
+  // 전체 목록 로딩 전 입력했거나 서버 설정상 전체 후보가 잘린 경우에도 현재 입력어로 보강 검색합니다.
+  useEffect(() => {
+    if (subTab !== 'market' || !user?.id) return;
+    const keyword = watchStreamerQuery.trim();
+    if (!keyword) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const query = new URLSearchParams({
+          mode: 'value',
+          q: keyword,
+          limit: '50'
+        });
+        const res = await apiFetch(`/streamers/ranking?${query.toString()}`);
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled && Array.isArray(data)) {
+          setStreamerOptions((prev) => mergeStreamerOptions(prev, data));
+        }
+      } catch {
+        /* 검색 보강 실패는 자동완성만 비워질 수 있으므로 조용히 무시 */
+      }
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [subTab, user?.id, watchStreamerQuery]);
 
   useEffect(() => {
     if (subTab !== 'market') return;
@@ -657,7 +733,7 @@ export const ShopTab: React.FC = () => {
     // 우선순위: 명시 payload → 자동완성에서 선택된 channel_id → 검색어 유연 매칭으로 추정
     let channelId = payload?.channel_id || watchChannelId.trim();
     if (!channelId && watchStreamerQuery.trim()) {
-      const matched = streamerOptions.find((s) => fuzzySearch(s.name || '', watchStreamerQuery));
+      const matched = getSortedStreamerOptionMatches(streamerOptions, watchStreamerQuery, 1)[0];
       if (matched) channelId = matched.channel_id;
     }
     if (!channelId) {
@@ -814,9 +890,9 @@ export const ShopTab: React.FC = () => {
   const filtered = items
     .filter((i) => i.type === shopType)
     .filter((item) => {
-      const query = shopSearch.trim().toLowerCase();
+      const query = shopSearch.trim();
       if (!query) return true;
-      return item.name.toLowerCase().includes(query) || (item.description || '').toLowerCase().includes(query);
+      return fuzzyScore(item.name || '', query) !== null || fuzzyScore(item.description || '', query) !== null;
     })
     .sort((a, b) => {
       if (shopSort === 'price_asc') return a.price - b.price;
@@ -1331,9 +1407,7 @@ export const ShopTab: React.FC = () => {
                           <div className="fixed inset-0 z-20" onClick={() => setWatchStreamerOpen(false)} />
                           <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-2xl border border-sky-200 bg-white p-1 shadow-xl dark:border-sky-300/20 dark:bg-sky-950">
                             {(() => {
-                              const suggestions = streamerOptions
-                                .filter((s) => fuzzySearch(s.name || '', watchStreamerQuery))
-                                .slice(0, 8);
+                              const suggestions = getSortedStreamerOptionMatches(streamerOptions, watchStreamerQuery, 8);
                               if (suggestions.length === 0) {
                                 return <p className="px-3 py-3 text-center text-[11px] font-bold text-sky-700/60 dark:text-sky-100/50">검색 결과가 없습니다.</p>;
                               }

@@ -1041,7 +1041,7 @@ export const GachaTab: React.FC = () => {
                   {myCollection.length === 0 ? (
                     <p className="text-[10px] text-muted-foreground py-1">보유한 카드가 없습니다.</p>
                   ) : myCollection
-                    .filter((c) => offerSearch.trim() === '' ? true : c.streamer.name.toLowerCase().includes(offerSearch.toLowerCase()))
+                    .filter((c) => fuzzySearch(c.streamer?.name || '', offerSearch))
                     .map((c) => (
                       <div key={c.key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                         <div className="flex items-center gap-2 min-w-0">
@@ -1084,7 +1084,7 @@ export const GachaTab: React.FC = () => {
                       {partnerCollection.length === 0 ? (
                         <p className="text-[10px] text-muted-foreground py-1">상대가 보유한 카드가 없습니다.</p>
                       ) : partnerCollection
-                        .filter((c) => requestSearch.trim() === '' ? true : c.streamer?.name?.toLowerCase().includes(requestSearch.toLowerCase()))
+                        .filter((c) => fuzzySearch(c.streamer?.name || '', requestSearch))
                         .map((c) => {
                           const key = `${c.channel_id}#${c.star || 0}`;
                           return (
