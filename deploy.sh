@@ -10,6 +10,7 @@ LOCK_FILE="${PROJECT_DIR}/deploy.lock"
 API_APP_NAME="${API_APP_NAME:-chikapo-api}"
 WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
+REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
 
 resolve_command() {
   local command_name="$1"
@@ -34,6 +35,62 @@ resolve_command() {
 
   return 1
 }
+
+resolve_node() {
+  local candidate
+
+  if [ -n "${NODE_BIN:-}" ] && [ -x "${NODE_BIN}" ]; then
+    printf '%s\n' "${NODE_BIN}"
+    return
+  fi
+
+  for candidate in \
+    "${HOME:-}/.nvm/versions/node/v${REQUIRED_NODE_MAJOR}"*"/bin/node" \
+    "/opt/node-v${REQUIRED_NODE_MAJOR}"*"/bin/node" \
+    "/usr/local/node-v${REQUIRED_NODE_MAJOR}"*"/bin/node"; do
+    if [ -x "${candidate}" ]; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return
+  fi
+
+  return 1
+}
+
+assert_node_version() {
+  local node_bin="$1"
+  local version major
+
+  version="$("${node_bin}" -p "process.versions.node" 2>/dev/null || true)"
+  major="${version%%.*}"
+  if [ -z "${version}" ] || [ "${major:-0}" -lt "${REQUIRED_NODE_MAJOR}" ]; then
+    echo "[deploy] Node.js ${REQUIRED_NODE_MAJOR}+ is required for production install."
+    echo "[deploy] current node: ${node_bin:-not found} ${version:-unknown}"
+    echo "[deploy] install Node.js ${REQUIRED_NODE_MAJOR} on the server, or set NODE_BIN to a compatible node binary."
+    echo "[deploy] nvm example:"
+    echo "[deploy]   nvm install ${REQUIRED_NODE_MAJOR}"
+    echo "[deploy]   nvm alias default ${REQUIRED_NODE_MAJOR}"
+    echo "[deploy]   corepack enable"
+    echo "[deploy]   corepack prepare pnpm@10 --activate"
+    echo "[deploy]   npm install -g pm2"
+    exit 1
+  fi
+}
+
+NODE_BIN="$(resolve_node || true)"
+if [ -z "${NODE_BIN}" ]; then
+  echo "[deploy] node command not found"
+  echo "[deploy] install Node.js ${REQUIRED_NODE_MAJOR}, or set NODE_BIN to a compatible node binary."
+  exit 1
+fi
+assert_node_version "${NODE_BIN}"
+NODE_DIR="$(dirname "${NODE_BIN}")"
+export PATH="${NODE_DIR}:${PATH}"
 
 PM2_BIN="${PM2_BIN:-}"
 if [ -z "${PM2_BIN}" ]; then
