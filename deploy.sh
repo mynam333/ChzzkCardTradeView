@@ -150,7 +150,7 @@ read_env_value() {
   local result=""
   local file line value
 
-  for file in ".env" "backend/.env"; do
+  for file in ".env" "backend/.env" ".env.deploy"; do
     [ -f "${file}" ] || continue
     while IFS= read -r line || [ -n "${line}" ]; do
       line="${line%$'\r'}"
