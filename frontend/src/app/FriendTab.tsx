@@ -1251,7 +1251,7 @@ export const FriendTab: React.FC = () => {
       onDragOver={handleChatDragOver}
       onDragLeave={handleChatDragLeave}
       onDrop={handleChatDrop}
-      className="relative flex h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] max-h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)]"
+      className="relative flex h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] max-h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] min-h-0 w-full max-w-full flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)]"
     >
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
@@ -1274,10 +1274,10 @@ export const FriendTab: React.FC = () => {
         </header>
       )}
 
-      <div className="grid min-h-0 flex-1 lg:h-full lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="grid min-h-0 min-w-0 flex-1 lg:h-full lg:grid-cols-[18rem_minmax(0,1fr)]">
         {chatRoomRail}
 
-        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} relative min-h-0 flex-col lg:h-full`}>
+        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} relative min-h-0 min-w-0 max-w-full flex-col overflow-hidden lg:h-full`}>
         <header className="hidden items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5 lg:flex">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -1318,12 +1318,12 @@ export const FriendTab: React.FC = () => {
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-secondary/15 px-4 py-3">
+            <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/70 bg-secondary/15 px-4 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
                 <button type="button" onClick={returnToRoomList} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-sm ring-1 ring-border lg:hidden" aria-label="톡방 목록으로 돌아가기">
                   <ArrowLeft className="h-5 w-5" />
                 </button>
-                <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 rounded-full border border-border object-cover" />
+                <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 shrink-0 rounded-full border border-border object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black">{activeChatRoom.other_user.username}</p>
                   <p className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
@@ -1348,7 +1348,7 @@ export const FriendTab: React.FC = () => {
               </div>
             </div>
 
-            <div className="relative min-h-0 flex-1">
+            <div className="relative min-h-0 min-w-0 flex-1">
               {showScrollDateBubble && scrollDateBubble && (
                 <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-border bg-card/95 px-3 py-1 text-[10px] font-black text-muted-foreground shadow-sm backdrop-blur">
                   {scrollDateBubble}
@@ -1361,9 +1361,9 @@ export const FriendTab: React.FC = () => {
                   updateScrollDateBubble(target);
                   if (target.scrollTop < 48 && activeRoomIsReal) fetchChatMessages(activeChatRoom.id, 'older', false);
                 }}
-                className="h-full min-h-0 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
+                className="h-full min-h-0 min-w-0 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
               >
-                <div className="flex min-h-full flex-col justify-end space-y-3">
+                <div className="flex min-h-full min-w-0 flex-col justify-end space-y-3">
                   {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
                   {chatMessages.length === 0 && (
                     <div className="flex min-h-[18rem] flex-col items-center justify-center text-center">
@@ -1477,7 +1477,7 @@ export const FriendTab: React.FC = () => {
                   </div>
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex w-full min-w-0 gap-2">
                 <input
                   ref={chatImageInputRef}
                   type="file"
@@ -1514,7 +1514,7 @@ export const FriendTab: React.FC = () => {
                     }
                   }}
                   placeholder="메시지 입력"
-                  className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-secondary/35 px-3 py-2 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
+                  className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-secondary/35 px-3 py-2 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
                 />
                 <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || chatImageUploading || Boolean(recentAttachmentSendingId) || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
                   <Send className="h-4 w-4" />

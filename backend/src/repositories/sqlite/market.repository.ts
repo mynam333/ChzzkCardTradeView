@@ -608,12 +608,13 @@ export class SqliteMarketRepository implements IMarketRepository {
         });
       }
 
-      // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
-      const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
-      const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;  // 3분 연장
+      // 안티-스나이프: 마감까지 3분 이하일 때 입찰이 들어오면 남은 시간을 다시 3분으로 맞춥니다.
+      const ANTI_SNIPE_THRESHOLD_MS = 3 * 60_000;
+      const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;
       const nowMs = Date.now();
       const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
-      const extendedEndsAt = endsAtMs && endsAtMs - nowMs < ANTI_SNIPE_THRESHOLD_MS
+      const remainingMs = endsAtMs - nowMs;
+      const extendedEndsAt = remainingMs > 0 && remainingMs <= ANTI_SNIPE_THRESHOLD_MS
         ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
         : null;
 

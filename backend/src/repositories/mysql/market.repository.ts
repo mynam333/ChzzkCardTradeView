@@ -436,7 +436,10 @@ export class MysqlMarketRepository implements IMarketRepository {
 
         const nowMs = Date.now();
         const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
-        const extendedEndsAt = endsAtMs && endsAtMs - nowMs < 60_000 ? new Date(nowMs + 3 * 60_000).toISOString() : null;
+        const remainingMs = endsAtMs - nowMs;
+        const extendedEndsAt = remainingMs > 0 && remainingMs <= 3 * 60_000
+          ? new Date(nowMs + 3 * 60_000).toISOString()
+          : null;
         if (extendedEndsAt) {
           await tx.run('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, auction_ends_at = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', amount, bidderId, amount, extendedEndsAt, listingId);
         } else {

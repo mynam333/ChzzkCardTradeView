@@ -1500,7 +1500,7 @@ export const ShopTab: React.FC = () => {
                     const endsAt = parseAppDate(listing.auction_ends_at);
                     const remainingMs = endsAt ? endsAt.getTime() - nowTs : 0;
                     const isEnded = !!endsAt && remainingMs <= 0;
-                    const isUrgent = isAuction && !isEnded && remainingMs < 60_000;     // 1분 미만
+                    const isUrgent = isAuction && !isEnded && remainingMs <= 3 * 60_000; // 3분 이하
                     const isSoon = isAuction && !isEnded && remainingMs < 5 * 60_000;   // 5분 미만
 
                     return (
@@ -1589,7 +1589,7 @@ export const ShopTab: React.FC = () => {
                                 <span className="truncate">
                                   {listing.current_bidder_username ? `🏆 ${listing.current_bidder_username}` : '아직 입찰 없음'}
                                 </span>
-                                {isUrgent && <span className="shrink-0 font-black text-red-500">입찰 시 +3분 연장</span>}
+                                {isUrgent && <span className="shrink-0 font-black text-red-500">입찰 시 3분으로 연장</span>}
                               </div>
                             </div>
                           )}

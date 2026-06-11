@@ -434,12 +434,11 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                   />
                 </span>
                 <span
-                  className="w-full truncate text-center font-black transition-[color,opacity,font-size] duration-200"
+                  className="-mx-3 w-[4.75rem] whitespace-nowrap text-center text-[11px] font-black leading-tight transition-[color,opacity] duration-200"
                   style={{
                     color: centerWeight > 0.02
                       ? `color-mix(in srgb, var(--foreground) ${Math.round(62 + centerWeight * 38)}%, var(--muted-foreground))`
                       : 'var(--muted-foreground)',
-                    fontSize: `${10 + centerWeight * 2}px`,
                     opacity: 0.72 + centerWeight * 0.28
                   }}
                 >
