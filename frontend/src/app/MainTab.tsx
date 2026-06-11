@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
-import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, Pin, ChevronRight } from 'lucide-react';
+import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, Pin, ChevronRight, Users, Layers, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { Announcement } from '@/lib/types';
 import { formatAnnouncementDate, getAnnouncementPreview } from '@/lib/announcement';
@@ -13,6 +13,12 @@ import { AnnouncementBoardModal } from './AnnouncementBoardModal';
 import { DraggableAnnouncementPopups } from './DraggableAnnouncementPopups';
 
 const POPUP_DISMISSED_FOREVER = 'forever';
+
+type LandingStats = {
+  user_count: number;
+  streamer_count: number;
+  card_distributed: number;
+};
 
 export const MainTab: React.FC = () => {
   const { user, updatePoints } = useApp();
@@ -25,11 +31,13 @@ export const MainTab: React.FC = () => {
 
   // 치지직 실시간 스트리머 상위 가치 3명 (메인 노출용)
   const [hotStreamers, setHotStreamers] = useState<any[]>([]);
+  const [landingStats, setLandingStats] = useState<LandingStats | null>(null);
 
   useEffect(() => {
     setMounted(true);
     fetchNotices();
     fetchHotStreamers();
+    fetchLandingStats();
     let refreshTimer: number | null = null;
     const scheduleHotStreamerRefresh = () => {
       if (document.visibilityState !== 'visible') return;
@@ -87,6 +95,21 @@ export const MainTab: React.FC = () => {
       setHotStreamers([]);
     }
   };
+
+  const fetchLandingStats = async () => {
+    try {
+      const res = await apiFetch('/public/stats');
+      if (res.ok) {
+        setLandingStats(await res.json());
+      }
+    } catch (e) {
+      console.error('랜딩 통계 로드 에러:', e);
+    }
+  };
+
+  const formatLandingStat = (value?: number) => (
+    typeof value === 'number' ? value.toLocaleString() : '--'
+  );
 
   const dismissPopup = (popupId: number, permanently = false) => {
     if (permanently) {
@@ -315,6 +338,63 @@ export const MainTab: React.FC = () => {
         </div>
 
       </div>
+
+      {/* 공개 서비스 통계 */}
+      <section className="cute-surface overflow-hidden rounded-[2rem] p-5 sm:p-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-primary/80">CHIKAPO NOW</p>
+            <h3 className="mt-1 text-lg font-black text-foreground sm:text-xl">치카포는 지금</h3>
+          </div>
+          <p className="max-w-md text-xs font-bold leading-relaxed text-muted-foreground sm:text-right">
+            수집가들이 함께 쌓아 올린 카드 세계의 현재 기록이에요.
+          </p>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="cute-card-pop rounded-2xl border border-sky-200/70 bg-sky-50/80 p-4 shadow-sm dark:border-sky-400/20 dark:bg-sky-400/10">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-sky-500 shadow-sm dark:bg-sky-950/40 dark:text-sky-300">
+                <Users className="h-5 w-5" />
+              </span>
+              <span className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-black text-sky-600 dark:bg-white/10 dark:text-sky-200">함께해요</span>
+            </div>
+            <p className="mt-4 text-xs font-black text-sky-700/80 dark:text-sky-200/80">총 유저 수</p>
+            <p className="mt-1 text-2xl font-black leading-none text-foreground sm:text-3xl">
+              {formatLandingStat(landingStats?.user_count)}
+              <span className="ml-1 text-sm font-black text-muted-foreground">명</span>
+            </p>
+          </div>
+
+          <div className="cute-card-pop rounded-2xl border border-fuchsia-200/70 bg-fuchsia-50/80 p-4 shadow-sm dark:border-fuchsia-400/20 dark:bg-fuchsia-400/10">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-fuchsia-500 shadow-sm dark:bg-fuchsia-950/40 dark:text-fuchsia-300">
+                <Sparkles className="h-5 w-5" />
+              </span>
+              <span className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-black text-fuchsia-600 dark:bg-white/10 dark:text-fuchsia-200">최애 발견</span>
+            </div>
+            <p className="mt-4 text-xs font-black text-fuchsia-700/80 dark:text-fuchsia-200/80">등록 스트리머</p>
+            <p className="mt-1 text-2xl font-black leading-none text-foreground sm:text-3xl">
+              {formatLandingStat(landingStats?.streamer_count)}
+              <span className="ml-1 text-sm font-black text-muted-foreground">명</span>
+            </p>
+          </div>
+
+          <div className="cute-card-pop rounded-2xl border border-emerald-200/70 bg-emerald-50/80 p-4 shadow-sm dark:border-emerald-400/20 dark:bg-emerald-400/10">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-500 shadow-sm dark:bg-emerald-950/40 dark:text-emerald-300">
+                <Layers className="h-5 w-5" />
+              </span>
+              <span className="rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-black text-emerald-600 dark:bg-white/10 dark:text-emerald-200">반짝이는 컬렉션</span>
+            </div>
+            <p className="mt-4 text-xs font-black text-emerald-700/80 dark:text-emerald-200/80">배포된 카드</p>
+            <p className="mt-1 text-2xl font-black leading-none text-foreground sm:text-3xl">
+              {formatLandingStat(landingStats?.card_distributed)}
+              <span className="ml-1 text-sm font-black text-muted-foreground">장</span>
+            </p>
+          </div>
+        </div>
+      </section>
 
       {/* 이용 방법 안내 */}
       <section className="cute-surface rounded-[2rem] p-6">

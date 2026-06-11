@@ -19,15 +19,18 @@ import { apiFetch } from '@/lib/api';
 import { NotificationBell } from './NotificationBell';
 import { UserTitleList } from './UserTitleBadge';
 
-interface NavigationProps {
-  onNotifyClick?: () => void;
-}
+type NavItem = { id: TabId; label: string; icon: typeof Home };
+
+const loopIndex = (index: number, length: number) => ((index % length) + length) % length;
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
-  const touchStartX = React.useRef<number | null>(null);
-  const touchStartY = React.useRef<number | null>(null);
-  const touchStartTime = React.useRef<number>(0);
+  const dockTouchStartX = React.useRef<number | null>(null);
+  const dockTouchStartY = React.useRef<number | null>(null);
+  const dockClickSuppressed = React.useRef(false);
+  const [dockDragDelta, setDockDragDelta] = React.useState(0);
+  const [dockPressedId, setDockPressedId] = React.useState<TabId | null>(null);
 
   const handleLogin = async () => {
     try {
@@ -44,7 +47,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  const navItems: { id: TabId; label: string; icon: typeof Home }[] = [
+  const navItems: NavItem[] = [
     { id: 'main', label: '메인', icon: Home },
     { id: 'shop', label: '상점', icon: Store },
     { id: 'inventory', label: '보관함', icon: Layers },
@@ -56,33 +59,61 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       : []),
   ];
 
-  // 모바일 좌우 스와이프로 탭 전환 (오작동 방지를 위해 둔감하게 조정)
-  const SWIPE_MIN_DISTANCE = 110;   // 최소 가로 이동 거리(px)
-  const SWIPE_MAX_DURATION = 700;   // 너무 느린(스크롤성) 제스처 제외(ms)
-  const SWIPE_HORIZONTAL_RATIO = 2; // 가로 이동이 세로보다 충분히 커야 함
+  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'ranking', 'arcade', 'my-info', 'admin'];
+  const mobileNavItems = mobileNavOrder
+    .map((id) => navItems.find((item) => item.id === id))
+    .filter((item): item is NavItem => Boolean(item));
+  const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === activeTab));
+  const mobileDockItems = [-2, -1, 0, 1, 2].map((offset) => ({
+    offset,
+    item: mobileNavItems[loopIndex(activeNavIndex + offset, mobileNavItems.length)]
+  }));
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-    touchStartTime.current = Date.now();
+  const triggerLightHaptic = () => {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate?.(10);
+    }
   };
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null || touchStartY.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-    const dt = Date.now() - touchStartTime.current;
-    touchStartX.current = null;
-    touchStartY.current = null;
 
-    // 1) 충분히 길고 빠른 가로 스와이프만 인정, 2) 세로 이동(스크롤) 대비 가로가 우세할 때만
-    if (Math.abs(dx) < SWIPE_MIN_DISTANCE) return;
-    if (dt > SWIPE_MAX_DURATION) return;
-    if (Math.abs(dx) < Math.abs(dy) * SWIPE_HORIZONTAL_RATIO) return;
+  const shiftMobileDock = (direction: -1 | 1) => {
+    const nextItem = mobileNavItems[loopIndex(activeNavIndex + direction, mobileNavItems.length)];
+    if (!nextItem || nextItem.id === activeTab) return;
+    triggerLightHaptic();
+    setActiveTab(nextItem.id);
+  };
 
-    const ids = navItems.map((i) => i.id);
-    const idx = ids.indexOf(activeTab);
-    if (dx < 0 && idx < ids.length - 1) setActiveTab(ids[idx + 1]);
-    else if (dx > 0 && idx > 0) setActiveTab(ids[idx - 1]);
+  const handleDockPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    dockTouchStartX.current = event.clientX;
+    dockTouchStartY.current = event.clientY;
+    setDockDragDelta(0);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleDockPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (dockTouchStartX.current === null || dockTouchStartY.current === null) return;
+    const dx = event.clientX - dockTouchStartX.current;
+    const dy = event.clientY - dockTouchStartY.current;
+    if (Math.abs(dy) > Math.abs(dx) * 1.35) return;
+    setDockDragDelta(clamp(dx, -86, 86));
+  };
+
+  const finishDockPointer = (event: React.PointerEvent<HTMLElement>) => {
+    if (dockTouchStartX.current === null || dockTouchStartY.current === null) return;
+    const dx = event.clientX - dockTouchStartX.current;
+    const dy = event.clientY - dockTouchStartY.current;
+    dockTouchStartX.current = null;
+    dockTouchStartY.current = null;
+    setDockDragDelta(0);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+
+    if (Math.abs(dx) >= 38 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      dockClickSuppressed.current = true;
+      window.setTimeout(() => {
+        dockClickSuppressed.current = false;
+      }, 220);
+      shiftMobileDock(dx < 0 ? 1 : -1);
+    }
   };
 
   return (
@@ -234,35 +265,81 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       </header>
 
       {/* Main Content Area */}
-      <main
-        className="relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-24 pt-6 md:px-8 md:py-8"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
+      <main className="relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-8 md:py-8">
         {children}
         <p className="mx-auto mt-8 max-w-3xl text-center text-[10px] font-bold leading-relaxed text-muted-foreground/80">
           치카포는 비공식 서드파티 서비스이며 네이버/치지직과 제휴 또는 공식 서비스가 아님을 밝힙니다.
         </p>
       </main>
 
-      {/* 모바일 하단 탭 내비게이션 바 (Mobile Bottom Navigation) */}
-      <nav className="cute-surface fixed bottom-3 left-3 right-3 z-50 flex items-center justify-center rounded-[2rem] px-1.5 py-2 backdrop-blur-md md:hidden">
-        {navItems.map((item) => {
+      {/* 모바일 루프형 하단 도크 */}
+      <nav
+        className="fixed inset-x-3 bottom-3 z-50 md:hidden"
+        aria-label="모바일 주요 메뉴"
+        onPointerDown={handleDockPointerDown}
+        onPointerMove={handleDockPointerMove}
+        onPointerUp={finishDockPointer}
+        onPointerCancel={finishDockPointer}
+        style={{ touchAction: 'pan-y' }}
+      >
+        <div className="cute-surface relative mx-auto flex max-w-md items-end justify-center overflow-hidden rounded-[2.35rem] border border-white/70 px-2 pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]">
+          <div className="pointer-events-none absolute inset-x-10 top-2 h-px bg-gradient-to-r from-transparent via-primary/25 to-transparent" />
+          {mobileDockItems.map(({ item, offset }) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+            const distance = Math.abs(offset);
+            const translateX = dockDragDelta * (1 - distance * 0.12);
+            const arcLift = offset === 0 ? -14 : distance === 1 ? -5 : 8;
+            const dragArcTilt = Math.abs(dockDragDelta) * distance * 0.035;
+            const translateY = arcLift + dragArcTilt;
+            const rotate = offset * 4 + dockDragDelta * 0.035;
+            const scale = offset === 0 ? 1.14 : distance === 1 ? 0.96 : 0.82;
+            const opacity = distance === 2 ? 0.62 : 1;
           return (
             <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`cute-wiggle-hover flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition-all ${
-                isActive ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' : 'text-muted-foreground'
-              }`}
+                key={`${item.id}-${offset}`}
+                onPointerDown={() => setDockPressedId(item.id)}
+                onPointerUp={() => setDockPressedId(null)}
+                onPointerCancel={() => setDockPressedId(null)}
+                onClick={() => {
+                  if (dockClickSuppressed.current) return;
+                  triggerLightHaptic();
+                  setActiveTab(item.id);
+                }}
+                className={`group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 rounded-[1.45rem] px-1 pb-1.5 pt-2 transition-[transform,opacity,color,background,box-shadow] duration-300 ${
+                  isActive
+                    ? 'z-10 text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                style={{
+                  transform: `translate3d(${translateX}px, ${translateY}px, 0) rotate(${rotate}deg) scale(${dockPressedId === item.id ? scale * 0.94 : scale})`,
+                  opacity
+                }}
+                aria-current={isActive ? 'page' : undefined}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium truncate w-full text-center">{item.label}</span>
+                <span
+                  className={`relative flex items-center justify-center rounded-full transition-all duration-300 ${
+                    isActive
+                      ? 'h-14 w-14 bg-primary text-primary-foreground shadow-[0_14px_34px_rgba(34,153,240,0.36)] ring-4 ring-primary/12 dark:ring-white/10'
+                      : distance === 1
+                        ? 'h-10 w-10 bg-secondary/75 text-muted-foreground group-hover:bg-secondary'
+                        : 'h-9 w-9 bg-secondary/45 text-muted-foreground/80'
+                  }`}
+                >
+                  <Icon className={isActive ? 'h-6 w-6' : 'h-5 w-5'} />
+                  {isActive && (
+                    <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.8)]" />
+                  )}
+                </span>
+                <span className={`w-full truncate text-center font-black transition-all duration-300 ${
+                  isActive ? 'text-[11px]' : distance === 1 ? 'text-[9px]' : 'text-[8px]'
+                }`}>
+                  {item.label}
+                </span>
             </button>
           );
         })}
+        </div>
       </nav>
 
     </div>

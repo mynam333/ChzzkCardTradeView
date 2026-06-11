@@ -53,6 +53,7 @@ import {
   sendTestPush
 } from '../controllers/pushController';
 import { claimTutorialGachaTicket, getTutorialProgress, markTutorialCompleted } from '../controllers/tutorialController';
+import { getPublicLandingStats } from '../controllers/publicStatsController';
 
 import {
   getUserMe,
@@ -227,6 +228,7 @@ router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updat
 router.delete('/users/me', authMiddleware, deleteMyAccount);
 router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
 router.get('/users/ranking', getUserRankings);
+router.get('/public/stats', getPublicLandingStats);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);

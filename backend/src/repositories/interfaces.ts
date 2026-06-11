@@ -25,7 +25,7 @@ export interface User {
 
 export interface DeletedUserAccount {
   user_id: string;
-  deleted_at: string;
+  deleted_at: string | Date;
   username_snapshot?: string | null;
   avatar_url_snapshot?: string | null;
   point_at_deletion?: number | null;
