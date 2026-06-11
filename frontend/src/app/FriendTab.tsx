@@ -74,6 +74,18 @@ export const FriendTab: React.FC = () => {
   const activeChatRoomRef = useRef<ChatRoom | null>(null);
 
   const friendIdSet = useMemo(() => new Set(friends.map((friend) => friend.id)), [friends]);
+  const outgoingRequestUserIdSet = useMemo(
+    () => new Set(friendRequests.outgoing.map((request) => request.receiver_id)),
+    [friendRequests.outgoing]
+  );
+  const outgoingRequestByUserId = useMemo(
+    () => new Map(friendRequests.outgoing.map((request) => [request.receiver_id, request])),
+    [friendRequests.outgoing]
+  );
+  const incomingRequestUserIdSet = useMemo(
+    () => new Set(friendRequests.incoming.map((request) => request.requester_id)),
+    [friendRequests.incoming]
+  );
 
   const buildChatSocketUrl = () => {
     const explicit = process.env.NEXT_PUBLIC_CHAT_WS_URL;
@@ -194,7 +206,7 @@ export const FriendTab: React.FC = () => {
         toast(data.message || '친구 신청을 보낼 수 없습니다.', 'error');
         return;
       }
-      toast('친구 신청을 보냈습니다.', 'success');
+      toast(data.already_friends || data.already_pending ? data.message : '친구 신청을 보냈습니다.', data.already_friends || data.already_pending ? 'info' : 'success');
       setFriendCandidates([]);
       setFriendSearch('');
       fetchFriends(false);
@@ -214,6 +226,21 @@ export const FriendTab: React.FC = () => {
       fetchFriends(false);
     } catch {
       toast('친구 신청 처리에 실패했습니다.', 'error');
+    }
+  };
+
+  const cancelFriendInvite = async (requestId: number) => {
+    try {
+      const res = await apiFetch(`/friends/requests/${requestId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.message || '친구 신청을 취소할 수 없습니다.', 'error');
+        return;
+      }
+      toast('친구 신청을 취소했습니다.', 'info');
+      fetchFriends(false);
+    } catch {
+      toast('친구 신청 취소에 실패했습니다.', 'error');
     }
   };
 
@@ -492,6 +519,9 @@ export const FriendTab: React.FC = () => {
               <div className="mt-3 space-y-2">
                 {friendCandidates.map((candidate) => {
                   const alreadyFriend = friendIdSet.has(candidate.id);
+                  const outgoingPending = outgoingRequestUserIdSet.has(candidate.id);
+                  const outgoingRequest = outgoingRequestByUserId.get(candidate.id);
+                  const incomingPending = incomingRequestUserIdSet.has(candidate.id);
                   return (
                     <div key={candidate.id} className="flex items-center justify-between gap-2 rounded-2xl bg-card/80 px-3 py-2 shadow-sm">
                       <div className="flex min-w-0 items-center gap-2.5">
@@ -507,7 +537,23 @@ export const FriendTab: React.FC = () => {
                             <Shield className="h-3.5 w-3.5" /> 톡 열기
                           </button>
                         )}
-                        {!alreadyFriend && (
+                        {alreadyFriend ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black text-emerald-600 dark:text-emerald-300">
+                            친구
+                          </span>
+                        ) : outgoingPending ? (
+                          <button
+                            type="button"
+                            onClick={() => outgoingRequest && cancelFriendInvite(outgoingRequest.id)}
+                            className="inline-flex items-center rounded-full bg-muted px-3 py-1.5 text-[10px] font-black text-muted-foreground hover:bg-secondary"
+                          >
+                            신청 취소
+                          </button>
+                        ) : incomingPending ? (
+                          <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary">
+                            받은 신청
+                          </span>
+                        ) : (
                           <button type="button" onClick={() => sendFriendInvite(candidate.id)} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary hover:bg-primary/15">
                             <UserPlus className="h-3.5 w-3.5" /> 신청
                           </button>
@@ -538,10 +584,26 @@ export const FriendTab: React.FC = () => {
             </div>
           )}
 
+          {friendRequests.outgoing.length > 0 && (
+            <div className="space-y-2 rounded-[2rem] border border-border/70 bg-card/70 p-4 shadow-sm">
+              <p className="text-[11px] font-black text-muted-foreground">보낸 친구 신청</p>
+              {friendRequests.outgoing.map((request) => (
+                <div key={request.id} className="flex items-center justify-between gap-2 rounded-2xl bg-secondary/30 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <img src={request.receiver?.avatar_url} alt={request.receiver?.username || '보낸 친구 신청'} className="h-8 w-8 rounded-full border border-border object-cover" />
+                    <p className="truncate text-xs font-black">{request.receiver?.username}</p>
+                  </div>
+                  <button type="button" onClick={() => cancelFriendInvite(request.id)} className="shrink-0 rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-black text-rose-500">
+                    취소
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div data-tour="friends-list" className="space-y-2 rounded-[2rem] border border-border/70 bg-card/70 p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground"><Users className="h-3.5 w-3.5" /> 친구 목록 ({friends.length})</p>
-              {friendRequests.outgoing.length > 0 && <span className="text-[10px] font-bold text-muted-foreground">신청 대기 {friendRequests.outgoing.length}</span>}
             </div>
             {friends.length === 0 ? (
               <p className="py-5 text-center text-[11px] text-muted-foreground">아직 친구가 없습니다.</p>

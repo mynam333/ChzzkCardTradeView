@@ -5,6 +5,7 @@ import { userRepository } from '../repositories';
 import { createRealtimeNotification } from './notificationController';
 import { sendPushToUser } from './pushController';
 import {
+  cancelFriendRequest,
   createFriendRequest,
   getOrCreateChatRoom,
   getRoomForUser,
@@ -21,8 +22,8 @@ import {
 } from '../services/friendChatService';
 import { clearChatRoomViewing, isChatRoomViewing, markChatRoomViewing } from '../services/chatPresence';
 
-const jsonError = (res: Response, status: number, message: string, details?: string) =>
-  res.status(status).json({ error: status >= 500 ? 'InternalServerError' : 'BadRequest', message, details: IS_PRODUCTION ? undefined : details });
+const jsonError = (res: Response, status: number, message: string, details?: string, error?: string) =>
+  res.status(status).json({ error: error || (status >= 500 ? 'InternalServerError' : 'BadRequest'), message, details: IS_PRODUCTION ? undefined : details });
 
 const currentUser = (req: AuthenticatedRequest) => req.user;
 
@@ -89,8 +90,12 @@ export const sendFriendRequest = async (req: AuthenticatedRequest, res: Response
     await notifyUser(targetId, '친구 신청 도착', `${user.username}님이 친구 신청을 보냈습니다.`, 'friends');
     return res.status(201).json({ request, message: '친구 신청을 보냈습니다.' });
   } catch (err: any) {
-    if (err.message === 'AlreadyFriends') return jsonError(res, 400, '이미 친구인 유저입니다.');
-    if (err.message === 'PendingRequestExists') return jsonError(res, 400, '이미 대기 중인 친구 신청이 있습니다.');
+    if (err.message === 'AlreadyFriends') {
+      return res.status(200).json({ ok: true, already_friends: true, message: '이미 친구인 유저입니다.' });
+    }
+    if (err.message === 'PendingRequestExists') {
+      return res.status(200).json({ ok: true, already_pending: true, message: '이미 대기 중인 친구 신청이 있습니다.' });
+    }
     return jsonError(res, 500, '친구 신청 실패', err.message);
   }
 };
@@ -112,6 +117,21 @@ export const respondToFriendRequest = async (req: AuthenticatedRequest, res: Res
     return res.status(200).json({ ok: true, accepted: accept, room });
   } catch (err: any) {
     return jsonError(res, 400, '처리할 수 없는 친구 신청입니다.', err.message);
+  }
+};
+
+export const cancelOutgoingFriendRequest = async (req: AuthenticatedRequest, res: Response) => {
+  const user = currentUser(req);
+  if (!user) return jsonError(res, 401, '로그인이 필요합니다.');
+
+  const requestId = Number(req.params.request_id);
+  if (!requestId) return jsonError(res, 400, '친구 신청 ID가 필요합니다.');
+
+  try {
+    await cancelFriendRequest(requestId, user.id);
+    return res.status(200).json({ ok: true, canceled: true, message: '친구 신청을 취소했습니다.' });
+  } catch (err: any) {
+    return jsonError(res, 400, '취소할 수 없는 친구 신청입니다.', err.message);
   }
 };
 

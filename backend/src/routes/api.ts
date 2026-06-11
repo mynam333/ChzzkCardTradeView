@@ -131,6 +131,7 @@ import {
   clearRoomViewing,
   closeChatRoom,
   createChatMessage,
+  cancelOutgoingFriendRequest,
   deleteClosedChatRoom,
   deleteFriend,
   getChatMessages,
@@ -295,6 +296,7 @@ router.delete('/notifications/:id', authMiddleware, banCheckMiddleware, hideRead
 router.get('/friends/search', authMiddleware, banCheckMiddleware, searchLimiter, searchFriendCandidates);
 router.get('/friends', authMiddleware, banCheckMiddleware, getFriendOverview);
 router.post('/friends/requests', authMiddleware, banCheckMiddleware, sendFriendRequest);
+router.delete('/friends/requests/:request_id', authMiddleware, banCheckMiddleware, cancelOutgoingFriendRequest);
 router.post('/friends/requests/:request_id/respond', authMiddleware, banCheckMiddleware, respondToFriendRequest);
 router.delete('/friends/:user_id', authMiddleware, banCheckMiddleware, deleteFriend);
 router.get('/friends/rooms', authMiddleware, banCheckMiddleware, getChatRooms);

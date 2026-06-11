@@ -39,8 +39,8 @@ describe('fuzzyScore', () => {
   it('완전 일치를 부분일치보다 우선한다', () => {
     const exact = fuzzyScore('치카포', '치카포');
     const prefix = fuzzyScore('치카포컬렉터', '치카포');
-    expect(exact).toBe(-100);
-    expect(prefix).toBe(0);
+    expect(exact).toBe(-10000);
+    expect(prefix).toBeLessThan(0);
     expect(exact as number).toBeLessThan(prefix as number);
   });
 
@@ -54,6 +54,18 @@ describe('fuzzyScore', () => {
 
   it('일치하지 않으면 null', () => {
     expect(fuzzyScore('치카포', 'xyz')).toBeNull();
+  });
+
+  it('전각/반각, 특수문자, 보이지 않는 문자를 정규화해 비교한다', () => {
+    expect(fuzzyScore('ＡＢＣ 스트리머', 'abc스트리머')).toBe(-10000);
+    expect(fuzzyScore('치\u200B카-포!', '치카포')).toBe(-10000);
+  });
+
+  it('작은 오타는 낮은 우선순위로 보정한다', () => {
+    const typo = fuzzyScore('치카포', '치카보');
+    const exact = fuzzyScore('치카포', '치카포');
+    expect(typo).not.toBeNull();
+    expect(exact as number).toBeLessThan(typo as number);
   });
 });
 

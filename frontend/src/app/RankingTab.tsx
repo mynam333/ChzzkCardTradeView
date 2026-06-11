@@ -11,7 +11,7 @@ import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { StreamerTooltip } from './StreamerTooltip';
-import { fuzzyScore, fuzzySearch } from '@/lib/search';
+import { fuzzyScore, fuzzySearch, normalizeSearchText } from '@/lib/search';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
 
@@ -66,17 +66,17 @@ export const RankingTab: React.FC = () => {
   const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
 
   const findBestCardFilterMatch = (query: string): Streamer | null => {
-    const normalizedQuery = query.replace(/\s+/g, '').toLowerCase().trim();
+    const normalizedQuery = normalizeSearchText(query);
     if (!normalizedQuery) return null;
 
     const scored = streamers
       .map((streamer) => {
-        const normalizedName = (streamer.name || '').replace(/\s+/g, '').toLowerCase();
-        const normalizedChannelId = (streamer.channel_id || '').toLowerCase();
+        const normalizedName = normalizeSearchText(streamer.name || '');
+        const normalizedChannelId = normalizeSearchText(streamer.channel_id || '');
         const nameScore = fuzzyScore(streamer.name || '', query);
         const channelScore = fuzzyScore(streamer.channel_id || '', query);
         const score = normalizedName === normalizedQuery || normalizedChannelId === normalizedQuery
-          ? -100
+          ? -10000
           : nameScore ?? (channelScore !== null ? 2000 + channelScore : null);
         return { streamer, score };
       })
@@ -120,6 +120,33 @@ export const RankingTab: React.FC = () => {
     const match = findBestCardFilterMatch(cardFilterName);
     setCardFilterChannelId(match ? match.channel_id : '');
   }, [cardFilterName, streamers, supportsCardHolderFilter]);
+
+  useEffect(() => {
+    if (!supportsCardHolderFilter) return;
+    const query = cardFilterName.trim();
+    if (!query) return;
+    let canceled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ mode: 'value', q: query, limit: '20' });
+        const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
+        if (!res.ok || canceled) return;
+        const matches = await res.json();
+        if (!Array.isArray(matches) || canceled) return;
+        setStreamers((prev) => {
+          const byId = new Map(prev.map((streamer) => [streamer.channel_id, streamer]));
+          for (const streamer of matches) byId.set(streamer.channel_id, streamer);
+          return Array.from(byId.values());
+        });
+      } catch {
+        // 카드 보유자 필터 후보 보강 실패는 기본 랭킹 로드를 막지 않습니다.
+      }
+    }, 180);
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [cardFilterName, supportsCardHolderFilter]);
 
   useEffect(() => {
     const handleTutorialSubTab = (event: Event) => {

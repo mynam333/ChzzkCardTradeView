@@ -270,6 +270,27 @@ export const respondFriendRequest = async (requestId: number, userId: string, ac
   return { request, room };
 };
 
+export const cancelFriendRequest = async (requestId: number, userId: string) => {
+  const mode = getDbMode();
+  const request = mode === 'MYSQL'
+    ? await getMysqlDb().get<any>('SELECT * FROM friend_requests WHERE id = ?', requestId)
+    : mode === 'SUPABASE'
+      ? (await getSupabaseClient().from('friend_requests').select('*').eq('id', requestId).maybeSingle()).data as any
+      : getSqliteDb().prepare('SELECT * FROM friend_requests WHERE id = ?').get(requestId) as any;
+
+  if (!request || request.requester_id !== userId || request.status !== 'pending') throw new Error('InvalidRequest');
+
+  if (mode === 'MYSQL') {
+    await getMysqlDb().run("UPDATE friend_requests SET status = 'canceled', responded_at = UTC_TIMESTAMP() WHERE id = ?", requestId);
+  } else if (mode === 'SUPABASE') {
+    await getSupabaseClient().from('friend_requests').update({ status: 'canceled', responded_at: new Date().toISOString() }).eq('id', requestId);
+  } else {
+    getSqliteDb().prepare("UPDATE friend_requests SET status = 'canceled', responded_at = datetime('now') WHERE id = ?").run(requestId);
+  }
+
+  return request as FriendRequestRow;
+};
+
 export const removeFriend = async (userId: string, friendId: string) => {
   const [userA, userB] = pair(userId, friendId);
   const mode = getDbMode();
