@@ -64,7 +64,9 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     .map((id) => navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));
   const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === activeTab));
-  const mobileDockItems = [-2, -1, 0, 1, 2].map((offset) => ({
+  const dockSlotWidth = 62;
+  const dockDragProgress = clamp(dockDragDelta / dockSlotWidth, -1, 1);
+  const mobileDockItems = [-3, -2, -1, 0, 1, 2, 3].map((offset) => ({
     offset,
     item: mobileNavItems[loopIndex(activeNavIndex + offset, mobileNavItems.length)]
   }));
@@ -95,7 +97,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     const dx = event.clientX - dockTouchStartX.current;
     const dy = event.clientY - dockTouchStartY.current;
     if (Math.abs(dy) > Math.abs(dx) * 1.35) return;
-    setDockDragDelta(clamp(dx, -86, 86));
+    setDockDragDelta(clamp(dx, -dockSlotWidth, dockSlotWidth));
   };
 
   const finishDockPointer = (event: React.PointerEvent<HTMLElement>) => {
@@ -282,21 +284,31 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         onPointerCancel={finishDockPointer}
         style={{ touchAction: 'pan-y' }}
       >
-        <div className="cute-surface relative mx-auto flex max-w-md items-end justify-center overflow-hidden rounded-[2.35rem] border border-white/70 px-2 pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]">
-          <div className="pointer-events-none absolute inset-x-10 top-2 h-px bg-gradient-to-r from-transparent via-primary/25 to-transparent" />
+        <div
+          className="cute-surface relative mx-auto max-w-md overflow-hidden border border-white/70 shadow-[0_18px_46px_rgba(20,101,170,0.20)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+          style={{
+            height: 'calc(6.7rem + env(safe-area-inset-bottom))',
+            borderRadius: '44% 44% 2.15rem 2.15rem / 24% 24% 2rem 2rem'
+          }}
+        >
+          <div className="pointer-events-none absolute inset-x-8 top-2 h-8 rounded-[50%] border-t border-primary/20" />
+          <div className="pointer-events-none absolute inset-x-6 bottom-[calc(0.45rem+env(safe-area-inset-bottom))] h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
           {mobileDockItems.map(({ item, offset }) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-            const distance = Math.abs(offset);
-            const translateX = dockDragDelta * (1 - distance * 0.12);
-            const arcLift = offset === 0 ? -14 : distance === 1 ? -5 : 8;
-            const dragArcTilt = Math.abs(dockDragDelta) * distance * 0.035;
-            const translateY = arcLift + dragArcTilt;
-            const rotate = offset * 4 + dockDragDelta * 0.035;
-            const scale = offset === 0 ? 1.14 : distance === 1 ? 0.96 : 0.82;
-            const opacity = distance === 2 ? 0.62 : 1;
-          return (
-            <button
+            const Icon = item.icon;
+            const curvePosition = offset + dockDragProgress;
+            const distance = Math.abs(curvePosition);
+            const centerWeight = clamp(1 - distance / 0.95, 0, 1);
+            const visibleWeight = clamp(1 - Math.max(0, distance - 2.15) / 0.55, 0, 1);
+            const x = curvePosition * dockSlotWidth;
+            const y = 4 + Math.pow(Math.min(distance, 2.55), 2) * 6.2;
+            const iconSize = 40 + centerWeight * 18;
+            const iconColorMix = Math.round(centerWeight * 100);
+            const iconBgMix = Math.round(18 + centerWeight * 82);
+            const isCentered = centerWeight > 0.72;
+            const pressScale = dockPressedId === item.id ? 0.94 : 1;
+
+            return (
+              <button
                 key={`${item.id}-${offset}`}
                 onPointerDown={() => setDockPressedId(item.id)}
                 onPointerUp={() => setDockPressedId(null)}
@@ -306,39 +318,58 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                   triggerLightHaptic();
                   setActiveTab(item.id);
                 }}
-                className={`group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 rounded-[1.45rem] px-1 pb-1.5 pt-2 transition-[transform,opacity,color,background,box-shadow] duration-300 ${
-                  isActive
-                    ? 'z-10 text-primary-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                className="group absolute left-1/2 top-2 flex w-16 -translate-x-1/2 flex-col items-center gap-1 rounded-[1.45rem] px-1 pb-1 pt-1.5 transition-[transform,opacity] duration-200"
                 style={{
-                  transform: `translate3d(${translateX}px, ${translateY}px, 0) rotate(${rotate}deg) scale(${dockPressedId === item.id ? scale * 0.94 : scale})`,
-                  opacity
+                  transform: `translate3d(calc(-50% + ${x}px), ${y}px, 0) scale(${pressScale})`,
+                  opacity: visibleWeight,
+                  pointerEvents: visibleWeight < 0.15 ? 'none' : 'auto',
+                  zIndex: Math.round(20 - distance * 4)
                 }}
-                aria-current={isActive ? 'page' : undefined}
-            >
+                aria-current={isCentered ? 'page' : undefined}
+              >
                 <span
-                  className={`relative flex items-center justify-center rounded-full transition-all duration-300 ${
-                    isActive
-                      ? 'h-14 w-14 bg-primary text-primary-foreground shadow-[0_14px_34px_rgba(34,153,240,0.36)] ring-4 ring-primary/12 dark:ring-white/10'
-                      : distance === 1
-                        ? 'h-10 w-10 bg-secondary/75 text-muted-foreground group-hover:bg-secondary'
-                        : 'h-9 w-9 bg-secondary/45 text-muted-foreground/80'
-                  }`}
+                  className="relative flex items-center justify-center rounded-full transition-[width,height,background,color,box-shadow,ring-color] duration-200"
+                  style={{
+                    width: `${iconSize}px`,
+                    height: `${iconSize}px`,
+                    color: centerWeight > 0.02
+                      ? `color-mix(in srgb, var(--primary-foreground) ${iconColorMix}%, var(--muted-foreground))`
+                      : 'var(--muted-foreground)',
+                    background: centerWeight > 0.02
+                      ? `color-mix(in srgb, var(--primary) ${iconBgMix}%, var(--secondary))`
+                      : 'color-mix(in srgb, var(--secondary) 76%, var(--card))',
+                    boxShadow: centerWeight > 0.02
+                      ? `0 ${Math.round(8 + centerWeight * 9)}px ${Math.round(18 + centerWeight * 22)}px color-mix(in srgb, var(--primary) ${Math.round(12 + centerWeight * 24)}%, transparent)`
+                      : '0 4px 10px rgba(15, 80, 130, 0.08)',
+                    outline: centerWeight > 0.45 ? '4px solid color-mix(in srgb, var(--primary) 12%, transparent)' : '0 solid transparent'
+                  }}
                 >
-                  <Icon className={isActive ? 'h-6 w-6' : 'h-5 w-5'} />
-                  {isActive && (
+                  <Icon
+                    className="transition-[width,height] duration-200"
+                    style={{
+                      width: `${20 + centerWeight * 5}px`,
+                      height: `${20 + centerWeight * 5}px`
+                    }}
+                  />
+                  {centerWeight > 0.72 && (
                     <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.8)]" />
                   )}
                 </span>
-                <span className={`w-full truncate text-center font-black transition-all duration-300 ${
-                  isActive ? 'text-[11px]' : distance === 1 ? 'text-[9px]' : 'text-[8px]'
-                }`}>
+                <span
+                  className="w-full truncate text-center font-black transition-[color,opacity,font-size] duration-200"
+                  style={{
+                    color: centerWeight > 0.02
+                      ? `color-mix(in srgb, var(--foreground) ${Math.round(62 + centerWeight * 38)}%, var(--muted-foreground))`
+                      : 'var(--muted-foreground)',
+                    fontSize: `${8 + centerWeight * 3}px`,
+                    opacity: 0.72 + centerWeight * 0.28
+                  }}
+                >
                   {item.label}
                 </span>
-            </button>
-          );
-        })}
+              </button>
+            );
+          })}
         </div>
       </nav>
 
