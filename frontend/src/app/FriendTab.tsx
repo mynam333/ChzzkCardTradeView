@@ -722,7 +722,7 @@ export const FriendTab: React.FC = () => {
 
   const activeRoomIsReal = activeChatRoom && !isDraftRoom(activeChatRoom);
   const chatRoomRail = (
-    <aside className={`${activeChatRoom ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col bg-secondary/20 p-3 lg:border-r lg:border-border/70 lg:p-4`}>
+    <aside className={`${activeChatRoom ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col bg-secondary/20 p-3 lg:h-full lg:border-r lg:border-border/70 lg:p-4`}>
       <div className="mb-3 flex items-center justify-between gap-2 lg:mb-3">
         <div>
           <p className="flex items-center gap-1.5 text-sm font-black lg:text-[11px] lg:text-muted-foreground">
@@ -771,7 +771,7 @@ export const FriendTab: React.FC = () => {
   );
 
   return (
-    <div className="relative flex min-h-[calc(100vh-9rem)] flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
+    <div className="relative flex h-[calc(100dvh-9rem)] max-h-[calc(100dvh-9rem)] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
 
@@ -793,10 +793,10 @@ export const FriendTab: React.FC = () => {
         </header>
       )}
 
-      <div className="grid min-h-0 flex-1 lg:min-h-[calc(100vh-9rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 lg:h-full lg:grid-cols-[18rem_minmax(0,1fr)]">
         {chatRoomRail}
 
-        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} min-h-0 flex-col`}>
+        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} min-h-0 flex-col lg:h-full`}>
         <header className="hidden items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5 lg:flex">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -857,7 +857,7 @@ export const FriendTab: React.FC = () => {
                 const target = event.currentTarget;
                 if (target.scrollTop < 48 && activeRoomIsReal) fetchChatMessages(activeChatRoom.id, 'older', false);
               }}
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-secondary/10 px-3 py-4 sm:px-5"
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 px-3 py-4 [scrollbar-gutter:stable] sm:px-5"
             >
               {loadingOlderMessages && <p className="text-center text-[10px] font-bold text-muted-foreground">이전 대화 불러오는 중...</p>}
               {chatMessages.length === 0 && (

@@ -29,6 +29,8 @@ export type ChatRoomRow = {
   closed_by_user_id?: string | null;
   deleted_for_a: boolean;
   deleted_for_b: boolean;
+  hidden_after_a?: string | null;
+  hidden_after_b?: string | null;
   created_at: string;
   updated_at: string;
   other_user: ChatUserSummary;
@@ -84,6 +86,8 @@ const mapRoom = (row: any): ChatRoomRow => ({
   closed_by_user_id: row.closed_by_user_id ?? null,
   deleted_for_a: bool(row.deleted_for_a),
   deleted_for_b: bool(row.deleted_for_b),
+  hidden_after_a: row.hidden_after_a ? normalizeUtcDateTime(row.hidden_after_a) : null,
+  hidden_after_b: row.hidden_after_b ? normalizeUtcDateTime(row.hidden_after_b) : null,
   created_at: row.created_at,
   updated_at: row.updated_at,
   other_user: mapUser({
@@ -340,9 +344,11 @@ export const removeFriend = async (userId: string, friendId: string) => {
               closed_by_user_id = ?,
               deleted_for_a = CASE WHEN user_a_id = ? THEN 1 ELSE deleted_for_a END,
               deleted_for_b = CASE WHEN user_b_id = ? THEN 1 ELSE deleted_for_b END,
+              hidden_after_a = CASE WHEN user_a_id = ? THEN UTC_TIMESTAMP() ELSE hidden_after_a END,
+              hidden_after_b = CASE WHEN user_b_id = ? THEN UTC_TIMESTAMP() ELSE hidden_after_b END,
               updated_at = UTC_TIMESTAMP()
         WHERE id = ?`,
-      userId, userId, userId, room.id
+      userId, userId, userId, userId, userId, room.id
     );
   } else if (mode === 'SUPABASE') {
     await getSupabaseClient().from('friendships').delete().eq('user_a_id', userA).eq('user_b_id', userB);
@@ -351,6 +357,8 @@ export const removeFriend = async (userId: string, friendId: string) => {
       closed_by_user_id: userId,
       deleted_for_a: room.user_a_id === userId ? true : room.deleted_for_a,
       deleted_for_b: room.user_b_id === userId ? true : room.deleted_for_b,
+      hidden_after_a: room.user_a_id === userId ? new Date().toISOString() : room.hidden_after_a,
+      hidden_after_b: room.user_b_id === userId ? new Date().toISOString() : room.hidden_after_b,
       updated_at: new Date().toISOString()
     }).eq('id', room.id);
   } else {
@@ -362,9 +370,11 @@ export const removeFriend = async (userId: string, friendId: string) => {
               closed_by_user_id = ?,
               deleted_for_a = CASE WHEN user_a_id = ? THEN 1 ELSE deleted_for_a END,
               deleted_for_b = CASE WHEN user_b_id = ? THEN 1 ELSE deleted_for_b END,
+              hidden_after_a = CASE WHEN user_a_id = ? THEN datetime('now') ELSE hidden_after_a END,
+              hidden_after_b = CASE WHEN user_b_id = ? THEN datetime('now') ELSE hidden_after_b END,
               updated_at = datetime('now')
         WHERE id = ?`
-    ).run(userId, userId, userId, room.id);
+    ).run(userId, userId, userId, userId, userId, room.id);
   }
 };
 
@@ -385,10 +395,28 @@ const roomSelectSql = (viewerId: string) => `
          lm.body AS last_body,
          lm.created_at AS last_created_at,
          lm.read_at AS last_read_at,
-         (SELECT COUNT(*) FROM chat_messages unread WHERE unread.room_id = cr.id AND unread.sender_id <> ? AND unread.read_at IS NULL) AS unread_count
+         (SELECT COUNT(*)
+            FROM chat_messages unread
+           WHERE unread.room_id = cr.id
+             AND unread.sender_id <> ?
+             AND unread.read_at IS NULL
+             AND (
+               CASE WHEN cr.user_a_id = ? THEN cr.hidden_after_a ELSE cr.hidden_after_b END IS NULL
+               OR unread.created_at > CASE WHEN cr.user_a_id = ? THEN cr.hidden_after_a ELSE cr.hidden_after_b END
+             )) AS unread_count
     FROM chat_rooms cr
     JOIN users u ON u.id = CASE WHEN cr.user_a_id = ? THEN cr.user_b_id ELSE cr.user_a_id END
-    LEFT JOIN chat_messages lm ON lm.id = (SELECT id FROM chat_messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1)
+    LEFT JOIN chat_messages lm ON lm.id = (
+      SELECT id
+        FROM chat_messages
+       WHERE room_id = cr.id
+         AND (
+           CASE WHEN cr.user_a_id = ? THEN cr.hidden_after_a ELSE cr.hidden_after_b END IS NULL
+           OR created_at > CASE WHEN cr.user_a_id = ? THEN cr.hidden_after_a ELSE cr.hidden_after_b END
+         )
+       ORDER BY id DESC
+       LIMIT 1
+    )
 `;
 
 const roomSelectMysqlSql = (viewerId: string) => `
@@ -402,13 +430,31 @@ const roomSelectMysqlSql = (viewerId: string) => `
          lm.body AS last_body,
          lm.created_at AS last_created_at,
          lm.read_at AS last_read_at,
-         (SELECT COUNT(*) FROM chat_messages unread WHERE unread.room_id = cr.id AND unread.sender_id <> ? COLLATE utf8mb4_unicode_ci AND unread.read_at IS NULL) AS unread_count
+         (SELECT COUNT(*)
+            FROM chat_messages unread
+           WHERE unread.room_id = cr.id
+             AND unread.sender_id <> ? COLLATE utf8mb4_unicode_ci
+             AND unread.read_at IS NULL
+             AND (
+               CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.hidden_after_a ELSE cr.hidden_after_b END IS NULL
+               OR unread.created_at > CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.hidden_after_a ELSE cr.hidden_after_b END
+             )) AS unread_count
     FROM chat_rooms cr
     JOIN users u
       ON u.id COLLATE utf8mb4_unicode_ci = (
         CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.user_b_id ELSE cr.user_a_id END
       ) COLLATE utf8mb4_unicode_ci
-    LEFT JOIN chat_messages lm ON lm.id = (SELECT id FROM chat_messages WHERE room_id = cr.id ORDER BY id DESC LIMIT 1)
+    LEFT JOIN chat_messages lm ON lm.id = (
+      SELECT id
+        FROM chat_messages
+       WHERE room_id = cr.id
+         AND (
+           CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.hidden_after_a ELSE cr.hidden_after_b END IS NULL
+           OR created_at > CASE WHEN cr.user_a_id = ? COLLATE utf8mb4_unicode_ci THEN cr.hidden_after_a ELSE cr.hidden_after_b END
+         )
+       ORDER BY id DESC
+       LIMIT 1
+    )
 `;
 
 export const listChatRooms = async (userId: string, options: { includeEmpty?: boolean } = {}): Promise<ChatRoomRow[]> => {
@@ -424,9 +470,10 @@ export const listChatRooms = async (userId: string, options: { includeEmpty?: bo
    WHERE ((cr.user_a_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_a = 0) OR (cr.user_b_id = ? COLLATE utf8mb4_unicode_ci AND cr.deleted_for_b = 0))
      ${emptyRoomCondition}
    ORDER BY cr.updated_at DESC, cr.id DESC`;
-  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(mysqlSql, userId, userId, userId, userId, userId)).map(mapRoom);
+  const params = [userId, userId, userId, userId, userId, userId, userId, userId, userId];
+  if (mode === 'MYSQL') return (await getMysqlDb().all<any>(mysqlSql, ...params)).map(mapRoom);
   if (mode === 'SUPABASE') return [];
-  return (getSqliteDb().prepare(sql).all(userId, userId, userId, userId, userId) as any[]).map(mapRoom);
+  return (getSqliteDb().prepare(sql).all(...params) as any[]).map(mapRoom);
 };
 
 export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boolean): Promise<ChatRoomRow> => {
@@ -442,8 +489,15 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
       );
       existing = { id: result.insertId };
     } else {
+      const deletedCol = userA === a ? 'deleted_for_a' : 'deleted_for_b';
       await db.run(
-        'UPDATE chat_rooms SET deleted_for_a = 0, deleted_for_b = 0, is_admin_room = GREATEST(is_admin_room, ?), updated_at = UTC_TIMESTAMP() WHERE id = ?',
+        `UPDATE chat_rooms
+            SET ${deletedCol} = 0,
+                closed_at = NULL,
+                closed_by_user_id = NULL,
+                is_admin_room = GREATEST(is_admin_room, ?),
+                updated_at = UTC_TIMESTAMP()
+          WHERE id = ?`,
         isAdminRoom ? 1 : 0, existing.id
       );
     }
@@ -452,6 +506,15 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
     if (!data) {
       const inserted = await getSupabaseClient().from('chat_rooms').insert({ user_a_id: userA, user_b_id: userB, is_admin_room: isAdminRoom }).select('id').single();
       data = inserted.data;
+    } else {
+      const patch: Record<string, any> = {
+        [userA === a ? 'deleted_for_a' : 'deleted_for_b']: false,
+        closed_at: null,
+        closed_by_user_id: null,
+        updated_at: new Date().toISOString()
+      };
+      if (isAdminRoom) patch.is_admin_room = true;
+      await getSupabaseClient().from('chat_rooms').update(patch).eq('id', data.id);
     }
   } else {
     const db = getSqliteDb();
@@ -460,7 +523,14 @@ export const getOrCreateChatRoom = async (a: string, b: string, isAdminRoom: boo
       const result = db.prepare('INSERT INTO chat_rooms (user_a_id, user_b_id, is_admin_room) VALUES (?, ?, ?)').run(userA, userB, isAdminRoom ? 1 : 0);
       existing = { id: result.lastInsertRowid };
     } else {
-      db.prepare("UPDATE chat_rooms SET deleted_for_a = 0, deleted_for_b = 0, is_admin_room = CASE WHEN ? = 1 THEN 1 ELSE is_admin_room END, updated_at = datetime('now') WHERE id = ?")
+      const deletedCol = userA === a ? 'deleted_for_a' : 'deleted_for_b';
+      db.prepare(`UPDATE chat_rooms
+                     SET ${deletedCol} = 0,
+                         closed_at = NULL,
+                         closed_by_user_id = NULL,
+                         is_admin_room = CASE WHEN ? = 1 THEN 1 ELSE is_admin_room END,
+                         updated_at = datetime('now')
+                   WHERE id = ?`)
         .run(isAdminRoom ? 1 : 0, existing.id);
     }
   }
@@ -487,10 +557,11 @@ export const hideClosedChatRoom = async (roomId: number, userId: string) => {
   const room = (await listChatRooms(userId)).find((r) => r.id === roomId);
   if (!room || !room.closed_at) throw new Error('RoomNotClosed');
   const col = room.user_a_id === userId ? 'deleted_for_a' : 'deleted_for_b';
+  const hiddenCol = room.user_a_id === userId ? 'hidden_after_a' : 'hidden_after_b';
   const mode = getDbMode();
-  if (mode === 'MYSQL') await getMysqlDb().run(`UPDATE chat_rooms SET ${col} = 1 WHERE id = ?`, roomId);
-  else if (mode === 'SUPABASE') await getSupabaseClient().from('chat_rooms').update({ [col]: true }).eq('id', roomId);
-  else getSqliteDb().prepare(`UPDATE chat_rooms SET ${col} = 1 WHERE id = ?`).run(roomId);
+  if (mode === 'MYSQL') await getMysqlDb().run(`UPDATE chat_rooms SET ${col} = 1, ${hiddenCol} = UTC_TIMESTAMP() WHERE id = ?`, roomId);
+  else if (mode === 'SUPABASE') await getSupabaseClient().from('chat_rooms').update({ [col]: true, [hiddenCol]: new Date().toISOString() }).eq('id', roomId);
+  else getSqliteDb().prepare(`UPDATE chat_rooms SET ${col} = 1, ${hiddenCol} = datetime('now') WHERE id = ?`).run(roomId);
 };
 
 export const getRoomForUser = async (roomId: number, userId: string): Promise<ChatRoomRow | null> => {
@@ -506,16 +577,28 @@ export const listMessages = async (
   if (!room) throw new Error('RoomNotFound');
   const limit = Math.min(Math.max(Math.floor(Number(options.limit || 50)), 1), 100);
   const beforeId = options.beforeId && Number.isFinite(options.beforeId) ? Math.floor(Number(options.beforeId)) : null;
+  const hiddenAfter = room.user_a_id === userId ? room.hidden_after_a : room.hidden_after_b;
+  const hiddenAfterSql = hiddenAfter ? hiddenAfter.replace('T', ' ').replace(/Z$/, '') : null;
   const mode = getDbMode();
   if (mode === 'MYSQL') {
-    await getMysqlDb().run('UPDATE chat_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL', roomId, userId);
+    await getMysqlDb().run(
+      `UPDATE chat_messages
+          SET read_at = COALESCE(read_at, UTC_TIMESTAMP())
+        WHERE room_id = ?
+          AND sender_id <> ?
+          AND read_at IS NULL
+          AND (? IS NULL OR created_at > ?)`,
+      roomId, userId, hiddenAfterSql, hiddenAfterSql
+    );
     const rows = beforeId
-      ? await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, beforeId, limit)
-      : await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, limit);
+      ? await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? AND (? IS NULL OR created_at > ?) ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, beforeId, hiddenAfterSql, hiddenAfterSql, limit)
+      : await getMysqlDb().all<any>('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND (? IS NULL OR created_at > ?) ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC', roomId, hiddenAfterSql, hiddenAfterSql, limit);
     return rows.map(mapMessage);
   }
   if (mode === 'SUPABASE') {
-    await getSupabaseClient().from('chat_messages').update({ read_at: new Date().toISOString() }).eq('room_id', roomId).neq('sender_id', userId).is('read_at', null);
+    let readQuery = getSupabaseClient().from('chat_messages').update({ read_at: new Date().toISOString() }).eq('room_id', roomId).neq('sender_id', userId).is('read_at', null);
+    if (hiddenAfter) readQuery = readQuery.gt('created_at', hiddenAfter);
+    await readQuery;
     let query = getSupabaseClient()
       .from('chat_messages')
       .select('*')
@@ -523,40 +606,49 @@ export const listMessages = async (
       .order('id', { ascending: false })
       .limit(limit);
     if (beforeId) query = query.lt('id', beforeId);
+    if (hiddenAfter) query = query.gt('created_at', hiddenAfter);
     const { data } = await query;
     return (data || []).reverse().map(mapMessage);
   }
   const db = getSqliteDb();
-  db.prepare("UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL").run(roomId, userId);
+  db.prepare("UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL AND (? IS NULL OR created_at > ?)").run(roomId, userId, hiddenAfterSql, hiddenAfterSql);
   const rows = beforeId
-    ? db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, beforeId, limit)
-    : db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, limit);
+    ? db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND id < ? AND (? IS NULL OR created_at > ?) ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, beforeId, hiddenAfterSql, hiddenAfterSql, limit)
+    : db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room_id = ? AND (? IS NULL OR created_at > ?) ORDER BY id DESC LIMIT ?) recent ORDER BY id ASC').all(roomId, hiddenAfterSql, hiddenAfterSql, limit);
   return (rows as any[]).map(mapMessage);
 };
 
 export const sendChatMessage = async (roomId: number, senderId: string, body: string, markReadForReceiver: boolean): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
   const room = await getRoomForUser(roomId, senderId);
   if (!room) throw new Error('RoomNotFound');
-  if (!room.can_send) throw new Error('RoomClosed');
   const receiverId = room.user_a_id === senderId ? room.user_b_id : room.user_a_id;
   const mode = getDbMode();
   let row: any;
   if (mode === 'MYSQL') {
+    if (!room.can_send) {
+      await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', roomId);
+    }
     const result = await getMysqlDb().run(
       `INSERT INTO chat_messages (room_id, sender_id, body, read_at, created_at)
        VALUES (?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
       roomId, senderId, body
     );
-    await getMysqlDb().run('UPDATE chat_rooms SET updated_at = UTC_TIMESTAMP(), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?', roomId);
+    await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP(), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?', roomId);
     row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
   } else if (mode === 'SUPABASE') {
+    if (!room.can_send) {
+      await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString() }).eq('id', roomId);
+    }
     const { data } = await getSupabaseClient().from('chat_messages').insert({ room_id: roomId, sender_id: senderId, body, read_at: markReadForReceiver ? new Date().toISOString() : null }).select('*').single();
-    await getSupabaseClient().from('chat_rooms').update({ updated_at: new Date().toISOString(), deleted_for_a: false, deleted_for_b: false }).eq('id', roomId);
+    await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString(), deleted_for_a: false, deleted_for_b: false }).eq('id', roomId);
     row = data;
   } else {
     const db = getSqliteDb();
+    if (!room.can_send) {
+      db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now') WHERE id = ?").run(roomId);
+    }
     const result = db.prepare(`INSERT INTO chat_messages (room_id, sender_id, body, read_at) VALUES (?, ?, ?, ${markReadForReceiver ? "datetime('now')" : 'NULL'})`).run(roomId, senderId, body);
-    db.prepare("UPDATE chat_rooms SET updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
+    db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
     row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
   }
   return { message: mapMessage(row), room, receiverId };

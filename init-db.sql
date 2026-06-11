@@ -337,6 +337,8 @@ CREATE TABLE IF NOT EXISTS chat_rooms (
     closed_by_user_id TEXT,
     deleted_for_a INTEGER NOT NULL DEFAULT 0,
     deleted_for_b INTEGER NOT NULL DEFAULT 0,
+    hidden_after_a TEXT,
+    hidden_after_b TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE(user_a_id, user_b_id),

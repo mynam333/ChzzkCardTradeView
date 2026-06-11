@@ -341,6 +341,8 @@ CREATE TABLE IF NOT EXISTS chat_rooms (
     closed_by_user_id VARCHAR(191),
     deleted_for_a TINYINT DEFAULT 0,
     deleted_for_b TINYINT DEFAULT 0,
+    hidden_after_a VARCHAR(64),
+    hidden_after_b VARCHAR(64),
     created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     updated_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     UNIQUE KEY idx_chat_rooms_pair (user_a_id, user_b_id),

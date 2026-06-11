@@ -289,6 +289,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       closed_by_user_id VARCHAR(191) NULL,
       deleted_for_a TINYINT NOT NULL DEFAULT 0,
       deleted_for_b TINYINT NOT NULL DEFAULT 0,
+      hidden_after_a DATETIME NULL,
+      hidden_after_b DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY idx_chat_rooms_pair_unique (user_a_id, user_b_id),
@@ -296,6 +298,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_chat_rooms_user_b (user_b_id, updated_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await ensureMysqlColumn(db, 'chat_rooms', 'hidden_after_a', 'hidden_after_a DATETIME NULL AFTER deleted_for_b');
+  await ensureMysqlColumn(db, 'chat_rooms', 'hidden_after_b', 'hidden_after_b DATETIME NULL AFTER hidden_after_a');
   await db.run(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -575,6 +579,13 @@ export const initDatabaseConnection = async (): Promise<void> => {
         PRIMARY KEY(user_id, reward_key),
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
+      try {
+        sqliteDb.prepare("SELECT hidden_after_a FROM chat_rooms LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] chat_rooms 테이블에 사용자별 숨김 기준 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN hidden_after_a TEXT;");
+        sqliteDb.exec("ALTER TABLE chat_rooms ADD COLUMN hidden_after_b TEXT;");
+      }
       try {
         sqliteDb.prepare("SELECT star FROM user_cards LIMIT 1").get();
       } catch (e) {
