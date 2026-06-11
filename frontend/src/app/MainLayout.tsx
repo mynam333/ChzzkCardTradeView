@@ -113,6 +113,29 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     }, 220);
   };
 
+  const snapMobileDockVisualToOffset = (offset: number) => {
+    const targetOffset = offset;
+    const nextItem = mobileNavItems[loopIndex(activeNavIndex + targetOffset, mobileNavItems.length)];
+    if (!nextItem) return;
+
+    if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
+    dockClickSuppressed.current = true;
+    setDockIsDragging(false);
+    setDockIsSettling(true);
+    setDockDragDelta(-targetOffset * dockSlotWidth);
+    triggerLightHaptic();
+    window.setTimeout(() => {
+      dockClickSuppressed.current = false;
+    }, 240);
+
+    dockSnapTimer.current = window.setTimeout(() => {
+      setDockVisualTab({ tab: nextItem.id, from: activeTab });
+      setDockDragDelta(0);
+      setDockIsSettling(false);
+      dockSnapTimer.current = null;
+    }, 220);
+  };
+
   const handleDockPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     if (dockSnapTimer.current !== null) {
@@ -148,12 +171,8 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
     if (Math.abs(dx) >= 24 && Math.abs(dx) > Math.abs(dy) * 1.15) {
       const targetOffset = Math.round(-dx / dockSlotWidth);
-      dockClickSuppressed.current = true;
-      window.setTimeout(() => {
-        dockClickSuppressed.current = false;
-      }, 240);
       if (targetOffset !== 0) {
-        settleMobileDockToOffset(targetOffset);
+        snapMobileDockVisualToOffset(targetOffset);
         return;
       }
     }

@@ -564,6 +564,7 @@ const streamerRankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerDetailCache = new Map<string, { data: any; expiresAt: number }>();
 const streamerDetailInFlight = new Map<string, Promise<any>>();
 const STREAMER_DETAIL_CACHE_TTL = 30_000;
+const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RANKING_MAX_LIMIT || 10_000));
 
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
@@ -707,7 +708,10 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
   try {
     const mode = req.query.mode === 'change' ? 'change' : 'value';
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    const limit = Math.max(1, Math.min(1000, Math.floor(Number(req.query.limit || 100))));
+    const rawLimit = typeof req.query.limit === 'string' ? req.query.limit.trim().toLowerCase() : '';
+    const limit = rawLimit === 'all'
+      ? STREAMER_RANKING_MAX_LIMIT
+      : Math.max(1, Math.min(STREAMER_RANKING_MAX_LIMIT, Math.floor(Number(req.query.limit || 100)) || 100));
     const cacheKey = `${mode}|${keyword}|${limit}`;
     const now = Date.now();
     const cached = streamerRankingsCache.get(cacheKey);

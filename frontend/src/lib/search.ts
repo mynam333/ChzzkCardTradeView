@@ -1,6 +1,8 @@
 /**
  * 한글 초성 리스트
  */
+import Fuse from 'fuse.js';
+
 const CHOSUNG_LIST = [
   'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
 ];
@@ -58,57 +60,24 @@ const scoreContains = (target: string, query: string, exactScore: number, prefix
   return null;
 };
 
-const scoreSubsequence = (target: string, query: string): number | null => {
-  if (query.length < 2 || target.length < query.length) return null;
-  let targetIndex = 0;
-  let firstIndex = -1;
-  let lastIndex = -1;
-  let gapPenalty = 0;
-
-  for (const char of query) {
-    const found = target.indexOf(char, targetIndex);
-    if (found === -1) return null;
-    if (firstIndex === -1) firstIndex = found;
-    if (lastIndex !== -1) gapPenalty += Math.max(0, found - lastIndex - 1);
-    lastIndex = found;
-    targetIndex = found + 1;
-  }
-
-  const span = Math.max(0, lastIndex - firstIndex + 1);
-  return 3000 + firstIndex * 20 + gapPenalty * 8 + Math.max(0, span - query.length);
-};
-
-const levenshteinDistance = (a: string, b: string, maxDistance: number): number => {
-  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  let curr = new Array<number>(b.length + 1);
-
-  for (let i = 1; i <= a.length; i++) {
-    curr[0] = i;
-    let rowMin = curr[0];
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(
-        prev[j] + 1,
-        curr[j - 1] + 1,
-        prev[j - 1] + cost
-      );
-      rowMin = Math.min(rowMin, curr[j]);
+const scoreWithFuse = (target: string, targetChosung: string, query: string): number | null => {
+  if (query.length < 2) return null;
+  const fuse = new Fuse(
+    [{ normalized: target, chosung: targetChosung }],
+    {
+      includeScore: true,
+      ignoreLocation: true,
+      threshold: 0.35,
+      minMatchCharLength: Math.min(2, query.length),
+      keys: [
+        { name: 'normalized', weight: 0.85 },
+        { name: 'chosung', weight: 0.15 }
+      ]
     }
-    if (rowMin > maxDistance) return maxDistance + 1;
-    [prev, curr] = [curr, prev];
-  }
-
-  return prev[b.length];
-};
-
-const scoreEditDistance = (target: string, query: string): number | null => {
-  if (query.length < 2 || target.length < 2) return null;
-  const maxLen = Math.max(target.length, query.length);
-  const maxDistance = maxLen <= 4 ? 1 : Math.floor(maxLen * 0.25);
-  const distance = levenshteinDistance(target, query, maxDistance);
-  if (distance > maxDistance) return null;
-  return 5000 + distance * 120 + Math.abs(target.length - query.length) * 10;
+  );
+  const result = fuse.search(query)[0];
+  if (!result || result.score === undefined) return null;
+  return 3000 + Math.round(result.score * 2000);
 };
 
 /**
@@ -129,11 +98,8 @@ export function fuzzyScore(target: string, query: string): number | null {
   const chosungScore = scoreContains(targetChosung, queryChosung, 1000, 1200, 1600);
   if (chosungScore !== null) return chosungScore;
 
-  const subsequenceScore = scoreSubsequence(cleanTarget, cleanQuery) ?? scoreSubsequence(targetChosung, queryChosung);
-  if (subsequenceScore !== null) return subsequenceScore;
-
-  const editScore = scoreEditDistance(cleanTarget, cleanQuery);
-  if (editScore !== null) return editScore;
+  const fuseScore = scoreWithFuse(cleanTarget, targetChosung, cleanQuery);
+  if (fuseScore !== null) return fuseScore;
 
   return null;
 }

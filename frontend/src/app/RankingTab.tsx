@@ -60,6 +60,8 @@ export const RankingTab: React.FC = () => {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [cardFilterName, setCardFilterName] = useState('');
   const [cardFilterChannelId, setCardFilterChannelId] = useState('');
+  const [cardFilterCandidates, setCardFilterCandidates] = useState<Streamer[]>([]);
+  const [cardFilterSearching, setCardFilterSearching] = useState(false);
   const [cardFilterStar, setCardFilterStar] = useState('');
   const fetchSeqRef = useRef(0);
   const supportsCardHolderFilter = subTab === 'user' || subTab === 'cards';
@@ -69,7 +71,11 @@ export const RankingTab: React.FC = () => {
     const normalizedQuery = normalizeSearchText(query);
     if (!normalizedQuery) return null;
 
-    const scored = streamers
+    const candidatesById = new Map<string, Streamer>();
+    for (const streamer of streamers) candidatesById.set(streamer.channel_id, streamer);
+    for (const streamer of cardFilterCandidates) candidatesById.set(streamer.channel_id, streamer);
+
+    const scored = Array.from(candidatesById.values())
       .map((streamer) => {
         const normalizedName = normalizeSearchText(streamer.name || '');
         const normalizedChannelId = normalizeSearchText(streamer.channel_id || '');
@@ -119,31 +125,35 @@ export const RankingTab: React.FC = () => {
     if (!supportsCardHolderFilter) return;
     const match = findBestCardFilterMatch(cardFilterName);
     setCardFilterChannelId(match ? match.channel_id : '');
-  }, [cardFilterName, streamers, supportsCardHolderFilter]);
+  }, [cardFilterName, streamers, cardFilterCandidates, supportsCardHolderFilter]);
 
   useEffect(() => {
     if (!supportsCardHolderFilter) return;
     const query = cardFilterName.trim();
-    if (!query) return;
+    if (!query) {
+      setCardFilterCandidates([]);
+      setCardFilterSearching(false);
+      return;
+    }
     let canceled = false;
+    setCardFilterSearching(true);
     const timer = window.setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ mode: 'value', q: query, limit: '20' });
+        const params = new URLSearchParams({ mode: 'value', q: query, limit: '50' });
         const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
         if (!res.ok || canceled) return;
         const matches = await res.json();
         if (!Array.isArray(matches) || canceled) return;
-        setStreamers((prev) => {
-          const byId = new Map(prev.map((streamer) => [streamer.channel_id, streamer]));
-          for (const streamer of matches) byId.set(streamer.channel_id, streamer);
-          return Array.from(byId.values());
-        });
+        setCardFilterCandidates(matches);
       } catch {
         // 카드 보유자 필터 후보 보강 실패는 기본 랭킹 로드를 막지 않습니다.
+      } finally {
+        if (!canceled) setCardFilterSearching(false);
       }
     }, 180);
     return () => {
       canceled = true;
+      setCardFilterSearching(false);
       window.clearTimeout(timer);
     };
   }, [cardFilterName, supportsCardHolderFilter]);
@@ -179,7 +189,7 @@ export const RankingTab: React.FC = () => {
         const [rankings, streamerOptions] = await Promise.all([
           apiFetch(`/users/ranking${query ? `?${query}` : ''}`).then((res) => res.ok ? res.json() : null),
           supportsCardHolderFilter
-            ? apiFetch('/streamers/ranking?mode=value&limit=1000').then((res) => res.ok ? res.json() : null)
+            ? apiFetch('/streamers/ranking?mode=value&limit=all').then((res) => res.ok ? res.json() : null)
             : Promise.resolve(null)
         ]);
         if (!isCurrentRequest()) return;
@@ -245,7 +255,7 @@ export const RankingTab: React.FC = () => {
   // 수집가 자산 탭: 백엔드가 총자산 순으로 정렬해 주므로 순위·검색만 적용 (프론트엔드 2차 필터 적용)
   const rankedUsers = rankAndFilter(userRankings, (u) => u.username);
   const selectedCardFilterStreamer = cardFilterChannelId
-    ? streamers.find((streamer) => streamer.channel_id === cardFilterChannelId) || null
+    ? [...cardFilterCandidates, ...streamers].find((streamer) => streamer.channel_id === cardFilterChannelId) || null
     : null;
 
   // 페이지네이션 (10위 단위) — 순위(rank)는 이미 부여되어 있으므로 슬라이스만 함
@@ -351,7 +361,9 @@ export const RankingTab: React.FC = () => {
             </button>
             {cardFilterName.trim() && (
               <p className="text-[10px] font-bold text-muted-foreground sm:col-span-3">
-                {selectedCardFilterStreamer
+                {cardFilterSearching
+                  ? '스트리머를 검색하는 중입니다...'
+                  : selectedCardFilterStreamer
                   ? <>유사도 검색 결과: <b className="text-primary">{selectedCardFilterStreamer.name}</b> 카드 보유자만 표시합니다.</>
                   : '유사도 검색 결과와 일치하는 스트리머를 찾지 못했습니다.'}
               </p>
