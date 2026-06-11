@@ -2508,11 +2508,15 @@ export const AdminTab: React.FC = () => {
                   const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
                   const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
                   const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
-                  const setCustom = (cls: string, css: string) => {
+                  const curFallbackActive = !!parsed?.fallback_ks_active;
+                  const curFallbackCss = typeof parsed?.fallback_ks_css === 'string' ? parsed.fallback_ks_css : '';
+                  const setCustom = (cls: string, css: string, fallbackActive = curFallbackActive, fallbackCss = curFallbackCss) => {
                     const c = cls.trim();
-                    if (!c && !css.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
+                    if (!c && !css.trim() && !fallbackActive && !fallbackCss.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
                     const obj: any = { class: c || (isBorder ? 'cb-custom' : 'ne-custom') };
                     if (css.trim()) obj.css = css;
+                    if (fallbackActive) obj.fallback_ks_active = true;
+                    if (fallbackCss.trim()) obj.fallback_ks_css = fallbackCss;
                     setShopForm({ ...shopForm, style_json: JSON.stringify(obj) });
                   };
                   return (
@@ -2540,6 +2544,31 @@ export const AdminTab: React.FC = () => {
                           : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
                         <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
                       </p>
+
+                      {!isBorder && (
+                        <div className="pt-2 border-t border-border/40 space-y-2">
+                          <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={curFallbackActive}
+                              onChange={(e) => setCustom(curClass, curCss, e.target.checked, curFallbackCss)}
+                            />
+                            완성형 외 한글 덮어쓰기 (폴백) 활성화
+                          </label>
+                          {curFallbackActive && (
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-muted-foreground block">폴백용 웹폰트 CSS (@font-face 정의)</label>
+                              <textarea
+                                rows={4}
+                                placeholder={`@font-face {\n  font-family: 'GMarketSans';\n  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff') format('woff');\n  font-weight: 700;\n  font-display: swap;\n}`}
+                                value={curFallbackCss}
+                                onChange={(e) => setCustom(curClass, curCss, curFallbackActive, e.target.value)}
+                                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[10px] font-mono leading-relaxed"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

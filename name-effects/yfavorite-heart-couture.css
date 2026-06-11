@@ -14,16 +14,9 @@
   font-display: swap;
 }
 
-@font-face {
-    font-family: 'GMarketSans';
-    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff') format('woff');
-    font-weight: 700;
-    font-display: swap;
-}
-
 .ne-yfavorite-heart-couture {
   color: #fff0f7;
-  font-family: "YFavorite", "GMarketSans", "Pretendard", sans-serif;
+  font-family: "YFavorite", "Pretendard", sans-serif;
   font-weight: 700;
   letter-spacing: 0.015em;
   paint-order: stroke fill;

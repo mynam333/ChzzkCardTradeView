@@ -214,7 +214,12 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     }
     return;
   }
-  const cssText = normalizeSvgInCss(obj.css);
+  let cssText = normalizeSvgInCss(obj.css);
+  if (obj.fallback_ks_active && typeof obj.fallback_ks_css === 'string' && obj.fallback_ks_css.trim()) {
+    const fontNameMatch = obj.fallback_ks_css.match(/font-family\s*:\s*['"]([^'"]+)['"]/);
+    const fallbackFontName = fontNameMatch ? fontNameMatch[1] : 'GMarketSans';
+    cssText += `\n${obj.fallback_ks_css}\n.${key} .ne-fallback-char { font-family: "${fallbackFontName}" !important; }`;
+  }
   let el = injectedBorderCss.get(key);
   if (!el) {
     el = document.createElement('style');
