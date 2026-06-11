@@ -140,35 +140,57 @@ export class MysqlMarketRepository implements IMarketRepository {
     type?: 'all' | 'fixed' | 'auction' | 'bidding';
     bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
-    const rows = await this.getDb().all(this.listingSelectWhere("WHERE ml.status = 'PENDING'"));
-    let listings = rows.map((r) => this.mapRow(r));
+    const where: string[] = ["ml.status = 'PENDING'"];
+    const params: any[] = [];
+
     if (options.type === 'bidding') {
-      listings = options.bidderId
-        ? listings.filter((item) =>
-            (item.listing_type || 'fixed') === 'auction' &&
-            item.current_bidder_id === options.bidderId &&
-            Number(item.bid_reserved || 0) > 0
-          )
-        : [];
+      if (!options.bidderId) return { listings: [], total: 0 };
+      where.push("ml.listing_type = 'auction'", 'ml.current_bidder_id = ?', 'ml.bid_reserved > 0');
+      params.push(options.bidderId);
     } else if (options.type && options.type !== 'all') {
-      listings = listings.filter((item) => (item.listing_type || 'fixed') === options.type);
+      where.push("COALESCE(ml.listing_type, 'fixed') = ?");
+      params.push(options.type);
     }
-    if (options.search && options.search.trim()) {
-      const q = options.search.trim();
-      listings = listings.filter((item) => fuzzyMatch(item.card?.streamer?.name || '', q) || fuzzyMatch(item.seller_username || '', q));
+
+    const orderBy = (() => {
+      if (options.sort === 'oldest') return 'ml.created_at ASC, ml.id ASC';
+      if (options.sort === 'price_desc') return 'ml.price DESC, ml.id DESC';
+      if (options.sort === 'price_asc') return 'ml.price ASC, ml.id ASC';
+      if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
+      if (options.sort === 'bid_desc') return 'COALESCE(ml.current_bid, ml.starting_bid, 0) DESC, ml.id DESC';
+      return 'ml.updated_at DESC, ml.id DESC';
+    })();
+
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+    const search = options.search?.trim();
+    if (search) {
+      const rows = await this.getDb().all(
+        `${this.listingSelectWhere(whereSql)} ORDER BY ${orderBy}`,
+        ...params
+      );
+      const listings = rows
+        .map((r) => this.mapRow(r))
+        .filter((item) => fuzzyMatch(item.card?.streamer?.name || '', search) || fuzzyMatch(item.seller_username || '', search));
+      const offset = (options.page - 1) * options.limit;
+      return { listings: listings.slice(offset, offset + options.limit), total: listings.length };
     }
-    listings.sort((a, b) => {
-      if (options.sort === 'latest') return new Date(b.updated_at || b.created_at || '').getTime() - new Date(a.updated_at || a.created_at || '').getTime();
-      if (options.sort === 'oldest') return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
-      if (options.sort === 'price_desc') return b.price - a.price;
-      if (options.sort === 'price_asc') return a.price - b.price;
-      if (options.sort === 'ending_soon') return new Date(a.auction_ends_at || '9999-12-31').getTime() - new Date(b.auction_ends_at || '9999-12-31').getTime();
-      if (options.sort === 'bid_desc') return (b.current_bid || b.starting_bid || 0) - (a.current_bid || a.starting_bid || 0);
-      return 0;
-    });
-    const total = listings.length;
-    const startIndex = (options.page - 1) * options.limit;
-    return { listings: listings.slice(startIndex, startIndex + options.limit), total };
+
+    const countRow = await this.getDb().get<{ total: number }>(`
+      SELECT COUNT(*) AS total
+        FROM market_listings ml
+        JOIN users u ON u.id = ml.seller_id
+        JOIN user_cards uc ON uc.id = ml.user_card_id
+        JOIN streamers s ON s.channel_id = uc.channel_id
+       ${whereSql}
+    `, params);
+    const offset = (options.page - 1) * options.limit;
+    const rows = await this.getDb().all(
+      `${this.listingSelectWhere(whereSql)} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      ...params,
+      options.limit,
+      offset
+    );
+    return { listings: rows.map((r) => this.mapRow(r)), total: Number(countRow?.total || 0) };
   }
 
   async listByUser(userId: string): Promise<MarketListing[]> {

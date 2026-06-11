@@ -7,22 +7,28 @@ import { sendPushToUser } from './pushController';
 import {
   CHAT_ATTACHMENT_MAX_ACTIVE_BYTES,
   deleteProcessedChatAttachment,
+  getChatAttachmentSourceHash,
   processChatImageAttachment
 } from '../services/chatAttachmentService';
 import {
   cancelFriendRequest,
   createFriendRequest,
+  deleteSavedChatAttachment,
+  findReusableChatAttachment,
   getActiveChatAttachmentBytes,
   getOrCreateChatRoom,
+  getReusableChatAttachmentById,
   getRoomForUser,
   getUserSummary,
   hideClosedChatRoom,
+  listRecentChatAttachments,
   listChatRooms,
   listFriendRequests,
   listFriends,
   listMessages,
   removeFriend,
   respondFriendRequest,
+  saveChatAttachmentRecord,
   sendChatAttachmentMessage,
   sendChatMessage,
   setChatRoomClosed,
@@ -35,8 +41,8 @@ const jsonError = (res: Response, status: number, message: string, details?: str
 
 const currentUser = (req: AuthenticatedRequest) => req.user;
 
-const notifyUser = async (userId: string, title: string, body: string, link = 'friends') => {
-  await createRealtimeNotification({ user_id: userId, title, body, link });
+const notifyUser = async (userId: string, title: string, body: string, link = 'friends', groupKey?: string) => {
+  await createRealtimeNotification({ user_id: userId, title, body, link, group_key: groupKey });
   sendPushToUser(userId, title, body, `/${link.split('?')[0]}`).catch(() => { /* 푸시 실패는 본 요청을 막지 않습니다. */ });
 };
 
@@ -269,7 +275,7 @@ export const createChatMessage = async (req: AuthenticatedRequest, res: Response
     const result = await sendChatMessage(roomId, user.id, body, receiverViewing);
 
     if (!receiverViewing && !receiverMuted) {
-      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, body.length > 80 ? `${body.slice(0, 80)}...` : body, 'friends');
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, body.length > 80 ? `${body.slice(0, 80)}...` : body, 'friends', `friend-chat:${user.id}`);
     }
 
     return res.status(201).json(result.message);
@@ -285,23 +291,90 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
   const roomId = Number(req.params.room_id);
   if (!roomId) return jsonError(res, 400, '채팅방 ID가 필요합니다.');
   if (!req.file) return jsonError(res, 400, '첨부할 이미지가 필요합니다.');
+  const file = req.file;
 
-  let attachmentUrl: string | null = null;
+  let pendingProcessedUrl: string | null = null;
+  let savedAttachment: Awaited<ReturnType<typeof findReusableChatAttachment>> = null;
+  let messageCreated = false;
   try {
     const room = await getRoomForUser(roomId, user.id);
     if (!room) return jsonError(res, 404, '채팅방을 찾을 수 없습니다.');
 
-    const activeBytes = await getActiveChatAttachmentBytes(user.id);
-    if (activeBytes >= CHAT_ATTACHMENT_MAX_ACTIVE_BYTES || activeBytes + req.file.size > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
-      return jsonError(res, 413, '이미지 첨부 보관 한도 100MB를 초과했습니다. 오래된 첨부가 만료된 뒤 다시 시도해 주세요.', undefined, 'ChatAttachmentLimitExceeded');
+    const sourceHash = getChatAttachmentSourceHash(file);
+    const reusableAttachment = await findReusableChatAttachment(user.id, sourceHash);
+    const attachment = reusableAttachment || await (async () => {
+      const activeBytes = await getActiveChatAttachmentBytes(user.id);
+      if (activeBytes >= CHAT_ATTACHMENT_MAX_ACTIVE_BYTES || activeBytes + file.size > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
+        throw new Error('ChatAttachmentLimitExceeded');
+      }
+
+      const processed = await processChatImageAttachment(user.id, file);
+      pendingProcessedUrl = processed.url;
+      if (activeBytes + processed.sizeBytes > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
+        deleteProcessedChatAttachment(processed.url);
+        pendingProcessedUrl = null;
+        throw new Error('ChatAttachmentLimitExceeded');
+      }
+      const saved = await saveChatAttachmentRecord(user.id, sourceHash, processed);
+      pendingProcessedUrl = null;
+      savedAttachment = saved;
+      return saved;
+    })();
+    if (reusableAttachment) {
+      savedAttachment = reusableAttachment;
     }
 
-    const attachment = await processChatImageAttachment(user.id, req.file);
-    attachmentUrl = attachment.url;
-    if (activeBytes + attachment.sizeBytes > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
-      deleteProcessedChatAttachment(attachment.url);
+    const receiverId = room.user_a_id === user.id ? room.user_b_id : room.user_a_id;
+    const receiverViewing = isChatRoomViewing(roomId, receiverId);
+    const receiverMuted = room.user_a_id === receiverId ? room.muted_for_a : room.muted_for_b;
+    const result = await sendChatAttachmentMessage(roomId, user.id, attachment, receiverViewing);
+    messageCreated = true;
+
+    if (!receiverViewing && !receiverMuted) {
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', 'friends', `friend-chat:${user.id}`);
+    }
+
+    return res.status(201).json(result.message);
+  } catch (err: any) {
+    if (pendingProcessedUrl) deleteProcessedChatAttachment(pendingProcessedUrl);
+    if (savedAttachment && !savedAttachment.reused && !messageCreated) await deleteSavedChatAttachment(savedAttachment).catch(() => { /* noop */ });
+    if (err.message === 'RoomClosed') return jsonError(res, 403, '닫힌 채팅방에는 메시지를 보낼 수 없습니다.');
+    if (err.message === 'ChatAttachmentLimitExceeded') {
       return jsonError(res, 413, '이미지 첨부 보관 한도 100MB를 초과했습니다. 오래된 첨부가 만료된 뒤 다시 시도해 주세요.', undefined, 'ChatAttachmentLimitExceeded');
     }
+    const badRequest = /이미지|ffmpeg|GIF|변환|첨부/.test(String(err.message || ''));
+    return jsonError(res, badRequest ? 400 : 500, badRequest ? err.message : '이미지 메시지 전송 실패', err.message);
+  }
+};
+
+export const getRecentChatAttachments = async (req: AuthenticatedRequest, res: Response) => {
+  const user = currentUser(req);
+  if (!user) return jsonError(res, 401, '로그인이 필요합니다.');
+  try {
+    const page = await listRecentChatAttachments(user.id, {
+      cursor: typeof req.query.cursor === 'string' ? req.query.cursor : null,
+      limit: req.query.limit ? Number(req.query.limit) : undefined
+    });
+    return res.status(200).json(page);
+  } catch (err: any) {
+    return jsonError(res, 500, '최근 첨부함을 불러오지 못했습니다.', err.message);
+  }
+};
+
+export const reuseChatAttachmentMessage = async (req: AuthenticatedRequest, res: Response) => {
+  const user = currentUser(req);
+  if (!user) return jsonError(res, 401, '로그인이 필요합니다.');
+  const roomId = Number(req.params.room_id);
+  const attachmentId = Number(req.body?.attachment_id);
+  if (!roomId) return jsonError(res, 400, '채팅방 ID가 필요합니다.');
+  if (!attachmentId) return jsonError(res, 400, '첨부 ID가 필요합니다.');
+
+  try {
+    const room = await getRoomForUser(roomId, user.id);
+    if (!room) return jsonError(res, 404, '채팅방을 찾을 수 없습니다.');
+
+    const attachment = await getReusableChatAttachmentById(user.id, attachmentId);
+    if (!attachment) return jsonError(res, 404, '재사용할 수 있는 첨부를 찾을 수 없습니다.');
 
     const receiverId = room.user_a_id === user.id ? room.user_b_id : room.user_a_id;
     const receiverViewing = isChatRoomViewing(roomId, receiverId);
@@ -309,15 +382,13 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
     const result = await sendChatAttachmentMessage(roomId, user.id, attachment, receiverViewing);
 
     if (!receiverViewing && !receiverMuted) {
-      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', 'friends');
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', 'friends', `friend-chat:${user.id}`);
     }
 
     return res.status(201).json(result.message);
   } catch (err: any) {
-    if (attachmentUrl) deleteProcessedChatAttachment(attachmentUrl);
     if (err.message === 'RoomClosed') return jsonError(res, 403, '닫힌 채팅방에는 메시지를 보낼 수 없습니다.');
-    const badRequest = /이미지|ffmpeg|GIF|변환|첨부/.test(String(err.message || ''));
-    return jsonError(res, badRequest ? 400 : 500, badRequest ? err.message : '이미지 메시지 전송 실패', err.message);
+    return jsonError(res, 500, '이미지 재사용 전송 실패', err.message);
   }
 };
 

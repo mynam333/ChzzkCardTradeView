@@ -12,6 +12,7 @@ import {
   getRoomForUser,
   listFriends,
   listMessages,
+  markRoomMessagesRead,
   registerChatMessageUpdateNotifier,
   sendChatMessage,
   type ChatMessageRow,
@@ -74,6 +75,12 @@ const sendUser = (userId: string, payload: unknown) => {
 };
 
 const sendRoomState = async (userId: string, roomId: number) => {
+  const clients = clientsByUser.get(userId);
+  if (!clients?.size) return;
+  const needsRoomState = Array.from(clients).some((client) => (
+    client.readyState === WebSocket.OPEN && client.currentRoomId !== roomId
+  ));
+  if (!needsRoomState) return;
   const room = await getRoomForUser(roomId, userId);
   if (room) sendUser(userId, { type: 'room_state', room });
 };
@@ -155,6 +162,7 @@ const joinRoom = async (socket: ChatSocket, roomId: number) => {
 
 const notifyIfNeeded = async (
   receiverId: string,
+  senderId: string,
   senderName: string,
   body: string,
   receiverViewing: boolean,
@@ -166,7 +174,8 @@ const notifyIfNeeded = async (
     user_id: receiverId,
     title: `${senderName}님의 1:1 톡`,
     body: preview,
-    link: 'friends'
+    link: 'friends',
+    group_key: `friend-chat:${senderId}`
   });
   sendPushToUser(receiverId, `${senderName}님의 1:1 톡`, preview, '/friends').catch(() => {
     // 푸시 실패는 채팅 전송을 막지 않습니다.
@@ -186,13 +195,14 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
   const receiverMuted = room.user_a_id === receiverId ? room.muted_for_a : room.muted_for_b;
 
   const result = await sendChatMessage(roomId, socket.user.id, text, receiverViewing);
-  await notifyIfNeeded(result.receiverId, socket.user.username, text, receiverViewing, receiverMuted);
+  await notifyIfNeeded(result.receiverId, socket.user.id, socket.user.username, text, receiverViewing, receiverMuted);
 
   const payload = { type: 'message', room_id: roomId, message: result.message };
   const delivered = new Set<ChatSocket>();
   sendJson(socket, payload);
   delivered.add(socket);
   for (const client of clientsByRoom.get(roomId) || []) {
+    if (delivered.has(client)) continue;
     sendJson(client, payload);
     delivered.add(client);
   }
@@ -206,13 +216,14 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
   ]);
 };
 
-const broadcastMessage = async (socket: ChatSocket, roomId: number, message: ChatMessageRow, receiverId: string) => {
+const broadcastMessage = async (socket: ChatSocket, roomId: number, message: ChatMessageRow, receiverId: string, echoSource = true) => {
   if (!socket.user) throw new Error('Unauthorized');
   const payload = { type: 'message', room_id: roomId, message };
   const delivered = new Set<ChatSocket>();
-  sendJson(socket, payload);
+  if (echoSource) sendJson(socket, payload);
   delivered.add(socket);
   for (const client of clientsByRoom.get(roomId) || []) {
+    if (delivered.has(client)) continue;
     sendJson(client, payload);
     delivered.add(client);
   }
@@ -232,7 +243,7 @@ const handleAnnounce = async (socket: ChatSocket, roomId: number, messageId: num
   const message = await getChatMessageForRoom(roomId, messageId, socket.user.id);
   if (!message || message.sender_id !== socket.user.id) throw new Error('MessageNotFound');
   const receiverId = room.user_a_id === socket.user.id ? room.user_b_id : room.user_a_id;
-  await broadcastMessage(socket, roomId, message, receiverId);
+  await broadcastMessage(socket, roomId, message, receiverId, false);
 };
 
 const handleOpenAndSend = async (socket: ChatSocket, targetUserId: string, body: string) => {
@@ -255,10 +266,8 @@ const handleOpenAndSend = async (socket: ChatSocket, targetUserId: string, body:
 
 const handleRead = async (socket: ChatSocket, roomId: number) => {
   if (!socket.user) throw new Error('Unauthorized');
-  const room = await assertRoomAccess(socket, roomId);
+  const room = await markRoomMessagesRead(roomId, socket.user.id);
   markChatRoomViewing(roomId, socket.user.id);
-  const messages = await listMessages(roomId, socket.user.id);
-  sendJson(socket, { type: 'messages', room_id: roomId, messages });
   broadcastRoom(roomId, { type: 'read', room_id: roomId, reader_id: socket.user.id });
   await Promise.all([
     sendRoomState(room.user_a_id, roomId),

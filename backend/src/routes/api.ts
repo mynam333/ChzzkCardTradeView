@@ -138,9 +138,11 @@ import {
   getChatMessages,
   getChatRooms,
   getFriendOverview,
+  getRecentChatAttachments,
   markRoomViewing,
   openChatRoom,
   respondToFriendRequest,
+  reuseChatAttachmentMessage,
   searchFriendCandidates,
   sendFriendRequest,
   setChatRoomMute
@@ -323,6 +325,7 @@ router.post('/friends/requests', authMiddleware, banCheckMiddleware, sendFriendR
 router.delete('/friends/requests/:request_id', authMiddleware, banCheckMiddleware, cancelOutgoingFriendRequest);
 router.post('/friends/requests/:request_id/respond', authMiddleware, banCheckMiddleware, respondToFriendRequest);
 router.delete('/friends/:user_id', authMiddleware, banCheckMiddleware, deleteFriend);
+router.get('/friends/attachments/recent', authMiddleware, banCheckMiddleware, getRecentChatAttachments);
 router.get('/friends/rooms', authMiddleware, banCheckMiddleware, getChatRooms);
 router.post('/friends/rooms/open', authMiddleware, banCheckMiddleware, openChatRoom);
 router.post('/friends/rooms/:room_id/close', authMiddleware, adminMiddleware, closeChatRoom);
@@ -331,6 +334,7 @@ router.delete('/friends/rooms/:room_id', authMiddleware, banCheckMiddleware, del
 router.get('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, getChatMessages);
 router.post('/friends/rooms/:room_id/messages', authMiddleware, banCheckMiddleware, createChatMessage);
 router.post('/friends/rooms/:room_id/attachments', authMiddleware, banCheckMiddleware, chatImageLimiter, uploadChatImage, createChatImageMessage);
+router.post('/friends/rooms/:room_id/attachments/reuse', authMiddleware, banCheckMiddleware, chatImageLimiter, reuseChatAttachmentMessage);
 router.post('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, markRoomViewing);
 router.delete('/friends/rooms/:room_id/viewing', authMiddleware, banCheckMiddleware, clearRoomViewing);
 

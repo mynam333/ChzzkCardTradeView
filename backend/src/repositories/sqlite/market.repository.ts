@@ -159,6 +159,69 @@ export class SqliteMarketRepository implements IMarketRepository {
     bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
     const db = this.getDb();
+    const where: string[] = ["ml.status = 'PENDING'"];
+    const params: any[] = [];
+
+    if (options.type === 'bidding') {
+      if (!options.bidderId) return { listings: [], total: 0 };
+      where.push("ml.listing_type = 'auction'", 'ml.current_bidder_id = ?', 'ml.bid_reserved > 0');
+      params.push(options.bidderId);
+    } else if (options.type && options.type !== 'all') {
+      where.push("COALESCE(ml.listing_type, 'fixed') = ?");
+      params.push(options.type);
+    }
+
+    const orderBy = (() => {
+      if (options.sort === 'oldest') return 'ml.created_at ASC, ml.id ASC';
+      if (options.sort === 'price_desc') return 'ml.price DESC, ml.id DESC';
+      if (options.sort === 'price_asc') return 'ml.price ASC, ml.id ASC';
+      if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
+      if (options.sort === 'bid_desc') return 'COALESCE(ml.current_bid, ml.starting_bid, 0) DESC, ml.id DESC';
+      return 'ml.updated_at DESC, ml.id DESC';
+    })();
+
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+    const search = options.search?.trim();
+    if (search) {
+      const searchRows = db.prepare(`
+        SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
+               uc.user_id AS card_user_id, uc.channel_id, uc.serial_number, uc.star,
+               uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
+               s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
+               s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+               s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+               s.base_value AS streamer_base_value, s.follower_count AS streamer_follower,
+               s.is_active AS streamer_is_active, s.is_image_banned AS streamer_is_image_banned,
+               s.serial_number AS streamer_serial,
+               bi.id AS border_id, bi.style_json AS border_style,
+               ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
+          FROM market_listings ml
+          JOIN users u ON u.id = ml.seller_id
+          LEFT JOIN users bu ON bu.id = ml.buyer_id
+          LEFT JOIN users cb ON cb.id = ml.current_bidder_id
+          JOIN user_cards uc ON uc.id = ml.user_card_id
+          JOIN streamers s ON s.channel_id = uc.channel_id
+          LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
+          LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
+         ${whereSql}
+         ORDER BY ${orderBy}
+      `).all(...params) as any[];
+      const listings = searchRows
+        .map(r => this.mapRow(r))
+        .filter(item => fuzzyMatch(item.card?.streamer?.name || '', search) || fuzzyMatch(item.seller_username || '', search));
+      const startIndex = (options.page - 1) * options.limit;
+      return { listings: listings.slice(startIndex, startIndex + options.limit), total: listings.length };
+    }
+
+    const total = (db.prepare(`
+      SELECT COUNT(*) AS total
+        FROM market_listings ml
+        JOIN users u ON u.id = ml.seller_id
+        JOIN user_cards uc ON uc.id = ml.user_card_id
+        JOIN streamers s ON s.channel_id = uc.channel_id
+       ${whereSql}
+    `).get(...params) as { total?: number } | undefined)?.total || 0;
+    const startIndex = (options.page - 1) * options.limit;
     const rows = db.prepare(`
       SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
              uc.user_id AS card_user_id, uc.channel_id, uc.serial_number, uc.star,
@@ -179,58 +242,12 @@ export class SqliteMarketRepository implements IMarketRepository {
         JOIN streamers s ON s.channel_id = uc.channel_id
         LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
         LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
-       WHERE ml.status = 'PENDING'
-    `).all() as any[];
+       ${whereSql}
+       ORDER BY ${orderBy}
+       LIMIT ? OFFSET ?
+    `).all(...params, options.limit, startIndex) as any[];
 
-    let listings = rows.map(r => this.mapRow(r));
-    if (options.type === 'bidding') {
-      listings = options.bidderId
-        ? listings.filter(item =>
-            (item.listing_type || 'fixed') === 'auction' &&
-            item.current_bidder_id === options.bidderId &&
-            Number(item.bid_reserved || 0) > 0
-          )
-        : [];
-    } else if (options.type && options.type !== 'all') {
-      listings = listings.filter(item => (item.listing_type || 'fixed') === options.type);
-    }
-
-    // 유사도 검색 적용
-    if (options.search && options.search.trim()) {
-      const q = options.search.trim();
-      listings = listings.filter(item => {
-        const streamerName = item.card?.streamer?.name || '';
-        const sellerName = item.seller_username || '';
-        return fuzzyMatch(streamerName, q) || fuzzyMatch(sellerName, q);
-      });
-    }
-
-    // 정렬 적용
-    listings.sort((a, b) => {
-      if (options.sort === 'latest') {
-        return new Date(b.updated_at || b.created_at || '').getTime() - new Date(a.updated_at || a.created_at || '').getTime();
-      } else if (options.sort === 'oldest') {
-        return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
-      } else if (options.sort === 'price_desc') {
-        return b.price - a.price;
-      } else if (options.sort === 'price_asc') {
-        return a.price - b.price;
-      } else if (options.sort === 'ending_soon') {
-        return new Date(a.auction_ends_at || '9999-12-31').getTime() - new Date(b.auction_ends_at || '9999-12-31').getTime();
-      } else if (options.sort === 'bid_desc') {
-        return (b.current_bid || b.starting_bid || 0) - (a.current_bid || a.starting_bid || 0);
-      }
-      return 0;
-    });
-
-    const total = listings.length;
-    const startIndex = (options.page - 1) * options.limit;
-    const paginatedListings = listings.slice(startIndex, startIndex + options.limit);
-
-    return {
-      listings: paginatedListings,
-      total
-    };
+    return { listings: rows.map(r => this.mapRow(r)), total };
   }
 
   async listByUser(userId: string): Promise<MarketListing[]> {

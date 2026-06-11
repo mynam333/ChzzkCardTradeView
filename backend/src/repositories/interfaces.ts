@@ -393,13 +393,15 @@ export interface AppNotification {
   title: string;
   body: string | null;
   link: string | null;
+  group_key?: string | null;
   is_read: boolean;
   deleted_at?: string | null;
   created_at?: string;
 }
 
 export interface INotificationRepository {
-  create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<AppNotification>;
+  create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key?: string | null }): Promise<AppNotification>;
+  upsertByGroupKey(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key: string }): Promise<AppNotification>;
   findByUser(userId: string, limit: number): Promise<AppNotification[]>;
   countUnread(userId: string): Promise<number>;
   markRead(id: number, userId: string): Promise<void>;

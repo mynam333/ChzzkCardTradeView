@@ -7,6 +7,7 @@ import {
   BellOff,
   Check,
   ExternalLink,
+  Images,
   ImagePlus,
   MessageCircle,
   PanelLeftOpen,
@@ -67,6 +68,17 @@ type ChatLinkPreview = {
   provider?: string | null;
   video_id?: string | null;
   embed_url?: string | null;
+};
+
+type RecentChatAttachment = {
+  id: number;
+  url: string;
+  mime: string;
+  size_bytes: number;
+  width?: number | null;
+  height?: number | null;
+  last_used_at: string;
+  expires_at: string;
 };
 
 type ChatRoom = {
@@ -150,6 +162,12 @@ export const FriendTab: React.FC = () => {
   const [showScrollDateBubble, setShowScrollDateBubble] = useState(false);
   const [embeddedPreviewId, setEmbeddedPreviewId] = useState<number | null>(null);
   const [chatDragActive, setChatDragActive] = useState(false);
+  const [recentAttachmentsOpen, setRecentAttachmentsOpen] = useState(false);
+  const [recentAttachments, setRecentAttachments] = useState<RecentChatAttachment[]>([]);
+  const [recentAttachmentsLoading, setRecentAttachmentsLoading] = useState(false);
+  const [recentAttachmentsCursor, setRecentAttachmentsCursor] = useState<string | null>(null);
+  const [recentAttachmentsHasMore, setRecentAttachmentsHasMore] = useState(false);
+  const [recentAttachmentSendingId, setRecentAttachmentSendingId] = useState<number | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
@@ -213,6 +231,14 @@ export const FriendTab: React.FC = () => {
     });
   };
 
+  const touchChatRoomMessage = (roomId: number, message: ChatMessage) => {
+    setChatRooms((prev) => sortChatRooms(prev.map((room) => (
+      room.id === roomId
+        ? { ...room, last_message: message, updated_at: message.created_at }
+        : room
+    ))));
+  };
+
   const fetchFriends = async (showLoading = true) => {
     if (!user) return;
     if (showLoading) setFriendLoading(true);
@@ -247,6 +273,7 @@ export const FriendTab: React.FC = () => {
       activeChatRoomRef.current = payload.room;
       setJoinedRoomId(payload.room.id);
       setActiveChatRoom(payload.room);
+      upsertChatRoom(payload.room);
       setChatMessages(payload.messages || []);
       setHasOlderMessages((payload.messages || []).length >= 50);
       return;
@@ -259,6 +286,7 @@ export const FriendTab: React.FC = () => {
       return;
     }
     if (payload.type === 'message' || payload.type === 'sent') {
+      touchChatRoomMessage(payload.room_id, payload.message);
       if (!isDraftRoom(activeChatRoomRef.current) && activeChatRoomRef.current?.id === payload.room_id) {
         applyIncomingMessage(payload.message);
         if (payload.message.sender_id !== user?.id) sendSocket({ type: 'read', room_id: payload.room_id });
@@ -516,6 +544,7 @@ export const FriendTab: React.FC = () => {
         return;
       }
       applyIncomingMessage(data);
+      void fetchRecentAttachments(false);
       if (chatSocketStatus === 'connected') {
         sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
       } else {
@@ -530,15 +559,85 @@ export const FriendTab: React.FC = () => {
     }
   };
 
+  const fetchRecentAttachments = async (showError = true, mode: 'reset' | 'append' = 'reset') => {
+    if (recentAttachmentsLoading) return;
+    const cursor = mode === 'append' ? recentAttachmentsCursor : null;
+    if (mode === 'append' && !recentAttachmentsHasMore) return;
+    setRecentAttachmentsLoading(true);
+    try {
+      const query = new URLSearchParams({ limit: '40' });
+      if (cursor) query.set('cursor', cursor);
+      const res = await apiFetch(`/friends/attachments/recent?${query.toString()}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (showError) toast(data?.message || '최근 첨부함을 불러오지 못했습니다.', 'error');
+        return;
+      }
+      const nextItems: RecentChatAttachment[] = Array.isArray(data?.attachments) ? data.attachments : [];
+      setRecentAttachments((prev) => {
+        if (mode === 'reset') return nextItems;
+        const existing = new Set(prev.map((item) => item.id));
+        return [...prev, ...nextItems.filter((item) => !existing.has(item.id))];
+      });
+      setRecentAttachmentsCursor(data?.nextCursor || null);
+      setRecentAttachmentsHasMore(Boolean(data?.hasMore));
+    } catch {
+      if (showError) toast('최근 첨부함을 불러오지 못했습니다.', 'error');
+    } finally {
+      setRecentAttachmentsLoading(false);
+    }
+  };
+
+  const toggleRecentAttachments = () => {
+    const nextOpen = !recentAttachmentsOpen;
+    setRecentAttachmentsOpen(nextOpen);
+    if (nextOpen) void fetchRecentAttachments(true, 'reset');
+  };
+
+  const sendRecentAttachment = async (attachment: RecentChatAttachment) => {
+    if (!activeChatRoom || recentAttachmentSendingId) return;
+    setRecentAttachmentSendingId(attachment.id);
+    try {
+      const wasDraft = isDraftRoom(activeChatRoom);
+      const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
+      if (!room) return;
+
+      const res = await apiFetch(`/friends/rooms/${room.id}/attachments/reuse`, {
+        method: 'POST',
+        body: JSON.stringify({ attachment_id: attachment.id })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.message || '이미지를 다시 보내지 못했습니다.', 'error');
+        if (res.status === 404) void fetchRecentAttachments(false);
+        return;
+      }
+      applyIncomingMessage(data);
+      setRecentAttachmentsOpen(false);
+      void fetchRecentAttachments(false);
+      if (chatSocketStatus === 'connected') {
+        sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
+      } else {
+        await fetchChatMessages(room.id, 'initial', false);
+      }
+      await fetchFriends(false);
+    } catch {
+      toast('이미지 재전송에 실패했습니다.', 'error');
+    } finally {
+      setRecentAttachmentSendingId(null);
+    }
+  };
+
   const isImageDrag = (event: React.DragEvent) => {
     const items = Array.from(event.dataTransfer.items || []);
-    if (items.length > 0) return items.some((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    if (items.length > 0) return items.some((item) => item.kind === 'file' && (!item.type || item.type.startsWith('image/')));
     return Array.from(event.dataTransfer.files || []).some((file) => file.type.startsWith('image/'));
   };
 
   const handleChatDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
     if (!activeChatRoom?.can_send || chatImageUploading || !isImageDrag(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     chatDragDepthRef.current += 1;
     setChatDragActive(true);
   };
@@ -546,6 +645,7 @@ export const FriendTab: React.FC = () => {
   const handleChatDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     if (!activeChatRoom?.can_send || chatImageUploading || !isImageDrag(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
     setChatDragActive(true);
   };
@@ -553,6 +653,7 @@ export const FriendTab: React.FC = () => {
   const handleChatDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
     if (!chatDragActive) return;
     event.preventDefault();
+    event.stopPropagation();
     chatDragDepthRef.current = Math.max(0, chatDragDepthRef.current - 1);
     if (chatDragDepthRef.current === 0) setChatDragActive(false);
   };
@@ -560,6 +661,7 @@ export const FriendTab: React.FC = () => {
   const handleChatDrop = (event: React.DragEvent<HTMLDivElement>) => {
     if (!activeChatRoom?.can_send || chatImageUploading) return;
     event.preventDefault();
+    event.stopPropagation();
     chatDragDepthRef.current = 0;
     setChatDragActive(false);
     const imageFile = Array.from(event.dataTransfer.files || []).find((file) => file.type.startsWith('image/'));
@@ -636,6 +738,10 @@ export const FriendTab: React.FC = () => {
 
   const formatChatTime = (value?: string) => parseChatDate(value)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
   const formatChatDate = (value?: string) => parseChatDate(value)?.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) || '';
+  const formatAttachmentSize = (bytes: number) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)}MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+  };
 
   const updateScrollDateBubble = (container: HTMLDivElement) => {
     const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-date]'));
@@ -688,6 +794,7 @@ export const FriendTab: React.FC = () => {
 
   useEffect(() => {
     activeChatRoomRef.current = activeChatRoom;
+    setRecentAttachmentsOpen(false);
   }, [activeChatRoom]);
 
   useEffect(() => {
@@ -805,6 +912,28 @@ export const FriendTab: React.FC = () => {
     };
   }, []);
 
+  const renderRecentAttachmentPreview = (attachment: RecentChatAttachment) => {
+    const mediaClass = "h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]";
+    if (attachment.mime === 'video/webm') {
+      return (
+        <video
+          src={attachment.url}
+          className={`${mediaClass} chat-gif-video`}
+          autoPlay
+          muted
+          loop
+          playsInline
+          controls={false}
+          controlsList="nodownload noplaybackrate noremoteplayback"
+          disablePictureInPicture
+          preload="metadata"
+          onContextMenu={(event) => event.preventDefault()}
+        />
+      );
+    }
+    return <img src={attachment.url} alt="" className={mediaClass} loading="lazy" />;
+  };
+
   const renderChatAttachment = (message: ChatMessage) => {
     if (message.message_type !== 'image') return null;
     if (message.attachment_expired || !message.attachment_url) {
@@ -823,13 +952,17 @@ export const FriendTab: React.FC = () => {
       return (
         <video
           src={message.attachment_url}
-          className={mediaClass}
+          className={`${mediaClass} chat-gif-video cursor-pointer`}
           autoPlay
           muted
           loop
           playsInline
           controls={false}
+          controlsList="nodownload noplaybackrate noremoteplayback"
+          disablePictureInPicture
+          preload="auto"
           onLoadedMetadata={keepChatBottomIfNeeded}
+          onContextMenu={(event) => event.preventDefault()}
           onClick={(event) => {
             const video = event.currentTarget;
             if (video.paused) video.play().catch(() => { /* noop */ });
@@ -1113,7 +1246,13 @@ export const FriendTab: React.FC = () => {
   );
 
   return (
-    <div className="relative flex h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] max-h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)]">
+    <div
+      onDragEnter={handleChatDragEnter}
+      onDragOver={handleChatDragOver}
+      onDragLeave={handleChatDragLeave}
+      onDrop={handleChatDrop}
+      className="relative flex h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] max-h-[calc(100dvh_-_16.75rem_-_env(safe-area-inset-bottom))] min-h-0 flex-col overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm md:h-[calc(100dvh-4rem)] md:max-h-[calc(100dvh-4rem)]"
+    >
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
 
@@ -1138,13 +1277,7 @@ export const FriendTab: React.FC = () => {
       <div className="grid min-h-0 flex-1 lg:h-full lg:grid-cols-[18rem_minmax(0,1fr)]">
         {chatRoomRail}
 
-        <div
-          onDragEnter={handleChatDragEnter}
-          onDragOver={handleChatDragOver}
-          onDragLeave={handleChatDragLeave}
-          onDrop={handleChatDrop}
-          className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} relative min-h-0 flex-col lg:h-full`}
-        >
+        <div className={`${activeChatRoom ? 'flex' : 'hidden lg:flex'} relative min-h-0 flex-col lg:h-full`}>
         <header className="hidden items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5 lg:flex">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -1274,6 +1407,76 @@ export const FriendTab: React.FC = () => {
 
             <div className="border-t border-border/70 bg-card/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3">
               {!activeChatRoom.can_send && <p className="mb-2 rounded-2xl bg-secondary/60 px-3 py-2 text-[11px] font-bold text-muted-foreground">이 톡방은 닫혀 있어 새 메시지를 보낼 수 없습니다.</p>}
+              {recentAttachmentsOpen && (
+                <div className="mb-3 overflow-hidden rounded-[1.5rem] border border-border bg-card/95 shadow-lg backdrop-blur">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <Images className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black">최근 첨부함</p>
+                        <p className="truncate text-[10px] font-bold text-muted-foreground">다시 보내면 만료가 7일 연장돼요.</p>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => fetchRecentAttachments(true, 'reset')} disabled={recentAttachmentsLoading} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-secondary/60 text-muted-foreground transition hover:bg-secondary disabled:opacity-50" aria-label="최근 첨부 새로고침">
+                      <RefreshCw className={`h-3.5 w-3.5 ${recentAttachmentsLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div
+                    className="max-h-[42dvh] overflow-y-auto p-2 sm:max-h-72"
+                    onScroll={(event) => {
+                      const target = event.currentTarget;
+                      if (target.scrollHeight - target.scrollTop - target.clientHeight < 96) {
+                        void fetchRecentAttachments(false, 'append');
+                      }
+                    }}
+                  >
+                    {recentAttachmentsLoading && recentAttachments.length === 0 ? (
+                      <div className="flex h-28 items-center justify-center text-[11px] font-bold text-muted-foreground">불러오는 중...</div>
+                    ) : recentAttachments.length === 0 ? (
+                      <div className="flex h-28 flex-col items-center justify-center text-center">
+                        <Images className="mb-2 h-8 w-8 text-primary/55" />
+                        <p className="text-xs font-black">아직 최근 첨부가 없어요</p>
+                        <p className="mt-1 text-[10px] font-bold text-muted-foreground">한 번 보낸 이미지는 여기서 다시 보낼 수 있어요.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
+                        {recentAttachments.map((attachment) => {
+                          const expiresAt = parseChatDate(attachment.expires_at);
+                          return (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              onClick={() => sendRecentAttachment(attachment)}
+                              disabled={!activeChatRoom.can_send || Boolean(recentAttachmentSendingId)}
+                              className="group relative aspect-square overflow-hidden rounded-2xl border border-border bg-secondary/45 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/45 hover:shadow-md disabled:opacity-50"
+                              aria-label="최근 첨부 다시 보내기"
+                            >
+                              {renderRecentAttachmentPreview(attachment)}
+                              {attachment.mime === 'video/webm' && (
+                                <span className="absolute left-1.5 top-1.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur">GIF</span>
+                              )}
+                              {recentAttachmentSendingId === attachment.id && (
+                                <span className="absolute inset-0 flex items-center justify-center bg-card/70 text-[10px] font-black text-primary backdrop-blur-sm">전송 중</span>
+                              )}
+                              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 to-transparent px-1.5 pb-1 pt-5 text-left text-[9px] font-black text-white">
+                                {formatAttachmentSize(attachment.size_bytes)}
+                                {expiresAt && <span className="ml-1 font-bold opacity-80">{expiresAt.toLocaleDateString([], { month: 'numeric', day: 'numeric' })}까지</span>}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {recentAttachmentsHasMore && recentAttachments.length > 0 && (
+                      <button type="button" onClick={() => fetchRecentAttachments(false, 'append')} disabled={recentAttachmentsLoading} className="mt-2 w-full rounded-2xl bg-secondary/50 px-3 py-2 text-[11px] font-black text-muted-foreground transition hover:bg-secondary disabled:opacity-50">
+                        {recentAttachmentsLoading ? '불러오는 중...' : '더 보기'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <input
                   ref={chatImageInputRef}
@@ -1285,15 +1488,24 @@ export const FriendTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => chatImageInputRef.current?.click()}
-                  disabled={!activeChatRoom.can_send || chatImageUploading}
+                  disabled={!activeChatRoom.can_send || chatImageUploading || Boolean(recentAttachmentSendingId)}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary/40 text-muted-foreground transition hover:bg-secondary disabled:opacity-45"
                   aria-label="이미지 첨부"
                 >
                   <ImagePlus className={`h-4 w-4 ${chatImageUploading ? 'animate-pulse' : ''}`} />
                 </button>
+                <button
+                  type="button"
+                  onClick={toggleRecentAttachments}
+                  disabled={!activeChatRoom.can_send || chatImageUploading || Boolean(recentAttachmentSendingId)}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition disabled:opacity-45 ${recentAttachmentsOpen ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-secondary/40 text-muted-foreground hover:bg-secondary'}`}
+                  aria-label="최근 첨부함"
+                >
+                  <Images className="h-4 w-4" />
+                </button>
                 <textarea
                   value={chatMessage}
-                  disabled={!activeChatRoom.can_send || chatImageUploading}
+                  disabled={!activeChatRoom.can_send || chatImageUploading || Boolean(recentAttachmentSendingId)}
                   onChange={(e) => setChatMessage(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1304,7 +1516,7 @@ export const FriendTab: React.FC = () => {
                   placeholder="메시지 입력"
                   className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border border-border bg-secondary/35 px-3 py-2 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
                 />
-                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || chatImageUploading || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
+                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || chatImageUploading || Boolean(recentAttachmentSendingId) || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
                   <Send className="h-4 w-4" />
                 </button>
               </div>

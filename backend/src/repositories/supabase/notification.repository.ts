@@ -25,14 +25,36 @@ export class SupabaseNotificationRepository implements INotificationRepository {
     return getSupabaseClient();
   }
 
-  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'>): Promise<AppNotification> {
+  async create(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key?: string | null }): Promise<AppNotification> {
     const { data, error } = await this.getClient()
       .from('notifications')
-      .insert([{ user_id: n.user_id, title: n.title, body: n.body ?? null, link: n.link ?? null }])
+      .insert([{ user_id: n.user_id, title: n.title, body: n.body ?? null, link: n.link ?? null, group_key: n.group_key ?? null }])
       .select('*')
       .single();
     if (error) throw error;
     return data as AppNotification;
+  }
+
+  async upsertByGroupKey(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key: string }): Promise<AppNotification> {
+    const { data: existing, error: findError } = await this.getClient()
+      .from('notifications')
+      .select('id')
+      .eq('user_id', n.user_id)
+      .eq('group_key', n.group_key)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (findError) throw findError;
+    if (existing?.id) {
+      const { data, error } = await this.getClient()
+        .from('notifications')
+        .update({ title: n.title, body: n.body ?? null, link: n.link ?? null, is_read: false, created_at: new Date().toISOString() })
+        .eq('id', existing.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      return data as AppNotification;
+    }
+    return this.create(n);
   }
 
   async findByUser(userId: string, limit: number): Promise<AppNotification[]> {
@@ -41,6 +63,7 @@ export class SupabaseNotificationRepository implements INotificationRepository {
       .select('*')
       .eq('user_id', userId)
       .is('deleted_at', null)
+      .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(limit);
     if (error) throw error;

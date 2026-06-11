@@ -286,6 +286,7 @@ export interface AppNotificationItem {
   title: string;
   body: string | null;
   link: string | null;
+  group_key?: string | null;
   is_read: boolean;
   created_at?: string;
 }
@@ -399,11 +400,16 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       try {
         const notification = JSON.parse(event.data) as AppNotificationItem;
         if (!notification?.id) return;
+        let unreadDelta = notification.is_read ? 0 : 1;
         setNotifications((prev) => {
-          if (prev.some((item) => item.id === notification.id)) return prev;
+          const existing = prev.find((item) => item.id === notification.id);
+          if (existing) {
+            unreadDelta = !notification.is_read && existing.is_read ? 1 : 0;
+            return [notification, ...prev.filter((item) => item.id !== notification.id)].slice(0, 50);
+          }
           return [notification, ...prev].slice(0, 50);
         });
-        if (!notification.is_read) setUnreadCount((count) => count + 1);
+        if (unreadDelta > 0) setUnreadCount((count) => count + unreadDelta);
       } catch (e) {
         console.error('[NotificationProvider] 실시간 알림 파싱 실패:', e);
       }

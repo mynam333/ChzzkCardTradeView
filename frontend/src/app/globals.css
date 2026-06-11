@@ -236,6 +236,24 @@ body::before {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   }
 
+  .chat-gif-video {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  .chat-gif-video::-webkit-media-controls,
+  .chat-gif-video::-webkit-media-controls-enclosure,
+  .chat-gif-video::-webkit-media-controls-panel,
+  .chat-gif-video::-webkit-media-controls-play-button,
+  .chat-gif-video::-webkit-media-controls-timeline,
+  .chat-gif-video::-webkit-media-controls-current-time-display,
+  .chat-gif-video::-webkit-media-controls-time-remaining-display,
+  .chat-gif-video::-webkit-media-controls-mute-button,
+  .chat-gif-video::-webkit-media-controls-volume-slider {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
   .dark .cute-pill {
     background: color-mix(in srgb, var(--primary) 13%, var(--card) 87%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);

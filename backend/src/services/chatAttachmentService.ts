@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
@@ -17,11 +18,22 @@ type ProcessedChatAttachment = {
   width?: number | null;
   height?: number | null;
   expiresAt: Date;
+  sourceHash: string;
 };
 
 const allowedMime = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif']);
 
 const safeUserPart = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'user';
+
+export const getChatAttachmentSourceHash = (file: Express.Multer.File) => {
+  if (!file?.buffer?.length) throw new Error('업로드할 이미지가 없습니다.');
+  return crypto
+    .createHash('sha256')
+    .update(file.mimetype)
+    .update('\0')
+    .update(file.buffer)
+    .digest('hex');
+};
 
 const createLimiter = (maxConcurrency: number) => {
   const max = Math.max(1, Math.floor(maxConcurrency));
@@ -120,6 +132,7 @@ export const processChatImageAttachment = async (
   if (!allowedMime.has(file.mimetype)) throw new Error('이미지 파일만 첨부할 수 있습니다.');
 
   const isGif = file.mimetype === 'image/gif';
+  const sourceHash = getChatAttachmentSourceHash(file);
   if (isGif && file.size > CHAT_GIF_MAX_UPLOAD_BYTES) {
     throw new Error(`GIF 첨부는 ${Math.floor(CHAT_GIF_MAX_UPLOAD_BYTES / 1024 / 1024)}MB 이하만 가능합니다.`);
   }
@@ -143,7 +156,8 @@ export const processChatImageAttachment = async (
     sizeBytes: stat.size,
     width: size.width,
     height: size.height,
-    expiresAt: new Date(now + CHAT_ATTACHMENT_TTL_MS)
+    expiresAt: new Date(now + CHAT_ATTACHMENT_TTL_MS),
+    sourceHash
   };
 };
 

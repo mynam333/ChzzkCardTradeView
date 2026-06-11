@@ -244,6 +244,23 @@ const ensureMysqlIndex = async (db: MysqlDb, table: string, indexName: string, d
   await db.run(`ALTER TABLE ${table} ADD INDEX ${indexName} ${ddl}`);
 };
 
+const ensureMysqlUniqueIndex = async (db: MysqlDb, table: string, indexName: string, ddl: string) => {
+  const existing = await db.get<{ present: number }>(
+    `SELECT 1 AS present
+       FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
+      LIMIT 1`,
+    table,
+    indexName
+  );
+  if (existing) return;
+
+  console.log(`[DB Migration] MySQL ${table}.${indexName} 유니크 인덱스가 없어 추가합니다.`);
+  await db.run(`ALTER TABLE ${table} ADD UNIQUE INDEX ${indexName} ${ddl}`);
+};
+
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
   await db.run(`
@@ -328,6 +345,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       sender_id VARCHAR(191) NOT NULL,
       body TEXT NOT NULL,
       message_type VARCHAR(16) NOT NULL DEFAULT 'text',
+      attachment_id BIGINT NULL,
       attachment_url VARCHAR(512) NULL,
       attachment_mime VARCHAR(64) NULL,
       attachment_size_bytes BIGINT NULL,
@@ -341,10 +359,12 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_chat_messages_room (room_id, id),
       INDEX idx_chat_messages_unread (room_id, sender_id, read_at),
       INDEX idx_chat_messages_attachment_expiry (message_type, attachment_expires_at, attachment_deleted_at),
+      INDEX idx_chat_messages_attachment_id (attachment_id),
       INDEX idx_chat_messages_sender_attachments (sender_id, message_type, attachment_deleted_at, attachment_expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
   await ensureMysqlColumn(db, 'chat_messages', 'message_type', "message_type VARCHAR(16) NOT NULL DEFAULT 'text' AFTER body");
+  await ensureMysqlColumn(db, 'chat_messages', 'attachment_id', 'attachment_id BIGINT NULL AFTER message_type');
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_url', 'attachment_url VARCHAR(512) NULL AFTER message_type');
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_mime', 'attachment_mime VARCHAR(64) NULL AFTER attachment_url');
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_size_bytes', 'attachment_size_bytes BIGINT NULL AFTER attachment_mime');
@@ -354,7 +374,44 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_deleted_at', 'attachment_deleted_at DATETIME NULL AFTER attachment_expires_at');
   await ensureMysqlColumn(db, 'chat_messages', 'link_preview_json', 'link_preview_json JSON NULL AFTER attachment_deleted_at');
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_attachment_expiry', '(message_type, attachment_expires_at, attachment_deleted_at)');
+  await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_attachment_id', '(attachment_id)');
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_sender_attachments', '(sender_id, message_type, attachment_deleted_at, attachment_expires_at)');
+  await ensureMysqlColumn(db, 'notifications', 'group_key', 'group_key VARCHAR(191) NULL AFTER link');
+  await ensureMysqlIndex(db, 'notifications', 'idx_notifications_group_key', '(user_id, group_key, deleted_at)');
+  await ensureMysqlIndex(db, 'streamers', 'idx_streamers_base_value', '(base_value DESC, channel_id)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_updated', '(status, updated_at DESC, id DESC)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_updated', '(status, listing_type, updated_at DESC, id DESC)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_price', '(status, price, id)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
+  await db.run(`
+    DELETE n1 FROM notifications n1
+    JOIN notifications n2
+      ON n1.user_id = n2.user_id
+     AND n1.group_key = n2.group_key
+     AND n1.group_key IS NOT NULL
+     AND n1.id < n2.id
+  `);
+  await ensureMysqlUniqueIndex(db, 'notifications', 'uniq_notifications_group_key', '(user_id, group_key)');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_attachments (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      owner_user_id VARCHAR(191) NOT NULL,
+      source_hash CHAR(64) NOT NULL,
+      url VARCHAR(512) NOT NULL,
+      mime VARCHAR(64) NOT NULL,
+      size_bytes BIGINT NOT NULL,
+      width INT NULL,
+      height INT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      deleted_at DATETIME NULL,
+      UNIQUE KEY idx_chat_attachments_owner_hash (owner_user_id, source_hash),
+      INDEX idx_chat_attachments_owner_active (owner_user_id, deleted_at, expires_at),
+      INDEX idx_chat_attachments_expiry (expires_at, deleted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS link_previews (
       url_hash CHAR(64) PRIMARY KEY,
@@ -652,6 +709,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       } catch (e) {
         console.log('[DB Migration] chat_messages 테이블에 이미지 첨부 컬럼을 추가합니다.');
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text';");
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_id INTEGER;");
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_url TEXT;");
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_mime TEXT;");
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_size_bytes INTEGER;");
@@ -661,13 +719,39 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_deleted_at TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT attachment_id FROM chat_messages LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] chat_messages 테이블에 첨부 캐시 참조 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN attachment_id INTEGER;");
+      }
+      try {
         sqliteDb.prepare("SELECT link_preview_json FROM chat_messages LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] chat_messages 테이블에 링크 프리뷰 컬럼을 추가합니다.');
         sqliteDb.exec("ALTER TABLE chat_messages ADD COLUMN link_preview_json TEXT;");
       }
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_expiry ON chat_messages(message_type, attachment_expires_at, attachment_deleted_at);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_id ON chat_messages(attachment_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_attachments ON chat_messages(sender_id, message_type, attachment_deleted_at, attachment_expires_at);");
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS chat_attachments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          owner_user_id TEXT NOT NULL,
+          source_hash TEXT NOT NULL,
+          url TEXT NOT NULL,
+          mime TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          width INTEGER,
+          height INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT NOT NULL,
+          deleted_at TEXT,
+          UNIQUE(owner_user_id, source_hash)
+        );
+      `);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_attachments_owner_active ON chat_attachments(owner_user_id, deleted_at, expires_at);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_attachments_expiry ON chat_attachments(expires_at, deleted_at);");
       sqliteDb.exec(`
         CREATE TABLE IF NOT EXISTS link_previews (
           url_hash TEXT PRIMARY KEY,
@@ -705,6 +789,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_streamers_base_value ON streamers(base_value DESC, channel_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_recorded_channel ON value_history(recorded_at DESC, channel_id);");
       try {
@@ -796,6 +881,24 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE notifications ADD COLUMN deleted_at TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT group_key FROM notifications LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] notifications 테이블에 묶음 키 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE notifications ADD COLUMN group_key TEXT;");
+      }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_notifications_group_key ON notifications(user_id, group_key, deleted_at);");
+      sqliteDb.exec(`
+        DELETE FROM notifications
+         WHERE group_key IS NOT NULL
+           AND id NOT IN (
+             SELECT MAX(id)
+               FROM notifications
+              WHERE group_key IS NOT NULL
+              GROUP BY user_id, group_key
+           );
+      `);
+      sqliteDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications(user_id, group_key);");
+      try {
         sqliteDb.prepare("SELECT is_pinned FROM announcements LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] announcements 테이블에 is_pinned(상단 고정) 컬럼이 없어 추가합니다.');
@@ -831,6 +934,11 @@ export const initDatabaseConnection = async (): Promise<void> => {
       );`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_updated ON market_listings(status, updated_at DESC, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_type_updated ON market_listings(status, listing_type, updated_at DESC, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_price ON market_listings(status, price, id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings(status, auction_ends_at, id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_bidder_active ON market_listings(status, listing_type, current_bidder_id, bid_reserved);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_sold_updated_card ON market_listings(status, updated_at DESC, user_card_id, price);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_participants ON market_listings(seller_id, buyer_id, current_bidder_id);`);
       try {
