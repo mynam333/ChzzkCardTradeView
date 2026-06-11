@@ -11,6 +11,7 @@ API_APP_NAME="${API_APP_NAME:-chikapo-api}"
 WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
+CLEANUP_RELEASE_ARTIFACTS="${CLEANUP_RELEASE_ARTIFACTS:-true}"
 
 resolve_command() {
   local command_name="$1"
@@ -274,7 +275,7 @@ if [ "${NEED_INSTALL}" = "true" ]; then
     exit 1
   fi
   echo "[deploy] install production dependencies because package metadata changed"
-  nice -n 15 ionice -c2 -n7 pnpm install --prod --no-frozen-lockfile --filter backend...
+  nice -n 15 ionice -c2 -n7 pnpm install --prod --no-lockfile --filter backend...
 else
   echo "[deploy] dependencies unchanged; skip install"
 fi
@@ -345,8 +346,14 @@ for app_name in ${WORKER_APP_NAMES}; do
   sleep 2
 done
 
-echo "[deploy] prune old releases"
-find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n +"$((KEEP_RELEASES + 1))" | xargs -r rm -rf
+if [ "${CLEANUP_RELEASE_ARTIFACTS}" = "true" ]; then
+  echo "[deploy] cleanup release artifacts"
+  rm -rf "${RELEASE_DIR}"
+  rm -f "${RELEASE_ARCHIVE}"
+else
+  echo "[deploy] prune old releases"
+  find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n +"$((KEEP_RELEASES + 1))" | xargs -r rm -rf
+fi
 
 echo "[deploy] status"
 "${PM2_BIN}" status

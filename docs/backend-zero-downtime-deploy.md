@@ -82,7 +82,7 @@ curl http://127.0.0.1:5000/health
 
 `.github/workflows/deploy-backend.yml`는 다음 순서로 실행됩니다.
 
-1. GitHub runner에서 `pnpm install --no-frozen-lockfile`
+1. GitHub runner에서 `pnpm install --no-lockfile`
 2. GitHub runner에서 `pnpm --filter backend build`
 3. `backend/dist`와 배포 메타 파일을 `backend-release-<sha>.tar.gz`로 압축
 4. 운영 서버로 업로드
