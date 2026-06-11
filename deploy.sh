@@ -257,6 +257,20 @@ cp "${RELEASE_DIR}/init-db-mysql.sql" init-db-mysql.sql
 cp "${RELEASE_DIR}/deploy.sh" deploy.sh
 chmod +x deploy.sh
 
+if [ "${NEED_INSTALL}" != "true" ]; then
+  MISSING_PROD_DEPS="$("${NODE_BIN}" -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('backend/package.json', 'utf8'));
+    const deps = Object.keys(pkg.dependencies || {});
+    const missing = deps.filter((dep) => !fs.existsSync('backend/node_modules/' + dep));
+    if (missing.length) process.stdout.write(missing.join(' '));
+  ")"
+  if [ -n "${MISSING_PROD_DEPS}" ]; then
+    echo "[deploy] production dependencies missing; install required: ${MISSING_PROD_DEPS}"
+    NEED_INSTALL=true
+  fi
+fi
+
 if [ "${NEED_INSTALL}" = "true" ]; then
   if ! command -v pnpm >/dev/null 2>&1; then
     echo "[deploy] pnpm is required on the server when dependencies changed"
