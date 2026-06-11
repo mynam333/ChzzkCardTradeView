@@ -22,6 +22,8 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: Production
     env:
       NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.yuaru.com' }}
       NEXT_PUBLIC_CHAT_WS_URL: ${{ vars.NEXT_PUBLIC_CHAT_WS_URL || 'wss://api.yuaru.com/chat' }}
