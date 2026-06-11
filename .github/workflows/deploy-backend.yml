@@ -47,7 +47,16 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile || {
+              echo "::error::pnpm-lock.yaml이 package.json과 맞지 않습니다. 로컬에서 pnpm install 후 pnpm-lock.yaml을 커밋하세요."
+              exit 1
+            }
+          else
+            echo "::warning::pnpm-lock.yaml이 없어 초기 lockfile을 생성합니다. 생성된 pnpm-lock.yaml은 반드시 커밋하세요."
+            pnpm install
+          fi
 
       - name: Build backend
         run: pnpm --filter backend build
