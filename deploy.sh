@@ -226,8 +226,12 @@ if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2
   if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
     mkdir -p backups
     echo "[deploy] backup mysql"
-    mysqldump -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" -p"${DB_PASSWORD_VALUE}" \
-      --single-transaction --routines --triggers \
+    MYSQLDUMP_GTID_ARG=""
+    if mysqldump --help 2>/dev/null | grep -q -- '--set-gtid-purged'; then
+      MYSQLDUMP_GTID_ARG="--set-gtid-purged=OFF"
+    fi
+    MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
+      --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
       "${DB_NAME_VALUE}" > "backups/mysql-before-update-${TIMESTAMP}.sql"
   else
     echo "[deploy] mysql backup skipped: MYSQL_* or DB_* env is incomplete"
@@ -276,7 +280,7 @@ mv backend/dist.next backend/dist
 if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; then
   if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
     echo "[deploy] apply mysql schema"
-    mysql -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" -p"${DB_PASSWORD_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql
+    MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql
   else
     echo "[deploy] schema skipped: MYSQL_* or DB_* env is incomplete"
   fi
