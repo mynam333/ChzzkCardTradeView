@@ -412,9 +412,6 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                       height: `${20 + centerWeight * 5}px`
                     }}
                   />
-                  {centerWeight > 0.72 && (
-                    <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card bg-teal-300 shadow-[0_0_12px_rgba(94,234,212,0.8)]" />
-                  )}
                 </span>
                 <span
                   className="w-full truncate text-center font-black transition-[color,opacity,font-size] duration-200"
