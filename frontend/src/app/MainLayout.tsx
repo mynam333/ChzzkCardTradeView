@@ -419,7 +419,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                     color: centerWeight > 0.02
                       ? `color-mix(in srgb, var(--foreground) ${Math.round(62 + centerWeight * 38)}%, var(--muted-foreground))`
                       : 'var(--muted-foreground)',
-                    fontSize: `${8 + centerWeight * 3}px`,
+                    fontSize: `${10 + centerWeight * 2}px`,
                     opacity: 0.72 + centerWeight * 0.28
                   }}
                 >
