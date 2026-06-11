@@ -58,13 +58,21 @@ export const getFriendOverview = async (req: AuthenticatedRequest, res: Response
   const user = currentUser(req);
   if (!user) return jsonError(res, 401, '로그인이 필요합니다.');
   try {
-    const [friends, requests, rooms] = await Promise.all([
-      listFriends(user.id),
-      listFriendRequests(user.id),
-      listChatRooms(user.id)
-    ]);
+    const friends = await listFriends(user.id).catch((err: any) => {
+      console.error('[FriendController] listFriends 실패:', err?.message || err);
+      throw err;
+    });
+    const requests = await listFriendRequests(user.id).catch((err: any) => {
+      console.error('[FriendController] listFriendRequests 실패:', err?.message || err);
+      throw err;
+    });
+    const rooms = await listChatRooms(user.id).catch((err: any) => {
+      console.error('[FriendController] listChatRooms 실패:', err?.message || err);
+      throw err;
+    });
     return res.status(200).json({ friends, requests, rooms });
   } catch (err: any) {
+    console.error('[FriendController] getFriendOverview 실패:', err?.message || err);
     return jsonError(res, 500, '친구 정보 조회 실패', err.message);
   }
 };
