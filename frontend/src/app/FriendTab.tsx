@@ -548,6 +548,13 @@ export const FriendTab: React.FC = () => {
   const renderCandidateAction = (candidate: FriendUser) => {
     const incoming = incomingRequestByUserId.get(candidate.id);
     const outgoing = outgoingRequestByUserId.get(candidate.id);
+    if (user.role === 'ADMIN') {
+      return (
+        <button type="button" onClick={() => openDraftChat(candidate)} className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[10px] font-black text-primary-foreground">
+          <Shield className="h-3.5 w-3.5" /> 톡 열기
+        </button>
+      );
+    }
     if (friendIdSet.has(candidate.id)) {
       return (
         <button type="button" onClick={() => openDraftChat(candidate)} className="rounded-full bg-primary/10 px-3 py-1.5 text-[10px] font-black text-primary">
@@ -676,45 +683,61 @@ export const FriendTab: React.FC = () => {
             </div>
           ))}
         </div>
-
-        <div className="space-y-2 rounded-[1.5rem] border border-border bg-secondary/20 p-3">
-          <p className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground"><MessageCircle className="h-3.5 w-3.5" /> 톡방 ({chatRooms.length})</p>
-          {chatRooms.length === 0 ? (
-            <p className="py-5 text-center text-[11px] text-muted-foreground">메시지를 보내면 톡방이 시작됩니다.</p>
-          ) : chatRooms.map((room) => (
-            <button
-              key={room.id}
-              type="button"
-              onClick={() => openExistingRoom(room)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setContextMenu({ x: event.clientX, y: event.clientY, kind: 'room', room });
-              }}
-              className={`block w-full rounded-2xl px-3 py-2 text-left transition ${!isDraftRoom(activeChatRoom) && activeChatRoom?.id === room.id ? 'bg-primary text-primary-foreground' : 'bg-card/75 hover:bg-secondary/60'}`}
-            >
-              <div className="flex items-center gap-2">
-                <img src={room.other_user.avatar_url || avatarFallback(room.other_user.id)} alt={room.other_user.username} className="h-8 w-8 rounded-full border border-border object-cover" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-black">{room.other_user.username}</p>
-                  <p className="truncate text-[10px] opacity-75">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
-                </div>
-                {room.unread_count > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{room.unread_count}</span>}
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
     </aside>
   );
 
   const activeRoomIsReal = activeChatRoom && !isDraftRoom(activeChatRoom);
+  const chatRoomRail = (
+    <aside className="min-h-0 border-b border-border/70 bg-secondary/20 p-3 lg:border-b-0 lg:border-r lg:p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground">
+          <MessageCircle className="h-3.5 w-3.5" /> 톡방 ({chatRooms.length})
+        </p>
+        <button type="button" onClick={() => fetchFriends(false)} className="rounded-full p-1.5 text-muted-foreground hover:bg-card" aria-label="톡방 새로고침">
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1 lg:max-h-[calc(100vh-14rem)] lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:pb-0">
+        {chatRooms.length === 0 ? (
+          <div className="min-w-full rounded-2xl border border-dashed border-border bg-card/50 px-4 py-8 text-center lg:min-w-0">
+            <MessageCircle className="mx-auto mb-2 h-7 w-7 text-primary/60" />
+            <p className="text-[11px] font-bold text-muted-foreground">메시지를 보내면 톡방이 시작됩니다.</p>
+          </div>
+        ) : chatRooms.map((room) => (
+          <button
+            key={room.id}
+            type="button"
+            onClick={() => openExistingRoom(room)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu({ x: event.clientX, y: event.clientY, kind: 'room', room });
+            }}
+            className={`min-w-[13rem] rounded-2xl px-3 py-2 text-left transition lg:min-w-0 ${!isDraftRoom(activeChatRoom) && activeChatRoom?.id === room.id ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/20' : 'bg-card/75 hover:bg-card'}`}
+          >
+            <div className="flex items-center gap-2">
+              <img src={room.other_user.avatar_url || avatarFallback(room.other_user.id)} alt={room.other_user.username} className="h-9 w-9 shrink-0 rounded-full border border-border object-cover" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-black">{room.other_user.username}</p>
+                <p className="truncate text-[10px] opacity-75">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
+              </div>
+              {room.unread_count > 0 && <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white">{room.unread_count}</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
 
   return (
     <div className="relative min-h-[calc(100vh-9rem)] overflow-hidden rounded-[2rem] border border-border bg-card/75 shadow-sm">
       {panelOpen && <button type="button" aria-label="친구 관리 닫기" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px] lg:absolute" />}
       {managementPanel}
 
-      <div className="flex min-h-[calc(100vh-9rem)] flex-col">
+      <div className="grid min-h-[calc(100vh-9rem)] lg:grid-cols-[18rem_minmax(0,1fr)]">
+        {chatRoomRail}
+
+        <div className="flex min-h-0 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-card/85 px-3 py-3 backdrop-blur sm:px-5">
           <div className="flex min-w-0 items-center gap-2.5">
             <button
@@ -839,6 +862,7 @@ export const FriendTab: React.FC = () => {
             </button>
           </div>
         )}
+      </div>
       </div>
 
       {contextMenu && (
