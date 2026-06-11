@@ -10,6 +10,15 @@ import { ensureDirectory, getUploadsDir } from './storagePaths';
 export const CHAT_ATTACHMENT_MAX_ACTIVE_BYTES = 100 * 1024 * 1024;
 export const CHAT_ATTACHMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAT_GIF_MAX_UPLOAD_BYTES = Number(process.env.CHAT_GIF_MAX_UPLOAD_BYTES || 8 * 1024 * 1024);
+const clampNumber = (value: number, min: number, max: number, fallback: number) => (
+  Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+);
+const CHAT_GIF_FPS = Math.round(clampNumber(Number(process.env.CHAT_GIF_FPS || 18), 8, 30, 18));
+const CHAT_GIF_CRF = Math.round(clampNumber(Number(process.env.CHAT_GIF_CRF || 34), 20, 45, 34));
+const CHAT_GIF_CPU_USED = Math.round(clampNumber(Number(process.env.CHAT_GIF_CPU_USED || 5), 0, 8, 5));
+const CHAT_GIF_THREADS = Math.round(clampNumber(Number(process.env.CHAT_GIF_THREADS || 1), 1, 4, 1));
+const CHAT_GIF_TIMEOUT_MS = Math.round(clampNumber(Number(process.env.CHAT_GIF_TIMEOUT_MS || 45_000), 5_000, 180_000, 45_000));
+const CHAT_GIF_CODEC = (process.env.CHAT_GIF_CODEC || 'vp8').toLowerCase() === 'vp9' ? 'vp9' : 'vp8';
 
 type ProcessedChatAttachment = {
   url: string;
@@ -63,22 +72,38 @@ const staticImageLimiter = createLimiter(Number(process.env.CHAT_IMAGE_CONCURREN
 const gifLimiter = createLimiter(Number(process.env.CHAT_GIF_CONCURRENCY || 1));
 
 const runFfmpeg = (args: string[]) => new Promise<void>((resolve, reject) => {
-  const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
   let stderr = '';
+  let settled = false;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, CHAT_GIF_TIMEOUT_MS);
+  const finish = (callback: () => void) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    callback();
+  };
   child.stderr.on('data', (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 4000) stderr = stderr.slice(-4000);
   });
   child.on('error', (err: any) => {
     if (err?.code === 'ENOENT') {
-      reject(new Error('GIF 변환을 위해 서버에 ffmpeg가 필요합니다.'));
+      finish(() => reject(new Error('GIF 변환을 위해 서버에 ffmpeg가 필요합니다.')));
       return;
     }
-    reject(err);
+    finish(() => reject(err));
   });
   child.on('close', (code) => {
-    if (code === 0) resolve();
-    else reject(new Error(`GIF 변환 실패(ffmpeg ${code}): ${stderr || 'no stderr'}`));
+    if (timedOut) {
+      finish(() => reject(new Error(`GIF 변환 시간이 초과되었습니다(${Math.round(CHAT_GIF_TIMEOUT_MS / 1000)}초). 더 짧거나 작은 GIF를 사용해 주세요.`)));
+      return;
+    }
+    if (code === 0) finish(resolve);
+    else finish(() => reject(new Error(`GIF 변환 실패(ffmpeg ${code}): ${stderr || 'no stderr'}`)));
   });
 });
 
@@ -108,14 +133,33 @@ const saveGifAsWebm = async (buffer: Buffer, outputPath: string) => {
     await fsp.writeFile(inputPath, buffer);
     const metadata = await sharp(buffer, { animated: true }).metadata();
     const size = getResizedDimensions(metadata.width, metadata.height);
+    const codecArgs = CHAT_GIF_CODEC === 'vp9'
+      ? [
+          '-c:v', 'libvpx-vp9',
+          '-deadline', 'good',
+          '-cpu-used', String(CHAT_GIF_CPU_USED),
+          '-row-mt', '1',
+          '-threads', String(CHAT_GIF_THREADS),
+          '-b:v', '0',
+          '-crf', String(CHAT_GIF_CRF)
+        ]
+      : [
+          '-c:v', 'libvpx',
+          '-deadline', 'realtime',
+          '-cpu-used', String(CHAT_GIF_CPU_USED),
+          '-threads', String(CHAT_GIF_THREADS),
+          '-b:v', '0',
+          '-crf', String(CHAT_GIF_CRF),
+          '-auto-alt-ref', '0'
+        ];
     await runFfmpeg([
       '-y',
       '-i', inputPath,
-      '-vf', "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease,fps=24",
+      '-vf', `scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=${CHAT_GIF_FPS}`,
       '-an',
-      '-c:v', 'libvpx-vp9',
-      '-b:v', '0',
-      '-crf', '36',
+      '-pix_fmt', 'yuv420p',
+      ...codecArgs,
+      '-f', 'webm',
       outputPath
     ]);
     return size;
