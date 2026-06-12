@@ -462,8 +462,8 @@ export class MysqlUserRepository implements IUserRepository {
                COUNT(uc.id) AS card_count,
                COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
         FROM NormalizedUsers u
-        LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
-        LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+        LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
+        LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
         WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
         GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
       ),
@@ -473,15 +473,15 @@ export class MysqlUserRepository implements IUserRepository {
         FROM UserCardValues
       )
       SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
-      WHERE (? = '' OR username LIKE ?)
+      WHERE (? = '' OR username COLLATE utf8mb4_unicode_ci LIKE ? COLLATE utf8mb4_unicode_ci)
         AND (
           ? = ''
           OR EXISTS (
             SELECT 1
               FROM user_cards fc
-             WHERE fc.user_id = RankedUsers.id
+             WHERE fc.user_id COLLATE utf8mb4_unicode_ci = RankedUsers.id COLLATE utf8mb4_unicode_ci
                AND COALESCE(fc.is_hidden, 0) = 0
-               AND fc.channel_id = ?
+               AND fc.channel_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
                AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
           )
         )

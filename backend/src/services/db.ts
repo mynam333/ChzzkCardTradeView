@@ -350,8 +350,9 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_user_asset_rankings_total (total_rank, user_id),
       INDEX idx_user_asset_rankings_cards (cards_rank, user_id),
       INDEX idx_user_asset_rankings_username (username)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlTableCollation(db, 'user_asset_rankings');
   await db.run(`
     CREATE TABLE IF NOT EXISTS subscription_title_rules (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,

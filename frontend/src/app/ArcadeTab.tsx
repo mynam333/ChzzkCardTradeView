@@ -164,15 +164,15 @@ const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 // 방향형(모션) 블러: 한 방향으로 강하게 밀린 듯한 선형 모션 스미어.
 // N장의 평행 이동 사본을 누적 평균(alpha=1/(i+1))하여 진짜 모션 블러를 만든다.
-const QUIZ_MOTION_SAMPLES = 36;
-const QUIZ_MOTION_TRAVEL_RATIO = 1.15; // 캔버스 긴 변 대비 최대 이동 비율(원본 식별 불가 수준)
+const QUIZ_MOTION_SAMPLES = 28;
+const QUIZ_MOTION_TRAVEL_RATIO = 0.72; // 캔버스 긴 변 대비 최대 이동 비율
 // 모자이크 블러: 픽셀 블록 크기 (독립 상수)
 const QUIZ_MOSAIC_MAX_BLOCK_PX = 34;
 // 회전형 블러: 둥글게 뒤틀린 듯한 강한 회전 스핀 스미어.
 // N장의 회전 사본을 누적 평균 + 바깥일수록 확대해 소용돌이처럼 휘말리게 한다.
-const QUIZ_RADIAL_SAMPLES = 36;
-const QUIZ_RADIAL_MAX_SPIN_DEG = 150;     // 최대 회전 스프레드(±75°)
-const QUIZ_RADIAL_MAX_SWIRL_SCALE = 0.3;  // 외곽 잔상 최대 30% 확대(소용돌이)
+const QUIZ_RADIAL_SAMPLES = 28;
+const QUIZ_RADIAL_MAX_SPIN_DEG = 95;      // 최대 회전 스프레드(±47.5°)
+const QUIZ_RADIAL_MAX_SWIRL_SCALE = 0.18; // 외곽 잔상 최대 18% 확대(소용돌이)
 
 // [-0.5, 0.5] 구간을 균등 분할하되 중앙(0)에서 바깥 순서로 정렬한 위치 배열.
 // 첫(불투명) 사본이 중앙 정렬본이 되어 누적 평균 시 스미어가 한쪽으로 쏠리지 않게 한다.
@@ -1895,7 +1895,7 @@ export const ArcadeTab: React.FC = () => {
 
             <span className="text-xs font-black text-primary capitalize flex items-center gap-1.5">
               <Gamepad2 className="h-4 w-4" />
-              {activeGame === 'quiz' && '❓ 인물 퀴즈'}
+              {activeGame === 'quiz' && '❓ 송출 오류난 스트리머 맞추기'}
               {activeGame === 'puzzle' && '🧩 3x4 회전 퍼즐'}
               {activeGame === 'match' && '🎴 짝맞추기 카드게임'}
             </span>

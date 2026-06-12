@@ -645,8 +645,8 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
                  COUNT(uc.id) AS card_count,
                  COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
             FROM NormalizedUsers u
-            LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
-            LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+            LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
+            LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
            WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
            GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
         ),
@@ -716,18 +716,28 @@ const readUserRankingsFromSnapshot = async (
   const channelId = (options.channelId || '').trim();
   const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
   const rankColumn = mode === 'cards' ? 'cards_rank' : 'total_rank';
+  const isMysql = getDbMode() === 'MYSQL';
+  const usernameFilter = isMysql
+    ? '? = \'\' OR r.username COLLATE utf8mb4_unicode_ci LIKE ? COLLATE utf8mb4_unicode_ci'
+    : "? = '' OR r.username LIKE ?";
+  const userCardUserFilter = isMysql
+    ? 'fc.user_id COLLATE utf8mb4_unicode_ci = r.user_id COLLATE utf8mb4_unicode_ci'
+    : 'fc.user_id = r.user_id';
+  const userCardChannelFilter = isMysql
+    ? 'fc.channel_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci'
+    : 'fc.channel_id = ?';
   const sql = `
     SELECT r.*, r.${rankColumn} AS user_rank
       FROM user_asset_rankings r
-     WHERE (? = '' OR r.username LIKE ?)
+     WHERE (${usernameFilter})
        AND (
          ? = ''
          OR EXISTS (
            SELECT 1
              FROM user_cards fc
-            WHERE fc.user_id = r.user_id
+            WHERE ${userCardUserFilter}
               AND COALESCE(fc.is_hidden, 0) = 0
-              AND fc.channel_id = ?
+              AND ${userCardChannelFilter}
               AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
          )
        )
@@ -735,7 +745,7 @@ const readUserRankingsFromSnapshot = async (
      LIMIT ?
   `;
   const params = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
-  const rows = getDbMode() === 'MYSQL'
+  const rows = isMysql
     ? await getMysqlDb().all<any>(sql, ...params)
     : getSqliteDb().prepare(sql).all(...params) as any[];
   return rows.map((row: any) => ({
