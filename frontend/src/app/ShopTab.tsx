@@ -791,7 +791,12 @@ export const ShopTab: React.FC = () => {
       if (res.ok) {
         toast('입찰이 등록되었습니다.', 'success');
         setBidInputs(prev => ({ ...prev, [listing.id]: '' }));
-        fetchMarketListings();
+        if (data?.listing) {
+          applyMarketRealtimeEvent({ reason: 'auction_bid', listing: data.listing });
+        }
+        if (marketSort === 'bid_desc') {
+          scheduleMarketRefresh(300, 0);
+        }
         refreshUserData();
       } else {
         toast(data.message || '입찰에 실패했습니다.', 'error');

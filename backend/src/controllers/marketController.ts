@@ -21,6 +21,14 @@ const clearMarketListCache = () => {
   marketListCache.clear();
 };
 
+const setMarketListCacheHeaders = (res: Response) => {
+  // Browser-level caching can replay a stale listing immediately after a bid.
+  // Keep the short server-side cache above for DB protection, but force clients
+  // to revalidate through the API so mutation-triggered cache clears take effect.
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Pragma', 'no-cache');
+};
+
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (
   userId: string,
@@ -82,7 +90,7 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const now = Date.now();
   const cached = marketListCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
-    res.set('Cache-Control', 'private, max-age=5');
+    setMarketListCacheHeaders(res);
     return res.json(cached.data);
   }
 
@@ -95,12 +103,12 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
         if (value.expiresAt <= Date.now()) marketListCache.delete(key);
       }
     }
-    res.set('Cache-Control', 'private, max-age=5');
+    setMarketListCacheHeaders(res);
     return res.json(result);
   } catch (err: any) {
     console.error('[MarketController] listActiveListings 에러:', err);
     if (cached) {
-      res.set('Cache-Control', 'private, max-age=1');
+      setMarketListCacheHeaders(res);
       return res.json(cached.data);
     }
     return res.status(500).json({ error: 'ServerError', message: '마켓 목록을 가져오는 중 오류가 발생했습니다.' });
@@ -394,11 +402,15 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     );
   }
   const updatedListing = await marketRepository.findById(id).catch(() => null);
+  const listingPatch = realtimeListingPatch(updatedListing);
   publishMarketUpdated('auction_bid', updatedListing, {
+    listingId: id,
     current_bid: result.current_bid,
+    current_bidder_id: updatedListing?.current_bidder_id ?? user.id,
+    current_bidder_username: updatedListing?.current_bidder_username ?? user.username,
     auction_ends_at: result.auction_ends_at ?? null
   });
-  return res.status(200).json(result);
+  return res.status(200).json({ ...result, listing: listingPatch });
 };
 
 export const listMarketWatches = async (req: AuthenticatedRequest, res: Response) => {
