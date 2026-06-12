@@ -1,0 +1,11 @@
+/admin /admin.html 200
+/arcade /arcade.html 200
+/auth/chzzk/callback /auth/chzzk/callback.html 200
+/friends /friends.html 200
+/inventory /inventory.html 200
+/login /login.html 200
+/maintenance /maintenance.html 200
+/my-info /my-info.html 200
+/ranking /ranking.html 200
+/shop /shop.html 200
+/* /index.html 200

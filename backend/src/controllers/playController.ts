@@ -575,6 +575,13 @@ const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RA
 let userRankingSnapshotExpiresAt = 0;
 let userRankingSnapshotInFlight: Promise<boolean> | null = null;
 
+const mysqlDateValueSql = (column: string) => `
+  CASE
+    WHEN ${column} LIKE '%T%Z' THEN STR_TO_DATE(SUBSTRING_INDEX(REPLACE(${column}, 'T', ' '), '.', 1), '%Y-%m-%d %H:%i:%s')
+    ELSE ${column}
+  END
+`;
+
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
   rankingsInFlight.clear();
@@ -604,7 +611,7 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
     const counts = mode === 'MYSQL'
       ? await getMysqlDb().get<{ users_count: number; snapshot_count: number }>(
         `SELECT
-            (SELECT COUNT(*) FROM users WHERE banned_until IS NULL OR banned_until <= UTC_TIMESTAMP()) AS users_count,
+            (SELECT COUNT(*) FROM users u WHERE ${mysqlDateValueSql('u.banned_until')} IS NULL OR ${mysqlDateValueSql('u.banned_until')} <= UTC_TIMESTAMP()) AS users_count,
             (SELECT COUNT(*) FROM user_asset_rankings) AS snapshot_count`
       )
       : getSqliteDb().prepare(
@@ -624,12 +631,20 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
         INSERT INTO user_asset_rankings
           (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
            card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
-        WITH UserCardValues AS (
+        WITH NormalizedUsers AS (
+          SELECT u.id, u.username, u.avatar_url, u.role, u.point,
+                 ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
+                 ${mysqlDateValueSql('u.banned_until')} AS banned_until,
+                 u.ban_reason, u.status_message,
+                 ${mysqlDateValueSql('u.created_at')} AS created_at
+            FROM users u
+        ),
+        UserCardValues AS (
           SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
                  u.status_message, u.created_at,
                  COUNT(uc.id) AS card_count,
                  COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
-            FROM users u
+            FROM NormalizedUsers u
             LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
             LEFT JOIN streamers s ON s.channel_id = uc.channel_id
            WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()

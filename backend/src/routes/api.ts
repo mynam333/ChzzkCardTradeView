@@ -378,10 +378,12 @@ router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInte
 // 1. 스트리머 관련 기능
 // ==========================================
 // 전체 스트리머 정보 목록 조회 (시세 탑3 리딩 등 활용)
-// 여러 화면(메인·랭킹·가챠·관리자)에서 빈번히 호출되므로 짧은 TTL 메모리 캐시 적용
+// 여러 화면(메인·랭킹·가챠·관리자)에서 빈번히 호출되므로 메모리 캐시와 stale 응답을 적용합니다.
 let streamersCache: { data: any[]; expiresAt: number } | null = null;
 let streamersCacheInFlight: Promise<any[]> | null = null;
-const STREAMERS_CACHE_TTL = 15_000; // 15초
+const streamersCacheTtlEnv = Number(process.env.STREAMERS_CACHE_TTL_MS);
+const STREAMERS_CACHE_TTL = Number.isFinite(streamersCacheTtlEnv) && streamersCacheTtlEnv > 0 ? streamersCacheTtlEnv : 60_000;
+const STREAMERS_CACHE_MAX_AGE_SECONDS = Math.max(15, Math.floor(STREAMERS_CACHE_TTL / 1000));
 
 const loadStreamerValueMap = async (
   label: string,
@@ -427,48 +429,64 @@ router.get('/streamers', async (req, res) => {
   try {
     const now = Date.now();
     if (streamersCache && streamersCache.expiresAt > now) {
-      res.set('Cache-Control', 'public, max-age=15');
+      res.set('Cache-Control', `public, max-age=${STREAMERS_CACHE_MAX_AGE_SECONDS}, stale-while-revalidate=120`);
       return res.status(200).json(streamersCache.data);
     }
+
+    const refreshStreamersCache = () => {
+      if (!streamersCacheInFlight) {
+        streamersCacheInFlight = (async () => {
+          const streamers = await streamerRepository.findAll();
+          // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
+          const [value24hMap, value1hMap, titlesByUser] = await Promise.all([
+            loadStreamerValueMap('24시간 전', () => streamerRepository.getValue24hAgoMap()),
+            loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
+            loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
+          ]);
+
+          // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출
+          const enriched = streamers.map((s) => ({
+            channel_id: s.channel_id,
+            name: s.name,
+            logo_url: s.logo_url,
+            custom_image_url: s.custom_image_url,
+            custom_images: s.custom_images, // 1~5성 커스텀 이미지 배열 화이트리스트 추가
+            is_image_banned: s.is_image_banned,
+            follower_count: s.follower_count,
+            base_value: s.base_value,
+            is_active: s.is_active,
+            serial_number: s.serial_number,
+            titles: (titlesByUser[s.channel_id] || []).filter((title) => title.is_equipped),
+            prev_value: value24hMap[s.channel_id] ?? s.prev_value,
+            value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
+          }));
+
+          streamersCache = { data: enriched, expiresAt: Date.now() + STREAMERS_CACHE_TTL };
+          return enriched;
+        })().finally(() => {
+          streamersCacheInFlight = null;
+        });
+      }
+      return streamersCacheInFlight;
+    };
+
+    if (streamersCache) {
+      void refreshStreamersCache().catch((err: any) => {
+        console.warn('[Streamers] stale 캐시 백그라운드 갱신 실패:', err?.message || err);
+      });
+      res.set('Cache-Control', `public, max-age=15, stale-while-revalidate=${Math.max(120, STREAMERS_CACHE_MAX_AGE_SECONDS)}`);
+      res.set('X-Streamers-Cache', 'stale');
+      return res.status(200).json(streamersCache.data);
+    }
+
     if (streamersCacheInFlight) {
       const data = await streamersCacheInFlight;
-      res.set('Cache-Control', 'public, max-age=15');
+      res.set('Cache-Control', `public, max-age=${STREAMERS_CACHE_MAX_AGE_SECONDS}, stale-while-revalidate=120`);
       return res.status(200).json(data);
     }
 
-    streamersCacheInFlight = (async () => {
-      const streamers = await streamerRepository.findAll();
-      // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
-      const [value24hMap, value1hMap, titlesByUser] = await Promise.all([
-        loadStreamerValueMap('24시간 전', () => streamerRepository.getValue24hAgoMap()),
-        loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
-        loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
-      ]);
-
-      // 민감 정보(registered_by 및 시세 관련 미사용 원천 데이터 등)를 제외한 필드만 화이트리스트 노출
-      const enriched = streamers.map((s) => ({
-        channel_id: s.channel_id,
-        name: s.name,
-        logo_url: s.logo_url,
-        custom_image_url: s.custom_image_url,
-        custom_images: s.custom_images, // 1~5성 커스텀 이미지 배열 화이트리스트 추가
-        is_image_banned: s.is_image_banned,
-        follower_count: s.follower_count,
-        base_value: s.base_value,
-        is_active: s.is_active,
-        serial_number: s.serial_number,
-        titles: (titlesByUser[s.channel_id] || []).filter((title) => title.is_equipped),
-        prev_value: value24hMap[s.channel_id] ?? s.prev_value,
-        value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
-      }));
-
-      streamersCache = { data: enriched, expiresAt: Date.now() + STREAMERS_CACHE_TTL };
-      return enriched;
-    })().finally(() => {
-      streamersCacheInFlight = null;
-    });
-    const enriched = await streamersCacheInFlight;
-    res.set('Cache-Control', 'public, max-age=15');
+    const enriched = await refreshStreamersCache();
+    res.set('Cache-Control', `public, max-age=${STREAMERS_CACHE_MAX_AGE_SECONDS}, stale-while-revalidate=120`);
     return res.status(200).json(enriched);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '스트리머 정보를 로드하지 못했습니다.' });

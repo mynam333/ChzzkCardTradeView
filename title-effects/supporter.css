@@ -1,0 +1,174 @@
+/*
+ * Title name: 후원자
+ * Lucide icon: HeartHandshake
+ * Icon color: #f59e0b
+ *
+ * Paste this entire file into the title CSS field.
+ * {{selector}} is replaced with the title's generated class.
+ */
+
+{{selector}} {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(254, 240, 138, 0.88);
+  background:
+    radial-gradient(circle at 18% 24%, rgba(255, 247, 237, 0.2) 0 0.08rem, transparent 0.1rem),
+    radial-gradient(circle at 82% 28%, rgba(254, 215, 170, 0.24), transparent 28%),
+    linear-gradient(135deg, #451a03 0%, #78350f 28%, #b45309 52%, #7c2d12 74%, #2b0b04 100%);
+  background-size:
+    0.86rem 0.86rem,
+    100% 100%,
+    220% 220%;
+  color: #fffbeb;
+  letter-spacing: 0.055em;
+  text-shadow:
+    0 1px 0 rgba(41, 13, 3, 0.96),
+    0 0 0.12rem rgba(255, 255, 255, 0.58),
+    0 0 0.36rem rgba(251, 191, 36, 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 -0.28rem 0.72rem rgba(41, 13, 3, 0.24),
+    0 0 0 1px rgba(251, 191, 36, 0.14),
+    0 0.18rem 0.58rem rgba(120, 53, 15, 0.28),
+    0 0 0.92rem rgba(245, 158, 11, 0.22);
+  animation: chikapo-supporter-warmth 4.6s ease-in-out infinite;
+}
+
+{{selector}}::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -0.12rem -0.18rem -0.12rem auto;
+  width: 2.85rem;
+  opacity: 0.42;
+  background:
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2772%27%20height%3D%2732%27%20viewBox%3D%270%200%2072%2032%27%3E%3Cg%20fill%3D%27none%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M41%2010c2.4-4.4%209.8-3.2%2010.4%202.8.5%205.4-6.2%208.2-10.4%2011.2-4.2-3-10.9-5.8-10.4-11.2C31.2%206.8%2038.6%205.6%2041%2010Z%27%20fill%3D%27%23fff7ed%27%20fill-opacity%3D%27.82%27%20stroke%3D%27%23fed7aa%27%20stroke-width%3D%271.4%27%2F%3E%3Cpath%20d%3D%27M14%2021c5.5-4.6%2011-4.6%2016.5%200M15%2014h8.2c2.8%200%204.2%201.1%204.2%203.1%200%201.9-1.4%203-4.2%203H19%27%20stroke%3D%27%23ffedd5%27%20stroke-width%3D%272.2%27%2F%3E%3Ccircle%20cx%3D%2759%27%20cy%3D%2710%27%20r%3D%273.2%27%20fill%3D%27%23fcd34d%27%20fill-opacity%3D%27.78%27%20stroke%3D%27%23fff7ed%27%20stroke-width%3D%271%27%2F%3E%3Ccircle%20cx%3D%2763%27%20cy%3D%2722%27%20r%3D%272.2%27%20fill%3D%27%23fdba74%27%20fill-opacity%3D%27.66%27%2F%3E%3Cpath%20d%3D%27M5%207l1.4%202.8%203.1.5-2.2%202.2.5%203.1L5%2014.2%202.2%2015.6l.5-3.1L.5%2010.3l3.1-.5L5%207Z%27%20fill%3D%27%23fff7ed%27%20fill-opacity%3D%27.72%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"),
+    radial-gradient(circle at 74% 50%, rgba(255, 247, 237, 0.66) 0 0.1rem, transparent 0.12rem),
+    radial-gradient(circle at 94% 28%, rgba(253, 186, 116, 0.62) 0 0.08rem, transparent 0.1rem);
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-size: 3rem 1.34rem, 0.42rem 0.42rem, 0.34rem 0.34rem;
+  background-position: 100% 50%, 16% 24%, 92% 74%;
+  filter:
+    drop-shadow(0 0 0.16rem rgba(255, 247, 237, 0.62))
+    drop-shadow(0 0 0.34rem rgba(251, 191, 36, 0.38));
+  transform-origin: 76% 50%;
+  animation: chikapo-supporter-token 3.2s ease-in-out infinite;
+}
+
+{{selector}}::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -70% auto -70% -42%;
+  width: 24%;
+  transform: rotate(18deg);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.08),
+      rgba(255, 247, 237, 0.38),
+      rgba(251, 191, 36, 0.14),
+      transparent
+    );
+  filter: blur(0.04rem);
+  animation: chikapo-supporter-gift-light 4.1s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+
+{{selector}} > * {
+  position: relative;
+  z-index: 1;
+}
+
+{{selector}} > span {
+  border-radius: 999px;
+  background: rgba(67, 20, 7, 0.48);
+  box-shadow:
+    -0.16rem 0 0 rgba(67, 20, 7, 0.48),
+    0.16rem 0 0 rgba(67, 20, 7, 0.48),
+    0 0 0.32rem rgba(67, 20, 7, 0.26);
+}
+
+{{selector}} svg {
+  color: #fde68a !important;
+  filter:
+    drop-shadow(0 1px 0 rgba(67, 20, 7, 0.7))
+    drop-shadow(0 0 0.18rem rgba(255, 247, 237, 0.82))
+    drop-shadow(0 0 0.32rem rgba(251, 191, 36, 0.6));
+}
+
+@keyframes chikapo-supporter-warmth {
+  0%,
+  100% {
+    background-position:
+      0 0,
+      50% 50%,
+      0% 50%;
+    border-color: rgba(254, 240, 138, 0.82);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+      inset 0 -0.28rem 0.72rem rgba(41, 13, 3, 0.24),
+      0 0 0 1px rgba(251, 191, 36, 0.14),
+      0 0.18rem 0.58rem rgba(120, 53, 15, 0.28),
+      0 0 0.92rem rgba(245, 158, 11, 0.22);
+  }
+
+  50% {
+    background-position:
+      0.22rem -0.12rem,
+      50% 50%,
+      100% 50%;
+    border-color: rgba(255, 247, 237, 0.94);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.24),
+      inset 0 -0.22rem 0.8rem rgba(41, 13, 3, 0.16),
+      0 0 0 1px rgba(251, 191, 36, 0.22),
+      0 0.22rem 0.72rem rgba(120, 53, 15, 0.32),
+      0 0 1.16rem rgba(251, 191, 36, 0.34);
+  }
+}
+
+@keyframes chikapo-supporter-token {
+  0%,
+  100% {
+    opacity: 0.76;
+    transform: translateY(0) scale(1);
+  }
+
+  45% {
+    opacity: 0.95;
+    transform: translateY(-0.035rem) scale(1.025);
+  }
+
+  70% {
+    opacity: 0.84;
+    transform: translateY(0.025rem) scale(0.995);
+  }
+}
+
+@keyframes chikapo-supporter-gift-light {
+  0%,
+  16% {
+    left: -36%;
+    opacity: 0;
+  }
+
+  34% {
+    opacity: 0.78;
+  }
+
+  62%,
+  100% {
+    left: 124%;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  {{selector}},
+  {{selector}}::before,
+  {{selector}}::after {
+    animation: none;
+  }
+}

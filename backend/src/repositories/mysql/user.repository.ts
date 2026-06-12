@@ -4,6 +4,20 @@ import { fuzzyScore, isExactSearchMatch } from '../../utils/search';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { DeletedUserAccount, IUserRepository, User, UserRanking } from '../interfaces';
 
+const toMysqlDateTime = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+};
+
+const mysqlDateValueSql = (column: string) => `
+  CASE
+    WHEN ${column} LIKE '%T%Z' THEN STR_TO_DATE(SUBSTRING_INDEX(REPLACE(${column}, 'T', ' '), '.', 1), '%Y-%m-%d %H:%i:%s')
+    ELSE ${column}
+  END
+`;
+
 export class MysqlUserRepository implements IUserRepository {
   private getDb() {
     return getMysqlDb();
@@ -117,19 +131,21 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async updateBanStatus(id: string, bannedUntil: string | null, reason?: string | null): Promise<void> {
-    await this.getDb().run('UPDATE users SET banned_until = ?, ban_reason = ? WHERE id = ?', bannedUntil, bannedUntil === null ? null : (reason || null), id);
+    await this.getDb().run('UPDATE users SET banned_until = ?, ban_reason = ? WHERE id = ?', toMysqlDateTime(bannedUntil), bannedUntil === null ? null : (reason || null), id);
   }
 
   async claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean> {
+    const now = toMysqlDateTime(nowIso);
+    const segmentStart = toMysqlDateTime(segmentStartIso);
     if (segmentStartIso === null) {
-      await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', nowIso, id);
+      await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', now, id);
       return true;
     }
     const result = await this.getDb().run(
       `UPDATE users SET last_free_draw = ?
        WHERE id = ?
          AND (last_free_draw IS NULL OR last_free_draw < ?)`,
-      nowIso, id, segmentStartIso
+      now, id, segmentStart
     );
     return result.changes > 0;
   }
@@ -149,7 +165,7 @@ export class MysqlUserRepository implements IUserRepository {
       const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
       const grantCount = row.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
       const nextTickets = Math.min(safeMaxStack, currentTickets + grantCount);
-      await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextTickets, segmentStartIso, id);
+      await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextTickets, toMysqlDateTime(segmentStartIso), id);
       return this.mapUser({ ...row, free_draw_tickets: nextTickets, last_free_draw: segmentStartIso });
     });
   }
@@ -294,7 +310,7 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
-    await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', time, id);
+    await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', toMysqlDateTime(time), id);
   }
 
   async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {
@@ -308,7 +324,7 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void> {
-    await this.getDb().run('UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?', accessToken, refreshToken, tokenExpiresAt, id);
+    await this.getDb().run('UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?', accessToken, refreshToken, toMysqlDateTime(tokenExpiresAt), id);
   }
 
   async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
@@ -432,12 +448,20 @@ export class MysqlUserRepository implements IUserRepository {
     const orderExpr = mode === 'cards' ? 'cards_value' : '(point + cards_value)';
     const params: any[] = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
     const rows = await this.getDb().all(`
-      WITH UserCardValues AS (
+      WITH NormalizedUsers AS (
+        SELECT u.id, u.username, u.avatar_url, u.role, u.point,
+               ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
+               ${mysqlDateValueSql('u.banned_until')} AS banned_until,
+               u.ban_reason, u.status_message,
+               ${mysqlDateValueSql('u.created_at')} AS created_at
+          FROM users u
+      ),
+      UserCardValues AS (
         SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
                u.status_message, u.created_at,
                COUNT(uc.id) AS card_count,
                COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
-        FROM users u
+        FROM NormalizedUsers u
         LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
         LEFT JOIN streamers s ON s.channel_id = uc.channel_id
         WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()

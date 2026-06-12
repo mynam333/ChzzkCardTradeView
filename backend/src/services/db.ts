@@ -280,8 +280,23 @@ const ensureMysqlTableCollation = async (db: MysqlDb, table: string, collation =
   await db.run(`ALTER TABLE ${table} CONVERT TO CHARACTER SET utf8mb4 COLLATE ${collation}`);
 };
 
+const normalizeMysqlIsoDateColumn = async (db: MysqlDb, table: string, column: string) => {
+  try {
+    await db.run(`
+      UPDATE ${table}
+         SET ${column} = STR_TO_DATE(SUBSTRING_INDEX(REPLACE(${column}, 'T', ' '), '.', 1), '%Y-%m-%d %H:%i:%s')
+       WHERE ${column} LIKE '%T%Z'
+    `);
+  } catch (err: any) {
+    console.warn(`[DB Migration] MySQL ${table}.${column} ISO 날짜 보정 실패:`, err?.message || err);
+  }
+};
+
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+  await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
+  await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
+  await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
   await ensureMysqlColumn(db, 'user_titles', 'grant_source', "grant_source VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER is_equipped");
   await ensureMysqlIndex(db, 'user_titles', 'idx_user_titles_grant_source', '(grant_source, title_id)');
   await db.run(`
