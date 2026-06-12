@@ -18,6 +18,17 @@ export interface UserTitle {
   is_equipped?: boolean;
 }
 
+export interface SubscriptionTitleRule {
+  id: number;
+  broadcaster_channel_id: string;
+  broadcaster_name: string | null;
+  title_id: number;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  title_name?: string | null;
+}
+
 export interface CosmeticRef {
   class?: string;
   css?: string;
@@ -137,6 +148,43 @@ export interface PointAuditResponse {
     net: number;
   };
   next_before_id: number | null;
+}
+
+export interface TradeOfferCard {
+  channel_id: string;
+  star?: number;
+  count: number;
+  streamer_name?: string | null;
+  streamer_logo_url?: string | null;
+}
+
+export interface TradeOffer {
+  cards: TradeOfferCard[];
+  point: number;
+}
+
+export type TradeStatus = 'PENDING' | 'CONFIRMED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
+
+export interface AdminTrade {
+  id: number;
+  sender_id: string;
+  receiver_id: string;
+  sender_username?: string | null;
+  receiver_username?: string | null;
+  sender_offer: TradeOffer;
+  receiver_offer: TradeOffer;
+  status: TradeStatus;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface AdminTradeListResponse {
+  items: AdminTrade[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
 }
 
 /** 관리자 신고 목록 항목 (reporter_username/streamer_name 보강 포함) */

@@ -6,6 +6,46 @@ export class SupabaseTitleRepository implements ITitleRepository {
     return getSupabaseClient();
   }
 
+  private async filterVisibleSubscriptionTitleRows<T extends { user_id: string; title: any; awarded_at: string; is_equipped: boolean }>(rows: T[]): Promise<T[]> {
+    if (rows.length === 0) return [];
+    const titleIds = [...new Set(rows.map((row) => Number(row.title?.id)).filter(Boolean))];
+    const { data: rules, error: rulesError } = await this.getClient()
+      .from('subscription_title_rules')
+      .select('id, title_id')
+      .eq('active', true)
+      .in('title_id', titleIds);
+    if (rulesError) throw rulesError;
+    const activeRules = rules || [];
+    if (activeRules.length === 0) {
+      return rows;
+    }
+
+    const ruleIds = activeRules.map((rule: any) => Number(rule.id));
+    const titleRuleMap = new Map<number, number[]>();
+    for (const rule of activeRules as any[]) {
+      const titleId = Number(rule.title_id);
+      titleRuleMap.set(titleId, [...(titleRuleMap.get(titleId) || []), Number(rule.id)]);
+    }
+
+    const userIds = [...new Set(rows.map((row) => row.user_id))];
+    const { data: states, error: statesError } = await this.getClient()
+      .from('subscription_title_states')
+      .select('user_id, rule_id')
+      .in('user_id', userIds)
+      .in('rule_id', ruleIds)
+      .eq('is_subscribed', true)
+      .gt('checked_until', new Date().toISOString());
+    if (statesError) throw statesError;
+    const activeStateKeys = new Set((states || []).map((state: any) => `${state.user_id}:${state.rule_id}`));
+
+    return rows.filter((row) => {
+      const titleId = Number(row.title?.id);
+      const requiredRuleIds = titleRuleMap.get(titleId);
+      if (!requiredRuleIds || requiredRuleIds.length === 0) return true;
+      return requiredRuleIds.some((ruleId) => activeStateKeys.has(`${row.user_id}:${ruleId}`));
+    });
+  }
+
   async findAll(): Promise<UserTitle[]> {
     const { data, error } = await this.getClient().from('titles').select('*').order('id', { ascending: false });
     if (error) throw error;
@@ -26,7 +66,8 @@ export class SupabaseTitleRepository implements ITitleRepository {
       .order('is_equipped', { ascending: false })
       .order('awarded_at', { ascending: true });
     if (error) throw error;
-    return (data || []).map((row: any) => ({ ...row.title, awarded_at: row.awarded_at, is_equipped: row.is_equipped })) as UserTitle[];
+    const visibleRows = await this.filterVisibleSubscriptionTitleRows((data || []).map((row: any) => ({ ...row, user_id: userId })));
+    return visibleRows.map((row: any) => ({ ...row.title, awarded_at: row.awarded_at, is_equipped: row.is_equipped })) as UserTitle[];
   }
 
   async findByUserIds(userIds: string[]): Promise<Record<string, UserTitle[]>> {
@@ -41,7 +82,8 @@ export class SupabaseTitleRepository implements ITitleRepository {
       .order('is_equipped', { ascending: false })
       .order('awarded_at', { ascending: true });
     if (error) throw error;
-    for (const row of data || []) {
+    const visibleRows = await this.filterVisibleSubscriptionTitleRows((data || []) as any[]);
+    for (const row of visibleRows) {
       (result[row.user_id] ||= []).push({ ...(row.title as any), awarded_at: row.awarded_at, is_equipped: row.is_equipped });
     }
     return result;
@@ -108,12 +150,14 @@ export class SupabaseTitleRepository implements ITitleRepository {
     if (titleId !== null) {
       const { data, error } = await this.getClient()
         .from('user_titles')
-        .select('title_id')
+        .select('user_id, awarded_at, is_equipped, title:titles(*)')
         .eq('user_id', userId)
         .eq('title_id', titleId)
         .maybeSingle();
       if (error) throw error;
       if (!data) return false;
+      const visibleRows = await this.filterVisibleSubscriptionTitleRows([data as any]);
+      if (visibleRows.length === 0) return false;
     }
 
     const { error: clearError } = await this.getClient()

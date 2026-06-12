@@ -14,6 +14,8 @@ import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfil
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
+import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService';
+import { getDbMode, getMysqlDb, getSqliteDb } from '../services/db';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -201,10 +203,12 @@ export const getUserMe = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
 
-    // 서로 독립적인 작업(치지직 프로필 동기화 / 설정값 조회 / 보유 타이틀 조회)을 병렬 실행합니다.
-    // 치지직 동기화는 throttle되어 대부분의 호출에서는 즉시 반환됩니다.
-    const [, [intervalStr, maxStackStr, drawCostStr], ownedTitles] = await Promise.all([
+    // 치지직 프로필/구독 칭호 동기화는 throttle/cache되어 대부분의 호출에서는 외부 요청 없이 반환됩니다.
+    await Promise.all([
       maybeSyncChzzkProfile(userId, user),
+      syncUserSubscriptionTitles(userId)
+    ]);
+    const [[intervalStr, maxStackStr, drawCostStr], ownedTitles] = await Promise.all([
       Promise.all([
         systemConfigRepository.get('free_draw_interval', '24'),
         systemConfigRepository.get('free_draw_max_stack', '1'),
@@ -557,25 +561,33 @@ export const getUserProfile = async (req: Request, res: Response) => {
 // 프론트는 주로 SSE(ranking 이벤트)로 갱신하고 폴링은 긴 fallback만 돌리지만, 시세는 2분 주기로
 // 갱신되므로 실시간일 필요가 없습니다. 동일 파라미터 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
 const RANKINGS_CACHE_TTL = 60_000; // 60초
+const USER_RANKING_SNAPSHOT_TTL = Math.max(30_000, Number(process.env.USER_RANKING_SNAPSHOT_TTL_MS || 60_000));
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsInFlight = new Map<string, Promise<any[]>>();
+const streamerRankingSnapshots = new Map<'value' | 'change', { data: any[]; expiresAt: number }>();
+const streamerRankingSnapshotInFlight = new Map<'value' | 'change', Promise<any[]>>();
 const streamerDetailCache = new Map<string, { data: any; expiresAt: number }>();
 const streamerDetailInFlight = new Map<string, Promise<any>>();
 const STREAMER_DETAIL_CACHE_TTL = 30_000;
 const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RANKING_MAX_LIMIT || 10_000));
+let userRankingSnapshotExpiresAt = 0;
+let userRankingSnapshotInFlight: Promise<boolean> | null = null;
 
 export const clearUserRankingCaches = () => {
   rankingsCache.clear();
   rankingsInFlight.clear();
   rankingPoolCache.clear();
+  userRankingSnapshotExpiresAt = 0;
 };
 
 export const clearRankingCaches = () => {
   clearUserRankingCaches();
   streamerRankingsCache.clear();
   streamerRankingsInFlight.clear();
+  streamerRankingSnapshots.clear();
+  streamerRankingSnapshotInFlight.clear();
   streamerDetailCache.clear();
   streamerDetailInFlight.clear();
   clearDrawPoolCache();
@@ -584,6 +596,151 @@ export const clearRankingCaches = () => {
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
 // (검색은 키워드별 결과 + 동일한 전체 풀이 필요하므로, 풀을 캐싱하면 무거운 집계가 반복되지 않음)
 const rankingPoolCache = new Map<string, { data: any[]; expiresAt: number }>();
+
+const refreshUserRankingSnapshot = async (): Promise<boolean> => {
+  const mode = getDbMode();
+  if (mode === 'SUPABASE') return false;
+  if (userRankingSnapshotExpiresAt > Date.now()) {
+    const counts = mode === 'MYSQL'
+      ? await getMysqlDb().get<{ users_count: number; snapshot_count: number }>(
+        `SELECT
+            (SELECT COUNT(*) FROM users WHERE banned_until IS NULL OR banned_until <= UTC_TIMESTAMP()) AS users_count,
+            (SELECT COUNT(*) FROM user_asset_rankings) AS snapshot_count`
+      )
+      : getSqliteDb().prepare(
+        `SELECT
+            (SELECT COUNT(*) FROM users WHERE banned_until IS NULL OR datetime(banned_until) <= datetime('now')) AS users_count,
+            (SELECT COUNT(*) FROM user_asset_rankings) AS snapshot_count`
+      ).get() as { users_count: number; snapshot_count: number };
+    if (Number(counts?.users_count || 0) === 0 || Number(counts?.snapshot_count || 0) > 0) return true;
+  }
+  if (userRankingSnapshotInFlight) return userRankingSnapshotInFlight;
+
+  userRankingSnapshotInFlight = (async () => {
+    if (mode === 'MYSQL') {
+      const db = getMysqlDb();
+      await db.run('DELETE FROM user_asset_rankings');
+      await db.run(`
+        INSERT INTO user_asset_rankings
+          (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+           card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+        WITH UserCardValues AS (
+          SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                 u.status_message, u.created_at,
+                 COUNT(uc.id) AS card_count,
+                 COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+            FROM users u
+            LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
+            LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+           WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
+           GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
+        ),
+        RankedUsers AS (
+          SELECT *,
+                 ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
+                 ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
+            FROM UserCardValues
+        )
+        SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+               card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
+          FROM RankedUsers
+      `);
+    } else {
+      const db = getSqliteDb();
+      db.transaction(() => {
+        db.prepare('DELETE FROM user_asset_rankings').run();
+        db.prepare(`
+          WITH UserCardValues AS (
+            SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                   u.status_message, u.created_at,
+                   COUNT(uc.id) AS card_count,
+                   COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+              FROM users u
+              LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
+              LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+             WHERE u.banned_until IS NULL OR datetime(u.banned_until) <= datetime('now')
+             GROUP BY u.id
+          ),
+          RankedUsers AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
+                   ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
+              FROM UserCardValues
+          )
+          INSERT INTO user_asset_rankings
+            (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+             card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+          SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+                 card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, datetime('now')
+            FROM RankedUsers
+        `).run();
+      })();
+    }
+    userRankingSnapshotExpiresAt = Date.now() + USER_RANKING_SNAPSHOT_TTL;
+    return true;
+  })()
+    .catch((err) => {
+      console.warn('[RankingSnapshot] 유저 랭킹 스냅샷 갱신 실패:', err?.message || err);
+      return false;
+    })
+    .finally(() => {
+      userRankingSnapshotInFlight = null;
+    });
+
+  return userRankingSnapshotInFlight;
+};
+
+const readUserRankingsFromSnapshot = async (
+  limit: number,
+  keyword: string = '',
+  options: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null } = {}
+): Promise<any[] | null> => {
+  const refreshed = await refreshUserRankingSnapshot();
+  if (!refreshed) return null;
+  const mode = options.mode === 'cards' ? 'cards' : 'total';
+  const channelId = (options.channelId || '').trim();
+  const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
+  const rankColumn = mode === 'cards' ? 'cards_rank' : 'total_rank';
+  const sql = `
+    SELECT r.*, r.${rankColumn} AS rank
+      FROM user_asset_rankings r
+     WHERE (? = '' OR r.username LIKE ?)
+       AND (
+         ? = ''
+         OR EXISTS (
+           SELECT 1
+             FROM user_cards fc
+            WHERE fc.user_id = r.user_id
+              AND COALESCE(fc.is_hidden, 0) = 0
+              AND fc.channel_id = ?
+              AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
+         )
+       )
+     ORDER BY r.${rankColumn} ASC, r.user_id ASC
+     LIMIT ?
+  `;
+  const params = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
+  const rows = getDbMode() === 'MYSQL'
+    ? await getMysqlDb().all<any>(sql, ...params)
+    : getSqliteDb().prepare(sql).all(...params) as any[];
+  return rows.map((row: any) => ({
+    id: row.user_id,
+    username: row.username,
+    avatar_url: row.avatar_url,
+    role: row.role as 'USER' | 'ADMIN',
+    point: Number(row.point || 0),
+    last_free_draw: row.last_free_draw,
+    banned_until: row.banned_until,
+    ban_reason: row.ban_reason ?? null,
+    status_message: row.status_message ?? null,
+    created_at: row.created_at,
+    card_count: Number(row.card_count || 0),
+    cards_value: Math.round(Number(row.cards_value || 0)),
+    total_asset: Number(row.total_asset || 0),
+    rank: Number(row.rank || 0)
+  }));
+};
+
 const loadRankingPool = async (
   mode: 'total' | 'cards',
   channelId: string,
@@ -595,7 +752,8 @@ const loadRankingPool = async (
   if (hit && hit.expiresAt > now) return hit.data;
   const inFlight = rankingsInFlight.get(`pool|${key}`);
   if (inFlight) return inFlight;
-  const request = userRepository.findRankings(100, '', { mode, channelId, star })
+  const request = (async () => (await readUserRankingsFromSnapshot(100, '', { mode, channelId, star }))
+    ?? userRepository.findRankings(100, '', { mode, channelId, star }))()
     .then((data) => {
       rankingPoolCache.set(key, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
       if (rankingPoolCache.size > 100) {
@@ -607,6 +765,66 @@ const loadRankingPool = async (
       rankingsInFlight.delete(`pool|${key}`);
     });
   rankingsInFlight.set(`pool|${key}`, request);
+  return request;
+};
+
+const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
+  const now = Date.now();
+  const hit = streamerRankingSnapshots.get(mode);
+  if (hit && hit.expiresAt > now) return hit.data;
+  const inFlight = streamerRankingSnapshotInFlight.get(mode);
+  if (inFlight) return inFlight;
+
+  const request = (async () => {
+    const streamers = await streamerRepository.findRankingBase(undefined);
+    const value1hMap = mode === 'change'
+      ? await streamerRepository.getValue1hAgoMap()
+      : {} as Record<string, number>;
+
+    const scoreChange = (streamer: any) => {
+      const current = Number(streamer.base_value || 0);
+      const previous = Number(value1hMap[streamer.channel_id] ?? current);
+      return previous > 0 ? ((current - previous) / previous) * 100 : 0;
+    };
+
+    const ranked = streamers
+      .slice()
+      .sort((a: any, b: any) => {
+        if (mode === 'change') {
+          return scoreChange(b) - scoreChange(a) || Number(b.base_value || 0) - Number(a.base_value || 0);
+        }
+        return Number(b.base_value || 0) - Number(a.base_value || 0);
+      })
+      .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
+
+    const channelIds = ranked.map((item) => item.streamer.channel_id);
+    const [titlesByUser, value24hMap] = await Promise.all([
+      titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>)),
+      mode === 'value'
+        ? streamerRepository.getValue24hAgoMapForChannels(channelIds)
+        : Promise.resolve({} as Record<string, number>)
+    ]);
+
+    const data = ranked.map(({ streamer, rank }) => ({
+      channel_id: streamer.channel_id,
+      name: streamer.name,
+      logo_url: streamer.logo_url,
+      custom_image_url: streamer.custom_image_url,
+      follower_count: streamer.follower_count,
+      base_value: streamer.base_value,
+      is_active: streamer.is_active,
+      rank,
+      titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
+      prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
+      value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
+    }));
+    streamerRankingSnapshots.set(mode, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
+    return data;
+  })().finally(() => {
+    streamerRankingSnapshotInFlight.delete(mode);
+  });
+
+  streamerRankingSnapshotInFlight.set(mode, request);
   return request;
 };
 
@@ -642,7 +860,8 @@ export const getUserRankings = async (req: Request, res: Response) => {
     let rankings;
     if (keyword) {
       const [matched, topPool] = await Promise.all([
-        userRepository.findRankings(100, keyword, { mode, channelId, star }),
+        (async () => (await readUserRankingsFromSnapshot(100, keyword, { mode, channelId, star }))
+          ?? userRepository.findRankings(100, keyword, { mode, channelId, star }))(),
         loadRankingPool(mode, channelId, star)
       ]);
       const byId = new Map<string, typeof matched[number]>();
@@ -710,7 +929,7 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const rawLimit = typeof req.query.limit === 'string' ? req.query.limit.trim().toLowerCase() : '';
     const limit = rawLimit === 'all'
-      ? STREAMER_RANKING_MAX_LIMIT
+      ? Number.MAX_SAFE_INTEGER
       : Math.max(1, Math.min(STREAMER_RANKING_MAX_LIMIT, Math.floor(Number(req.query.limit || 100)) || 100));
     const cacheKey = `${mode}|${keyword}|${limit}`;
     const now = Date.now();
@@ -727,57 +946,17 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     }
 
     const request = (async () => {
-      const needsFullStreamerPool = mode === 'change' || !!keyword;
-      const streamers = await streamerRepository.findRankingBase(needsFullStreamerPool ? undefined : limit);
-      const value1hMap = mode === 'change'
-        ? await streamerRepository.getValue1hAgoMap()
-        : {} as Record<string, number>;
-
-      const scoreChange = (streamer: any) => {
-        const current = Number(streamer.base_value || 0);
-        const previous = Number(value1hMap[streamer.channel_id] ?? current);
-        return previous > 0 ? ((current - previous) / previous) * 100 : 0;
-      };
-
-      let ranked = streamers
-        .slice()
-        .sort((a: any, b: any) => {
-          if (mode === 'change') {
-            return scoreChange(b) - scoreChange(a) || Number(b.base_value || 0) - Number(a.base_value || 0);
-          }
-          return Number(b.base_value || 0) - Number(a.base_value || 0);
-        })
-        .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
+      let ranked = await loadStreamerRankingSnapshot(mode);
 
       if (keyword) {
         ranked = ranked
-          .map((item) => ({ ...item, score: fuzzyScore(item.streamer.name || '', keyword) }))
+          .map((item) => ({ ...item, score: fuzzyScore(item.name || '', keyword) }))
           .filter((item) => item.score !== null)
-          .sort((a, b) => (a.score ?? 0) - (b.score ?? 0) || a.rank - b.rank);
+          .sort((a, b) => (a.score ?? 0) - (b.score ?? 0) || a.rank - b.rank)
+          .map(({ score: _score, ...item }) => item);
       }
 
-      const sliced = ranked.slice(0, limit);
-      const channelIds = sliced.map((item) => item.streamer.channel_id);
-      const [titlesByUser, value24hMap] = await Promise.all([
-        titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>)),
-        mode === 'value'
-          ? streamerRepository.getValue24hAgoMapForChannels(channelIds)
-          : Promise.resolve({} as Record<string, number>)
-      ]);
-
-      const data = sliced.map(({ streamer, rank }) => ({
-        channel_id: streamer.channel_id,
-        name: streamer.name,
-        logo_url: streamer.logo_url,
-        custom_image_url: streamer.custom_image_url,
-        follower_count: streamer.follower_count,
-        base_value: streamer.base_value,
-        is_active: streamer.is_active,
-        rank,
-        titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
-        prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
-        value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
-      }));
+      const data = ranked.slice(0, limit);
 
       streamerRankingsCache.set(cacheKey, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
       if (streamerRankingsCache.size > 100) {

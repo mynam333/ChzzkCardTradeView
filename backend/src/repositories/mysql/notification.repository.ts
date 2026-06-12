@@ -79,6 +79,14 @@ export class MysqlNotificationRepository implements INotificationRepository {
     await this.getDb().run('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?', id, userId);
   }
 
+  async markGroupRead(userId: string, groupKey: string): Promise<void> {
+    await this.getDb().run(
+      'UPDATE notifications SET is_read = 1 WHERE user_id = ? AND group_key = ? AND is_read = 0 AND deleted_at IS NULL',
+      userId,
+      groupKey
+    );
+  }
+
   async markAllRead(userId: string): Promise<void> {
     await this.getDb().run('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL', userId);
   }

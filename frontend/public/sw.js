@@ -30,6 +30,8 @@ self.addEventListener('push', (event) => {
       body: payload.body || '',
       icon: '/icon.png',
       badge: '/badge.png',
+      tag: payload.tag || undefined,
+      renotify: Boolean(payload.tag),
       data: { url: payload.url || '/' }
     })
   );

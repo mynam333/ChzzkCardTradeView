@@ -343,6 +343,22 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       try { await apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }); } catch { /* 무시 */ }
     }
     // 알림의 link를 탭/하위 탭으로 변환해 해당 위치로 이동시킵니다.
+    const rawLink = (n.link || '').trim();
+    if (rawLink) {
+      try {
+        const url = new URL(rawLink, window.location.origin);
+        if (url.origin === window.location.origin) {
+          const href = `${url.pathname}${url.search}`;
+          const routeName = url.pathname.replace(/^\/+/, '').split('/')[0] || 'main';
+          if (url.pathname === '/' || VALID_TABS.includes(routeName as TabId)) {
+            router.push(href);
+            return;
+          }
+        }
+      } catch {
+        // 기존 탭 문자열 링크는 아래 fallback에서 처리합니다.
+      }
+    }
     const target = parseNotificationLink(n.link);
     if (target) {
       if (target.tab === 'shop' && target.shopSubTab) {

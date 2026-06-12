@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   TrendingUp,
   Search,
@@ -45,18 +46,25 @@ interface UserRank {
 }
 
 type SubTab = 'value' | 'change' | 'user' | 'cards';
+const RANKING_SUB_TABS: SubTab[] = ['value', 'change', 'user', 'cards'];
 
 export const RankingTab: React.FC = () => {
-  const [subTab, setSubTab] = useState<SubTab>('value');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const initialSubTab: SubTab = RANKING_SUB_TABS.includes(tabParam as SubTab) ? tabParam as SubTab : 'value';
+  const pageParam = Number(searchParams.get('page') || '1');
+  const [subTab, setSubTab] = useState<SubTab>(initialSubTab);
 
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [userRankings, setUserRankings] = useState<UserRank[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1);
+  const [pageInput, setPageInput] = useState(String(Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1));
   const PER_PAGE = 10;
-  const [profileUserId, setProfileUserId] = useState<string | null>(null);
-  const [detailChannelId, setDetailChannelId] = useState<string | null>(null);
+  const [profileUserId, setProfileUserId] = useState<string | null>(searchParams.get('profile'));
+  const [detailChannelId, setDetailChannelId] = useState<string | null>(searchParams.get('streamer'));
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [cardFilterName, setCardFilterName] = useState('');
   const [cardFilterChannelId, setCardFilterChannelId] = useState('');
@@ -66,6 +74,49 @@ export const RankingTab: React.FC = () => {
   const fetchSeqRef = useRef(0);
   const supportsCardHolderFilter = subTab === 'user' || subTab === 'cards';
   const serverSearchQuery = subTab === 'cards' ? '' : debouncedSearchQuery;
+
+  const pushRankingRoute = (updates: Record<string, string | number | null | undefined>) => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') params.delete(key);
+      else params.set(key, String(value));
+    });
+    const query = params.toString();
+    router.push(query ? `/ranking?${query}` : '/ranking');
+  };
+
+  const handleSubTabChange = (tab: SubTab) => {
+    setSubTab(tab);
+    setPage(1);
+    setProfileUserId(null);
+    setDetailChannelId(null);
+    pushRankingRoute({ tab, page: null, profile: null, streamer: null });
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    const normalizedPage = Math.max(1, Math.floor(nextPage));
+    setPage(normalizedPage);
+    setPageInput(String(normalizedPage));
+    pushRankingRoute({ tab: subTab, page: normalizedPage === 1 ? null : normalizedPage });
+  };
+
+  const openProfile = (userId: string) => {
+    setProfileUserId(userId);
+    setDetailChannelId(null);
+    pushRankingRoute({ tab: subTab, profile: userId, streamer: null });
+  };
+
+  const openStreamerDetail = (channelId: string) => {
+    setDetailChannelId(channelId);
+    setProfileUserId(null);
+    pushRankingRoute({ tab: subTab, streamer: channelId, profile: null });
+  };
+
+  const closeRankingModal = () => {
+    setProfileUserId(null);
+    setDetailChannelId(null);
+    pushRankingRoute({ profile: null, streamer: null });
+  };
 
   const findBestCardFilterMatch = (query: string): Streamer | null => {
     const normalizedQuery = normalizeSearchText(query);
@@ -99,6 +150,20 @@ export const RankingTab: React.FC = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const nextTabParam = searchParams.get('tab');
+    const nextTab: SubTab = RANKING_SUB_TABS.includes(nextTabParam as SubTab) ? nextTabParam as SubTab : 'value';
+    const nextPageRaw = Number(searchParams.get('page') || '1');
+    const nextPage = Number.isFinite(nextPageRaw) && nextPageRaw > 0 ? Math.floor(nextPageRaw) : 1;
+    setSubTab(nextTab);
+    setPage(nextPage);
+    setPageInput(String(nextPage));
+    const profile = searchParams.get('profile');
+    const streamer = searchParams.get('streamer');
+    setProfileUserId(profile);
+    setDetailChannelId(profile ? null : streamer);
+  }, [searchParams]);
 
   useEffect(() => {
     fetchRankings();
@@ -162,7 +227,7 @@ export const RankingTab: React.FC = () => {
     const handleTutorialSubTab = (event: Event) => {
       const subTabId = (event as CustomEvent<{ subTab?: SubTab }>).detail?.subTab;
       if (subTabId === 'value' || subTabId === 'change' || subTabId === 'user' || subTabId === 'cards') {
-        setSubTab(subTabId);
+        handleSubTabChange(subTabId);
       }
     };
 
@@ -171,7 +236,16 @@ export const RankingTab: React.FC = () => {
   }, []);
 
   // 탭 전환·검색 시 1페이지로 초기화
-  useEffect(() => { setPage(1); }, [subTab, searchQuery, cardFilterChannelId, cardFilterStar]);
+  useEffect(() => {
+    setPage(1);
+    setPageInput('1');
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('page')) {
+      params.delete('page');
+      const query = params.toString();
+      router.replace(query ? `/ranking?${query}` : '/ranking');
+    }
+  }, [searchQuery, cardFilterChannelId, cardFilterStar, router]);
 
   const fetchRankings = async (silent = false) => {
     const requestSeq = ++fetchSeqRef.current;
@@ -266,6 +340,15 @@ export const RankingTab: React.FC = () => {
   const pagedStreamers = rankedStreamers.slice(sliceStart, sliceStart + PER_PAGE);
   const pagedUsers = rankedUsers.slice(sliceStart, sliceStart + PER_PAGE);
 
+  const goToRankingPage = () => {
+    const parsed = Math.floor(Number(pageInput));
+    if (!Number.isFinite(parsed)) {
+      setPageInput(String(pageClamped));
+      return;
+    }
+    handlePageChange(Math.min(Math.max(1, parsed), totalPages));
+  };
+
   const rankColor = (rank: number) =>
     rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-500 dark:text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
 
@@ -299,7 +382,7 @@ export const RankingTab: React.FC = () => {
             {subTabs.map((t) => (
               <button
                 key={t.id}
-                onClick={() => setSubTab(t.id)}
+                onClick={() => handleSubTabChange(t.id)}
                 className={`cute-wiggle-hover rounded-xl px-3 py-1.5 text-xs font-bold transition ${subTab === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}
               >
@@ -384,7 +467,7 @@ export const RankingTab: React.FC = () => {
             ) : pagedUsers.map((ur) => (
               <div
                 key={ur.id}
-                onClick={() => setProfileUserId(ur.id)}
+                onClick={() => openProfile(ur.id)}
                 className="cute-card-pop flex cursor-pointer items-center justify-between gap-2 rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45 sm:gap-4"
               >
                 <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
@@ -440,7 +523,7 @@ export const RankingTab: React.FC = () => {
               return (
                 <div
                   key={st.channel_id}
-                  onClick={() => setDetailChannelId(st.channel_id)}
+                  onClick={() => openStreamerDetail(st.channel_id)}
                   className="cute-card-pop flex cursor-pointer items-center justify-between rounded-2xl border border-border/50 bg-secondary/25 p-4 hover:border-primary/45 hover:bg-secondary/45"
                 >
                   <div className="flex items-center gap-4">
@@ -496,51 +579,78 @@ export const RankingTab: React.FC = () => {
 
         {/* 페이지네이션 (10위 단위) */}
         {!loading && totalPages > 1 && (
-          <div className="mt-5 flex items-center justify-center gap-1.5">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={pageClamped <= 1}
-              className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+          <div className="mt-5 flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
+            <div className="flex items-center justify-center gap-1.5">
+              <button
+                onClick={() => handlePageChange(pageClamped - 1)}
+                disabled={pageClamped <= 1}
+                className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+              >
+                이전
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((p) => Math.abs(p - pageClamped) <= 2 || p === 1 || p === totalPages)
+                .reduce((acc: (number | string)[], p, idx, arr) => {
+                  if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('…');
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) =>
+                  typeof p === 'number' ? (
+                    <button
+                      key={i}
+                      onClick={() => handlePageChange(p)}
+                      className={`min-w-8 rounded-2xl px-2.5 py-1.5 text-xs font-bold transition ${p === pageClamped ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {p}
+                    </button>
+                  ) : (
+                    <span key={i} className="px-1 text-xs text-muted-foreground">{p}</span>
+                  )
+                )}
+              <button
+                onClick={() => handlePageChange(pageClamped + 1)}
+                disabled={pageClamped >= totalPages}
+                className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+              >
+                다음
+              </button>
+            </div>
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                goToRankingPage();
+              }}
             >
-              이전
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter((p) => Math.abs(p - pageClamped) <= 2 || p === 1 || p === totalPages)
-              .reduce((acc: (number | string)[], p, idx, arr) => {
-                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('…');
-                acc.push(p);
-                return acc;
-              }, [])
-              .map((p, i) =>
-                typeof p === 'number' ? (
-                  <button
-                    key={i}
-                    onClick={() => setPage(p)}
-                    className={`min-w-8 rounded-2xl px-2.5 py-1.5 text-xs font-bold transition ${p === pageClamped ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {p}
-                  </button>
-                ) : (
-                  <span key={i} className="px-1 text-xs text-muted-foreground">{p}</span>
-                )
-              )}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={pageClamped >= totalPages}
-              className="rounded-2xl bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
-            >
-              다음
-            </button>
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={pageInput}
+                onChange={(event) => setPageInput(event.target.value)}
+                onBlur={goToRankingPage}
+                className="h-8 w-16 rounded-lg border border-border bg-card px-2 text-center text-xs font-black focus:border-primary focus:outline-none"
+                aria-label="이동할 랭킹 페이지"
+              />
+              <span className="text-[11px] font-bold text-muted-foreground">/ {totalPages.toLocaleString()}</span>
+              <button
+                type="submit"
+                className="h-8 rounded-lg border border-border bg-card px-3 text-xs font-black text-foreground transition hover:bg-secondary/40"
+              >
+                이동
+              </button>
+            </form>
           </div>
         )}
 
       </div>
 
       {/* 컬렉터 프로필 모달 */}
-      {profileUserId && <ProfileModal userId={profileUserId} onClose={() => setProfileUserId(null)} />}
+      {profileUserId && <ProfileModal userId={profileUserId} onClose={closeRankingModal} />}
 
       {/* 스트리머 시세 상세 모달 */}
-      {detailChannelId && <StreamerDetailModal channelId={detailChannelId} onClose={() => setDetailChannelId(null)} />}
+      {detailChannelId && <StreamerDetailModal channelId={detailChannelId} onClose={closeRankingModal} />}
 
     </div>
   );

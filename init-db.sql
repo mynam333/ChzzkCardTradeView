@@ -72,12 +72,41 @@ CREATE TABLE IF NOT EXISTS user_titles (
     title_id INTEGER NOT NULL,
     awarded_at TEXT DEFAULT (datetime('now')),
     is_equipped INTEGER NOT NULL DEFAULT 0,
+    grant_source TEXT NOT NULL DEFAULT 'manual',
     PRIMARY KEY (user_id, title_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (title_id) REFERENCES titles(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_user_titles_grant_source ON user_titles(grant_source, title_id);
 
 CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id);
+
+CREATE TABLE IF NOT EXISTS subscription_title_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcaster_channel_id TEXT NOT NULL,       -- 구독 확인 대상 치지직 채널 ID
+    broadcaster_name TEXT,                      -- 관리자 표시용 채널명
+    title_id INTEGER NOT NULL,                  -- 구독 중일 때 제공할 칭호
+    active INTEGER NOT NULL DEFAULT 1,          -- 규칙 사용 여부
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(title_id) REFERENCES titles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_subscription_title_rules_active ON subscription_title_rules(active, title_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_title_rules_broadcaster ON subscription_title_rules(broadcaster_channel_id);
+
+CREATE TABLE IF NOT EXISTS subscription_title_states (
+    user_id TEXT NOT NULL,
+    rule_id INTEGER NOT NULL,
+    is_subscribed INTEGER NOT NULL DEFAULT 0,
+    checked_at TEXT,
+    checked_until TEXT,
+    last_error TEXT,
+    PRIMARY KEY(user_id, rule_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(rule_id) REFERENCES subscription_title_rules(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_subscription_title_states_valid ON subscription_title_states(rule_id, is_subscribed, checked_until);
+CREATE INDEX IF NOT EXISTS idx_subscription_title_states_user ON subscription_title_states(user_id, checked_until);
 
 -- 2. 스트리머 테이블
 CREATE TABLE IF NOT EXISTS streamers (
@@ -128,6 +157,28 @@ CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS user_asset_rankings (
+    user_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    avatar_url TEXT,
+    role TEXT DEFAULT 'USER',
+    point INTEGER NOT NULL DEFAULT 0,
+    last_free_draw TEXT,
+    banned_until TEXT,
+    ban_reason TEXT,
+    status_message TEXT,
+    created_at TEXT,
+    card_count INTEGER NOT NULL DEFAULT 0,
+    cards_value INTEGER NOT NULL DEFAULT 0,
+    total_asset INTEGER NOT NULL DEFAULT 0,
+    total_rank INTEGER NOT NULL,
+    cards_rank INTEGER NOT NULL,
+    snapshot_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings(total_rank, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings(cards_rank, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_username ON user_asset_rankings(username);
 
 -- 4. 1:1 교환 제안 테이블
 CREATE TABLE IF NOT EXISTS trades (
@@ -250,12 +301,15 @@ CREATE TABLE IF NOT EXISTS notifications (
     title TEXT NOT NULL,                       -- 알림 제목
     body TEXT,                                 -- 알림 본문
     link TEXT,                                 -- 클릭 시 이동할 탭/경로 (예: 'gacha')
+    group_key TEXT,                            -- 같은 성격의 알림을 갱신/묶기 위한 키
     is_read INTEGER DEFAULT 0,                 -- 읽음 여부 (0/1)
     deleted_at TEXT,                           -- 알림함에서 숨김 처리한 시각(DB 기록은 유지)
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_group_key ON notifications(user_id, group_key, deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications(user_id, group_key);
 
 -- 13. 상점 아이템 (테두리 / 이름 이펙트)
 CREATE TABLE IF NOT EXISTS shop_items (

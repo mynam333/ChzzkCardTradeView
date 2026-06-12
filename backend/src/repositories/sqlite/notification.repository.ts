@@ -82,6 +82,12 @@ export class SqliteNotificationRepository implements INotificationRepository {
     this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(id, userId);
   }
 
+  async markGroupRead(userId: string, groupKey: string): Promise<void> {
+    this.getDb()
+      .prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND group_key = ? AND is_read = 0 AND deleted_at IS NULL')
+      .run(userId, groupKey);
+  }
+
   async markAllRead(userId: string): Promise<void> {
     this.getDb().prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL').run(userId);
   }

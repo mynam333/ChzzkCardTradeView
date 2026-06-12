@@ -179,16 +179,26 @@ export class SupabaseMarketRepository implements IMarketRepository {
     type?: 'all' | 'fixed' | 'auction' | 'bidding';
     bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
+    let bidListingIds: number[] | null = null;
+    if (options.type === 'bidding') {
+      if (!options.bidderId) return { listings: [], total: 0 };
+      const { data: bidRows, error: bidError } = await this.getClient()
+        .from('market_bids')
+        .select('listing_id')
+        .eq('bidder_id', options.bidderId);
+      if (bidError || !bidRows?.length) return { listings: [], total: 0 };
+      bidListingIds = Array.from(new Set(bidRows.map((row: any) => Number(row.listing_id)).filter(Number.isFinite)));
+      if (bidListingIds.length === 0) return { listings: [], total: 0 };
+    }
+
     let query = this.getClient()
       .from('market_listings')
       .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
       .eq('status', 'PENDING');
     if (options.type === 'bidding') {
-      if (!options.bidderId) return { listings: [], total: 0 };
       query = query
         .eq('listing_type', 'auction')
-        .eq('current_bidder_id', options.bidderId)
-        .gt('bid_reserved', 0);
+        .in('id', bidListingIds as number[]);
     } else if (options.type && options.type !== 'all') {
       query = query.eq('listing_type', options.type);
     }

@@ -165,6 +165,8 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
       'shop_items',
       'user_cosmetics',
       'point_ledger_entries',
+      'subscription_title_rules',
+      'subscription_title_states',
       'friend_requests',
       'friendships',
       'chat_rooms',
@@ -187,6 +189,8 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     ensureUniqueIndex(db, 'coupons', ['id'], 'idx_coupons_id_unique');
     ensureUniqueIndex(db, 'user_cards', ['id'], 'idx_user_cards_id_unique');
     ensureUniqueIndex(db, 'point_ledger_entries', ['id'], 'idx_point_ledger_entries_id_unique');
+    ensureUniqueIndex(db, 'subscription_title_rules', ['id'], 'idx_subscription_title_rules_id_unique');
+    ensureUniqueIndex(db, 'subscription_title_states', ['user_id', 'rule_id'], 'idx_subscription_title_states_user_rule_unique');
     ensureUniqueIndex(db, 'market_listings', ['id'], 'idx_market_listings_id_unique');
     ensureUniqueIndex(db, 'market_transaction_audit_logs', ['audit_key'], 'idx_market_audit_key_unique');
     ensureUniqueIndex(db, 'system_configs', ['key'], 'idx_system_configs_key_unique');
@@ -263,6 +267,8 @@ const ensureMysqlUniqueIndex = async (db: MysqlDb, table: string, indexName: str
 
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+  await ensureMysqlColumn(db, 'user_titles', 'grant_source', "grant_source VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER is_equipped");
+  await ensureMysqlIndex(db, 'user_titles', 'idx_user_titles_grant_source', '(grant_source, title_id)');
   await db.run(`
     CREATE TABLE IF NOT EXISTS deleted_user_accounts (
       user_id VARCHAR(191) PRIMARY KEY,
@@ -294,6 +300,77 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
   await db.run(`
+    CREATE TABLE IF NOT EXISTS user_asset_rankings (
+      user_id VARCHAR(191) PRIMARY KEY,
+      username VARCHAR(191) NOT NULL,
+      avatar_url TEXT NULL,
+      role VARCHAR(24) NOT NULL DEFAULT 'USER',
+      point BIGINT NOT NULL DEFAULT 0,
+      last_free_draw DATETIME NULL,
+      banned_until DATETIME NULL,
+      ban_reason VARCHAR(255) NULL,
+      status_message VARCHAR(160) NULL,
+      created_at DATETIME NULL,
+      card_count BIGINT NOT NULL DEFAULT 0,
+      cards_value BIGINT NOT NULL DEFAULT 0,
+      total_asset BIGINT NOT NULL DEFAULT 0,
+      total_rank BIGINT NOT NULL,
+      cards_rank BIGINT NOT NULL,
+      snapshot_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_asset_rankings_total (total_rank, user_id),
+      INDEX idx_user_asset_rankings_cards (cards_rank, user_id),
+      INDEX idx_user_asset_rankings_username (username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS subscription_title_rules (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      broadcaster_channel_id VARCHAR(191) NOT NULL,
+      broadcaster_name VARCHAR(191) NULL,
+      title_id BIGINT NOT NULL,
+      active TINYINT NOT NULL DEFAULT 1,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_subscription_title_rules_active (active, title_id),
+      INDEX idx_subscription_title_rules_broadcaster (broadcaster_channel_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS subscription_title_states (
+      user_id VARCHAR(191) NOT NULL,
+      rule_id BIGINT NOT NULL,
+      is_subscribed TINYINT NOT NULL DEFAULT 0,
+      checked_at DATETIME NULL,
+      checked_until DATETIME NULL,
+      last_error VARCHAR(191) NULL,
+      PRIMARY KEY (user_id, rule_id),
+      INDEX idx_subscription_title_states_valid (rule_id, is_subscribed, checked_until),
+      INDEX idx_subscription_title_states_user (user_id, checked_until)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS trades (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      sender_id VARCHAR(191) NOT NULL,
+      receiver_id VARCHAR(191) NOT NULL,
+      sender_offer JSON NOT NULL,
+      receiver_offer JSON NOT NULL,
+      status VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      completed_at DATETIME NULL,
+      INDEX idx_trades_sender_id (sender_id, id),
+      INDEX idx_trades_receiver_id (receiver_id, id),
+      INDEX idx_trades_status_id (status, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await ensureMysqlColumn(db, 'trades', 'updated_at', 'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
+  await ensureMysqlColumn(db, 'trades', 'completed_at', 'completed_at DATETIME NULL AFTER updated_at');
+  await ensureMysqlIndex(db, 'users', 'idx_users_username', '(username)');
+  await ensureMysqlIndex(db, 'trades', 'idx_trades_sender_id', '(sender_id, id)');
+  await ensureMysqlIndex(db, 'trades', 'idx_trades_receiver_id', '(receiver_id, id)');
+  await ensureMysqlIndex(db, 'trades', 'idx_trades_status_id', '(status, id)');
+  await db.run(`
     CREATE TABLE IF NOT EXISTS friend_requests (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       requester_id VARCHAR(191) NOT NULL,
@@ -305,6 +382,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_friend_requests_requester (requester_id, status, id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await ensureMysqlIndex(db, 'friend_requests', 'idx_friend_requests_receiver', '(receiver_id, status, id)');
+  await ensureMysqlIndex(db, 'friend_requests', 'idx_friend_requests_requester', '(requester_id, status, id)');
   await db.run(`
     CREATE TABLE IF NOT EXISTS friendships (
       user_a_id VARCHAR(191) NOT NULL,
@@ -338,6 +417,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'chat_rooms', 'hidden_after_b', 'hidden_after_b DATETIME NULL AFTER hidden_after_a');
   await ensureMysqlColumn(db, 'chat_rooms', 'muted_for_a', 'muted_for_a TINYINT NOT NULL DEFAULT 0 AFTER hidden_after_b');
   await ensureMysqlColumn(db, 'chat_rooms', 'muted_for_b', 'muted_for_b TINYINT NOT NULL DEFAULT 0 AFTER muted_for_a');
+  await ensureMysqlIndex(db, 'chat_rooms', 'idx_chat_rooms_user_a', '(user_a_id, updated_at)');
+  await ensureMysqlIndex(db, 'chat_rooms', 'idx_chat_rooms_user_b', '(user_b_id, updated_at)');
   await db.run(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -373,6 +454,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_expires_at', 'attachment_expires_at DATETIME NULL AFTER attachment_height');
   await ensureMysqlColumn(db, 'chat_messages', 'attachment_deleted_at', 'attachment_deleted_at DATETIME NULL AFTER attachment_expires_at');
   await ensureMysqlColumn(db, 'chat_messages', 'link_preview_json', 'link_preview_json JSON NULL AFTER attachment_deleted_at');
+  await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_room', '(room_id, id)');
+  await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_unread', '(room_id, sender_id, read_at)');
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_attachment_expiry', '(message_type, attachment_expires_at, attachment_deleted_at)');
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_attachment_id', '(attachment_id)');
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_sender_attachments', '(sender_id, message_type, attachment_deleted_at, attachment_expires_at)');
@@ -384,6 +467,16 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_price', '(status, price, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
+  const marketBidsTable = await db.get<{ present: number }>(
+    `SELECT 1 AS present
+       FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name = 'market_bids'
+      LIMIT 1`
+  );
+  if (marketBidsTable) {
+    await ensureMysqlIndex(db, 'market_bids', 'idx_market_bids_bidder_listing', '(bidder_id, listing_id)');
+  }
   await db.run(`
     DELETE n1 FROM notifications n1
     JOIN notifications n2
@@ -690,6 +783,67 @@ export const initDatabaseConnection = async (): Promise<void> => {
         PRIMARY KEY(user_id, reward_key),
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS subscription_title_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        broadcaster_channel_id TEXT NOT NULL,
+        broadcaster_name TEXT,
+        title_id INTEGER NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(title_id) REFERENCES titles(id) ON DELETE CASCADE
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_subscription_title_rules_active ON subscription_title_rules(active, title_id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_subscription_title_rules_broadcaster ON subscription_title_rules(broadcaster_channel_id);`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS subscription_title_states (
+        user_id TEXT NOT NULL,
+        rule_id INTEGER NOT NULL,
+        is_subscribed INTEGER NOT NULL DEFAULT 0,
+        checked_at TEXT,
+        checked_until TEXT,
+        last_error TEXT,
+        PRIMARY KEY(user_id, rule_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(rule_id) REFERENCES subscription_title_rules(id) ON DELETE CASCADE
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_subscription_title_states_valid ON subscription_title_states(rule_id, is_subscribed, checked_until);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_subscription_title_states_user ON subscription_title_states(user_id, checked_until);`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS trades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_id TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        sender_offer TEXT NOT NULL,
+        receiver_offer TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(receiver_id) REFERENCES users(id) ON DELETE CASCADE
+      );`);
+      try {
+        sqliteDb.prepare("SELECT updated_at FROM trades LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] trades 테이블에 updated_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE trades ADD COLUMN updated_at TEXT;");
+        sqliteDb.exec("UPDATE trades SET updated_at = COALESCE(created_at, datetime('now')) WHERE updated_at IS NULL;");
+      }
+      try {
+        sqliteDb.prepare("SELECT completed_at FROM trades LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] trades 테이블에 completed_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE trades ADD COLUMN completed_at TEXT;");
+      }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_trades_sender_id ON trades(sender_id, id DESC);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_trades_receiver_id ON trades(receiver_id, id DESC);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_trades_status_id ON trades(status, id DESC);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests(receiver_id, status, id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_friend_requests_requester ON friend_requests(requester_id, status, id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_a ON chat_rooms(user_a_id, updated_at);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_b ON chat_rooms(user_b_id, updated_at);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_room ON chat_messages(room_id, id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at);");
       try {
         sqliteDb.prepare("SELECT hidden_after_a FROM chat_rooms LIMIT 1").get();
       } catch (e) {
@@ -789,6 +943,29 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;");
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS user_asset_rankings (
+          user_id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          avatar_url TEXT,
+          role TEXT DEFAULT 'USER',
+          point INTEGER NOT NULL DEFAULT 0,
+          last_free_draw TEXT,
+          banned_until TEXT,
+          ban_reason TEXT,
+          status_message TEXT,
+          created_at TEXT,
+          card_count INTEGER NOT NULL DEFAULT 0,
+          cards_value INTEGER NOT NULL DEFAULT 0,
+          total_asset INTEGER NOT NULL DEFAULT 0,
+          total_rank INTEGER NOT NULL,
+          cards_rank INTEGER NOT NULL,
+          snapshot_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings(total_rank, user_id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings(cards_rank, user_id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_username ON user_asset_rankings(username);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_streamers_base_value ON streamers(base_value DESC, channel_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_recorded_channel ON value_history(recorded_at DESC, channel_id);");
@@ -856,11 +1033,18 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE user_titles ADD COLUMN is_equipped INTEGER NOT NULL DEFAULT 0;");
       }
       try {
+        sqliteDb.prepare("SELECT grant_source FROM user_titles LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_titles 테이블에 grant_source 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_titles ADD COLUMN grant_source TEXT NOT NULL DEFAULT 'manual';");
+      }
+      try {
         sqliteDb.prepare("SELECT description FROM titles LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] titles 테이블에 description 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE titles ADD COLUMN description TEXT;");
       }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_titles_grant_source ON user_titles(grant_source, title_id);");
       sqliteDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = 1;");
       try {
         sqliteDb.prepare("SELECT star FROM card_reports LIMIT 1").get();
@@ -1092,6 +1276,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         FOREIGN KEY(bidder_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id);`);
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS market_watches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,

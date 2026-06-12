@@ -4,6 +4,28 @@ import { ITitleRepository, UserTitle } from '../interfaces';
 type MysqlUserTitleRow = Omit<UserTitle, 'is_equipped'> & { is_equipped: number };
 type MysqlUserTitleWithUserRow = MysqlUserTitleRow & { user_id: string };
 
+const subscriptionVisibilitySql = `
+  AND (
+    NOT EXISTS (
+      SELECT 1
+        FROM subscription_title_rules str
+       WHERE str.title_id = t.id
+         AND str.active = 1
+    )
+    OR EXISTS (
+      SELECT 1
+        FROM subscription_title_rules str
+        JOIN subscription_title_states sts
+          ON sts.rule_id = str.id
+         AND sts.user_id = ut.user_id
+         AND sts.is_subscribed = 1
+         AND sts.checked_until > UTC_TIMESTAMP()
+       WHERE str.title_id = t.id
+         AND str.active = 1
+    )
+  )
+`;
+
 export class MysqlTitleRepository implements ITitleRepository {
   private getDb() {
     return getMysqlDb();
@@ -23,6 +45,7 @@ export class MysqlTitleRepository implements ITitleRepository {
       FROM user_titles ut
       JOIN titles t ON t.id = ut.title_id
       WHERE ut.user_id = ?
+      ${subscriptionVisibilitySql}
       ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
     `, userId);
     return rows.map((row) => ({ ...row, is_equipped: row.is_equipped === 1 }));
@@ -38,6 +61,7 @@ export class MysqlTitleRepository implements ITitleRepository {
       FROM user_titles ut
       JOIN titles t ON t.id = ut.title_id
       WHERE ut.user_id IN (${placeholders})
+      ${subscriptionVisibilitySql}
       ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
     `, userIds);
     for (const row of rows) {
@@ -100,7 +124,14 @@ export class MysqlTitleRepository implements ITitleRepository {
   async equip(userId: string, titleId: number | null): Promise<boolean> {
     return this.getDb().transaction(async (tx) => {
       if (titleId !== null) {
-        const owned = await tx.get('SELECT 1 FROM user_titles WHERE user_id = ? AND title_id = ?', userId, titleId);
+        const owned = await tx.get(`
+          SELECT 1
+            FROM user_titles ut
+            JOIN titles t ON t.id = ut.title_id
+           WHERE ut.user_id = ?
+             AND ut.title_id = ?
+             ${subscriptionVisibilitySql}
+        `, userId, titleId);
         if (!owned) return false;
       }
       await tx.run('UPDATE user_titles SET is_equipped = 0 WHERE user_id = ?', userId);

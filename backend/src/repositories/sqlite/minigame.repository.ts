@@ -145,6 +145,10 @@ export class SqliteMinigameRepository implements IMinigameRepository {
       if (!session) {
         return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
       }
+      if (session.status === 'COMPLETED') {
+        const user = db.prepare('SELECT point FROM users WHERE id = ?').get(session.user_id) as any;
+        return { ok: true, newPoints: user?.point ?? 0 };
+      }
       if (session.status !== 'STARTED') {
         return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
       }

@@ -145,7 +145,10 @@ export class MysqlMarketRepository implements IMarketRepository {
 
     if (options.type === 'bidding') {
       if (!options.bidderId) return { listings: [], total: 0 };
-      where.push("ml.listing_type = 'auction'", 'ml.current_bidder_id = ?', 'ml.bid_reserved > 0');
+      where.push(
+        "ml.listing_type = 'auction'",
+        'EXISTS (SELECT 1 FROM market_bids mb WHERE mb.listing_id = ml.id AND mb.bidder_id = ?)'
+      );
       params.push(options.bidderId);
     } else if (options.type && options.type !== 'all') {
       where.push("COALESCE(ml.listing_type, 'fixed') = ?");
@@ -164,15 +167,29 @@ export class MysqlMarketRepository implements IMarketRepository {
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const search = options.search?.trim();
     if (search) {
-      const rows = await this.getDb().all(
-        `${this.listingSelectWhere(whereSql)} ORDER BY ${orderBy}`,
+      const rows = await this.getDb().all<any>(
+        `SELECT ml.id, s.name AS streamer_name, u.username AS seller_username
+           FROM market_listings ml
+           JOIN users u ON u.id = ml.seller_id
+           JOIN user_cards uc ON uc.id = ml.user_card_id
+           JOIN streamers s ON s.channel_id = uc.channel_id
+          ${whereSql}
+          ORDER BY ${orderBy}`,
         ...params
       );
-      const listings = rows
-        .map((r) => this.mapRow(r))
-        .filter((item) => fuzzyMatch(item.card?.streamer?.name || '', search) || fuzzyMatch(item.seller_username || '', search));
       const offset = (options.page - 1) * options.limit;
-      return { listings: listings.slice(offset, offset + options.limit), total: listings.length };
+      const matchedIds = rows
+        .filter((row) => fuzzyMatch(row.streamer_name || '', search) || fuzzyMatch(row.seller_username || '', search))
+        .map((row) => Number(row.id));
+      const pageIds = matchedIds.slice(offset, offset + options.limit);
+      if (pageIds.length === 0) return { listings: [], total: matchedIds.length };
+      const placeholders = pageIds.map(() => '?').join(',');
+      const detailRows = await this.getDb().all(
+        `${this.listingSelectWhere(`WHERE ml.id IN (${placeholders})`)}`,
+        ...pageIds
+      );
+      const byId = new Map(detailRows.map((row: any) => [Number(row.id), this.mapRow(row)]));
+      return { listings: pageIds.map((id) => byId.get(id)).filter(Boolean) as MarketListing[], total: matchedIds.length };
     }
 
     const countRow = await this.getDb().get<{ total: number }>(`

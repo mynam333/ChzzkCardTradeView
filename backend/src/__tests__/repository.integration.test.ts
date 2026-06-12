@@ -14,7 +14,7 @@ import {
   userCardRepository,
   userRepository
 } from '../repositories';
-import { getUserProfile } from '../controllers/playController';
+import { getUserProfile, getUserRankings } from '../controllers/playController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 
@@ -43,6 +43,9 @@ const createJsonResponse = () => {
     body: undefined,
     status(code: number) {
       this.statusCode = code;
+      return this;
+    },
+    set() {
       return this;
     },
     json(body: unknown) {
@@ -213,6 +216,29 @@ describe('UserRepository admin listUsers', () => {
         identity_source: 'deleted_snapshot'
       })
     ]);
+  });
+
+  it('유저 랭킹 API는 스냅샷 테이블에서 기존과 같은 랭킹 응답을 반환한다', async () => {
+    seedUser(db, 'ranking-api-user-a', 1000);
+    seedUser(db, 'ranking-api-user-b', 5000);
+    seedStreamer(db, 'ranking-api-channel', '랭킹 API 스트리머');
+    db.prepare("UPDATE streamers SET base_value = 2000 WHERE channel_id = 'ranking-api-channel'").run();
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('ranking-api-user-a', 'ranking-api-channel', 1, 0)
+    `).run();
+
+    const res = createJsonResponse();
+    await getUserRankings({
+      query: { mode: 'total' }
+    } as any, res as any);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.map((user: any) => user.id).slice(0, 2)).toEqual(['ranking-api-user-b', 'ranking-api-user-a']);
+    expect(res.body.find((user: any) => user.id === 'ranking-api-user-a')).toMatchObject({
+      cards_value: 2000,
+      total_asset: 3000
+    });
   });
 });
 
@@ -775,13 +801,19 @@ describe('MarketRepository 재등록 제약', () => {
       current_bid: 2000,
       bid_reserved: 2000
     });
-    await expect(marketRepository.listActive({
+    const bidderAActive = await marketRepository.listActive({
       page: 1,
       limit: 12,
       sort: 'latest',
       type: 'bidding',
       bidderId: 'auction-bidder-a'
-    })).resolves.toMatchObject({ listings: [], total: 0 });
+    });
+    expect(bidderAActive.total).toBe(1);
+    expect(bidderAActive.listings[0]).toMatchObject({
+      id: listing.id,
+      current_bidder_id: 'auction-bidder-b',
+      bid_reserved: 2000
+    });
     const bidderBActive = await marketRepository.listActive({
       page: 1,
       limit: 12,

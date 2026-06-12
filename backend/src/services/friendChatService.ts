@@ -1,6 +1,7 @@
 import { deleteLocalUploadByUrl, formatUploadUrl } from './imageService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { extractFirstUrl, getLinkPreviewForText, type ChatLinkPreview } from './linkPreviewService';
+import { notificationRepository } from '../repositories';
 
 export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'canceled';
 
@@ -706,12 +707,13 @@ export const setChatRoomMuted = async (roomId: number, userId: string, muted: bo
 export const listMessages = async (
   roomId: number,
   userId: string,
-  options: { beforeId?: number | null; limit?: number } = {}
+  options: { beforeId?: number | null; afterId?: number | null; limit?: number } = {}
 ): Promise<ChatMessageRow[]> => {
   const room = await getRoomForUser(roomId, userId);
   if (!room) throw new Error('RoomNotFound');
   const limit = Math.min(Math.max(Math.floor(Number(options.limit || 50)), 1), 100);
   const beforeId = options.beforeId && Number.isFinite(options.beforeId) ? Math.floor(Number(options.beforeId)) : null;
+  const afterId = !beforeId && options.afterId && Number.isFinite(options.afterId) ? Math.floor(Number(options.afterId)) : null;
   const hiddenAfter = room.user_a_id === userId ? room.hidden_after_a : room.hidden_after_b;
   const hiddenAfterSql = hiddenAfter ? hiddenAfter.replace('T', ' ').replace(/Z$/, '') : null;
   const mode = getDbMode();
@@ -722,8 +724,11 @@ export const listMessages = async (
         WHERE room_id = ?
           AND sender_id <> ?
           AND read_at IS NULL
+          ${afterId ? 'AND id > ?' : ''}
           AND (? IS NULL OR created_at > ?)`,
-      roomId, userId, hiddenAfterSql, hiddenAfterSql
+      ...(afterId
+        ? [roomId, userId, afterId, hiddenAfterSql, hiddenAfterSql]
+        : [roomId, userId, hiddenAfterSql, hiddenAfterSql])
     );
     const selectSql = `
       SELECT recent.*,
@@ -739,34 +744,40 @@ export const listMessages = async (
             FROM chat_messages
            WHERE room_id = ?
              ${beforeId ? 'AND id < ?' : ''}
+             ${afterId ? 'AND id > ?' : ''}
              AND (? IS NULL OR created_at > ?)
-           ORDER BY id DESC
+           ORDER BY id ${afterId ? 'ASC' : 'DESC'}
            LIMIT ?
         ) recent
         LEFT JOIN chat_attachments ca ON ca.id = recent.attachment_id
        ORDER BY recent.id ASC`;
     const rows = beforeId
       ? await getMysqlDb().all<any>(selectSql, roomId, beforeId, hiddenAfterSql, hiddenAfterSql, limit)
+      : afterId
+        ? await getMysqlDb().all<any>(selectSql, roomId, afterId, hiddenAfterSql, hiddenAfterSql, limit)
       : await getMysqlDb().all<any>(selectSql, roomId, hiddenAfterSql, hiddenAfterSql, limit);
     return rows.map(mapMessage);
   }
   if (mode === 'SUPABASE') {
     let readQuery = getSupabaseClient().from('chat_messages').update({ read_at: new Date().toISOString() }).eq('room_id', roomId).neq('sender_id', userId).is('read_at', null);
     if (hiddenAfter) readQuery = readQuery.gt('created_at', hiddenAfter);
+    if (afterId) readQuery = readQuery.gt('id', afterId);
     await readQuery;
     let query = getSupabaseClient()
       .from('chat_messages')
       .select('*')
       .eq('room_id', roomId)
-      .order('id', { ascending: false })
+      .order('id', { ascending: Boolean(afterId) })
       .limit(limit);
     if (beforeId) query = query.lt('id', beforeId);
+    if (afterId) query = query.gt('id', afterId);
     if (hiddenAfter) query = query.gt('created_at', hiddenAfter);
     const { data } = await query;
-    return (data || []).reverse().map(mapMessage);
+    return (afterId ? (data || []) : (data || []).reverse()).map(mapMessage);
   }
   const db = getSqliteDb();
-  db.prepare("UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL AND (? IS NULL OR created_at > ?)").run(roomId, userId, hiddenAfterSql, hiddenAfterSql);
+  db.prepare(`UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL ${afterId ? 'AND id > ?' : ''} AND (? IS NULL OR created_at > ?)`)
+    .run(...(afterId ? [roomId, userId, afterId, hiddenAfterSql, hiddenAfterSql] : [roomId, userId, hiddenAfterSql, hiddenAfterSql]));
   const selectSql = `
     SELECT recent.*,
            ca.url AS effective_attachment_url,
@@ -781,14 +792,17 @@ export const listMessages = async (
           FROM chat_messages
          WHERE room_id = ?
            ${beforeId ? 'AND id < ?' : ''}
+           ${afterId ? 'AND id > ?' : ''}
            AND (? IS NULL OR created_at > ?)
-         ORDER BY id DESC
+         ORDER BY id ${afterId ? 'ASC' : 'DESC'}
          LIMIT ?
       ) recent
       LEFT JOIN chat_attachments ca ON ca.id = recent.attachment_id
      ORDER BY recent.id ASC`;
   const rows = beforeId
     ? db.prepare(selectSql).all(roomId, beforeId, hiddenAfterSql, hiddenAfterSql, limit)
+    : afterId
+      ? db.prepare(selectSql).all(roomId, afterId, hiddenAfterSql, hiddenAfterSql, limit)
     : db.prepare(selectSql).all(roomId, hiddenAfterSql, hiddenAfterSql, limit);
   return (rows as any[]).map(mapMessage);
 };
@@ -796,6 +810,7 @@ export const listMessages = async (
 export const markRoomMessagesRead = async (roomId: number, userId: string): Promise<ChatRoomRow> => {
   const room = await getRoomForUser(roomId, userId);
   if (!room) throw new Error('RoomNotFound');
+  const otherUserId = room.user_a_id === userId ? room.user_b_id : room.user_a_id;
   const hiddenAfter = room.user_a_id === userId ? room.hidden_after_a : room.hidden_after_b;
   const hiddenAfterSql = hiddenAfter ? hiddenAfter.replace('T', ' ').replace(/Z$/, '') : null;
   const mode = getDbMode();
@@ -826,6 +841,9 @@ export const markRoomMessagesRead = async (roomId: number, userId: string): Prom
       .prepare("UPDATE chat_messages SET read_at = COALESCE(read_at, datetime('now')) WHERE room_id = ? AND sender_id <> ? AND read_at IS NULL AND (? IS NULL OR created_at > ?)")
       .run(roomId, userId, hiddenAfterSql, hiddenAfterSql);
   }
+  await notificationRepository.markGroupRead(userId, `friend-chat:${otherUserId}`).catch((err: any) => {
+    console.error('[FriendChatService] 채팅 알림 읽음 처리 실패:', err?.message || err);
+  });
   return room;
 };
 

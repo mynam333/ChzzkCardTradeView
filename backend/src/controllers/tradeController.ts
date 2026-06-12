@@ -119,6 +119,23 @@ const enrichTradesForUser = async (trades: Trade[], userId: string) => {
   }));
 };
 
+const enrichTradesForAdmin = async (trades: Trade[]) => {
+  const channelIds = [...new Set(trades.flatMap(collectOfferChannelIds))];
+  const streamers = channelIds.length > 0
+    ? await streamerRepository.findByIds(channelIds).catch(() => [])
+    : [];
+  const streamerMap = new Map(streamers.map((streamer) => [
+    streamer.channel_id,
+    { name: streamer.name, logo_url: streamer.logo_url }
+  ]));
+
+  return trades.map((trade) => ({
+    ...trade,
+    sender_offer: enrichOffer(trade.sender_offer, streamerMap),
+    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap)
+  }));
+};
+
 // 카드 식별 복합키: 채널 + 별
 const cardKey = (channelId: string, star?: number) => `${channelId}#${star ?? 0}`;
 
@@ -442,5 +459,32 @@ export const getTradeHistory = async (req: AuthenticatedRequest, res: Response) 
   } catch (err: any) {
     console.error('[TradeController] getTradeHistory 에러:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '교환 이력 조회에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+const ADMIN_TRADE_STATUSES = new Set<Trade['status']>(['PENDING', 'CONFIRMED', 'ACCEPTED', 'REJECTED', 'CANCELLED']);
+
+export const getAdminTradeHistory = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const limit = Math.max(1, Math.min(100, Math.floor(Number(req.query.limit) || 30)));
+    const search = String(req.query.search || '').trim().slice(0, 80);
+    const rawStatus = String(req.query.status || 'ALL').toUpperCase();
+    const status = ADMIN_TRADE_STATUSES.has(rawStatus as Trade['status'])
+      ? rawStatus as Trade['status']
+      : 'ALL';
+
+    const result = await tradeRepository.listForAdmin({ page, limit, search, status });
+    return res.status(200).json({
+      ...result,
+      items: await enrichTradesForAdmin(result.items)
+    });
+  } catch (err: any) {
+    console.error('[TradeController] getAdminTradeHistory 에러:', err);
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '관리자 교환 이력 조회에 실패했습니다.',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
   }
 };

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Award, Edit3, RefreshCw, Search, Trash2, UserMinus, UserPlus, icons } from 'lucide-react';
+import { Award, Edit3, Link2, RefreshCw, Search, Trash2, UserMinus, UserPlus, icons } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import type { AdminUser, UserTitle } from '@/lib/types';
+import type { AdminUser, SubscriptionTitleRule, UserTitle } from '@/lib/types';
 import { useApp } from './AppContext';
 import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
 
@@ -14,6 +14,14 @@ const emptyForm = {
   css: '',
   icon_name: 'Award',
   icon_color: '#facc15'
+};
+
+const emptySubscriptionRuleForm = {
+  id: 0,
+  broadcaster_channel_id: '',
+  broadcaster_name: '',
+  title_id: 0,
+  active: true
 };
 
 const suggestedIcons = ['Award', 'BadgeCheck', 'Crown', 'Diamond', 'Flame', 'Gem', 'Heart', 'Medal', 'ShieldCheck', 'Sparkles', 'Star', 'Trophy', 'Zap'];
@@ -30,6 +38,9 @@ export const AdminTitlesTab: React.FC = () => {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [bulkAwarding, setBulkAwarding] = useState(false);
   const [bulkMode, setBulkMode] = useState<'award' | 'revoke'>('award');
+  const [subscriptionRules, setSubscriptionRules] = useState<SubscriptionTitleRule[]>([]);
+  const [subscriptionRuleForm, setSubscriptionRuleForm] = useState({ ...emptySubscriptionRuleForm });
+  const [savingSubscriptionRule, setSavingSubscriptionRule] = useState(false);
 
   const selectedTitle = titles.find((title) => title.id === selectedTitleId) || null;
   const previewTitle: UserTitle = {
@@ -56,6 +67,11 @@ export const AdminTitlesTab: React.FC = () => {
     if (res.ok) setTitles(await res.json());
   };
 
+  const fetchSubscriptionRules = async () => {
+    const res = await apiFetch('/admin/titles/subscription-rules');
+    if (res.ok) setSubscriptionRules(await res.json());
+  };
+
   const fetchUsers = async (keyword = search) => {
     setLoadingUsers(true);
     try {
@@ -71,6 +87,7 @@ export const AdminTitlesTab: React.FC = () => {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void fetchTitles();
+      void fetchSubscriptionRules();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -209,8 +226,154 @@ export const AdminTitlesTab: React.FC = () => {
     }
   };
 
+  const editSubscriptionRule = (rule: SubscriptionTitleRule) => {
+    setSubscriptionRuleForm({
+      id: rule.id,
+      broadcaster_channel_id: rule.broadcaster_channel_id,
+      broadcaster_name: rule.broadcaster_name || '',
+      title_id: rule.title_id,
+      active: rule.active
+    });
+  };
+
+  const saveSubscriptionRule = async () => {
+    if (!subscriptionRuleForm.broadcaster_channel_id.trim()) return toast('구독 확인 대상 치지직 채널 ID를 입력해 주세요.');
+    if (!subscriptionRuleForm.title_id) return toast('구독자에게 지급할 칭호를 선택해 주세요.');
+    setSavingSubscriptionRule(true);
+    try {
+      const res = await apiFetch(
+        subscriptionRuleForm.id
+          ? `/admin/titles/subscription-rules/${subscriptionRuleForm.id}`
+          : '/admin/titles/subscription-rules',
+        {
+          method: subscriptionRuleForm.id ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            broadcaster_channel_id: subscriptionRuleForm.broadcaster_channel_id,
+            broadcaster_name: subscriptionRuleForm.broadcaster_name,
+            title_id: Number(subscriptionRuleForm.title_id),
+            active: subscriptionRuleForm.active
+          })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) return toast(data.message || '구독 칭호 규칙 저장에 실패했습니다.');
+      toast(subscriptionRuleForm.id ? '구독 칭호 규칙을 수정했습니다.' : '구독 칭호 규칙을 추가했습니다.');
+      setSubscriptionRuleForm({ ...emptySubscriptionRuleForm });
+      await fetchSubscriptionRules();
+    } finally {
+      setSavingSubscriptionRule(false);
+    }
+  };
+
+  const removeSubscriptionRule = async (rule: SubscriptionTitleRule) => {
+    if (!window.confirm(`${rule.broadcaster_name || rule.broadcaster_channel_id} 구독 칭호 규칙을 삭제할까요?`)) return;
+    const res = await apiFetch(`/admin/titles/subscription-rules/${rule.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    toast(data.message || (res.ok ? '구독 칭호 규칙을 삭제했습니다.' : '삭제에 실패했습니다.'));
+    if (res.ok) {
+      if (subscriptionRuleForm.id === rule.id) setSubscriptionRuleForm({ ...emptySubscriptionRuleForm });
+      await fetchSubscriptionRules();
+    }
+  };
+
   return (
     <section className="space-y-5">
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="flex items-center gap-1.5 text-sm font-bold">
+              <Link2 className="h-4 w-4 text-emerald-400" /> 구독 칭호 자동 지급
+            </h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              지정한 치지직 채널을 구독 중인 유저에게만 선택한 칭호가 표시됩니다.
+            </p>
+          </div>
+          <button onClick={fetchSubscriptionRules} className="flex items-center gap-1 rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground">
+            <RefreshCw className="h-3.5 w-3.5" /> 새로고침
+          </button>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr_220px_110px_auto]">
+          <input
+            value={subscriptionRuleForm.broadcaster_channel_id}
+            onChange={(e) => setSubscriptionRuleForm({ ...subscriptionRuleForm, broadcaster_channel_id: e.target.value })}
+            className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+            placeholder="치지직 채널 ID"
+          />
+          <input
+            value={subscriptionRuleForm.broadcaster_name}
+            onChange={(e) => setSubscriptionRuleForm({ ...subscriptionRuleForm, broadcaster_name: e.target.value })}
+            className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+            placeholder="표시명 (선택)"
+          />
+          <select
+            value={subscriptionRuleForm.title_id || ''}
+            onChange={(e) => setSubscriptionRuleForm({ ...subscriptionRuleForm, title_id: Number(e.target.value) })}
+            className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+          >
+            <option value="">지급 칭호 선택</option>
+            {titles.map((title) => (
+              <option key={title.id} value={title.id}>{title.name}</option>
+            ))}
+          </select>
+          <label className="flex items-center justify-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs font-bold">
+            <input
+              type="checkbox"
+              checked={subscriptionRuleForm.active}
+              onChange={(e) => setSubscriptionRuleForm({ ...subscriptionRuleForm, active: e.target.checked })}
+            />
+            활성
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={saveSubscriptionRule}
+              disabled={savingSubscriptionRule}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {subscriptionRuleForm.id ? '수정' : '추가'}
+            </button>
+            {subscriptionRuleForm.id ? (
+              <button onClick={() => setSubscriptionRuleForm({ ...emptySubscriptionRuleForm })} className="rounded-lg bg-secondary px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground">취소</button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {subscriptionRules.map((rule) => {
+            const title = titles.find((item) => item.id === rule.title_id);
+            return (
+              <div key={rule.id} className="rounded-xl border border-border bg-secondary/25 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-black">{rule.broadcaster_name || rule.broadcaster_channel_id}</p>
+                    <p className="truncate text-[10px] text-muted-foreground">{rule.broadcaster_channel_id}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${rule.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-secondary text-muted-foreground'}`}>
+                    {rule.active ? '활성' : '비활성'}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  {title ? <UserTitleBadge title={title} /> : <span className="text-xs text-muted-foreground">삭제된 칭호</span>}
+                </div>
+                <div className="mt-3 flex justify-end gap-1">
+                  <button onClick={() => editSubscriptionRule(rule)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">
+                    수정
+                  </button>
+                  <button onClick={() => removeSubscriptionRule(rule)} className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-500 hover:bg-red-500/20">
+                    삭제
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {subscriptionRules.length === 0 && (
+            <p className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground md:col-span-2 xl:col-span-3">
+              아직 등록된 구독 칭호 규칙이 없습니다.
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">

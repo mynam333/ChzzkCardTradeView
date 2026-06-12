@@ -3,6 +3,12 @@ import { notificationRepository, titleRepository, userRepository } from '../repo
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
 import { minifyCss } from '../utils/css';
+import {
+  deleteSubscriptionTitleRule,
+  listSubscriptionTitleRules,
+  saveSubscriptionTitleRule,
+  syncUserSubscriptionTitles
+} from '../services/subscriptionTitleService';
 
 const parseTitleId = (value: unknown): number => {
   const id = Number(value);
@@ -36,6 +42,69 @@ export const listTitles = async (_req: Request, res: Response) => {
     return res.status(200).json(await titleRepository.findAll());
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '칭호 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const listSubscriptionTitleRuleSettings = async (_req: Request, res: Response) => {
+  try {
+    return res.status(200).json(await listSubscriptionTitleRules());
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '구독 칭호 규칙 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const createSubscriptionTitleRuleSetting = async (req: Request, res: Response) => {
+  try {
+    const rule = await saveSubscriptionTitleRule({
+      broadcaster_channel_id: String(req.body?.broadcaster_channel_id || ''),
+      broadcaster_name: req.body?.broadcaster_name == null ? null : String(req.body.broadcaster_name),
+      title_id: Number(req.body?.title_id),
+      active: req.body?.active !== false
+    });
+    return res.status(201).json(rule);
+  } catch (err: any) {
+    const badRequest = /입력|선택|존재하지/.test(String(err.message || ''));
+    return res.status(badRequest ? 400 : 500).json({ error: badRequest ? 'BadRequest' : 'InternalServerError', message: err.message || '구독 칭호 규칙 생성 실패' });
+  }
+};
+
+export const updateSubscriptionTitleRuleSetting = async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'BadRequest', message: '규칙 ID가 올바르지 않습니다.' });
+  try {
+    const rule = await saveSubscriptionTitleRule({
+      id,
+      broadcaster_channel_id: String(req.body?.broadcaster_channel_id || ''),
+      broadcaster_name: req.body?.broadcaster_name == null ? null : String(req.body.broadcaster_name),
+      title_id: Number(req.body?.title_id),
+      active: req.body?.active !== false
+    });
+    return res.status(200).json(rule);
+  } catch (err: any) {
+    const badRequest = /입력|선택|존재하지/.test(String(err.message || ''));
+    return res.status(badRequest ? 400 : 500).json({ error: badRequest ? 'BadRequest' : 'InternalServerError', message: err.message || '구독 칭호 규칙 수정 실패' });
+  }
+};
+
+export const deleteSubscriptionTitleRuleSetting = async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    await deleteSubscriptionTitleRule(id);
+    return res.status(200).json({ message: '구독 칭호 규칙을 삭제했습니다.' });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'BadRequest', message: err.message || '구독 칭호 규칙 삭제 실패' });
+  }
+};
+
+export const syncMySubscriptionTitleRules = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    await syncUserSubscriptionTitles(userId, true);
+    const titles = await titleRepository.findByUserId(userId);
+    return res.status(200).json({ owned_titles: titles, titles: titles.filter((title) => title.is_equipped) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '구독 칭호 동기화 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

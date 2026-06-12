@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Ban,
@@ -22,7 +23,7 @@ import {
   X
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
-import { useApp } from './AppContext';
+import { useApp, useNotifications } from './AppContext';
 
 type FriendUser = {
   id: string;
@@ -141,6 +142,9 @@ const sortChatRooms = (rooms: ChatRoom[]) => [...rooms].sort((a, b) => (
 
 export const FriendTab: React.FC = () => {
   const { user, toast } = useApp();
+  const { fetchNotifications } = useNotifications();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [friendSearch, setFriendSearch] = useState('');
   const [friendCandidates, setFriendCandidates] = useState<FriendUser[]>([]);
   const [friends, setFriends] = useState<FriendUser[]>([]);
@@ -174,9 +178,11 @@ export const FriendTab: React.FC = () => {
   const chatSocketRef = useRef<WebSocket | null>(null);
   const chatReconnectTimerRef = useRef<number | null>(null);
   const activeChatRoomRef = useRef<ActiveChatRoom | null>(null);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
   const skipNextAutoScrollRef = useRef(false);
   const scrollDateTimerRef = useRef<number | null>(null);
   const chatDragDepthRef = useRef(0);
+  const lastNotificationReadSyncRef = useRef(0);
 
   const pendingCount = friendRequests.incoming.length + friendRequests.outgoing.length;
   const friendIdSet = useMemo(() => new Set(friends.map((friend) => friend.id)), [friends]);
@@ -188,6 +194,15 @@ export const FriendTab: React.FC = () => {
     () => new Map(friendRequests.incoming.map((request) => [request.requester_id, request])),
     [friendRequests.incoming]
   );
+
+  const syncNotificationsAfterChatRead = () => {
+    const now = Date.now();
+    if (now - lastNotificationReadSyncRef.current < 2000) return;
+    lastNotificationReadSyncRef.current = now;
+    window.setTimeout(() => {
+      fetchNotifications().catch(() => { /* noop */ });
+    }, 250);
+  };
 
   const buildChatSocketUrl = () => {
     const explicit = process.env.NEXT_PUBLIC_CHAT_WS_URL;
@@ -218,6 +233,10 @@ export const FriendTab: React.FC = () => {
       return [...prev, message];
     });
   };
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
 
   const upsertChatRoom = (room: ChatRoom) => {
     setChatRooms((prev) => {
@@ -289,7 +308,9 @@ export const FriendTab: React.FC = () => {
       touchChatRoomMessage(payload.room_id, payload.message);
       if (!isDraftRoom(activeChatRoomRef.current) && activeChatRoomRef.current?.id === payload.room_id) {
         applyIncomingMessage(payload.message);
-        if (payload.message.sender_id !== user?.id) sendSocket({ type: 'read', room_id: payload.room_id });
+        if (payload.message.sender_id !== user?.id && sendSocket({ type: 'read', room_id: payload.room_id })) {
+          syncNotificationsAfterChatRead();
+        }
       }
       return;
     }
@@ -393,7 +414,19 @@ export const FriendTab: React.FC = () => {
     }
   };
 
-  const openDraftChat = (target: FriendUser) => {
+  const pushFriendRoute = (updates: Record<string, string | number | null | undefined>, replace = false) => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') params.delete(key);
+      else params.set(key, String(value));
+    });
+    const query = params.toString();
+    const url = query ? `/friends?${query}` : '/friends';
+    if (replace) router.replace(url);
+    else router.push(url);
+  };
+
+  const openDraftChat = (target: FriendUser, syncUrl = true) => {
     const draftRoom: DraftChatRoom = {
       id: `draft-${target.id}`,
       draft: true,
@@ -408,6 +441,7 @@ export const FriendTab: React.FC = () => {
     setChatMessages([]);
     setHasOlderMessages(false);
     setPanelOpen(false);
+    if (syncUrl) pushFriendRoute({ user: target.id, room: null });
   };
 
   const materializeChatRoom = async (targetId: string): Promise<ChatRoom | null> => {
@@ -422,27 +456,32 @@ export const FriendTab: React.FC = () => {
     }
     setActiveChatRoom(data);
     activeChatRoomRef.current = data;
+    pushFriendRoute({ room: data.id, user: null }, true);
     await fetchFriends(false);
     return data;
   };
 
-  const openExistingRoom = (room: ChatRoom) => {
+  const openExistingRoom = (room: ChatRoom, syncUrl = true) => {
     activeChatRoomRef.current = room;
     setJoinedRoomId(null);
     setActiveChatRoom(room);
     setPanelOpen(false);
+    if (syncUrl) pushFriendRoute({ room: room.id, user: null });
   };
 
-  const returnToRoomList = () => {
+  const returnToRoomList = (syncUrl = true) => {
     activeChatRoomRef.current = null;
     setJoinedRoomId(null);
     setActiveChatRoom(null);
     setChatMessages([]);
     setHasOlderMessages(false);
+    if (syncUrl) pushFriendRoute({ room: null, user: null });
   };
 
-  const fetchChatMessages = async (roomId: number, mode: 'initial' | 'older' = 'initial', showError = true) => {
-    const beforeId = mode === 'older' ? chatMessages[0]?.id : undefined;
+  const fetchChatMessages = async (roomId: number, mode: 'initial' | 'older' | 'delta' = 'initial', showError = true) => {
+    const currentMessages = chatMessagesRef.current;
+    const beforeId = mode === 'older' ? currentMessages[0]?.id : undefined;
+    const afterId = mode === 'delta' ? currentMessages[currentMessages.length - 1]?.id : undefined;
     if (mode === 'older' && (!beforeId || loadingOlderMessages || !hasOlderMessages)) return;
     const scrollEl = chatScrollRef.current;
     const previousHeight = scrollEl?.scrollHeight || 0;
@@ -450,15 +489,18 @@ export const FriendTab: React.FC = () => {
     if (mode === 'older') setLoadingOlderMessages(true);
     try {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        await apiFetch(`/friends/rooms/${roomId}/viewing`, { method: 'POST' }).catch(() => { /* noop */ });
+        await apiFetch(`/friends/rooms/${roomId}/viewing`, { method: 'POST' }).then((res) => {
+          if (res.ok) syncNotificationsAfterChatRead();
+        }).catch(() => { /* noop */ });
       }
       const query = new URLSearchParams({ limit: '50' });
       if (beforeId) query.set('before_id', String(beforeId));
+      if (afterId) query.set('after_id', String(afterId));
       const res = await apiFetch(`/friends/rooms/${roomId}/messages?${query.toString()}`);
       if (res.ok) {
         const messages: ChatMessage[] = await res.json();
-        setHasOlderMessages(messages.length >= 50);
         if (mode === 'older') {
+          setHasOlderMessages(messages.length >= 50);
           skipNextAutoScrollRef.current = true;
           setChatMessages((prev) => {
             const existing = new Set(prev.map((message) => message.id));
@@ -469,10 +511,19 @@ export const FriendTab: React.FC = () => {
             if (!nextEl) return;
             nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop;
           });
+        } else if (mode === 'delta' && afterId) {
+          if (messages.length > 0) {
+            setChatMessages((prev) => {
+              const existing = new Set(prev.map((message) => message.id));
+              return [...prev, ...messages.filter((message) => !existing.has(message.id))];
+            });
+            fetchFriends(false);
+          }
         } else {
+          setHasOlderMessages(messages.length >= 50);
           setChatMessages(messages);
+          fetchFriends(false);
         }
-        fetchFriends(false);
       }
     } catch {
       if (showError) toast('채팅 내역을 불러오지 못했습니다.', 'error');
@@ -678,8 +729,7 @@ export const FriendTab: React.FC = () => {
       const res = await apiFetch(`/friends/${targetId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       if (activeChatRoom?.other_user.id === targetId) {
-        setActiveChatRoom(null);
-        setChatMessages([]);
+        returnToRoomList(true);
       }
       toast('친구를 삭제했습니다.', 'info');
       await fetchFriends(false);
@@ -693,8 +743,7 @@ export const FriendTab: React.FC = () => {
       const res = await apiFetch(`/friends/rooms/${roomId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error();
       if (!isDraftRoom(activeChatRoom) && activeChatRoom?.id === roomId) {
-        setActiveChatRoom(null);
-        setChatMessages([]);
+        returnToRoomList(true);
       }
       await fetchFriends(false);
     } catch {
@@ -793,6 +842,36 @@ export const FriendTab: React.FC = () => {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!user) return;
+
+    const roomParam = searchParams.get('room');
+    if (roomParam) {
+      const roomId = Number(roomParam);
+      if (!Number.isFinite(roomId)) return;
+      const nextRoom = chatRooms.find((room) => room.id === roomId);
+      if (!nextRoom) return;
+      const current = activeChatRoomRef.current;
+      if (!isDraftRoom(current) && current?.id === nextRoom.id) return;
+      openExistingRoom(nextRoom, false);
+      return;
+    }
+
+    const userParam = searchParams.get('user');
+    if (userParam) {
+      const nextFriend = friends.find((friend) => friend.id === userParam);
+      if (!nextFriend) return;
+      const current = activeChatRoomRef.current;
+      if (isDraftRoom(current) && current.other_user.id === nextFriend.id) return;
+      openDraftChat(nextFriend, false);
+      return;
+    }
+
+    if (activeChatRoomRef.current) {
+      returnToRoomList(false);
+    }
+  }, [user?.id, searchParams, chatRooms, friends]);
+
+  useEffect(() => {
     activeChatRoomRef.current = activeChatRoom;
     setRecentAttachmentsOpen(false);
   }, [activeChatRoom]);
@@ -874,14 +953,14 @@ export const FriendTab: React.FC = () => {
     if (chatSocketStatus === 'connected') {
       setJoinedRoomId(null);
       sendSocket({ type: 'join', room_id: activeChatRoom.id });
-      sendSocket({ type: 'read', room_id: activeChatRoom.id });
+      if (sendSocket({ type: 'read', room_id: activeChatRoom.id })) syncNotificationsAfterChatRead();
       return;
     }
     fetchChatMessages(activeChatRoom.id);
-    const timer = window.setInterval(() => fetchChatMessages(activeChatRoom.id, 'initial', false), 5000);
+    const timer = window.setInterval(() => fetchChatMessages(activeChatRoom.id, 'delta', false), 5000);
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        fetchChatMessages(activeChatRoom.id, 'initial', false);
+        fetchChatMessages(activeChatRoom.id, 'delta', false);
       } else {
         apiFetch(`/friends/rooms/${activeChatRoom.id}/viewing`, { method: 'DELETE' }).catch(() => { /* noop */ });
       }
@@ -1320,7 +1399,7 @@ export const FriendTab: React.FC = () => {
             )}
             <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border/70 bg-secondary/15 px-4 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
-                <button type="button" onClick={returnToRoomList} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-sm ring-1 ring-border lg:hidden" aria-label="톡방 목록으로 돌아가기">
+                <button type="button" onClick={() => returnToRoomList()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-sm ring-1 ring-border lg:hidden" aria-label="톡방 목록으로 돌아가기">
                   <ArrowLeft className="h-5 w-5" />
                 </button>
                 <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 shrink-0 rounded-full border border-border object-cover" />

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from './AppContext';
 import {
   Search,
@@ -107,6 +108,8 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
   const broadcastModeLoadedKeyRef = React.useRef<string | null>(null);
   const skipNextBroadcastModeSaveRef = React.useRef(false);
@@ -146,7 +149,9 @@ export const GachaTab: React.FC = () => {
   const [historyPage, setHistoryPage] = useState(1);
 
   // 스트리머 상세 + 시세 그래프 모달 (공용 StreamerDetailModal 사용, channel_id만 보관)
-  const [detailStreamer, setDetailStreamer] = useState<{ channel_id: string } | null>(null);
+  const [detailStreamer, setDetailStreamer] = useState<{ channel_id: string } | null>(
+    searchParams.get('streamer') ? { channel_id: searchParams.get('streamer') as string } : null
+  );
 
   // 카드 확대(상세) 모달 — 테두리/이름 효과가 적용된 카드를 크게 표시
   const [zoomCard, setZoomCard] = useState<UserCard | null>(null);
@@ -289,6 +294,11 @@ export const GachaTab: React.FC = () => {
       window.visualViewport?.removeEventListener('scroll', repositionContextMenu);
     };
   }, [contextMenu.open, contextMenu.x, contextMenu.y]);
+
+  useEffect(() => {
+    const streamerId = searchParams.get('streamer');
+    setDetailStreamer(streamerId ? { channel_id: streamerId } : null);
+  }, [searchParams]);
 
   useEffect(() => {
     if (user) {
@@ -622,6 +632,17 @@ export const GachaTab: React.FC = () => {
   // 스트리머 상세 + 시세 그래프 열기 (실제 로딩/차트는 공용 StreamerDetailModal이 담당)
   const openStreamerDetail = (channelId: string) => {
     setDetailStreamer({ channel_id: channelId });
+    const params = new URLSearchParams(window.location.search);
+    params.set('streamer', channelId);
+    router.push(`/inventory?${params.toString()}`);
+  };
+
+  const closeStreamerDetail = () => {
+    setDetailStreamer(null);
+    const params = new URLSearchParams(window.location.search);
+    params.delete('streamer');
+    const query = params.toString();
+    router.push(query ? `/inventory?${query}` : '/inventory');
   };
 
   const shortChannelId = (channelId: string) => (
@@ -1167,7 +1188,7 @@ export const GachaTab: React.FC = () => {
 
       {/* 스트리머 상세 + 시세 그래프 모달 (공용 컴포넌트) */}
       {detailStreamer && (
-        <StreamerDetailModal channelId={detailStreamer.channel_id} onClose={() => setDetailStreamer(null)} />
+        <StreamerDetailModal channelId={detailStreamer.channel_id} onClose={closeStreamerDetail} />
       )}
 
       {/* 교환 인박스 (받은/보낸 진행 중 교환) */}

@@ -17,6 +17,8 @@ import {
   CardReport,
   Announcement,
   Trade,
+  AdminTradeListOptions,
+  AdminTradeListResult,
   AppNotification
 } from '../interfaces';
 
@@ -88,6 +90,62 @@ export class SupabaseTradeRepository implements ITradeRepository {
   async findHistoryByUser(userId: string, limit: number): Promise<Trade[]> {
     const trades = await this.queryTrades(userId, ['ACCEPTED', 'REJECTED', 'CANCELLED']);
     return trades.slice(0, limit);
+  }
+
+  private async findParticipantIds(search?: string): Promise<string[] | null> {
+    const keyword = String(search || '').trim();
+    if (!keyword) return null;
+
+    const { data, error } = await this.getClient()
+      .from('users')
+      .select('id')
+      .or(`id.eq.${keyword},username.eq.${keyword},username.ilike.%${keyword}%`)
+      .limit(40);
+    if (error) throw error;
+    return (data || []).map((row: any) => row.id);
+  }
+
+  async listForAdmin(options: AdminTradeListOptions): Promise<AdminTradeListResult> {
+    const page = Math.max(1, Math.floor(options.page || 1));
+    const limit = Math.max(1, Math.min(100, Math.floor(options.limit || 30)));
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const participantIds = await this.findParticipantIds(options.search);
+    if (participantIds && participantIds.length === 0) {
+      return { items: [], total: 0, page, limit, total_pages: 1 };
+    }
+
+    let query = this.getClient()
+      .from('trades')
+      .select('*, sender:users!trades_sender_id_fkey(username), receiver:users!trades_receiver_id_fkey(username)', { count: 'exact' });
+
+    if (options.status && options.status !== 'ALL') {
+      query = query.eq('status', options.status);
+    }
+    if (participantIds) {
+      query = query.or(`sender_id.in.(${participantIds.join(',')}),receiver_id.in.(${participantIds.join(',')})`);
+    }
+
+    const { data, error, count } = await query
+      .order('id', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const items = (data || []).map((row: any) => ({
+      ...row,
+      sender_username: row.sender?.username,
+      receiver_username: row.receiver?.username
+    })) as Trade[];
+    const total = count || 0;
+    return {
+      items,
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit))
+    };
   }
 
   async updateStatus(id: number, status: Trade['status']): Promise<void> {

@@ -25,7 +25,7 @@ import {
   Ticket
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import type { AdminReport, OrphanImage, ShopItem, Coupon, CouponReward, CouponRewardType, Announcement } from '@/lib/types';
+import type { AdminReport, OrphanImage, ShopItem, Coupon, CouponReward, CouponRewardType, Announcement, AdminTrade, AdminTradeListResponse, TradeOffer, TradeStatus } from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
 import { fuzzyScore } from '@/lib/search';
@@ -34,7 +34,7 @@ import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
 
-type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'streamers' | 'shop' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
 
 interface PushFormState {
@@ -100,6 +100,7 @@ export const AdminTab: React.FC = () => {
     tabParam === 'announcements' ||
     tabParam === 'push' ||
     tabParam === 'reports' ||
+    tabParam === 'trades' ||
     tabParam === 'streamers' ||
     tabParam === 'shop' ||
     tabParam === 'maintenance'
@@ -112,7 +113,7 @@ export const AdminTab: React.FC = () => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
       'dashboard', 'users', 'titles', 'coupons', 'announcements',
-      'push', 'reports', 'streamers', 'shop', 'maintenance'
+      'push', 'reports', 'trades', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
     }
@@ -123,7 +124,7 @@ export const AdminTab: React.FC = () => {
     setSubTab(tab);
     const newParams = new URLSearchParams(window.location.search);
     newParams.set('tab', tab);
-    router.replace(`/admin?${newParams.toString()}`);
+    router.push(`/admin?${newParams.toString()}`);
   };
 
   // 대시보드
@@ -199,6 +200,15 @@ export const AdminTab: React.FC = () => {
   const [banUserId, setBanUserId] = useState('');
   const [banReason, setBanReason] = useState('');
 
+  // 1:1 거래 감사
+  const [adminTrades, setAdminTrades] = useState<AdminTrade[]>([]);
+  const [adminTradesSearch, setAdminTradesSearch] = useState('');
+  const [adminTradesStatus, setAdminTradesStatus] = useState<TradeStatus | 'ALL'>('ALL');
+  const [adminTradesPage, setAdminTradesPage] = useState(1);
+  const [adminTradesTotalPages, setAdminTradesTotalPages] = useState(1);
+  const [adminTradesTotal, setAdminTradesTotal] = useState(0);
+  const [adminTradesLoading, setAdminTradesLoading] = useState(false);
+
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
   const [missingProfileStreamers, setMissingProfileStreamers] = useState<any[]>([]);
@@ -240,6 +250,9 @@ export const AdminTab: React.FC = () => {
       fetchReports();
       fetchBannedUsers(1, bannedSearch, bannedSortBy, bannedSortOrder);
     }
+    if (subTab === 'trades') {
+      fetchAdminTrades(adminTradesPage, adminTradesSearch, adminTradesStatus);
+    }
     if (subTab === 'streamers') {
       fetchCouponStreamers(true);
       fetchMissingProfileStreamers();
@@ -260,6 +273,20 @@ export const AdminTab: React.FC = () => {
       fetchMaintenanceStatus();
     }
   }, [subTab, isAdmin, sentPushesPage]);
+
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'trades') return;
+    const t = setTimeout(() => {
+      setAdminTradesPage(1);
+      fetchAdminTrades(1, adminTradesSearch, adminTradesStatus);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [adminTradesSearch, adminTradesStatus, subTab, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'trades') return;
+    fetchAdminTrades(adminTradesPage, adminTradesSearch, adminTradesStatus);
+  }, [adminTradesPage]);
 
   // 제재 유저 검색/정렬 변경 시 재조회 (디바운스 포함)
   useEffect(() => {
@@ -399,6 +426,32 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/reports');
       if (res.ok) setReports(await res.json());
     } catch { /* noop */ }
+  };
+  const fetchAdminTrades = async (page = adminTradesPage, keyword = adminTradesSearch, status = adminTradesStatus) => {
+    try {
+      setAdminTradesLoading(true);
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '30',
+        status
+      });
+      const trimmed = keyword.trim();
+      if (trimmed) params.set('search', trimmed);
+      const res = await apiFetch(`/admin/trades?${params.toString()}`);
+      if (!res.ok) {
+        toast('1:1 거래 내역을 불러오지 못했습니다.');
+        return;
+      }
+      const data = await res.json() as AdminTradeListResponse;
+      setAdminTrades(data.items || []);
+      setAdminTradesTotal(data.total || 0);
+      setAdminTradesTotalPages(data.total_pages || 1);
+      setAdminTradesPage(data.page || page);
+    } catch {
+      toast('서버 통신 에러');
+    } finally {
+      setAdminTradesLoading(false);
+    }
   };
 
   const handleCreateCoupon = async () => {
@@ -1173,6 +1226,41 @@ export const AdminTab: React.FC = () => {
     } catch { toast('서버 통신 에러'); }
   };
 
+  const tradeStatusMeta: Record<TradeStatus, { label: string; className: string }> = {
+    PENDING: { label: '대기', className: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+    CONFIRMED: { label: '동의됨', className: 'bg-sky-500/10 text-sky-600 border-sky-500/20' },
+    ACCEPTED: { label: '체결', className: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
+    REJECTED: { label: '거절', className: 'bg-red-500/10 text-red-500 border-red-500/20' },
+    CANCELLED: { label: '취소', className: 'bg-secondary text-muted-foreground border-border' }
+  };
+
+  const summarizeTradeOffer = (offer?: TradeOffer | null): string => {
+    if (!offer) return '없음';
+    const parts: string[] = [];
+    const point = Number(offer.point || 0);
+    if (point > 0) parts.push(`${point.toLocaleString()}P`);
+    const cardTotal = (offer.cards || []).reduce((sum, card) => sum + (Number(card.count) || 0), 0);
+    if (cardTotal > 0) parts.push(`카드 ${cardTotal.toLocaleString()}장`);
+    return parts.length ? parts.join(' · ') : '없음';
+  };
+
+  const renderTradeOfferDetail = (offer?: TradeOffer | null) => {
+    const cards = offer?.cards || [];
+    if (cards.length === 0) return null;
+    return (
+      <div className="mt-1 flex flex-wrap gap-1">
+        {cards.slice(0, 4).map((card, index) => (
+          <span key={`${card.channel_id}-${card.star ?? 0}-${index}`} className="rounded-full bg-secondary/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+            {card.streamer_name || card.channel_id} {card.star ?? 0}성 x{card.count}
+          </span>
+        ))}
+        {cards.length > 4 && (
+          <span className="rounded-full bg-secondary/70 px-2 py-0.5 text-[10px] text-muted-foreground">외 {cards.length - 4}종</span>
+        )}
+      </div>
+    );
+  };
+
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     { id: 'users', label: '유저', icon: Users },
@@ -1181,6 +1269,7 @@ export const AdminTab: React.FC = () => {
     { id: 'announcements', label: '공지', icon: Megaphone },
     { id: 'push', label: '푸시', icon: BellRing },
     { id: 'reports', label: '신고·밴', icon: AlertTriangle },
+    { id: 'trades', label: '1:1 거래', icon: ArrowRightLeft },
     { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
     { id: 'shop', label: '상점 관리', icon: Store },
     { id: 'maintenance', label: 'DB 초기화', icon: Database }
@@ -2065,6 +2154,126 @@ export const AdminTab: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        </section>
+      )}
+
+      {subTab === 'trades' && (
+        <section className="space-y-4">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-1.5">
+                  <ArrowRightLeft className="h-4 w-4 text-primary" /> 유저간 1:1 거래 내역
+                </h3>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  참여 유저 ID 또는 닉네임으로 후보를 먼저 좁힌 뒤 거래 내역을 조회합니다.
+                </p>
+              </div>
+              <button
+                onClick={() => fetchAdminTrades(adminTradesPage, adminTradesSearch, adminTradesStatus)}
+                className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${adminTradesLoading ? 'animate-spin' : ''}`} /> 새로고침
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_160px]">
+              <input
+                type="text"
+                placeholder="참여 유저 ID 또는 닉네임 검색"
+                value={adminTradesSearch}
+                onChange={(e) => setAdminTradesSearch(e.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              />
+              <select
+                value={adminTradesStatus}
+                onChange={(e) => setAdminTradesStatus(e.target.value as TradeStatus | 'ALL')}
+                className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              >
+                <option value="ALL">전체 상태</option>
+                <option value="PENDING">대기</option>
+                <option value="CONFIRMED">동의됨</option>
+                <option value="ACCEPTED">체결</option>
+                <option value="REJECTED">거절</option>
+                <option value="CANCELLED">취소</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>총 {adminTradesTotal.toLocaleString()}건</span>
+              <span>페이지당 30건</span>
+            </div>
+
+            <div className="space-y-2">
+              {adminTradesLoading && adminTrades.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">거래 내역을 불러오는 중입니다.</div>
+              ) : adminTrades.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">조건에 맞는 1:1 거래 내역이 없습니다.</div>
+              ) : (
+                adminTrades.map((trade) => {
+                  const status = tradeStatusMeta[trade.status] || tradeStatusMeta.PENDING;
+                  const createdAt = trade.completed_at || trade.updated_at || trade.created_at;
+                  return (
+                    <article key={trade.id} className="rounded-xl border border-border bg-secondary/20 p-4">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-black text-foreground">#{trade.id}</span>
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.className}`}>{status.label}</span>
+                            <span className="text-[10px] text-muted-foreground">{createdAt ? formatLocalDateTime(createdAt) : '시간 없음'}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="rounded-lg bg-card px-2 py-1">
+                              <b>{trade.sender_username || '탈퇴/미확인 유저'}</b>
+                              <span className="ml-1 text-[10px] text-muted-foreground">{trade.sender_id}</span>
+                            </span>
+                            <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="rounded-lg bg-card px-2 py-1">
+                              <b>{trade.receiver_username || '탈퇴/미확인 유저'}</b>
+                              <span className="ml-1 text-[10px] text-muted-foreground">{trade.receiver_id}</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <div className="rounded-lg bg-card/70 p-3">
+                          <p className="text-[10px] font-bold text-muted-foreground">제안자 제공</p>
+                          <p className="mt-1 text-xs font-black text-foreground">{summarizeTradeOffer(trade.sender_offer)}</p>
+                          {renderTradeOfferDetail(trade.sender_offer)}
+                        </div>
+                        <div className="rounded-lg bg-card/70 p-3">
+                          <p className="text-[10px] font-bold text-muted-foreground">상대 제공</p>
+                          <p className="mt-1 text-xs font-black text-foreground">{summarizeTradeOffer(trade.receiver_offer)}</p>
+                          {renderTradeOfferDetail(trade.receiver_offer)}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                disabled={adminTradesPage <= 1 || adminTradesLoading}
+                onClick={() => setAdminTradesPage((prev) => Math.max(1, prev - 1))}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+              >
+                이전
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {adminTradesPage} / {adminTradesTotalPages}
+              </span>
+              <button
+                disabled={adminTradesPage >= adminTradesTotalPages || adminTradesLoading}
+                onClick={() => setAdminTradesPage((prev) => Math.min(adminTradesTotalPages, prev + 1))}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+              >
+                다음
+              </button>
+            </div>
           </div>
         </section>
       )}

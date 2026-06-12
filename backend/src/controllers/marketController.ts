@@ -26,11 +26,12 @@ const notify = (
   userId: string,
   title: string,
   body: string,
-  target: MarketNotificationTarget = 'inventory'
+  target: MarketNotificationTarget = 'inventory',
+  groupKey?: string
 ) => {
   const pushUrl = target === 'shop:market' ? '/shop?tab=market' : '/inventory';
-  sendPushToUser(userId, title, body, pushUrl);
-  createRealtimeNotification({ user_id: userId, title, body, link: target }).catch(() => { /* 무시 */ });
+  sendPushToUser(userId, title, body, pushUrl, groupKey);
+  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
 };
 
 const realtimeListingPatch = (listing: MarketListing | null | undefined) => {
@@ -388,7 +389,8 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       previousBidderId,
       '[오픈마켓] 경매 상위 입찰 발생',
       `[${streamerName}] ${star}성 카드 경매에서 다른 유저가 ${amount.toLocaleString()}P로 상위 입찰했습니다.`,
-      'shop:market'
+      'shop:market',
+      `market-auction:${id}`
     );
   }
   const updatedListing = await marketRepository.findById(id).catch(() => null);

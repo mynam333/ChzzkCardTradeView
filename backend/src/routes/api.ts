@@ -78,7 +78,8 @@ import {
   confirmTrade,
   finalizeTrade,
   rejectTrade,
-  getTradeHistory
+  getTradeHistory,
+  getAdminTradeHistory
 } from '../controllers/tradeController';
 import {
   listActiveListings,
@@ -114,6 +115,11 @@ import {
   createTitle,
   updateTitle,
   deleteTitle,
+  listSubscriptionTitleRuleSettings,
+  createSubscriptionTitleRuleSetting,
+  updateSubscriptionTitleRuleSetting,
+  deleteSubscriptionTitleRuleSetting,
+  syncMySubscriptionTitleRules,
   awardTitle,
   awardTitleToMany,
   revokeTitle,
@@ -552,14 +558,22 @@ router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);
 router.get('/admin/users/:user_id/audit/points', authMiddleware, adminMiddleware, getUserPointAudit);
 router.post('/admin/users/:user_id/status-message/reset', authMiddleware, adminMiddleware, resetUserStatusMessage);
 
+// 관리자 1:1 교환 이력 조회 (참여 유저 검색 + 상태 필터 + 페이지네이션)
+router.get('/admin/trades', authMiddleware, adminMiddleware, getAdminTradeHistory);
+
 router.get('/admin/titles', authMiddleware, adminMiddleware, listTitles);
 router.post('/admin/titles', authMiddleware, adminMiddleware, createTitle);
+router.get('/admin/titles/subscription-rules', authMiddleware, adminMiddleware, listSubscriptionTitleRuleSettings);
+router.post('/admin/titles/subscription-rules', authMiddleware, adminMiddleware, createSubscriptionTitleRuleSetting);
+router.put('/admin/titles/subscription-rules/:id', authMiddleware, adminMiddleware, updateSubscriptionTitleRuleSetting);
+router.delete('/admin/titles/subscription-rules/:id', authMiddleware, adminMiddleware, deleteSubscriptionTitleRuleSetting);
 router.put('/admin/titles/:id', authMiddleware, adminMiddleware, updateTitle);
 router.delete('/admin/titles/:id', authMiddleware, adminMiddleware, deleteTitle);
 router.post('/admin/titles/:id/award-many', authMiddleware, adminMiddleware, awardTitleToMany);
 router.post('/admin/titles/:id/revoke-many', authMiddleware, adminMiddleware, revokeTitleFromMany);
 router.post('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, awardTitle);
 router.delete('/admin/titles/:id/users/:user_id', authMiddleware, adminMiddleware, revokeTitle);
+router.post('/titles/subscriptions/sync', authMiddleware, banCheckMiddleware, syncMySubscriptionTitleRules);
 
 // 쿠폰 발급 및 목록/사용현황 조회
 router.post('/admin/coupons', authMiddleware, adminMiddleware, createCoupon);

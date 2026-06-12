@@ -90,6 +90,17 @@ export class SupabaseNotificationRepository implements INotificationRepository {
     if (error) throw error;
   }
 
+  async markGroupRead(userId: string, groupKey: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('group_key', groupKey)
+      .eq('is_read', false)
+      .is('deleted_at', null);
+    if (error) throw error;
+  }
+
   async markAllRead(userId: string): Promise<void> {
     const { error } = await this.getClient()
       .from('notifications')

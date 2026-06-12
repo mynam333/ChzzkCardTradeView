@@ -364,10 +364,26 @@ export interface Trade {
   // PENDING: 수신자 검토 대기, CONFIRMED: 수신자 동의(제안자 최종승인 대기), ACCEPTED: 체결 완료
   status: 'PENDING' | 'CONFIRMED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
   created_at?: string;
+  updated_at?: string;
   completed_at?: string | null;
   // 조회 편의를 위한 비정규화 표시용 필드 (옵션)
   sender_username?: string;
   receiver_username?: string;
+}
+
+export interface AdminTradeListOptions {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: Trade['status'] | 'ALL';
+}
+
+export interface AdminTradeListResult {
+  items: Trade[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
 }
 
 // 7. 거래(1:1 교환) 리포지토리 인터페이스
@@ -378,6 +394,8 @@ export interface ITradeRepository {
   findActiveByUser(userId: string): Promise<Trade[]>;
   /** 해당 유저의 종료된(ACCEPTED/REJECTED/CANCELLED) 거래 이력 */
   findHistoryByUser(userId: string, limit: number): Promise<Trade[]>;
+  /** 관리자용 전체 거래 이력 조회. 검색어가 있으면 참여 유저 후보를 먼저 좁힌 뒤 거래 테이블을 조회합니다. */
+  listForAdmin(options: AdminTradeListOptions): Promise<AdminTradeListResult>;
   updateStatus(id: number, status: Trade['status']): Promise<void>;
   /** 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED). actorId는 수신자여야 합니다. */
   confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }>;
@@ -405,6 +423,7 @@ export interface INotificationRepository {
   findByUser(userId: string, limit: number): Promise<AppNotification[]>;
   countUnread(userId: string): Promise<number>;
   markRead(id: number, userId: string): Promise<void>;
+  markGroupRead(userId: string, groupKey: string): Promise<void>;
   markAllRead(userId: string): Promise<void>;
   hideRead(id: number, userId: string): Promise<boolean>;
 }

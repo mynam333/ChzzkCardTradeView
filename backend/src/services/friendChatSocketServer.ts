@@ -164,6 +164,7 @@ const notifyIfNeeded = async (
   receiverId: string,
   senderId: string,
   senderName: string,
+  roomId: number,
   body: string,
   receiverViewing: boolean,
   receiverMuted: boolean
@@ -174,10 +175,10 @@ const notifyIfNeeded = async (
     user_id: receiverId,
     title: `${senderName}님의 1:1 톡`,
     body: preview,
-    link: 'friends',
+    link: `friends?room=${roomId}`,
     group_key: `friend-chat:${senderId}`
   });
-  sendPushToUser(receiverId, `${senderName}님의 1:1 톡`, preview, '/friends').catch(() => {
+  sendPushToUser(receiverId, `${senderName}님의 1:1 톡`, preview, `/friends?room=${roomId}`).catch(() => {
     // 푸시 실패는 채팅 전송을 막지 않습니다.
   });
 };
@@ -195,7 +196,7 @@ const handleSend = async (socket: ChatSocket, roomId: number, body: string) => {
   const receiverMuted = room.user_a_id === receiverId ? room.muted_for_a : room.muted_for_b;
 
   const result = await sendChatMessage(roomId, socket.user.id, text, receiverViewing);
-  await notifyIfNeeded(result.receiverId, socket.user.id, socket.user.username, text, receiverViewing, receiverMuted);
+  await notifyIfNeeded(result.receiverId, socket.user.id, socket.user.username, roomId, text, receiverViewing, receiverMuted);
 
   const payload = { type: 'message', room_id: roomId, message: result.message };
   const delivered = new Set<ChatSocket>();

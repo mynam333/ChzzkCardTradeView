@@ -26,6 +26,7 @@ import {
   listFriendRequests,
   listFriends,
   listMessages,
+  markRoomMessagesRead,
   removeFriend,
   respondFriendRequest,
   saveChatAttachmentRecord,
@@ -41,9 +42,23 @@ const jsonError = (res: Response, status: number, message: string, details?: str
 
 const currentUser = (req: AuthenticatedRequest) => req.user;
 
+const notificationLinkToPath = (link: string): string => {
+  const trimmed = String(link || '').trim();
+  if (!trimmed) return '/';
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      return `${url.pathname}${url.search}${url.hash}` || '/';
+    } catch {
+      return '/';
+    }
+  }
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+};
+
 const notifyUser = async (userId: string, title: string, body: string, link = 'friends', groupKey?: string) => {
   await createRealtimeNotification({ user_id: userId, title, body, link, group_key: groupKey });
-  sendPushToUser(userId, title, body, `/${link.split('?')[0]}`).catch(() => { /* 푸시 실패는 본 요청을 막지 않습니다. */ });
+  sendPushToUser(userId, title, body, notificationLinkToPath(link)).catch(() => { /* 푸시 실패는 본 요청을 막지 않습니다. */ });
 };
 
 export const searchFriendCandidates = async (req: AuthenticatedRequest, res: Response) => {
@@ -251,8 +266,9 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
   try {
     markChatRoomViewing(roomId, user.id);
     const beforeId = req.query.before_id ? Number(req.query.before_id) : null;
+    const afterId = req.query.after_id ? Number(req.query.after_id) : null;
     const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const messages = await listMessages(roomId, user.id, { beforeId, limit });
+    const messages = await listMessages(roomId, user.id, { beforeId, afterId, limit });
     return res.status(200).json(messages);
   } catch (err: any) {
     return jsonError(res, 404, '채팅방을 찾을 수 없습니다.', err.message);
@@ -275,7 +291,7 @@ export const createChatMessage = async (req: AuthenticatedRequest, res: Response
     const result = await sendChatMessage(roomId, user.id, body, receiverViewing);
 
     if (!receiverViewing && !receiverMuted) {
-      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, body.length > 80 ? `${body.slice(0, 80)}...` : body, 'friends', `friend-chat:${user.id}`);
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, body.length > 80 ? `${body.slice(0, 80)}...` : body, `friends?room=${roomId}`, `friend-chat:${user.id}`);
     }
 
     return res.status(201).json(result.message);
@@ -331,7 +347,7 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
     messageCreated = true;
 
     if (!receiverViewing && !receiverMuted) {
-      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', 'friends', `friend-chat:${user.id}`);
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', `friends?room=${roomId}`, `friend-chat:${user.id}`);
     }
 
     return res.status(201).json(result.message);
@@ -382,7 +398,7 @@ export const reuseChatAttachmentMessage = async (req: AuthenticatedRequest, res:
     const result = await sendChatAttachmentMessage(roomId, user.id, attachment, receiverViewing);
 
     if (!receiverViewing && !receiverMuted) {
-      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', 'friends', `friend-chat:${user.id}`);
+      await notifyUser(receiverId, `${user.username}님의 1:1 톡`, '이미지를 보냈습니다.', `friends?room=${roomId}`, `friend-chat:${user.id}`);
     }
 
     return res.status(201).json(result.message);
@@ -396,8 +412,13 @@ export const markRoomViewing = async (req: AuthenticatedRequest, res: Response) 
   const user = currentUser(req);
   if (!user) return jsonError(res, 401, '로그인이 필요합니다.');
   const roomId = Number(req.params.room_id);
-  markChatRoomViewing(roomId, user.id);
-  return res.status(200).json({ ok: true });
+  try {
+    markChatRoomViewing(roomId, user.id);
+    await markRoomMessagesRead(roomId, user.id);
+    return res.status(200).json({ ok: true });
+  } catch (err: any) {
+    return jsonError(res, 404, '채팅방을 찾을 수 없습니다.', err.message);
+  }
 };
 
 export const clearRoomViewing = async (req: AuthenticatedRequest, res: Response) => {

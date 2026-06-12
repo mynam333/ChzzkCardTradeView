@@ -392,7 +392,7 @@ const sendPushToAll = async (title: string, body: string, url = '/') => {
 /**
  * 특정 유저에게만 푸시 알림을 전송합니다 (교환 알림 등). 실패해도 호출부에 영향을 주지 않습니다.
  */
-export const sendPushToUser = async (userId: string, title: string, body: string, url?: string) => {
+export const sendPushToUser = async (userId: string, title: string, body: string, url?: string, tag?: string) => {
   try {
     const dbMode = getDbMode();
     let subscriptions: any[] = [];
@@ -408,7 +408,7 @@ export const sendPushToUser = async (userId: string, title: string, body: string
     }
 
     if (subscriptions.length === 0) return;
-    const payload = JSON.stringify({ title, body, url: url || '/' });
+    const payload = JSON.stringify({ title, body, url: url || '/', tag });
     await sendPushBatch(subscriptions, payload, dbMode);
   } catch (err) {
     console.error('[Push] 개별 푸시 전송 중 에러:', err);

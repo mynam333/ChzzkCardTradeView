@@ -16,6 +16,7 @@ const PUZZLE_PIECE_COUNT = 12;
 const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
+const BONUS_CLIENT_TIMING_GRACE_MS = 500;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
 
@@ -46,6 +47,25 @@ const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
   if (gameType === 'quiz') return 15_000;
   if (gameType === 'puzzle') return PUZZLE_TIME_LIMIT_MS;
   return MATCH_TIME_LIMIT_MS;
+};
+
+const completedWithinBonusTime = (
+  serverElapsedMs: number,
+  clientRemainingMs: number,
+  gameType: DailyMinigameType,
+  bonusPlayLimitMs: number
+): boolean => {
+  const serverBonusLimitMs = getGamePreplayMs(gameType) + bonusPlayLimitMs + SUBMISSION_GRACE_MS;
+  if (serverElapsedMs <= serverBonusLimitMs) return true;
+
+  const playLimitMs = getGamePlayLimitMs(gameType);
+  if (clientRemainingMs <= 0 || clientRemainingMs > playLimitMs) return false;
+
+  const allowanceMs = getGameSubmitAllowanceMs(gameType) + CLIENT_REPORTED_GRACE_MS;
+  if (serverElapsedMs > allowanceMs) return false;
+
+  const clientPlayElapsedMs = Math.max(0, playLimitMs - clientRemainingMs);
+  return clientPlayElapsedMs <= bonusPlayLimitMs + BONUS_CLIENT_TIMING_GRACE_MS;
 };
 
 const getGameSubmitAllowanceMs = (gameType: DailyMinigameType): number => {
@@ -595,8 +615,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     if (session.game_type === 'quiz') {
       const { answer_channel_id } = payload || {};
 
-      // 15초 제한시간 초과 검증 (카운트다운 3초 + 15초 플레이 + RTT 2초 = 20000ms 초과 시 실패)
-      if (serverElapsedMs > 20000) {
+      // 15초 제한시간 초과 검증. 초기 로딩/왕복 지연은 클라이언트 남은 시간 보고로 보정합니다.
+      if (exceededTimeLimit(COUNTDOWN_MS + 15_000)) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -621,8 +641,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
-        // 3초(카운트다운 3초 + 3초 플레이 + RTT 0.5초 = 6500ms) 내 해결 시 보너스 200 P
-        if (serverElapsedMs <= 6500) {
+        // 3초 내 해결 시 보너스 200 P. 이미지/결과 로딩 지연으로 보너스가 빠지지 않도록 제출 시점의 남은 시간도 함께 봅니다.
+        if (completedWithinBonusTime(serverElapsedMs, clientRemainingMs, 'quiz', 3_000)) {
           earnedPoints += BONUS_REWARD;
           message = `3초 내로 정답을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {
@@ -664,8 +684,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
-        // 30초(카운트다운 3초 + 30초 플레이 + RTT 1초 = 34000ms) 내 퍼즐 완성 시 보너스 200 P
-        if (serverElapsedMs <= 34000) {
+        // 30초 내 퍼즐 완성 시 보너스 200 P.
+        if (completedWithinBonusTime(serverElapsedMs, clientRemainingMs, 'puzzle', 30_000)) {
           earnedPoints += BONUS_REWARD;
           message = `30초 내로 퍼즐을 완성하셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {
@@ -708,8 +728,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         isCorrect = true;
         earnedPoints = BASE_REWARD;
 
-        // 10초(카운트다운 3초 + 2초 노출 + 10초 플레이 = 15000ms) 내 완료 시 보너스 200 P
-        if (serverElapsedMs <= 15000) {
+        // 10초 내 완료 시 보너스 200 P.
+        if (completedWithinBonusTime(serverElapsedMs, clientRemainingMs, 'match', 10_000)) {
           earnedPoints += BONUS_REWARD;
           message = `10초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
         } else {

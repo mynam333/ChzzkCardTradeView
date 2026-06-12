@@ -180,6 +180,20 @@ export const ShopTab: React.FC = () => {
   const initialSubTab = (subTabParam === 'market' || subTabParam === 'my_listings' || subTabParam === 'history' || subTabParam === 'gacha_shop')
     ? subTabParam
     : 'gacha_shop';
+  const marketSortParam = searchParams.get('sort');
+  const initialMarketSort = (marketSortParam === 'oldest' || marketSortParam === 'price_desc' || marketSortParam === 'price_asc' || marketSortParam === 'ending_soon' || marketSortParam === 'bid_desc')
+    ? marketSortParam
+    : 'latest';
+  const marketTypeParam = searchParams.get('type');
+  const initialMarketType = (marketTypeParam === 'fixed' || marketTypeParam === 'auction' || marketTypeParam === 'bidding')
+    ? marketTypeParam
+    : 'all';
+  const marketPageParam = Number(searchParams.get('page') || '1');
+  const initialMarketPage = Number.isFinite(marketPageParam) && marketPageParam > 0 ? Math.floor(marketPageParam) : 1;
+  const historyScopeParam = searchParams.get('scope');
+  const initialHistoryScope = historyScopeParam === 'mine' ? 'mine' : 'all';
+  const historyPageParam = Number(searchParams.get('historyPage') || '1');
+  const initialHistoryPage = Number.isFinite(historyPageParam) && historyPageParam > 0 ? Math.floor(historyPageParam) : 1;
 
   // ---- 가챠(소환) ----
   const [isDrawing, setIsDrawing] = useState(false);
@@ -201,10 +215,10 @@ export const ShopTab: React.FC = () => {
   const [marketListings, setMarketListings] = useState<any[]>([]);
   const [marketTotal, setMarketTotal] = useState(0);
   const [marketSearch, setMarketSearch] = useState('');
-  const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc'>('latest');
-  const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction' | 'bidding'>('all');
-  const [marketPage, setMarketPage] = useState(1);
-  const [marketPageInput, setMarketPageInput] = useState('1');
+  const [marketSort, setMarketSort] = useState<'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc'>(initialMarketSort);
+  const [marketType, setMarketType] = useState<'all' | 'fixed' | 'auction' | 'bidding'>(initialMarketType);
+  const [marketPage, setMarketPage] = useState(initialMarketPage);
+  const [marketPageInput, setMarketPageInput] = useState(String(initialMarketPage));
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
   const [purchasingListingId, setPurchasingListingId] = useState<number | null>(null);
@@ -228,9 +242,9 @@ export const ShopTab: React.FC = () => {
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
-  const [marketHistoryPage, setMarketHistoryPage] = useState(1);
+  const [marketHistoryPage, setMarketHistoryPage] = useState(initialHistoryPage);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [historyScope, setHistoryScope] = useState<'all' | 'mine'>('all'); // 전체 / 내 거래 이력
+  const [historyScope, setHistoryScope] = useState<'all' | 'mine'>(initialHistoryScope); // 전체 / 내 거래 이력
 
   // URL category 쿼리 파라미터를 기반으로 초기 shopType 결정
   const categoryParam = searchParams.get('category');
@@ -256,7 +270,30 @@ export const ShopTab: React.FC = () => {
     if (param === 'gacha_shop' || param === 'market' || param === 'my_listings' || param === 'history') {
       setSubTab(param);
     }
+    const sortParam = searchParams.get('sort');
+    setMarketSort(
+      sortParam === 'oldest' || sortParam === 'price_desc' || sortParam === 'price_asc' || sortParam === 'ending_soon' || sortParam === 'bid_desc'
+        ? sortParam
+        : 'latest'
+    );
+    const typeParam = searchParams.get('type');
+    setMarketType(typeParam === 'fixed' || typeParam === 'auction' || typeParam === 'bidding' ? typeParam : 'all');
+    const pageParam = Number(searchParams.get('page') || '1');
+    setMarketPage(Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1);
+    setHistoryScope(searchParams.get('scope') === 'mine' ? 'mine' : 'all');
+    const historyPageParam = Number(searchParams.get('historyPage') || '1');
+    setMarketHistoryPage(Number.isFinite(historyPageParam) && historyPageParam > 0 ? Math.floor(historyPageParam) : 1);
   }, [searchParams]);
+
+  const pushShopRoute = (updates: Record<string, string | number | null | undefined>) => {
+    const newParams = new URLSearchParams(window.location.search);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === '') newParams.delete(key);
+      else newParams.set(key, String(value));
+    });
+    const query = newParams.toString();
+    router.push(query ? `/shop?${query}` : '/shop');
+  };
 
   // 카테고리 전환 시 URL 쿼리 파라미터 동기화
   const handleShopTypeChange = (type: 'border' | 'name_effect') => {
@@ -264,6 +301,42 @@ export const ShopTab: React.FC = () => {
     const newParams = new URLSearchParams(window.location.search);
     newParams.set('category', type);
     router.replace(`/shop?${newParams.toString()}`);
+  };
+
+  const handleSubTabChange = (tab: 'gacha_shop' | 'market' | 'my_listings' | 'history') => {
+    setSubTab(tab);
+    pushShopRoute({ tab, page: null });
+  };
+
+  const handleMarketSortChange = (sort: 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc') => {
+    setMarketSort(sort);
+    setMarketPage(1);
+    pushShopRoute({ tab: 'market', sort: sort === 'latest' ? null : sort, page: null });
+  };
+
+  const handleMarketTypeChange = (type: 'all' | 'fixed' | 'auction' | 'bidding') => {
+    setMarketType(type);
+    setMarketPage(1);
+    pushShopRoute({ tab: 'market', type: type === 'all' ? null : type, page: null });
+  };
+
+  const handleMarketPageChange = (page: number) => {
+    const nextPage = Math.max(1, Math.floor(page));
+    setMarketPage(nextPage);
+    setMarketPageInput(String(nextPage));
+    pushShopRoute({ tab: 'market', page: nextPage === 1 ? null : nextPage });
+  };
+
+  const handleHistoryScopeChange = (scope: 'all' | 'mine') => {
+    setHistoryScope(scope);
+    setMarketHistoryPage(1);
+    pushShopRoute({ tab: 'history', scope: scope === 'all' ? null : scope, historyPage: null });
+  };
+
+  const handleHistoryPageChange = (page: number) => {
+    const nextPage = Math.max(1, Math.floor(page));
+    setMarketHistoryPage(nextPage);
+    pushShopRoute({ tab: 'history', historyPage: nextPage === 1 ? null : nextPage });
   };
 
   useEffect(() => {
@@ -365,8 +438,7 @@ export const ShopTab: React.FC = () => {
       return;
     }
     const nextPage = Math.min(Math.max(1, parsed), Math.max(1, marketTotalPages));
-    setMarketPage(nextPage);
-    setMarketPageInput(String(nextPage));
+    handleMarketPageChange(nextPage);
   };
 
   const scheduleMarketRefresh = (delayMs = 1200, minGapMs = 3500) => {
@@ -530,6 +602,12 @@ export const ShopTab: React.FC = () => {
     if (subTab === 'market') {
       const handler = setTimeout(() => {
         setMarketPage(1);
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('page')) {
+          params.delete('page');
+          const query = params.toString();
+          router.replace(query ? `/shop?${query}` : '/shop');
+        }
         fetchMarketListings();
       }, 300);
       return () => clearTimeout(handler);
@@ -600,7 +678,7 @@ export const ShopTab: React.FC = () => {
     const handleShopSubTab = (event: Event) => {
       const subTabId = (event as CustomEvent<{ subTab?: 'gacha_shop' | 'market' | 'my_listings' | 'history' }>).detail?.subTab;
       if (subTabId === 'gacha_shop' || subTabId === 'market' || subTabId === 'my_listings' || subTabId === 'history') {
-        setSubTab(subTabId);
+        handleSubTabChange(subTabId);
       }
     };
 
@@ -924,7 +1002,7 @@ export const ShopTab: React.FC = () => {
           return (
             <button
               key={tabId}
-              onClick={() => setSubTab(tabId)}
+              onClick={() => handleSubTabChange(tabId)}
               className={`cute-wiggle-hover flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition-all duration-200 ${isActive
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-105'
                   : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/80 hover:text-foreground'
@@ -1355,7 +1433,7 @@ export const ShopTab: React.FC = () => {
               </div>
               <select
                 value={marketSort}
-                onChange={(e: any) => { setMarketPage(1); setMarketSort(e.target.value); }}
+                onChange={(e) => handleMarketSortChange(e.target.value as 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc')}
                 className="w-full sm:w-44 rounded-lg border border-border bg-card px-3 py-2 text-xs focus:border-primary focus:outline-none"
               >
                 <option value="latest">최신 등록순</option>
@@ -1367,13 +1445,13 @@ export const ShopTab: React.FC = () => {
               </select>
               <select
                 value={marketType}
-                onChange={(e: any) => { setMarketPage(1); setMarketType(e.target.value); }}
+                onChange={(e) => handleMarketTypeChange(e.target.value as 'all' | 'fixed' | 'auction' | 'bidding')}
                 className="w-full sm:w-36 rounded-lg border border-border bg-card px-3 py-2 text-xs focus:border-primary focus:outline-none"
               >
                 <option value="all">전체 매물</option>
                 <option value="fixed">즉시 판매</option>
                 <option value="auction">경매</option>
-                <option value="bidding">입찰중</option>
+                <option value="bidding">내 입찰</option>
               </select>
             </div>
 
@@ -1654,7 +1732,7 @@ export const ShopTab: React.FC = () => {
                   <div className="flex flex-col items-center justify-center gap-3 border-t border-border/30 pt-4 sm:flex-row sm:flex-wrap">
                     <div className="flex items-center justify-center gap-2">
                       <button
-                        onClick={() => setMarketPage(p => Math.max(1, p - 1))}
+                        onClick={() => handleMarketPageChange(marketPage - 1)}
                         disabled={marketPage === 1}
                         className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
                       >
@@ -1668,7 +1746,7 @@ export const ShopTab: React.FC = () => {
                         return (
                           <button
                             key={p}
-                            onClick={() => setMarketPage(p)}
+                            onClick={() => handleMarketPageChange(p)}
                             className={`px-3 py-1 rounded-lg text-xs font-bold transition ${marketPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
                           >
                             {p}
@@ -1676,7 +1754,7 @@ export const ShopTab: React.FC = () => {
                         );
                       })}
                       <button
-                        onClick={() => setMarketPage(p => Math.min(marketTotalPages, p + 1))}
+                        onClick={() => handleMarketPageChange(marketPage + 1)}
                         disabled={marketPage === marketTotalPages}
                         className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
                       >
@@ -1862,7 +1940,7 @@ export const ShopTab: React.FC = () => {
                 {([['all', '전체'], ['mine', '내 거래 이력']] as const).map(([key, label]) => (
                   <button
                     key={key}
-                    onClick={() => { setHistoryScope(key); setMarketHistoryPage(1); }}
+                    onClick={() => handleHistoryScopeChange(key)}
                     className={`cute-wiggle-hover rounded-xl px-3 py-1.5 text-xs font-bold transition ${historyScope === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     {label}
@@ -1986,7 +2064,7 @@ export const ShopTab: React.FC = () => {
                   {historyTotalPages > 1 && (
                     <div className="flex items-center justify-center gap-2 mt-4 pt-2">
                       <button
-                        onClick={() => setMarketHistoryPage(p => Math.max(1, p - 1))}
+                        onClick={() => handleHistoryPageChange(marketHistoryPage - 1)}
                         disabled={marketHistoryPage === 1}
                         className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
                       >
@@ -1997,7 +2075,7 @@ export const ShopTab: React.FC = () => {
                         return (
                           <button
                             key={p}
-                            onClick={() => setMarketHistoryPage(p)}
+                            onClick={() => handleHistoryPageChange(p)}
                             className={`px-3 py-1 rounded-lg text-xs font-bold transition ${marketHistoryPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
                           >
                             {p}
@@ -2005,7 +2083,7 @@ export const ShopTab: React.FC = () => {
                         );
                       })}
                       <button
-                        onClick={() => setMarketHistoryPage(p => Math.min(historyTotalPages, p + 1))}
+                        onClick={() => handleHistoryPageChange(marketHistoryPage + 1)}
                         disabled={marketHistoryPage === historyTotalPages}
                         className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
                       >

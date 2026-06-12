@@ -1,6 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
-import { ITradeRepository, Trade } from '../interfaces';
+import { AdminTradeListOptions, AdminTradeListResult, ITradeRepository, Trade } from '../interfaces';
 
 export class MysqlTradeRepository implements ITradeRepository {
   private getDb() {
@@ -16,10 +16,28 @@ export class MysqlTradeRepository implements ITradeRepository {
       receiver_offer: JSON.parse(row.receiver_offer),
       status: row.status,
       created_at: row.created_at,
+      updated_at: row.updated_at,
       completed_at: row.completed_at,
       sender_username: row.sender_username,
       receiver_username: row.receiver_username
     };
+  }
+
+  private async findParticipantIds(search?: string): Promise<string[] | null> {
+    const keyword = String(search || '').trim();
+    if (!keyword) return null;
+
+    const like = `%${keyword.replace(/[\\%_]/g, '\\$&')}%`;
+    const rows = await this.getDb().all<{ id: string }>(`
+      SELECT id
+        FROM users
+       WHERE id = ?
+          OR username = ?
+          OR username LIKE ? ESCAPE '\\'
+       ORDER BY CASE WHEN id = ? OR username = ? THEN 0 ELSE 1 END, username ASC
+       LIMIT 40
+    `, keyword, keyword, like, keyword, keyword);
+    return rows.map((row) => row.id);
   }
 
   async create(trade: Pick<Trade, 'sender_id' | 'receiver_id' | 'sender_offer' | 'receiver_offer'>): Promise<Trade> {
@@ -62,6 +80,53 @@ export class MysqlTradeRepository implements ITradeRepository {
        LIMIT ?
     `, userId, userId, limit);
     return rows.map((row) => this.mapRow(row));
+  }
+
+  async listForAdmin(options: AdminTradeListOptions): Promise<AdminTradeListResult> {
+    const page = Math.max(1, Math.floor(options.page || 1));
+    const limit = Math.max(1, Math.min(100, Math.floor(options.limit || 30)));
+    const offset = (page - 1) * limit;
+    const where: string[] = [];
+    const params: any[] = [];
+
+    if (options.status && options.status !== 'ALL') {
+      where.push('t.status = ?');
+      params.push(options.status);
+    }
+
+    const participantIds = await this.findParticipantIds(options.search);
+    if (participantIds && participantIds.length === 0) {
+      return { items: [], total: 0, page, limit, total_pages: 1 };
+    }
+    if (participantIds) {
+      const placeholders = participantIds.map(() => '?').join(',');
+      where.push(`(t.sender_id IN (${placeholders}) OR t.receiver_id IN (${placeholders}))`);
+      params.push(...participantIds, ...participantIds);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const countRow = await this.getDb().get<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM trades t ${whereSql}`,
+      ...params
+    );
+    const total = Number(countRow?.c || 0);
+    const rows = await this.getDb().all(`
+      SELECT t.*, su.username AS sender_username, ru.username AS receiver_username
+        FROM trades t
+        LEFT JOIN users su ON su.id = t.sender_id
+        LEFT JOIN users ru ON ru.id = t.receiver_id
+       ${whereSql}
+       ORDER BY t.id DESC
+       LIMIT ? OFFSET ?
+    `, ...params, limit, offset);
+
+    return {
+      items: rows.map((row) => this.mapRow(row)),
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit))
+    };
   }
 
   async updateStatus(id: number, status: Trade['status']): Promise<void> {

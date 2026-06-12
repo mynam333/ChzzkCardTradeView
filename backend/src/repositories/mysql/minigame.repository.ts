@@ -116,6 +116,10 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     return this.getDb().transaction(async (tx) => {
       const session = await tx.get('SELECT * FROM minigame_sessions WHERE id = ? FOR UPDATE', sessionId);
       if (!session) return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
+      if (session.status === 'COMPLETED') {
+        const user = await tx.get('SELECT point FROM users WHERE id = ?', session.user_id);
+        return { ok: true, newPoints: user?.point ?? 0 };
+      }
       if (session.status !== 'STARTED') return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
       await tx.run("UPDATE minigame_sessions SET status = 'COMPLETED', earned_points = ?, completed_at = ? WHERE id = ?", earnedPoints, formatKstDbTime(), sessionId);
       await tx.run('UPDATE users SET point = point + ? WHERE id = ?', earnedPoints, session.user_id);
