@@ -717,7 +717,7 @@ const readUserRankingsFromSnapshot = async (
   const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
   const rankColumn = mode === 'cards' ? 'cards_rank' : 'total_rank';
   const sql = `
-    SELECT r.*, r.${rankColumn} AS rank
+    SELECT r.*, r.${rankColumn} AS user_rank
       FROM user_asset_rankings r
      WHERE (? = '' OR r.username LIKE ?)
        AND (
@@ -752,7 +752,7 @@ const readUserRankingsFromSnapshot = async (
     card_count: Number(row.card_count || 0),
     cards_value: Math.round(Number(row.cards_value || 0)),
     total_asset: Number(row.total_asset || 0),
-    rank: Number(row.rank || 0)
+    rank: Number(row.user_rank || 0)
   }));
 };
 

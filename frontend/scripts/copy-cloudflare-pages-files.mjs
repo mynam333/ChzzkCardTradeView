@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,7 +10,10 @@ if (existsSync(outDir)) {
   for (const file of files) {
     const source = join(root, 'public', file);
     const target = join(outDir, file);
-    if (!existsSync(source)) continue;
+    if (!existsSync(source)) {
+      if (existsSync(target)) unlinkSync(target);
+      continue;
+    }
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(source, target);
   }
