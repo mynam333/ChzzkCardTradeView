@@ -17,7 +17,7 @@ const subscriptionVisibilitySql = `
         FROM subscription_title_rules str
         JOIN subscription_title_states sts
           ON sts.rule_id = str.id
-         AND sts.user_id = ut.user_id
+         AND sts.user_id COLLATE utf8mb4_unicode_ci = ut.user_id COLLATE utf8mb4_unicode_ci
          AND sts.is_subscribed = 1
          AND sts.checked_until > UTC_TIMESTAMP()
        WHERE str.title_id = t.id
@@ -25,6 +25,16 @@ const subscriptionVisibilitySql = `
     )
   )
 `;
+
+const isSubscriptionVisibilityError = (err: any): boolean => {
+  const message = String(err?.message || '');
+  return (
+    err?.code === 'ER_NO_SUCH_TABLE' ||
+    err?.code === 'ER_BAD_FIELD_ERROR' ||
+    message.includes('subscription_title_') ||
+    message.includes('Illegal mix of collations')
+  );
+};
 
 export class MysqlTitleRepository implements ITitleRepository {
   private getDb() {
@@ -40,14 +50,27 @@ export class MysqlTitleRepository implements ITitleRepository {
   }
 
   async findByUserId(userId: string): Promise<UserTitle[]> {
-    const rows = await this.getDb().all<MysqlUserTitleRow>(`
-      SELECT t.*, ut.awarded_at, ut.is_equipped
-      FROM user_titles ut
-      JOIN titles t ON t.id = ut.title_id
-      WHERE ut.user_id = ?
-      ${subscriptionVisibilitySql}
-      ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
-    `, userId);
+    let rows: MysqlUserTitleRow[];
+    try {
+      rows = await this.getDb().all<MysqlUserTitleRow>(`
+        SELECT t.*, ut.awarded_at, ut.is_equipped
+        FROM user_titles ut
+        JOIN titles t ON t.id = ut.title_id
+        WHERE ut.user_id = ?
+        ${subscriptionVisibilitySql}
+        ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
+      `, userId);
+    } catch (err) {
+      if (!isSubscriptionVisibilityError(err)) throw err;
+      console.warn('[MysqlTitleRepository] 구독 칭호 표시 조건 조회 실패, 일반 칭호 조회로 폴백:', (err as any)?.message || err);
+      rows = await this.getDb().all<MysqlUserTitleRow>(`
+        SELECT t.*, ut.awarded_at, ut.is_equipped
+        FROM user_titles ut
+        JOIN titles t ON t.id = ut.title_id
+        WHERE ut.user_id = ?
+        ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
+      `, userId);
+    }
     return rows.map((row) => ({ ...row, is_equipped: row.is_equipped === 1 }));
   }
 
@@ -56,14 +79,27 @@ export class MysqlTitleRepository implements ITitleRepository {
     for (const id of userIds) result[id] = [];
     if (userIds.length === 0) return result;
     const placeholders = userIds.map(() => '?').join(', ');
-    const rows = await this.getDb().all<MysqlUserTitleWithUserRow>(`
-      SELECT ut.user_id, t.*, ut.awarded_at, ut.is_equipped
-      FROM user_titles ut
-      JOIN titles t ON t.id = ut.title_id
-      WHERE ut.user_id IN (${placeholders})
-      ${subscriptionVisibilitySql}
-      ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
-    `, userIds);
+    let rows: MysqlUserTitleWithUserRow[];
+    try {
+      rows = await this.getDb().all<MysqlUserTitleWithUserRow>(`
+        SELECT ut.user_id, t.*, ut.awarded_at, ut.is_equipped
+        FROM user_titles ut
+        JOIN titles t ON t.id = ut.title_id
+        WHERE ut.user_id IN (${placeholders})
+        ${subscriptionVisibilitySql}
+        ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
+      `, userIds);
+    } catch (err) {
+      if (!isSubscriptionVisibilityError(err)) throw err;
+      console.warn('[MysqlTitleRepository] 구독 칭호 표시 조건 일괄 조회 실패, 일반 칭호 조회로 폴백:', (err as any)?.message || err);
+      rows = await this.getDb().all<MysqlUserTitleWithUserRow>(`
+        SELECT ut.user_id, t.*, ut.awarded_at, ut.is_equipped
+        FROM user_titles ut
+        JOIN titles t ON t.id = ut.title_id
+        WHERE ut.user_id IN (${placeholders})
+        ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
+      `, userIds);
+    }
     for (const row of rows) {
       const { user_id, ...title } = row;
       (result[user_id] ||= []).push({ ...title, is_equipped: title.is_equipped === 1 });
@@ -124,14 +160,21 @@ export class MysqlTitleRepository implements ITitleRepository {
   async equip(userId: string, titleId: number | null): Promise<boolean> {
     return this.getDb().transaction(async (tx) => {
       if (titleId !== null) {
-        const owned = await tx.get(`
-          SELECT 1
-            FROM user_titles ut
-            JOIN titles t ON t.id = ut.title_id
-           WHERE ut.user_id = ?
-             AND ut.title_id = ?
-             ${subscriptionVisibilitySql}
-        `, userId, titleId);
+        let owned = null;
+        try {
+          owned = await tx.get(`
+            SELECT 1
+              FROM user_titles ut
+              JOIN titles t ON t.id = ut.title_id
+             WHERE ut.user_id = ?
+               AND ut.title_id = ?
+               ${subscriptionVisibilitySql}
+          `, userId, titleId);
+        } catch (err) {
+          if (!isSubscriptionVisibilityError(err)) throw err;
+          console.warn('[MysqlTitleRepository] 구독 칭호 장착 조건 조회 실패, 일반 보유 조건으로 폴백:', (err as any)?.message || err);
+          owned = await tx.get('SELECT 1 FROM user_titles WHERE user_id = ? AND title_id = ?', userId, titleId);
+        }
         if (!owned) return false;
       }
       await tx.run('UPDATE user_titles SET is_equipped = 0 WHERE user_id = ?', userId);

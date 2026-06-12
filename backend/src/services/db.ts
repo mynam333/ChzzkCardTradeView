@@ -265,6 +265,21 @@ const ensureMysqlUniqueIndex = async (db: MysqlDb, table: string, indexName: str
   await db.run(`ALTER TABLE ${table} ADD UNIQUE INDEX ${indexName} ${ddl}`);
 };
 
+const ensureMysqlTableCollation = async (db: MysqlDb, table: string, collation = 'utf8mb4_unicode_ci') => {
+  const existing = await db.get<{ table_collation: string }>(
+    `SELECT table_collation
+       FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+      LIMIT 1`,
+    table
+  );
+  if (!existing || existing.table_collation === collation) return;
+
+  console.log(`[DB Migration] MySQL ${table} collation을 ${collation}로 보정합니다. (현재: ${existing.table_collation})`);
+  await db.run(`ALTER TABLE ${table} CONVERT TO CHARACTER SET utf8mb4 COLLATE ${collation}`);
+};
+
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
   await ensureMysqlColumn(db, 'user_titles', 'grant_source', "grant_source VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER is_equipped");
@@ -333,7 +348,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_subscription_title_rules_active (active, title_id),
       INDEX idx_subscription_title_rules_broadcaster (broadcaster_channel_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS subscription_title_states (
@@ -346,8 +361,10 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       PRIMARY KEY (user_id, rule_id),
       INDEX idx_subscription_title_states_valid (rule_id, is_subscribed, checked_until),
       INDEX idx_subscription_title_states_user (user_id, checked_until)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlTableCollation(db, 'subscription_title_rules');
+  await ensureMysqlTableCollation(db, 'subscription_title_states');
   await db.run(`
     CREATE TABLE IF NOT EXISTS trades (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,

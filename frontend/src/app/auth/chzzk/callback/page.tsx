@@ -22,20 +22,54 @@ const ChzzkCallbackContent: React.FC = () => {
   const exchangeStartedRef = React.useRef(false);
 
   useEffect(() => {
-    const code = searchParams.get('code');
-    const state = searchParams.get('state');
+    const getCallbackParams = () => {
+      const currentUrl = new URL(window.location.href);
+      return {
+        code: currentUrl.searchParams.get('code') || searchParams.get('code'),
+        state: currentUrl.searchParams.get('state') || searchParams.get('state')
+      };
+    };
 
-    if (!code) {
-      setError('치지직 인증 코드(Authorization Code)가 전달되지 않았습니다.');
-      setLoading(false);
-      return;
-    }
     if (exchangeStartedRef.current) return;
-    exchangeStartedRef.current = true;
-    window.history.replaceState(null, '', '/auth/chzzk/callback');
+
+    let cancelled = false;
+    let waitTimer: number | undefined;
+
+    const waitForCallbackParams = async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const params = getCallbackParams();
+        if (params.code) return params;
+        await new Promise<void>((resolve) => {
+          waitTimer = window.setTimeout(resolve, 150);
+        });
+      }
+      return getCallbackParams();
+    };
+
+    const waitForConfirmedSession = async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const response = await apiFetch('/users/me');
+        if (response.ok) return response.json();
+        if (response.status !== 401) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.message || '로그인 세션 확인에 실패했습니다.');
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 250 + attempt * 150));
+      }
+      throw new Error('로그인 세션 쿠키가 저장되지 않았습니다. 모바일 브라우저의 쿠키 차단 설정을 확인해 주세요.');
+    };
 
     const exchangeCodeForToken = async () => {
       try {
+        const { code, state } = await waitForCallbackParams();
+        if (cancelled) return;
+        if (!code) {
+          throw new Error('치지직 인증 코드(Authorization Code)가 전달되지 않았습니다.');
+        }
+
+        exchangeStartedRef.current = true;
+        window.history.replaceState(null, '', '/auth/chzzk/callback');
+
         const response = await apiFetch('/auth/chzzk/callback', {
           method: 'POST',
           body: JSON.stringify({ code, state }),
@@ -47,19 +81,28 @@ const ChzzkCallbackContent: React.FC = () => {
         }
 
         const data = await response.json();
+        const confirmedUser = await waitForConfirmedSession();
 
-        // 세션 및 사용자 정보 로컬스토리지 보존
         const sessionUser = {
-          id: data.user.id,
-          username: data.user.username,
-          avatarUrl: data.user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${data.user.id}`,
-          role: data.user.role,
-          titles: [],
-          ownedTitles: [],
-          point: data.user.point,
-          lastFreeDraw: null,
-          representativeCardChannelId: null,
-          representativeCardStar: null
+          id: confirmedUser.id || data.user.id,
+          username: confirmedUser.username || data.user.username,
+          avatarUrl: confirmedUser.avatarUrl || data.user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${data.user.id}`,
+          role: confirmedUser.role || data.user.role,
+          statusMessage: confirmedUser.statusMessage ?? null,
+          titles: confirmedUser.titles || [],
+          ownedTitles: confirmedUser.ownedTitles || confirmedUser.titles || [],
+          point: confirmedUser.point ?? data.user.point,
+          lastFreeDraw: confirmedUser.lastFreeDraw ?? null,
+          freeDrawTickets: confirmedUser.freeDrawTickets ?? 0,
+          bonusFreeDrawTickets: confirmedUser.bonusFreeDrawTickets ?? 0,
+          freeDrawMaxStack: confirmedUser.freeDrawMaxStack ?? 1,
+          representativeCardChannelId: confirmedUser.representativeCardChannelId ?? null,
+          representativeCardStar: confirmedUser.representativeCardStar ?? null,
+          drawCost: confirmedUser.drawCost ?? 10000,
+          freeDrawInterval: confirmedUser.freeDrawInterval ?? 24,
+          isFreeDrawEligible: !!confirmedUser.isFreeDrawEligible,
+          nextFreeDrawAt: confirmedUser.nextFreeDrawAt ?? null,
+          interactionRestrictedUntil: confirmedUser.interactionRestrictedUntil ?? null
         };
 
         // 인증은 백엔드가 발급한 httpOnly 세션 쿠키로 유지됨. JS에는 민감 토큰 대신 비민감 플래그만 저장.
@@ -85,6 +128,10 @@ const ChzzkCallbackContent: React.FC = () => {
     };
 
     exchangeCodeForToken();
+    return () => {
+      cancelled = true;
+      if (waitTimer) window.clearTimeout(waitTimer);
+    };
   }, [searchParams, router, setUser]);
 
   if (loading) {
