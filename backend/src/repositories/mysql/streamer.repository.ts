@@ -6,6 +6,8 @@ import { formatUploadUrl } from '../../services/imageService';
 export class MysqlStreamerRepository implements IStreamerRepository {
   private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(5_000, Number(process.env.VALUE_AGO_CACHE_TTL_MS || 60_000));
   private static readonly VALUE_AGO_LOOKBACK_HOURS = Math.max(1, Number(process.env.VALUE_AGO_LOOKBACK_HOURS || 3));
+  private static readonly SCHEDULE_UPDATE_CHUNK_SIZE = Math.max(25, Number(process.env.STREAMER_SCHEDULE_UPDATE_CHUNK_SIZE || 100));
+  private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = Math.max(50, Number(process.env.VALUE_HISTORY_INSERT_CHUNK_SIZE || 500));
   private valueAgoCache = new Map<number, { data: Record<string, number>; expiresAt: number }>();
   private valueAgoInFlight = new Map<number, Promise<Record<string, number>>>();
 
@@ -21,6 +23,80 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
     return this.toUtcString(parsed);
+  }
+
+  private chunk<T>(items: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+  }
+
+  private caseExpr<T extends StreamerScheduleResult>(
+    rows: T[],
+    getValue: (row: T) => any,
+    fallback: string
+  ): { sql: string; params: any[] } {
+    const params: any[] = [];
+    const cases = rows.map((row) => {
+      params.push(row.channel_id, getValue(row));
+      return 'WHEN ? THEN ?';
+    }).join(' ');
+    return {
+      sql: `CASE channel_id ${cases} ELSE ${fallback} END`,
+      params
+    };
+  }
+
+  private async applyScheduleUpdateChunk(rows: StreamerScheduleResult[], polled: boolean): Promise<void> {
+    if (rows.length === 0) return;
+    const assignments: string[] = [];
+    const params: any[] = [];
+    const addCase = (
+      column: string,
+      getValue: (row: StreamerScheduleResult) => any,
+      fallback = column
+    ) => {
+      const expr = this.caseExpr(rows, getValue, fallback);
+      assignments.push(`${column} = ${expr.sql}`);
+      params.push(...expr.params);
+    };
+    const addIncrementCase = (
+      column: string,
+      getValue: (row: StreamerScheduleResult) => any
+    ) => {
+      const expr = this.caseExpr(rows, getValue, '0');
+      assignments.push(`${column} = ${column} + ${expr.sql}`);
+      params.push(...expr.params);
+    };
+
+    addCase('prev_value', (row) => row.prev_value);
+    addCase('base_value', (row) => row.base_value);
+    addCase('activity_score', (row) => row.activity_score);
+    addCase('broadcast_multiplier', (row) => row.broadcast_multiplier);
+    addIncrementCase('broadcast_minutes', (row) => row.add_minutes);
+    addIncrementCase('broadcast_count', (row) => row.add_broadcast_count);
+    const consumedChatsExpr = this.caseExpr(rows, (row) => row.consumed_chats, '0');
+    assignments.push(`chat_count = GREATEST(chat_count - ${consumedChatsExpr.sql}, 0)`);
+    params.push(...consumedChatsExpr.params);
+
+    if (polled) {
+      addCase('is_active', (row) => row.is_active ? 1 : 0);
+      addCase('follower_count', (row) => row.follower_count);
+      addCase('logo_url', (row) => row.logo_url ?? null);
+      addCase('last_broadcast_at', (row) => row.last_broadcast_at ? this.normalizeUtcString(row.last_broadcast_at) : null);
+    }
+
+    assignments.push('updated_at = UTC_TIMESTAMP()');
+    const ids = rows.map((row) => row.channel_id);
+    await this.getDb().run(
+      `UPDATE streamers
+          SET ${assignments.join(',\n              ')}
+        WHERE channel_id IN (${ids.map(() => '?').join(',')})`,
+      ...params,
+      ...ids
+    );
   }
 
   private mapRow(row: any): Streamer {
@@ -267,48 +343,29 @@ export class MysqlStreamerRepository implements IStreamerRepository {
   async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
     if (results.length === 0) return;
     const orderedResults = [...results].sort((a, b) => a.channel_id.localeCompare(b.channel_id));
-    await this.getDb().transaction(async (tx) => {
-      for (const r of orderedResults) {
-        if (r.polled) {
-          await tx.run(
-            `UPDATE streamers SET
-               prev_value = ?, base_value = ?, activity_score = ?, broadcast_multiplier = ?,
-               broadcast_minutes = broadcast_minutes + ?,
-               broadcast_count = broadcast_count + ?,
-               chat_count = GREATEST(chat_count - ?, 0),
-               is_active = ?, follower_count = ?,
-               logo_url = ?,
-               last_broadcast_at = ?,
-               updated_at = UTC_TIMESTAMP()
-             WHERE channel_id = ?`,
-            r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
-            r.add_minutes, r.add_broadcast_count, r.consumed_chats,
-            r.is_active ? 1 : 0, r.follower_count, r.logo_url ?? null, r.last_broadcast_at ?? null, r.channel_id
-          );
-        } else {
-          await tx.run(
-            `UPDATE streamers SET
-               prev_value = ?, base_value = ?, activity_score = ?, broadcast_multiplier = ?,
-               broadcast_minutes = broadcast_minutes + ?,
-               broadcast_count = broadcast_count + ?,
-               chat_count = GREATEST(chat_count - ?, 0),
-               updated_at = UTC_TIMESTAMP()
-             WHERE channel_id = ?`,
-            r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
-            r.add_minutes, r.add_broadcast_count, r.consumed_chats, r.channel_id
-          );
-        }
-      }
-    });
+    const polledRows = orderedResults.filter((row) => row.polled);
+    const computeOnlyRows = orderedResults.filter((row) => !row.polled);
+    for (const chunk of this.chunk(polledRows, MysqlStreamerRepository.SCHEDULE_UPDATE_CHUNK_SIZE)) {
+      await this.applyScheduleUpdateChunk(chunk, true);
+    }
+    for (const chunk of this.chunk(computeOnlyRows, MysqlStreamerRepository.SCHEDULE_UPDATE_CHUNK_SIZE)) {
+      await this.applyScheduleUpdateChunk(chunk, false);
+    }
   }
 
   async bulkRecordValueHistory(points: { channel_id: string; value: number }[]): Promise<void> {
     if (points.length === 0) return;
-    await this.getDb().transaction(async (tx) => {
-      for (const p of points) {
-        await tx.run('INSERT INTO value_history (channel_id, value) VALUES (?, ?)', p.channel_id, p.value);
-      }
-    });
+    for (const chunk of this.chunk(points, MysqlStreamerRepository.VALUE_HISTORY_INSERT_CHUNK_SIZE)) {
+      const params: any[] = [];
+      const placeholders = chunk.map((point) => {
+        params.push(point.channel_id, point.value);
+        return '(?, ?)';
+      }).join(',');
+      await this.getDb().run(
+        `INSERT INTO value_history (channel_id, value) VALUES ${placeholders}`,
+        ...params
+      );
+    }
   }
 
   async pruneValueHistory(olderThanDays: number): Promise<void> {

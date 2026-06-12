@@ -120,6 +120,16 @@ const prepareMysqlStatement = (sql: string, params: any[]): { sql: string; param
 
 const MYSQL_TRANSACTION_MAX_ATTEMPTS = Math.max(1, Number(process.env.MYSQL_TRANSACTION_MAX_ATTEMPTS || 3));
 const MYSQL_LOCK_WAIT_TIMEOUT_SECONDS = Math.max(1, Number(process.env.MYSQL_LOCK_WAIT_TIMEOUT_SECONDS || 5));
+const MYSQL_SLOW_QUERY_LOG_MS = Math.max(50, Number(process.env.MYSQL_SLOW_QUERY_LOG_MS || 1000));
+const MYSQL_SLOW_QUERY_SQL_MAX_LENGTH = Math.max(120, Number(process.env.MYSQL_SLOW_QUERY_SQL_MAX_LENGTH || 500));
+const MYSQL_SLOW_QUERY_SAMPLE_SIZE = Math.max(1, Number(process.env.MYSQL_SLOW_QUERY_SAMPLE_SIZE || 20));
+
+const mysqlQueryStats = {
+  totalQueries: 0,
+  slowQueries: 0,
+  activeQueries: 0,
+  lastSlowQueries: [] as Array<{ duration_ms: number; sql: string; scope: string; at: string }>
+};
 
 const isRetryableMysqlTransactionError = (err: any): boolean => {
   const code = String(err?.code || '');
@@ -129,18 +139,60 @@ const isRetryableMysqlTransactionError = (err: any): boolean => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const compactSql = (sql: string) => {
+  const compacted = sql.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= MYSQL_SLOW_QUERY_SQL_MAX_LENGTH) return compacted;
+  return `${compacted.slice(0, MYSQL_SLOW_QUERY_SQL_MAX_LENGTH)}...<truncated:${compacted.length - MYSQL_SLOW_QUERY_SQL_MAX_LENGTH}>`;
+};
+
+const observeMysqlQuery = async <T>(
+  scope: string,
+  sql: string,
+  task: () => Promise<T>
+): Promise<T> => {
+  mysqlQueryStats.totalQueries += 1;
+  mysqlQueryStats.activeQueries += 1;
+  const startedAt = Date.now();
+  try {
+    return await task();
+  } finally {
+    const durationMs = Date.now() - startedAt;
+    mysqlQueryStats.activeQueries = Math.max(0, mysqlQueryStats.activeQueries - 1);
+    if (durationMs >= MYSQL_SLOW_QUERY_LOG_MS) {
+      mysqlQueryStats.slowQueries += 1;
+      const item = {
+        duration_ms: durationMs,
+        sql: compactSql(sql),
+        scope,
+        at: new Date().toISOString()
+      };
+      mysqlQueryStats.lastSlowQueries.unshift(item);
+      mysqlQueryStats.lastSlowQueries.splice(MYSQL_SLOW_QUERY_SAMPLE_SIZE);
+      console.warn('[MySQLSlowQuery]', item);
+    }
+  }
+};
+
+export const getMysqlQueryStats = () => ({
+  totalQueries: mysqlQueryStats.totalQueries,
+  slowQueries: mysqlQueryStats.slowQueries,
+  activeQueries: mysqlQueryStats.activeQueries,
+  slowQueryThresholdMs: MYSQL_SLOW_QUERY_LOG_MS,
+  lastSlowQueries: mysqlQueryStats.lastSlowQueries
+});
+
 export class MysqlDb {
   constructor(private readonly pool: Pool) {}
 
   async query<T extends RowDataPacket[] = RowDataPacket[]>(sql: string, params: any[] = []): Promise<T> {
     const statement = prepareMysqlStatement(sql, params);
-    const [rows] = await this.pool.execute<T>(statement.sql, statement.params);
+    const [rows] = await observeMysqlQuery('pool.query', statement.sql, () => this.pool.execute<T>(statement.sql, statement.params));
     return rows;
   }
 
   async all<T = any>(sql: string, ...args: any[]): Promise<T[]> {
     const statement = prepareMysqlStatement(sql, toParams(args));
-    const [rows] = await this.pool.execute<RowDataPacket[]>(statement.sql, statement.params);
+    const [rows] = await observeMysqlQuery('pool.all', statement.sql, () => this.pool.execute<RowDataPacket[]>(statement.sql, statement.params));
     return rows as T[];
   }
 
@@ -151,7 +203,7 @@ export class MysqlDb {
 
   async run(sql: string, ...args: any[]): Promise<MysqlRunResult> {
     const statement = prepareMysqlStatement(sql, toParams(args));
-    const [result] = await this.pool.execute<ResultSetHeader>(statement.sql, statement.params);
+    const [result] = await observeMysqlQuery('pool.run', statement.sql, () => this.pool.execute<ResultSetHeader>(statement.sql, statement.params));
     return {
       changes: result.affectedRows,
       affectedRows: result.affectedRows,
@@ -201,7 +253,7 @@ export class MysqlTx {
 
   async all<T = any>(sql: string, ...args: any[]): Promise<T[]> {
     const statement = prepareMysqlStatement(sql, toParams(args));
-    const [rows] = await this.conn.execute<RowDataPacket[]>(statement.sql, statement.params);
+    const [rows] = await observeMysqlQuery('tx.all', statement.sql, () => this.conn.execute<RowDataPacket[]>(statement.sql, statement.params));
     return rows as T[];
   }
 
@@ -212,7 +264,7 @@ export class MysqlTx {
 
   async run(sql: string, ...args: any[]): Promise<MysqlRunResult> {
     const statement = prepareMysqlStatement(sql, toParams(args));
-    const [result] = await this.conn.execute<ResultSetHeader>(statement.sql, statement.params);
+    const [result] = await observeMysqlQuery('tx.run', statement.sql, () => this.conn.execute<ResultSetHeader>(statement.sql, statement.params));
     return {
       changes: result.affectedRows,
       affectedRows: result.affectedRows,

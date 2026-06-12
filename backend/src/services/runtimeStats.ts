@@ -3,6 +3,7 @@ import { getRealtimeStreamStats } from './realtimeStream';
 import { getPlayControllerStats } from '../controllers/playController';
 import { getSoftBanStats } from '../middlewares/softBan';
 import { isLiveWorkerProcess } from './processRole';
+import { getMysqlQueryStats } from './mysqlDb';
 
 let chatStatsProvider: (() => any) | null = null;
 
@@ -45,6 +46,9 @@ export const getRuntimeStats = () => {
     chat: getChatStats(),
     caches: {
       play: getPlayControllerStats()
+    },
+    db: {
+      mysql: getMysqlQueryStats()
     },
     protection: {
       softBan: getSoftBanStats()

@@ -156,7 +156,7 @@ export const FriendTab: React.FC = () => {
   const [chatMessage, setChatMessage] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [chatImageUploading, setChatImageUploading] = useState(false);
-  const [chatSocketStatus, setChatSocketStatus] = useState<'connecting' | 'connected' | 'fallback'>('fallback');
+  const [chatSocketStatus, setChatSocketStatus] = useState<'connecting' | 'connected' | 'reconnecting' | 'unsupported'>('connecting');
   const [joinedRoomId, setJoinedRoomId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
@@ -535,35 +535,27 @@ export const FriendTab: React.FC = () => {
   const sendChat = async () => {
     const text = chatMessage.trim();
     if (!activeChatRoom || !text) return;
+    if (chatSocketStatus !== 'connected') {
+      toast('채팅 서버에 재연결 중입니다. 잠시 후 다시 보내주세요.', 'info');
+      return;
+    }
     setChatSending(true);
     try {
       const wasDraft = isDraftRoom(activeChatRoom);
-      if (wasDraft && chatSocketStatus === 'connected') {
+      if (wasDraft) {
         if (sendSocket({ type: 'open_send', user_id: activeChatRoom.other_user.id, body: text })) {
           setChatMessage('');
           return;
         }
+        toast('채팅 서버에 재연결 중입니다. 잠시 후 다시 보내주세요.', 'info');
+        return;
       }
 
-      const room = wasDraft ? await materializeChatRoom(activeChatRoom.other_user.id) : activeChatRoom;
-      if (!room) return;
-
-      if (chatSocketStatus === 'connected' && sendSocket({ type: 'send', room_id: room.id, body: text })) {
+      if (sendSocket({ type: 'send', room_id: activeChatRoom.id, body: text })) {
         setChatMessage('');
         return;
       }
-
-      const res = await apiFetch(`/friends/rooms/${room.id}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ body: text })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast(data.message || '메시지를 보낼 수 없습니다.', 'error');
-        return;
-      }
-      setChatMessage('');
-      await fetchChatMessages(room.id, 'initial', false);
+      toast('채팅 서버에 재연결 중입니다. 잠시 후 다시 보내주세요.', 'info');
     } catch {
       toast('메시지 전송에 실패했습니다.', 'error');
     } finally {
@@ -575,6 +567,10 @@ export const FriendTab: React.FC = () => {
     if (!file || !activeChatRoom) return;
     if (!file.type.startsWith('image/')) {
       toast('이미지 파일만 첨부할 수 있습니다.', 'error');
+      return;
+    }
+    if (chatSocketStatus !== 'connected') {
+      toast('채팅 서버에 재연결 중입니다. 잠시 후 다시 첨부해주세요.', 'info');
       return;
     }
     setChatImageUploading(true);
@@ -596,11 +592,7 @@ export const FriendTab: React.FC = () => {
       }
       applyIncomingMessage(data);
       void fetchRecentAttachments(false);
-      if (chatSocketStatus === 'connected') {
-        sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
-      } else {
-        await fetchChatMessages(room.id, 'initial', false);
-      }
+      sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
       await fetchFriends(false);
     } catch {
       toast('이미지 첨부에 실패했습니다.', 'error');
@@ -647,6 +639,10 @@ export const FriendTab: React.FC = () => {
 
   const sendRecentAttachment = async (attachment: RecentChatAttachment) => {
     if (!activeChatRoom || recentAttachmentSendingId) return;
+    if (chatSocketStatus !== 'connected') {
+      toast('채팅 서버에 재연결 중입니다. 잠시 후 다시 보내주세요.', 'info');
+      return;
+    }
     setRecentAttachmentSendingId(attachment.id);
     try {
       const wasDraft = isDraftRoom(activeChatRoom);
@@ -666,11 +662,7 @@ export const FriendTab: React.FC = () => {
       applyIncomingMessage(data);
       setRecentAttachmentsOpen(false);
       void fetchRecentAttachments(false);
-      if (chatSocketStatus === 'connected') {
-        sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
-      } else {
-        await fetchChatMessages(room.id, 'initial', false);
-      }
+      sendSocket({ type: 'announce', room_id: room.id, message_id: data.id });
       await fetchFriends(false);
     } catch {
       toast('이미지 재전송에 실패했습니다.', 'error');
@@ -878,7 +870,7 @@ export const FriendTab: React.FC = () => {
 
   useEffect(() => {
     if (!user || typeof WebSocket === 'undefined') {
-      setChatSocketStatus('fallback');
+      setChatSocketStatus('unsupported');
       return;
     }
 
@@ -921,7 +913,7 @@ export const FriendTab: React.FC = () => {
         }
         if (chatSocketRef.current === socket) chatSocketRef.current = null;
         if (cancelled) return;
-        setChatSocketStatus('fallback');
+        setChatSocketStatus('reconnecting');
         setJoinedRoomId(null);
         const delay = Math.min(15_000, 1000 + reconnectAttempts * 1500);
         reconnectAttempts += 1;
@@ -956,21 +948,7 @@ export const FriendTab: React.FC = () => {
       if (sendSocket({ type: 'read', room_id: activeChatRoom.id })) syncNotificationsAfterChatRead();
       return;
     }
-    fetchChatMessages(activeChatRoom.id);
-    const timer = window.setInterval(() => fetchChatMessages(activeChatRoom.id, 'delta', false), 5000);
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        fetchChatMessages(activeChatRoom.id, 'delta', false);
-      } else {
-        apiFetch(`/friends/rooms/${activeChatRoom.id}/viewing`, { method: 'DELETE' }).catch(() => { /* noop */ });
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      apiFetch(`/friends/rooms/${activeChatRoom.id}/viewing`, { method: 'DELETE' }).catch(() => { /* noop */ });
-    };
+    apiFetch(`/friends/rooms/${activeChatRoom.id}/viewing`, { method: 'DELETE' }).catch(() => { /* noop */ });
   }, [activeChatRoom?.id, chatSocketStatus]);
 
   useEffect(() => {
@@ -1267,7 +1245,13 @@ export const FriendTab: React.FC = () => {
   );
 
   const activeRoomIsReal = activeChatRoom && !isDraftRoom(activeChatRoom);
-  const activeRoomRealtime = chatSocketStatus === 'connected' && (!activeRoomIsReal || joinedRoomId === activeChatRoom.id);
+  const chatSendReady = chatSocketStatus === 'connected';
+  const activeRoomRealtime = chatSendReady && (!activeRoomIsReal || joinedRoomId === activeChatRoom.id);
+  const chatSocketStatusLabel = activeRoomRealtime
+    ? '실시간'
+    : chatSocketStatus === 'unsupported'
+      ? '실시간 미지원'
+      : '재연결 중';
   const chatRoomRail = (
     <aside className={`${activeChatRoom ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col bg-secondary/20 p-3 lg:h-full lg:border-r lg:border-border/70 lg:p-4`}>
       <div className="mb-3 flex items-center justify-between gap-2 lg:mb-3">
@@ -1375,8 +1359,8 @@ export const FriendTab: React.FC = () => {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-full border border-border bg-secondary/30 px-2.5 py-1 text-[10px] font-black text-muted-foreground sm:inline-flex">
-              <span className={`h-2 w-2 rounded-full ${activeRoomRealtime ? 'bg-emerald-400' : chatSocketStatus === 'connecting' || chatSocketStatus === 'connected' ? 'bg-amber-400' : 'bg-muted-foreground/40'}`} />
-              {activeRoomRealtime ? '실시간' : chatSocketStatus === 'connecting' || chatSocketStatus === 'connected' ? '연결 중' : '폴백'}
+              <span className={`h-2 w-2 rounded-full ${activeRoomRealtime ? 'bg-emerald-400' : chatSocketStatus === 'unsupported' ? 'bg-muted-foreground/40' : 'bg-amber-400'}`} />
+              {chatSocketStatusLabel}
             </span>
             <button type="button" onClick={() => fetchFriends()} disabled={friendLoading} className="flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground hover:bg-secondary disabled:opacity-50" aria-label="새로고침">
               <RefreshCw className={`h-4 w-4 ${friendLoading ? 'animate-spin' : ''}`} />
@@ -1567,7 +1551,7 @@ export const FriendTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => chatImageInputRef.current?.click()}
-                  disabled={!activeChatRoom.can_send || chatImageUploading || Boolean(recentAttachmentSendingId)}
+                  disabled={!activeChatRoom.can_send || !chatSendReady || chatImageUploading || Boolean(recentAttachmentSendingId)}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary/40 text-muted-foreground transition hover:bg-secondary disabled:opacity-45"
                   aria-label="이미지 첨부"
                 >
@@ -1576,7 +1560,7 @@ export const FriendTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={toggleRecentAttachments}
-                  disabled={!activeChatRoom.can_send || chatImageUploading || Boolean(recentAttachmentSendingId)}
+                  disabled={!activeChatRoom.can_send || !chatSendReady || chatImageUploading || Boolean(recentAttachmentSendingId)}
                   className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition disabled:opacity-45 ${recentAttachmentsOpen ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-secondary/40 text-muted-foreground hover:bg-secondary'}`}
                   aria-label="최근 첨부함"
                 >
@@ -1595,7 +1579,7 @@ export const FriendTab: React.FC = () => {
                   placeholder="메시지 입력"
                   className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-border bg-secondary/35 px-3 py-2 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
                 />
-                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || chatSending || chatImageUploading || Boolean(recentAttachmentSendingId) || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
+                <button type="button" onClick={sendChat} disabled={!activeChatRoom.can_send || !chatSendReady || chatSending || chatImageUploading || Boolean(recentAttachmentSendingId) || !chatMessage.trim()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 disabled:opacity-45" aria-label="메시지 보내기">
                   <Send className="h-4 w-4" />
                 </button>
               </div>
