@@ -1,16 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { CORS_ALLOWED_ORIGINS } from '../config';
+import { CORS_ALLOWED_ORIGINS, normalizeOrigin } from '../config';
 import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-const normalizeOrigin = (value: string): string | null => {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-};
 
 const getRequestOrigin = (req: Request): string => `${req.protocol}://${req.get('host')}`;
 

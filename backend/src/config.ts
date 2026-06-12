@@ -33,15 +33,37 @@ export const JWT_SECRET = requireEnv('JWT_SECRET');
 export const TOKEN_ENCRYPTION_SECRET =
   process.env.TOKEN_ENCRYPTION_KEY || JWT_SECRET;
 
+export const normalizeOrigin = (value: string | undefined | null): string | null => {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
+const DEFAULT_CORS_ALLOWED_ORIGINS = [
+  'https://chikapo.yuaru.com',
+  'https://dev.chikapo.yuaru.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
+];
+
 /**
  * CORS 허용 오리진 화이트리스트.
  * CORS_ALLOWED_ORIGINS="https://a.com,https://b.com" 형태로 콤마 구분.
- * 미설정 시 개발 편의를 위해 localhost(3000)만 허용합니다.
+ * 미설정 시 운영 기본 도메인과 로컬 개발 도메인을 허용합니다.
  */
 export const CORS_ALLOWED_ORIGINS: string[] = (
   process.env.CORS_ALLOWED_ORIGINS ||
-  'http://localhost:3000,http://127.0.0.1:3000'
+  DEFAULT_CORS_ALLOWED_ORIGINS.join(',')
 )
   .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
+  .map((o) => normalizeOrigin(o.trim()))
+  .filter((origin): origin is string => Boolean(origin))
+  .filter((origin, index, origins) => origins.indexOf(origin) === index);
+
+export const isConfiguredCorsOriginAllowed = (origin: string | undefined | null): boolean => {
+  const normalized = normalizeOrigin(origin);
+  return Boolean(normalized && CORS_ALLOWED_ORIGINS.includes(normalized));
+};

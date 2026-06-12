@@ -1,7 +1,7 @@
 import http from 'http';
 import jwt from 'jsonwebtoken';
 import WebSocket, { WebSocketServer } from 'ws';
-import { CORS_ALLOWED_ORIGINS, JWT_SECRET } from '../config';
+import { JWT_SECRET, isConfiguredCorsOriginAllowed } from '../config';
 import { createRealtimeNotification } from '../controllers/notificationController';
 import { sendPushToUser } from '../controllers/pushController';
 import { userRepository } from '../repositories';
@@ -325,7 +325,7 @@ export const attachFriendChatSocketServer = (server: http.Server, path = '/chat'
     if (url.pathname !== path) return;
 
     const origin = req.headers.origin;
-    if (origin && !CORS_ALLOWED_ORIGINS.includes(origin)) {
+    if (origin && !isConfiguredCorsOriginAllowed(origin)) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;

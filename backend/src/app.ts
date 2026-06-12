@@ -11,7 +11,7 @@ import { initDatabaseConnection } from './services/db';
 import { initRepositories } from './repositories';
 import apiRouter from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
-import { CORS_ALLOWED_ORIGINS, IS_PRODUCTION } from './config';
+import { IS_PRODUCTION, isConfiguredCorsOriginAllowed } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
 import { rateLimit } from './middlewares/rateLimit';
 import { apiAccessGuard } from './middlewares/apiAccessGuard';
@@ -185,7 +185,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // 그 외 일반 API 요청들은 환경변수로 지정된 오리진 화이트리스트만 허용하며, 쿠키 사용을 위해 credentials를 허용합니다.
   cors({
     origin: (origin, callback) => {
-      const isAllowed = !origin || CORS_ALLOWED_ORIGINS.includes(origin);
+      const isAllowed = !origin || isConfiguredCorsOriginAllowed(origin);
       callback(null, isAllowed);
     },
     credentials: true

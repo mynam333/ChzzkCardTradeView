@@ -1,13 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { CORS_ALLOWED_ORIGINS } from '../config';
-
-const normalizeOrigin = (value: string): string | null => {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-};
+import { CORS_ALLOWED_ORIGINS, normalizeOrigin } from '../config';
 
 const allowedOrigins = () =>
   new Set(CORS_ALLOWED_ORIGINS.map((origin) => normalizeOrigin(origin)).filter(Boolean) as string[]);
