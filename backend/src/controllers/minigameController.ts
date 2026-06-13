@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import crypto from 'crypto';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { UserMinigameTicket, MinigameSession } from '../repositories/interfaces';
+import { getPuzzleExcludedImageKeys, normalizePuzzleImageKey } from '../services/puzzleImageExclusionService';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
@@ -367,6 +368,13 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     && Number.isFinite(Number(req.body.force_star))
     ? Math.max(0, Math.min(5, Math.floor(Number(req.body.force_star))))
     : null;
+  const forceImageUrl = practiceMode
+    && game_type === 'puzzle'
+    && typeof req.body.force_image_url === 'string'
+    && req.body.force_image_url.trim().length > 0
+    && req.body.force_image_url.trim().length <= 2048
+    ? req.body.force_image_url.trim()
+    : '';
 
   try {
     const dailyMinigame = getDailyMinigame();
@@ -472,9 +480,34 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
     } else if (game_type === 'puzzle') {
       // 카드 퍼즐: 가로 3칸 세로 4칸 (정사각형 조각)
-      const correctStreamer = forcedStreamer || streamers[Math.floor(Math.random() * streamers.length)];
-      const star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6);
-      const imageUrl = getCardImageUrl(correctStreamer, star);
+      let correctStreamer = forcedStreamer || streamers[Math.floor(Math.random() * streamers.length)];
+      let star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6);
+      let imageUrl = forceImageUrl || getCardImageUrl(correctStreamer, star);
+
+      if (!practiceMode && !forcedStreamer) {
+        const excludedImageKeys = await getPuzzleExcludedImageKeys().catch((err) => {
+          console.warn('[MinigameController] 퍼즐 제외 이미지 목록 조회 실패, 필터 없이 진행합니다:', err?.message || err);
+          return new Set<string>();
+        });
+        const candidates = streamers.flatMap((streamer) =>
+          Array.from({ length: 6 }, (_, candidateStar) => {
+            const candidateImageUrl = getCardImageUrl(streamer, candidateStar);
+            if (!candidateImageUrl) return null;
+            const imageKey = normalizePuzzleImageKey(candidateImageUrl);
+            if (imageKey && excludedImageKeys.has(imageKey)) return null;
+            return { streamer, star: candidateStar, imageUrl: candidateImageUrl };
+          }).filter(Boolean) as Array<{ streamer: any; star: number; imageUrl: string }>
+        );
+
+        if (candidates.length === 0) {
+          return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 3x4 퍼즐 이미지가 없습니다.' });
+        }
+
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        correctStreamer = chosen.streamer;
+        star = chosen.star;
+        imageUrl = chosen.imageUrl;
+      }
 
       targetData = {
         correct_id: correctStreamer.channel_id,

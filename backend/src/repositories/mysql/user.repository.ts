@@ -3,13 +3,7 @@ import { MysqlTx } from '../../services/mysqlDb';
 import { fuzzyScore, isExactSearchMatch } from '../../utils/search';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { DeletedUserAccount, IUserRepository, User, UserRanking } from '../interfaces';
-
-const toMysqlDateTime = (value: string | null | undefined): string | null => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 19).replace('T', ' ');
-};
+import { parseMysqlDateTimeMs, toMysqlDateTime } from './dateUtils';
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -157,11 +151,19 @@ export class MysqlUserRepository implements IUserRepository {
       if (!row) return null;
       if (segmentStartIso === null) return this.mapUser(row);
 
-      const shouldGrant = !row.last_free_draw || new Date(row.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+      const lastFreeDrawMs = parseMysqlDateTimeMs(row.last_free_draw);
+      const segmentStartMs = parseMysqlDateTimeMs(segmentStartIso);
+      const shouldGrant = !row.last_free_draw || (
+        Number.isFinite(lastFreeDrawMs) &&
+        Number.isFinite(segmentStartMs) &&
+        lastFreeDrawMs < segmentStartMs
+      );
       if (!shouldGrant) return this.mapUser(row);
 
       const currentTickets = Number(row.free_draw_tickets || 0);
-      const diffMs = row.last_free_draw ? new Date(segmentStartIso).getTime() - new Date(row.last_free_draw).getTime() : 0;
+      const diffMs = row.last_free_draw && Number.isFinite(lastFreeDrawMs) && Number.isFinite(segmentStartMs)
+        ? segmentStartMs - lastFreeDrawMs
+        : 0;
       const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
       const grantCount = row.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
       const nextTickets = Math.min(safeMaxStack, currentTickets + grantCount);

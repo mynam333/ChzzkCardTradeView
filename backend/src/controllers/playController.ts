@@ -16,6 +16,7 @@ import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
 import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService';
 import { getDbMode, getMysqlDb, getSqliteDb } from '../services/db';
+import { acquireSchedulerLock } from '../services/schedulerLock';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -603,6 +604,18 @@ export const clearRankingCaches = () => {
 // 무키워드(전체) 랭킹 풀 캐시. 기본 랭킹 로드와 검색 시 유사도 보강용 풀이 공유합니다.
 // (검색은 키워드별 결과 + 동일한 전체 풀이 필요하므로, 풀을 캐싱하면 무거운 집계가 반복되지 않음)
 const rankingPoolCache = new Map<string, { data: any[]; expiresAt: number }>();
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForUserRankingSnapshot = async (attempts = 8, delayMs = 250): Promise<boolean> => {
+  if (getDbMode() !== 'MYSQL') return false;
+  const db = getMysqlDb();
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const row = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM user_asset_rankings');
+    if (Number(row?.c || 0) > 0) return true;
+    await sleep(delayMs);
+  }
+  return false;
+};
 
 const refreshUserRankingSnapshot = async (): Promise<boolean> => {
   const mode = getDbMode();
@@ -626,40 +639,48 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
   userRankingSnapshotInFlight = (async () => {
     if (mode === 'MYSQL') {
       const db = getMysqlDb();
-      await db.run('DELETE FROM user_asset_rankings');
-      await db.run(`
-        INSERT INTO user_asset_rankings
-          (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
-           card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
-        WITH NormalizedUsers AS (
-          SELECT u.id, u.username, u.avatar_url, u.role, u.point,
-                 ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
-                 ${mysqlDateValueSql('u.banned_until')} AS banned_until,
-                 u.ban_reason, u.status_message,
-                 ${mysqlDateValueSql('u.created_at')} AS created_at
-            FROM users u
-        ),
-        UserCardValues AS (
-          SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                 u.status_message, u.created_at,
-                 COUNT(uc.id) AS card_count,
-                 COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
-            FROM NormalizedUsers u
-            LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
-            LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
-           WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
-           GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
-        ),
-        RankedUsers AS (
-          SELECT *,
-                 ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
-                 ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
-            FROM UserCardValues
-        )
-        SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
-               card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
-          FROM RankedUsers
-      `);
+      const releaseLock = await acquireSchedulerLock('snapshot:user-ranking', 60_000);
+      if (!releaseLock) return waitForUserRankingSnapshot();
+      try {
+        await db.transaction(async (tx) => {
+          await tx.run('DELETE FROM user_asset_rankings');
+          await tx.run(`
+            INSERT INTO user_asset_rankings
+              (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+               card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+            WITH NormalizedUsers AS (
+              SELECT u.id, u.username, u.avatar_url, u.role, u.point,
+                     ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
+                     ${mysqlDateValueSql('u.banned_until')} AS banned_until,
+                     u.ban_reason, u.status_message,
+                     ${mysqlDateValueSql('u.created_at')} AS created_at
+                FROM users u
+            ),
+            UserCardValues AS (
+              SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                     u.status_message, u.created_at,
+                     COUNT(uc.id) AS card_count,
+                     COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+                FROM NormalizedUsers u
+                LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
+                LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
+               WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
+               GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
+            ),
+            RankedUsers AS (
+              SELECT *,
+                     ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
+                     ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
+                FROM UserCardValues
+            )
+            SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+                   card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
+              FROM RankedUsers
+          `);
+        });
+      } finally {
+        await releaseLock().catch(() => undefined);
+      }
     } else {
       const db = getSqliteDb();
       db.transaction(() => {

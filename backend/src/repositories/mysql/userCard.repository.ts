@@ -2,6 +2,7 @@ import { getMysqlDb } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { IUserCardRepository } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
+import { parseMysqlDateTimeMs, toMysqlDateTime } from './dateUtils';
 
 export class MysqlUserCardRepository implements IUserCardRepository {
   private getDb() {
@@ -46,13 +47,21 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       let freeDrawSource: 'unlimited' | 'reset' | 'bonus' | 'point' = 'point';
 
       if (segmentStartIso !== null) {
-        const shouldGrant = !user.last_free_draw || new Date(user.last_free_draw).getTime() < new Date(segmentStartIso).getTime();
+        const lastFreeDrawMs = parseMysqlDateTimeMs(user.last_free_draw);
+        const segmentStartMs = parseMysqlDateTimeMs(segmentStartIso);
+        const shouldGrant = !user.last_free_draw || (
+          Number.isFinite(lastFreeDrawMs) &&
+          Number.isFinite(segmentStartMs) &&
+          lastFreeDrawMs < segmentStartMs
+        );
         if (shouldGrant) {
-          const diffMs = user.last_free_draw ? new Date(segmentStartIso).getTime() - new Date(user.last_free_draw).getTime() : 0;
+          const diffMs = user.last_free_draw && Number.isFinite(lastFreeDrawMs) && Number.isFinite(segmentStartMs)
+            ? segmentStartMs - lastFreeDrawMs
+            : 0;
           const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
           const grantCount = user.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
           nextFreeTickets = Math.min(safeMaxFreeTickets, nextFreeTickets + grantCount);
-          await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextFreeTickets, segmentStartIso, userId);
+          await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextFreeTickets, toMysqlDateTime(segmentStartIso), userId);
         }
       }
 

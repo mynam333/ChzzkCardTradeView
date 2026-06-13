@@ -1066,7 +1066,7 @@ export const ArcadeTab: React.FC = () => {
   const handleStartGame = async (
     type: GameType,
     practiceMode = false,
-    override?: { channelId?: string; star?: number | null; blur?: string | null }
+    override?: { channelId?: string; star?: number | null; blur?: string | null; imageUrl?: string | null }
   ) => {
     if (!practiceMode && (!todayGame || type !== todayGame)) {
       toast('오늘의 미니게임이 변경되었습니다. 최신 게임을 다시 불러옵니다.', 'warning');
@@ -1105,7 +1105,8 @@ export const ArcadeTab: React.FC = () => {
           practice_mode: practiceMode,
           // 연습 모드 한정: 특정 스트리머/별 이미지를 강제 지정(테스트용)
           ...(practiceMode && override?.channelId ? { force_channel_id: override.channelId } : {}),
-          ...(practiceMode && override?.star != null ? { force_star: override.star } : {})
+          ...(practiceMode && override?.star != null ? { force_star: override.star } : {}),
+          ...(practiceMode && type === 'puzzle' && override?.imageUrl ? { force_image_url: override.imageUrl } : {})
         })
       });
 
@@ -1186,7 +1187,7 @@ export const ArcadeTab: React.FC = () => {
 
   // URL 파라미터로 연습 게임을 자동 시작합니다 (특정 유저·별 이미지 테스트용).
   // 예) /arcade?practice=quiz&channel=<channel_id>&star=3&blur=motion
-  //     practice=quiz|puzzle|match (필수), channel=스트리머 channel_id, star=0~5, blur=(퀴즈) gaussian|mosaic|motion|radial
+  //     practice=quiz|puzzle|match (필수), channel=스트리머 channel_id, star=0~5, blur=(퀴즈) gaussian|mosaic|motion|radial, image=(퍼즐) 스냅샷 URL
   useEffect(() => {
     if (autoStartRef.current || !user) return;
     const practiceType = searchParams.get('practice');
@@ -1199,8 +1200,9 @@ export const ArcadeTab: React.FC = () => {
       ? Math.max(0, Math.min(5, parseInt(starRaw, 10) || 0))
       : null;
     const blur = searchParams.get('blur');
+    const imageUrl = searchParams.get('image');
 
-    handleStartGame(practiceType as GameType, true, { channelId, star, blur });
+    handleStartGame(practiceType as GameType, true, { channelId, star, blur, imageUrl });
     router.replace('/arcade'); // 파라미터 정리 (새로고침 시 재실행 방지)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, searchParams]);

@@ -199,6 +199,7 @@ export interface AdminReport {
   created_at: string | null;
   reporter_username: string | null;
   streamer_name: string | null;
+  puzzle_excluded?: boolean;
 }
 
 /** 쿠폰 */

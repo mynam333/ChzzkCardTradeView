@@ -161,6 +161,7 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
       'push_subscriptions',
       'push_notifications',
       'card_reports',
+      'puzzle_excluded_images',
       'notifications',
       'shop_items',
       'user_cosmetics',
@@ -188,6 +189,8 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     ensureUniqueIndex(db, 'shop_items', ['id'], 'idx_shop_items_id_unique');
     ensureUniqueIndex(db, 'coupons', ['id'], 'idx_coupons_id_unique');
     ensureUniqueIndex(db, 'user_cards', ['id'], 'idx_user_cards_id_unique');
+    ensureUniqueIndex(db, 'puzzle_excluded_images', ['id'], 'idx_puzzle_excluded_images_id_unique');
+    ensureUniqueIndex(db, 'puzzle_excluded_images', ['image_key'], 'idx_puzzle_excluded_images_key_unique');
     ensureUniqueIndex(db, 'point_ledger_entries', ['id'], 'idx_point_ledger_entries_id_unique');
     ensureUniqueIndex(db, 'subscription_title_rules', ['id'], 'idx_subscription_title_rules_id_unique');
     ensureUniqueIndex(db, 'subscription_title_states', ['user_id', 'rule_id'], 'idx_subscription_title_states_user_rule_unique');
@@ -297,6 +300,22 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
   await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS puzzle_excluded_images (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      image_key VARCHAR(512) NOT NULL,
+      image_url TEXT NOT NULL,
+      source_report_id BIGINT NULL,
+      channel_id VARCHAR(191) NULL,
+      star INT NULL,
+      reason VARCHAR(500) NULL,
+      created_by VARCHAR(191) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_puzzle_excluded_images_key (image_key),
+      INDEX idx_puzzle_excluded_images_channel_star (channel_id, star),
+      INDEX idx_puzzle_excluded_images_report (source_report_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
   await ensureMysqlColumn(db, 'user_titles', 'grant_source', "grant_source VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER is_equipped");
   await ensureMysqlIndex(db, 'user_titles', 'idx_user_titles_grant_source', '(grant_source, title_id)');
   await db.run(`
@@ -1085,6 +1104,19 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] card_reports 테이블에 star(신고 카드 별) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE card_reports ADD COLUMN star INTEGER DEFAULT 0;");
       }
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS puzzle_excluded_images (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        image_key TEXT NOT NULL UNIQUE,
+        image_url TEXT NOT NULL,
+        source_report_id INTEGER,
+        channel_id TEXT,
+        star INTEGER,
+        reason TEXT,
+        created_by TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );`);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_puzzle_excluded_images_channel_star ON puzzle_excluded_images(channel_id, star);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_puzzle_excluded_images_report ON puzzle_excluded_images(source_report_id);");
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS streamer_registration_blocks (
         channel_id TEXT PRIMARY KEY,
         reason TEXT NOT NULL,

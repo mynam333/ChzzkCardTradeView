@@ -36,6 +36,10 @@ export const rateLimit = (options: { windowMs: number; max: number; key: string 
   const { windowMs, max, key } = options;
 
   return (req: Request, res: Response, next: NextFunction) => {
+    if (max <= 0) {
+      return next();
+    }
+
     const ip = getClientIp(req);
     const bucketKey = `${key}:${ip}`;
     const now = Date.now();

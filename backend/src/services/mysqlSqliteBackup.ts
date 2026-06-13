@@ -25,6 +25,7 @@ const BACKUP_TABLES = [
   'push_subscriptions',
   'push_notifications',
   'card_reports',
+  'puzzle_excluded_images',
   'streamer_registration_blocks',
   'notifications',
   'user_cosmetics',

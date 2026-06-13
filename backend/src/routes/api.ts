@@ -24,6 +24,7 @@ import {
   bulkUpdateBans,
   getReports,
   resolveReport,
+  excludeReportImageFromPuzzle,
   getFreeDrawInterval,
   setFreeDrawInterval,
   getDrawCost,
@@ -175,27 +176,35 @@ import { streamerRepository, titleRepository } from '../repositories';
 import { rateLimit } from '../middlewares/rateLimit';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
 import { shouldServeImageProxyInApi } from '../services/processRole';
+import { bytesToWholeMb, readBytesEnv, readIntegerEnv } from '../utils/env';
 
 const router = Router();
 router.use(maintenanceCheckMiddleware);
 
 // 라우트별 레이트 리미터 (IP 기준 고정 윈도우)
-const drawLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'draw' });
-const searchLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'search' });
-const tradeLimiter = rateLimit({ windowMs: 60_000, max: 30, key: 'trade' });
-const couponLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'coupon' });
-const authLimiter = rateLimit({ windowMs: 60_000, max: 15, key: 'auth' });
-const registerLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'register' });
-const reportLimiter = rateLimit({ windowMs: 60_000, max: 10, key: 'report' });
-const chatImageLimiter = rateLimit({ windowMs: 60_000, max: 12, key: 'chat-image' });
+const defaultRouteRateLimitWindowMs = readIntegerEnv('ROUTE_RATE_LIMIT_WINDOW_MS', 60_000, { min: 1000 });
+const routeRateLimitWindowMs = (name: string) => readIntegerEnv(name, defaultRouteRateLimitWindowMs, { min: 1000 });
+const routeRateLimitMax = (name: string, fallback: number) => readIntegerEnv(name, fallback, { min: 0 });
 
-// Multer 파일 메모리 스토리지 세팅 (최대 5MB 제한 + 이미지 MIME 사전 필터)
+const drawLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('DRAW_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('DRAW_RATE_LIMIT_MAX', 180), key: 'draw' });
+const searchLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('SEARCH_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('SEARCH_RATE_LIMIT_MAX', 180), key: 'search' });
+const tradeLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('TRADE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('TRADE_RATE_LIMIT_MAX', 180), key: 'trade' });
+const couponLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('COUPON_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('COUPON_RATE_LIMIT_MAX', 60), key: 'coupon' });
+const authLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('AUTH_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('AUTH_RATE_LIMIT_MAX', 60), key: 'auth' });
+const registerLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REGISTER_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REGISTER_RATE_LIMIT_MAX', 60), key: 'register' });
+const reportLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REPORT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REPORT_RATE_LIMIT_MAX', 60), key: 'report' });
+const chatImageLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('CHAT_IMAGE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('CHAT_IMAGE_RATE_LIMIT_MAX', 60), key: 'chat-image' });
+
+const STREAMER_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('STREAMER_IMAGE_MAX_UPLOAD_BYTES', 20 * 1024 * 1024, { minBytes: 1024 * 1024 });
+const CHAT_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_IMAGE_MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { minBytes: 1024 * 1024 });
+
+// Multer 파일 메모리 스토리지 세팅 (이미지 MIME 사전 필터)
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: STREAMER_IMAGE_MAX_UPLOAD_BYTES },
   fileFilter: (_req, file, cb) => {
-    // 비이미지 업로드를 5MB 버퍼링 전에 조기 차단 (sharp 처리 이전 1차 방어)
+    // 비이미지 업로드를 버퍼링 전에 조기 차단 (sharp 처리 이전 1차 방어)
     if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
     else cb(new Error('이미지 파일(JPEG/PNG/WebP/GIF/AVIF)만 업로드할 수 있습니다.'));
   }
@@ -206,7 +215,7 @@ const uploadSingleImage = (req: any, res: any, next: any) => {
   upload.single('image')(req, res, (err: any) => {
     if (err) {
       const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
-        ? '이미지 용량은 5MB 이하만 업로드할 수 있습니다.'
+        ? `이미지 용량은 ${bytesToWholeMb(STREAMER_IMAGE_MAX_UPLOAD_BYTES)}MB 이하만 업로드할 수 있습니다.`
         : (err.message || '파일 업로드 중 오류가 발생했습니다.');
       return res.status(400).json({ error: 'BadRequest', message: msg });
     }
@@ -216,7 +225,7 @@ const uploadSingleImage = (req: any, res: any, next: any) => {
 
 const chatImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 12 * 1024 * 1024 },
+  limits: { fileSize: CHAT_IMAGE_MAX_UPLOAD_BYTES },
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
     else cb(new Error('이미지 파일(JPEG/PNG/WebP/GIF/AVIF)만 첨부할 수 있습니다.'));
@@ -227,7 +236,7 @@ const uploadChatImage = (req: any, res: any, next: any) => {
   chatImageUpload.single('image')(req, res, (err: any) => {
     if (err) {
       const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
-        ? '채팅 이미지는 12MB 이하만 첨부할 수 있습니다.'
+        ? `채팅 이미지는 ${bytesToWholeMb(CHAT_IMAGE_MAX_UPLOAD_BYTES)}MB 이하만 첨부할 수 있습니다.`
         : (err.message || '이미지 첨부 중 오류가 발생했습니다.');
       return res.status(400).json({ error: 'BadRequest', message: msg });
     }
@@ -567,6 +576,9 @@ router.get('/admin/reports', authMiddleware, adminMiddleware, getReports);
 
 // 특정 신고 건에 대한 종결 처리 상태 갱신
 router.post('/admin/reports/:report_id/resolve', authMiddleware, adminMiddleware, resolveReport);
+
+// 신고 스냅샷 이미지를 3x4 퍼즐 출제 제외 목록에 등록
+router.post('/admin/reports/:report_id/puzzle-exclude', authMiddleware, adminMiddleware, excludeReportImageFromPuzzle);
 
 // 관리자 대시보드 통계
 router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);

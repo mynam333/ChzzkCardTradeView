@@ -6,10 +6,11 @@ import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
 import { ensureDirectory, getUploadsDir } from './storagePaths';
+import { readBytesEnv } from '../utils/env';
 
 export const CHAT_ATTACHMENT_MAX_ACTIVE_BYTES = 100 * 1024 * 1024;
 export const CHAT_ATTACHMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const CHAT_GIF_MAX_UPLOAD_BYTES = Number(process.env.CHAT_GIF_MAX_UPLOAD_BYTES || 8 * 1024 * 1024);
+const CHAT_GIF_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_GIF_MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { minBytes: 1024 * 1024 });
 const clampNumber = (value: number, min: number, max: number, fallback: number) => (
   Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
 );

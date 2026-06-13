@@ -760,6 +760,33 @@ export const AdminTab: React.FC = () => {
     }
   };
 
+  const handleOpenReportPuzzlePractice = (report: AdminReport) => {
+    const params = new URLSearchParams({
+      practice: 'puzzle',
+      channel: report.channel_id,
+      star: String(report.star || 0),
+      image: report.reported_image_url
+    });
+    window.open(`/arcade?${params.toString()}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleExcludeReportImageFromPuzzle = async (report: AdminReport) => {
+    if (!window.confirm(`신고 #${report.id}의 스냅샷 이미지를 3x4 퍼즐 일반 출제에서 제외할까요?\n\n같은 이미지 URL 계열도 함께 제외됩니다.`)) return;
+
+    try {
+      const res = await apiFetch(`/admin/reports/${report.id}/puzzle-exclude`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '퍼즐 제외 등록에 실패했습니다.', 'error');
+        return;
+      }
+      toast(data.message || '3x4 퍼즐 제외 목록에 등록했습니다.', 'success');
+      fetchReports();
+    } catch {
+      toast('서버 통신 에러', 'error');
+    }
+  };
+
   const handleBanUser = async (userId: string, duration: string, reason: string = '') => {
     if (!userId.trim()) { toast('대상 유저 ID가 필요합니다.'); return; }
     try {
@@ -1872,6 +1899,9 @@ export const AdminTab: React.FC = () => {
                         신고 #{rep.id}
                         <span className="rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{rep.star || 0}★</span>
                         <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${rep.status === 'pending' ? 'bg-red-500/15 text-red-500' : rep.status === 'resolved' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-secondary text-muted-foreground'}`}>{rep.status}</span>
+                        {rep.puzzle_excluded ? (
+                          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-bold text-sky-500">퍼즐 제외됨</span>
+                        ) : null}
                       </p>
                       <p className="text-[10px] text-muted-foreground truncate">
                         대상 스트리머: <span className="font-bold text-foreground">{rep.streamer_name || '(알 수 없음)'}</span> · {rep.channel_id}
@@ -1883,6 +1913,14 @@ export const AdminTab: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5 border-t border-border/40 pt-2">
+                    <button onClick={() => handleOpenReportPuzzlePractice(rep)} className="rounded bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-500 hover:bg-indigo-500/20">3x4 연습</button>
+                    <button
+                      onClick={() => handleExcludeReportImageFromPuzzle(rep)}
+                      disabled={rep.puzzle_excluded === true}
+                      className="rounded bg-sky-500/10 px-2 py-1 text-[10px] font-bold text-sky-500 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {rep.puzzle_excluded ? '퍼즐 제외 완료' : '퍼즐 제외'}
+                    </button>
                     <button onClick={() => handleBanUser(rep.reporter_id, '7d', '허위/악성 신고 누적으로 인한 제재')} className="rounded bg-red-500/10 px-2 py-1 text-[10px] text-red-500 hover:bg-red-500/20">신고자 7일 밴</button>
                     {rep.status === 'pending' && isSelfDeletionReport(rep) ? (
                       <div className="flex flex-wrap items-center justify-end gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2 py-1">

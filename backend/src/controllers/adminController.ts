@@ -18,6 +18,11 @@ import { clearRankingCaches, clearUserRankingCaches } from './playController';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { CardReport, Streamer } from '../repositories/interfaces';
 import { listPointLedgerForUser } from '../services/pointLedger';
+import {
+  addPuzzleExcludedImage,
+  getPuzzleExcludedImageKeys,
+  normalizePuzzleImageKey
+} from '../services/puzzleImageExclusionService';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -559,9 +564,10 @@ export const getReports = async (req: Request, res: Response) => {
     // 신고자 닉네임 / 대상 스트리머 닉네임을 함께 제공 (배치 조회로 N+1 방지)
     const reporterIds = [...new Set(reports.map((r) => r.reporter_id))];
     const channelIds = [...new Set(reports.map((r) => r.channel_id))];
-    const [reporters, streamers] = await Promise.all([
+    const [reporters, streamers, puzzleExcludedKeys] = await Promise.all([
       userRepository.findByIds(reporterIds).catch(() => []),
-      streamerRepository.findByIds(channelIds).catch(() => [])
+      streamerRepository.findByIds(channelIds).catch(() => []),
+      getPuzzleExcludedImageKeys().catch(() => new Set<string>())
     ]);
     const reporterNameMap = Object.fromEntries(reporters.map((u) => [u.id, u.username]));
     const streamerNameMap = Object.fromEntries(streamers.map((s) => [s.channel_id, s.name]));
@@ -569,7 +575,8 @@ export const getReports = async (req: Request, res: Response) => {
     const enriched = reports.map((r) => ({
       ...r,
       reporter_username: reporterNameMap[r.reporter_id] || null,
-      streamer_name: streamerNameMap[r.channel_id] || null
+      streamer_name: streamerNameMap[r.channel_id] || null,
+      puzzle_excluded: puzzleExcludedKeys.has(normalizePuzzleImageKey(r.reported_image_url))
     }));
     return res.status(200).json(enriched);
   } catch (err: any) {
@@ -613,6 +620,43 @@ export const resolveReport = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '신고 처리 상태 변경 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 7-1. 신고 스냅샷 이미지를 3x4 퍼즐 출제 제외 목록에 등록
+ */
+export const excludeReportImageFromPuzzle = async (req: AuthenticatedRequest, res: Response) => {
+  const { report_id } = req.params;
+  const reportId = Number(report_id);
+  if (!report_id || !Number.isFinite(reportId)) {
+    return res.status(400).json({ error: 'BadRequest', message: '유효한 신고 ID가 필요합니다.' });
+  }
+
+  try {
+    const report = (await reportRepository.findAll()).find((item) => item.id === reportId);
+    if (!report) {
+      return res.status(404).json({ error: 'NotFound', message: '신고를 찾을 수 없습니다.' });
+    }
+    if (!report.reported_image_url) {
+      return res.status(400).json({ error: 'BadRequest', message: '신고에 저장된 이미지 스냅샷이 없습니다.' });
+    }
+
+    const record = await addPuzzleExcludedImage({
+      imageUrl: report.reported_image_url,
+      sourceReportId: report.id ?? reportId,
+      channelId: report.channel_id,
+      star: report.star ?? 0,
+      reason: `card_report:${reportId}`,
+      createdBy: req.user?.id || null
+    });
+
+    return res.status(200).json({
+      message: '해당 신고 이미지가 3x4 퍼즐 출제 제외 목록에 등록되었습니다.',
+      excluded_image: record
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '퍼즐 제외 이미지 등록 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
 

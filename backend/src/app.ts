@@ -19,6 +19,7 @@ import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
 import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
+import { readIntegerEnv } from './utils/env';
 import { startChatAttachmentCleanupScheduler } from './services/friendChatService';
 import {
   isApiProcess,
@@ -41,6 +42,7 @@ const IMAGE_PROXY_SLOW_REQUEST_LOG_MS = Math.max(
   Number(process.env.IMAGE_PROXY_SLOW_REQUEST_LOG_MS || 10_000)
 );
 const REQUEST_LOG_URL_MAX_LENGTH = Math.max(120, Number(process.env.REQUEST_LOG_URL_MAX_LENGTH || 300));
+const BODY_SIZE_LIMIT = process.env.API_BODY_SIZE_LIMIT || '50mb';
 
 const resolveProjectPath = (value: string): string =>
   path.isAbsolute(value) ? value : path.resolve(__dirname, '..', '..', value);
@@ -197,7 +199,11 @@ app.use('/api', apiAccessGuard);
 // API 전체 경로에 soft-ban + 기본 레이트 리밋 적용.
 // soft-ban은 짧은 시간의 비정상 반복 요청을 몇 분간 쉬게 하여 DB/API 폭주를 완화합니다.
 app.use('/api', softBanMiddleware);
-const globalApiLimiter = rateLimit({ windowMs: 60_000, max: 100, key: 'global-api' });
+const globalApiLimiter = rateLimit({
+  windowMs: readIntegerEnv('GLOBAL_API_RATE_LIMIT_WINDOW_MS', 60_000, { min: 1000 }),
+  max: readIntegerEnv('GLOBAL_API_RATE_LIMIT_MAX', 600, { min: 0 }),
+  key: 'global-api'
+});
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   if (req.path === '/image-proxy' || req.path === '/api/image-proxy') return next();
   return globalApiLimiter(req, res, next);
@@ -234,8 +240,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: BODY_SIZE_LIMIT }));
+app.use(express.urlencoded({ limit: BODY_SIZE_LIMIT, extended: true }));
 app.use(cookieParser());
 app.use(csrfOriginGuard);
 
