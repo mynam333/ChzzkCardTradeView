@@ -18,7 +18,8 @@ import {
   AlertTriangle,
   Trash2,
   Sparkles,
-  Send
+  Send,
+  RefreshCw
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
@@ -64,7 +65,7 @@ type ClaimedCouponReward = {
 };
 
 export const MyInfoTab: React.FC = () => {
-  const { user, logout, updatePoints, refreshUserData, toast } = useApp();
+  const { user, setUser, logout, updatePoints, refreshUserData, toast } = useApp();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pwaAutoTriggeredRef = useRef(false);
@@ -101,6 +102,7 @@ export const MyInfoTab: React.FC = () => {
   const [uploadStar, setUploadStar] = useState(0); // 업로드 대상 별(0~5성) 슬롯
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
+  const [titleRefreshing, setTitleRefreshing] = useState(false);
   const [statusMessage, setStatusMessage] = useState(user?.statusMessage || '');
   const [statusSaving, setStatusSaving] = useState(false);
   const [deleteRequesting, setDeleteRequesting] = useState(false);
@@ -208,6 +210,28 @@ export const MyInfoTab: React.FC = () => {
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setTitleSaving(false);
+    }
+  };
+
+  const handleRefreshTitles = async () => {
+    setTitleRefreshing(true);
+    try {
+      const res = await apiFetch('/titles/subscriptions/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '칭호 목록을 새로고침하지 못했습니다.', 'error');
+        return;
+      }
+      setUser((prev) => prev ? {
+        ...prev,
+        titles: data.titles || [],
+        ownedTitles: data.owned_titles || data.titles || []
+      } : prev);
+      toast('구독 상태와 보유 칭호를 새로 확인했습니다.', 'success');
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setTitleRefreshing(false);
     }
   };
 
@@ -681,15 +705,27 @@ export const MyInfoTab: React.FC = () => {
               장착한 칭호 1개가 프로필, 내 정보와 메인 사이드바에 표시됩니다.
             </p>
           </div>
-          {user.titles.length > 0 && (
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
-              disabled={titleSaving}
+              type="button"
+              disabled={titleRefreshing || titleSaving}
+              onClick={handleRefreshTitles}
+              className="cute-wiggle-hover inline-flex items-center gap-1.5 rounded-2xl border border-primary/20 bg-primary/8 px-3 py-2 text-[10px] font-black text-primary shadow-sm transition hover:border-primary/35 hover:bg-primary/12 disabled:cursor-wait disabled:opacity-60 dark:border-primary/25 dark:bg-primary/12"
+              title="구독 상태와 보유 칭호를 새로 확인합니다"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${titleRefreshing ? 'animate-spin' : ''}`} />
+              <span>{titleRefreshing ? '확인 중...' : '새로고침'}</span>
+            </button>
+            {user.titles.length > 0 && (
+            <button
+              disabled={titleSaving || titleRefreshing}
               onClick={() => handleEquipTitle(null)}
               className="cute-wiggle-hover rounded-2xl bg-secondary px-3 py-2 text-[10px] font-black text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               장착 해제
             </button>
-          )}
+            )}
+          </div>
         </div>
 
         {user.ownedTitles.length === 0 ? (
@@ -719,7 +755,7 @@ export const MyInfoTab: React.FC = () => {
                     <UserTitleBadge title={title} />
                   </div>
                   <button
-                    disabled={titleSaving || equipped}
+                    disabled={titleSaving || titleRefreshing || equipped}
                     onClick={() => handleEquipTitle(title.id)}
                     className={`cute-wiggle-hover mt-4 w-full rounded-2xl py-2 text-[10px] font-black transition disabled:cursor-default ${equipped
                         ? 'bg-primary/10 text-primary'

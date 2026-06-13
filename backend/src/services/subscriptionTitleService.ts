@@ -17,7 +17,10 @@ const DEFAULT_CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const ERROR_RETRY_MS = 30 * 60 * 1000;
 const SUBSCRIBER_PAGE_SIZE = 50;
 
-const subscriberListCache = new Map<string, { expiresAt: number; subscribers: Set<string> }>();
+type SubscriberSetResult = { ok: true; subscribers: Set<string> } | { ok: false; reason: string };
+
+const subscriberListCache = new Map<string, { expiresAt: number; fetchedAt: number; subscribers: Set<string> }>();
+const subscriberListInFlight = new Map<string, Promise<SubscriberSetResult>>();
 
 const getCheckTtlMs = () => {
   const hours = Number(process.env.CHZZK_SUBSCRIPTION_CHECK_TTL_HOURS || 6);
@@ -27,6 +30,11 @@ const getCheckTtlMs = () => {
 const getSubscriberListCacheMs = () => {
   const seconds = Number(process.env.CHZZK_SUBSCRIBER_LIST_CACHE_SECONDS || 600);
   return Math.max(30, Math.min(3600, Number.isFinite(seconds) ? seconds : 600)) * 1000;
+};
+
+const getSubscriberListForceMinMs = () => {
+  const seconds = Number(process.env.CHZZK_SUBSCRIBER_LIST_FORCE_MIN_SECONDS || 60);
+  return Math.max(15, Math.min(600, Number.isFinite(seconds) ? seconds : 60)) * 1000;
 };
 
 const getSubscriberListMaxPages = () => {
@@ -65,60 +73,76 @@ const extractSubscriberRows = (payload: any): any[] => {
 
 const fetchSubscriberSet = async (
   accessToken: string,
-  broadcasterChannelId: string
-): Promise<{ ok: true; subscribers: Set<string> } | { ok: false; reason: string }> => {
+  broadcasterChannelId: string,
+  forceRefresh = false
+): Promise<SubscriberSetResult> => {
   const cacheKey = broadcasterChannelId;
   const cached = subscriberListCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
+  const now = Date.now();
+  if (cached && (!forceRefresh || now - cached.fetchedAt < getSubscriberListForceMinMs()) && cached.expiresAt > now) {
     return { ok: true, subscribers: cached.subscribers };
   }
 
-  const subscribers = new Set<string>();
-  const maxPages = getSubscriberListMaxPages();
+  const inFlight = subscriberListInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
 
-  for (let page = 0; page < maxPages; page++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    try {
-      const url = `https://openapi.chzzk.naver.com/open/v1/channels/subscribers?page=${page}&size=${SUBSCRIBER_PAGE_SIZE}&sort=RECENT`;
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chikapo-App/1.0',
-          Accept: 'application/json'
-        },
-        signal: controller.signal
-      });
-      if (!res.ok) return { ok: false, reason: `HTTP_${res.status}` };
+  const request: Promise<SubscriberSetResult> = (async () => {
+    const subscribers = new Set<string>();
+    const maxPages = getSubscriberListMaxPages();
 
-      const payload = await res.json();
-      const rows = extractSubscriberRows(payload);
-      for (const row of rows) {
-        const channelId = row?.channelId || row?.channel_id || row?.subscriberChannelId || row?.userChannelId;
-        if (channelId) subscribers.add(String(channelId));
+    for (let page = 0; page < maxPages; page++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const url = `https://openapi.chzzk.naver.com/open/v1/channels/subscribers?page=${page}&size=${SUBSCRIBER_PAGE_SIZE}&sort=RECENT`;
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chikapo-App/1.0',
+            Accept: 'application/json'
+          },
+          signal: controller.signal
+        });
+        if (!res.ok) return { ok: false as const, reason: `HTTP_${res.status}` };
+
+        const payload = await res.json();
+        const rows = extractSubscriberRows(payload);
+        for (const row of rows) {
+          const channelId = row?.channelId || row?.channel_id || row?.subscriberChannelId || row?.userChannelId;
+          if (channelId) subscribers.add(String(channelId));
+        }
+
+        if (rows.length < SUBSCRIBER_PAGE_SIZE) break;
+      } catch (err: any) {
+        return { ok: false as const, reason: err?.name === 'AbortError' ? 'TIMEOUT' : (err?.message || 'REQUEST_FAILED') };
+      } finally {
+        clearTimeout(timeout);
       }
-
-      if (rows.length < SUBSCRIBER_PAGE_SIZE) break;
-    } catch (err: any) {
-      return { ok: false, reason: err?.name === 'AbortError' ? 'TIMEOUT' : (err?.message || 'REQUEST_FAILED') };
-    } finally {
-      clearTimeout(timeout);
     }
-  }
 
-  subscriberListCache.set(cacheKey, {
-    expiresAt: Date.now() + getSubscriberListCacheMs(),
-    subscribers
-  });
-  return { ok: true, subscribers };
+    subscriberListCache.set(cacheKey, {
+      expiresAt: Date.now() + getSubscriberListCacheMs(),
+      fetchedAt: Date.now(),
+      subscribers
+    });
+    return { ok: true as const, subscribers };
+  })();
+
+  subscriberListInFlight.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    subscriberListInFlight.delete(cacheKey);
+  }
 };
 
 const verifyChzzkSubscription = async (
   accessToken: string,
   userId: string,
-  broadcasterChannelId: string
+  broadcasterChannelId: string,
+  forceSubscriberListRefresh = false
 ): Promise<{ ok: true; subscribed: boolean } | { ok: false; reason: string }> => {
-  const result = await fetchSubscriberSet(accessToken, broadcasterChannelId);
+  const result = await fetchSubscriberSet(accessToken, broadcasterChannelId, forceSubscriberListRefresh);
   if (!result.ok) return result;
   return { ok: true, subscribed: result.subscribers.has(userId) };
 };
@@ -390,7 +414,26 @@ const cleanupStaleSubscriptionRuleGrant = async (
   await deleteSubscriptionStatesForRule(previousRule.id);
 };
 
-export const syncUserSubscriptionTitles = async (userId: string, force = false): Promise<void> => {
+type SyncUserSubscriptionTitleOptions = {
+  forceState?: boolean;
+  refreshSubscriberList?: boolean;
+};
+
+const normalizeSyncOptions = (options: boolean | SyncUserSubscriptionTitleOptions = false): Required<SyncUserSubscriptionTitleOptions> => {
+  if (typeof options === 'boolean') {
+    return { forceState: options, refreshSubscriberList: false };
+  }
+  return {
+    forceState: options.forceState === true,
+    refreshSubscriberList: options.refreshSubscriberList === true
+  };
+};
+
+export const syncUserSubscriptionTitles = async (
+  userId: string,
+  options: boolean | SyncUserSubscriptionTitleOptions = false
+): Promise<void> => {
+  const syncOptions = normalizeSyncOptions(options);
   let rules: SubscriptionTitleRule[] = [];
   try {
     rules = (await listSubscriptionTitleRules()).filter((rule) => rule.active);
@@ -404,7 +447,7 @@ export const syncUserSubscriptionTitles = async (userId: string, force = false):
   for (const rule of rules) {
     const state = await getState(userId, rule.id);
     const checkedUntilMs = state?.checked_until ? new Date(state.checked_until).getTime() : 0;
-    if (!force && checkedUntilMs > now) continue;
+    if (!syncOptions.forceState && checkedUntilMs > now) continue;
 
     const accessToken = await getValidUserAccessToken(rule.broadcaster_channel_id);
     if (!accessToken) {
@@ -413,7 +456,7 @@ export const syncUserSubscriptionTitles = async (userId: string, force = false):
       continue;
     }
 
-    const result = await verifyChzzkSubscription(accessToken, userId, rule.broadcaster_channel_id);
+    const result = await verifyChzzkSubscription(accessToken, userId, rule.broadcaster_channel_id, syncOptions.refreshSubscriberList);
     if (!result.ok) {
       const previousSubscribed = state?.is_subscribed === true || state?.is_subscribed === 1;
       await upsertState(userId, rule.id, previousSubscribed, new Date(now + ERROR_RETRY_MS), result.reason);

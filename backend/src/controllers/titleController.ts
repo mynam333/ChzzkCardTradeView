@@ -10,6 +10,8 @@ import {
   syncUserSubscriptionTitles
 } from '../services/subscriptionTitleService';
 
+const userSubscriptionTitleSyncInFlight = new Map<string, Promise<void>>();
+
 const parseTitleId = (value: unknown): number => {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : 0;
@@ -100,7 +102,13 @@ export const syncMySubscriptionTitleRules = async (req: Request, res: Response) 
   const userId = (req as any).user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   try {
-    await syncUserSubscriptionTitles(userId, true);
+    let syncTask = userSubscriptionTitleSyncInFlight.get(userId);
+    if (!syncTask) {
+      syncTask = syncUserSubscriptionTitles(userId, { forceState: true, refreshSubscriberList: true });
+      userSubscriptionTitleSyncInFlight.set(userId, syncTask);
+      syncTask.finally(() => userSubscriptionTitleSyncInFlight.delete(userId)).catch(() => {});
+    }
+    await syncTask;
     const titles = await titleRepository.findByUserId(userId);
     return res.status(200).json({ owned_titles: titles, titles: titles.filter((title) => title.is_equipped) });
   } catch (err: any) {
