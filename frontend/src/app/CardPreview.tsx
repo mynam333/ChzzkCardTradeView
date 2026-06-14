@@ -44,7 +44,7 @@ const CardShell: React.FC<CardPreviewProps> = ({
       containerType: 'inline-size',
       ...(borderClass(border) ? {} : (borderStyle(border) || {}))
     }}
-    className={`relative flex flex-col justify-between overflow-hidden rounded-xl border border-border/80 bg-card shadow-2xl ${star >= 1 ? `card-star card-star-${star}` : ''} ${className || ''}`}
+    className={`card-3d-surface relative flex flex-col justify-between overflow-hidden rounded-xl border border-border/80 bg-card shadow-2xl ${star >= 1 ? `card-star card-star-${star}` : ''} ${className || ''}`}
   >
     <CosmeticFrame border={border} />
 
@@ -54,7 +54,7 @@ const CardShell: React.FC<CardPreviewProps> = ({
     </div>
     <div className="absolute inset-0 z-15 bg-gradient-to-t from-black/90 via-black/12 to-black/25 pointer-events-none" />
 
-    <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 text-white pointer-events-none">
+    <div className="card-3d-text relative z-20 flex h-full w-full flex-col justify-between p-3 text-white pointer-events-none">
       <div className="flex items-center justify-between w-full">
         <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-200">
           {statusLabel}

@@ -191,6 +191,34 @@ export const normalizeSvgInCss = (css: string): string => {
   );
 };
 
+const CSS_URL_TOKEN = /url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\)/gi;
+const CSS_PX_LENGTH = /(-?\d*\.?\d+)px\b/g;
+
+const withCssUrlsProtected = (css: string, transform: (protectedCss: string) => string): string => {
+  const urls: string[] = [];
+  const protectedCss = css.replace(CSS_URL_TOKEN, (value) => {
+    const index = urls.push(value) - 1;
+    return `__CHIKAPO_CSS_URL_${index}__`;
+  });
+  return transform(protectedCss).replace(/__CHIKAPO_CSS_URL_(\d+)__/g, (_match, index) => urls[Number(index)] ?? '');
+};
+
+/**
+ * 카드 테두리 CSS는 기존 64px x 102.4px 좌표계로 작성되어 있습니다.
+ * 프레임 자체를 transform scale로 키우면 3D hover 중 래스터 확대가 겹쳐 흐려질 수 있으므로,
+ * px 길이값을 카드 폭 기준 컨테이너 단위로 바꿔 같은 비율을 직접 렌더링합니다.
+ */
+export const migrateFramePxToContainerUnits = (css: string): string => {
+  if (!css || !css.includes('px')) return css;
+  return withCssUrlsProtected(css, (protectedCss) =>
+    protectedCss.replace(CSS_PX_LENGTH, (_match, rawNumber: string) => {
+      const value = Number(rawNumber);
+      if (!Number.isFinite(value) || value === 0) return '0';
+      return `calc(var(--cosmetic-frame-unit) * ${Number(value.toFixed(4))})`;
+    })
+  );
+};
+
 // 커스텀 코스메틱 CSS를 클래스 단위로 1회 주입(또는 변경 시 갱신)
 const injectedBorderCss = new Map<string, HTMLStyleElement>();
 
@@ -215,6 +243,9 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     return;
   }
   let cssText = normalizeSvgInCss(obj.css);
+  if (key.startsWith('cb-')) {
+    cssText = migrateFramePxToContainerUnits(cssText);
+  }
   if (obj.fallback_ks_active && typeof obj.fallback_ks_css === 'string' && obj.fallback_ks_css.trim()) {
     const fontNameMatch = obj.fallback_ks_css.match(/font-family\s*:\s*['"]([^'"]+)['"]/);
     const fallbackFontName = fontNameMatch ? fontNameMatch[1] : 'GMarketSans';

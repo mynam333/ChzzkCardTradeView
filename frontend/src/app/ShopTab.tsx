@@ -273,6 +273,8 @@ export const ShopTab: React.FC = () => {
   const [nowTs, setNowTs] = useState(() => Date.now());
   const marketRefreshTimerRef = useRef<number | null>(null);
   const lastMarketRefreshAtRef = useRef(0);
+  const shopRefreshTimerRef = useRef<number | null>(null);
+  const lastShopRefreshAtRef = useRef(0);
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
@@ -412,6 +414,7 @@ export const ShopTab: React.FC = () => {
   }, [user?.nextFreeDrawAt]);
 
   const fetchItems = async () => {
+    lastShopRefreshAtRef.current = Date.now();
     try {
       const res = await apiFetch('/shop/items');
       if (res.ok) setItems(await res.json());
@@ -424,6 +427,19 @@ export const ShopTab: React.FC = () => {
         setOwned(await res.json());
       }
     } catch { /* noop */ }
+  };
+
+  const scheduleShopRefresh = (delayMs = 500, minGapMs = 2500) => {
+    const elapsed = Date.now() - lastShopRefreshAtRef.current;
+    const wait = elapsed >= minGapMs ? delayMs : Math.max(delayMs, minGapMs - elapsed);
+    if (shopRefreshTimerRef.current !== null) {
+      window.clearTimeout(shopRefreshTimerRef.current);
+    }
+    shopRefreshTimerRef.current = window.setTimeout(() => {
+      shopRefreshTimerRef.current = null;
+      fetchItems();
+      if (user?.id) fetchPurchased();
+    }, wait);
   };
   const fetchPurchased = async () => {
     try {
@@ -559,12 +575,62 @@ export const ShopTab: React.FC = () => {
     }
   }, [subTab, marketPage, marketSort, marketType]);
 
-  // 경매 남은 시간을 위한 1초 카운트다운 (마켓 탭에서만 작동)
+  // 경매/한정판매 남은 시간을 위한 1초 카운트다운 (필요한 탭에서만 작동)
   useEffect(() => {
-    if (subTab !== 'market') return;
+    if (subTab !== 'market' && subTab !== 'gacha_shop') return;
     const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [subTab]);
+
+  useEffect(() => {
+    if (subTab !== 'gacha_shop') return;
+    const handleShopUpdated = () => {
+      if (document.visibilityState !== 'visible') return;
+      scheduleShopRefresh(250, 1500);
+    };
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') scheduleShopRefresh(200, 0);
+    };
+
+    window.addEventListener('chikapo:shop-updated', handleShopUpdated);
+    document.addEventListener('visibilitychange', handleVisible);
+    const fallbackMs = typeof EventSource === 'undefined' ? 30_000 : 300_000;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') scheduleShopRefresh(200, 0);
+    }, fallbackMs);
+
+    return () => {
+      if (shopRefreshTimerRef.current !== null) {
+        window.clearTimeout(shopRefreshTimerRef.current);
+        shopRefreshTimerRef.current = null;
+      }
+      window.removeEventListener('chikapo:shop-updated', handleShopUpdated);
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.clearInterval(timer);
+    };
+  }, [subTab, user?.id]);
+
+  useEffect(() => {
+    if (subTab !== 'gacha_shop' || items.length === 0) return;
+    const now = Date.now();
+    const nextBoundaryMs = items.reduce<number | null>((nearest, item) => {
+      const candidates = [
+        parseAppDate(item.sale_start_at)?.getTime(),
+        parseAppDate(item.sale_end_at)?.getTime()
+      ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > now);
+      const next = candidates.length ? Math.min(...candidates) : null;
+      if (next === null) return nearest;
+      return nearest === null ? next : Math.min(nearest, next);
+    }, null);
+    if (nextBoundaryMs === null) return;
+
+    const delayMs = Math.min(Math.max(0, nextBoundaryMs - now + 500), 2_147_483_647);
+    const timer = window.setTimeout(() => {
+      setNowTs(Date.now());
+      scheduleShopRefresh(200, 0);
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [subTab, items]);
 
   // 관심 매물 알림의 스트리머 이름 검색용 목록 로드 (마켓 탭 진입 시 1회)
   useEffect(() => {
@@ -998,7 +1064,9 @@ export const ShopTab: React.FC = () => {
         refreshUserData();
         fetchOwned();
         fetchPurchased();
-        fetchItems();
+        if (data?.catalogChanged) {
+          scheduleShopRefresh(150, 0);
+        }
       } else {
         // 실패 시 롤백
         updatePoints(item.price);

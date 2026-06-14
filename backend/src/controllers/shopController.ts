@@ -4,9 +4,14 @@ import { IS_PRODUCTION } from '../config';
 import crypto from 'crypto';
 import * as shop from '../services/shopService';
 import { minifyCss } from '../utils/css';
+import { publishRealtimeEvent } from '../services/realtimeStream';
 
 const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });
+
+const publishShopUpdated = (reason: string, extra: Record<string, unknown> = {}) => {
+  publishRealtimeEvent('shop', { reason, ...extra });
+};
 
 /** 상점 활성 아이템 목록 (유저) */
 export const getShopItems = async (req: AuthenticatedRequest, res: Response) => {
@@ -69,7 +74,10 @@ export const buyShopItem = async (req: AuthenticatedRequest, res: Response) => {
         : '구매에 실패했습니다.';
       return res.status(400).json({ error: 'BuyFailed', reason: r.reason, message: msg });
     }
-    return res.status(200).json({ message: '구매가 완료되었습니다.' });
+    if (r.catalogChanged) {
+      publishShopUpdated('item_purchased', { itemId });
+    }
+    return res.status(200).json({ message: '구매가 완료되었습니다.', catalogChanged: !!r.catalogChanged });
   } catch (err) { return fail(res, '구매 처리 실패', err); }
 };
 
@@ -148,6 +156,7 @@ export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Respon
       limited_total_quantity: Math.max(0, Number(limited_total_quantity) || 0),
       sold_quantity: 0
     });
+    publishShopUpdated('item_created');
     return res.status(201).json({ message: '아이템이 추가되었습니다.' });
   } catch (err) { return fail(res, '아이템 추가 실패', err); }
 };
@@ -158,6 +167,7 @@ export const adminResetPurchases = async (req: AuthenticatedRequest, res: Respon
   if (!id) return res.status(400).json({ error: 'BadRequest', message: '아이템 ID가 필요합니다.' });
   try {
     await shop.resetPurchases(id);
+    publishShopUpdated('purchases_reset', { itemId: id });
     return res.status(200).json({ message: '해당 아이템의 구매 제한이 초기화되었습니다. (모든 유저 재구매 가능)' });
   } catch (err) { return fail(res, '구매 제한 초기화 실패', err); }
 };
@@ -181,6 +191,7 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
 
   try {
     await shop.updateItem(id, updateData);
+    publishShopUpdated('item_updated', { itemId: id });
     return res.status(200).json({ message: '아이템이 수정되었습니다.' });
   } catch (err) { return fail(res, '아이템 수정 실패', err); }
 };

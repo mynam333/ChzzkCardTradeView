@@ -2055,7 +2055,7 @@ export const GachaTab: React.FC = () => {
                     containerType: 'inline-size',
                     ...(borderClass(live.border) ? {} : (borderStyle(live.border) || {}))
                   }}
-                  className={`relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+                  className={`card-3d-surface relative flex flex-col justify-between overflow-hidden rounded-xl bg-card shadow-2xl border border-border/80 animate-in zoom-in-95 duration-200 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
                 >
                   {/* 프리미엄 테두리 코스메틱 오버레이 */}
                   <CosmeticFrame border={live.border} />

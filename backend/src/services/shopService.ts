@@ -91,6 +91,8 @@ const getItemSaleFailureReason = (item: any, now = Date.now()): string | null =>
   return null;
 };
 
+const resultNeedsCatalogRefresh = (reason: string) => reason === 'OK';
+
 // ---- 아이템 카탈로그 ----
 const fetchActiveItemsFromDb = async (): Promise<ShopItem[]> => {
   if (getDbMode() === 'SUPABASE') {
@@ -380,7 +382,7 @@ export const grantCosmetic = async (userId: string, itemId: number, quantity: nu
 };
 
 // ---- 구매 ----
-export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boolean; reason: string }> => {
+export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boolean; reason: string; catalogChanged?: boolean }> => {
   if (getDbMode() === 'SUPABASE') {
     const { data, error } = await getSupabaseClient().rpc('buy_shop_item_atomic', {
       p_user_id: userId,
@@ -391,8 +393,8 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       return { ok: false, reason: 'RPC_ERROR' };
     }
     const reason = String(data);
-    const result = { ok: reason === 'OK', reason };
-    if (result.ok) invalidateActiveShopItemsCache();
+    const result = { ok: reason === 'OK', reason, catalogChanged: resultNeedsCatalogRefresh(reason) };
+    if (result.catalogChanged) invalidateActiveShopItemsCache();
     return result;
   }
 
@@ -442,7 +444,7 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       return { ok: true, reason: 'OK' };
       });
       if (result.ok && shouldInvalidateCatalog) invalidateActiveShopItemsCache();
-      return result;
+      return { ...result, catalogChanged: result.ok && shouldInvalidateCatalog };
     } catch (err: any) {
       if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };
       throw err;
@@ -498,7 +500,7 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
     return { ok: true, reason: 'OK' };
     })();
     if (result.ok && shouldInvalidateCatalog) invalidateActiveShopItemsCache();
-    return result;
+    return { ...result, catalogChanged: result.ok && shouldInvalidateCatalog };
   } catch (err: any) {
     if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };
     throw err;

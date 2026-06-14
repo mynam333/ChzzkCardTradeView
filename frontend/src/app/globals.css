@@ -534,19 +534,64 @@ body::before {
 }
 
 .cosmetic-frame {
+  --cosmetic-frame-unit: calc(100cqw / 64);
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: 64px !important;
-  height: 102.4px !important;
-  transform: scale(calc(100cqw / 64px)) !important;
-  transform-origin: top left !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  transform-origin: center !important;
   z-index: 5 !important;
-  border-radius: 3.43px !important;
+  border-radius: calc(var(--cosmetic-frame-unit) * 3.43) !important;
   pointer-events: none;
   overflow: hidden;
+  container-type: inline-size;
+  contain: paint;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  image-rendering: auto;
+}
+
+.cosmetic-frame,
+.cosmetic-frame::before,
+.cosmetic-frame::after,
+.card-star,
+.card-star::before,
+.card-star::after {
+  transform-style: flat;
+}
+
+.card-star,
+.card-star::before,
+.card-star::after {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.card-3d-surface {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  will-change: transform;
+  isolation: isolate;
+}
+
+.card-3d-surface img,
+.card-3d-surface svg,
+.card-3d-surface canvas,
+.card-3d-surface video {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.card-3d-text {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ============================================================

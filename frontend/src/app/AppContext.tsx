@@ -583,7 +583,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       }
     };
 
-    const relayEvent = (name: 'ranking' | 'market') => (event: MessageEvent<string>) => {
+    const relayEvent = (name: 'ranking' | 'market' | 'shop') => (event: MessageEvent<string>) => {
       let detail: unknown = null;
       try {
         detail = JSON.parse(event.data);
@@ -595,15 +595,18 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
     const handleRanking = relayEvent('ranking');
     const handleMarket = relayEvent('market');
+    const handleShop = relayEvent('shop');
 
     source.addEventListener('maintenance', handleMaintenance as EventListener);
     source.addEventListener('ranking', handleRanking as EventListener);
     source.addEventListener('market', handleMarket as EventListener);
+    source.addEventListener('shop', handleShop as EventListener);
 
     return () => {
       source.removeEventListener('maintenance', handleMaintenance as EventListener);
       source.removeEventListener('ranking', handleRanking as EventListener);
       source.removeEventListener('market', handleMarket as EventListener);
+      source.removeEventListener('shop', handleShop as EventListener);
       source.close();
     };
   }, []);
