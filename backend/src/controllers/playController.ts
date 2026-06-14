@@ -10,7 +10,7 @@ import {
 import { IS_PRODUCTION } from '../config';
 import { fuzzyScore } from '../utils/search';
 import { computeValueDrawWeights } from '../utils/gachaWeights';
-import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile, isDiceBearImageUrl } from '../services/chzzkService';
+import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile, isPlaceholderProfileImageUrl } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
@@ -1277,7 +1277,8 @@ export const searchChzzkStreamer = async (req: Request, res: Response) => {
       channelId: item.channel.channelId,
       channelName: item.channel.channelName,
       channelImageUrl: item.channel.channelImageUrl,
-      followerCount: item.channel.followerCount || 0
+      followerCount: item.channel.followerCount || 0,
+      hasProfileImage: !isPlaceholderProfileImageUrl(item.channel.channelImageUrl)
     }));
 
     return res.status(200).json(mapped);
@@ -1330,7 +1331,7 @@ export const registerStreamer = async (req: Request, res: Response) => {
     const verifiedFollowerCount = profile.followerCount;
     const verifiedLogoUrl = profile.logoUrl;
 
-    if (!verifiedLogoUrl || String(verifiedLogoUrl).trim().length === 0 || isDiceBearImageUrl(verifiedLogoUrl)) {
+    if (isPlaceholderProfileImageUrl(verifiedLogoUrl)) {
       return res.status(400).json({
         error: 'MissingProfileImage',
         message: '프로필 이미지가 설정되지 않은 스트리머는 카드로 등록할 수 없습니다.'

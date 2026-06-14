@@ -34,6 +34,27 @@ export const isDiceBearImageUrl = (url: string | null | undefined): boolean => {
   }
 };
 
+export const isPlaceholderProfileImageUrl = (url: string | null | undefined): boolean => {
+  const raw = String(url || '').trim();
+  if (!raw) return true;
+  if (isDiceBearImageUrl(raw)) return true;
+
+  try {
+    const parsed = new URL(raw, 'https://chzzk.naver.com');
+    const pathname = decodeURIComponent(parsed.pathname || '').toLowerCase();
+    if (!parsed.protocol.startsWith('http') && !raw.startsWith('/')) return true;
+    return pathname === '/icon.png' || pathname.endsWith('/icon.png');
+  } catch {
+    const normalized = raw.split('?')[0].split('#')[0].trim().toLowerCase();
+    return normalized === '/icon.png' || normalized.endsWith('/icon.png');
+  }
+};
+
+const normalizeChannelImageUrl = (url: string | null | undefined): string => {
+  const raw = String(url || '').trim();
+  return isPlaceholderProfileImageUrl(raw) ? '' : raw;
+};
+
 /**
  * refresh_token으로 치지직 OAuth access_token을 갱신합니다.
  * 성공 시 새 토큰 세트를, 실패 시 null을 반환합니다.
@@ -149,7 +170,7 @@ export const fetchChzzkChannelProfile = async (
       const { channelName, channelImageUrl, followerCount } = profileBody.content;
       return {
         name: channelName || '알 수 없는 스트리머',
-        logoUrl: channelImageUrl || '',
+        logoUrl: normalizeChannelImageUrl(channelImageUrl),
         followerCount: followerCount || 0,
         openLive,
         lastLiveAt: lastLiveAt || findDateCandidate(profileBody.content),

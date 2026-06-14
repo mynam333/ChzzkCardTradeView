@@ -71,6 +71,14 @@ interface FuseModalState {
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.8;
 const cardKey = (channelId: string, star: number) => `${channelId}#${star}`;
+const appendImageVersion = (url: string, version?: number) => {
+  if (!url || !version || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const hashIndex = url.indexOf('#');
+  const baseUrl = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}v=${encodeURIComponent(String(version))}${hash}`;
+};
 const parseCardKey = (key: string) => {
   const separator = key.lastIndexOf('#');
   return {
@@ -115,6 +123,7 @@ export const GachaTab: React.FC = () => {
   const skipNextBroadcastModeSaveRef = React.useRef(false);
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
+  const [cardImageVersions, setCardImageVersions] = useState<Record<string, number>>({});
   const [broadcastMode, setBroadcastMode] = useState(false);
   // 코스메틱 장착
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
@@ -231,8 +240,11 @@ export const GachaTab: React.FC = () => {
     longPressStartPoint.current = null;
   };
 
-  const inventoryCardImage = (streamer?: Streamer | null, star: number = 0) =>
-    cardImage(streamer, broadcastMode ? 0 : star);
+  const inventoryCardImage = (streamer?: Streamer | null, star: number = 0) => {
+    const displayStar = broadcastMode ? 0 : star;
+    const version = streamer?.channel_id ? cardImageVersions[cardKey(streamer.channel_id, displayStar)] : undefined;
+    return appendImageVersion(cardImage(streamer, displayStar), version);
+  };
   const streamerProfileImage = (streamer?: Streamer | null, star: number = 0) =>
     streamer?.logo_url || cardImage(streamer, star);
 
@@ -815,10 +827,19 @@ export const GachaTab: React.FC = () => {
       const res = await apiFetch('/cards/fuse', { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
       if (res.ok) {
+        const fallbackResultStar = Math.min(5, materials?.length ? calculateFuseResultStar(star, materials) : star + 1);
+        const returnedResultStar = Number(data.new_star);
+        const resultStar = Number.isFinite(returnedResultStar) ? returnedResultStar : fallbackResultStar;
+        const version = Date.now();
+        setCardImageVersions((prev) => ({
+          ...prev,
+          [cardKey(channelId, star)]: version,
+          [cardKey(channelId, resultStar)]: version,
+        }));
         showAlert('한계돌파 성공', data.message || '한계돌파에 성공했습니다.', 'success');
         setFuseModal(null);
         setFuseMaterials({});
-        fetchInventory();
+        await fetchInventory();
       } else {
         showAlert('한계돌파 실패', data.message || '한계돌파에 실패했습니다.', 'error');
       }

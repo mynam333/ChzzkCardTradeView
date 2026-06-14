@@ -18,7 +18,7 @@ import { clearRankingCaches, clearUserRankingCaches } from './playController';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { CardReport, Streamer } from '../repositories/interfaces';
 import { listPointLedgerForUser } from '../services/pointLedger';
-import { isDiceBearImageUrl } from '../services/chzzkService';
+import { isPlaceholderProfileImageUrl } from '../services/chzzkService';
 import {
   addPuzzleExcludedImage,
   getPuzzleExcludedImageKeys,
@@ -90,7 +90,7 @@ const notifyReportResult = async (
 };
 
 const hasMissingProfileImage = (streamer: Pick<Streamer, 'logo_url'>) =>
-  !streamer.logo_url || streamer.logo_url.trim().length === 0 || isDiceBearImageUrl(streamer.logo_url);
+  isPlaceholderProfileImageUrl(streamer.logo_url);
 
 type DeleteStreamerWithCompensationOptions = {
   preventReregistration?: boolean;

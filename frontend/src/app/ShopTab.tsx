@@ -1439,22 +1439,30 @@ export const ShopTab: React.FC = () => {
                               <BadgePercent className="h-2.5 w-2.5" /> 한정
                             </span>
                           )}
-                          <div className="relative h-[5.2rem] w-[3.25rem] overflow-visible">
-                            <div
-                              className="pointer-events-none absolute left-0 top-0"
-                              style={{
-                                width: '224px',
-                                height: '358.4px',
-                                transform: 'scale(calc(52 / 224))',
-                                transformOrigin: 'top left'
-                              }}
-                            >
-                              <CardPreview
-                                border={item.type === 'border' ? item : null}
-                                nameEffect={item.type === 'name_effect' ? item : null}
-                              />
+                          {item.type === 'border' ? (
+                            <div className="relative h-[5.2rem] w-[3.25rem] overflow-visible">
+                              <div
+                                className="pointer-events-none absolute left-0 top-0"
+                                style={{
+                                  width: '224px',
+                                  height: '358.4px',
+                                  transform: 'scale(calc(52 / 224))',
+                                  transformOrigin: 'top left'
+                                }}
+                              >
+                                <CardPreview border={item} />
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex h-[5.2rem] w-full min-w-0 items-center justify-center px-2">
+                              <CosmeticName
+                                effect={item}
+                                className="block max-w-full text-center text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg"
+                              >
+                                {item.name}
+                              </CosmeticName>
+                            </div>
+                          )}
                         </div>
                         <div className="flex min-h-[3.25rem] flex-col items-center justify-start px-0.5 pt-1.5">
                           <p className="w-full truncate text-xs font-bold leading-5">{item.name}</p>

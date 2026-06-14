@@ -163,6 +163,11 @@ export const resetData = async (req: Request, res: Response) => {
 // ============================================================
 const IMAGE_EXT = new Set(['.webp', '.png', '.jpg', '.jpeg', '.gif', '.avif']);
 
+export const isIgnoredOrphanUploadRel = (rel: string): boolean => {
+  const normalized = String(rel || '').replace(/\\/g, '/').replace(/^\/?uploads\//, '').replace(/^\/+/, '').toLowerCase();
+  return normalized === 'chat' || normalized.startsWith('chat/');
+};
+
 /** uploads 하위 모든 이미지 파일의 상대경로(posix) 목록 */
 const listUploadFiles = (): { rel: string; size: number }[] => {
   const out: { rel: string; size: number }[] = [];
@@ -173,6 +178,7 @@ const listUploadFiles = (): { rel: string; size: number }[] => {
       if (entry.isDirectory()) { walk(full); continue; }
       if (!IMAGE_EXT.has(path.extname(entry.name).toLowerCase())) continue;
       const rel = path.relative(UPLOADS_DIR, full).split(path.sep).join('/');
+      if (isIgnoredOrphanUploadRel(rel)) continue;
       let size = 0;
       try { size = fs.statSync(full).size; } catch { /* noop */ }
       out.push({ rel, size });
@@ -235,7 +241,8 @@ export const deleteOrphanImages = async (req: Request, res: Response) => {
     let deleted = 0;
     const skipped: string[] = [];
     for (const raw of rels) {
-      const rel = String(raw).replace(/^\/?uploads\//, '').replace(/^\/+/, '');
+      const rel = String(raw).replace(/\\/g, '/').replace(/^\/?uploads\//, '').replace(/^\/+/, '');
+      if (isIgnoredOrphanUploadRel(rel)) { skipped.push(rel); continue; }
       // 경로 탈출 방지: uploads 디렉터리 내부인지 검증
       const target = path.resolve(UPLOADS_DIR, rel);
       const relCheck = path.relative(UPLOADS_DIR, target);

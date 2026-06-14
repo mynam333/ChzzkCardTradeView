@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getResetInfo, resetData } from '../controllers/adminMaintenanceController';
+import { getResetInfo, isIgnoredOrphanUploadRel, resetData } from '../controllers/adminMaintenanceController';
 import { initRepositories, minigameRepository } from '../repositories';
 import { __setSqliteDbForTest } from '../services/db';
 
@@ -74,5 +74,14 @@ describe('admin maintenance minigame reset', () => {
     const recreated = await minigameRepository.getTicketStatus('u1');
     expect(recreated.current_tickets).toBe(5);
     expect(recreated.bonus_tickets).toBe(0);
+  });
+});
+
+describe('admin maintenance orphan upload filtering', () => {
+  it('excludes chat attachment uploads from orphan image cleanup candidates', () => {
+    expect(isIgnoredOrphanUploadRel('chat/u1/chat_1.webp')).toBe(true);
+    expect(isIgnoredOrphanUploadRel('/uploads/chat/u1/chat_1.webp')).toBe(true);
+    expect(isIgnoredOrphanUploadRel('chat\\u1\\chat_1.webp')).toBe(true);
+    expect(isIgnoredOrphanUploadRel('streamers/u1/card.webp')).toBe(false);
   });
 });

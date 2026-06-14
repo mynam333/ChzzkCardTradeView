@@ -734,6 +734,7 @@ export const ArcadeTab: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [gameData, setGameData] = useState<MinigameData | null>(null);
   const [gameBusy, setGameBusy] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   // 공통 결과 화면 상태
   const [gameResult, setGameResult] = useState<MinigameResult | null>(null);
@@ -811,6 +812,7 @@ export const ArcadeTab: React.FC = () => {
 
   // 로비로 퇴장
   const handleExitGame = useCallback(() => {
+    submitInFlightRef.current = false;
     setActiveGame(null);
     setGameData(null);
     setGameResult(null);
@@ -828,14 +830,33 @@ export const ArcadeTab: React.FC = () => {
     }
   }, []);
 
+  const restoreActiveTimer = useCallback((remainingMs: number) => {
+    const safeRemainingMs = Math.max(0, Math.floor(remainingMs));
+    const remainingSeconds = Math.max(0, Math.ceil(safeRemainingMs / 1000));
+    const deadline = Date.now() + safeRemainingMs;
+
+    if (activeGame === 'quiz') {
+      setQuizTimeLeft(remainingSeconds);
+      quizDeadlineRef.current = deadline;
+    } else if (activeGame === 'puzzle') {
+      setPuzzleTimeLeft(remainingSeconds);
+      puzzleDeadlineRef.current = deadline;
+    } else if (activeGame === 'match') {
+      setGameTimeLeft(remainingSeconds);
+      matchDeadlineRef.current = deadline;
+    }
+  }, [activeGame]);
+
   // 게임 결과 제출 처리 (치팅 방지를 위해 백엔드에서 서버 시간 2중 검증함)
   const submitResult = useCallback(async (payload: SubmitPayload) => {
     if (!sessionId) return;
+    if (submitInFlightRef.current) return;
     const clientRemainingMs =
       activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
         : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
           : activeGame === 'match' ? Math.max(0, gameTimeLeft * 1000)
             : 0;
+    submitInFlightRef.current = true;
     setGameBusy(true);
     try {
       const res = await apiFetch('/minigames/submit', {
@@ -860,13 +881,15 @@ export const ArcadeTab: React.FC = () => {
       }
     } catch {
       toast('결과 전송에 실패했습니다. 연결이 복구되면 다시 시도해 주세요.', 'warning');
+      restoreActiveTimer(clientRemainingMs);
       if (activeGame === 'quiz') {
         setSelectedQuizChoice(null);
       }
     } finally {
+      submitInFlightRef.current = false;
       setGameBusy(false);
     }
-  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, sessionId, toast]);
+  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
 
   useEffect(() => {
     if (user) {
@@ -975,9 +998,10 @@ export const ArcadeTab: React.FC = () => {
 
   // 짝맞추기 30초 인게임 타이머 구동
   useEffect(() => {
-    if (activeGame !== 'match' || revealActive || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (activeGame !== 'match' || revealActive || gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
     if (gameTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
+        if (submitInFlightRef.current) return;
         setIsGameOver(true);
         // 시간 제한 만료 실패 제출
         submitResult({ success: false });
@@ -992,13 +1016,14 @@ export const ArcadeTab: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [activeGame, revealActive, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
+  }, [activeGame, revealActive, gameBusy, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
 
   // 회전 퍼즐 120초 인게임 타이머 구동
   useEffect(() => {
-    if (activeGame !== 'puzzle' || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (activeGame !== 'puzzle' || gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
     if (puzzleTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
+        if (submitInFlightRef.current) return;
         setIsGameOver(true);
         submitResult({ success: false });
       }, 0);
@@ -1012,13 +1037,14 @@ export const ArcadeTab: React.FC = () => {
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeGame, countdownLeft, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
 
   // 인물 퀴즈 15초 제한시간 타이머 구동
   useEffect(() => {
-    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameResult || selectedQuizChoice) return;
+    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameBusy || gameResult || selectedQuizChoice) return;
     if (quizTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
+        if (submitInFlightRef.current) return;
         submitResult({ success: false });
       }, 0);
       return () => window.clearTimeout(timeout);
@@ -1031,11 +1057,11 @@ export const ArcadeTab: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [activeGame, countdownLeft, quizTimeLeft, gameResult, selectedQuizChoice, submitResult]);
+  }, [activeGame, countdownLeft, gameBusy, quizTimeLeft, gameResult, selectedQuizChoice, submitResult]);
 
   // 인물 퀴즈 블러 강도 감쇄 타이머 구동 (10초 동안 100 -> 0, 50ms 갱신)
   useEffect(() => {
-    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameResult || selectedQuizChoice) return;
+    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameBusy || gameResult || selectedQuizChoice) return;
 
     const interval = 50;
     const duration = 10000; // 10초
@@ -1052,7 +1078,7 @@ export const ArcadeTab: React.FC = () => {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [activeGame, countdownLeft, quizStartTime, gameResult, selectedQuizChoice]);
+  }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, selectedQuizChoice]);
 
   // 포맷팅 헬퍼 (초 -> HH:MM:SS)
   const formatTime = (secs: number) => {
@@ -1080,6 +1106,7 @@ export const ArcadeTab: React.FC = () => {
     }
 
     setGameBusy(true);
+    submitInFlightRef.current = false;
     setGameResult(null);
     setSelectedQuizChoice(null);
     setFlippedIndices([]);
