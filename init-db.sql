@@ -486,6 +486,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);
+CREATE INDEX IF NOT EXISTS idx_market_listings_status_type_created ON market_listings(status, listing_type, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_market_listings_participants
     ON market_listings(seller_id, buyer_id, current_bidder_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card

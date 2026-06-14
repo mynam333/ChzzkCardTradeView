@@ -646,6 +646,40 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return settled;
   }
 
+  async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
+    const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
+    const { data: rows, error } = await this.getClient()
+      .from('market_listings')
+      .select('*, seller:users!market_listings_seller_id_fkey(username), buyer:users!market_listings_buyer_id_fkey(username), current_bidder:users!market_listings_current_bidder_id_fkey(username)')
+      .eq('status', 'PENDING')
+      .eq('listing_type', 'fixed')
+      .lte('created_at', cutoffIso)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(maxRows);
+    if (error) throw error;
+    if (!rows?.length) return [];
+
+    const ids = rows.map((row: any) => row.id).filter((id: any) => Number.isFinite(Number(id)));
+    const { error: updateError } = await this.getClient()
+      .from('market_listings')
+      .update({
+        status: 'CANCELLED',
+        bid_reserved: 0,
+        updated_at: new Date().toISOString()
+      })
+      .in('id', ids)
+      .eq('status', 'PENDING');
+    if (updateError) throw updateError;
+
+    const cancelled: MarketListing[] = [];
+    for (const row of rows) {
+      const cardData = await this.getCardDetail(row.user_card_id);
+      cancelled.push(this.mapRow({ ...row, status: 'CANCELLED', bid_reserved: 0 }, cardData));
+    }
+    return cancelled;
+  }
+
   async upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch> {
     const { data: existing } = await this.getClient()
       .from('market_watches')

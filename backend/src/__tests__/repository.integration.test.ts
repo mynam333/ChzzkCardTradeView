@@ -601,6 +601,58 @@ describe('MarketRepository 재등록 제약', () => {
     ]);
   });
 
+  it('7일 이상 판매되지 않은 고정가 매물만 자동 취소한다', async () => {
+    seedUser(db, 'stale-fixed-seller');
+    seedUser(db, 'fresh-fixed-seller');
+    seedUser(db, 'stale-auction-seller');
+    seedStreamer(db, 'stale-fixed-channel', '오래된 고정가');
+    seedStreamer(db, 'fresh-fixed-channel', '최근 고정가');
+    seedStreamer(db, 'stale-auction-channel', '오래된 경매');
+    const staleFixedCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('stale-fixed-seller', 'stale-fixed-channel', 1, 0)
+    `).run().lastInsertRowid);
+    const freshFixedCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('fresh-fixed-seller', 'fresh-fixed-channel', 1, 0)
+    `).run().lastInsertRowid);
+    const staleAuctionCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('stale-auction-seller', 'stale-auction-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const staleFixed = await marketRepository.create({
+      seller_id: 'stale-fixed-seller',
+      user_card_id: staleFixedCardId,
+      price: 1000
+    });
+    const freshFixed = await marketRepository.create({
+      seller_id: 'fresh-fixed-seller',
+      user_card_id: freshFixedCardId,
+      price: 1000
+    });
+    const staleAuction = await marketRepository.create({
+      seller_id: 'stale-auction-seller',
+      user_card_id: staleAuctionCardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    db.prepare("UPDATE market_listings SET created_at = datetime('now', '-8 day'), updated_at = datetime('now', '-8 day') WHERE id IN (?, ?)")
+      .run(staleFixed.id, staleAuction.id);
+    db.prepare("UPDATE market_listings SET created_at = datetime('now', '-2 day'), updated_at = datetime('now', '-2 day') WHERE id = ?")
+      .run(freshFixed.id);
+
+    const cancelled = await marketRepository.cancelStaleListings(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+    expect(cancelled.map((listing) => listing.id)).toEqual([staleFixed.id]);
+    expect(db.prepare('SELECT status FROM market_listings WHERE id = ?').get(staleFixed.id)).toEqual({ status: 'CANCELLED' });
+    expect(db.prepare('SELECT status FROM market_listings WHERE id = ?').get(freshFixed.id)).toEqual({ status: 'PENDING' });
+    expect(db.prepare('SELECT status FROM market_listings WHERE id = ?').get(staleAuction.id)).toEqual({ status: 'PENDING' });
+    expect(db.prepare('SELECT id FROM market_listings WHERE user_card_id = ? AND status = ?').get(staleFixedCardId, 'PENDING')).toBeUndefined();
+  });
+
   it('마켓에서 구매한 카드도 구매자가 다시 판매 등록할 수 있다', async () => {
     seedUser(db, 'old-seller');
     seedUser(db, 'new-buyer', 10000);

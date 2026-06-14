@@ -153,6 +153,9 @@ export const GachaTab: React.FC = () => {
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
   const [tradeRequestSearch, setTradeRequestSearch] = useState('');
+  const [rejectTradeTarget, setRejectTradeTarget] = useState<any | null>(null);
+  const [rejectTradeReason, setRejectTradeReason] = useState('');
+  const [rejectTradeBusy, setRejectTradeBusy] = useState(false);
   // 교환 이력 모달 + 페이지네이션
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
@@ -804,18 +807,43 @@ export const GachaTab: React.FC = () => {
   };
 
   // 교환 거절(받은) / 취소(보낸)
-  const handleRejectTrade = async (tradeId: number) => {
+  const handleRejectTrade = async (tradeId: number, reason?: string) => {
+    const trimmedReason = (reason || '').trim();
+    if (Array.from(trimmedReason).length > 30) {
+      showAlert('입력 확인', '거절 사유는 30자 이내로 입력해 주세요.', 'warning');
+      return;
+    }
     try {
-      const res = await apiFetch(`/trades/${tradeId}/reject`, { method: 'POST' });
+      const res = await apiFetch(`/trades/${tradeId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify(trimmedReason ? { reason: trimmedReason } : {})
+      });
       const data = await res.json();
       if (res.ok) {
         showAlert('처리 완료', data.message || '처리되었습니다.', 'info');
+        setRejectTradeTarget(null);
+        setRejectTradeReason('');
         fetchActiveTrades();
       } else {
         showAlert('처리 실패', data.message || '처리에 실패했습니다.', 'error');
       }
     } catch (e) {
       showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  const openRejectTradeModal = (trade: any) => {
+    setRejectTradeTarget(trade);
+    setRejectTradeReason('');
+  };
+
+  const submitRejectTradeReason = async () => {
+    if (!rejectTradeTarget?.id || rejectTradeBusy) return;
+    setRejectTradeBusy(true);
+    try {
+      await handleRejectTrade(rejectTradeTarget.id, rejectTradeReason);
+    } finally {
+      setRejectTradeBusy(false);
     }
   };
 
@@ -1213,6 +1241,99 @@ export const GachaTab: React.FC = () => {
         <StreamerDetailModal channelId={detailStreamer.channel_id} onClose={closeStreamerDetail} />
       )}
 
+      {rejectTradeTarget && (() => {
+        const counterpartName = rejectTradeTarget.sender_username || rejectTradeTarget.sender_id || '상대방';
+        const reasonLength = Array.from(rejectTradeReason.trim()).length;
+        return (
+          <div
+            className="modal-backdrop modal-backdrop-center z-[90] bg-black/65 backdrop-blur-sm animate-in fade-in duration-150"
+            onClick={() => {
+              if (!rejectTradeBusy) {
+                setRejectTradeTarget(null);
+                setRejectTradeReason('');
+              }
+            }}
+          >
+            <div
+              className="modal-panel modal-panel-sm rounded-2xl border border-border bg-card p-5 shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-500 shadow-sm">
+                    <UserMinus className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-foreground">교환 거절 사유</h3>
+                    <p className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
+                      {counterpartName}님에게 알림으로 전달돼요.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={rejectTradeBusy}
+                  onClick={() => {
+                    setRejectTradeTarget(null);
+                    setRejectTradeReason('');
+                  }}
+                  className="rounded-full p-1.5 text-muted-foreground transition hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                  aria-label="닫기"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-border/70 bg-secondary/20 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label htmlFor="trade-reject-reason" className="text-[11px] font-black text-foreground">
+                    사유 입력
+                  </label>
+                  <span className={`text-[10px] font-black ${reasonLength > 30 ? 'text-rose-500' : 'text-muted-foreground'}`}>
+                    {reasonLength}/30
+                  </span>
+                </div>
+                <textarea
+                  id="trade-reject-reason"
+                  value={rejectTradeReason}
+                  maxLength={30}
+                  rows={3}
+                  disabled={rejectTradeBusy}
+                  onChange={(e) => setRejectTradeReason(Array.from(e.target.value).slice(0, 30).join(''))}
+                  placeholder="예: 지금은 교환이 어려워요"
+                  className="min-h-[84px] w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground outline-none transition placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                />
+                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  비워두고 거절할 수도 있어요. 작성한 내용은 시스템 알림과 푸시 알림에 함께 표시됩니다.
+                </p>
+              </div>
+
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  disabled={rejectTradeBusy}
+                  onClick={() => {
+                    setRejectTradeTarget(null);
+                    setRejectTradeReason('');
+                  }}
+                  className="rounded-xl border border-border bg-secondary px-4 py-2 text-xs font-black text-muted-foreground transition hover:bg-secondary/80 hover:text-foreground disabled:opacity-50"
+                >
+                  돌아가기
+                </button>
+                <button
+                  type="button"
+                  disabled={rejectTradeBusy || reasonLength > 30}
+                  onClick={submitRejectTradeReason}
+                  className="rounded-xl bg-rose-500 px-5 py-2 text-xs font-black text-white shadow-lg shadow-rose-500/20 transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {rejectTradeBusy ? '전송 중...' : '거절 확인'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 교환 인박스 (받은/보낸 진행 중 교환) */}
       {activeTrades.length > 0 && (
         <section className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-3">
@@ -1294,7 +1415,7 @@ export const GachaTab: React.FC = () => {
                   </p>
                   <div className="mt-2 flex justify-end gap-2">
                     {/* 수신자: PENDING이면 '동의' 가능. 제안자: CONFIRMED면 '최종 승인' 가능. 양측 항상 취소/거절 가능 */}
-                    <button onClick={() => handleRejectTrade(t.id)} className="rounded-lg bg-secondary px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-secondary/80">
+                    <button onClick={() => incoming ? openRejectTradeModal(t) : handleRejectTrade(t.id)} className="rounded-lg bg-secondary px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-secondary/80">
                       {incoming ? '거절' : '취소'}
                     </button>
                     {incoming && !confirmed && (

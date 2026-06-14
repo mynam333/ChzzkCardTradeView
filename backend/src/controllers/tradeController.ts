@@ -12,6 +12,15 @@ const notify = (userId: string, title: string, body: string) => {
   notificationRepository.create({ user_id: userId, title, body, link: 'inventory' }).catch(() => { /* 무시 */ });
 };
 
+const normalizeTradeRejectReason = (value: unknown): { ok: true; reason: string } | { ok: false; message: string } => {
+  if (value == null) return { ok: true, reason: '' };
+  const reason = String(value).trim();
+  if (Array.from(reason).length > 30) {
+    return { ok: false, message: '거절 사유는 30자 이내로 입력해 주세요.' };
+  }
+  return { ok: true, reason };
+};
+
 const TRADE_ACCOUNT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 const parseUserCreatedAtMs = (createdAt?: string | null): number => {
@@ -517,14 +526,23 @@ export const rejectTrade = async (req: AuthenticatedRequest, res: Response) => {
 
     // 제안자가 취소하면 CANCELLED, 수신자가 거절하면 REJECTED
     const nextStatus = trade.sender_id === user.id ? 'CANCELLED' : 'REJECTED';
+    const parsedRejectReason = nextStatus === 'REJECTED'
+      ? normalizeTradeRejectReason(req.body?.reason)
+      : { ok: true as const, reason: '' };
+    if (!parsedRejectReason.ok) {
+      return res.status(400).json({ error: 'BadRequest', message: parsedRejectReason.message });
+    }
     await tradeRepository.updateStatus(tradeId, nextStatus);
 
     // 상대방에게 결과 푸시
     const counterpartId = trade.sender_id === user.id ? trade.receiver_id : trade.sender_id;
+    const rejectBody = parsedRejectReason.reason
+      ? `${user.username}님이 교환 제안을 거절했어요. 사유: ${parsedRejectReason.reason}`
+      : `${user.username}님이 교환 제안을 거절했어요.`;
     notify(
       counterpartId,
       nextStatus === 'CANCELLED' ? '교환 취소됨' : '교환 거절됨',
-      nextStatus === 'CANCELLED' ? `${user.username}님이 교환 제안을 취소했어요.` : `${user.username}님이 교환 제안을 거절했어요.`
+      nextStatus === 'CANCELLED' ? `${user.username}님이 교환 제안을 취소했어요.` : rejectBody
     );
 
     return res.status(200).json({

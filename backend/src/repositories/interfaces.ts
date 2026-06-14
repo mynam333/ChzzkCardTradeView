@@ -559,6 +559,7 @@ export interface IMarketRepository {
   getRecentPrice(channelId: string): Promise<number | null>;
   placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }>;
   finishExpiredAuctions(nowIso: string): Promise<MarketListing[]>;
+  cancelStaleListings(cutoffIso: string, limit?: number): Promise<MarketListing[]>;
   upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<MarketWatch>;
   deleteWatch(userId: string, id: number): Promise<boolean>;
   listWatches(userId: string): Promise<MarketWatch[]>;

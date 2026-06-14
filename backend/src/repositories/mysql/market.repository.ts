@@ -560,6 +560,35 @@ export class MysqlMarketRepository implements IMarketRepository {
     return completed;
   }
 
+  async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
+    const cutoff = cutoffIso.slice(0, 19).replace('T', ' ');
+    const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
+    const staleRows = await this.getDb().all<any>(
+      `${this.listingSelectWhere("WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND ml.created_at <= ?")}
+       ORDER BY ml.created_at ASC, ml.id ASC
+       LIMIT ?`,
+      cutoff,
+      maxRows
+    );
+    const staleListings = staleRows.map((row) => this.mapRow(row));
+    if (staleListings.length === 0) return [];
+
+    const ids = staleListings.map((listing) => Number(listing.id)).filter(Number.isFinite);
+    const placeholders = ids.map(() => '?').join(',');
+    await this.getDb().run(
+      `UPDATE market_listings
+          SET status = 'CANCELLED',
+              pending_user_card_id = NULL,
+              bid_reserved = 0,
+              updated_at = UTC_TIMESTAMP()
+        WHERE status = 'PENDING'
+          AND COALESCE(listing_type, 'fixed') = 'fixed'
+          AND id IN (${placeholders})`,
+      ...ids
+    );
+    return staleListings.map((listing) => ({ ...listing, status: 'CANCELLED' as const }));
+  }
+
   async upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<any> {
     const existing = await this.getDb().get(
       'SELECT id FROM market_watches WHERE user_id = ? AND channel_id = ? AND ((star IS NULL AND ? IS NULL) OR star = ?) LIMIT 1',

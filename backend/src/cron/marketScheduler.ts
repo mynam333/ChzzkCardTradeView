@@ -10,7 +10,7 @@ export const startMarketSettlementScheduler = () => {
     try {
       await settleExpiredAuctions();
     } catch (err: any) {
-      console.error('[MarketScheduler] 만료 경매 정산 실패:', err?.message || err);
+      console.error('[MarketScheduler] 마켓 예약 정리 실패:', err?.message || err);
     } finally {
       isSettling = false;
     }

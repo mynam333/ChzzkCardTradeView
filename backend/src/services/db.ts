@@ -524,6 +524,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'streamers', 'idx_streamers_base_value', '(base_value DESC, channel_id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_updated', '(status, updated_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_updated', '(status, listing_type, updated_at DESC, id DESC)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_created', '(status, listing_type, created_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_price', '(status, price, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
@@ -1211,6 +1212,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_updated ON market_listings(status, updated_at DESC, id DESC);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_type_updated ON market_listings(status, listing_type, updated_at DESC, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_type_created ON market_listings(status, listing_type, created_at, id);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_price ON market_listings(status, price, id);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings(status, auction_ends_at, id);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_bidder_active ON market_listings(status, listing_type, current_bidder_id, bid_reserved);`);

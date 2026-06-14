@@ -755,6 +755,52 @@ export class SqliteMarketRepository implements IMarketRepository {
     return completed;
   }
 
+  async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
+    const db = this.getDb();
+    const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
+    const staleRows = db.prepare(`
+      SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
+             uc.user_id AS card_user_id, uc.channel_id, uc.serial_number, uc.star,
+             uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
+             s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
+             s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+             s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+             s.base_value AS streamer_base_value, s.follower_count AS streamer_follower,
+             s.is_active AS streamer_is_active, s.is_image_banned AS streamer_is_image_banned,
+             s.serial_number AS streamer_serial,
+             bi.id AS border_id, bi.style_json AS border_style,
+             ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
+        FROM market_listings ml
+        JOIN users u ON u.id = ml.seller_id
+        LEFT JOIN users bu ON bu.id = ml.buyer_id
+        LEFT JOIN users cb ON cb.id = ml.current_bidder_id
+        JOIN user_cards uc ON uc.id = ml.user_card_id
+        JOIN streamers s ON s.channel_id = uc.channel_id
+        LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
+        LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
+       WHERE ml.status = 'PENDING'
+         AND COALESCE(ml.listing_type, 'fixed') = 'fixed'
+         AND datetime(ml.created_at) <= datetime(?)
+       ORDER BY ml.created_at ASC, ml.id ASC
+       LIMIT ?
+    `).all(cutoffIso, maxRows) as any[];
+    const staleListings = staleRows.map((row) => this.mapRow(row));
+    if (staleListings.length === 0) return [];
+
+    const ids = staleListings.map((listing) => Number(listing.id)).filter(Number.isFinite);
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`
+      UPDATE market_listings
+         SET status = 'CANCELLED',
+             bid_reserved = 0,
+             updated_at = datetime('now')
+       WHERE status = 'PENDING'
+         AND COALESCE(listing_type, 'fixed') = 'fixed'
+         AND id IN (${placeholders})
+    `).run(...ids);
+    return staleListings.map((listing) => ({ ...listing, status: 'CANCELLED' as const }));
+  }
+
   async upsertWatch(watch: { user_id: string; channel_id: string; star: number | null; max_price: number | null }): Promise<any> {
     const existing = this.getDb().prepare(`
       SELECT id FROM market_watches

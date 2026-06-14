@@ -12,6 +12,8 @@ import type { MarketListing } from '../repositories/interfaces';
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000));
 const MARKET_SETTLE_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.MARKET_SETTLE_MIN_INTERVAL_MS || 15_000));
+const MARKET_STALE_LISTING_DAYS = Math.max(1, Number(process.env.MARKET_STALE_LISTING_DAYS || 7));
+const MARKET_STALE_CANCEL_BATCH = Math.max(1, Math.min(500, Number(process.env.MARKET_STALE_CANCEL_BATCH || 200)));
 
 const marketListCache = new Map<string, { data: any; expiresAt: number }>();
 let marketSettleInFlight: Promise<void> | null = null;
@@ -478,6 +480,8 @@ export const settleExpiredAuctions = async () => {
   marketSettleInFlight = (async () => {
     lastMarketSettleAt = now;
     const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+    const staleCutoffIso = new Date(Date.now() - MARKET_STALE_LISTING_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const cancelledListings = await marketRepository.cancelStaleListings(staleCutoffIso, MARKET_STALE_CANCEL_BATCH);
     for (const listing of soldListings) {
       const streamerName = listing.card?.streamer?.name || '스트리머';
       const star = listing.card?.star ?? 0;
@@ -487,11 +491,25 @@ export const settleExpiredAuctions = async () => {
         notify(listing.buyer_id, '[오픈마켓] 경매 낙찰', `[${streamerName}] ${star}성 카드 경매에 낙찰되어 카드가 보관함으로 이동했습니다.`);
       }
     }
-    if (soldListings.length > 0) {
-      publishMarketUpdated('auction_settled', null, {
-        listingIds: soldListings.map((listing) => listing.id).filter(Boolean),
-        listings: soldListings.map(realtimeListingPatch).filter(Boolean)
+    for (const listing of cancelledListings) {
+      const streamerName = listing.card?.streamer?.name || '스트리머';
+      const star = listing.card?.star ?? 0;
+      notify(
+        listing.seller_id,
+        '[오픈마켓] 판매 등록 자동 취소',
+        `[${streamerName}] ${star}성 카드가 ${MARKET_STALE_LISTING_DAYS}일 동안 판매되지 않아 자동으로 등록 취소되었습니다.`,
+        'shop:market',
+        `market-stale:${listing.id}`
+      );
+    }
+    if (soldListings.length > 0 || cancelledListings.length > 0) {
+      const changedListings = [...soldListings, ...cancelledListings];
+      publishMarketUpdated('market_scheduled_cleanup', null, {
+        listingIds: changedListings.map((listing) => listing.id).filter(Boolean),
+        listings: changedListings.map(realtimeListingPatch).filter(Boolean)
       });
+    }
+    if (soldListings.length > 0) {
       publishRankingUpdated('auction_settled');
     }
   })().finally(() => {
