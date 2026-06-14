@@ -139,6 +139,17 @@ const enrichTradesForAdmin = async (trades: Trade[]) => {
 // 카드 식별 복합키: 채널 + 별
 const cardKey = (channelId: string, star?: number) => `${channelId}#${star ?? 0}`;
 
+const aggregateOfferCardsByStar = (offer: TradeOffer): Record<string, { channel_id: string; star: number; count: number }> => {
+  const map: Record<string, { channel_id: string; star: number; count: number }> = {};
+  for (const card of offer.cards || []) {
+    const star = card.star ?? 0;
+    const key = cardKey(card.channel_id, star);
+    if (!map[key]) map[key] = { channel_id: card.channel_id, star, count: 0 };
+    map[key].count += card.count;
+  }
+  return map;
+};
+
 /**
  * 특정 유저의 (채널+별)별 보유 카드 수량 맵을 구합니다.
  */
@@ -151,6 +162,36 @@ const getOwnedByStarMap = async (userId: string): Promise<Record<string, number>
   return map;
 };
 
+const validateOfferCardAvailability = async (
+  userId: string,
+  offer: TradeOffer,
+  options: { selfReservation?: boolean } = {}
+): Promise<{ ok: true } | { ok: false; key: string; requested: number; owned: number; reserved: number }> => {
+  const requestedByStar = aggregateOfferCardsByStar(offer);
+  const entries = Object.entries(requestedByStar);
+  if (entries.length === 0) return { ok: true };
+
+  const [ownedByStar, reservations] = await Promise.all([
+    getOwnedByStarMap(userId),
+    getUserReservations(userId)
+  ]);
+
+  for (const [key, requested] of entries) {
+    const owned = ownedByStar[key] || 0;
+    const reserved = reservations.cardsByStar[key] || 0;
+    const selfReservation = options.selfReservation ? requested.count : 0;
+    const available = owned - Math.max(0, reserved - selfReservation);
+    if (available < requested.count) {
+      return { ok: false, key, requested: requested.count, owned, reserved };
+    }
+  }
+
+  return { ok: true };
+};
+
+const tradeUnavailableMessage = (targetLabel: string) =>
+  `${targetLabel} 카드 중 마켓 판매 중이거나 다른 교환에 묶인 카드가 있어 교환할 수 없습니다.`;
+
 /**
  * 진행 중인 거래에 묶여(에스크로) 있는 유저의 카드/포인트 예약량을 계산합니다.
  * - 제안자 측: PENDING/CONFIRMED 모두 제시품(sender_offer)이 예약됨
@@ -158,7 +199,7 @@ const getOwnedByStarMap = async (userId: string): Promise<Record<string, number>
  * 다른 곳(판매/신규 제안)에서 available = 보유 - 예약 으로 검증해 이중 지출을 막습니다.
  */
 export const getUserReservations = async (userId: string): Promise<{ cards: Record<string, number>; cardsByStar: Record<string, number>; points: number }> => {
-  const active = await tradeRepository.findActiveByUser(userId);
+  const active = await Promise.resolve(tradeRepository.findActiveByUser(userId)).catch(() => []);
   const cards: Record<string, number> = {};        // 채널 단위 합산(판매 가드용 하위호환)
   const cardsByStar: Record<string, number> = {};  // 채널+별 복합키(교환 검증용)
   let points = 0;
@@ -172,7 +213,7 @@ export const getUserReservations = async (userId: string): Promise<{ cards: Reco
     points += offer.point || 0;
   };
 
-  for (const t of active) {
+  for (const t of Array.isArray(active) ? active : []) {
     if (t.sender_id === userId) reserve(t.sender_offer);
     if (t.receiver_id === userId && t.status === 'CONFIRMED') reserve(t.receiver_offer);
   }
@@ -243,17 +284,25 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: 'Blocked', message: '상대방에게 교환을 제안할 수 없습니다. (차단됨)' });
     }
 
-    // 제안자가 제시한 카드/포인트가 "사용 가능"한지 검증
-    // (보유량에서 이미 다른 진행 중 거래에 묶인 예약량을 뺀 값 기준 → 이중 지출 방지)
-    const ownedByStar = await getOwnedByStarMap(sender.id);
-    const reservations = await getUserReservations(sender.id);
-    for (const c of senderOffer.cards) {
-      const key = cardKey(c.channel_id, c.star);
-      const available = (ownedByStar[key] || 0) - (reservations.cardsByStar[key] || 0);
-      if (available < c.count) {
-        return res.status(400).json({ error: 'InsufficientCards', message: '제안하려는 카드가 부족합니다. (이미 다른 거래에 묶여 있을 수 있어요)' });
-      }
+    // 제안자가 제시한 카드와 상대방에게 요청한 카드가 모두 "사용 가능"한지 검증합니다.
+    // 마켓 판매 중인 카드도 예약량에 포함되므로 교환 요청 생성 단계에서 차단됩니다.
+    const senderCardsAvailable = await validateOfferCardAvailability(sender.id, senderOffer);
+    if (!senderCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'InsufficientCards',
+        reason: 'SENDER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('제안하려는')
+      });
     }
+    const receiverCardsAvailable = await validateOfferCardAvailability(receiver.id, receiverOffer);
+    if (!receiverCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'InsufficientCards',
+        reason: 'RECEIVER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('상대방에게 요청한')
+      });
+    }
+    const reservations = await getUserReservations(sender.id);
     const availablePoint = (freshSender?.point ?? 0) - reservations.points;
     if (availablePoint < senderOffer.point) {
       return res.status(400).json({ error: 'InsufficientPoint', message: '제안하려는 포인트가 부족합니다. (다른 거래에 묶인 포인트 제외)' });
@@ -340,6 +389,31 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
     if (ageRestriction) {
       return sendTradeAgeBlocked(res, ageRestriction);
     }
+    const senderCardsAvailable = await validateOfferCardAvailability(trade.sender_id, trade.sender_offer, { selfReservation: true });
+    if (!senderCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'TradeFailed',
+        reason: 'SENDER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('제안자가 제시한')
+      });
+    }
+    const receiverCardsAvailable = await validateOfferCardAvailability(trade.receiver_id, trade.receiver_offer);
+    if (!receiverCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'TradeFailed',
+        reason: 'RECEIVER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('내가 건네야 할')
+      });
+    }
+    const receiverReservations = await getUserReservations(trade.receiver_id);
+    const receiverPointAvailable = Number(participants.receiver.point || 0) - receiverReservations.points;
+    if (receiverPointAvailable < Number(trade.receiver_offer?.point || 0)) {
+      return res.status(400).json({
+        error: 'TradeFailed',
+        reason: 'RECEIVER_POINT_SHORT',
+        message: REASON_MESSAGES.RECEIVER_POINT_SHORT
+      });
+    }
     const result = await tradeRepository.confirm(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
@@ -383,6 +457,22 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
     const ageRestriction = findTradeAgeRestriction(participants.sender, participants.receiver);
     if (ageRestriction) {
       return sendTradeAgeBlocked(res, ageRestriction);
+    }
+    const senderCardsAvailable = await validateOfferCardAvailability(trade.sender_id, trade.sender_offer, { selfReservation: true });
+    if (!senderCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'TradeFailed',
+        reason: 'SENDER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('제안자가 제시한')
+      });
+    }
+    const receiverCardsAvailable = await validateOfferCardAvailability(trade.receiver_id, trade.receiver_offer, { selfReservation: true });
+    if (!receiverCardsAvailable.ok) {
+      return res.status(400).json({
+        error: 'TradeFailed',
+        reason: 'RECEIVER_CARDS_UNAVAILABLE',
+        message: tradeUnavailableMessage('상대방이 건네야 할')
+      });
     }
     const result = await tradeRepository.finalize(tradeId, user.id);
     if (!result.ok) {

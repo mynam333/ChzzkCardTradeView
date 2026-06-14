@@ -175,4 +175,58 @@ describe('trade account age restriction', () => {
     expect(response.status).toHaveBeenCalledWith(200);
     expect(tradeRepository.confirm).toHaveBeenCalledWith(1, 'receiver');
   });
+
+  it('blocks creating a trade that requests a receiver card listed on the market', async () => {
+    const sender = makeUser('sender', oldCreatedAt());
+    const receiver = makeUser('receiver', oldCreatedAt());
+    mockUsersById({ sender, receiver });
+    vi.mocked(userRepository.isBlocked).mockResolvedValue(false);
+    vi.mocked(tradeRepository.findActiveByUser).mockResolvedValue([]);
+    vi.mocked(userCardRepository.findByUserId).mockImplementation(async (userId: string) => {
+      if (userId === 'receiver') {
+        return [{
+          id: 10,
+          user_id: 'receiver',
+          channel_id: 'channel-a',
+          serial_number: 1,
+          star: 0,
+          streamer: { channel_id: 'channel-a', name: '스트리머A', logo_url: null }
+        }] as never;
+      }
+      return [] as never;
+    });
+    vi.mocked(marketRepository.listByUser).mockImplementation(async (userId: string) => {
+      if (userId === 'receiver') {
+        return [{
+          id: 99,
+          seller_id: 'receiver',
+          user_card_id: 10,
+          price: 1000,
+          status: 'PENDING',
+          buyer_id: null,
+          fee: 0,
+          settled_amount: 0,
+          card: { channel_id: 'channel-a', star: 0 }
+        }] as never;
+      }
+      return [] as never;
+    });
+
+    const response = createResponse();
+    await createTrade({
+      user: sender,
+      body: {
+        receiver_id: 'receiver',
+        sender_offer: { cards: [], point: 100 },
+        receiver_offer: { cards: [{ channel_id: 'channel-a', star: 0, count: 1 }], point: 0 }
+      }
+    } as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(vi.mocked(response.json).mock.calls[0][0]).toEqual(expect.objectContaining({
+      error: 'InsufficientCards',
+      reason: 'RECEIVER_CARDS_UNAVAILABLE'
+    }));
+    expect(tradeRepository.create).not.toHaveBeenCalled();
+  });
 });

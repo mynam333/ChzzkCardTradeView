@@ -172,11 +172,30 @@ export class MysqlTradeRepository implements ITradeRepository {
             const hasStar = c.star !== undefined && c.star !== null;
             const owned = hasStar
               ? await tx.all<{ id: number }>(
-                  'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND star = ? ORDER BY id ASC LIMIT ? FOR UPDATE',
+                  `SELECT id
+                     FROM user_cards uc
+                    WHERE uc.user_id = ?
+                      AND uc.channel_id = ?
+                      AND uc.star = ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM market_listings ml
+                         WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+                      )
+                    ORDER BY uc.id ASC
+                    LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.star, c.count
                 )
               : await tx.all<{ id: number }>(
-                  'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ? FOR UPDATE',
+                  `SELECT id
+                     FROM user_cards uc
+                    WHERE uc.user_id = ?
+                      AND uc.channel_id = ?
+                      AND NOT EXISTS (
+                        SELECT 1 FROM market_listings ml
+                         WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+                      )
+                    ORDER BY uc.id ASC
+                    LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.count
                 );
             if (owned.length < c.count) throw new Error('CARD_SHORTAGE');
