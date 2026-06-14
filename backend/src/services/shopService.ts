@@ -16,10 +16,12 @@ export interface ShopItem {
   font_family: string | null;
   active: boolean;
   purchase_limit: number; // 1인 최대 구매 갯수 (0 = 무제한)
+  listed_at?: string | null;
   sale_start_at?: string | null;
   sale_end_at?: string | null;
   limited_total_quantity?: number;
   sold_quantity?: number;
+  created_at?: string | null;
 }
 
 const mapSqliteItem = (r: any): ShopItem => ({
@@ -27,10 +29,12 @@ const mapSqliteItem = (r: any): ShopItem => ({
   price: r.price, style_json: r.style_json, font_url: r.font_url,
   font_family: r.font_family, active: r.active === 1,
   purchase_limit: r.purchase_limit ?? 0,
+  listed_at: r.listed_at ?? null,
   sale_start_at: r.sale_start_at ?? null,
   sale_end_at: r.sale_end_at ?? null,
   limited_total_quantity: r.limited_total_quantity ?? 0,
-  sold_quantity: r.sold_quantity ?? 0
+  sold_quantity: r.sold_quantity ?? 0,
+  created_at: r.created_at ?? null
 });
 
 const toDbDateTime = (value: string | null | undefined): string | null => {
@@ -39,6 +43,8 @@ const toDbDateTime = (value: string | null | undefined): string | null => {
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 19).replace('T', ' ');
 };
+
+const nowDbDateTime = () => toDbDateTime(new Date().toISOString());
 
 const parseShopDateMs = (value: string | null | undefined): number => {
   if (!value) return NaN;
@@ -62,14 +68,14 @@ const getItemSaleFailureReason = (item: any, now = Date.now()): string | null =>
 // ---- 아이템 카탈로그 ----
 export const getActiveItems = async (): Promise<ShopItem[]> => {
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('shop_items').select('*').eq('active', true).order('id', { ascending: true });
+    const { data } = await getSupabaseClient().from('shop_items').select('*').eq('active', true).order('listed_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false });
     return (data || []) as ShopItem[];
   }
   if (getDbMode() === 'MYSQL') {
-    const rows = await getMysqlDb().all('SELECT * FROM shop_items WHERE active = 1 ORDER BY id ASC');
+    const rows = await getMysqlDb().all('SELECT * FROM shop_items WHERE active = 1 ORDER BY COALESCE(listed_at, created_at) DESC, id DESC');
     return rows.map(mapSqliteItem);
   }
-  return getSqliteDb().prepare('SELECT * FROM shop_items WHERE active = 1 ORDER BY id ASC').all().map(mapSqliteItem);
+  return getSqliteDb().prepare('SELECT * FROM shop_items WHERE active = 1 ORDER BY COALESCE(listed_at, created_at) DESC, id DESC').all().map(mapSqliteItem);
 };
 
 export const getAllItems = async (): Promise<ShopItem[]> => {
@@ -103,29 +109,35 @@ export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { activ
   const totalQuantity = Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0));
   const saleStartAt = toDbDateTime(item.sale_start_at);
   const saleEndAt = toDbDateTime(item.sale_end_at);
+  const listedAt = active ? nowDbDateTime() : null;
   if (getDbMode() === 'SUPABASE') {
     await getSupabaseClient().from('shop_items').insert([{
       type: item.type, name: item.name, description: item.description ?? null, price: item.price,
       style_json: item.style_json ?? null, font_url: item.font_url ?? null, font_family: item.font_family ?? null, active, purchase_limit: limit,
-      sale_start_at: saleStartAt, sale_end_at: saleEndAt, limited_total_quantity: totalQuantity, sold_quantity: 0
+      listed_at: listedAt, sale_start_at: saleStartAt, sale_end_at: saleEndAt, limited_total_quantity: totalQuantity, sold_quantity: 0
     }]);
   } else if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
-      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, saleStartAt, saleEndAt, totalQuantity, 0
+      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, listed_at, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, listedAt, saleStartAt, saleEndAt, totalQuantity, 0
     );
   } else {
     getSqliteDb().prepare(
-      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).run(item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, saleStartAt, saleEndAt, totalQuantity, 0);
+      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, listed_at, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).run(item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, listedAt, saleStartAt, saleEndAt, totalQuantity, 0);
   }
 };
 
 export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const payload: any = {};
+    const cur = await getSupabaseClient().from('shop_items').select('active, listed_at').eq('id', id).maybeSingle();
     for (const k of ['type', 'name', 'description', 'price', 'style_json', 'font_url', 'font_family', 'active', 'purchase_limit', 'sale_start_at', 'sale_end_at', 'limited_total_quantity', 'sold_quantity'] as const) {
       if (item[k] !== undefined) payload[k] = item[k];
+    }
+    if (item.active !== undefined) {
+      const wasActive = !!cur.data?.active;
+      payload.listed_at = item.active ? (wasActive ? cur.data?.listed_at ?? nowDbDateTime() : nowDbDateTime()) : null;
     }
     if (payload.sale_start_at !== undefined) payload.sale_start_at = toDbDateTime(payload.sale_start_at);
     if (payload.sale_end_at !== undefined) payload.sale_end_at = toDbDateTime(payload.sale_end_at);
@@ -140,14 +152,17 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       font_url: item.font_url ?? cur.font_url, font_family: item.font_family ?? cur.font_family,
       active: item.active !== undefined ? (item.active ? 1 : 0) : cur.active,
       purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0),
+      listed_at: item.active !== undefined
+        ? (item.active ? (cur.active ? (cur.listed_at ?? nowDbDateTime()) : nowDbDateTime()) : null)
+        : (cur.listed_at ?? (cur.active ? cur.created_at ?? null : null)),
       sale_start_at: item.sale_start_at !== undefined ? toDbDateTime(item.sale_start_at) : (cur.sale_start_at ?? null),
       sale_end_at: item.sale_end_at !== undefined ? toDbDateTime(item.sale_end_at) : (cur.sale_end_at ?? null),
       limited_total_quantity: item.limited_total_quantity !== undefined ? Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0)) : (cur.limited_total_quantity ?? 0),
       sold_quantity: item.sold_quantity !== undefined ? Math.max(0, Math.floor(Number(item.sold_quantity) || 0)) : (cur.sold_quantity ?? 0)
     };
     await getMysqlDb().run(
-      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?',
-      merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id
+      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, listed_at=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?',
+      merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.listed_at, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id
     );
   } else {
     const cur = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id) as any;
@@ -158,14 +173,17 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       font_url: item.font_url ?? cur.font_url, font_family: item.font_family ?? cur.font_family,
       active: item.active !== undefined ? (item.active ? 1 : 0) : cur.active,
       purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0),
+      listed_at: item.active !== undefined
+        ? (item.active ? (cur.active ? (cur.listed_at ?? nowDbDateTime()) : nowDbDateTime()) : null)
+        : (cur.listed_at ?? (cur.active ? cur.created_at ?? null : null)),
       sale_start_at: item.sale_start_at !== undefined ? toDbDateTime(item.sale_start_at) : (cur.sale_start_at ?? null),
       sale_end_at: item.sale_end_at !== undefined ? toDbDateTime(item.sale_end_at) : (cur.sale_end_at ?? null),
       limited_total_quantity: item.limited_total_quantity !== undefined ? Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0)) : (cur.limited_total_quantity ?? 0),
       sold_quantity: item.sold_quantity !== undefined ? Math.max(0, Math.floor(Number(item.sold_quantity) || 0)) : (cur.sold_quantity ?? 0)
     };
     getSqliteDb().prepare(
-      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?'
-    ).run(merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id);
+      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, listed_at=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?'
+    ).run(merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.listed_at, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id);
   }
 };
 
@@ -189,7 +207,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
     const rows = await getMysqlDb().all(`
       SELECT
         si.id, si.type, si.name, si.description, si.price,
-        si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+        si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit, si.listed_at,
         si.sale_start_at, si.sale_end_at, si.limited_total_quantity, si.sold_quantity,
         uc.quantity
       FROM user_cosmetics uc
@@ -203,7 +221,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
   const rows = getSqliteDb().prepare(`
     SELECT 
       si.id, si.type, si.name, si.description, si.price, 
-      si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+      si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit, si.listed_at,
       si.sale_start_at, si.sale_end_at, si.limited_total_quantity, si.sold_quantity,
       uc.quantity 
     FROM user_cosmetics uc

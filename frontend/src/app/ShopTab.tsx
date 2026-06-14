@@ -23,6 +23,8 @@ interface ShopItem {
   font_url: string | null;
   font_family: string | null;
   purchase_limit: number;
+  listed_at?: string | null;
+  created_at?: string | null;
   sale_start_at?: string | null;
   sale_end_at?: string | null;
   limited_total_quantity?: number;
@@ -42,6 +44,9 @@ const getShopSaleState = (item: ShopItem, now = Date.now()) => {
   const leftMs = Number.isFinite(targetMs) ? Math.max(0, targetMs - now) : NaN;
   return { isLimited, notStarted, ended, total, sold, totalSoldOut, leftMs };
 };
+
+const getShopListedTime = (item: ShopItem) =>
+  parseAppDate(item.listed_at || item.created_at)?.getTime() ?? 0;
 
 const formatSaleLeft = (ms: number) => {
   if (!Number.isFinite(ms)) return '';
@@ -1015,7 +1020,8 @@ export const ShopTab: React.FC = () => {
       if (shopSort === 'price_asc') return a.price - b.price;
       if (shopSort === 'price_desc') return b.price - a.price;
       if (shopSort === 'name_asc') return a.name.localeCompare(b.name);
-      return b.id - a.id;
+      const listedDiff = getShopListedTime(b) - getShopListedTime(a);
+      return listedDiff || b.id - a.id;
     });
   const cosmeticTotal = filtered.length;
   const cosmeticTotalPages = Math.ceil(cosmeticTotal / 8);

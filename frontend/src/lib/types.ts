@@ -78,6 +78,8 @@ export interface ShopItem {
   font_url: string | null;
   font_family: string | null;
   purchase_limit: number;
+  listed_at?: string | null;
+  created_at?: string | null;
   sale_start_at?: string | null;
   sale_end_at?: string | null;
   limited_total_quantity?: number;

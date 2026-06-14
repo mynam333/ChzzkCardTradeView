@@ -301,6 +301,9 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'shop_items', 'sale_end_at', 'sale_end_at DATETIME NULL AFTER sale_start_at');
   await ensureMysqlColumn(db, 'shop_items', 'limited_total_quantity', 'limited_total_quantity INT NOT NULL DEFAULT 0 AFTER sale_end_at');
   await ensureMysqlColumn(db, 'shop_items', 'sold_quantity', 'sold_quantity INT NOT NULL DEFAULT 0 AFTER limited_total_quantity');
+  await ensureMysqlColumn(db, 'shop_items', 'listed_at', 'listed_at DATETIME NULL AFTER purchase_limit');
+  await db.run("UPDATE shop_items SET listed_at = COALESCE(created_at, UTC_TIMESTAMP()) WHERE active = 1 AND listed_at IS NULL");
+  await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_active_listed', '(active, listed_at, id)');
   await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_limited_sale', '(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
@@ -1083,6 +1086,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] shop_items 테이블에 purchase_limit(1인 구매 제한) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN purchase_limit INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT listed_at FROM shop_items LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] shop_items 테이블에 상점 등록 시각(listed_at) 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN listed_at TEXT;");
+      }
+      sqliteDb.exec("UPDATE shop_items SET listed_at = COALESCE(created_at, datetime('now')) WHERE active = 1 AND listed_at IS NULL;");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_shop_items_active_listed ON shop_items(active, listed_at, id);");
       try {
         sqliteDb.prepare("SELECT sale_start_at FROM shop_items LIMIT 1").get();
       } catch (e) {
