@@ -48,6 +48,7 @@ type CropDetectiveRound = {
     x: number;
     y: number;
     size: number;
+    rotation?: number;
   };
   source_image_url: string;
   choices: ArcadeCardOption[];
@@ -212,7 +213,6 @@ const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const PUZZLE_HINT_PENALTY_SECONDS = 10;
 const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
-const ROUND_GAME_TOTAL_SECONDS = 50;
 const ROUND_GAME_ROUND_SECONDS = 10;
 const QUIZ_TIME_LIMIT_SECONDS = 15;
 const QUIZ_DISTORTION_SCALE = 0.25;
@@ -782,8 +782,9 @@ const CardImageTile: React.FC<{
   correct?: boolean;
   wrong?: boolean;
   disabled?: boolean;
+  showStarLabel?: boolean;
   onClick?: () => void;
-}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, onClick }) => (
+}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, showStarLabel = true, onClick }) => (
   <button
     type="button"
     onClick={onClick}
@@ -808,27 +809,35 @@ const CardImageTile: React.FC<{
     </div>
     <div className="px-2.5 py-2 sm:px-3">
       <p className="truncate text-[11px] font-black text-foreground sm:text-sm">{card.name}</p>
-      <p className="mt-0.5 text-[9px] font-bold text-muted-foreground">{card.star > 0 ? `${card.star}성 카드` : '기본 카드'}</p>
+      {showStarLabel && (
+        <p className="mt-0.5 text-[9px] font-bold text-muted-foreground">{card.star > 0 ? `${card.star}성 카드` : '기본 카드'}</p>
+      )}
     </div>
   </button>
 );
 
 const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
-  const size = Math.max(0.08, Math.min(0.5, Number(round.crop?.size || 0.16)));
+  const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const x = Math.max(0, Math.min(1, Number(round.crop?.x || 0.5)));
   const y = Math.max(0, Math.min(1, Number(round.crop?.y || 0.5)));
+  const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
+  const rotationSafeScale = Math.SQRT2;
   return (
     <div
       role="img"
       aria-label="확대된 카드 이미지 조각"
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
-      style={{
-        backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: `${100 / size}% ${100 / size}%`,
-        backgroundPosition: `${x * 100}% ${y * 100}%`
-      }}
     >
+      <div
+        className="absolute left-1/2 top-1/2 aspect-square w-[142%] origin-center -translate-x-1/2 -translate-y-1/2"
+        style={{
+          backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: `${100 / (size * rotationSafeScale)}% ${100 / (size * rotationSafeScale)}%`,
+          backgroundPosition: `${x * 100}% ${y * 100}%`,
+          transform: `translate(-50%, -50%) rotate(${rotation}deg)`
+        }}
+      />
       <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
       <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-black tracking-[0.14em] text-white/80">
         ZOOM CROP
@@ -919,10 +928,8 @@ export const ArcadeTab: React.FC = () => {
   const [roundFeedback, setRoundFeedback] = useState<RoundFeedback | null>(null);
   const [roundCorrectCount, setRoundCorrectCount] = useState(0);
   const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
-  const [roundGameTimeLeft, setRoundGameTimeLeft] = useState(ROUND_GAME_TOTAL_SECONDS);
   const [roundChecking, setRoundChecking] = useState(false);
   const roundDeadlineRef = useRef<number | null>(null);
-  const roundGameDeadlineRef = useRef<number | null>(null);
 
   // 티켓 상태 조회 API 호출
   const fetchStatus = useCallback(async () => {
@@ -963,12 +970,10 @@ export const ArcadeTab: React.FC = () => {
     setRoundCorrectCount(0);
     setRoundChecking(false);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-    setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
     quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
     roundDeadlineRef.current = null;
-    roundGameDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -990,10 +995,8 @@ export const ArcadeTab: React.FC = () => {
       setGameTimeLeft(remainingSeconds);
       matchDeadlineRef.current = deadline;
     } else if (isRoundGame(activeGame)) {
-      setRoundGameTimeLeft(remainingSeconds);
-      setRoundTimeLeft(Math.min(ROUND_GAME_ROUND_SECONDS, remainingSeconds || ROUND_GAME_ROUND_SECONDS));
-      roundGameDeadlineRef.current = deadline;
-      roundDeadlineRef.current = Date.now() + Math.min(ROUND_GAME_ROUND_SECONDS, Math.max(1, remainingSeconds)) * 1000;
+      setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+      roundDeadlineRef.current = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
     }
   }, [activeGame]);
 
@@ -1005,8 +1008,7 @@ export const ArcadeTab: React.FC = () => {
       activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
         : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
           : activeGame === 'match' ? Math.max(0, gameTimeLeft * 1000)
-            : isRoundGame(activeGame) ? Math.max(0, roundGameTimeLeft * 1000)
-              : 0;
+            : 0;
     submitInFlightRef.current = true;
     setGameBusy(true);
     try {
@@ -1042,7 +1044,7 @@ export const ArcadeTab: React.FC = () => {
       submitInFlightRef.current = false;
       setGameBusy(false);
     }
-  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, roundGameTimeLeft, sessionId, toast]);
+  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
 
   useEffect(() => {
     if (user) {
@@ -1140,9 +1142,7 @@ export const ArcadeTab: React.FC = () => {
               setRevealActive(false);
             }, 2000);
           } else if (isRoundGame(activeGame)) {
-            roundGameDeadlineRef.current = now + ROUND_GAME_TOTAL_SECONDS * 1000;
             roundDeadlineRef.current = now + ROUND_GAME_ROUND_SECONDS * 1000;
-            setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
             setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
           }
           return 0;
@@ -1238,36 +1238,9 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, selectedQuizChoice]);
 
-  // 시세 듀얼 / 카드 확대 탐정 전체 제한시간 표시
-  useEffect(() => {
-    if (!isRoundGame(activeGame) || gameBusy || gameResult || isGameOver || !roundGameDeadlineRef.current || (countdownLeft !== null && countdownLeft > 0)) return;
-
-    const timer = window.setInterval(() => {
-      const totalDeadline = roundGameDeadlineRef.current;
-      if (!totalDeadline) return;
-      const nextTimeLeft = Math.max(0, Math.ceil((totalDeadline - Date.now()) / 1000));
-      setRoundGameTimeLeft(nextTimeLeft);
-      if (nextTimeLeft <= 0 && !submitInFlightRef.current) {
-        setIsGameOver(true);
-        submitResult({ answers: roundAnswers });
-      }
-    }, 250);
-
-    return () => window.clearInterval(timer);
-  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, roundAnswers, submitResult]);
-
   // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
   useEffect(() => {
     if (!isRoundGame(activeGame) || gameBusy || roundChecking || gameResult || isGameOver || roundFeedback || (countdownLeft !== null && countdownLeft > 0)) return;
-
-    if (roundGameTimeLeft <= 0) {
-      const timeout = window.setTimeout(() => {
-        if (submitInFlightRef.current) return;
-        setIsGameOver(true);
-        submitResult({ answers: roundAnswers });
-      }, 0);
-      return () => window.clearTimeout(timeout);
-    }
 
     if (roundTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
@@ -1291,7 +1264,7 @@ export const ArcadeTab: React.FC = () => {
     }, 250);
 
     return () => window.clearInterval(timer);
-  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, roundAnswers, roundChecking, roundFeedback, roundGameTimeLeft, roundIndex, roundTimeLeft, submitResult]);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, roundChecking, roundFeedback, roundIndex, roundTimeLeft]);
 
   // 포맷팅 헬퍼 (초 -> HH:MM:SS)
   const formatTime = (secs: number) => {
@@ -1333,13 +1306,11 @@ export const ArcadeTab: React.FC = () => {
     setRoundFeedback(null);
     setRoundCorrectCount(0);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-    setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
     setRoundChecking(false);
     quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
     roundDeadlineRef.current = null;
-    roundGameDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -1421,16 +1392,13 @@ export const ArcadeTab: React.FC = () => {
           .sort(() => 0.5 - Math.random()); // 셔플
         setMatchCards(deck);
       } else if (isRoundGame(type)) {
-        const totalRemaining = remainingSeconds ?? ROUND_GAME_TOTAL_SECONDS;
         setRoundIndex(0);
         setRoundAnswers([]);
         setRoundFeedback(null);
         setRoundCorrectCount(0);
         setRoundChecking(false);
-        setRoundGameTimeLeft(totalRemaining);
-        setRoundTimeLeft(Math.min(ROUND_GAME_ROUND_SECONDS, totalRemaining || ROUND_GAME_ROUND_SECONDS));
-        roundGameDeadlineRef.current = isResumed ? Date.now() + totalRemaining * 1000 : null;
-        roundDeadlineRef.current = isResumed ? Date.now() + Math.min(ROUND_GAME_ROUND_SECONDS, Math.max(1, totalRemaining)) * 1000 : null;
+        setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+        roundDeadlineRef.current = isResumed ? Date.now() + ROUND_GAME_ROUND_SECONDS * 1000 : null;
       }
 
       // 3초 카운트다운 가동
@@ -1680,7 +1648,7 @@ export const ArcadeTab: React.FC = () => {
 
   const handleRoundChoice = async (selectedChannelId: string) => {
     if (!sessionId || !isRoundGame(activeGame)) return;
-    if (gameBusy || roundChecking || roundFeedback || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (gameBusy || roundChecking || roundFeedback || gameResult || isGameOver || roundTimeLeft <= 0 || (countdownLeft !== null && countdownLeft > 0)) return;
 
     setRoundChecking(true);
     try {
@@ -2479,18 +2447,20 @@ export const ArcadeTab: React.FC = () => {
                 <div className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[10px] font-black text-amber-800 dark:text-amber-200 sm:text-xs">
                   <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
                   <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
-                  <span>전체 남은 시간 <span className="cute-number-font">{roundGameTimeLeft}</span>초</span>
+                  <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
 
                 <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:gap-5">
                   <CardImageTile
                     card={currentRound.left}
+                    showStarLabel={false}
                     disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
                     onClick={() => handleRoundChoice(currentRound.left.channel_id)}
                     {...leftState}
                   />
                   <CardImageTile
                     card={currentRound.right}
+                    showStarLabel={false}
                     disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
                     onClick={() => handleRoundChoice(currentRound.right.channel_id)}
                     {...rightState}
@@ -2552,7 +2522,7 @@ export const ArcadeTab: React.FC = () => {
                 <div className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-2 text-[10px] font-black text-fuchsia-800 dark:text-fuchsia-200 sm:text-xs">
                   <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
                   <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
-                  <span>전체 남은 시간 <span className="cute-number-font">{roundGameTimeLeft}</span>초</span>
+                  <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
 
                 <CropPreview round={currentRound} />

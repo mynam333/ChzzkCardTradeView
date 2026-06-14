@@ -18,14 +18,13 @@ const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
 const VALUE_DUEL_ROUND_COUNT = 5;
 const VALUE_DUEL_ROUND_TIME_MS = 10_000;
-const VALUE_DUEL_TIME_LIMIT_MS = VALUE_DUEL_ROUND_COUNT * VALUE_DUEL_ROUND_TIME_MS;
 const VALUE_DUEL_MIN_CORRECT = 3;
 const CROP_DETECTIVE_ROUND_COUNT = 5;
 const CROP_DETECTIVE_ROUND_TIME_MS = 10_000;
-const CROP_DETECTIVE_TIME_LIMIT_MS = CROP_DETECTIVE_ROUND_COUNT * CROP_DETECTIVE_ROUND_TIME_MS;
 const CROP_DETECTIVE_MIN_CORRECT = 3;
 const CROP_DETECTIVE_CHOICES = 4;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
+const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
@@ -70,8 +69,7 @@ const getGamePreplayMs = (gameType: DailyMinigameType): number => {
 const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
   if (gameType === 'quiz') return 15_000;
   if (gameType === 'puzzle') return PUZZLE_TIME_LIMIT_MS;
-  if (gameType === 'value_duel') return VALUE_DUEL_TIME_LIMIT_MS;
-  if (gameType === 'crop_detective') return CROP_DETECTIVE_TIME_LIMIT_MS;
+  if (gameType === 'value_duel' || gameType === 'crop_detective') return ROUND_GAME_SESSION_LIMIT_MS;
   return MATCH_TIME_LIMIT_MS;
 };
 
@@ -405,13 +403,18 @@ const getUniquePlayableImageCards = (streamers: any[]) => {
 };
 
 const buildCrop = (roundIndex: number) => {
-  const minSize = 0.10;
-  const maxSize = 0.20;
+  const minSize = 0.05;
+  const maxSize = 0.10;
   const size = Number((maxSize - (roundIndex / Math.max(1, CROP_DETECTIVE_ROUND_COUNT - 1)) * (maxSize - minSize)).toFixed(3));
   const min = size / 2 + 0.05;
   const max = 1 - size / 2 - 0.05;
   const pick = () => Number((min + Math.random() * Math.max(0.01, max - min)).toFixed(3));
-  return { x: pick(), y: pick(), size };
+  return {
+    x: pick(),
+    y: pick(),
+    size,
+    rotation: Math.floor(Math.random() * 360)
+  };
 };
 
 type MinigameAnswerReveal = {
@@ -1045,7 +1048,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
       }
     } else if (session.game_type === 'value_duel' || session.game_type === 'crop_detective') {
       const isValueDuel = session.game_type === 'value_duel';
-      const limitMs = isValueDuel ? VALUE_DUEL_TIME_LIMIT_MS : CROP_DETECTIVE_TIME_LIMIT_MS;
+      const limitMs = ROUND_GAME_SESSION_LIMIT_MS;
       const minCorrect = isValueDuel ? VALUE_DUEL_MIN_CORRECT : CROP_DETECTIVE_MIN_CORRECT;
       const gameLabel = isValueDuel ? '시세 듀얼' : '카드 확대 탐정';
 
@@ -1058,8 +1061,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           earned_points: 0,
           new_balance: user?.point ?? 0,
           message: practiceMode
-            ? `연습 게임의 ${Math.floor(limitMs / 1000)}초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.`
-            : `${Math.floor(limitMs / 1000)}초 시간 제한이 초과되어 실패 처리되었습니다.`,
+            ? '연습 게임 세션 시간이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.'
+            : `${gameLabel} 세션 시간이 초과되어 실패 처리되었습니다.`,
           practice_mode: practiceMode
         });
       }

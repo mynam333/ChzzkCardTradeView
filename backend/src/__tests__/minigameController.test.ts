@@ -380,6 +380,41 @@ describe('round-based minigames', () => {
     }));
   });
 
+  it('does not fail round-based games only because total wall-clock time exceeds 50 seconds', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'value-duel-session',
+      user_id: 'user-1',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      created_at: new Date(Date.now() - 70_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'value-duel-session',
+        payload: {
+          answers: [
+            { round: 0, selected_channel_id: 'left-0' },
+            { round: 1, selected_channel_id: 'left-1' },
+            { round: 2, selected_channel_id: 'left-2' }
+          ],
+          client_remaining_ms: 0
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('value-duel-session', 1000);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      correct: true,
+      earned_points: 1000
+    }));
+  });
+
   it('awards bonus points when crop detective has all 5 correct answers', async () => {
     findSessionById.mockResolvedValue({
       id: 'crop-session',
@@ -664,6 +699,44 @@ describe('daily minigame selection', () => {
       correct_id: expect.stringMatching(/^channel-\d+$/),
       correct_name: expect.stringMatching(/^streamer-\d+$/),
       image_url: expect.stringMatching(/^https:\/\/example\.com\/\d+\.png$/)
+    }));
+  });
+
+  it('issues crop detective rounds with doubled zoom and random rotation data', async () => {
+    findAllStreamers.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        channel_id: `channel-${index}`,
+        name: `streamer-${index}`,
+        logo_url: `https://example.com/${index}.png`
+      })) as never
+    );
+    startSession.mockResolvedValue({ ok: true });
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: 'crop_detective', practice_mode: true }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(responseBody.game_data.rounds).toHaveLength(5);
+    for (const round of responseBody.game_data.rounds) {
+      expect(round.crop.size).toBeGreaterThanOrEqual(0.05);
+      expect(round.crop.size).toBeLessThanOrEqual(0.10);
+      expect(round.crop.rotation).toBeGreaterThanOrEqual(0);
+      expect(round.crop.rotation).toBeLessThan(360);
+      expect(round.source_image_url).toMatch(/^https:\/\/example\.com\/\d+\.png$/);
+      expect(round.choices).toHaveLength(4);
+    }
+
+    const session = startSession.mock.calls[0][0];
+    const target = JSON.parse(session.target_data);
+    expect(target.rounds[0].crop).toEqual(expect.objectContaining({
+      x: expect.any(Number),
+      y: expect.any(Number),
+      size: expect.any(Number),
+      rotation: expect.any(Number)
     }));
   });
 });

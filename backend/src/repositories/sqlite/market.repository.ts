@@ -90,24 +90,51 @@ export class SqliteMarketRepository implements IMarketRepository {
     if (price < 100 || (startingBid != null && startingBid < 100)) {
       throw new Error('MIN_PRICE_LIMIT');
     }
-    const result = this.getDb().prepare(`
-      INSERT INTO market_listings
-        (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
-    `).run(
-      listing.seller_id,
-      listing.user_card_id,
-      price,
-      listingType,
-      buyNowPrice,
-      startingBid,
-      startingBid,
-      listing.auction_ends_at ?? null,
-      feeRate,
-      listing.with_cosmetics ? 1 : 0
-    );
+    const db = this.getDb();
+    const newId = db.transaction(() => {
+      if (!listing.with_cosmetics) {
+        const card = db.prepare(
+          'SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ?'
+        ).get(listing.user_card_id, listing.seller_id) as any;
+        if (card?.border_item_id) {
+          db.prepare(`
+            INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+          `).run(listing.seller_id, card.border_item_id);
+        }
+        if (card?.name_effect_item_id) {
+          db.prepare(`
+            INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+          `).run(listing.seller_id, card.name_effect_item_id);
+        }
+        db.prepare(`
+          UPDATE user_cards
+             SET border_item_id = NULL,
+                 name_effect_item_id = NULL
+           WHERE id = ?
+             AND user_id = ?
+        `).run(listing.user_card_id, listing.seller_id);
+      }
 
-    const newId = Number(result.lastInsertRowid);
+      const result = db.prepare(`
+        INSERT INTO market_listings
+          (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
+      `).run(
+        listing.seller_id,
+        listing.user_card_id,
+        price,
+        listingType,
+        buyNowPrice,
+        startingBid,
+        startingBid,
+        listing.auction_ends_at ?? null,
+        feeRate,
+        listing.with_cosmetics ? 1 : 0
+      );
+      return Number(result.lastInsertRowid);
+    })();
     const created = await this.findById(newId);
     if (!created) {
       throw new Error('CREATE_FAILED');

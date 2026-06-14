@@ -552,6 +552,7 @@ export const GachaTab: React.FC = () => {
         setWithCosmetics(false);
         refreshUserData();
         fetchInventory();
+        fetchMyCosmetics();
       } else {
         showAlert('등록 실패', data.message || '등록에 실패했습니다.', 'error');
       }

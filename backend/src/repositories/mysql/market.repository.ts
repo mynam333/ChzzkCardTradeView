@@ -112,12 +112,42 @@ export class MysqlMarketRepository implements IMarketRepository {
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
-    const result = await this.getDb().run(`
-      INSERT INTO market_listings
-        (seller_id, user_card_id, pending_user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
-    `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, listing.auction_ends_at ?? null, feeRate, listing.with_cosmetics ? 1 : 0);
-    const created = await this.findById(Number(result.insertId));
+    const insertId = await this.getDb().transaction(async (tx) => {
+      if (!listing.with_cosmetics) {
+        const card = await tx.get(
+          'SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE',
+          listing.user_card_id,
+          listing.seller_id
+        );
+        if (card?.border_item_id) {
+          await tx.run(
+            'INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + 1',
+            listing.seller_id,
+            card.border_item_id
+          );
+        }
+        if (card?.name_effect_item_id) {
+          await tx.run(
+            'INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + 1',
+            listing.seller_id,
+            card.name_effect_item_id
+          );
+        }
+        await tx.run(
+          'UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id = ? AND user_id = ?',
+          listing.user_card_id,
+          listing.seller_id
+        );
+      }
+
+      const result = await tx.run(`
+        INSERT INTO market_listings
+          (seller_id, user_card_id, pending_user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
+      `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, listing.auction_ends_at ?? null, feeRate, listing.with_cosmetics ? 1 : 0);
+      return Number(result.insertId);
+    });
+    const created = await this.findById(insertId);
     if (!created) throw new Error('CREATE_FAILED');
     return created;
   }

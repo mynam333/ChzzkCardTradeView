@@ -558,6 +558,49 @@ describe('MarketRepository 재등록 제약', () => {
     `).get(cardId)).toEqual({ c: 1 });
   });
 
+  it('코스메틱 포함을 해제하고 등록하면 장착 코스메틱을 즉시 회수하고 매물에는 적용하지 않는다', async () => {
+    seedUser(db, 'market-cosmetic-seller');
+    seedStreamer(db, 'market-cosmetic-channel', '코스메틱 매물 스트리머');
+    const borderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '테스트 테두리', 1000, '{"border":"1px solid red"}')
+    `).run().lastInsertRowid);
+    const nameEffectId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('name_effect', '테스트 이름표', 1000, '{"color":"red"}')
+    `).run().lastInsertRowid);
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id, name_effect_item_id)
+      VALUES ('market-cosmetic-seller', 'market-cosmetic-channel', 1, 3, ?, ?)
+    `).run(borderId, nameEffectId).lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'market-cosmetic-seller',
+      user_card_id: cardId,
+      price: 1000,
+      with_cosmetics: false
+    });
+
+    expect(listing.with_cosmetics).toBe(false);
+    expect(listing.card?.border_item_id).toBeNull();
+    expect(listing.card?.name_effect_item_id).toBeNull();
+    expect(listing.card?.border).toBeNull();
+    expect(listing.card?.name_effect).toBeNull();
+    expect(db.prepare('SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({
+      border_item_id: null,
+      name_effect_item_id: null
+    });
+    expect(db.prepare(`
+      SELECT item_id, quantity
+        FROM user_cosmetics
+       WHERE user_id = ?
+       ORDER BY item_id ASC
+    `).all('market-cosmetic-seller')).toEqual([
+      { item_id: borderId, quantity: 1 },
+      { item_id: nameEffectId, quantity: 1 }
+    ]);
+  });
+
   it('마켓에서 구매한 카드도 구매자가 다시 판매 등록할 수 있다', async () => {
     seedUser(db, 'old-seller');
     seedUser(db, 'new-buyer', 10000);
