@@ -154,7 +154,7 @@ export const AdminTab: React.FC = () => {
 
   // 상점 관리
   const [shopItems, setShopItems] = useState<ShopItem[]>([]);
-  const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0 };
+  const emptyShopForm = { id: 0, type: 'border' as 'border' | 'name_effect', name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0, sale_start_at: '', sale_end_at: '', limited_total_quantity: 0, sold_quantity: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
   const [freeDrawMaxStack, setFreeDrawMaxStack] = useState('1');
@@ -1048,7 +1048,10 @@ export const AdminTab: React.FC = () => {
       type: shopForm.type, name: shopForm.name, description: shopForm.description || null,
       price: Math.max(0, Number(shopForm.price) || 0), style_json: processedStyleJson,
       font_url: shopForm.font_url || null, font_family: shopForm.font_family || null, active: shopForm.active,
-      purchase_limit: Math.max(0, Number(shopForm.purchase_limit) || 0)
+      purchase_limit: Math.max(0, Number(shopForm.purchase_limit) || 0),
+      sale_start_at: shopForm.sale_start_at ? localDateTimeInputToIso(shopForm.sale_start_at) : null,
+      sale_end_at: shopForm.sale_end_at ? localDateTimeInputToIso(shopForm.sale_end_at) : null,
+      limited_total_quantity: Math.max(0, Number(shopForm.limited_total_quantity) || 0)
     };
     try {
       const url = shopForm.id ? `/admin/shop/items/${shopForm.id}` : '/admin/shop/items';
@@ -1074,7 +1077,11 @@ export const AdminTab: React.FC = () => {
     setShopForm({
       id: item.id, type: item.type, name: item.name, description: item.description || '',
       price: item.price, style_json: item.style_json || '', font_url: item.font_url || '',
-      font_family: item.font_family || '', active: item.active, purchase_limit: item.purchase_limit || 0
+      font_family: item.font_family || '', active: item.active, purchase_limit: item.purchase_limit || 0,
+      sale_start_at: item.sale_start_at ? formatLocalDateTimeInput(item.sale_start_at) : '',
+      sale_end_at: item.sale_end_at ? formatLocalDateTimeInput(item.sale_end_at) : '',
+      limited_total_quantity: item.limited_total_quantity || 0,
+      sold_quantity: item.sold_quantity || 0
     });
   };
 
@@ -2749,6 +2756,50 @@ export const AdminTab: React.FC = () => {
                     className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
                 </div>
 
+                <div className="rounded-2xl border border-amber-300/35 bg-amber-50/55 p-3 space-y-3 dark:border-amber-300/15 dark:bg-amber-300/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-black text-amber-700 dark:text-amber-200">한정판매 설정</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">기간 또는 전체 수량 중 하나만 설정해도 한정 상품으로 표시됩니다.</p>
+                    </div>
+                    {shopForm.id && shopForm.limited_total_quantity > 0 ? (
+                      <span className="rounded-full bg-amber-300/20 px-2 py-0.5 text-[10px] font-black text-amber-700 dark:text-amber-200">
+                        판매 {shopForm.sold_quantity || 0}/{shopForm.limited_total_quantity}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground block mb-1">판매 시작</label>
+                      <input
+                        type="datetime-local"
+                        value={shopForm.sale_start_at}
+                        onChange={(e) => setShopForm({ ...shopForm, sale_start_at: e.target.value })}
+                        className="w-full rounded-lg border border-border bg-card/70 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground block mb-1">판매 종료</label>
+                      <input
+                        type="datetime-local"
+                        value={shopForm.sale_end_at}
+                        onChange={(e) => setShopForm({ ...shopForm, sale_end_at: e.target.value })}
+                        className="w-full rounded-lg border border-border bg-card/70 px-3 py-2 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-foreground block mb-1">전체 선착순 수량 (0 = 제한 없음)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={shopForm.limited_total_quantity}
+                      onChange={(e) => setShopForm({ ...shopForm, limited_total_quantity: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-full rounded-lg border border-border bg-card/70 px-3 py-2 text-xs"
+                    />
+                  </div>
+                </div>
+
                 {/* 커스텀 CSS (테두리/이름 이펙트 공통 · 클래스명 + CSS 코드 전문) */}
                 {(() => {
                   const isBorder = shopForm.type === 'border';
@@ -2934,10 +2985,21 @@ export const AdminTab: React.FC = () => {
                         {item.name}
                         <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">{item.type === 'border' ? '테두리' : '이름 이펙트'}</span>
                         {!item.active && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">비활성</span>}
+                        {(item.sale_start_at || item.sale_end_at || (item.limited_total_quantity || 0) > 0) && (
+                          <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-600">한정</span>
+                        )}
                       </p>
                       <p className="text-[10px] text-muted-foreground truncate">
                         {item.price.toLocaleString()} P · {item.purchase_limit > 0 ? `1인 ${item.purchase_limit}개 제한` : '구매 무제한'} · {item.description || '설명 없음'}
                       </p>
+                      {(item.sale_start_at || item.sale_end_at || (item.limited_total_quantity || 0) > 0) && (
+                        <p className="mt-0.5 text-[10px] font-bold text-amber-600 truncate">
+                          {item.sale_start_at ? `시작 ${formatLocalDateTime(item.sale_start_at)}` : '즉시 시작'}
+                          {' · '}
+                          {item.sale_end_at ? `종료 ${formatLocalDateTime(item.sale_end_at)}` : '종료일 없음'}
+                          {(item.limited_total_quantity || 0) > 0 ? ` · 선착순 ${item.sold_quantity || 0}/${item.limited_total_quantity}` : ''}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">

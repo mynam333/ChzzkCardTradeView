@@ -159,7 +159,13 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return cards;
   }
 
-  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(
+    userId: string,
+    channelId: string,
+    star: number,
+    materials: { star: number; count: number }[] = [{ star: 0, count: 1 }],
+    _reservedByStar: Record<string, number> = {}
+  ): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const normalizedMaterials = materials
       .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))

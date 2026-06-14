@@ -323,8 +323,13 @@ CREATE TABLE IF NOT EXISTS shop_items (
     font_family TEXT,                          -- 폰트 패밀리명 (선택)
     active INTEGER DEFAULT 1,                  -- 판매 활성 여부 (0/1)
     purchase_limit INTEGER DEFAULT 0,         -- 1인 최대 구매 갯수 (0 = 무제한)
+    sale_start_at TEXT,                        -- 한정판매 시작 시각
+    sale_end_at TEXT,                          -- 한정판매 종료 시각
+    limited_total_quantity INTEGER NOT NULL DEFAULT 0, -- 전체 선착순 판매 수량 (0 = 무제한)
+    sold_quantity INTEGER NOT NULL DEFAULT 0,  -- 판매 완료 수량
     created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_shop_items_limited_sale ON shop_items(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity);
 
 -- 14. 유저 보유 코스메틱 (미장착 수량)
 CREATE TABLE IF NOT EXISTS user_cosmetics (

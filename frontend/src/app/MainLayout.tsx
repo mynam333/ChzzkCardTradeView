@@ -192,19 +192,26 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
       <aside className="cute-surface scrollbar-none sticky top-0 z-20 hidden h-screen w-72 flex-col overflow-y-auto overscroll-contain rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10">
-            <Image
-              src="/icon.png"
-              alt="치카포 로고"
-              width={38}
-              height={38}
-              className="object-contain"
-            />
-          </div>
-          <div className="flex-1">
-            <h1 className="cute-display-font cute-outline-soft text-2xl font-black tracking-tight text-foreground">치카포</h1>
-            <p className="text-[11px] font-bold text-primary">치지직 카드 포럼</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('main')}
+            className="flex min-w-0 flex-1 appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left"
+            aria-label="메인 페이지로 이동"
+          >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10">
+              <Image
+                src="/icon.png"
+                alt="치카포 로고"
+                width={38}
+                height={38}
+                className="object-contain"
+              />
+            </div>
+            <div className="flex-1">
+              <h1 className="cute-display-font cute-outline-soft text-2xl font-black tracking-tight text-foreground">치카포</h1>
+              <p className="text-[11px] font-bold text-primary">치지직 카드 포럼</p>
+            </div>
+          </button>
           {user && <NotificationBell align="left" />}
         </div>
 
@@ -290,7 +297,12 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       {/* 모바일 상단 바 (Mobile Top Bar) */}
       <header className="cute-surface sticky top-0 z-40 mx-3 mt-3 flex items-center justify-between rounded-3xl px-4 py-3.5 md:hidden">
-        <div className="flex min-w-0 items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => setActiveTab('main')}
+          className="flex min-w-0 appearance-none items-center gap-2.5 border-0 bg-transparent p-0 text-left"
+          aria-label="메인 페이지로 이동"
+        >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/80 p-1 shadow-sm dark:bg-white/10">
             <Image
               src="/icon.png"
@@ -304,7 +316,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             <span className="cute-loading-logo truncate text-[1.62rem] font-black tracking-tight">치카포</span>
             <span className="mt-1 truncate text-[0.68rem] font-bold text-muted-foreground">치지직 카드 포럼</span>
           </div>
-        </div>
+        </button>
 
         <div className="flex items-center gap-2">
           {user ? (

@@ -456,7 +456,13 @@ export interface IUserCardRepository {
   deleteCards(userId: string, channelId: string, count: number): Promise<number>;
   count(): Promise<number>;
   /** 대상 카드의 별을 올리고 같은 스트리머 카드를 재료로 소모합니다. */
-  fuse(userId: string, channelId: string, star: number, materials?: { star: number; count: number }[]): Promise<{ ok: boolean; reason: string; newStar?: number }>;
+  fuse(
+    userId: string,
+    channelId: string,
+    star: number,
+    materials?: { star: number; count: number }[],
+    reservedByStar?: Record<string, number>
+  ): Promise<{ ok: boolean; reason: string; newStar?: number }>;
   /** 특정 스트리머 카드의 보유자·별 목록(보상 계산용). */
   findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */

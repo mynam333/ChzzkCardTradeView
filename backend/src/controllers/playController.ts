@@ -10,7 +10,7 @@ import {
 import { IS_PRODUCTION } from '../config';
 import { fuzzyScore } from '../utils/search';
 import { computeValueDrawWeights } from '../utils/gachaWeights';
-import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile } from '../services/chzzkService';
+import { fetchChzzkChannelProfile, getValidUserAccessToken, fetchChzzkUserProfile, isDiceBearImageUrl } from '../services/chzzkService';
 import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
@@ -1330,7 +1330,7 @@ export const registerStreamer = async (req: Request, res: Response) => {
     const verifiedFollowerCount = profile.followerCount;
     const verifiedLogoUrl = profile.logoUrl;
 
-    if (!verifiedLogoUrl || String(verifiedLogoUrl).trim().length === 0) {
+    if (!verifiedLogoUrl || String(verifiedLogoUrl).trim().length === 0 || isDiceBearImageUrl(verifiedLogoUrl)) {
       return res.status(400).json({
         error: 'MissingProfileImage',
         message: '프로필 이미지가 설정되지 않은 스트리머는 카드로 등록할 수 없습니다.'
@@ -1544,6 +1544,18 @@ export const fuseCards = async (req: Request, res: Response) => {
     // 진행 중 거래에 예약된 카드는 합성 재료로 사용할 수 없도록 차단
     const cards = await userCardRepository.findByUserId(userId);
     const reservations = await getUserReservations(userId);
+    const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
+    const pendingMarketByStar: Record<string, number> = {};
+    for (const card of cards) {
+      if (card.id == null) continue;
+      if (!pendingMarketIds.has(card.id)) continue;
+      const marketKey = `${card.channel_id}#${card.star || 0}`;
+      pendingMarketByStar[marketKey] = (pendingMarketByStar[marketKey] || 0) + 1;
+    }
+    const tradeReservedByStar: Record<string, number> = {};
+    for (const [reservationKey, reservedCount] of Object.entries(reservations.cardsByStar)) {
+      tradeReservedByStar[reservationKey] = Math.max(0, Number(reservedCount || 0) - (pendingMarketByStar[reservationKey] || 0));
+    }
     const key = (st: number) => `${channel_id}#${st}`;
     const available = (st: number) =>
       cards.filter((c) =>
@@ -1572,7 +1584,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       }
     }
 
-    const result = await userCardRepository.fuse(userId, channel_id, starNum, normalizedMaterials);
+    const result = await userCardRepository.fuse(userId, channel_id, starNum, normalizedMaterials, tradeReservedByStar);
     if (!result.ok) {
       let msg = '한계돌파에 실패했습니다.';
       if (result.reason === 'MAX_STAR') msg = '이미 최고 등급(5성)입니다.';

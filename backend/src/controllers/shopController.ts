@@ -44,6 +44,9 @@ export const buyShopItem = async (req: AuthenticatedRequest, res: Response) => {
       const msg = r.reason === 'INSUFFICIENT_POINT' ? '포인트가 부족합니다.'
         : r.reason === 'NOT_FOUND' ? '판매 중인 아이템이 아닙니다.'
         : r.reason === 'LIMIT_REACHED' ? '이 아이템의 최대 구매 갯수에 도달했습니다.'
+        : r.reason === 'SALE_NOT_STARTED' ? '아직 판매가 시작되지 않은 한정 상품입니다.'
+        : r.reason === 'SALE_ENDED' ? '판매 기간이 종료된 한정 상품입니다.'
+        : r.reason === 'SOLD_OUT' ? '준비된 한정 수량이 모두 판매되었습니다.'
         : '구매에 실패했습니다.';
       return res.status(400).json({ error: 'BuyFailed', reason: r.reason, message: msg });
     }
@@ -92,7 +95,7 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
 };
 
 export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Response) => {
-  const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit } = req.body;
+  const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity } = req.body;
   if (!['border', 'name_effect'].includes(type) || !name) {
     return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect)와 이름이 필요합니다.' });
   }
@@ -120,7 +123,11 @@ export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Respon
       font_url: font_url ?? null,
       font_family: font_family ?? null,
       active,
-      purchase_limit: Math.max(0, Number(purchase_limit) || 0)
+      purchase_limit: Math.max(0, Number(purchase_limit) || 0),
+      sale_start_at: sale_start_at || null,
+      sale_end_at: sale_end_at || null,
+      limited_total_quantity: Math.max(0, Number(limited_total_quantity) || 0),
+      sold_quantity: 0
     });
     return res.status(201).json({ message: '아이템이 추가되었습니다.' });
   } catch (err) { return fail(res, '아이템 추가 실패', err); }

@@ -10,7 +10,7 @@ import { borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { CardPreview } from './CardPreview';
-import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel } from 'lucide-react';
+import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel, Hourglass, BadgePercent } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 
 interface ShopItem {
@@ -23,7 +23,36 @@ interface ShopItem {
   font_url: string | null;
   font_family: string | null;
   purchase_limit: number;
+  sale_start_at?: string | null;
+  sale_end_at?: string | null;
+  limited_total_quantity?: number;
+  sold_quantity?: number;
 }
+
+const getShopSaleState = (item: ShopItem, now = Date.now()) => {
+  const startMs = parseAppDate(item.sale_start_at)?.getTime() ?? NaN;
+  const endMs = parseAppDate(item.sale_end_at)?.getTime() ?? NaN;
+  const total = Math.max(0, Number(item.limited_total_quantity || 0));
+  const sold = Math.max(0, Number(item.sold_quantity || 0));
+  const isLimited = Number.isFinite(startMs) || Number.isFinite(endMs) || total > 0;
+  const notStarted = Number.isFinite(startMs) && now < startMs;
+  const ended = Number.isFinite(endMs) && now > endMs;
+  const totalSoldOut = total > 0 && sold >= total;
+  const targetMs = notStarted ? startMs : Number.isFinite(endMs) ? endMs : NaN;
+  const leftMs = Number.isFinite(targetMs) ? Math.max(0, targetMs - now) : NaN;
+  return { isLimited, notStarted, ended, total, sold, totalSoldOut, leftMs };
+};
+
+const formatSaleLeft = (ms: number) => {
+  if (!Number.isFinite(ms)) return '';
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (days > 0) return `${days}일 ${hours}시간`;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  return `${minutes}분`;
+};
 
 const formatStreamerSerial = (streamer: { serial_number?: number | null } | null | undefined): string =>
   streamer?.serial_number == null
@@ -944,6 +973,10 @@ export const ShopTab: React.FC = () => {
 
   const handleBuy = async (item: ShopItem) => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
+    const saleState = getShopSaleState(item, nowTs);
+    if (saleState.notStarted) { toast('아직 판매가 시작되지 않은 한정 상품입니다.', 'warning'); return; }
+    if (saleState.ended) { toast('판매 기간이 종료된 한정 상품입니다.', 'warning'); return; }
+    if (saleState.totalSoldOut) { toast('준비된 한정 수량이 모두 판매되었습니다.', 'warning'); return; }
 
     // 낙관적 포인트 차감
     updatePoints(-item.price);
@@ -956,6 +989,7 @@ export const ShopTab: React.FC = () => {
         refreshUserData();
         fetchOwned();
         fetchPurchased();
+        fetchItems();
       } else {
         // 실패 시 롤백
         updatePoints(item.price);
@@ -1297,6 +1331,12 @@ export const ShopTab: React.FC = () => {
                     const limited = item.purchase_limit > 0;
                     const bought = purchased[item.id] || 0;
                     const soldOut = limited && bought >= item.purchase_limit;
+                    const saleState = getShopSaleState(item, nowTs);
+                    const saleBlocked = saleState.notStarted || saleState.ended || saleState.totalSoldOut;
+                    const stockLeft = Math.max(0, saleState.total - saleState.sold);
+                    const stockPercent = saleState.total > 0
+                      ? Math.max(0, Math.min(100, (stockLeft / saleState.total) * 100))
+                      : 100;
                     return (
                       <div
                         key={item.id}
@@ -1309,10 +1349,18 @@ export const ShopTab: React.FC = () => {
                             setPreviewCosmetic(item);
                           }
                         }}
-                        className="cute-card-pop grid min-h-[17.25rem] cursor-pointer grid-rows-[5.5rem_minmax(3.25rem,auto)_1fr_auto] rounded-[1.25rem] border border-border bg-secondary/25 p-3 text-center transition hover:border-primary/40 hover:bg-secondary/35"
+                        className={`cute-card-pop grid min-h-[17.25rem] cursor-pointer grid-rows-[5.5rem_minmax(3.25rem,auto)_1fr_auto] rounded-[1.25rem] border p-3 text-center transition hover:border-primary/40 ${saleState.isLimited
+                          ? 'border-amber-300/55 bg-gradient-to-b from-amber-100/45 via-secondary/25 to-card shadow-[0_14px_35px_rgba(245,158,11,0.12)] dark:border-amber-300/20 dark:from-amber-400/10 dark:via-secondary/20 dark:to-card'
+                          : 'border-border bg-secondary/25 hover:bg-secondary/35'
+                        }`}
                       >
                         {/* 미리보기 */}
-                        <div className="flex h-[5.5rem] items-center justify-center">
+                        <div className="relative flex h-[5.5rem] items-center justify-center">
+                          {saleState.isLimited && (
+                            <span className="absolute left-0 top-0 z-10 inline-flex items-center gap-1 rounded-full border border-amber-300/60 bg-amber-300/20 px-2 py-0.5 text-[8px] font-black text-amber-700 shadow-sm dark:border-amber-200/20 dark:bg-amber-300/15 dark:text-amber-200">
+                              <BadgePercent className="h-2.5 w-2.5" /> 한정
+                            </span>
+                          )}
                           <div className="relative h-[5.2rem] w-[3.25rem] overflow-visible">
                             <div
                               className="pointer-events-none absolute left-0 top-0"
@@ -1337,6 +1385,35 @@ export const ShopTab: React.FC = () => {
                           </p>
                         </div>
                         <div className="flex flex-col items-center justify-end gap-1.5 pb-1.5">
+                          {saleState.isLimited && (
+                            <div className="w-full rounded-xl border border-amber-300/45 bg-amber-50/70 px-2 py-1 text-left dark:border-amber-300/15 dark:bg-amber-300/10">
+                              <div className="flex items-center justify-between gap-2 text-[9px] font-black">
+                                <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-200">
+                                  <Hourglass className="h-3 w-3" />
+                                  {saleState.notStarted
+                                    ? `${formatSaleLeft(saleState.leftMs)} 후 시작`
+                                    : saleState.ended
+                                      ? '판매 종료'
+                                      : saleState.leftMs
+                                        ? `${formatSaleLeft(saleState.leftMs)} 남음`
+                                        : '기간 한정'}
+                                </span>
+                                {saleState.total > 0 && (
+                                  <span className={saleState.totalSoldOut ? 'text-rose-500' : 'text-amber-700 dark:text-amber-200'}>
+                                    {stockLeft}/{saleState.total}
+                                  </span>
+                                )}
+                              </div>
+                              {saleState.total > 0 && (
+                                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-amber-200/60 dark:bg-amber-950/60">
+                                  <div
+                                    className={`h-full rounded-full ${stockPercent <= 20 ? 'bg-rose-500' : 'bg-gradient-to-r from-amber-400 to-emerald-400'}`}
+                                    style={{ width: `${stockPercent}%` }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="cute-number-font flex h-5 items-center justify-center gap-1 text-[11px] font-black text-primary"><Coins className="h-3.5 w-3.5" /> {item.price.toLocaleString()}</div>
                           <div className="flex h-4 items-center justify-center gap-2">
                             {owned[item.id] ? (
@@ -1352,10 +1429,10 @@ export const ShopTab: React.FC = () => {
                             event.stopPropagation();
                             handleBuy(item);
                           }}
-                          disabled={buying === item.id || soldOut}
+                          disabled={buying === item.id || soldOut || saleBlocked}
                           className="cute-wiggle-hover flex h-8 w-full items-center justify-center gap-1 rounded-xl bg-primary text-[11px] font-bold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                         >
-                          <ShoppingBag className="h-3.5 w-3.5" /> {soldOut ? '구매 완료' : buying === item.id ? '구매 중...' : '구매'}
+                          <ShoppingBag className="h-3.5 w-3.5" /> {saleState.notStarted ? '판매 예정' : saleState.ended ? '판매 종료' : saleState.totalSoldOut ? '품절' : soldOut ? '구매 완료' : buying === item.id ? '구매 중...' : '구매'}
                         </button>
                       </div>
                     );

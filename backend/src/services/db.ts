@@ -297,6 +297,11 @@ const normalizeMysqlIsoDateColumn = async (db: MysqlDb, table: string, column: s
 
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+  await ensureMysqlColumn(db, 'shop_items', 'sale_start_at', 'sale_start_at DATETIME NULL AFTER purchase_limit');
+  await ensureMysqlColumn(db, 'shop_items', 'sale_end_at', 'sale_end_at DATETIME NULL AFTER sale_start_at');
+  await ensureMysqlColumn(db, 'shop_items', 'limited_total_quantity', 'limited_total_quantity INT NOT NULL DEFAULT 0 AFTER sale_end_at');
+  await ensureMysqlColumn(db, 'shop_items', 'sold_quantity', 'sold_quantity INT NOT NULL DEFAULT 0 AFTER limited_total_quantity');
+  await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_limited_sale', '(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
   await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
@@ -1078,6 +1083,16 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] shop_items 테이블에 purchase_limit(1인 구매 제한) 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN purchase_limit INTEGER DEFAULT 0;");
       }
+      try {
+        sqliteDb.prepare("SELECT sale_start_at FROM shop_items LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] shop_items 테이블에 한정판매 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN sale_start_at TEXT;");
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN sale_end_at TEXT;");
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN limited_total_quantity INTEGER NOT NULL DEFAULT 0;");
+        sqliteDb.exec("ALTER TABLE shop_items ADD COLUMN sold_quantity INTEGER NOT NULL DEFAULT 0;");
+      }
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_shop_items_limited_sale ON shop_items(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity);");
       try {
         sqliteDb.prepare("SELECT is_equipped FROM user_titles LIMIT 1").get();
       } catch (e) {

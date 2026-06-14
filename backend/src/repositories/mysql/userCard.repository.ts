@@ -106,7 +106,13 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     });
   }
 
-  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(
+    userId: string,
+    channelId: string,
+    star: number,
+    materials: { star: number; count: number }[] = [{ star: 0, count: 1 }],
+    reservedByStar: Record<string, number> = {}
+  ): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const normalizedMaterials = materials
       .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))
@@ -117,33 +123,31 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     if (newStar > 5) return { ok: false, reason: 'EXCEEDS_MAX_STAR' };
     try {
       await this.getDb().transaction(async (tx) => {
-        const target = await tx.get(
-          `SELECT uc.id
-             FROM user_cards uc
-            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
-              AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
-            ORDER BY uc.id ASC
-            LIMIT 1
-            FOR UPDATE`,
-          userId, channelId, star
-        );
+        const reservedCount = (st: number) => Math.max(0, Math.floor(Number(reservedByStar[`${channelId}#${st}`] || 0)));
+        const selectAvailableIds = async (st: number, count: number, excludeIds: number[] = []) => {
+          const rows = await tx.all<{ id: number }>(
+            `SELECT uc.id
+               FROM user_cards uc
+              WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+                AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
+              ORDER BY uc.id ASC
+              FOR UPDATE`,
+            userId, channelId, st
+          );
+          const excluded = new Set(excludeIds.map((id) => Number(id)));
+          return rows
+            .slice(reservedCount(st))
+            .filter((row) => !excluded.has(Number(row.id)))
+            .slice(0, count);
+        };
+
+        const [target] = await selectAvailableIds(star, 1);
         if (!target) throw new Error('NO_TARGET');
 
         const materialIds: number[] = [];
         for (const material of normalizedMaterials) {
           const excludedIds = [target.id, ...materialIds];
-          const excludePlaceholders = excludedIds.map(() => '?').join(',');
-          const rows = await tx.all<{ id: number }>(
-            `SELECT uc.id
-               FROM user_cards uc
-              WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
-                AND uc.id NOT IN (${excludePlaceholders})
-                AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
-              ORDER BY uc.id ASC
-              LIMIT ?
-              FOR UPDATE`,
-            userId, channelId, material.star, ...excludedIds, material.count
-          );
+          const rows = await selectAvailableIds(material.star, material.count, excludedIds);
           if (rows.length < material.count) throw new Error('NO_FODDER');
           materialIds.push(...rows.map((row) => Number(row.id)));
         }

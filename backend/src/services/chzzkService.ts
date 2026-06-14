@@ -24,6 +24,16 @@ type ChzzkTokenRefreshResult =
   | { ok: true; token: ChzzkTokenResult }
   | { ok: false; status?: number };
 
+export const isDiceBearImageUrl = (url: string | null | undefined): boolean => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === 'api.dicebear.com' || parsed.hostname.endsWith('.dicebear.com');
+  } catch {
+    return String(url).includes('dicebear.com');
+  }
+};
+
 /**
  * refresh_token으로 치지직 OAuth access_token을 갱신합니다.
  * 성공 시 새 토큰 세트를, 실패 시 null을 반환합니다.
@@ -139,7 +149,7 @@ export const fetchChzzkChannelProfile = async (
       const { channelName, channelImageUrl, followerCount } = profileBody.content;
       return {
         name: channelName || '알 수 없는 스트리머',
-        logoUrl: channelImageUrl || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + channelId,
+        logoUrl: channelImageUrl || '',
         followerCount: followerCount || 0,
         openLive,
         lastLiveAt: lastLiveAt || findDateCandidate(profileBody.content),

@@ -16,14 +16,48 @@ export interface ShopItem {
   font_family: string | null;
   active: boolean;
   purchase_limit: number; // 1인 최대 구매 갯수 (0 = 무제한)
+  sale_start_at?: string | null;
+  sale_end_at?: string | null;
+  limited_total_quantity?: number;
+  sold_quantity?: number;
 }
 
 const mapSqliteItem = (r: any): ShopItem => ({
   id: r.id, type: r.type, name: r.name, description: r.description,
   price: r.price, style_json: r.style_json, font_url: r.font_url,
   font_family: r.font_family, active: r.active === 1,
-  purchase_limit: r.purchase_limit ?? 0
+  purchase_limit: r.purchase_limit ?? 0,
+  sale_start_at: r.sale_start_at ?? null,
+  sale_end_at: r.sale_end_at ?? null,
+  limited_total_quantity: r.limited_total_quantity ?? 0,
+  sold_quantity: r.sold_quantity ?? 0
 });
+
+const toDbDateTime = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+};
+
+const parseShopDateMs = (value: string | null | undefined): number => {
+  if (!value) return NaN;
+  const text = String(value).trim();
+  if (!text) return NaN;
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) return new Date(text).getTime();
+  return new Date(text.replace(' ', 'T') + 'Z').getTime();
+};
+
+const getItemSaleFailureReason = (item: any, now = Date.now()): string | null => {
+  const startMs = parseShopDateMs(item.sale_start_at);
+  if (Number.isFinite(startMs) && now < startMs) return 'SALE_NOT_STARTED';
+  const endMs = parseShopDateMs(item.sale_end_at);
+  if (Number.isFinite(endMs) && now > endMs) return 'SALE_ENDED';
+  const total = Number(item.limited_total_quantity || 0);
+  const sold = Number(item.sold_quantity || 0);
+  if (total > 0 && sold >= total) return 'SOLD_OUT';
+  return null;
+};
 
 // ---- 아이템 카탈로그 ----
 export const getActiveItems = async (): Promise<ShopItem[]> => {
@@ -66,29 +100,36 @@ export const getItem = async (id: number): Promise<ShopItem | null> => {
 export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { active?: boolean }): Promise<void> => {
   const active = item.active !== false;
   const limit = Math.max(0, Math.floor(Number(item.purchase_limit) || 0));
+  const totalQuantity = Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0));
+  const saleStartAt = toDbDateTime(item.sale_start_at);
+  const saleEndAt = toDbDateTime(item.sale_end_at);
   if (getDbMode() === 'SUPABASE') {
     await getSupabaseClient().from('shop_items').insert([{
       type: item.type, name: item.name, description: item.description ?? null, price: item.price,
-      style_json: item.style_json ?? null, font_url: item.font_url ?? null, font_family: item.font_family ?? null, active, purchase_limit: limit
+      style_json: item.style_json ?? null, font_url: item.font_url ?? null, font_family: item.font_family ?? null, active, purchase_limit: limit,
+      sale_start_at: saleStartAt, sale_end_at: saleEndAt, limited_total_quantity: totalQuantity, sold_quantity: 0
     }]);
   } else if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
-      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit) VALUES (?,?,?,?,?,?,?,?,?)',
-      item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit
+      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, saleStartAt, saleEndAt, totalQuantity, 0
     );
   } else {
     getSqliteDb().prepare(
-      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit) VALUES (?,?,?,?,?,?,?,?,?)'
-    ).run(item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit);
+      'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).run(item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, saleStartAt, saleEndAt, totalQuantity, 0);
   }
 };
 
 export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const payload: any = {};
-    for (const k of ['type', 'name', 'description', 'price', 'style_json', 'font_url', 'font_family', 'active', 'purchase_limit'] as const) {
+    for (const k of ['type', 'name', 'description', 'price', 'style_json', 'font_url', 'font_family', 'active', 'purchase_limit', 'sale_start_at', 'sale_end_at', 'limited_total_quantity', 'sold_quantity'] as const) {
       if (item[k] !== undefined) payload[k] = item[k];
     }
+    if (payload.sale_start_at !== undefined) payload.sale_start_at = toDbDateTime(payload.sale_start_at);
+    if (payload.sale_end_at !== undefined) payload.sale_end_at = toDbDateTime(payload.sale_end_at);
+    if (payload.limited_total_quantity !== undefined) payload.limited_total_quantity = Math.max(0, Math.floor(Number(payload.limited_total_quantity) || 0));
     await getSupabaseClient().from('shop_items').update(payload).eq('id', id);
   } else if (getDbMode() === 'MYSQL') {
     const cur = await getMysqlDb().get('SELECT * FROM shop_items WHERE id = ?', id) as any;
@@ -98,11 +139,15 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       price: item.price ?? cur.price, style_json: item.style_json ?? cur.style_json,
       font_url: item.font_url ?? cur.font_url, font_family: item.font_family ?? cur.font_family,
       active: item.active !== undefined ? (item.active ? 1 : 0) : cur.active,
-      purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0)
+      purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0),
+      sale_start_at: item.sale_start_at !== undefined ? toDbDateTime(item.sale_start_at) : (cur.sale_start_at ?? null),
+      sale_end_at: item.sale_end_at !== undefined ? toDbDateTime(item.sale_end_at) : (cur.sale_end_at ?? null),
+      limited_total_quantity: item.limited_total_quantity !== undefined ? Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0)) : (cur.limited_total_quantity ?? 0),
+      sold_quantity: item.sold_quantity !== undefined ? Math.max(0, Math.floor(Number(item.sold_quantity) || 0)) : (cur.sold_quantity ?? 0)
     };
     await getMysqlDb().run(
-      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=? WHERE id=?',
-      merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, id
+      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?',
+      merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id
     );
   } else {
     const cur = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id) as any;
@@ -112,11 +157,15 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       price: item.price ?? cur.price, style_json: item.style_json ?? cur.style_json,
       font_url: item.font_url ?? cur.font_url, font_family: item.font_family ?? cur.font_family,
       active: item.active !== undefined ? (item.active ? 1 : 0) : cur.active,
-      purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0)
+      purchase_limit: item.purchase_limit !== undefined ? Math.max(0, Math.floor(Number(item.purchase_limit) || 0)) : (cur.purchase_limit ?? 0),
+      sale_start_at: item.sale_start_at !== undefined ? toDbDateTime(item.sale_start_at) : (cur.sale_start_at ?? null),
+      sale_end_at: item.sale_end_at !== undefined ? toDbDateTime(item.sale_end_at) : (cur.sale_end_at ?? null),
+      limited_total_quantity: item.limited_total_quantity !== undefined ? Math.max(0, Math.floor(Number(item.limited_total_quantity) || 0)) : (cur.limited_total_quantity ?? 0),
+      sold_quantity: item.sold_quantity !== undefined ? Math.max(0, Math.floor(Number(item.sold_quantity) || 0)) : (cur.sold_quantity ?? 0)
     };
     getSqliteDb().prepare(
-      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=? WHERE id=?'
-    ).run(merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, id);
+      'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?'
+    ).run(merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id);
   }
 };
 
@@ -141,6 +190,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
       SELECT
         si.id, si.type, si.name, si.description, si.price,
         si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+        si.sale_start_at, si.sale_end_at, si.limited_total_quantity, si.sold_quantity,
         uc.quantity
       FROM user_cosmetics uc
       JOIN shop_items si ON uc.item_id = si.id
@@ -154,6 +204,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
     SELECT 
       si.id, si.type, si.name, si.description, si.price, 
       si.style_json, si.font_url, si.font_family, si.active, si.purchase_limit,
+      si.sale_start_at, si.sale_end_at, si.limited_total_quantity, si.sold_quantity,
       uc.quantity 
     FROM user_cosmetics uc
     JOIN shop_items si ON uc.item_id = si.id
@@ -235,9 +286,12 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
   }
 
   if (getDbMode() === 'MYSQL') {
-    return getMysqlDb().transaction(async (tx) => {
+    try {
+      return await getMysqlDb().transaction(async (tx) => {
       const item = await tx.get('SELECT * FROM shop_items WHERE id = ? AND active = 1', itemId) as any;
       if (!item) return { ok: false, reason: 'NOT_FOUND' };
+      const saleFailure = getItemSaleFailureReason(item);
+      if (saleFailure) return { ok: false, reason: saleFailure };
       if ((item.purchase_limit || 0) > 0) {
         const boughtRow = await tx.get('SELECT COALESCE(count, 0) AS c FROM shop_purchases WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId) as any;
         if ((boughtRow?.c || 0) >= item.purchase_limit) return { ok: false, reason: 'LIMIT_REACHED' };
@@ -257,6 +311,15 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
         ON DUPLICATE KEY UPDATE quantity = quantity + 1
       `, userId, itemId);
+      if ((item.limited_total_quantity || 0) > 0) {
+        const stock = await tx.run(
+          'UPDATE shop_items SET sold_quantity = sold_quantity + 1 WHERE id = ? AND sold_quantity < limited_total_quantity',
+          itemId
+        );
+        if (stock.changes === 0) {
+          throw new Error('SHOP_STOCK_RACE');
+        }
+      }
       if ((item.purchase_limit || 0) > 0) {
         await tx.run(`
           INSERT INTO shop_purchases (user_id, item_id, count) VALUES (?, ?, 1)
@@ -264,13 +327,20 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
         `, userId, itemId);
       }
       return { ok: true, reason: 'OK' };
-    });
+      });
+    } catch (err: any) {
+      if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };
+      throw err;
+    }
   }
 
   const db = getSqliteDb();
-  return db.transaction(() => {
+  try {
+    return db.transaction(() => {
     const item = db.prepare('SELECT * FROM shop_items WHERE id = ? AND active = 1').get(itemId) as any;
     if (!item) return { ok: false, reason: 'NOT_FOUND' };
+    const saleFailure = getItemSaleFailureReason(item);
+    if (saleFailure) return { ok: false, reason: saleFailure };
 
     if ((item.purchase_limit || 0) > 0) {
       const boughtRow = db.prepare('SELECT COALESCE(count, 0) AS c FROM shop_purchases WHERE user_id = ? AND item_id = ?')
@@ -296,6 +366,11 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
     `).run(userId, itemId);
 
+    if ((item.limited_total_quantity || 0) > 0) {
+      const stock = db.prepare('UPDATE shop_items SET sold_quantity = sold_quantity + 1 WHERE id = ? AND sold_quantity < limited_total_quantity').run(itemId);
+      if (stock.changes === 0) throw new Error('SHOP_STOCK_RACE');
+    }
+
     if ((item.purchase_limit || 0) > 0) {
       db.prepare(`
         INSERT INTO shop_purchases (user_id, item_id, count) VALUES (?, ?, 1)
@@ -304,7 +379,11 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
     }
 
     return { ok: true, reason: 'OK' };
-  })();
+    })();
+  } catch (err: any) {
+    if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };
+    throw err;
+  }
 };
 
 // ---- 카드 슬롯 조회/설정 ----

@@ -135,7 +135,13 @@ export class SqliteUserCardRepository implements IUserCardRepository {
   }
 
   // 대상 카드 별 상승 + 같은 스트리머의 0성 재료 1장 소모. better-sqlite3 트랜잭션으로 원자 처리
-  async fuse(userId: string, channelId: string, star: number, materials: { star: number; count: number }[] = [{ star: 0, count: 1 }]): Promise<{ ok: boolean; reason: string; newStar?: number }> {
+  async fuse(
+    userId: string,
+    channelId: string,
+    star: number,
+    materials: { star: number; count: number }[] = [{ star: 0, count: 1 }],
+    reservedByStar: Record<string, number> = {}
+  ): Promise<{ ok: boolean; reason: string; newStar?: number }> {
     if (star >= 5) return { ok: false, reason: 'MAX_STAR' };
     const normalizedMaterials = materials
       .map((m) => ({ star: Math.floor(Number(m.star)), count: Math.floor(Number(m.count)) }))
@@ -146,36 +152,32 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     if (newStar > 5) return { ok: false, reason: 'EXCEEDS_MAX_STAR' };
     const db = this.getDb();
     const txn = db.transaction(() => {
-      // 1) 업그레이드 대상: 현재 star인 카드 1장
-      const target = db.prepare(
-        `SELECT uc.id
-           FROM user_cards uc
-          WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
-            AND NOT EXISTS (
-              SELECT 1 FROM market_listings ml
-               WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
-            )
-          ORDER BY uc.id ASC
-          LIMIT 1`
-      ).get(userId, channelId, star) as any;
+      const reservedCount = (st: number) => Math.max(0, Math.floor(Number(reservedByStar[`${channelId}#${st}`] || 0)));
+      const selectAvailableIds = (st: number, count: number, excludeIds: number[] = []) => {
+        const rows = db.prepare(
+          `SELECT uc.id
+             FROM user_cards uc
+            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM market_listings ml
+                 WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
+              )
+            ORDER BY uc.id ASC`
+        ).all(userId, channelId, st) as { id: number }[];
+        const excluded = new Set(excludeIds.map((id) => Number(id)));
+        return rows
+          .slice(reservedCount(st))
+          .filter((row) => !excluded.has(Number(row.id)))
+          .slice(0, count);
+      };
+
+      const [target] = selectAvailableIds(star, 1);
       if (!target) throw new Error('NO_TARGET');
 
       const materialIds: number[] = [];
       for (const material of normalizedMaterials) {
         const excludedIds = [target.id, ...materialIds];
-        const excludePlaceholders = excludedIds.map(() => '?').join(',');
-        const rows = db.prepare(
-          `SELECT uc.id
-             FROM user_cards uc
-            WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
-              AND uc.id NOT IN (${excludePlaceholders})
-              AND NOT EXISTS (
-                SELECT 1 FROM market_listings ml
-                 WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
-              )
-            ORDER BY uc.id ASC
-            LIMIT ?`
-        ).all(userId, channelId, material.star, ...excludedIds, material.count) as any[];
+        const rows = selectAvailableIds(material.star, material.count, excludedIds);
         if (rows.length < material.count) throw new Error('NO_FODDER');
         materialIds.push(...rows.map((row) => Number(row.id)));
       }
