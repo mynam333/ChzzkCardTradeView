@@ -157,6 +157,7 @@ import {
 import {
   getShopItems,
   getMyCosmetics,
+  getMyCosmeticCounts,
   getMyPurchases,
   buyShopItem,
   equipToCard,
@@ -309,6 +310,7 @@ router.post('/cards/fuse', authMiddleware, banCheckMiddleware, accountInteractio
 // 상점 (코스메틱: 테두리 / 이름 이펙트)
 router.get('/shop/items', authMiddleware, getShopItems);
 router.get('/shop/inventory', authMiddleware, getMyCosmetics);
+router.get('/shop/inventory-counts', authMiddleware, getMyCosmeticCounts);
 router.get('/shop/purchases', authMiddleware, getMyPurchases);
 router.post('/shop/buy', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, buyShopItem);
 router.post('/cards/:card_id/equip', authMiddleware, banCheckMiddleware, equipToCard);

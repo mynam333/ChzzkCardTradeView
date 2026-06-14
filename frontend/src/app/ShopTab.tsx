@@ -374,9 +374,16 @@ export const ShopTab: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!user?.id) {
+      setItems([]);
+      setOwned({});
+      setPurchased({});
+      return;
+    }
     fetchItems();
-    if (user) { fetchOwned(); fetchPurchased(); }
-  }, [user]);
+    fetchOwned();
+    fetchPurchased();
+  }, [user?.id]);
 
   // 1. 마운트 시 최신 정보 1회 가져오기.
   // 무료 소환 리셋은 아래 nextFreeDrawAt 타이머로 정확히 갱신하므로 주기 폴링은 하지 않습니다.
@@ -412,12 +419,9 @@ export const ShopTab: React.FC = () => {
   };
   const fetchOwned = async () => {
     try {
-      const res = await apiFetch('/shop/inventory');
+      const res = await apiFetch('/shop/inventory-counts');
       if (res.ok) {
-        const list = await res.json();
-        const map: Record<number, number> = {};
-        for (const c of list) map[c.id] = c.quantity;
-        setOwned(map);
+        setOwned(await res.json());
       }
     } catch { /* noop */ }
   };

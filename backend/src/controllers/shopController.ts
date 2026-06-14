@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
+import crypto from 'crypto';
 import * as shop from '../services/shopService';
 import { minifyCss } from '../utils/css';
 
@@ -8,9 +9,17 @@ const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });
 
 /** 상점 활성 아이템 목록 (유저) */
-export const getShopItems = async (_req: AuthenticatedRequest, res: Response) => {
+export const getShopItems = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    return res.status(200).json(await shop.getActiveItems());
+    const items = await shop.getActiveItems();
+    const body = JSON.stringify(items);
+    const etag = `"shop-items-${crypto.createHash('sha1').update(body).digest('hex')}"`;
+    res.set('Cache-Control', 'private, no-cache');
+    res.set('ETag', etag);
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    return res.status(200).type('application/json').send(body);
   } catch (err) { return fail(res, '상점 목록 조회 실패', err); }
 };
 
@@ -21,6 +30,16 @@ export const getMyCosmetics = async (req: AuthenticatedRequest, res: Response) =
   try {
     return res.status(200).json(await shop.getUserCosmetics(userId));
   } catch (err) { return fail(res, '보유 코스메틱 조회 실패', err); }
+};
+
+/** 상점 목록 표시용 내 보유 수량 맵 */
+export const getMyCosmeticCounts = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    res.set('Cache-Control', 'private, no-store');
+    return res.status(200).json(await shop.getUserCosmeticCounts(userId));
+  } catch (err) { return fail(res, '보유 코스메틱 수량 조회 실패', err); }
 };
 
 /** 내 아이템별 구매 횟수 맵 (구매 제한 표시용) */
