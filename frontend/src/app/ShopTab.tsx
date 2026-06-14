@@ -1048,13 +1048,16 @@ export const ShopTab: React.FC = () => {
 
   const handleBuy = async (item: ShopItem) => {
     if (!user) { toast('로그인이 필요합니다.', 'warning'); return; }
+    if (buying !== null) return;
     const saleState = getShopSaleState(item, nowTs);
     if (saleState.notStarted) { toast('아직 판매가 시작되지 않은 한정 상품입니다.', 'warning'); return; }
     if (saleState.ended) { toast('판매 기간이 종료된 한정 상품입니다.', 'warning'); return; }
     if (saleState.totalSoldOut) { toast('준비된 한정 수량이 모두 판매되었습니다.', 'warning'); return; }
+    const price = Math.max(0, Number(item.price) || 0);
+    if (user.point < price) { toast('포인트가 부족합니다.', 'warning'); return; }
 
     // 낙관적 포인트 차감
-    updatePoints(-item.price);
+    updatePoints(-price);
     setBuying(item.id);
     try {
       const res = await apiFetch('/shop/buy', { method: 'POST', body: JSON.stringify({ item_id: item.id }) });
@@ -1069,12 +1072,12 @@ export const ShopTab: React.FC = () => {
         }
       } else {
         // 실패 시 롤백
-        updatePoints(item.price);
+        updatePoints(price);
         toast(data.message || '구매 실패', 'error');
       }
     } catch {
       // 에러 시 롤백
-      updatePoints(item.price);
+      updatePoints(price);
       toast('서버와의 통신 오류가 발생했습니다.', 'error');
     } finally {
       setBuying(null);

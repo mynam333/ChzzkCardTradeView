@@ -753,11 +753,10 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   };
 
   const updatePoints = async (diff: number) => {
-    if (!user) return;
-    setUser({
-      ...user,
-      point: Math.max(0, user.point + diff)
-    });
+    setUser((prev) => prev
+      ? { ...prev, point: Math.max(0, prev.point + diff) }
+      : prev
+    );
   };
 
   const isMaintenanceRoute = pathname === '/maintenance';
