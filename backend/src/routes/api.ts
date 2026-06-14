@@ -170,6 +170,7 @@ import {
 import {
   getMinigameStatus,
   startMinigame,
+  checkMinigameRoundAnswer,
   submitMinigameResult
 } from '../controllers/minigameController';
 import { streamerRepository, titleRepository } from '../repositories';
@@ -195,6 +196,7 @@ const authLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('AUTH_RATE_LIMI
 const registerLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REGISTER_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REGISTER_RATE_LIMIT_MAX', 60), key: 'register' });
 const reportLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REPORT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REPORT_RATE_LIMIT_MAX', 60), key: 'report' });
 const chatImageLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('CHAT_IMAGE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('CHAT_IMAGE_RATE_LIMIT_MAX', 60), key: 'chat-image' });
+const minigameLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('MINIGAME_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('MINIGAME_RATE_LIMIT_MAX', 120), key: 'minigame' });
 
 const STREAMER_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('STREAMER_IMAGE_MAX_UPLOAD_BYTES', 20 * 1024 * 1024, { minBytes: 1024 * 1024 });
 const CHAT_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_IMAGE_MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { minBytes: 1024 * 1024 });
@@ -380,8 +382,9 @@ router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, accountIntera
 // 미니게임 API (티켓 충전식 포인트 획득 기능)
 // ==========================================
 router.get('/minigames/status', authMiddleware, banCheckMiddleware, getMinigameStatus);
-router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, startMinigame);
-router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, submitMinigameResult);
+router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigame);
+router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);
+router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, submitMinigameResult);
 
 // ==========================================
 

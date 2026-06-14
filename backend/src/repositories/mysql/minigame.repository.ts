@@ -1,5 +1,5 @@
 import { getMysqlDb } from '../../services/db';
-import { IMinigameRepository, UserMinigameTicket, MinigameSession } from '../interfaces';
+import { IMinigameRepository, UserMinigameTicket, MinigameSession, MinigameType } from '../interfaces';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 
 const MAX_AUTO_TICKETS = 5;
@@ -142,7 +142,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     return row ? this.mapSession(row) : null;
   }
 
-  async findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null> {
+  async findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null> {
     const row = await this.getDb().get(`
       SELECT *
       FROM minigame_sessions

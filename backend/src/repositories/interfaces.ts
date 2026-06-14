@@ -566,6 +566,8 @@ export interface IMarketRepository {
 }
 
 // 10. 미니게임 티켓 및 세션 데이터 인터페이스
+export type MinigameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
+
 export interface UserMinigameTicket {
   user_id: string;
   /** 자동 충전되는 기본 티켓. 최대 5장까지 충전됩니다. */
@@ -579,7 +581,7 @@ export interface UserMinigameTicket {
 export interface MinigameSession {
   id: string;
   user_id: string;
-  game_type: 'quiz' | 'puzzle' | 'match';
+  game_type: MinigameType;
   status: 'STARTED' | 'COMPLETED' | 'EXPIRED';
   target_data: string; // JSON string
   ticket_spent_type?: 'BASE' | 'BONUS' | 'NONE' | null;
@@ -595,6 +597,6 @@ export interface IMinigameRepository {
   startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }>;
   completeSession(sessionId: string, earnedPoints: number): Promise<{ ok: boolean; reason?: string; newPoints?: number }>;
   findSessionById(id: string): Promise<MinigameSession | null>;
-  findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null>;
+  findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null>;
   expireSessions(olderThanMinutes: number): Promise<void>;
 }

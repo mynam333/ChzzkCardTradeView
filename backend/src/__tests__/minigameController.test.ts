@@ -24,7 +24,7 @@ vi.mock('../repositories', () => ({
   }
 }));
 
-import { getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+import { checkMinigameRoundAnswer, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 
 const getTicketStatus = vi.mocked(minigameRepository.getTicketStatus);
@@ -50,6 +50,37 @@ const createResponse = () => {
 
 const solvedPuzzlePieces = Array.from({ length: 12 }, (_, id) => ({ id, rotation: 0 }));
 const solvedMatchChannelIds = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+
+const valueDuelRounds = Array.from({ length: 5 }, (_, round) => ({
+  round,
+  left: {
+    channel_id: `left-${round}`,
+    name: `왼쪽 ${round}`,
+    image_url: `https://example.com/left-${round}.png`,
+    star: 0,
+    base_value: 1000 + round
+  },
+  right: {
+    channel_id: `right-${round}`,
+    name: `오른쪽 ${round}`,
+    image_url: `https://example.com/right-${round}.png`,
+    star: 0,
+    base_value: 900 + round
+  }
+}));
+
+const cropDetectiveRounds = Array.from({ length: 5 }, (_, round) => ({
+  round,
+  answer_channel_id: `answer-${round}`,
+  source_image_url: `https://example.com/answer-${round}.png`,
+  crop: { x: 0.5, y: 0.5, size: 0.15 },
+  choices: [
+    { channel_id: `answer-${round}`, name: `정답 ${round}`, image_url: `https://example.com/answer-${round}.png`, star: 0 },
+    { channel_id: `wrong-a-${round}`, name: `오답 A ${round}`, image_url: `https://example.com/wrong-a-${round}.png`, star: 0 },
+    { channel_id: `wrong-b-${round}`, name: `오답 B ${round}`, image_url: `https://example.com/wrong-b-${round}.png`, star: 0 },
+    { channel_id: `wrong-c-${round}`, name: `오답 C ${round}`, image_url: `https://example.com/wrong-c-${round}.png`, star: 0 }
+  ]
+}));
 
 const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
   findSessionById.mockResolvedValue({
@@ -294,6 +325,153 @@ describe('submitMinigameResult match time limit', () => {
 
     expect(completeSession).not.toHaveBeenCalled();
     expect(response.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('round-based minigames', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-06T00:00:00.000Z'));
+    vi.clearAllMocks();
+    findUserById.mockResolvedValue({ point: 5000 } as never);
+    completeSession.mockResolvedValue({ ok: true, newPoints: 6200 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('awards base points when value duel has at least 3 correct answers', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'value-duel-session',
+      user_id: 'user-1',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'value-duel-session',
+        payload: {
+          answers: [
+            { round: 0, selected_channel_id: 'left-0' },
+            { round: 1, selected_channel_id: 'left-1' },
+            { round: 2, selected_channel_id: 'left-2' },
+            { round: 3, selected_channel_id: 'right-3' },
+            { round: 4, selected_channel_id: 'right-4' }
+          ],
+          client_remaining_ms: 30_000
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('value-duel-session', 1000);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 1000,
+      message: expect.stringContaining('3/5')
+    }));
+  });
+
+  it('awards bonus points when crop detective has all 5 correct answers', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'crop-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'crop-session',
+        payload: {
+          answers: cropDetectiveRounds.map((round) => ({
+            round: round.round,
+            selected_channel_id: round.answer_channel_id
+          })),
+          client_remaining_ms: 30_000
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('crop-session', 1200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 1200,
+      message: expect.stringContaining('5문제')
+    }));
+  });
+
+  it('rejects round answers that are not one of the issued choices', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'crop-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'crop-session',
+        payload: {
+          answers: [{ round: 0, selected_channel_id: 'not-a-choice' }],
+          client_remaining_ms: 30_000
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(400);
+  });
+
+  it('returns immediate round feedback without completing the session', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'value-duel-session',
+      user_id: 'user-1',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      created_at: new Date(Date.now() - 10_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'value-duel-session',
+        payload: { round: 0, selected_channel_id: 'left-0' }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await checkMinigameRoundAnswer(request, response);
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      correct_channel_ids: ['left-0']
+    }));
   });
 });
 

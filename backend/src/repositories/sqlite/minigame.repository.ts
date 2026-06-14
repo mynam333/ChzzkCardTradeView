@@ -1,5 +1,5 @@
 import { getSqliteDb } from "../../services/db";
-import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../interfaces";
+import { IMinigameRepository, UserMinigameTicket, MinigameSession, MinigameType } from "../interfaces";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
 
 const MAX_AUTO_TICKETS = 5;
@@ -197,7 +197,7 @@ export class SqliteMinigameRepository implements IMinigameRepository {
     };
   }
 
-  async findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null> {
+  async findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null> {
     const row = this.getDb().prepare(`
       SELECT *
       FROM minigame_sessions

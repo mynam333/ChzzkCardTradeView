@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "../../services/db";
-import { IMinigameRepository, UserMinigameTicket, MinigameSession } from "../interfaces";
+import { IMinigameRepository, UserMinigameTicket, MinigameSession, MinigameType } from "../interfaces";
 
 const MAX_AUTO_TICKETS = 5;
 
@@ -270,7 +270,7 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
     return data as MinigameSession;
   }
 
-  async findActiveStartedSession(userId: string, gameType: 'quiz' | 'puzzle' | 'match'): Promise<MinigameSession | null> {
+  async findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null> {
     const { data, error } = await this.getClient()
       .from('minigame_sessions')
       .select('*')

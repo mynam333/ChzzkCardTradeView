@@ -23,11 +23,34 @@ import {
 } from 'lucide-react';
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 
-// 미니게임 타입 정의 (하이로우 제거)
-type GameType = 'quiz' | 'puzzle' | 'match';
+type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
 type QuizChoice = {
   channel_id: string;
   name: string;
+};
+
+type ArcadeCardOption = {
+  channel_id: string;
+  name: string;
+  image_url: string;
+  star: number;
+};
+
+type ValueDuelRound = {
+  round: number;
+  left: ArcadeCardOption;
+  right: ArcadeCardOption;
+};
+
+type CropDetectiveRound = {
+  round: number;
+  crop: {
+    x: number;
+    y: number;
+    size: number;
+  };
+  source_image_url: string;
+  choices: ArcadeCardOption[];
 };
 
 type MatchCardSource = {
@@ -51,6 +74,7 @@ type MinigameData = {
   image_url?: string;
   choices?: QuizChoice[];
   cards?: MatchCardSource[];
+  rounds?: Array<ValueDuelRound | CropDetectiveRound>;
 };
 
 type MinigameResult = {
@@ -72,6 +96,15 @@ type SubmitPayload = {
   answer_channel_id?: string;
   puzzle_pieces?: Array<{ id: number; rotation: number }>;
   matched_channel_ids?: string[];
+  answers?: Array<{ round: number; selected_channel_id: string }>;
+};
+
+type RoundFeedback = {
+  round: number;
+  selected_channel_id?: string;
+  correct: boolean;
+  correct_channel_ids: string[];
+  timed_out?: boolean;
 };
 
 type TicketStatusResponse = {
@@ -108,7 +141,7 @@ type StartGameResponse = {
   next_game_at?: string;
 };
 
-const GAME_TYPES: GameType[] = ['quiz', 'puzzle', 'match'];
+const GAME_TYPES: GameType[] = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'];
 
 const DAILY_GAME_DETAILS: Record<GameType, {
   title: string;
@@ -149,6 +182,26 @@ const DAILY_GAME_DETAILS: Record<GameType, {
     iconBackground: 'bg-sky-100 dark:bg-sky-500/10',
     badge: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300',
     glow: 'from-sky-500/18 via-transparent to-transparent'
+  },
+  value_duel: {
+    title: '시세 듀얼',
+    description: '5문제 동안 두 스트리머 카드 중 현재 시세가 더 높은 쪽을 10초 안에 고르세요. 3문제 이상 맞히면 성공입니다.',
+    bonus: '5문제 모두 정답 시 보너스 200 P',
+    Icon: Trophy,
+    accent: 'text-amber-700 dark:text-amber-300',
+    iconBackground: 'bg-amber-100 dark:bg-amber-500/10',
+    badge: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
+    glow: 'from-amber-500/18 via-transparent to-transparent'
+  },
+  crop_detective: {
+    title: '카드 확대 탐정',
+    description: '확대된 카드 조각을 보고 4개의 후보 카드 중 같은 이미지에서 나온 카드를 찾으세요. 3문제 이상 맞히면 성공입니다.',
+    bonus: '5문제 모두 정답 시 보너스 200 P',
+    Icon: Eye,
+    accent: 'text-fuchsia-700 dark:text-fuchsia-300',
+    iconBackground: 'bg-fuchsia-100 dark:bg-fuchsia-500/10',
+    badge: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800 dark:border-fuchsia-500/20 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
+    glow: 'from-fuchsia-500/18 via-transparent to-transparent'
   }
 };
 
@@ -159,6 +212,8 @@ const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const PUZZLE_HINT_PENALTY_SECONDS = 10;
 const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
+const ROUND_GAME_TOTAL_SECONDS = 50;
+const ROUND_GAME_ROUND_SECONDS = 10;
 const QUIZ_TIME_LIMIT_SECONDS = 15;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
@@ -712,6 +767,76 @@ const createInitialPuzzlePieces = (): PuzzlePiece[] => {
   return pieces;
 };
 
+const isRoundGame = (game: GameType | null): game is 'value_duel' | 'crop_detective' =>
+  game === 'value_duel' || game === 'crop_detective';
+
+const isValueDuelRound = (round: ValueDuelRound | CropDetectiveRound | undefined): round is ValueDuelRound =>
+  Boolean(round && 'left' in round && 'right' in round);
+
+const isCropDetectiveRound = (round: ValueDuelRound | CropDetectiveRound | undefined): round is CropDetectiveRound =>
+  Boolean(round && 'choices' in round && 'source_image_url' in round);
+
+const CardImageTile: React.FC<{
+  card: ArcadeCardOption;
+  selected?: boolean;
+  correct?: boolean;
+  wrong?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className={`cute-card-pop relative min-w-0 overflow-hidden rounded-2xl border bg-card text-left shadow-sm transition active:scale-95 disabled:pointer-events-none ${
+      correct
+        ? 'border-emerald-400 bg-emerald-500/12 ring-2 ring-emerald-400/50'
+        : wrong
+          ? 'border-rose-400 bg-rose-500/12 ring-2 ring-rose-400/50'
+          : selected
+            ? 'border-primary bg-primary/10 ring-2 ring-primary/35'
+            : 'border-border hover:-translate-y-0.5 hover:border-primary/35'
+    }`}
+  >
+    <div className="aspect-[4/5] w-full overflow-hidden bg-secondary/50">
+      <img
+        src={card.image_url || '/icon.png'}
+        alt={card.name}
+        className="h-full w-full object-cover"
+        draggable={false}
+      />
+    </div>
+    <div className="px-2.5 py-2 sm:px-3">
+      <p className="truncate text-[11px] font-black text-foreground sm:text-sm">{card.name}</p>
+      <p className="mt-0.5 text-[9px] font-bold text-muted-foreground">{card.star > 0 ? `${card.star}성 카드` : '기본 카드'}</p>
+    </div>
+  </button>
+);
+
+const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
+  const size = Math.max(0.08, Math.min(0.5, Number(round.crop?.size || 0.16)));
+  const x = Math.max(0, Math.min(1, Number(round.crop?.x || 0.5)));
+  const y = Math.max(0, Math.min(1, Number(round.crop?.y || 0.5)));
+  return (
+    <div
+      role="img"
+      aria-label="확대된 카드 이미지 조각"
+      className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
+      style={{
+        backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: `${100 / size}% ${100 / size}%`,
+        backgroundPosition: `${x * 100}% ${y * 100}%`
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-black tracking-[0.14em] text-white/80">
+        ZOOM CROP
+      </div>
+    </div>
+  );
+};
+
 export const ArcadeTab: React.FC = () => {
   const { user, refreshUserData, toast } = useApp();
   const searchParams = useSearchParams();
@@ -788,6 +913,17 @@ export const ArcadeTab: React.FC = () => {
   const [isGameOver, setIsGameOver] = useState(false);
   const matchDeadlineRef = useRef<number | null>(null);
 
+  // 4. 5라운드형 게임 공통 상태 (시세 듀얼 / 카드 확대 탐정)
+  const [roundIndex, setRoundIndex] = useState(0);
+  const [roundAnswers, setRoundAnswers] = useState<Array<{ round: number; selected_channel_id: string }>>([]);
+  const [roundFeedback, setRoundFeedback] = useState<RoundFeedback | null>(null);
+  const [roundCorrectCount, setRoundCorrectCount] = useState(0);
+  const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
+  const [roundGameTimeLeft, setRoundGameTimeLeft] = useState(ROUND_GAME_TOTAL_SECONDS);
+  const [roundChecking, setRoundChecking] = useState(false);
+  const roundDeadlineRef = useRef<number | null>(null);
+  const roundGameDeadlineRef = useRef<number | null>(null);
+
   // 티켓 상태 조회 API 호출
   const fetchStatus = useCallback(async () => {
     try {
@@ -821,9 +957,18 @@ export const ArcadeTab: React.FC = () => {
     setIsPracticeMode(false);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    setRoundIndex(0);
+    setRoundAnswers([]);
+    setRoundFeedback(null);
+    setRoundCorrectCount(0);
+    setRoundChecking(false);
+    setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+    setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
     quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
+    roundDeadlineRef.current = null;
+    roundGameDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -844,6 +989,11 @@ export const ArcadeTab: React.FC = () => {
     } else if (activeGame === 'match') {
       setGameTimeLeft(remainingSeconds);
       matchDeadlineRef.current = deadline;
+    } else if (isRoundGame(activeGame)) {
+      setRoundGameTimeLeft(remainingSeconds);
+      setRoundTimeLeft(Math.min(ROUND_GAME_ROUND_SECONDS, remainingSeconds || ROUND_GAME_ROUND_SECONDS));
+      roundGameDeadlineRef.current = deadline;
+      roundDeadlineRef.current = Date.now() + Math.min(ROUND_GAME_ROUND_SECONDS, Math.max(1, remainingSeconds)) * 1000;
     }
   }, [activeGame]);
 
@@ -855,7 +1005,8 @@ export const ArcadeTab: React.FC = () => {
       activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
         : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
           : activeGame === 'match' ? Math.max(0, gameTimeLeft * 1000)
-            : 0;
+            : isRoundGame(activeGame) ? Math.max(0, roundGameTimeLeft * 1000)
+              : 0;
     submitInFlightRef.current = true;
     setGameBusy(true);
     try {
@@ -884,12 +1035,14 @@ export const ArcadeTab: React.FC = () => {
       restoreActiveTimer(clientRemainingMs);
       if (activeGame === 'quiz') {
         setSelectedQuizChoice(null);
+      } else if (isRoundGame(activeGame)) {
+        setRoundFeedback(null);
       }
     } finally {
       submitInFlightRef.current = false;
       setGameBusy(false);
     }
-  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
+  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, roundGameTimeLeft, sessionId, toast]);
 
   useEffect(() => {
     if (user) {
@@ -986,6 +1139,11 @@ export const ArcadeTab: React.FC = () => {
               matchDeadlineRef.current = Date.now() + MATCH_TIME_LIMIT_SECONDS * 1000;
               setRevealActive(false);
             }, 2000);
+          } else if (isRoundGame(activeGame)) {
+            roundGameDeadlineRef.current = now + ROUND_GAME_TOTAL_SECONDS * 1000;
+            roundDeadlineRef.current = now + ROUND_GAME_ROUND_SECONDS * 1000;
+            setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
+            setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
           }
           return 0;
         }
@@ -1080,6 +1238,61 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, selectedQuizChoice]);
 
+  // 시세 듀얼 / 카드 확대 탐정 전체 제한시간 표시
+  useEffect(() => {
+    if (!isRoundGame(activeGame) || gameBusy || gameResult || isGameOver || !roundGameDeadlineRef.current || (countdownLeft !== null && countdownLeft > 0)) return;
+
+    const timer = window.setInterval(() => {
+      const totalDeadline = roundGameDeadlineRef.current;
+      if (!totalDeadline) return;
+      const nextTimeLeft = Math.max(0, Math.ceil((totalDeadline - Date.now()) / 1000));
+      setRoundGameTimeLeft(nextTimeLeft);
+      if (nextTimeLeft <= 0 && !submitInFlightRef.current) {
+        setIsGameOver(true);
+        submitResult({ answers: roundAnswers });
+      }
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, roundAnswers, submitResult]);
+
+  // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
+  useEffect(() => {
+    if (!isRoundGame(activeGame) || gameBusy || roundChecking || gameResult || isGameOver || roundFeedback || (countdownLeft !== null && countdownLeft > 0)) return;
+
+    if (roundGameTimeLeft <= 0) {
+      const timeout = window.setTimeout(() => {
+        if (submitInFlightRef.current) return;
+        setIsGameOver(true);
+        submitResult({ answers: roundAnswers });
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+
+    if (roundTimeLeft <= 0) {
+      const timeout = window.setTimeout(() => {
+        setRoundFeedback({
+          round: roundIndex,
+          correct: false,
+          correct_channel_ids: [],
+          timed_out: true
+        });
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+
+    const timer = window.setInterval(() => {
+      const currentRoundDeadline = roundDeadlineRef.current;
+      if (currentRoundDeadline) {
+        setRoundTimeLeft(Math.max(0, Math.ceil((currentRoundDeadline - Date.now()) / 1000)));
+      } else {
+        setRoundTimeLeft(prev => Math.max(0, prev - 1));
+      }
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, roundAnswers, roundChecking, roundFeedback, roundGameTimeLeft, roundIndex, roundTimeLeft, submitResult]);
+
   // 포맷팅 헬퍼 (초 -> HH:MM:SS)
   const formatTime = (secs: number) => {
     const h = Math.floor(secs / 3600);
@@ -1115,9 +1328,18 @@ export const ArcadeTab: React.FC = () => {
     setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    setRoundIndex(0);
+    setRoundAnswers([]);
+    setRoundFeedback(null);
+    setRoundCorrectCount(0);
+    setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+    setRoundGameTimeLeft(ROUND_GAME_TOTAL_SECONDS);
+    setRoundChecking(false);
     quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
+    roundDeadlineRef.current = null;
+    roundGameDeadlineRef.current = null;
     if (puzzleHintTimeoutRef.current !== null) {
       window.clearTimeout(puzzleHintTimeoutRef.current);
       puzzleHintTimeoutRef.current = null;
@@ -1198,6 +1420,17 @@ export const ArcadeTab: React.FC = () => {
           }))
           .sort(() => 0.5 - Math.random()); // 셔플
         setMatchCards(deck);
+      } else if (isRoundGame(type)) {
+        const totalRemaining = remainingSeconds ?? ROUND_GAME_TOTAL_SECONDS;
+        setRoundIndex(0);
+        setRoundAnswers([]);
+        setRoundFeedback(null);
+        setRoundCorrectCount(0);
+        setRoundChecking(false);
+        setRoundGameTimeLeft(totalRemaining);
+        setRoundTimeLeft(Math.min(ROUND_GAME_ROUND_SECONDS, totalRemaining || ROUND_GAME_ROUND_SECONDS));
+        roundGameDeadlineRef.current = isResumed ? Date.now() + totalRemaining * 1000 : null;
+        roundDeadlineRef.current = isResumed ? Date.now() + Math.min(ROUND_GAME_ROUND_SECONDS, Math.max(1, totalRemaining)) * 1000 : null;
       }
 
       // 3초 카운트다운 가동
@@ -1214,11 +1447,11 @@ export const ArcadeTab: React.FC = () => {
 
   // URL 파라미터로 연습 게임을 자동 시작합니다 (특정 유저·별 이미지 테스트용).
   // 예) /arcade?practice=quiz&channel=<channel_id>&star=3&blur=motion
-  //     practice=quiz|puzzle|match (필수), channel=스트리머 channel_id, star=0~5, blur=(퀴즈) gaussian|mosaic|motion|radial, image=(퍼즐) 스냅샷 URL
+  //     practice=quiz|puzzle|match|value_duel|crop_detective (필수), channel=스트리머 channel_id, star=0~5, blur=(퀴즈) gaussian|mosaic|motion|radial, image=(퍼즐) 스냅샷 URL
   useEffect(() => {
     if (autoStartRef.current || !user) return;
     const practiceType = searchParams.get('practice');
-    if (practiceType !== 'quiz' && practiceType !== 'puzzle' && practiceType !== 'match') return;
+    if (practiceType !== 'quiz' && practiceType !== 'puzzle' && practiceType !== 'match' && practiceType !== 'value_duel' && practiceType !== 'crop_detective') return;
     autoStartRef.current = true;
 
     const channelId = searchParams.get('channel') || undefined;
@@ -1443,6 +1676,62 @@ export const ArcadeTab: React.FC = () => {
         }, 800);
       }
     }
+  };
+
+  const handleRoundChoice = async (selectedChannelId: string) => {
+    if (!sessionId || !isRoundGame(activeGame)) return;
+    if (gameBusy || roundChecking || roundFeedback || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+
+    setRoundChecking(true);
+    try {
+      const res = await apiFetch('/minigames/round-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          payload: {
+            round: roundIndex,
+            selected_channel_id: selectedChannelId
+          }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.message || '라운드 결과 확인에 실패했습니다.', 'error');
+        return;
+      }
+
+      setRoundAnswers(prev => {
+        const withoutCurrent = prev.filter(answer => answer.round !== roundIndex);
+        return [...withoutCurrent, { round: roundIndex, selected_channel_id: selectedChannelId }];
+      });
+      if (data.correct) setRoundCorrectCount(prev => prev + 1);
+      setRoundFeedback({
+        round: roundIndex,
+        selected_channel_id: selectedChannelId,
+        correct: Boolean(data.correct),
+        correct_channel_ids: Array.isArray(data.correct_channel_ids) ? data.correct_channel_ids : []
+      });
+    } catch {
+      toast('라운드 결과 확인에 실패했습니다.', 'warning');
+    } finally {
+      setRoundChecking(false);
+    }
+  };
+
+  const handleRoundContinue = () => {
+    if (!isRoundGame(activeGame) || !gameData?.rounds) return;
+    const isLastRound = roundIndex >= gameData.rounds.length - 1;
+    if (isLastRound) {
+      submitResult({ answers: roundAnswers });
+      return;
+    }
+
+    const nextIndex = roundIndex + 1;
+    setRoundIndex(nextIndex);
+    setRoundFeedback(null);
+    setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+    roundDeadlineRef.current = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
   };
 
   // 로그인 체크
@@ -1840,7 +2129,7 @@ export const ArcadeTab: React.FC = () => {
           </button>
 
           {isPracticeExpanded && (
-            <div id="practice-game-list" className="grid gap-3 p-4 animate-in fade-in slide-in-from-top-2 duration-200 sm:grid-cols-3 sm:p-5">
+            <div id="practice-game-list" className="grid gap-3 p-4 animate-in fade-in slide-in-from-top-2 duration-200 sm:grid-cols-3 sm:p-5 xl:grid-cols-5">
               {GAME_TYPES.map((gameType) => {
                 const details = DAILY_GAME_DETAILS[gameType];
                 const PracticeIcon = details.Icon;
@@ -1927,6 +2216,8 @@ export const ArcadeTab: React.FC = () => {
               {activeGame === 'quiz' && '❓ 송출 오류난 스트리머 맞추기'}
               {activeGame === 'puzzle' && '🧩 3x4 회전 퍼즐'}
               {activeGame === 'match' && '🎴 짝맞추기 카드게임'}
+              {activeGame === 'value_duel' && '📈 시세 듀얼'}
+              {activeGame === 'crop_detective' && '🔎 카드 확대 탐정'}
             </span>
           </div>
 
@@ -2155,6 +2446,168 @@ export const ArcadeTab: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* ======================================================== */}
+          {/* 게임 4: 시세 듀얼 */}
+          {/* ======================================================== */}
+          {activeGame === 'value_duel' && gameData.rounds && (() => {
+            const currentRound = gameData.rounds[roundIndex];
+            if (!isValueDuelRound(currentRound)) return null;
+            const selectedId = roundFeedback?.selected_channel_id || null;
+            const correctIds = roundFeedback?.correct_channel_ids || [];
+            const leftState = {
+              selected: selectedId === currentRound.left.channel_id,
+              correct: correctIds.includes(currentRound.left.channel_id),
+              wrong: selectedId === currentRound.left.channel_id && roundFeedback?.correct === false
+            };
+            const rightState = {
+              selected: selectedId === currentRound.right.channel_id,
+              correct: correctIds.includes(currentRound.right.channel_id),
+              wrong: selectedId === currentRound.right.channel_id && roundFeedback?.correct === false
+            };
+
+            return (
+              <div className="flex flex-1 flex-col items-center justify-center space-y-4 sm:space-y-5">
+                <GameTimeLimit
+                  timeLeft={roundTimeLeft}
+                  totalSeconds={ROUND_GAME_ROUND_SECONDS}
+                  dangerSeconds={3}
+                  bonusLabel="5문제 만점 보너스"
+                  pausedLabel={roundFeedback ? '결과 확인' : undefined}
+                />
+
+                <div className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[10px] font-black text-amber-800 dark:text-amber-200 sm:text-xs">
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
+                  <span>전체 남은 시간 <span className="cute-number-font">{roundGameTimeLeft}</span>초</span>
+                </div>
+
+                <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:gap-5">
+                  <CardImageTile
+                    card={currentRound.left}
+                    disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                    onClick={() => handleRoundChoice(currentRound.left.channel_id)}
+                    {...leftState}
+                  />
+                  <CardImageTile
+                    card={currentRound.right}
+                    disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                    onClick={() => handleRoundChoice(currentRound.right.channel_id)}
+                    {...rightState}
+                  />
+                </div>
+
+                <div className="min-h-16 w-full max-w-3xl">
+                  {roundChecking && (
+                    <div className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-secondary/45 px-4 py-3 text-xs font-black text-muted-foreground">
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                      라운드 결과 확인 중
+                    </div>
+                  )}
+                  {roundFeedback && (
+                    <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+                      roundFeedback.correct
+                        ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                    }`}>
+                      <div>
+                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                          {roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRoundContinue}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                      >
+                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ======================================================== */}
+          {/* 게임 5: 카드 확대 탐정 */}
+          {/* ======================================================== */}
+          {activeGame === 'crop_detective' && gameData.rounds && (() => {
+            const currentRound = gameData.rounds[roundIndex];
+            if (!isCropDetectiveRound(currentRound)) return null;
+            const selectedId = roundFeedback?.selected_channel_id || null;
+            const correctIds = roundFeedback?.correct_channel_ids || [];
+
+            return (
+              <div className="flex flex-1 flex-col items-center justify-center space-y-4 sm:space-y-5">
+                <GameTimeLimit
+                  timeLeft={roundTimeLeft}
+                  totalSeconds={ROUND_GAME_ROUND_SECONDS}
+                  dangerSeconds={3}
+                  bonusLabel="5문제 만점 보너스"
+                  pausedLabel={roundFeedback ? '결과 확인' : undefined}
+                />
+
+                <div className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-2 text-[10px] font-black text-fuchsia-800 dark:text-fuchsia-200 sm:text-xs">
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
+                  <span>전체 남은 시간 <span className="cute-number-font">{roundGameTimeLeft}</span>초</span>
+                </div>
+
+                <CropPreview round={currentRound} />
+
+                <div className="grid w-full max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-4">
+                  {currentRound.choices.map((choice) => {
+                    const selected = selectedId === choice.channel_id;
+                    const correct = correctIds.includes(choice.channel_id);
+                    const wrong = selected && roundFeedback?.correct === false;
+                    return (
+                      <CardImageTile
+                        key={`${currentRound.round}-${choice.channel_id}`}
+                        card={choice}
+                        selected={selected}
+                        correct={correct}
+                        wrong={wrong}
+                        disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                        onClick={() => handleRoundChoice(choice.channel_id)}
+                      />
+                    );
+                  })}
+                </div>
+
+                <div className="min-h-16 w-full max-w-4xl">
+                  {roundChecking && (
+                    <div className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-secondary/45 px-4 py-3 text-xs font-black text-muted-foreground">
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                      라운드 결과 확인 중
+                    </div>
+                  )}
+                  {roundFeedback && (
+                    <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+                      roundFeedback.correct
+                        ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                    }`}>
+                      <div>
+                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                          {roundFeedback.correct ? '확대 조각을 정확히 찾았습니다.' : '후보 카드의 이미지 패턴을 다시 살펴보세요.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRoundContinue}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                      >
+                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ======================================================== */}
           {/* 게임 3: 짝맞추기 뒤집기 (2초 선공개, 30초 시간제한, 3D 플립 모션) */}

@@ -1563,8 +1563,9 @@ export const fuseCards = async (req: Request, res: Response) => {
         c.channel_id === channel_id
         && (c.star || 0) === st
         && c.id != null
+        && !pendingMarketIds.has(c.id)
       ).length
-      - (reservations.cardsByStar[key(st)] || 0);
+      - (tradeReservedByStar[key(st)] || 0);
     const targetAvailable = available(starNum);
     if (targetAvailable < 1) {
       return res.status(400).json({
@@ -1590,7 +1591,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       let msg = '한계돌파에 실패했습니다.';
       if (result.reason === 'MAX_STAR') msg = '이미 최고 등급(5성)입니다.';
       else if (result.reason === 'NO_TARGET') msg = `${starNum}성 카드를 보유하고 있지 않습니다.`;
-      else if (result.reason === 'NO_FODDER') msg = '한계돌파에 사용할 재료 카드가 부족합니다.';
+      else if (result.reason === 'NO_FODDER') msg = '한계돌파에 사용할 수 있는 재료 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.';
       else if (result.reason === 'INVALID_MATERIALS') msg = '한계돌파 재료 선택이 올바르지 않습니다.';
       else if (result.reason === 'EXCEEDS_MAX_STAR') msg = '선택한 재료를 모두 합치면 최고 등급(5성)을 초과합니다.';
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });

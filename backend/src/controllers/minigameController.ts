@@ -2,13 +2,13 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import crypto from 'crypto';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
-import { UserMinigameTicket, MinigameSession } from '../repositories/interfaces';
+import { UserMinigameTicket, MinigameSession, MinigameType } from '../repositories/interfaces';
 import { getPuzzleExcludedImageKeys, normalizePuzzleImageKey } from '../services/puzzleImageExclusionService';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match'] as const;
+const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'] as const;
 const COUNTDOWN_MS = 3_000;
 const SUBMISSION_GRACE_MS = 2_000;
 const CLIENT_REPORTED_GRACE_MS = 8_000;
@@ -16,10 +16,33 @@ const PUZZLE_TIME_LIMIT_MS = 120_000;
 const PUZZLE_PIECE_COUNT = 12;
 const MATCH_REVEAL_MS = 2_000;
 const MATCH_TIME_LIMIT_MS = 30_000;
+const VALUE_DUEL_ROUND_COUNT = 5;
+const VALUE_DUEL_ROUND_TIME_MS = 10_000;
+const VALUE_DUEL_TIME_LIMIT_MS = VALUE_DUEL_ROUND_COUNT * VALUE_DUEL_ROUND_TIME_MS;
+const VALUE_DUEL_MIN_CORRECT = 3;
+const CROP_DETECTIVE_ROUND_COUNT = 5;
+const CROP_DETECTIVE_ROUND_TIME_MS = 10_000;
+const CROP_DETECTIVE_TIME_LIMIT_MS = CROP_DETECTIVE_ROUND_COUNT * CROP_DETECTIVE_ROUND_TIME_MS;
+const CROP_DETECTIVE_MIN_CORRECT = 3;
+const CROP_DETECTIVE_CHOICES = 4;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
+
+type RoundAnswer = {
+  round: number;
+  selected_channel_id: string;
+};
+
+type RoundScore = {
+  valid: boolean;
+  reason?: string;
+  correctCount: number;
+  totalRounds: number;
+  selectedCount: number;
+  perfect: boolean;
+};
 
 const formatKstDbTime = (dateMs = Date.now()): string => {
   const kst = new Date(dateMs + KST_OFFSET_MS);
@@ -47,6 +70,8 @@ const getGamePreplayMs = (gameType: DailyMinigameType): number => {
 const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
   if (gameType === 'quiz') return 15_000;
   if (gameType === 'puzzle') return PUZZLE_TIME_LIMIT_MS;
+  if (gameType === 'value_duel') return VALUE_DUEL_TIME_LIMIT_MS;
+  if (gameType === 'crop_detective') return CROP_DETECTIVE_TIME_LIMIT_MS;
   return MATCH_TIME_LIMIT_MS;
 };
 
@@ -135,6 +160,109 @@ const isSolvedMatchPayload = (payloadChannelIds: unknown, targetChannelIds: unkn
     if (actualCounts.get(id) !== count) return false;
   }
   return actualCounts.size === expectedCounts.size;
+};
+
+const isRoundGameType = (gameType: string): gameType is 'value_duel' | 'crop_detective' =>
+  gameType === 'value_duel' || gameType === 'crop_detective';
+
+const shuffle = <T>(items: T[]): T[] => [...items].sort(() => 0.5 - Math.random());
+
+const toRoundAnswers = (rawAnswers: unknown): { ok: true; answers: RoundAnswer[] } | { ok: false; reason: string } => {
+  if (!Array.isArray(rawAnswers)) return { ok: false, reason: '라운드 답안 목록이 올바르지 않습니다.' };
+  const seen = new Set<number>();
+  const answers: RoundAnswer[] = [];
+  for (const raw of rawAnswers) {
+    const round = Number((raw as any)?.round);
+    const selected = String((raw as any)?.selected_channel_id || '').trim();
+    if (!Number.isInteger(round) || round < 0) return { ok: false, reason: '라운드 번호가 올바르지 않습니다.' };
+    if (seen.has(round)) return { ok: false, reason: '중복된 라운드 답안이 포함되어 있습니다.' };
+    if (!selected) return { ok: false, reason: '선택한 스트리머 정보가 누락되었습니다.' };
+    seen.add(round);
+    answers.push({ round, selected_channel_id: selected });
+  }
+  return { ok: true, answers };
+};
+
+const getRoundAnswerMap = (answers: RoundAnswer[]) => {
+  const map = new Map<number, string>();
+  for (const answer of answers) map.set(answer.round, answer.selected_channel_id);
+  return map;
+};
+
+const getValueDuelCorrectIds = (round: any): string[] => {
+  const leftValue = Number(round?.left?.base_value);
+  const rightValue = Number(round?.right?.base_value);
+  if (!Number.isFinite(leftValue) || !Number.isFinite(rightValue)) return [];
+  if (leftValue === rightValue) return [round.left.channel_id, round.right.channel_id].filter(Boolean);
+  return [leftValue > rightValue ? round.left?.channel_id : round.right?.channel_id].filter(Boolean);
+};
+
+const scoreValueDuelAnswers = (answers: RoundAnswer[], target: any): RoundScore => {
+  const rounds = Array.isArray(target?.rounds) ? target.rounds : [];
+  if (rounds.length !== VALUE_DUEL_ROUND_COUNT) {
+    return { valid: false, reason: '시세 듀얼 문제 데이터가 올바르지 않습니다.', correctCount: 0, totalRounds: VALUE_DUEL_ROUND_COUNT, selectedCount: 0, perfect: false };
+  }
+  const answerMap = getRoundAnswerMap(answers);
+  let correctCount = 0;
+
+  for (let index = 0; index < rounds.length; index += 1) {
+    const round = rounds[index];
+    if (Number(round?.round) !== index || !round?.left?.channel_id || !round?.right?.channel_id) {
+      return { valid: false, reason: '시세 듀얼 라운드 데이터가 올바르지 않습니다.', correctCount: 0, totalRounds: rounds.length, selectedCount: answerMap.size, perfect: false };
+    }
+    const selected = answerMap.get(index);
+    if (!selected) continue;
+    if (selected !== round.left.channel_id && selected !== round.right.channel_id) {
+      return { valid: false, reason: '보기 외 선택값이 포함되어 있습니다.', correctCount: 0, totalRounds: rounds.length, selectedCount: answerMap.size, perfect: false };
+    }
+    if (getValueDuelCorrectIds(round).includes(selected)) correctCount += 1;
+  }
+
+  return {
+    valid: true,
+    correctCount,
+    totalRounds: rounds.length,
+    selectedCount: answerMap.size,
+    perfect: correctCount === rounds.length
+  };
+};
+
+const scoreCropDetectiveAnswers = (answers: RoundAnswer[], target: any): RoundScore => {
+  const rounds = Array.isArray(target?.rounds) ? target.rounds : [];
+  if (rounds.length !== CROP_DETECTIVE_ROUND_COUNT) {
+    return { valid: false, reason: '카드 확대 탐정 문제 데이터가 올바르지 않습니다.', correctCount: 0, totalRounds: CROP_DETECTIVE_ROUND_COUNT, selectedCount: 0, perfect: false };
+  }
+  const answerMap = getRoundAnswerMap(answers);
+  let correctCount = 0;
+
+  for (let index = 0; index < rounds.length; index += 1) {
+    const round = rounds[index];
+    const choices = Array.isArray(round?.choices) ? round.choices : [];
+    const choiceIds = new Set(choices.map((choice: any) => String(choice?.channel_id || '').trim()).filter(Boolean));
+    if (Number(round?.round) !== index || !round?.answer_channel_id || choiceIds.size !== CROP_DETECTIVE_CHOICES) {
+      return { valid: false, reason: '카드 확대 탐정 라운드 데이터가 올바르지 않습니다.', correctCount: 0, totalRounds: rounds.length, selectedCount: answerMap.size, perfect: false };
+    }
+    const selected = answerMap.get(index);
+    if (!selected) continue;
+    if (!choiceIds.has(selected)) {
+      return { valid: false, reason: '보기 외 선택값이 포함되어 있습니다.', correctCount: 0, totalRounds: rounds.length, selectedCount: answerMap.size, perfect: false };
+    }
+    if (selected === round.answer_channel_id) correctCount += 1;
+  }
+
+  return {
+    valid: true,
+    correctCount,
+    totalRounds: rounds.length,
+    selectedCount: answerMap.size,
+    perfect: correctCount === rounds.length
+  };
+};
+
+const scoreRoundGameAnswers = (gameType: string, answers: RoundAnswer[], target: any): RoundScore => {
+  if (gameType === 'value_duel') return scoreValueDuelAnswers(answers, target);
+  if (gameType === 'crop_detective') return scoreCropDetectiveAnswers(answers, target);
+  return { valid: false, reason: '라운드형 미니게임이 아닙니다.', correctCount: 0, totalRounds: 0, selectedCount: 0, perfect: false };
 };
 
 async function getTicketChargeIntervalMinutes(): Promise<number> {
@@ -227,6 +355,65 @@ function getCardImageUrl(streamer: any, star: number): string {
   return streamer.logo_url || '';
 }
 
+const buildCardOption = (streamer: any, star: number) => ({
+  channel_id: streamer.channel_id,
+  name: streamer.name,
+  image_url: getCardImageUrl(streamer, star),
+  star
+});
+
+const buildValuedCardOption = (streamer: any, star: number) => ({
+  ...buildCardOption(streamer, star),
+  base_value: Number(streamer.base_value || 0)
+});
+
+const stripCardValue = (card: any) => ({
+  channel_id: card.channel_id,
+  name: card.name,
+  image_url: card.image_url,
+  star: Number(card.star) || 0
+});
+
+const getPlayableImageCards = (streamers: any[]) =>
+  streamers.flatMap((streamer) =>
+    Array.from({ length: 6 }, (_, star) => {
+      const imageUrl = getCardImageUrl(streamer, star);
+      if (!imageUrl) return null;
+      return {
+        streamer,
+        card: {
+          channel_id: streamer.channel_id,
+          name: streamer.name,
+          image_url: imageUrl,
+          star,
+          base_value: Number(streamer.base_value || 0)
+        }
+      };
+    }).filter(Boolean) as Array<{ streamer: any; card: any }>
+  );
+
+const getUniquePlayableImageCards = (streamers: any[]) => {
+  const byChannel = new Map<string, any[]>();
+  for (const item of getPlayableImageCards(streamers)) {
+    const channelId = item.card.channel_id;
+    if (!channelId) continue;
+    const cards = byChannel.get(channelId) || [];
+    cards.push(item.card);
+    byChannel.set(channelId, cards);
+  }
+  return Array.from(byChannel.values()).map((cards) => shuffle(cards)[0]);
+};
+
+const buildCrop = (roundIndex: number) => {
+  const minSize = 0.10;
+  const maxSize = 0.20;
+  const size = Number((maxSize - (roundIndex / Math.max(1, CROP_DETECTIVE_ROUND_COUNT - 1)) * (maxSize - minSize)).toFixed(3));
+  const min = size / 2 + 0.05;
+  const max = 1 - size / 2 - 0.05;
+  const pick = () => Number((min + Math.random() * Math.max(0.01, max - min)).toFixed(3));
+  return { x: pick(), y: pick(), size };
+};
+
 type MinigameAnswerReveal = {
   channel_id: string;
   name: string;
@@ -309,6 +496,29 @@ async function buildRecoverableGameData(
     };
   }
 
+  if (gameType === 'value_duel') {
+    if (!Array.isArray(target?.rounds) || target.rounds.length !== VALUE_DUEL_ROUND_COUNT) return null;
+    return {
+      rounds: target.rounds.map((round: any) => ({
+        round: Number(round.round),
+        left: stripCardValue(round.left || {}),
+        right: stripCardValue(round.right || {})
+      }))
+    };
+  }
+
+  if (gameType === 'crop_detective') {
+    if (!Array.isArray(target?.rounds) || target.rounds.length !== CROP_DETECTIVE_ROUND_COUNT) return null;
+    return {
+      rounds: target.rounds.map((round: any) => ({
+        round: Number(round.round),
+        crop: round.crop,
+        source_image_url: round.source_image_url,
+        choices: Array.isArray(round.choices) ? round.choices.map(stripCardValue) : []
+      }))
+    };
+  }
+
   return null;
 }
 
@@ -354,7 +564,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
   const { game_type, practice_mode } = req.body;
   const practiceMode = practice_mode === true;
-  if (!['quiz', 'puzzle', 'match'].includes(game_type)) {
+  if (!['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'].includes(game_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 게임 타입입니다.' });
   }
 
@@ -544,6 +754,63 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           logo_url: s.logo_url
         }))
       };
+    } else if (game_type === 'value_duel') {
+      const candidates = getUniquePlayableImageCards(streamers)
+        .filter((card) => Number.isFinite(Number(card.base_value)));
+      if (candidates.length < 2) {
+        return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 시세 듀얼 카드가 부족합니다. (최소 2명 필요)' });
+      }
+
+      const rounds = Array.from({ length: VALUE_DUEL_ROUND_COUNT }, (_, roundIndex) => {
+        const pool = shuffle(candidates);
+        const left = pool[0];
+        const right = pool.find((card) => card.channel_id !== left.channel_id) || pool[1];
+        return {
+          round: roundIndex,
+          left,
+          right
+        };
+      });
+
+      targetData = { rounds };
+      gameData = {
+        rounds: rounds.map((round) => ({
+          round: round.round,
+          left: stripCardValue(round.left),
+          right: stripCardValue(round.right)
+        }))
+      };
+    } else if (game_type === 'crop_detective') {
+      const candidates = getUniquePlayableImageCards(streamers);
+      if (candidates.length < CROP_DETECTIVE_CHOICES) {
+        return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 카드 확대 탐정 이미지가 부족합니다. (최소 4명 필요)' });
+      }
+
+      const answerPool = shuffle(candidates);
+      const rounds = Array.from({ length: CROP_DETECTIVE_ROUND_COUNT }, (_, roundIndex) => {
+        const answer = answerPool[roundIndex % answerPool.length];
+        const distractors = shuffle(candidates)
+          .filter((card) => card.channel_id !== answer.channel_id)
+          .slice(0, CROP_DETECTIVE_CHOICES - 1);
+        const choices = shuffle([answer, ...distractors]).map(stripCardValue);
+        return {
+          round: roundIndex,
+          answer_channel_id: answer.channel_id,
+          source_image_url: answer.image_url,
+          crop: buildCrop(roundIndex),
+          choices
+        };
+      });
+
+      targetData = { rounds };
+      gameData = {
+        rounds: rounds.map((round) => ({
+          round: round.round,
+          crop: round.crop,
+          source_image_url: round.source_image_url,
+          choices: round.choices
+        }))
+      };
     }
 
     targetData.practice_mode = practiceMode;
@@ -612,7 +879,14 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           ? payload?.answer_channel_id === target.correct_id
           : session.game_type === 'puzzle'
             ? isSolvedPuzzlePayload(payload?.puzzle_pieces)
-            : isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids);
+            : session.game_type === 'match'
+              ? isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids)
+              : isRoundGameType(session.game_type)
+                ? (() => {
+                  const parsed = toRoundAnswers(payload?.answers);
+                  return parsed.ok && scoreRoundGameAnswers(session.game_type, parsed.answers, target).correctCount >= (session.game_type === 'value_duel' ? VALUE_DUEL_MIN_CORRECT : CROP_DETECTIVE_MIN_CORRECT);
+                })()
+                : false;
 
       return res.status(200).json({
         success: true,
@@ -769,6 +1043,54 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           message = `모든 카드의 짝을 찾으셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
         }
       }
+    } else if (session.game_type === 'value_duel' || session.game_type === 'crop_detective') {
+      const isValueDuel = session.game_type === 'value_duel';
+      const limitMs = isValueDuel ? VALUE_DUEL_TIME_LIMIT_MS : CROP_DETECTIVE_TIME_LIMIT_MS;
+      const minCorrect = isValueDuel ? VALUE_DUEL_MIN_CORRECT : CROP_DETECTIVE_MIN_CORRECT;
+      const gameLabel = isValueDuel ? '시세 듀얼' : '카드 확대 탐정';
+
+      if (exceededTimeLimit(COUNTDOWN_MS + limitMs)) {
+        await minigameRepository.completeSession(session_id, 0);
+        const user = await userRepository.findById(userId);
+        return res.status(200).json({
+          success: false,
+          correct: false,
+          earned_points: 0,
+          new_balance: user?.point ?? 0,
+          message: practiceMode
+            ? `연습 게임의 ${Math.floor(limitMs / 1000)}초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.`
+            : `${Math.floor(limitMs / 1000)}초 시간 제한이 초과되어 실패 처리되었습니다.`,
+          practice_mode: practiceMode
+        });
+      }
+
+      if (serverElapsedMs < 4500) {
+        return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
+      }
+
+      const parsedAnswers = toRoundAnswers(payload?.answers);
+      if (!parsedAnswers.ok) {
+        return res.status(400).json({ error: 'BadRequest', message: parsedAnswers.reason });
+      }
+
+      const score = scoreRoundGameAnswers(session.game_type, parsedAnswers.answers, target);
+      if (!score.valid) {
+        return res.status(400).json({ error: 'BadRequest', message: score.reason || '라운드 답안을 서버에서 검증할 수 없습니다.' });
+      }
+
+      if (score.correctCount >= minCorrect) {
+        isCorrect = true;
+        earnedPoints = BASE_REWARD;
+
+        if (score.perfect) {
+          earnedPoints += BONUS_REWARD;
+          message = `${gameLabel} 5문제를 모두 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+        } else {
+          message = `${gameLabel} ${score.correctCount}/${score.totalRounds}문제 성공! 기본 성공 포인트 ${earnedPoints} P 획득!`;
+        }
+      } else {
+        message = `${gameLabel} ${score.correctCount}/${score.totalRounds}문제 정답입니다. 3문제 이상 맞혀야 성공입니다.`;
+      }
     }
 
     if (practiceMode) {
@@ -797,5 +1119,77 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
   } catch (err: any) {
     console.error('[MinigameController] submit error:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '게임 결과 제출 중 오류가 발생했습니다.' });
+  }
+};
+
+export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+
+  const { session_id, payload } = req.body;
+  if (!session_id) {
+    return res.status(400).json({ error: 'BadRequest', message: '세션 ID가 누락되었습니다.' });
+  }
+
+  try {
+    const session = await minigameRepository.findSessionById(session_id);
+    if (!session) {
+      return res.status(404).json({ error: 'NotFound', message: '유효하지 않은 미니게임 세션입니다.' });
+    }
+    if (session.user_id !== userId) {
+      return res.status(403).json({ error: 'Forbidden', message: '잘못된 세션 소유권입니다.' });
+    }
+    if (session.status !== 'STARTED') {
+      return res.status(400).json({ error: 'BadRequest', message: '이미 처리되었거나 만료된 세션입니다.' });
+    }
+    if (!isRoundGameType(session.game_type)) {
+      return res.status(400).json({ error: 'BadRequest', message: '라운드 판정을 지원하지 않는 미니게임입니다.' });
+    }
+
+    const target = JSON.parse(session.target_data || '{}');
+    const round = Number(payload?.round);
+    const selectedChannelId = String(payload?.selected_channel_id || '').trim();
+    if (!Number.isInteger(round) || round < 0 || !selectedChannelId) {
+      return res.status(400).json({ error: 'BadRequest', message: '라운드 답안이 올바르지 않습니다.' });
+    }
+
+    const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
+    const serverElapsedMs = Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0;
+    if (serverElapsedMs > getGameSubmitAllowanceMs(session.game_type) + CLIENT_REPORTED_GRACE_MS) {
+      return res.status(400).json({ error: 'BadRequest', message: '미니게임 시간 제한이 초과되었습니다.' });
+    }
+
+    if (session.game_type === 'value_duel') {
+      const rounds = Array.isArray(target?.rounds) ? target.rounds : [];
+      const roundData = rounds[round];
+      if (!roundData || selectedChannelId !== roundData.left?.channel_id && selectedChannelId !== roundData.right?.channel_id) {
+        return res.status(400).json({ error: 'BadRequest', message: '보기 외 선택값입니다.' });
+      }
+      const correctChannelIds = getValueDuelCorrectIds(roundData);
+      return res.status(200).json({
+        success: true,
+        correct: correctChannelIds.includes(selectedChannelId),
+        round,
+        correct_channel_ids: correctChannelIds
+      });
+    }
+
+    const rounds = Array.isArray(target?.rounds) ? target.rounds : [];
+    const roundData = rounds[round];
+    const choices = Array.isArray(roundData?.choices) ? roundData.choices : [];
+    const choiceIds = choices.map((choice: any) => String(choice?.channel_id || '').trim()).filter(Boolean);
+    if (!roundData || !choiceIds.includes(selectedChannelId)) {
+      return res.status(400).json({ error: 'BadRequest', message: '보기 외 선택값입니다.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      correct: selectedChannelId === roundData.answer_channel_id,
+      round,
+      correct_channel_ids: [roundData.answer_channel_id]
+    });
+  } catch (err: any) {
+    console.error('[MinigameController] round check error:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '라운드 결과 확인 중 오류가 발생했습니다.' });
   }
 };
