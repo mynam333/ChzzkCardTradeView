@@ -176,6 +176,75 @@ describe('trade account age restriction', () => {
     expect(tradeRepository.confirm).toHaveBeenCalledWith(1, 'receiver');
   });
 
+  it('allows receiver confirmation when this trade does not require receiver points even if other point reservations exist', async () => {
+    const sender = makeUser('sender', oldCreatedAt());
+    const receiver = makeUser('receiver', oldCreatedAt());
+    mockUsersById({ sender, receiver });
+    vi.mocked(tradeRepository.findById).mockResolvedValue({
+      ...makeTrade('PENDING'),
+      sender_offer: { cards: [], point: 10000 },
+      receiver_offer: { cards: [], point: 0 }
+    });
+    vi.mocked(tradeRepository.findActiveByUser).mockResolvedValue([{
+      ...makeTrade('CONFIRMED'),
+      id: 2,
+      sender_id: 'receiver',
+      receiver_id: 'other-user',
+      sender_offer: { cards: [], point: 20000 },
+      receiver_offer: { cards: [], point: 0 }
+    }]);
+    vi.mocked(tradeRepository.confirm).mockResolvedValue({ ok: true, reason: 'OK' });
+    vi.mocked(notificationRepository.create).mockResolvedValue({} as never);
+    vi.mocked(userCardRepository.findByUserId).mockResolvedValue([]);
+    vi.mocked(marketRepository.listByUser).mockResolvedValue([]);
+
+    const response = createResponse();
+    await confirmTrade({
+      user: receiver,
+      params: { trade_id: '1' }
+    } as unknown as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(tradeRepository.confirm).toHaveBeenCalledWith(1, 'receiver');
+  });
+
+  it('returns point reservation details when receiver must pay points but available points are short', async () => {
+    const sender = makeUser('sender', oldCreatedAt());
+    const receiver = { ...makeUser('receiver', oldCreatedAt()), point: 24000 };
+    mockUsersById({ sender, receiver });
+    vi.mocked(tradeRepository.findById).mockResolvedValue({
+      ...makeTrade('PENDING'),
+      sender_offer: { cards: [], point: 0 },
+      receiver_offer: { cards: [], point: 10000 }
+    });
+    vi.mocked(tradeRepository.findActiveByUser).mockResolvedValue([{
+      ...makeTrade('CONFIRMED'),
+      id: 2,
+      sender_id: 'receiver',
+      receiver_id: 'other-user',
+      sender_offer: { cards: [], point: 20000 },
+      receiver_offer: { cards: [], point: 0 }
+    }]);
+    vi.mocked(userCardRepository.findByUserId).mockResolvedValue([]);
+    vi.mocked(marketRepository.listByUser).mockResolvedValue([]);
+
+    const response = createResponse();
+    await confirmTrade({
+      user: receiver,
+      params: { trade_id: '1' }
+    } as unknown as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(vi.mocked(response.json).mock.calls[0][0]).toEqual(expect.objectContaining({
+      reason: 'RECEIVER_POINT_SHORT',
+      required_point: 10000,
+      owned_point: 24000,
+      reserved_point: 20000,
+      available_point: 4000
+    }));
+    expect(tradeRepository.confirm).not.toHaveBeenCalled();
+  });
+
   it('blocks creating a trade that requests a receiver card listed on the market', async () => {
     const sender = makeUser('sender', oldCreatedAt());
     const receiver = makeUser('receiver', oldCreatedAt());

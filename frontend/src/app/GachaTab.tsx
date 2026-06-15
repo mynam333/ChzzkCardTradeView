@@ -716,6 +716,17 @@ export const GachaTab: React.FC = () => {
     );
   };
 
+  const getTradePerspective = (trade: any) => {
+    const incoming = trade.direction === 'incoming';
+    return {
+      incoming,
+      receiveOffer: incoming ? trade.sender_offer : trade.receiver_offer,
+      giveOffer: incoming ? trade.receiver_offer : trade.sender_offer
+    };
+  };
+
+  const getOfferPoint = (offer: any) => Number(offer?.point || 0);
+
   const resetTradeForm = () => {
     setOfferCards({});
     setOfferPoint(0);
@@ -1342,9 +1353,10 @@ export const GachaTab: React.FC = () => {
           </h3>
           <div className="space-y-2.5">
             {activeTrades.map((t) => {
-              const incoming = t.direction === 'incoming';
+              const { incoming, receiveOffer, giveOffer } = getTradePerspective(t);
               const counterpartName = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
               const confirmed = t.status === 'CONFIRMED';
+              const givePoint = getOfferPoint(giveOffer);
               // 단계 안내 라벨
               const stageLabel = confirmed
                 ? (incoming ? '내가 동의함 · 제안자 최종 승인 대기' : '상대가 동의함 · 내 최종 승인 필요')
@@ -1402,14 +1414,19 @@ export const GachaTab: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
                     <div className="min-w-0 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2">
-                      <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
-                      {renderTradeOffer(t.sender_offer)}
+                      <p className="font-bold text-emerald-500 mb-0.5">내가 받을 것</p>
+                      {renderTradeOffer(receiveOffer)}
                     </div>
                     <div className="min-w-0 rounded-lg bg-sky-500/5 border border-sky-500/20 p-2">
-                      <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
-                      {renderTradeOffer(t.receiver_offer)}
+                      <p className="font-bold text-sky-500 mb-0.5">내가 건넬 것</p>
+                      {renderTradeOffer(giveOffer)}
                     </div>
                   </div>
+                  {incoming && !confirmed && givePoint > 0 && (
+                    <p className="mt-2 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[9.5px] font-bold leading-relaxed text-amber-600 dark:text-amber-300">
+                      동의하면 내가 건네야 할 {givePoint.toLocaleString()}P가 최종 승인 전까지 예약됩니다.
+                    </p>
+                  )}
                   <p className="mt-2 text-[9.5px] leading-relaxed text-muted-foreground">
                     ※ 카드에 장착된 코스메틱(테두리·이름 효과)은 카드와 함께 소유권이 이전됩니다.
                   </p>
@@ -1464,7 +1481,7 @@ export const GachaTab: React.FC = () => {
                   <p className="py-8 text-center text-xs text-muted-foreground">교환 이력이 없습니다.</p>
                 )}
                 {paged.map((t) => {
-                  const incoming = t.direction === 'incoming';
+                  const { incoming, receiveOffer, giveOffer } = getTradePerspective(t);
                   const counterpart = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
                   return (
                     <div key={t.id} className="rounded-xl border border-border/60 bg-secondary/20 p-3">
@@ -1479,12 +1496,12 @@ export const GachaTab: React.FC = () => {
                       </div>
                       <div className="grid grid-cols-1 gap-1.5 text-[10px] sm:grid-cols-2">
                         <div className="min-w-0 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-1.5">
-                          <p className="font-bold text-emerald-500 mb-0.5">{incoming ? '상대 제시' : '내 제시'}</p>
-                          {renderTradeOffer(t.sender_offer)}
+                          <p className="font-bold text-emerald-500 mb-0.5">내가 받은 것</p>
+                          {renderTradeOffer(receiveOffer)}
                         </div>
                         <div className="min-w-0 rounded-lg bg-sky-500/5 border border-sky-500/20 p-1.5">
-                          <p className="font-bold text-sky-500 mb-0.5">{incoming ? '나에게 요청' : '상대에게 요청'}</p>
-                          {renderTradeOffer(t.receiver_offer)}
+                          <p className="font-bold text-sky-500 mb-0.5">내가 건넨 것</p>
+                          {renderTradeOffer(giveOffer)}
                         </div>
                       </div>
                     </div>

@@ -361,13 +361,34 @@ const REASON_MESSAGES: Record<string, string> = {
   NOT_CONFIRMED: '수신자 동의가 완료되지 않았거나 이미 처리된 거래입니다.',
   FORBIDDEN: '이 거래를 처리할 권한이 없습니다.',
   CARD_SHORTAGE: '거래 당사자 중 한쪽의 카드 보유 수량이 부족하여 체결할 수 없습니다.',
-  SENDER_POINT_SHORT: '제안자의 포인트가 부족하여 체결할 수 없습니다.',
-  RECEIVER_POINT_SHORT: '수락자의 포인트가 부족하여 체결할 수 없습니다.',
+  SENDER_POINT_SHORT: '제안자가 건네야 할 포인트가 부족하여 체결할 수 없습니다.',
+  RECEIVER_POINT_SHORT: '수락자가 건네야 할 포인트가 부족하여 체결할 수 없습니다.',
   USER_NOT_FOUND: '거래 당사자 정보를 찾을 수 없습니다.'
 };
 
 const reasonToStatus = (reason: string): number =>
   reason === 'NOT_FOUND' ? 404 : reason === 'FORBIDDEN' ? 403 : 400;
+
+const formatPoint = (point: number) => `${Math.max(0, Math.floor(point)).toLocaleString('ko-KR')}P`;
+
+const pointShortPayload = (
+  reason: 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT',
+  label: string,
+  required: number,
+  owned: number,
+  reserved = 0
+) => {
+  const available = Math.max(0, owned - reserved);
+  return {
+    error: 'TradeFailed',
+    reason,
+    message: `${label} 건네야 할 포인트가 부족합니다. 필요 ${formatPoint(required)} / 사용 가능 ${formatPoint(available)} (보유 ${formatPoint(owned)}, 다른 거래 예약 ${formatPoint(reserved)})`,
+    required_point: required,
+    owned_point: owned,
+    reserved_point: reserved,
+    available_point: available
+  };
+};
 
 /**
  * 3-1. 교환 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED)
@@ -415,13 +436,17 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
     const receiverReservations = await getUserReservations(trade.receiver_id);
-    const receiverPointAvailable = Number(participants.receiver.point || 0) - receiverReservations.points;
-    if (receiverPointAvailable < Number(trade.receiver_offer?.point || 0)) {
-      return res.status(400).json({
-        error: 'TradeFailed',
-        reason: 'RECEIVER_POINT_SHORT',
-        message: REASON_MESSAGES.RECEIVER_POINT_SHORT
-      });
+    const receiverPointRequired = Number(trade.receiver_offer?.point || 0);
+    const receiverPointOwned = Number(participants.receiver.point || 0);
+    const receiverPointAvailable = receiverPointOwned - receiverReservations.points;
+    if (receiverPointRequired > 0 && receiverPointAvailable < receiverPointRequired) {
+      return res.status(400).json(pointShortPayload(
+        'RECEIVER_POINT_SHORT',
+        '내가',
+        receiverPointRequired,
+        receiverPointOwned,
+        receiverReservations.points
+      ));
     }
     const result = await tradeRepository.confirm(tradeId, user.id);
     if (!result.ok) {
@@ -482,6 +507,26 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
         reason: 'RECEIVER_CARDS_UNAVAILABLE',
         message: tradeUnavailableMessage('상대방이 건네야 할')
       });
+    }
+    const senderPointRequired = Number(trade.sender_offer?.point || 0);
+    const receiverPointRequired = Number(trade.receiver_offer?.point || 0);
+    const senderPointOwned = Number(participants.sender.point || 0);
+    const receiverPointOwned = Number(participants.receiver.point || 0);
+    if (senderPointOwned < senderPointRequired) {
+      return res.status(400).json(pointShortPayload(
+        'SENDER_POINT_SHORT',
+        '제안자가',
+        senderPointRequired,
+        senderPointOwned
+      ));
+    }
+    if (receiverPointOwned < receiverPointRequired) {
+      return res.status(400).json(pointShortPayload(
+        'RECEIVER_POINT_SHORT',
+        '수락자가',
+        receiverPointRequired,
+        receiverPointOwned
+      ));
     }
     const result = await tradeRepository.finalize(tradeId, user.id);
     if (!result.ok) {
