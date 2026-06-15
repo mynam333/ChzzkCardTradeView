@@ -24,8 +24,36 @@ vi.mock('../repositories', () => ({
   }
 }));
 
-import { checkMinigameRoundAnswer, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+vi.mock('../services/puzzleImageExclusionService', () => {
+  const normalizePuzzleImageKey = (rawUrl: string | null | undefined): string => {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) return '';
+    try {
+      const parsed = new URL(trimmed, 'https://chikapo.local');
+      const pathname = parsed.pathname.replace(/\/{2,}/g, '/');
+      const lowerPath = pathname.toLowerCase();
+      const uploadsIndex = lowerPath.indexOf('/uploads/');
+      if (uploadsIndex >= 0) {
+        return `uploads:${decodeURIComponent(lowerPath.slice(uploadsIndex + '/uploads/'.length))}`;
+      }
+      const host = parsed.hostname && parsed.hostname !== 'chikapo.local'
+        ? `${parsed.hostname.toLowerCase()}:`
+        : '';
+      return `url:${host}${decodeURIComponent(lowerPath)}`;
+    } catch {
+      return `raw:${trimmed.split(/[?#]/, 1)[0].toLowerCase()}`;
+    }
+  };
+
+  return {
+    getPuzzleExcludedImageKeys: vi.fn(async () => new Set<string>()),
+    normalizePuzzleImageKey
+  };
+});
+
+import { checkMinigameRoundAnswer, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
+import { getPuzzleExcludedImageKeys } from '../services/puzzleImageExclusionService';
 
 const getTicketStatus = vi.mocked(minigameRepository.getTicketStatus);
 const updateTickets = vi.mocked(minigameRepository.updateTickets);
@@ -37,6 +65,7 @@ const completeSession = vi.mocked(minigameRepository.completeSession);
 const findAllStreamers = vi.mocked(streamerRepository.findAll);
 const findUserById = vi.mocked(userRepository.findById);
 const systemConfigGet = vi.mocked(systemConfigRepository.get);
+const getExcludedPuzzleImageKeys = vi.mocked(getPuzzleExcludedImageKeys);
 
 const createResponse = () => {
   const response = {
@@ -517,6 +546,7 @@ describe('daily minigame selection', () => {
     systemConfigGet.mockResolvedValue('240');
     expireSessions.mockResolvedValue(undefined);
     findActiveStartedSession.mockResolvedValue(null);
+    getExcludedPuzzleImageKeys.mockResolvedValue(new Set());
   });
 
   afterEach(() => {
@@ -700,6 +730,79 @@ describe('daily minigame selection', () => {
       correct_name: expect.stringMatching(/^streamer-\d+$/),
       image_url: expect.stringMatching(/^https:\/\/example\.com\/\d+\.png$/)
     }));
+  });
+
+  it('uses the same lower-star image fallback as card rendering', () => {
+    const streamer = {
+      logo_url: 'https://example.com/logo.png',
+      custom_image_url: null,
+      custom_images: [
+        null,
+        'https://example.com/star-1.png',
+        null,
+        'https://example.com/star-3.png',
+        null,
+        null
+      ]
+    };
+
+    expect(getCardImageUrl(streamer, 5)).toBe('https://example.com/star-3.png');
+    expect(getCardImageUrl(streamer, 2)).toBe('https://example.com/star-1.png');
+    expect(getCardImageUrl(streamer, 0)).toBe('https://example.com/logo.png');
+  });
+
+  it('does not issue a puzzle image that is excluded through a lower-star fallback', async () => {
+    let puzzleDay = Date.parse('2026-06-01T03:00:00.000Z');
+    for (let offset = 0; offset < 40; offset++) {
+      const candidate = Date.UTC(2026, 5, 1 + offset, 3, 0, 0);
+      if (getDailyMinigame(candidate).game_type === 'puzzle') {
+        puzzleDay = candidate;
+        break;
+      }
+    }
+    vi.setSystemTime(new Date(puzzleDay));
+
+    const excludedImage = 'https://api.yuaru.com/uploads/cards/reported-image.webp';
+    getExcludedPuzzleImageKeys.mockResolvedValue(new Set(['uploads:cards/reported-image.webp']));
+    findAllStreamers.mockResolvedValue([
+      {
+        channel_id: 'reported-channel',
+        name: '신고된 이미지',
+        logo_url: 'https://example.com/reported-logo.png',
+        custom_image_url: null,
+        custom_images: [null, null, null, excludedImage, null, null]
+      },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        channel_id: `safe-channel-${index}`,
+        name: `안전 ${index}`,
+        logo_url: `https://example.com/safe-${index}.png`,
+        custom_image_url: null,
+        custom_images: []
+      }))
+    ] as never);
+    getTicketStatus.mockResolvedValue({
+      user_id: 'user-1',
+      current_tickets: 5,
+      bonus_tickets: 0,
+      last_charged_at: new Date(puzzleDay).toISOString()
+    });
+    updateTickets.mockResolvedValue(undefined);
+    startSession.mockResolvedValue({ ok: true });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: 'puzzle' }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(responseBody.game_data.image_url).not.toBe(excludedImage);
+
+    const target = JSON.parse(startSession.mock.calls[0][0].target_data);
+    expect(target.image_url).not.toBe(excludedImage);
   });
 
   it('issues crop detective rounds with doubled zoom and random rotation data', async () => {

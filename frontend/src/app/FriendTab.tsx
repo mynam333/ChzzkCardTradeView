@@ -1142,7 +1142,7 @@ export const FriendTab: React.FC = () => {
   };
 
   const managementPanel = (
-    <aside className={`fixed inset-y-3 left-3 z-50 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[2rem] border border-border bg-card/95 shadow-2xl shadow-black/15 backdrop-blur-xl transition-transform duration-300 lg:absolute lg:inset-y-4 lg:left-4 ${panelOpen ? 'translate-x-0' : '-translate-x-[calc(100%+2rem)]'}`}>
+    <aside className={`fixed bottom-[calc(8rem+env(safe-area-inset-bottom))] left-3 top-3 z-50 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[2rem] border border-border bg-card/95 shadow-2xl shadow-black/15 backdrop-blur-xl transition-transform duration-300 lg:absolute lg:inset-y-4 lg:left-4 ${panelOpen ? 'translate-x-0' : '-translate-x-[calc(100%+2rem)]'}`}>
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <div>
           <p className="text-sm font-black">친구 관리</p>

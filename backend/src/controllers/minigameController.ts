@@ -342,13 +342,15 @@ function refreshUserTickets(
 }
 
 // 스트리머 카드 이미지 경로 결정 함수 (프론트와 동치)
-function getCardImageUrl(streamer: any, star: number): string {
-  const images = streamer.custom_images || [];
-  if (star > 0 && images[star]) {
-    return images[star];
-  }
-  if (streamer.custom_image_url) {
-    return streamer.custom_image_url;
+export function getCardImageUrl(streamer: any, star: number): string {
+  const images = streamer.custom_images && streamer.custom_images.length
+    ? streamer.custom_images
+    : [streamer.custom_image_url ?? null];
+  const safeStar = Math.max(0, Math.min(5, Math.floor(Number(star) || 0)));
+  for (let currentStar = safeStar; currentStar >= 0; currentStar--) {
+    if (images[currentStar]) {
+      return images[currentStar];
+    }
   }
   return streamer.logo_url || '';
 }

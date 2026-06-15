@@ -53,6 +53,8 @@ interface ProfileData {
   collection: CollectionItem[];
 }
 
+const starValueMultiplier = (star: number) => 1 + Math.max(0, Math.min(5, Number(star) || 0)) * 0.8;
+
 export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn?: boolean }> = ({ userId, onClose, isOwn = false }) => {
   const { toast } = useApp();
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -139,6 +141,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
 
   const rep = profile?.representative_card;
   const repStreamer = rep?.streamer;
+  const repCardValue = Math.round((repStreamer?.base_value || 0) * starValueMultiplier(rep?.star || 0));
 
   return (
     <div
@@ -254,7 +257,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                         </CosmeticName>
                         <div className="flex items-center justify-between border-t border-white/20 pt-1.5">
                           <span className="text-[8px] text-zinc-300">대표 카드</span>
-                          <span className="text-xs font-black text-emerald-400">{(repStreamer.base_value || 0).toLocaleString()} P</span>
+                          <span className="text-xs font-black text-emerald-400">{repCardValue.toLocaleString()} P</span>
                         </div>
                       </div>
                     </div>
