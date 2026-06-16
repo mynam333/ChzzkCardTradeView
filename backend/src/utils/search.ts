@@ -1,9 +1,7 @@
 /**
- * search.ts - 백엔드 공용 유사도(초성/띄어쓰기 무시) 검색 유틸리티
+ * search.ts - 백엔드 공용 검색 유틸리티
  * 프론트엔드 frontend/src/lib/search.ts 의 fuzzySearch 와 동작을 맞춥니다.
  */
-import Fuse from 'fuse.js';
-
 const CHOSUNG = [
   'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
 ];
@@ -14,6 +12,7 @@ const JAMO_TO_COMPAT_CHOSUNG = new Map(JAMO_CHOSUNG.map((char, index) => [char, 
 
 const NOISE_PATTERN = /[\s\p{P}\p{S}\u200B-\u200D\uFEFF\u2060]+/gu;
 const CONTROL_PATTERN = /[\u0000-\u001F\u007F]/g;
+const COMPAT_CHOSUNG_PATTERN = /^[ㄱ-ㅎ]+$/;
 
 /** 한글 음절을 초성 문자열로 변환합니다. (음절이 아닌 문자는 그대로 유지) */
 export function getChosung(str: string): string {
@@ -66,24 +65,52 @@ const scoreContains = (target: string, query: string, exactScore: number, prefix
   return null;
 };
 
-const scoreWithFuse = (target: string, targetChosung: string, query: string): number | null => {
-  if (query.length < 2) return null;
-  const fuse = new Fuse(
-    [{ normalized: target, chosung: targetChosung }],
-    {
-      includeScore: true,
-      ignoreLocation: true,
-      threshold: 0.35,
-      minMatchCharLength: Math.min(2, query.length),
-      keys: [
-        { name: 'normalized', weight: 0.85 },
-        { name: 'chosung', weight: 0.15 }
-      ]
+const levenshteinDistance = (a: string, b: string, maxDistance: number): number => {
+  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const curr = [i];
+    let rowMin = curr[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      curr[j] = value;
+      rowMin = Math.min(rowMin, value);
     }
-  );
-  const result = fuse.search(query)[0];
-  if (!result || result.score === undefined) return null;
-  return 3000 + Math.round(result.score * 2000);
+    if (rowMin > maxDistance) return maxDistance + 1;
+    prev = curr;
+  }
+  return prev[b.length] ?? maxDistance + 1;
+};
+
+const firstSearchUnit = (value: string) => value[0] || '';
+
+const canCompareTypoWindow = (window: string, query: string) => {
+  const a = firstSearchUnit(window);
+  const b = firstSearchUnit(query);
+  return !!a && !!b && (a === b || getChosung(a) === getChosung(b));
+};
+
+const scoreTypo = (target: string, query: string): number | null => {
+  if (query.length < 3 || COMPAT_CHOSUNG_PATTERN.test(query)) return null;
+  const maxDistance = query.length >= 6 ? 2 : 1;
+  if (target.length < Math.max(1, query.length - maxDistance)) return null;
+
+  let best: number | null = null;
+  const minLen = Math.max(1, query.length - maxDistance);
+  const maxLen = Math.min(target.length, query.length + maxDistance);
+
+  for (let len = minLen; len <= maxLen; len += 1) {
+    const window = target.slice(0, len);
+    if (!canCompareTypoWindow(window, query)) continue;
+    const distance = levenshteinDistance(window, query, maxDistance);
+    if (distance <= maxDistance) {
+      const score = 3000 + distance * 500 + Math.abs(window.length - query.length) * 100;
+      best = best === null ? score : Math.min(best, score);
+    }
+  }
+
+  return best;
 };
 
 /**
@@ -91,8 +118,8 @@ const scoreWithFuse = (target: string, targetChosung: string, query: string): nu
  * 점수 우선순위:
  * 1. 정규화 완전 일치
  * 2. 접두/부분 문자열 일치
- * 3. 초성 완전/접두/부분 일치
- * 4. Fuse.js 기반 유사도 일치
+ * 3. 사용자가 초성을 입력한 경우의 초성 완전/접두/부분 일치
+ * 4. 짧은 편집거리 기반 오타 보정
  */
 export function fuzzyScore(target: string, query: string): number | null {
   const cleanTarget = normalizeSearchText(target);
@@ -103,13 +130,14 @@ export function fuzzyScore(target: string, query: string): number | null {
   const directScore = scoreContains(cleanTarget, cleanQuery, -10000, -8000, -6000);
   if (directScore !== null) return directScore;
 
-  const targetChosung = getChosung(cleanTarget);
-  const queryChosung = getChosung(cleanQuery);
-  const chosungScore = scoreContains(targetChosung, queryChosung, 1000, 1200, 1600);
-  if (chosungScore !== null) return chosungScore;
+  if (COMPAT_CHOSUNG_PATTERN.test(cleanQuery) && cleanQuery.length >= 2) {
+    const targetChosung = getChosung(cleanTarget);
+    const chosungScore = scoreContains(targetChosung, cleanQuery, 1000, 1200, 1600);
+    if (chosungScore !== null) return chosungScore;
+  }
 
-  const fuseScore = scoreWithFuse(cleanTarget, targetChosung, cleanQuery);
-  if (fuseScore !== null) return fuseScore;
+  const typoScore = scoreTypo(cleanTarget, cleanQuery);
+  if (typoScore !== null) return typoScore;
 
   return null;
 }

@@ -24,9 +24,19 @@ describe('fuzzyMatch', () => {
     expect(fuzzyMatch('스트리머', 'ㅅㅌ')).toBe(true);
   });
 
+  it('일반 한글 검색어는 초성으로 과도하게 확장하지 않는다', () => {
+    expect(fuzzyMatch('치카포', '차')).toBe(false);
+    expect(fuzzyMatch('스트리머', '사')).toBe(false);
+  });
+
+  it('초성 한 글자는 너무 넓게 매칭하지 않는다', () => {
+    expect(fuzzyMatch('치카포', 'ㅊ')).toBe(false);
+  });
+
   it('일치하지 않으면 false', () => {
     expect(fuzzyMatch('치카포', 'ㄱㄴㄷ')).toBe(false);
     expect(fuzzyMatch('hello', 'world')).toBe(false);
+    expect(fuzzyMatch('강한별', '치카포')).toBe(false);
   });
 
   it('빈 검색어는 모두 일치로 본다', () => {
@@ -66,6 +76,11 @@ describe('fuzzyScore', () => {
     const exact = fuzzyScore('치카포', '치카포');
     expect(typo).not.toBeNull();
     expect(exact as number).toBeLessThan(typo as number);
+  });
+
+  it('첫 글자/초성이 다른 오타 보정은 허용하지 않는다', () => {
+    expect(fuzzyScore('치카포', '키카포')).toBeNull();
+    expect(fuzzyScore('hello', 'cello')).toBeNull();
   });
 });
 
