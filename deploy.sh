@@ -275,7 +275,8 @@ if [ "${NEED_INSTALL}" = "true" ]; then
     exit 1
   fi
   echo "[deploy] install production dependencies because package metadata changed"
-  nice -n 15 ionice -c2 -n7 pnpm install --prod --no-lockfile --filter backend...
+  CI=true PNPM_CONFIG_CONFIRM_MODULES_PURGE=false \
+    nice -n 15 ionice -c2 -n7 pnpm install --prod --no-lockfile --config.confirm-modules-purge=false --filter backend...
 else
   echo "[deploy] dependencies unchanged; skip install"
 fi
