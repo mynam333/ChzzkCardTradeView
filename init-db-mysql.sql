@@ -49,6 +49,41 @@ CREATE TABLE IF NOT EXISTS point_ledger_entries (
     KEY idx_point_ledger_source (source_type, source_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS asset_event_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    event_key VARCHAR(255) NULL,
+    user_id VARCHAR(191) NULL,
+    counterparty_user_id VARCHAR(191) NULL,
+    from_user_id VARCHAR(191) NULL,
+    to_user_id VARCHAR(191) NULL,
+    asset_type VARCHAR(32) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    amount BIGINT NULL,
+    quantity BIGINT NULL,
+    balance_after BIGINT NULL,
+    source_type VARCHAR(64) NOT NULL DEFAULT 'unknown',
+    source_id VARCHAR(191) NULL,
+    reason VARCHAR(120) NOT NULL,
+    description VARCHAR(500) NULL,
+    card_id BIGINT NULL,
+    channel_id VARCHAR(191) NULL,
+    serial_number BIGINT NULL,
+    star INT NULL,
+    item_id BIGINT NULL,
+    item_type VARCHAR(64) NULL,
+    metadata JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_asset_event_key (event_key),
+    KEY idx_asset_event_user (user_id, id),
+    KEY idx_asset_event_counterparty (counterparty_user_id, id),
+    KEY idx_asset_event_from_to (from_user_id, to_user_id, id),
+    KEY idx_asset_event_asset_action (asset_type, action, id),
+    KEY idx_asset_event_source (source_type, source_id),
+    KEY idx_asset_event_card (card_id, id),
+    KEY idx_asset_event_item (item_id, id),
+    KEY idx_asset_event_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id VARCHAR(191) NOT NULL,
     reward_key VARCHAR(191) NOT NULL,

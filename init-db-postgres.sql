@@ -49,6 +49,40 @@ CREATE INDEX IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user
 CREATE INDEX IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_point_ledger_source ON point_ledger_entries(source_type, source_id);
 
+CREATE TABLE IF NOT EXISTS asset_event_logs (
+    id BIGSERIAL PRIMARY KEY,
+    event_key TEXT UNIQUE,
+    user_id TEXT,
+    counterparty_user_id TEXT,
+    from_user_id TEXT,
+    to_user_id TEXT,
+    asset_type TEXT NOT NULL,
+    action TEXT NOT NULL,
+    amount INTEGER,
+    quantity INTEGER,
+    balance_after INTEGER,
+    source_type TEXT NOT NULL DEFAULT 'unknown',
+    source_id TEXT,
+    reason TEXT NOT NULL,
+    description TEXT,
+    card_id INTEGER,
+    channel_id TEXT,
+    serial_number INTEGER,
+    star INTEGER,
+    item_id INTEGER,
+    item_type TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_asset_event_user ON asset_event_logs(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_counterparty ON asset_event_logs(counterparty_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_from_to ON asset_event_logs(from_user_id, to_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_asset_action ON asset_event_logs(asset_type, action, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_source ON asset_event_logs(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_asset_event_card ON asset_event_logs(card_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_item ON asset_event_logs(item_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_asset_event_created ON asset_event_logs(created_at);
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     reward_key TEXT NOT NULL,

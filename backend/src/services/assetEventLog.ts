@@ -182,6 +182,7 @@ const normalizedParams = (event: ReturnType<typeof normalizeEvent>) => [
 ];
 
 const sqliteAssetEventTables = new WeakSet<object>();
+let mysqlAssetEventTableReady = false;
 
 const ensureSqliteAssetEventTable = (db: any) => {
   if (typeof db !== 'object' || db === null || sqliteAssetEventTables.has(db)) return;
@@ -223,6 +224,113 @@ const ensureSqliteAssetEventTable = (db: any) => {
   sqliteAssetEventTables.add(db);
 };
 
+const ensureMysqlAssetEventColumn = async (db: any, column: string, ddl: string) => {
+  const existing = await db.get(
+    `SELECT 1 AS present
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'asset_event_logs'
+        AND column_name = ?
+      LIMIT 1`,
+    column
+  );
+  if (existing) return;
+  await db.run(`ALTER TABLE asset_event_logs ADD COLUMN ${ddl}`);
+};
+
+const ensureMysqlAssetEventIndex = async (db: any, indexName: string, ddl: string) => {
+  const existing = await db.get(
+    `SELECT 1 AS present
+       FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = 'asset_event_logs'
+        AND index_name = ?
+      LIMIT 1`,
+    indexName
+  );
+  if (existing) return;
+  await db.run(`ALTER TABLE asset_event_logs ADD ${ddl}`);
+};
+
+const ensureMysqlAssetEventTable = async (db: any) => {
+  if (mysqlAssetEventTableReady) return;
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS asset_event_logs (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      event_key VARCHAR(255) NULL,
+      user_id VARCHAR(191) NULL,
+      counterparty_user_id VARCHAR(191) NULL,
+      from_user_id VARCHAR(191) NULL,
+      to_user_id VARCHAR(191) NULL,
+      asset_type VARCHAR(32) NOT NULL,
+      action VARCHAR(32) NOT NULL,
+      amount BIGINT NULL,
+      quantity BIGINT NULL,
+      balance_after BIGINT NULL,
+      source_type VARCHAR(64) NOT NULL DEFAULT 'unknown',
+      source_id VARCHAR(191) NULL,
+      reason VARCHAR(120) NOT NULL,
+      description VARCHAR(500) NULL,
+      card_id BIGINT NULL,
+      channel_id VARCHAR(191) NULL,
+      serial_number BIGINT NULL,
+      star INT NULL,
+      item_id BIGINT NULL,
+      item_type VARCHAR(64) NULL,
+      metadata JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_asset_event_key (event_key),
+      INDEX idx_asset_event_user (user_id, id),
+      INDEX idx_asset_event_counterparty (counterparty_user_id, id),
+      INDEX idx_asset_event_from_to (from_user_id, to_user_id, id),
+      INDEX idx_asset_event_asset_action (asset_type, action, id),
+      INDEX idx_asset_event_source (source_type, source_id),
+      INDEX idx_asset_event_card (card_id, id),
+      INDEX idx_asset_event_item (item_id, id),
+      INDEX idx_asset_event_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const columns: Array<[string, string]> = [
+    ['event_key', 'event_key VARCHAR(255) NULL AFTER id'],
+    ['user_id', 'user_id VARCHAR(191) NULL AFTER event_key'],
+    ['counterparty_user_id', 'counterparty_user_id VARCHAR(191) NULL AFTER user_id'],
+    ['from_user_id', 'from_user_id VARCHAR(191) NULL AFTER counterparty_user_id'],
+    ['to_user_id', 'to_user_id VARCHAR(191) NULL AFTER from_user_id'],
+    ['asset_type', "asset_type VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER to_user_id"],
+    ['action', "action VARCHAR(32) NOT NULL DEFAULT 'update' AFTER asset_type"],
+    ['amount', 'amount BIGINT NULL AFTER action'],
+    ['quantity', 'quantity BIGINT NULL AFTER amount'],
+    ['balance_after', 'balance_after BIGINT NULL AFTER quantity'],
+    ['source_type', "source_type VARCHAR(64) NOT NULL DEFAULT 'unknown' AFTER balance_after"],
+    ['source_id', 'source_id VARCHAR(191) NULL AFTER source_type'],
+    ['reason', "reason VARCHAR(120) NOT NULL DEFAULT 'unknown' AFTER source_id"],
+    ['description', 'description VARCHAR(500) NULL AFTER reason'],
+    ['card_id', 'card_id BIGINT NULL AFTER description'],
+    ['channel_id', 'channel_id VARCHAR(191) NULL AFTER card_id'],
+    ['serial_number', 'serial_number BIGINT NULL AFTER channel_id'],
+    ['star', 'star INT NULL AFTER serial_number'],
+    ['item_id', 'item_id BIGINT NULL AFTER star'],
+    ['item_type', 'item_type VARCHAR(64) NULL AFTER item_id'],
+    ['metadata', 'metadata JSON NULL AFTER item_type'],
+    ['created_at', 'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER metadata']
+  ];
+  for (const [column, ddl] of columns) {
+    await ensureMysqlAssetEventColumn(db, column, ddl);
+  }
+
+  await ensureMysqlAssetEventIndex(db, 'uniq_asset_event_key', 'UNIQUE INDEX uniq_asset_event_key (event_key)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_user', 'INDEX idx_asset_event_user (user_id, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_counterparty', 'INDEX idx_asset_event_counterparty (counterparty_user_id, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_from_to', 'INDEX idx_asset_event_from_to (from_user_id, to_user_id, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_asset_action', 'INDEX idx_asset_event_asset_action (asset_type, action, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_source', 'INDEX idx_asset_event_source (source_type, source_id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_card', 'INDEX idx_asset_event_card (card_id, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_item', 'INDEX idx_asset_event_item (item_id, id)');
+  await ensureMysqlAssetEventIndex(db, 'idx_asset_event_created', 'INDEX idx_asset_event_created (created_at)');
+  mysqlAssetEventTableReady = true;
+};
+
 export const recordSqliteAssetEvent = (db: any, event: AssetEventInput): void => {
   const normalized = normalizeEvent(event);
   if (!normalized.userId && !normalized.fromUserId && !normalized.toUserId) return;
@@ -238,6 +346,7 @@ export const recordSqliteAssetEvents = (db: any, events: AssetEventInput[]): voi
 export const recordMysqlAssetEvent = async (db: any, event: AssetEventInput): Promise<void> => {
   const normalized = normalizeEvent(event);
   if (!normalized.userId && !normalized.fromUserId && !normalized.toUserId) return;
+  await ensureMysqlAssetEventTable(db);
   await db.run(`INSERT IGNORE INTO asset_event_logs ${insertColumns} VALUES ${insertValues}`,
     ...normalizedParams(normalized));
 };
@@ -413,9 +522,16 @@ export const listAssetEvents = async (
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all(selectEventSql(whereSql), ...params, limit + 1)
-    : getSqliteDb().prepare(selectEventSql(whereSql)).all(...params, limit + 1) as any[];
+  let rows: any[];
+  if (getDbMode() === 'MYSQL') {
+    const db = getMysqlDb();
+    await ensureMysqlAssetEventTable(db);
+    rows = await db.all(selectEventSql(whereSql), ...params, limit + 1);
+  } else {
+    const db = getSqliteDb();
+    ensureSqliteAssetEventTable(db);
+    rows = db.prepare(selectEventSql(whereSql)).all(...params, limit + 1) as any[];
+  }
 
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
@@ -551,8 +667,15 @@ export const listAssetEventSuspects = async (
      ORDER BY e.negative_balance_events DESC, e.point_income DESC, e.total_events DESC
      LIMIT ?
   `;
-  const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all(sql, since, limit)
-    : getSqliteDb().prepare(sql).all(since, limit) as any[];
+  let rows: any[];
+  if (getDbMode() === 'MYSQL') {
+    const db = getMysqlDb();
+    await ensureMysqlAssetEventTable(db);
+    rows = await db.all(sql, since, limit);
+  } else {
+    const db = getSqliteDb();
+    ensureSqliteAssetEventTable(db);
+    rows = db.prepare(sql).all(since, limit) as any[];
+  }
   return { days, items: rows.map(buildSuspect) };
 };

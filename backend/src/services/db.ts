@@ -335,8 +335,9 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       username_snapshot VARCHAR(191) NULL,
       avatar_url_snapshot TEXT NULL,
       point_at_deletion BIGINT NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlTableCollation(db, 'deleted_user_accounts');
   await ensureMysqlColumn(db, 'deleted_user_accounts', 'username_snapshot', 'username_snapshot VARCHAR(191) NULL AFTER deleted_at');
   await ensureMysqlColumn(db, 'deleted_user_accounts', 'avatar_url_snapshot', 'avatar_url_snapshot TEXT NULL AFTER username_snapshot');
   await ensureMysqlColumn(db, 'deleted_user_accounts', 'point_at_deletion', 'point_at_deletion BIGINT NULL AFTER avatar_url_snapshot');
@@ -356,12 +357,13 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_point_ledger_user_id (user_id, id),
       INDEX idx_point_ledger_counterparty (counterparty_user_id, id),
       INDEX idx_point_ledger_source (source_type, source_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlTableCollation(db, 'point_ledger_entries');
   await db.run(`
     CREATE TABLE IF NOT EXISTS asset_event_logs (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
-      event_key VARCHAR(255) NULL UNIQUE,
+      event_key VARCHAR(255) NULL,
       user_id VARCHAR(191) NULL,
       counterparty_user_id VARCHAR(191) NULL,
       from_user_id VARCHAR(191) NULL,
@@ -383,6 +385,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       item_type VARCHAR(64) NULL,
       metadata JSON NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_asset_event_key (event_key),
       INDEX idx_asset_event_user (user_id, id),
       INDEX idx_asset_event_counterparty (counterparty_user_id, id),
       INDEX idx_asset_event_from_to (from_user_id, to_user_id, id),
@@ -391,8 +394,9 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_asset_event_card (card_id, id),
       INDEX idx_asset_event_item (item_id, id),
       INDEX idx_asset_event_created (created_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlTableCollation(db, 'asset_event_logs');
   await db.run(`
     CREATE TABLE IF NOT EXISTS user_asset_rankings (
       user_id VARCHAR(191) PRIMARY KEY,
