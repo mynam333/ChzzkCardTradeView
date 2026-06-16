@@ -477,7 +477,14 @@ export interface IUserCardRepository {
     reservedByStar?: Record<string, number>
   ): Promise<{ ok: boolean; reason: string; newStar?: number }>;
   /** 특정 스트리머 카드의 보유자·별 목록(보상 계산용). */
-  findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]>;
+  findByChannel(channelId: string): Promise<{
+    user_id: string;
+    star: number;
+    id?: number;
+    serial_number?: number;
+    border_item_id?: number | null;
+    name_effect_item_id?: number | null;
+  }[]>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
   deleteByChannel(channelId: string): Promise<number>;
   /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */

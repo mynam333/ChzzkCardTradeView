@@ -4,6 +4,7 @@ import { formatUploadUrl } from '../../services/imageService';
 import { fuzzyMatch } from '../../utils/search';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
+import { recordMysqlAssetEvent } from '../../services/assetEventLog';
 
 export class MysqlMarketRepository implements IMarketRepository {
   private getDb() {
@@ -115,7 +116,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     const insertId = await this.getDb().transaction(async (tx) => {
       if (!listing.with_cosmetics) {
         const card = await tx.get(
-          'SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE',
+          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE',
           listing.user_card_id,
           listing.seller_id
         );
@@ -125,6 +126,20 @@ export class MysqlMarketRepository implements IMarketRepository {
             listing.seller_id,
             card.border_item_id
           );
+          await recordMysqlAssetEvent(tx, {
+            userId: listing.seller_id,
+            assetType: 'cosmetic',
+            action: 'unequip',
+            quantity: 1,
+            sourceType: 'market_listing',
+            sourceId: listing.user_card_id,
+            reason: 'market_listing_cosmetic_return',
+            description: '오픈마켓 등록으로 장착 코스메틱 반환',
+            cardId: listing.user_card_id,
+            channelId: card.channel_id,
+            itemId: Number(card.border_item_id),
+            itemType: 'border'
+          });
         }
         if (card?.name_effect_item_id) {
           await tx.run(
@@ -132,6 +147,20 @@ export class MysqlMarketRepository implements IMarketRepository {
             listing.seller_id,
             card.name_effect_item_id
           );
+          await recordMysqlAssetEvent(tx, {
+            userId: listing.seller_id,
+            assetType: 'cosmetic',
+            action: 'unequip',
+            quantity: 1,
+            sourceType: 'market_listing',
+            sourceId: listing.user_card_id,
+            reason: 'market_listing_cosmetic_return',
+            description: '오픈마켓 등록으로 장착 코스메틱 반환',
+            cardId: listing.user_card_id,
+            channelId: card.channel_id,
+            itemId: Number(card.name_effect_item_id),
+            itemType: 'name_effect'
+          });
         }
         await tx.run(
           'UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id = ? AND user_id = ?',
@@ -250,7 +279,9 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async hideForSeller(id: number, sellerId: string): Promise<boolean> {
     const result = await this.getDb().run(`
-      UPDATE market_listings SET seller_hidden_at = UTC_TIMESTAMP()
+      UPDATE market_listings
+         SET seller_hidden_at = UTC_TIMESTAMP(),
+             updated_at = updated_at
        WHERE id = ? AND seller_id = ? AND status IN ('SOLD', 'CANCELLED', 'AUCTION_ENDED') AND seller_hidden_at IS NULL
     `, id, sellerId);
     return result.changes > 0;
@@ -390,17 +421,71 @@ export class MysqlMarketRepository implements IMarketRepository {
         await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", buyerId, fee, settledAmount, listingId);
         await this.recordTransactionAudit(tx, listingId, 'sold');
 
+        const movingCard = await tx.get(
+          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? FOR UPDATE',
+          listing.user_card_id
+        );
         if (listing.with_cosmetics === 1) {
           await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', buyerId, listing.user_card_id);
         } else {
-          const card = await tx.get('SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ? FOR UPDATE', listing.user_card_id);
+          const card = movingCard;
           if (card?.border_item_id) {
             await tx.run('INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + 1', listing.seller_id, card.border_item_id);
+            await recordMysqlAssetEvent(tx, {
+              userId: listing.seller_id,
+              assetType: 'cosmetic',
+              action: 'unequip',
+              quantity: 1,
+              sourceType: 'market_purchase',
+              sourceId: listingId,
+              reason: 'market_sale_cosmetic_return',
+              description: `오픈마켓 매물 #${listingId} 코스메틱 제외 반환`,
+              cardId: listing.user_card_id,
+              channelId: card.channel_id,
+              itemId: Number(card.border_item_id),
+              itemType: 'border',
+              metadata: { listing_id: listingId, buyer_id: buyerId }
+            });
           }
           if (card?.name_effect_item_id) {
             await tx.run('INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + 1', listing.seller_id, card.name_effect_item_id);
+            await recordMysqlAssetEvent(tx, {
+              userId: listing.seller_id,
+              assetType: 'cosmetic',
+              action: 'unequip',
+              quantity: 1,
+              sourceType: 'market_purchase',
+              sourceId: listingId,
+              reason: 'market_sale_cosmetic_return',
+              description: `오픈마켓 매물 #${listingId} 코스메틱 제외 반환`,
+              cardId: listing.user_card_id,
+              channelId: card.channel_id,
+              itemId: Number(card.name_effect_item_id),
+              itemType: 'name_effect',
+              metadata: { listing_id: listingId, buyer_id: buyerId }
+            });
           }
           await tx.run('UPDATE user_cards SET user_id = ?, border_item_id = NULL, name_effect_item_id = NULL WHERE id = ?', buyerId, listing.user_card_id);
+        }
+        if (movingCard) {
+          await recordMysqlAssetEvent(tx, {
+            userId: listing.seller_id,
+            counterpartyUserId: buyerId,
+            fromUserId: listing.seller_id,
+            toUserId: buyerId,
+            assetType: 'card',
+            action: 'move',
+            quantity: 1,
+            sourceType: 'market_purchase',
+            sourceId: listingId,
+            reason: 'market_card_move',
+            description: `오픈마켓 매물 #${listingId} 카드 이동`,
+            cardId: listing.user_card_id,
+            channelId: movingCard.channel_id,
+            serialNumber: Number(movingCard.serial_number),
+            star: Number(movingCard.star || 0),
+            metadata: { listing_id: listingId, price: finalPrice, with_cosmetics: listing.with_cosmetics === 1 }
+          });
         }
         return { ok: true, reason: 'OK', settled_amount: settledAmount, seller_id: listing.seller_id, price: finalPrice };
       });
@@ -549,7 +634,31 @@ export class MysqlMarketRepository implements IMarketRepository {
         });
         await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", locked.current_bidder_id, price, fee, settledAmount, row.id);
         await this.recordTransactionAudit(tx, row.id, 'sold');
+        const movingCard = await tx.get(
+          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star FROM user_cards WHERE id = ? FOR UPDATE',
+          locked.user_card_id
+        );
         await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', locked.current_bidder_id, locked.user_card_id);
+        if (movingCard) {
+          await recordMysqlAssetEvent(tx, {
+            userId: locked.seller_id,
+            counterpartyUserId: locked.current_bidder_id,
+            fromUserId: locked.seller_id,
+            toUserId: locked.current_bidder_id,
+            assetType: 'card',
+            action: 'move',
+            quantity: 1,
+            sourceType: 'market_purchase',
+            sourceId: row.id,
+            reason: 'auction_card_move',
+            description: `경매 #${row.id} 낙찰 카드 이동`,
+            cardId: locked.user_card_id,
+            channelId: movingCard.channel_id,
+            serialNumber: Number(movingCard.serial_number),
+            star: Number(movingCard.star || 0),
+            metadata: { listing_id: row.id, price }
+          });
+        }
         return true;
       });
       if (sold) {

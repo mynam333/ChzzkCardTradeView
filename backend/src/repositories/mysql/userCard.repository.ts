@@ -1,5 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
+import { recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
 import { IUserCardRepository } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
 import { parseMysqlDateTimeMs, toMysqlDateTime } from './dateUtils';
@@ -62,6 +63,18 @@ export class MysqlUserCardRepository implements IUserCardRepository {
           const grantCount = user.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
           nextFreeTickets = Math.min(safeMaxFreeTickets, nextFreeTickets + grantCount);
           await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextFreeTickets, toMysqlDateTime(segmentStartIso), userId);
+          if (grantCount > 0) {
+            await recordMysqlAssetEvent(tx, {
+              userId,
+              assetType: 'ticket',
+              action: 'add',
+              quantity: grantCount,
+              sourceType: 'gacha_draw',
+              reason: 'free_draw_ticket_refresh',
+              description: '무료 소환 티켓 충전',
+              metadata: { channel_id: channelId, segment_start: segmentStartIso, max_free_tickets: safeMaxFreeTickets }
+            });
+          }
         }
       }
 
@@ -71,10 +84,30 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         nextFreeTickets -= 1;
         freeDrawSource = 'reset';
         await tx.run('UPDATE users SET free_draw_tickets = ? WHERE id = ?', nextFreeTickets, userId);
+        await recordMysqlAssetEvent(tx, {
+          userId,
+          assetType: 'ticket',
+          action: 'spend',
+          quantity: 1,
+          sourceType: 'gacha_draw',
+          reason: 'free_draw_ticket_spend',
+          description: '무료 소환 티켓 사용',
+          metadata: { channel_id: channelId, tickets_left: nextFreeTickets }
+        });
       } else if (nextBonusTickets > 0) {
         nextBonusTickets -= 1;
         freeDrawSource = 'bonus';
         await tx.run('UPDATE users SET bonus_free_draw_tickets = ? WHERE id = ?', nextBonusTickets, userId);
+        await recordMysqlAssetEvent(tx, {
+          userId,
+          assetType: 'ticket',
+          action: 'spend',
+          quantity: 1,
+          sourceType: 'gacha_draw',
+          reason: 'bonus_free_draw_ticket_spend',
+          description: '추가 무료 소환 티켓 사용',
+          metadata: { channel_id: channelId, bonus_tickets_left: nextBonusTickets }
+        });
       } else {
         const deducted = await tx.run('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?', drawCost, userId, drawCost);
         if (deducted.changes === 0) return { ok: false, reason: 'INSUFFICIENT_POINT' };
@@ -93,6 +126,20 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', channelId);
       const serialNumber = Number(latest?.max_sn || 0) + 1;
       const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, channelId, serialNumber);
+      await recordMysqlAssetEvent(tx, {
+        userId,
+        assetType: 'card',
+        action: 'add',
+        quantity: 1,
+        sourceType: 'gacha_draw',
+        reason: 'gacha_draw_card_add',
+        description: '카드 소환 획득',
+        cardId: Number(result.insertId),
+        channelId,
+        serialNumber,
+        star: 0,
+        metadata: { channel_id: channelId, free_draw_source: freeDrawSource }
+      });
       return {
         ok: true,
         reason: 'OK',
@@ -125,8 +172,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       await this.getDb().transaction(async (tx) => {
         const reservedCount = (st: number) => Math.max(0, Math.floor(Number(reservedByStar[`${channelId}#${st}`] || 0)));
         const selectAvailableIds = async (st: number, count: number, excludeIds: number[] = []) => {
-          const rows = await tx.all<{ id: number }>(
-            `SELECT uc.id
+          const rows = await tx.all<{ id: number; serial_number: number; star: number }>(
+            `SELECT uc.id, uc.serial_number, COALESCE(uc.star, 0) AS star
                FROM user_cards uc
               WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
                 AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
@@ -144,15 +191,16 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         const [target] = await selectAvailableIds(star, 1);
         if (!target) throw new Error('NO_TARGET');
 
-        const materialIds: number[] = [];
+        const materialRows: { id: number; serial_number: number; star: number }[] = [];
         for (const material of normalizedMaterials) {
-          const excludedIds = [target.id, ...materialIds];
+          const excludedIds = [target.id, ...materialRows.map((row) => row.id)];
           const rows = await selectAvailableIds(material.star, material.count, excludedIds);
           if (rows.length < material.count) throw new Error('NO_FODDER');
-          materialIds.push(...rows.map((row) => Number(row.id)));
+          materialRows.push(...rows.map((row) => ({ id: Number(row.id), serial_number: Number(row.serial_number), star: Number(row.star || 0) })));
         }
 
-        if (materialIds.length === 0) throw new Error('NO_FODDER');
+        if (materialRows.length === 0) throw new Error('NO_FODDER');
+        const materialIds = materialRows.map((row) => row.id);
         const affectedIds = [Number(target.id), ...materialIds];
         const affectedPlaceholders = affectedIds.map(() => '?').join(',');
         const equippedRows = await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
@@ -171,6 +219,20 @@ export class MysqlUserCardRepository implements IUserCardRepository {
               INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
               ON DUPLICATE KEY UPDATE quantity = quantity + 1
             `, userId, itemId);
+            await recordMysqlAssetEvent(tx, {
+              userId,
+              assetType: 'cosmetic',
+              action: 'add',
+              quantity: 1,
+              sourceType: 'card_fuse',
+              sourceId: target.id,
+              reason: 'card_fuse_cosmetic_return',
+              description: '카드 합성으로 장착 코스메틱 반환',
+              cardId: Number(row.id),
+              channelId,
+              itemId: Number(itemId),
+              metadata: { target_card_id: target.id, material_card_ids: materialIds }
+            });
           }
         }
         await tx.run(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${affectedPlaceholders}) AND user_id = ?`, ...affectedIds, userId);
@@ -178,6 +240,36 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         const deletePlaceholders = materialIds.map(() => '?').join(',');
         await tx.run('UPDATE user_cards SET star = ? WHERE id = ?', newStar, target.id);
         await tx.run(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`, ...materialIds);
+        await recordMysqlAssetEvent(tx, {
+          userId,
+          assetType: 'card',
+          action: 'update',
+          quantity: 1,
+          sourceType: 'card_fuse',
+          sourceId: target.id,
+          reason: 'card_fuse_upgrade',
+          description: '카드 합성 별 등급 상승',
+          cardId: Number(target.id),
+          channelId,
+          serialNumber: Number(target.serial_number),
+          star: newStar,
+          metadata: { previous_star: star, new_star: newStar, material_card_ids: materialIds }
+        });
+        await recordMysqlAssetEvents(tx, materialRows.map((row) => ({
+          userId,
+          assetType: 'card',
+          action: 'delete',
+          quantity: 1,
+          sourceType: 'card_fuse',
+          sourceId: target.id,
+          reason: 'card_fuse_material_delete',
+          description: '카드 합성 재료 소모',
+          cardId: row.id,
+          channelId,
+          serialNumber: row.serial_number,
+          star: row.star,
+          metadata: { target_card_id: target.id, new_star: newStar }
+        })));
       });
       return { ok: true, reason: 'OK', newStar };
     } catch (err: any) {
@@ -290,22 +382,84 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     return row?.c || 0;
   }
 
-  async findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]> {
-    const rows = await this.getDb().all('SELECT user_id, COALESCE(star, 0) AS star FROM user_cards WHERE channel_id = ?', channelId);
-    return rows.map((r: any) => ({ user_id: r.user_id, star: Number(r.star || 0) }));
+  async findByChannel(channelId: string): Promise<{ user_id: string; star: number; id?: number; serial_number?: number; border_item_id?: number | null; name_effect_item_id?: number | null }[]> {
+    const rows = await this.getDb().all('SELECT id, user_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE channel_id = ?', channelId);
+    return rows.map((r: any) => ({
+      id: Number(r.id),
+      user_id: r.user_id,
+      serial_number: r.serial_number == null ? undefined : Number(r.serial_number),
+      star: Number(r.star || 0),
+      border_item_id: r.border_item_id ?? null,
+      name_effect_item_id: r.name_effect_item_id ?? null
+    }));
   }
 
   async deleteByChannel(channelId: string): Promise<number> {
-    const result = await this.getDb().run('DELETE FROM user_cards WHERE channel_id = ?', channelId);
-    return result.changes;
+    return this.getDb().transaction(async (tx) => {
+      const rows = await tx.all<{
+        id: number;
+        user_id: string;
+        channel_id: string;
+        serial_number: number;
+        star: number;
+        border_item_id: number | null;
+        name_effect_item_id: number | null;
+      }>(
+        'SELECT id, user_id, channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE channel_id = ? FOR UPDATE',
+        channelId
+      );
+      const result = await tx.run('DELETE FROM user_cards WHERE channel_id = ?', channelId);
+      await recordMysqlAssetEvents(tx, rows.flatMap((row) => {
+        const events: any[] = [{
+          userId: row.user_id,
+          assetType: 'card',
+          action: 'delete',
+          quantity: 1,
+          sourceType: 'admin_streamer_delete',
+          sourceId: channelId,
+          reason: 'streamer_card_delete',
+          description: '관리자 스트리머 카드 일괄 삭제',
+          cardId: Number(row.id),
+          channelId: row.channel_id,
+          serialNumber: Number(row.serial_number),
+          star: Number(row.star || 0)
+        }];
+        for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+          if (!itemId) continue;
+          events.push({
+            userId: row.user_id,
+            assetType: 'cosmetic',
+            action: 'delete',
+            quantity: 1,
+            sourceType: 'admin_streamer_delete',
+            sourceId: channelId,
+            reason: 'streamer_card_equipped_cosmetic_delete',
+            description: '관리자 카드 일괄 삭제로 장착 코스메틱 제거',
+            cardId: Number(row.id),
+            channelId: row.channel_id,
+            itemId: Number(itemId)
+          });
+        }
+        return events;
+      }));
+      return result.changes;
+    });
   }
 
   async sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number> {
     return this.getDb().transaction(async (tx) => {
       let total = 0;
       for (const action of actions) {
-        const rows = await tx.all<{ id: number; star: number }>(
-          `SELECT uc.id, COALESCE(uc.star, 0) AS star
+        const rows = await tx.all<{
+          id: number;
+          channel_id: string;
+          serial_number: number;
+          star: number;
+          border_item_id: number | null;
+          name_effect_item_id: number | null;
+        }>(
+          `SELECT uc.id, uc.channel_id, uc.serial_number, COALESCE(uc.star, 0) AS star,
+                  uc.border_item_id, uc.name_effect_item_id
              FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
               AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
@@ -318,6 +472,40 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         for (const row of rows) total += Math.round(action.baseValue * (1 + (row.star || 0) * 0.8));
         const placeholders = rows.map(() => '?').join(',');
         await tx.run(`DELETE FROM user_cards WHERE id IN (${placeholders})`, rows.map((r) => r.id));
+        await recordMysqlAssetEvents(tx, rows.flatMap((row) => {
+          const events: any[] = [{
+            userId,
+            assetType: 'card',
+            action: 'delete',
+            quantity: 1,
+            sourceType: 'card_sell',
+            sourceId: row.id,
+            reason: 'card_sell_delete',
+            description: '보유 카드 판매 삭제',
+            cardId: Number(row.id),
+            channelId: row.channel_id,
+            serialNumber: Number(row.serial_number),
+            star: Number(row.star || 0),
+            metadata: { base_value: action.baseValue }
+          }];
+          for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+            if (!itemId) continue;
+            events.push({
+              userId,
+              assetType: 'cosmetic',
+              action: 'delete',
+              quantity: 1,
+              sourceType: 'card_sell',
+              sourceId: row.id,
+              reason: 'card_sell_equipped_cosmetic_delete',
+              description: '카드 판매로 장착 코스메틱 제거',
+              cardId: Number(row.id),
+              channelId: row.channel_id,
+              itemId: Number(itemId)
+            });
+          }
+          return events;
+        }));
       }
       if (total > 0) {
         await tx.run('UPDATE users SET point = point + ? WHERE id = ?', total, userId);

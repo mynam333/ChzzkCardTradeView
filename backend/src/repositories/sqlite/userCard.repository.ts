@@ -1,5 +1,6 @@
 import { getSqliteDb } from "../../services/db";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
+import { recordSqliteAssetEvent, recordSqliteAssetEvents } from "../../services/assetEventLog";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -77,6 +78,18 @@ export class SqliteUserCardRepository implements IUserCardRepository {
           nextFreeTickets = Math.min(safeMaxFreeTickets, nextFreeTickets + grantCount);
           db.prepare('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?')
             .run(nextFreeTickets, segmentStartIso, userId);
+          if (grantCount > 0) {
+            recordSqliteAssetEvent(db, {
+              userId,
+              assetType: 'ticket',
+              action: 'add',
+              quantity: grantCount,
+              sourceType: 'gacha_draw',
+              reason: 'free_draw_ticket_refresh',
+              description: '무료 소환 티켓 충전',
+              metadata: { channel_id: channelId, segment_start: segmentStartIso, max_free_tickets: safeMaxFreeTickets }
+            });
+          }
         }
       }
 
@@ -86,10 +99,30 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         nextFreeTickets -= 1;
         freeDrawSource = 'reset';
         db.prepare('UPDATE users SET free_draw_tickets = ? WHERE id = ?').run(nextFreeTickets, userId);
+        recordSqliteAssetEvent(db, {
+          userId,
+          assetType: 'ticket',
+          action: 'spend',
+          quantity: 1,
+          sourceType: 'gacha_draw',
+          reason: 'free_draw_ticket_spend',
+          description: '무료 소환 티켓 사용',
+          metadata: { channel_id: channelId, tickets_left: nextFreeTickets }
+        });
       } else if (nextBonusTickets > 0) {
         nextBonusTickets -= 1;
         freeDrawSource = 'bonus';
         db.prepare('UPDATE users SET bonus_free_draw_tickets = ? WHERE id = ?').run(nextBonusTickets, userId);
+        recordSqliteAssetEvent(db, {
+          userId,
+          assetType: 'ticket',
+          action: 'spend',
+          quantity: 1,
+          sourceType: 'gacha_draw',
+          reason: 'bonus_free_draw_ticket_spend',
+          description: '추가 무료 소환 티켓 사용',
+          metadata: { channel_id: channelId, bonus_tickets_left: nextBonusTickets }
+        });
       } else {
         const deducted = db.prepare('UPDATE users SET point = point - ? WHERE id = ? AND point >= ?')
           .run(drawCost, userId, drawCost);
@@ -112,6 +145,20 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       const result = db.prepare(
         'INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)'
       ).run(userId, channelId, serialNumber);
+      recordSqliteAssetEvent(db, {
+        userId,
+        assetType: 'card',
+        action: 'add',
+        quantity: 1,
+        sourceType: 'gacha_draw',
+        reason: 'gacha_draw_card_add',
+        description: '카드 소환 획득',
+        cardId: Number(result.lastInsertRowid),
+        channelId,
+        serialNumber,
+        star: 0,
+        metadata: { channel_id: channelId, free_draw_source: freeDrawSource }
+      });
 
       return {
         ok: true,
@@ -155,7 +202,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       const reservedCount = (st: number) => Math.max(0, Math.floor(Number(reservedByStar[`${channelId}#${st}`] || 0)));
       const selectAvailableIds = (st: number, count: number, excludeIds: number[] = []) => {
         const rows = db.prepare(
-          `SELECT uc.id
+          `SELECT uc.id, uc.serial_number, COALESCE(uc.star, 0) AS star
              FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
               AND NOT EXISTS (
@@ -163,7 +210,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
                  WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
               )
             ORDER BY uc.id ASC`
-        ).all(userId, channelId, st) as { id: number }[];
+        ).all(userId, channelId, st) as { id: number; serial_number: number; star: number }[];
         const excluded = new Set(excludeIds.map((id) => Number(id)));
         return rows
           .slice(reservedCount(st))
@@ -174,15 +221,16 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       const [target] = selectAvailableIds(star, 1);
       if (!target) throw new Error('NO_TARGET');
 
-      const materialIds: number[] = [];
+      const materialRows: { id: number; serial_number: number; star: number }[] = [];
       for (const material of normalizedMaterials) {
-        const excludedIds = [target.id, ...materialIds];
+        const excludedIds = [target.id, ...materialRows.map((row) => row.id)];
         const rows = selectAvailableIds(material.star, material.count, excludedIds);
         if (rows.length < material.count) throw new Error('NO_FODDER');
-        materialIds.push(...rows.map((row) => Number(row.id)));
+        materialRows.push(...rows.map((row) => ({ id: Number(row.id), serial_number: Number(row.serial_number), star: Number(row.star || 0) })));
       }
 
-      if (materialIds.length === 0) throw new Error('NO_FODDER');
+      if (materialRows.length === 0) throw new Error('NO_FODDER');
+      const materialIds = materialRows.map((row) => row.id);
       const affectedIds = [Number(target.id), ...materialIds];
       const affectedPlaceholders = affectedIds.map(() => '?').join(',');
       const equippedRows = db.prepare(`
@@ -198,6 +246,20 @@ export class SqliteUserCardRepository implements IUserCardRepository {
             INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
             ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
           `).run(userId, itemId);
+          recordSqliteAssetEvent(db, {
+            userId,
+            assetType: 'cosmetic',
+            action: 'add',
+            quantity: 1,
+            sourceType: 'card_fuse',
+            sourceId: target.id,
+            reason: 'card_fuse_cosmetic_return',
+            description: '카드 합성으로 장착 코스메틱 반환',
+            cardId: Number(row.id),
+            channelId,
+            itemId: Number(itemId),
+            metadata: { target_card_id: target.id, material_card_ids: materialIds }
+          });
         }
       }
       db.prepare(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${affectedPlaceholders}) AND user_id = ?`)
@@ -206,6 +268,36 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       const deletePlaceholders = materialIds.map(() => '?').join(',');
       db.prepare('UPDATE user_cards SET star = ? WHERE id = ?').run(newStar, target.id);
       db.prepare(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`).run(...materialIds);
+      recordSqliteAssetEvent(db, {
+        userId,
+        assetType: 'card',
+        action: 'update',
+        quantity: 1,
+        sourceType: 'card_fuse',
+        sourceId: target.id,
+        reason: 'card_fuse_upgrade',
+        description: '카드 합성 별 등급 상승',
+        cardId: Number(target.id),
+        channelId,
+        serialNumber: Number(target.serial_number),
+        star: newStar,
+        metadata: { previous_star: star, new_star: newStar, material_card_ids: materialIds }
+      });
+      recordSqliteAssetEvents(db, materialRows.map((row) => ({
+        userId,
+        assetType: 'card',
+        action: 'delete',
+        quantity: 1,
+        sourceType: 'card_fuse',
+        sourceId: target.id,
+        reason: 'card_fuse_material_delete',
+        description: '카드 합성 재료 소모',
+        cardId: row.id,
+        channelId,
+        serialNumber: row.serial_number,
+        star: row.star,
+        metadata: { target_card_id: target.id, new_star: newStar }
+      })));
     });
     try {
       txn();
@@ -331,16 +423,71 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return row?.c || 0;
   }
 
-  async findByChannel(channelId: string): Promise<{ user_id: string; star: number }[]> {
+  async findByChannel(channelId: string): Promise<{ user_id: string; star: number; id?: number; serial_number?: number; border_item_id?: number | null; name_effect_item_id?: number | null }[]> {
     const rows = this.getDb().prepare(
-      'SELECT user_id, COALESCE(star, 0) AS star FROM user_cards WHERE channel_id = ?'
+      'SELECT id, user_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE channel_id = ?'
     ).all(channelId) as any[];
-    return rows.map(r => ({ user_id: r.user_id, star: r.star || 0 }));
+    return rows.map(r => ({
+      id: Number(r.id),
+      user_id: r.user_id,
+      serial_number: r.serial_number == null ? undefined : Number(r.serial_number),
+      star: r.star || 0,
+      border_item_id: r.border_item_id ?? null,
+      name_effect_item_id: r.name_effect_item_id ?? null
+    }));
   }
 
   async deleteByChannel(channelId: string): Promise<number> {
-    const result = this.getDb().prepare('DELETE FROM user_cards WHERE channel_id = ?').run(channelId);
-    return result.changes;
+    const db = this.getDb();
+    const txn = db.transaction(() => {
+      const rows = db.prepare(
+        'SELECT id, user_id, channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE channel_id = ?'
+      ).all(channelId) as {
+        id: number;
+        user_id: string;
+        channel_id: string;
+        serial_number: number;
+        star: number;
+        border_item_id: number | null;
+        name_effect_item_id: number | null;
+      }[];
+      const result = db.prepare('DELETE FROM user_cards WHERE channel_id = ?').run(channelId);
+      recordSqliteAssetEvents(db, rows.flatMap((row) => {
+        const events: any[] = [{
+          userId: row.user_id,
+          assetType: 'card',
+          action: 'delete',
+          quantity: 1,
+          sourceType: 'admin_streamer_delete',
+          sourceId: channelId,
+          reason: 'streamer_card_delete',
+          description: '관리자 스트리머 카드 일괄 삭제',
+          cardId: Number(row.id),
+          channelId: row.channel_id,
+          serialNumber: Number(row.serial_number),
+          star: Number(row.star || 0)
+        }];
+        for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+          if (!itemId) continue;
+          events.push({
+            userId: row.user_id,
+            assetType: 'cosmetic',
+            action: 'delete',
+            quantity: 1,
+            sourceType: 'admin_streamer_delete',
+            sourceId: channelId,
+            reason: 'streamer_card_equipped_cosmetic_delete',
+            description: '관리자 카드 일괄 삭제로 장착 코스메틱 제거',
+            cardId: Number(row.id),
+            channelId: row.channel_id,
+            itemId: Number(itemId)
+          });
+        }
+        return events;
+      }));
+      return result.changes;
+    });
+    return txn();
   }
 
   async sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number> {
@@ -350,7 +497,8 @@ export class SqliteUserCardRepository implements IUserCardRepository {
 
       for (const action of actions) {
         const rows = db.prepare(
-          `SELECT uc.id, COALESCE(uc.star, 0) AS star
+          `SELECT uc.id, uc.channel_id, uc.serial_number, COALESCE(uc.star, 0) AS star,
+                  uc.border_item_id, uc.name_effect_item_id
              FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
               AND NOT EXISTS (
@@ -359,7 +507,14 @@ export class SqliteUserCardRepository implements IUserCardRepository {
               )
             ORDER BY uc.id ASC
             LIMIT ?`
-        ).all(userId, action.channelId, action.star, action.count) as { id: number; star: number }[];
+        ).all(userId, action.channelId, action.star, action.count) as {
+          id: number;
+          channel_id: string;
+          serial_number: number;
+          star: number;
+          border_item_id: number | null;
+          name_effect_item_id: number | null;
+        }[];
 
         if (rows.length < action.count) {
           throw new Error('CARD_SHORTAGE');
@@ -371,6 +526,40 @@ export class SqliteUserCardRepository implements IUserCardRepository {
 
         const placeholders = rows.map(() => '?').join(',');
         db.prepare(`DELETE FROM user_cards WHERE id IN (${placeholders})`).run(...rows.map((r) => r.id));
+        recordSqliteAssetEvents(db, rows.flatMap((row) => {
+          const events: any[] = [{
+            userId,
+            assetType: 'card',
+            action: 'delete',
+            quantity: 1,
+            sourceType: 'card_sell',
+            sourceId: row.id,
+            reason: 'card_sell_delete',
+            description: '보유 카드 판매 삭제',
+            cardId: Number(row.id),
+            channelId: row.channel_id,
+            serialNumber: Number(row.serial_number),
+            star: Number(row.star || 0),
+            metadata: { base_value: action.baseValue }
+          }];
+          for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+            if (!itemId) continue;
+            events.push({
+              userId,
+              assetType: 'cosmetic',
+              action: 'delete',
+              quantity: 1,
+              sourceType: 'card_sell',
+              sourceId: row.id,
+              reason: 'card_sell_equipped_cosmetic_delete',
+              description: '카드 판매로 장착 코스메틱 제거',
+              cardId: Number(row.id),
+              channelId: row.channel_id,
+              itemId: Number(itemId)
+            });
+          }
+          return events;
+        }));
       }
 
       if (total > 0) {

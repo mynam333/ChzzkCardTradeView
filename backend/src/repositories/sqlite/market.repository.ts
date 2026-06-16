@@ -5,6 +5,7 @@ import { formatUploadUrl } from "../../services/imageService";
 import { fuzzyMatch } from "../../utils/search";
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from "../../utils/marketFee";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
+import { recordSqliteAssetEvent } from "../../services/assetEventLog";
 
 export class SqliteMarketRepository implements IMarketRepository {
   private getDb() {
@@ -94,19 +95,47 @@ export class SqliteMarketRepository implements IMarketRepository {
     const newId = db.transaction(() => {
       if (!listing.with_cosmetics) {
         const card = db.prepare(
-          'SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ?'
+          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ?'
         ).get(listing.user_card_id, listing.seller_id) as any;
         if (card?.border_item_id) {
           db.prepare(`
             INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
             ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
           `).run(listing.seller_id, card.border_item_id);
+          recordSqliteAssetEvent(db, {
+            userId: listing.seller_id,
+            assetType: 'cosmetic',
+            action: 'unequip',
+            quantity: 1,
+            sourceType: 'market_listing',
+            sourceId: listing.user_card_id,
+            reason: 'market_listing_cosmetic_return',
+            description: '오픈마켓 등록으로 장착 코스메틱 반환',
+            cardId: listing.user_card_id,
+            channelId: card.channel_id,
+            itemId: Number(card.border_item_id),
+            itemType: 'border'
+          });
         }
         if (card?.name_effect_item_id) {
           db.prepare(`
             INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
             ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
           `).run(listing.seller_id, card.name_effect_item_id);
+          recordSqliteAssetEvent(db, {
+            userId: listing.seller_id,
+            assetType: 'cosmetic',
+            action: 'unequip',
+            quantity: 1,
+            sourceType: 'market_listing',
+            sourceId: listing.user_card_id,
+            reason: 'market_listing_cosmetic_return',
+            description: '오픈마켓 등록으로 장착 코스메틱 반환',
+            cardId: listing.user_card_id,
+            channelId: card.channel_id,
+            itemId: Number(card.name_effect_item_id),
+            itemType: 'name_effect'
+          });
         }
         db.prepare(`
           UPDATE user_cards
@@ -324,7 +353,8 @@ export class SqliteMarketRepository implements IMarketRepository {
   async hideForSeller(id: number, sellerId: string): Promise<boolean> {
     const result = this.getDb().prepare(`
       UPDATE market_listings
-         SET seller_hidden_at = datetime('now')
+         SET seller_hidden_at = datetime('now'),
+             updated_at = updated_at
        WHERE id = ?
          AND seller_id = ?
          AND status IN ('SOLD', 'CANCELLED', 'AUCTION_ENDED')
@@ -488,6 +518,9 @@ export class SqliteMarketRepository implements IMarketRepository {
       this.recordTransactionAudit(db, listingId, 'sold');
 
       // 소유권 및 코스메틱 처리 분기
+      const movingCard = db.prepare(
+        'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ?'
+      ).get(listing.user_card_id) as any;
       if (listing.with_cosmetics === 1) {
         // 코스메틱 정보를 유지한 채 소유권만 이전
         db.prepare(`
@@ -497,19 +530,49 @@ export class SqliteMarketRepository implements IMarketRepository {
         `).run(buyerId, listing.user_card_id);
       } else {
         // 코스메틱 정보를 해제하고 판매자 계정으로 반환 처리
-        const card = db.prepare('SELECT border_item_id, name_effect_item_id FROM user_cards WHERE id = ?').get(listing.user_card_id) as any;
+        const card = movingCard;
         if (card) {
           if (card.border_item_id) {
             db.prepare(`
               INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
               ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
             `).run(listing.seller_id, card.border_item_id);
+            recordSqliteAssetEvent(db, {
+              userId: listing.seller_id,
+              assetType: 'cosmetic',
+              action: 'unequip',
+              quantity: 1,
+              sourceType: 'market_purchase',
+              sourceId: listingId,
+              reason: 'market_sale_cosmetic_return',
+              description: `오픈마켓 매물 #${listingId} 코스메틱 제외 반환`,
+              cardId: listing.user_card_id,
+              channelId: card.channel_id,
+              itemId: Number(card.border_item_id),
+              itemType: 'border',
+              metadata: { listing_id: listingId, buyer_id: buyerId }
+            });
           }
           if (card.name_effect_item_id) {
             db.prepare(`
               INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
               ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
             `).run(listing.seller_id, card.name_effect_item_id);
+            recordSqliteAssetEvent(db, {
+              userId: listing.seller_id,
+              assetType: 'cosmetic',
+              action: 'unequip',
+              quantity: 1,
+              sourceType: 'market_purchase',
+              sourceId: listingId,
+              reason: 'market_sale_cosmetic_return',
+              description: `오픈마켓 매물 #${listingId} 코스메틱 제외 반환`,
+              cardId: listing.user_card_id,
+              channelId: card.channel_id,
+              itemId: Number(card.name_effect_item_id),
+              itemType: 'name_effect',
+              metadata: { listing_id: listingId, buyer_id: buyerId }
+            });
           }
         }
         
@@ -518,6 +581,26 @@ export class SqliteMarketRepository implements IMarketRepository {
              SET user_id = ?, border_item_id = NULL, name_effect_item_id = NULL
            WHERE id = ?
         `).run(buyerId, listing.user_card_id);
+      }
+      if (movingCard) {
+        recordSqliteAssetEvent(db, {
+          userId: listing.seller_id,
+          counterpartyUserId: buyerId,
+          fromUserId: listing.seller_id,
+          toUserId: buyerId,
+          assetType: 'card',
+          action: 'move',
+          quantity: 1,
+          sourceType: 'market_purchase',
+          sourceId: listingId,
+          reason: 'market_card_move',
+          description: `오픈마켓 매물 #${listingId} 카드 이동`,
+          cardId: listing.user_card_id,
+          channelId: movingCard.channel_id,
+          serialNumber: Number(movingCard.serial_number),
+          star: Number(movingCard.star || 0),
+          metadata: { listing_id: listingId, price: finalPrice, with_cosmetics: listing.with_cosmetics === 1 }
+        });
       }
 
       return {
@@ -744,7 +827,30 @@ export class SqliteMarketRepository implements IMarketRepository {
            WHERE id = ?
         `).run(locked.current_bidder_id, price, fee, settledAmount, row.id);
         this.recordTransactionAudit(db, row.id, 'sold');
+        const movingCard = db.prepare(
+          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star FROM user_cards WHERE id = ?'
+        ).get(locked.user_card_id) as any;
         db.prepare('UPDATE user_cards SET user_id = ? WHERE id = ?').run(locked.current_bidder_id, locked.user_card_id);
+        if (movingCard) {
+          recordSqliteAssetEvent(db, {
+            userId: locked.seller_id,
+            counterpartyUserId: locked.current_bidder_id,
+            fromUserId: locked.seller_id,
+            toUserId: locked.current_bidder_id,
+            assetType: 'card',
+            action: 'move',
+            quantity: 1,
+            sourceType: 'market_purchase',
+            sourceId: row.id,
+            reason: 'auction_card_move',
+            description: `경매 #${row.id} 낙찰 카드 이동`,
+            cardId: locked.user_card_id,
+            channelId: movingCard.channel_id,
+            serialNumber: Number(movingCard.serial_number),
+            star: Number(movingCard.star || 0),
+            metadata: { listing_id: row.id, price }
+          });
+        }
         return true;
       })();
       if (result) {

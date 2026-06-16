@@ -1,5 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
+import { recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
 import { AdminTradeListOptions, AdminTradeListResult, ITradeRepository, Trade } from '../interfaces';
 
 export class MysqlTradeRepository implements ITradeRepository {
@@ -177,8 +178,8 @@ export class MysqlTradeRepository implements ITradeRepository {
             if (!c.channel_id || !c.count || c.count <= 0) continue;
             const hasStar = c.star !== undefined && c.star !== null;
             const owned = hasStar
-              ? await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
-                  `SELECT id, border_item_id, name_effect_item_id
+              ? await tx.all<{ id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }>(
+                  `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
@@ -191,8 +192,8 @@ export class MysqlTradeRepository implements ITradeRepository {
                     LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.star, c.count
                 )
-              : await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
-                  `SELECT id, border_item_id, name_effect_item_id
+              : await tx.all<{ id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }>(
+                  `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
@@ -217,6 +218,20 @@ export class MysqlTradeRepository implements ITradeRepository {
                     fromId,
                     itemId
                   );
+                  await recordMysqlAssetEvent(tx, {
+                    userId: fromId,
+                    assetType: 'cosmetic',
+                    action: 'add',
+                    quantity: 1,
+                    sourceType: 'trade',
+                    sourceId: id,
+                    reason: 'trade_cosmetic_return',
+                    description: `1:1 교환 #${id} 코스메틱 제외 반환`,
+                    cardId: Number(row.id),
+                    channelId: c.channel_id,
+                    itemId: Number(itemId),
+                    metadata: { trade_id: id, from_user_id: fromId, to_user_id: toId }
+                  });
                 }
               }
               await tx.run(
@@ -225,6 +240,24 @@ export class MysqlTradeRepository implements ITradeRepository {
               );
             }
             await tx.run(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`, toId, ...ids);
+            await recordMysqlAssetEvents(tx, owned.map((row) => ({
+              userId: fromId,
+              counterpartyUserId: toId,
+              fromUserId: fromId,
+              toUserId: toId,
+              assetType: 'card',
+              action: 'move',
+              quantity: 1,
+              sourceType: 'trade',
+              sourceId: id,
+              reason: 'trade_card_move',
+              description: `1:1 교환 #${id} 카드 이동`,
+              cardId: Number(row.id),
+              channelId: c.channel_id,
+              serialNumber: Number(row.serial_number),
+              star: Number(row.star || 0),
+              metadata: { trade_id: id, with_cosmetics: withCosmetics, requested_star: c.star ?? null }
+            })));
           }
         };
 

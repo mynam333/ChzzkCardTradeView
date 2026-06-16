@@ -1,4 +1,5 @@
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { recordMysqlAssetEvent, recordSqliteAssetEvent, type AssetEventAction } from './assetEventLog';
 
 export type PointLedgerSourceType =
   | 'gacha_draw'
@@ -58,6 +59,13 @@ const normalizeEntry = (entry: PointLedgerEntryInput) => ({
   metadata: JSON.stringify(entry.metadata || {})
 });
 
+const pointEventAction = (sourceType: string, amount: number): AssetEventAction => {
+  if (sourceType === 'market_bid') return 'reserve';
+  if (sourceType.includes('refund')) return 'refund';
+  if (amount > 0) return 'add';
+  return 'remove';
+};
+
 export const recordSqlitePointLedger = (db: any, entry: PointLedgerEntryInput): void => {
   const normalized = normalizeEntry(entry);
   if (!normalized.userId || normalized.amount === 0) return;
@@ -77,6 +85,19 @@ export const recordSqlitePointLedger = (db: any, entry: PointLedgerEntryInput): 
     normalized.description,
     normalized.metadata
   );
+  recordSqliteAssetEvent(db, {
+    userId: normalized.userId,
+    counterpartyUserId: normalized.counterpartyUserId,
+    assetType: 'point',
+    action: pointEventAction(normalized.sourceType, normalized.amount),
+    amount: normalized.amount,
+    balanceAfter,
+    sourceType: normalized.sourceType,
+    sourceId: normalized.sourceId,
+    reason: normalized.reason,
+    description: normalized.description,
+    metadata: entry.metadata || {}
+  });
 };
 
 export const recordMysqlPointLedger = async (db: any, entry: PointLedgerEntryInput): Promise<void> => {
@@ -98,6 +119,19 @@ export const recordMysqlPointLedger = async (db: any, entry: PointLedgerEntryInp
     normalized.description,
     normalized.metadata
   );
+  await recordMysqlAssetEvent(db, {
+    userId: normalized.userId,
+    counterpartyUserId: normalized.counterpartyUserId,
+    assetType: 'point',
+    action: pointEventAction(normalized.sourceType, normalized.amount),
+    amount: normalized.amount,
+    balanceAfter,
+    sourceType: normalized.sourceType,
+    sourceId: normalized.sourceId,
+    reason: normalized.reason,
+    description: normalized.description,
+    metadata: entry.metadata || {}
+  });
 };
 
 const parseMetadata = (value: any): Record<string, unknown> | null => {

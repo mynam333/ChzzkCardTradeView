@@ -166,6 +166,7 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
       'shop_items',
       'user_cosmetics',
       'point_ledger_entries',
+      'asset_event_logs',
       'subscription_title_rules',
       'subscription_title_states',
       'friend_requests',
@@ -192,6 +193,7 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     ensureUniqueIndex(db, 'puzzle_excluded_images', ['id'], 'idx_puzzle_excluded_images_id_unique');
     ensureUniqueIndex(db, 'puzzle_excluded_images', ['image_key'], 'idx_puzzle_excluded_images_key_unique');
     ensureUniqueIndex(db, 'point_ledger_entries', ['id'], 'idx_point_ledger_entries_id_unique');
+    ensureUniqueIndex(db, 'asset_event_logs', ['id'], 'idx_asset_event_logs_id_unique');
     ensureUniqueIndex(db, 'subscription_title_rules', ['id'], 'idx_subscription_title_rules_id_unique');
     ensureUniqueIndex(db, 'subscription_title_states', ['user_id', 'rule_id'], 'idx_subscription_title_states_user_rule_unique');
     ensureUniqueIndex(db, 'market_listings', ['id'], 'idx_market_listings_id_unique');
@@ -354,6 +356,41 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_point_ledger_user_id (user_id, id),
       INDEX idx_point_ledger_counterparty (counterparty_user_id, id),
       INDEX idx_point_ledger_source (source_type, source_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS asset_event_logs (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      event_key VARCHAR(255) NULL UNIQUE,
+      user_id VARCHAR(191) NULL,
+      counterparty_user_id VARCHAR(191) NULL,
+      from_user_id VARCHAR(191) NULL,
+      to_user_id VARCHAR(191) NULL,
+      asset_type VARCHAR(32) NOT NULL,
+      action VARCHAR(32) NOT NULL,
+      amount BIGINT NULL,
+      quantity BIGINT NULL,
+      balance_after BIGINT NULL,
+      source_type VARCHAR(64) NOT NULL DEFAULT 'unknown',
+      source_id VARCHAR(191) NULL,
+      reason VARCHAR(120) NOT NULL,
+      description VARCHAR(500) NULL,
+      card_id BIGINT NULL,
+      channel_id VARCHAR(191) NULL,
+      serial_number BIGINT NULL,
+      star INT NULL,
+      item_id BIGINT NULL,
+      item_type VARCHAR(64) NULL,
+      metadata JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_asset_event_user (user_id, id),
+      INDEX idx_asset_event_counterparty (counterparty_user_id, id),
+      INDEX idx_asset_event_from_to (from_user_id, to_user_id, id),
+      INDEX idx_asset_event_asset_action (asset_type, action, id),
+      INDEX idx_asset_event_source (source_type, source_id),
+      INDEX idx_asset_event_card (card_id, id),
+      INDEX idx_asset_event_item (item_id, id),
+      INDEX idx_asset_event_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
   await db.run(`
@@ -835,6 +872,39 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user_id, id DESC);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_point_ledger_source ON point_ledger_entries(source_type, source_id);`);
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS asset_event_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT UNIQUE,
+        user_id TEXT,
+        counterparty_user_id TEXT,
+        from_user_id TEXT,
+        to_user_id TEXT,
+        asset_type TEXT NOT NULL,
+        action TEXT NOT NULL,
+        amount INTEGER,
+        quantity INTEGER,
+        balance_after INTEGER,
+        source_type TEXT NOT NULL DEFAULT 'unknown',
+        source_id TEXT,
+        reason TEXT NOT NULL,
+        description TEXT,
+        card_id INTEGER,
+        channel_id TEXT,
+        serial_number INTEGER,
+        star INTEGER,
+        item_id INTEGER,
+        item_type TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now'))
+      );`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_user ON asset_event_logs(user_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_counterparty ON asset_event_logs(counterparty_user_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_from_to ON asset_event_logs(from_user_id, to_user_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_asset_action ON asset_event_logs(asset_type, action, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_source ON asset_event_logs(source_type, source_id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_card ON asset_event_logs(card_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_item ON asset_event_logs(item_id, id DESC);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_asset_event_created ON asset_event_logs(created_at);`);
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS tutorial_rewards (
         user_id TEXT NOT NULL,
         reward_key TEXT NOT NULL,

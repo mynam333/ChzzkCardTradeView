@@ -1,5 +1,6 @@
 import { getSqliteDb } from "../../services/db";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
+import { recordSqliteAssetEvent } from "../../services/assetEventLog";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -158,8 +159,23 @@ export class SqliteCouponRepository implements ICouponRepository {
             .get(reward.channel_id) as any;
           const baseSn = Number(latest?.max_sn || 0);
           for (let i = 1; i <= quantity; i++) {
-            db.prepare('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)')
+            const result = db.prepare('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)')
               .run(userId, reward.channel_id, baseSn + i);
+            recordSqliteAssetEvent(db, {
+              userId,
+              assetType: 'card',
+              action: 'add',
+              quantity: 1,
+              sourceType: 'coupon',
+              sourceId: couponId,
+              reason: 'coupon_card_reward',
+              description: `쿠폰 ${coupon.code} 카드 보상`,
+              cardId: Number(result.lastInsertRowid),
+              channelId: reward.channel_id,
+              serialNumber: baseSn + i,
+              star: 0,
+              metadata: { coupon_id: couponId, coupon_code: coupon.code, reward_quantity: quantity }
+            });
           }
         } else if (reward.type === 'cosmetic') {
           const quantity = Number(reward.quantity || 0);
@@ -167,6 +183,18 @@ export class SqliteCouponRepository implements ICouponRepository {
             INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
             ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + excluded.quantity
           `).run(userId, reward.item_id, quantity);
+          recordSqliteAssetEvent(db, {
+            userId,
+            assetType: 'cosmetic',
+            action: 'add',
+            quantity,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_cosmetic_reward',
+            description: `쿠폰 ${coupon.code} 코스메틱 보상`,
+            itemId: Number(reward.item_id),
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'minigame_ticket') {
           const quantity = Number(reward.quantity || 0);
           const now = new Date().toISOString();
@@ -177,6 +205,18 @@ export class SqliteCouponRepository implements ICouponRepository {
               bonus_tickets = bonus_tickets + excluded.bonus_tickets,
               updated_at = excluded.updated_at
           `).run(userId, quantity, now, now);
+          recordSqliteAssetEvent(db, {
+            userId,
+            assetType: 'ticket',
+            action: 'add',
+            quantity,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_minigame_ticket_reward',
+            description: `쿠폰 ${coupon.code} 미니게임 티켓 보상`,
+            itemType: 'minigame_ticket',
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'free_draw_ticket') {
           const quantity = Number(reward.quantity || 0);
           db.prepare(`
@@ -184,6 +224,18 @@ export class SqliteCouponRepository implements ICouponRepository {
                SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ?
              WHERE id = ?
           `).run(quantity, userId);
+          recordSqliteAssetEvent(db, {
+            userId,
+            assetType: 'ticket',
+            action: 'add',
+            quantity,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_free_draw_ticket_reward',
+            description: `쿠폰 ${coupon.code} 추가 무료 소환 티켓 보상`,
+            itemType: 'free_draw_ticket',
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         }
       }
       const updated = db.prepare('SELECT point FROM users WHERE id = ?').get(userId) as any;

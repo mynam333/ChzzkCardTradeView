@@ -1,5 +1,6 @@
 import { getSqliteDb } from "../../services/db";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
+import { recordSqliteAssetEvent, recordSqliteAssetEvents } from "../../services/assetEventLog";
 import { 
   IUserRepository, 
   IStreamerRepository, 
@@ -185,7 +186,7 @@ export class SqliteTradeRepository implements ITradeRepository {
         const hasStar = c.star !== undefined && c.star !== null;
         const owned = hasStar
           ? db.prepare(
-              `SELECT id, border_item_id, name_effect_item_id
+              `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
                  FROM user_cards uc
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
@@ -196,9 +197,9 @@ export class SqliteTradeRepository implements ITradeRepository {
                   )
                 ORDER BY uc.id ASC
                 LIMIT ?`
-            ).all(fromId, c.channel_id, c.star, c.count) as { id: number; border_item_id: number | null; name_effect_item_id: number | null }[]
+            ).all(fromId, c.channel_id, c.star, c.count) as { id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }[]
           : db.prepare(
-              `SELECT id, border_item_id, name_effect_item_id
+              `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
                  FROM user_cards uc
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
@@ -208,7 +209,7 @@ export class SqliteTradeRepository implements ITradeRepository {
                   )
                 ORDER BY uc.id ASC
                 LIMIT ?`
-            ).all(fromId, c.channel_id, c.count) as { id: number; border_item_id: number | null; name_effect_item_id: number | null }[];
+            ).all(fromId, c.channel_id, c.count) as { id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }[];
         if (owned.length < c.count) {
           throw new Error('CARD_SHORTAGE');
         }
@@ -222,11 +223,43 @@ export class SqliteTradeRepository implements ITradeRepository {
                 INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
                 ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
               `).run(fromId, itemId);
+              recordSqliteAssetEvent(db, {
+                userId: fromId,
+                assetType: 'cosmetic',
+                action: 'add',
+                quantity: 1,
+                sourceType: 'trade',
+                sourceId: id,
+                reason: 'trade_cosmetic_return',
+                description: `1:1 교환 #${id} 코스메틱 제외 반환`,
+                cardId: Number(row.id),
+                channelId: c.channel_id,
+                itemId: Number(itemId),
+                metadata: { trade_id: id, from_user_id: fromId, to_user_id: toId }
+              });
             }
           }
           db.prepare(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${placeholders})`).run(...ids);
         }
         db.prepare(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`).run(toId, ...ids);
+        recordSqliteAssetEvents(db, owned.map((row) => ({
+          userId: fromId,
+          counterpartyUserId: toId,
+          fromUserId: fromId,
+          toUserId: toId,
+          assetType: 'card',
+          action: 'move',
+          quantity: 1,
+          sourceType: 'trade',
+          sourceId: id,
+          reason: 'trade_card_move',
+          description: `1:1 교환 #${id} 카드 이동`,
+          cardId: Number(row.id),
+          channelId: c.channel_id,
+          serialNumber: Number(row.serial_number),
+          star: Number(row.star || 0),
+          metadata: { trade_id: id, with_cosmetics: withCosmetics, requested_star: c.star ?? null }
+        })));
       }
     };
 

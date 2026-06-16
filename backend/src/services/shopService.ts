@@ -4,6 +4,7 @@
  */
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
+import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 
 export interface ShopItem {
   id: number;
@@ -425,6 +426,19 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
         ON DUPLICATE KEY UPDATE quantity = quantity + 1
       `, userId, itemId);
+      await recordMysqlAssetEvent(tx, {
+        userId,
+        assetType: 'cosmetic',
+        action: 'add',
+        quantity: 1,
+        sourceType: 'shop_purchase',
+        sourceId: itemId,
+        reason: 'shop_cosmetic_purchase',
+        description: `상점 아이템 구매 지급: ${item.name || itemId}`,
+        itemId,
+        itemType: item.type,
+        metadata: { item_id: itemId, item_name: item.name, price: item.price }
+      });
       if ((item.limited_total_quantity || 0) > 0) {
         const stock = await tx.run(
           'UPDATE shop_items SET sold_quantity = sold_quantity + 1 WHERE id = ? AND sold_quantity < limited_total_quantity',
@@ -483,6 +497,19 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
       ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
     `).run(userId, itemId);
+    recordSqliteAssetEvent(db, {
+      userId,
+      assetType: 'cosmetic',
+      action: 'add',
+      quantity: 1,
+      sourceType: 'shop_purchase',
+      sourceId: itemId,
+      reason: 'shop_cosmetic_purchase',
+      description: `상점 아이템 구매 지급: ${item.name || itemId}`,
+      itemId,
+      itemType: item.type,
+      metadata: { item_id: itemId, item_name: item.name, price: item.price }
+    });
 
     if ((item.limited_total_quantity || 0) > 0) {
       const stock = db.prepare('UPDATE shop_items SET sold_quantity = sold_quantity + 1 WHERE id = ? AND sold_quantity < limited_total_quantity').run(itemId);
@@ -541,9 +568,35 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
           INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
           ON DUPLICATE KEY UPDATE quantity = quantity + 1
         `, userId, card.current);
+        await recordMysqlAssetEvent(tx, {
+          userId,
+          assetType: 'cosmetic',
+          action: 'unequip',
+          quantity: 1,
+          sourceType: 'shop_equip',
+          sourceId: cardId,
+          reason: 'cosmetic_replace_return',
+          description: '코스메틱 교체로 기존 장착품 반환',
+          cardId,
+          itemId: Number(card.current),
+          itemType: item.type
+        });
       }
       await tx.run('UPDATE user_cosmetics SET quantity = GREATEST(0, quantity - 1) WHERE user_id = ? AND item_id = ?', userId, itemId);
       await tx.run(`UPDATE user_cards SET ${col} = ? WHERE id = ? AND user_id = ?`, itemId, cardId, userId);
+      await recordMysqlAssetEvent(tx, {
+        userId,
+        assetType: 'cosmetic',
+        action: 'equip',
+        quantity: 1,
+        sourceType: 'shop_equip',
+        sourceId: cardId,
+        reason: 'cosmetic_equip',
+        description: '카드 코스메틱 장착',
+        cardId,
+        itemId,
+        itemType: item.type
+      });
       return { ok: true, reason: 'OK' };
     });
   }
@@ -567,11 +620,37 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
         ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
       `).run(userId, card.current);
+      recordSqliteAssetEvent(db, {
+        userId,
+        assetType: 'cosmetic',
+        action: 'unequip',
+        quantity: 1,
+        sourceType: 'shop_equip',
+        sourceId: cardId,
+        reason: 'cosmetic_replace_return',
+        description: '코스메틱 교체로 기존 장착품 반환',
+        cardId,
+        itemId: Number(card.current),
+        itemType: item.type
+      });
     }
     db.prepare('UPDATE user_cosmetics SET quantity = MAX(0, quantity - 1) WHERE user_id = ? AND item_id = ?')
       .run(userId, itemId);
     db.prepare(`UPDATE user_cards SET ${col} = ? WHERE id = ? AND user_id = ?`)
       .run(itemId, cardId, userId);
+    recordSqliteAssetEvent(db, {
+      userId,
+      assetType: 'cosmetic',
+      action: 'equip',
+      quantity: 1,
+      sourceType: 'shop_equip',
+      sourceId: cardId,
+      reason: 'cosmetic_equip',
+      description: '카드 코스메틱 장착',
+      cardId,
+      itemId,
+      itemType: item.type
+    });
     return { ok: true, reason: 'OK' };
   })();
 };
@@ -603,6 +682,19 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
         ON DUPLICATE KEY UPDATE quantity = quantity + 1
       `, userId, card.current);
       await tx.run(`UPDATE user_cards SET ${col} = NULL WHERE id = ? AND user_id = ?`, cardId, userId);
+      await recordMysqlAssetEvent(tx, {
+        userId,
+        assetType: 'cosmetic',
+        action: 'unequip',
+        quantity: 1,
+        sourceType: 'shop_unequip',
+        sourceId: cardId,
+        reason: 'cosmetic_unequip',
+        description: '카드 코스메틱 해제 반환',
+        cardId,
+        itemId: Number(card.current),
+        itemType: type
+      });
       return { ok: true, reason: 'OK' };
     });
   }
@@ -620,6 +712,19 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
       ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
     `).run(userId, card.current);
     db.prepare(`UPDATE user_cards SET ${col} = NULL WHERE id = ? AND user_id = ?`).run(cardId, userId);
+    recordSqliteAssetEvent(db, {
+      userId,
+      assetType: 'cosmetic',
+      action: 'unequip',
+      quantity: 1,
+      sourceType: 'shop_unequip',
+      sourceId: cardId,
+      reason: 'cosmetic_unequip',
+      description: '카드 코스메틱 해제 반환',
+      cardId,
+      itemId: Number(card.current),
+      itemType: type
+    });
     return { ok: true, reason: 'OK' };
   })();
 };

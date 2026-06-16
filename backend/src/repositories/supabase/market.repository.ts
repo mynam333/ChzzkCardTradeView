@@ -334,9 +334,20 @@ export class SupabaseMarketRepository implements IMarketRepository {
   }
 
   async hideForSeller(id: number, sellerId: string): Promise<boolean> {
+    const { data: current, error: currentError } = await this.getClient()
+      .from('market_listings')
+      .select('id, updated_at')
+      .eq('id', id)
+      .eq('seller_id', sellerId)
+      .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])
+      .is('seller_hidden_at', null)
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (!current) return false;
+
     const { data, error } = await this.getClient()
       .from('market_listings')
-      .update({ seller_hidden_at: new Date().toISOString() })
+      .update({ seller_hidden_at: new Date().toISOString(), updated_at: (current as any).updated_at })
       .eq('id', id)
       .eq('seller_id', sellerId)
       .in('status', ['SOLD', 'CANCELLED', 'AUCTION_ENDED'])

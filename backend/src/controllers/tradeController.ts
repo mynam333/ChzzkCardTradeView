@@ -506,9 +506,10 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
         receiverReservations.points
       ));
     }
-    const result = await tradeRepository.confirm(tradeId, user.id, {
-      receiverWithCosmetics: req.body?.with_cosmetics === true
-    });
+    const receiverWithCosmeticsProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'with_cosmetics');
+    const result = receiverWithCosmeticsProvided
+      ? await tradeRepository.confirm(tradeId, user.id, { receiverWithCosmetics: req.body?.with_cosmetics === true })
+      : await tradeRepository.confirm(tradeId, user.id);
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 동의 처리에 실패했습니다.'

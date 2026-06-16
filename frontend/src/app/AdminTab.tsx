@@ -22,10 +22,28 @@ import {
   Edit,
   Pin,
   Award,
-  Ticket
+  Ticket,
+  Activity
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import type { AdminReport, OrphanImage, ShopItem, Coupon, CouponReward, CouponRewardType, Announcement, AdminTrade, AdminTradeListResponse, TradeOffer, TradeStatus } from '@/lib/types';
+import type {
+  AdminReport,
+  OrphanImage,
+  ShopItem,
+  Coupon,
+  CouponReward,
+  CouponRewardType,
+  Announcement,
+  AdminTrade,
+  AdminTradeListResponse,
+  TradeOffer,
+  TradeStatus,
+  AssetEventAssetType,
+  AssetEventLogEntry,
+  AssetEventListResponse,
+  AssetEventSuspect,
+  AssetEventSuspectResponse
+} from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
 import { fuzzyScore } from '@/lib/search';
@@ -34,7 +52,7 @@ import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
 
-type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'streamers' | 'shop' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
 
 interface PushFormState {
@@ -101,6 +119,7 @@ export const AdminTab: React.FC = () => {
     tabParam === 'push' ||
     tabParam === 'reports' ||
     tabParam === 'trades' ||
+    tabParam === 'asset-events' ||
     tabParam === 'streamers' ||
     tabParam === 'shop' ||
     tabParam === 'maintenance'
@@ -113,7 +132,7 @@ export const AdminTab: React.FC = () => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
       'dashboard', 'users', 'titles', 'coupons', 'announcements',
-      'push', 'reports', 'trades', 'streamers', 'shop', 'maintenance'
+      'push', 'reports', 'trades', 'asset-events', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
     }
@@ -209,6 +228,16 @@ export const AdminTab: React.FC = () => {
   const [adminTradesTotal, setAdminTradesTotal] = useState(0);
   const [adminTradesLoading, setAdminTradesLoading] = useState(false);
 
+  // 자산 감사 기록
+  const [assetEvents, setAssetEvents] = useState<AssetEventLogEntry[]>([]);
+  const [assetEventsNextBeforeId, setAssetEventsNextBeforeId] = useState<number | null>(null);
+  const [assetEventsLoading, setAssetEventsLoading] = useState(false);
+  const [assetEventSearch, setAssetEventSearch] = useState('');
+  const [assetEventType, setAssetEventType] = useState<AssetEventAssetType | 'ALL'>('ALL');
+  const [assetEventSource, setAssetEventSource] = useState('ALL');
+  const [assetSuspects, setAssetSuspects] = useState<AssetEventSuspect[]>([]);
+  const [assetSuspectsLoading, setAssetSuspectsLoading] = useState(false);
+
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
   const [missingProfileStreamers, setMissingProfileStreamers] = useState<any[]>([]);
@@ -253,6 +282,10 @@ export const AdminTab: React.FC = () => {
     if (subTab === 'trades') {
       fetchAdminTrades(adminTradesPage, adminTradesSearch, adminTradesStatus);
     }
+    if (subTab === 'asset-events') {
+      fetchAssetEvents(true);
+      fetchAssetSuspects();
+    }
     if (subTab === 'streamers') {
       fetchCouponStreamers(true);
       fetchMissingProfileStreamers();
@@ -287,6 +320,14 @@ export const AdminTab: React.FC = () => {
     if (!isAdmin || subTab !== 'trades') return;
     fetchAdminTrades(adminTradesPage, adminTradesSearch, adminTradesStatus);
   }, [adminTradesPage]);
+
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'asset-events') return;
+    const t = setTimeout(() => {
+      fetchAssetEvents(true);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [assetEventSearch, assetEventType, assetEventSource, subTab, isAdmin]);
 
   // 제재 유저 검색/정렬 변경 시 재조회 (디바운스 포함)
   useEffect(() => {
@@ -451,6 +492,45 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러');
     } finally {
       setAdminTradesLoading(false);
+    }
+  };
+
+  const fetchAssetEvents = async (reset = true) => {
+    if (!reset && !assetEventsNextBeforeId) return;
+    try {
+      setAssetEventsLoading(true);
+      const params = new URLSearchParams({ limit: '50' });
+      if (!reset && assetEventsNextBeforeId) params.set('before_id', String(assetEventsNextBeforeId));
+      if (assetEventType !== 'ALL') params.set('asset_type', assetEventType);
+      if (assetEventSource !== 'ALL') params.set('source_type', assetEventSource);
+      const trimmed = assetEventSearch.trim();
+      if (trimmed) params.set('search', trimmed);
+      const res = await apiFetch(`/admin/asset-events?${params.toString()}`);
+      if (!res.ok) {
+        toast('자산 기록을 불러오지 못했습니다.', 'error');
+        return;
+      }
+      const data = await res.json() as AssetEventListResponse;
+      setAssetEvents((prev) => reset ? (data.entries || []) : [...prev, ...(data.entries || [])]);
+      setAssetEventsNextBeforeId(data.next_before_id || null);
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setAssetEventsLoading(false);
+    }
+  };
+
+  const fetchAssetSuspects = async () => {
+    try {
+      setAssetSuspectsLoading(true);
+      const res = await apiFetch('/admin/asset-events/suspects?days=7&limit=50');
+      if (!res.ok) return;
+      const data = await res.json() as AssetEventSuspectResponse;
+      setAssetSuspects(data.items || []);
+    } catch {
+      /* noop */
+    } finally {
+      setAssetSuspectsLoading(false);
     }
   };
 
@@ -1307,6 +1387,85 @@ export const AdminTab: React.FC = () => {
     );
   };
 
+  const assetTypeLabel: Record<AssetEventAssetType | 'ALL', string> = {
+    ALL: '전체 자산',
+    card: '카드',
+    point: '포인트',
+    cosmetic: '코스메틱',
+    ticket: '티켓',
+    title: '칭호',
+    unknown: '기타'
+  };
+
+  const assetActionLabel: Record<string, string> = {
+    add: '추가',
+    remove: '차감',
+    move: '이동',
+    delete: '삭제',
+    update: '수정',
+    spend: '사용',
+    refund: '환불',
+    reserve: '예약',
+    release: '해제',
+    equip: '장착',
+    unequip: '해제/반환'
+  };
+
+  const assetSourceLabel: Record<string, string> = {
+    ALL: '전체 출처',
+    gacha_draw: '카드 소환',
+    card_sell: '카드 판매',
+    card_fuse: '카드 합성',
+    coupon: '쿠폰',
+    minigame: '미니게임',
+    shop_purchase: '상점 구매',
+    shop_equip: '코스메틱 장착',
+    shop_unequip: '코스메틱 해제',
+    market_listing: '마켓 등록',
+    market_purchase: '마켓 구매',
+    market_sale: '마켓 판매',
+    market_bid: '경매 입찰',
+    market_bid_refund: '입찰 환불',
+    card_delete_refund: '카드 삭제 보상',
+    admin_streamer_delete: '관리자 카드 삭제',
+    trade: '1:1 거래',
+    manual_adjustment: '수동 조정',
+    admin_reset: '관리자 초기화',
+    unknown: '기타'
+  };
+
+  const assetEventSubject = (event: AssetEventLogEntry) => {
+    if (event.asset_type === 'point') {
+      const amount = Number(event.amount || 0);
+      return `${amount > 0 ? '+' : ''}${amount.toLocaleString()}P`;
+    }
+    if (event.asset_type === 'card') {
+      const name = event.streamer_name || event.channel_id || '카드';
+      const serial = event.serial_number ? ` #${event.serial_number}` : '';
+      return `${name} ${event.star ?? 0}성${serial}`;
+    }
+    if (event.asset_type === 'cosmetic') {
+      return event.item_name || (event.item_id ? `아이템 #${event.item_id}` : '코스메틱');
+    }
+    if (event.asset_type === 'ticket') return `티켓 x${Number(event.quantity || 1).toLocaleString()}`;
+    return event.description || event.reason;
+  };
+
+  const assetEventActorLabel = (event: AssetEventLogEntry) =>
+    event.username || event.user_id || event.from_username || event.from_user_id || '대상 없음';
+
+  const assetEventRelationLabel = (event: AssetEventLogEntry) => {
+    if (event.from_user_id || event.to_user_id) {
+      const from = event.from_username || event.from_user_id || '출발 없음';
+      const to = event.to_username || event.to_user_id || '도착 없음';
+      return `${from} -> ${to}`;
+    }
+    if (event.counterparty_user_id) {
+      return `상대: ${event.counterparty_username || event.counterparty_user_id}`;
+    }
+    return null;
+  };
+
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     { id: 'users', label: '유저', icon: Users },
@@ -1316,6 +1475,7 @@ export const AdminTab: React.FC = () => {
     { id: 'push', label: '푸시', icon: BellRing },
     { id: 'reports', label: '신고·밴', icon: AlertTriangle },
     { id: 'trades', label: '1:1 거래', icon: ArrowRightLeft },
+    { id: 'asset-events', label: '자산 기록', icon: Activity },
     { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
     { id: 'shop', label: '상점 관리', icon: Store },
     { id: 'maintenance', label: 'DB 초기화', icon: Database }
@@ -2330,6 +2490,169 @@ export const AdminTab: React.FC = () => {
               >
                 다음
               </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {subTab === 'asset-events' && (
+        <section className="space-y-4">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-1.5">
+                  <Activity className="h-4 w-4 text-primary" /> 전체 자산 변동 기록
+                </h3>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  카드, 포인트, 코스메틱, 티켓의 추가·이동·삭제·환불·장착 내역을 자산 단위로 확인합니다.
+                </p>
+              </div>
+              <button
+                onClick={() => { fetchAssetEvents(true); fetchAssetSuspects(); }}
+                className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${assetEventsLoading || assetSuspectsLoading ? 'animate-spin' : ''}`} /> 새로고침
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_150px_170px]">
+              <input
+                type="text"
+                placeholder="유저 ID, 닉네임, 카드/아이템/출처 검색"
+                value={assetEventSearch}
+                onChange={(e) => setAssetEventSearch(e.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              />
+              <select
+                value={assetEventType}
+                onChange={(e) => setAssetEventType(e.target.value as AssetEventAssetType | 'ALL')}
+                className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              >
+                {Object.entries(assetTypeLabel).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <select
+                value={assetEventSource}
+                onChange={(e) => setAssetEventSource(e.target.value)}
+                className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs"
+              >
+                {Object.entries(assetSourceLabel).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="space-y-2">
+                {assetEventsLoading && assetEvents.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">자산 기록을 불러오는 중입니다.</div>
+                ) : assetEvents.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">조건에 맞는 자산 기록이 없습니다.</div>
+                ) : (
+                  assetEvents.map((event) => {
+                    const relation = assetEventRelationLabel(event);
+                    const action = assetActionLabel[event.action] || event.action;
+                    const source = assetSourceLabel[event.source_type] || event.source_type;
+                    return (
+                      <article key={event.id} className="rounded-xl border border-border bg-secondary/20 p-4">
+                        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-black text-foreground">#{event.id}</span>
+                              <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                {assetTypeLabel[event.asset_type] || event.asset_type} · {action}
+                              </span>
+                              <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{source}</span>
+                              <span className="text-[10px] text-muted-foreground">{event.created_at ? formatLocalDateTime(event.created_at) : '시간 없음'}</span>
+                            </div>
+                            <p className="mt-2 text-sm font-black text-foreground">{assetEventSubject(event)}</p>
+                            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                              <span>대상: {assetEventActorLabel(event)}</span>
+                              {relation && <span>{relation}</span>}
+                              {event.source_id && <span>출처 ID: {event.source_id}</span>}
+                              {event.balance_after != null && <span>잔액: {event.balance_after.toLocaleString()}P</span>}
+                            </div>
+                            {(event.description || event.reason) && (
+                              <p className="mt-2 text-[11px] text-muted-foreground">{event.description || event.reason}</p>
+                            )}
+                          </div>
+                          <div className="shrink-0 text-right text-[10px] text-muted-foreground">
+                            {event.card_id && <p>card #{event.card_id}</p>}
+                            {event.item_id && <p>item #{event.item_id}</p>}
+                            {event.channel_id && <p className="max-w-[180px] truncate">{event.channel_id}</p>}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+
+                {assetEventsNextBeforeId && (
+                  <div className="flex justify-center pt-2">
+                    <button
+                      onClick={() => fetchAssetEvents(false)}
+                      disabled={assetEventsLoading}
+                      className="rounded-lg border border-border px-4 py-2 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    >
+                      더 보기
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <aside className="space-y-3">
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-amber-700 dark:text-amber-200">의심 계정 요약</h4>
+                    <span className="text-[10px] text-muted-foreground">최근 7일</span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {assetSuspectsLoading ? (
+                      <p className="text-[11px] text-muted-foreground">요약 계산 중입니다.</p>
+                    ) : assetSuspects.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground">현재 기준으로 표시할 후보가 없습니다.</p>
+                    ) : (
+                      assetSuspects.slice(0, 8).map((suspect) => (
+                        <div key={suspect.user_id} className="rounded-lg bg-card/80 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-black">{suspect.username || '미확인 유저'}</p>
+                              <p className="truncate text-[10px] text-muted-foreground">{suspect.user_id}</p>
+                            </div>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                              suspect.severity === 'high'
+                                ? 'bg-red-500/10 text-red-500'
+                                : suspect.severity === 'medium'
+                                  ? 'bg-amber-500/10 text-amber-600'
+                                  : 'bg-secondary text-muted-foreground'
+                            }`}>
+                              {suspect.severity === 'high' ? '높음' : suspect.severity === 'medium' ? '중간' : '낮음'}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-[11px] text-muted-foreground">{suspect.reasons.join(' · ')}</p>
+                          <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+                            <span>이벤트 {suspect.total_events.toLocaleString()}건</span>
+                            <span>카드 이동 {suspect.card_moves.toLocaleString()}건</span>
+                            <span>포인트 유입 {suspect.point_income.toLocaleString()}P</span>
+                            <span>코스메틱 {suspect.cosmetic_events.toLocaleString()}건</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-secondary/20 p-4">
+                  <h4 className="text-xs font-black text-foreground">검토 주의사항</h4>
+                  <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                    <li>로그는 기능 배포 이후부터 누적되며, 과거 누락분은 기존 거래/포인트 원장과 함께 확인해야 합니다.</li>
+                    <li>의심 요약은 자동 후보 추출입니다. 제재 전에는 거래 원장, 신고, 접속 제한 기록, 실제 보유 상태를 교차 확인해야 합니다.</li>
+                    <li>동명이인 가능성이 있으므로 닉네임보다 계정 고유 ID와 카드 channel_id를 기준으로 판단해야 합니다.</li>
+                    <li>경매 예약금, 환불, 코스메틱 제외 거래의 반환 이벤트는 정상 흐름에서도 짧은 시간에 여러 건 발생할 수 있습니다.</li>
+                  </ul>
+                </div>
+              </aside>
             </div>
           </div>
         </section>

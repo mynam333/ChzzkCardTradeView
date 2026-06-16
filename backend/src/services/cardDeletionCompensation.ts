@@ -5,6 +5,7 @@ import {
 import type { Streamer } from '../repositories/interfaces';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
+import { recordAssetEvent } from './assetEventLog';
 
 export type DeletedCardCompensationTarget = {
   user_id: string;
@@ -118,6 +119,18 @@ const grantPointRefund = async (
         metadata
       });
     if (error) throw error;
+    await recordAssetEvent({
+      userId,
+      assetType: 'point',
+      action: 'refund',
+      amount,
+      balanceAfter: user?.point ?? null,
+      sourceType,
+      sourceId: metadata.channel_id == null ? null : String(metadata.channel_id),
+      reason,
+      description,
+      metadata
+    });
     return;
   }
 
@@ -173,6 +186,23 @@ export const grantCardDeletionCompensations = async (
   for (const compensation of users) {
     if (compensation.free_draw_tickets > 0) {
       await userRepository.addBonusFreeDrawTickets(compensation.user_id, compensation.free_draw_tickets);
+      await recordAssetEvent({
+        userId: compensation.user_id,
+        assetType: 'ticket',
+        action: 'add',
+        quantity: compensation.free_draw_tickets,
+        sourceType: 'card_delete_refund',
+        sourceId: streamer.channel_id,
+        reason: 'card_delete_free_draw_ticket_refund',
+        description: '카드 삭제 보상 추가 무료 소환 티켓 지급',
+        channelId: streamer.channel_id,
+        metadata: {
+          channel_id: streamer.channel_id,
+          streamer_name: streamer.name,
+          deleted_count: compensation.deleted_count,
+          ticket_compensated_cards: compensation.ticket_compensated_cards
+        }
+      });
     }
     if (compensation.point_refund > 0) {
       await grantPointRefund(compensation.user_id, compensation.point_refund, {

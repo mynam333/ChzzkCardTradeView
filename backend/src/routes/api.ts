@@ -57,6 +57,11 @@ import {
 } from '../controllers/pushController';
 import { claimTutorialGachaTicket, getTutorialProgress, markTutorialCompleted } from '../controllers/tutorialController';
 import { getPublicLandingStats } from '../controllers/publicStatsController';
+import {
+  getMyAssetEvents,
+  getAdminAssetEvents,
+  getAdminAssetEventSuspects
+} from '../controllers/assetEventController';
 
 import {
   getUserMe,
@@ -286,6 +291,7 @@ router.get('/image-proxy', async (req, res, next) => {
   }
 });
 router.get('/users/me', authMiddleware, banCheckMiddleware, getUserMe);
+router.get('/users/me/asset-events', authMiddleware, banCheckMiddleware, getMyAssetEvents);
 router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
 router.delete('/users/me', authMiddleware, deleteMyAccount);
 router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
@@ -587,6 +593,10 @@ router.post('/admin/reports/:report_id/puzzle-exclude', authMiddleware, adminMid
 
 // 관리자 대시보드 통계
 router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
+
+// 관리자 자산 변동 감사 로그 및 의심 계정 요약
+router.get('/admin/asset-events', authMiddleware, adminMiddleware, getAdminAssetEvents);
+router.get('/admin/asset-events/suspects', authMiddleware, adminMiddleware, getAdminAssetEventSuspects);
 
 // 관리자 유저 목록 (닉네임/채널ID 검색 + 페이지네이션)
 router.get('/admin/users', authMiddleware, adminMiddleware, listUsers);

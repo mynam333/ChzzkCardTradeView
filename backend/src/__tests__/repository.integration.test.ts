@@ -1227,6 +1227,10 @@ describe('MarketRepository 재등록 제약', () => {
       INSERT INTO user_cards (user_id, channel_id, serial_number, star)
       VALUES ('hide-seller', 'hide-channel', 1, 0)
     `).run().lastInsertRowid);
+    const recentCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('hide-seller', 'hide-channel', 2, 0)
+    `).run().lastInsertRowid);
 
     const listing = await marketRepository.create({
       seller_id: 'hide-seller',
@@ -1236,14 +1240,25 @@ describe('MarketRepository 재등록 제약', () => {
     expect(await marketRepository.buyAtomic(listing.id as number, 'hide-buyer')).toMatchObject({ ok: true });
     const soldUpdatedAt = '2026-01-01T00:00:00.000Z';
     db.prepare('UPDATE market_listings SET updated_at = ? WHERE id = ?').run(soldUpdatedAt, listing.id);
+    const recentListing = await marketRepository.create({
+      seller_id: 'hide-seller',
+      user_card_id: recentCardId,
+      price: 2000
+    });
+    expect(await marketRepository.buyAtomic(recentListing.id as number, 'hide-buyer')).toMatchObject({ ok: true });
+    db.prepare('UPDATE market_listings SET updated_at = ? WHERE id = ?').run('2026-01-02T00:00:00.000Z', recentListing.id);
+    expect(await marketRepository.getRecentPrice('hide-channel')).toBe(2000);
 
     expect(await marketRepository.hideForSeller(listing.id as number, 'hide-seller')).toBe(true);
-    expect(await marketRepository.listByUser('hide-seller')).toEqual([]);
+    const visibleMyListings = await marketRepository.listByUser('hide-seller');
+    expect(visibleMyListings.map((item) => item.id)).not.toContain(listing.id);
+    expect(visibleMyListings.map((item) => item.id)).toContain(recentListing.id);
     expect(db.prepare('SELECT status, seller_hidden_at, updated_at FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
       status: 'SOLD',
       seller_hidden_at: expect.any(String),
       updated_at: soldUpdatedAt
     });
+    expect(await marketRepository.getRecentPrice('hide-channel')).toBe(2000);
     const sellerHistory = await marketRepository.listHistory('hide-seller');
     const buyerHistory = await marketRepository.listHistory('hide-buyer');
     expect(sellerHistory.map((item) => item.id)).toContain(listing.id);

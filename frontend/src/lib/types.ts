@@ -157,6 +157,88 @@ export interface PointAuditResponse {
   next_before_id: number | null;
 }
 
+export type AssetEventAssetType = 'card' | 'point' | 'cosmetic' | 'ticket' | 'title' | 'unknown';
+export type AssetEventAction =
+  | 'add'
+  | 'remove'
+  | 'move'
+  | 'delete'
+  | 'update'
+  | 'spend'
+  | 'refund'
+  | 'reserve'
+  | 'release'
+  | 'equip'
+  | 'unequip';
+
+export interface AssetEventLogEntry {
+  id: number;
+  event_key: string | null;
+  user_id: string | null;
+  username?: string | null;
+  user_deleted_at?: string | null;
+  counterparty_user_id: string | null;
+  counterparty_username?: string | null;
+  counterparty_deleted_at?: string | null;
+  from_user_id: string | null;
+  from_username?: string | null;
+  to_user_id: string | null;
+  to_username?: string | null;
+  asset_type: AssetEventAssetType;
+  action: AssetEventAction;
+  amount: number | null;
+  quantity: number | null;
+  balance_after: number | null;
+  source_type: string;
+  source_id: string | null;
+  reason: string;
+  description: string | null;
+  card_id: number | null;
+  channel_id: string | null;
+  streamer_name?: string | null;
+  serial_number: number | null;
+  star: number | null;
+  item_id: number | null;
+  item_name?: string | null;
+  item_type: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AssetEventListResponse {
+  entries: AssetEventLogEntry[];
+  page_summary: {
+    point_income: number;
+    point_expense: number;
+    cards: number;
+    cosmetics: number;
+    tickets: number;
+  };
+  next_before_id: number | null;
+}
+
+export interface AssetEventSuspect {
+  user_id: string;
+  username: string | null;
+  user_deleted_at: string | null;
+  severity: 'high' | 'medium' | 'low';
+  reasons: string[];
+  total_events: number;
+  point_income: number;
+  point_expense: number;
+  card_moves: number;
+  card_adds: number;
+  card_deletes: number;
+  cosmetic_events: number;
+  negative_balance_events: number;
+  last_event_at: string | null;
+}
+
+export interface AssetEventSuspectResponse {
+  items: AssetEventSuspect[];
+  days: number;
+}
+
 export interface TradeOfferCard {
   channel_id: string;
   star?: number;

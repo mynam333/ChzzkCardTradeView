@@ -19,9 +19,12 @@ import {
   Trash2,
   Sparkles,
   Send,
-  RefreshCw
+  RefreshCw,
+  History
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
+import type { AssetEventAssetType, AssetEventListResponse, AssetEventLogEntry } from '@/lib/types';
+import { formatLocalDateTime } from '@/lib/time';
 import { subscribeToPush, isPushSupported } from '@/lib/push';
 import { ProfileModal } from './ProfileModal';
 import { cardImage } from '@/lib/cosmetics';
@@ -69,6 +72,9 @@ export const MyInfoTab: React.FC = () => {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pwaAutoTriggeredRef = useRef(false);
+  const [myInfoView, setMyInfoView] = useState<'profile' | 'records'>(
+    searchParams.get('tab') === 'records' ? 'records' : 'profile'
+  );
 
   // 쿠폰 사용 입력 상태
   const [couponCode, setCouponCode] = useState('');
@@ -93,6 +99,12 @@ export const MyInfoTab: React.FC = () => {
   const [blockSearch, setBlockSearch] = useState('');
   const [blockedUsers, setBlockedUsers] = useState<{ id: string; username: string; avatar_url: string }[]>([]);
   const [blocking, setBlocking] = useState(false);
+
+  // 내 자산 변동 기록
+  const [assetEvents, setAssetEvents] = useState<AssetEventLogEntry[]>([]);
+  const [assetEventsNextBeforeId, setAssetEventsNextBeforeId] = useState<number | null>(null);
+  const [assetEventsLoading, setAssetEventsLoading] = useState(false);
+  const [assetEventType, setAssetEventType] = useState<AssetEventAssetType | 'ALL'>('ALL');
 
   // 스트리머 프로필 커스텀 이미지 업로드 상태 (지연 업로드)
   const [previewBlob, setPreviewBlob] = useState<string | null>(null);
@@ -191,6 +203,48 @@ export const MyInfoTab: React.FC = () => {
       if (res.ok) setBlockedUsers(await res.json());
     } catch { /* noop */ }
   };
+
+  const handleMyInfoViewChange = (view: 'profile' | 'records') => {
+    setMyInfoView(view);
+    const params = new URLSearchParams(window.location.search);
+    if (view === 'records') params.set('tab', 'records');
+    else params.delete('tab');
+    const query = params.toString();
+    router.push(query ? `/my-info?${query}` : '/my-info');
+  };
+
+  const fetchMyAssetEvents = async (reset = true) => {
+    if (!reset && !assetEventsNextBeforeId) return;
+    try {
+      setAssetEventsLoading(true);
+      const params = new URLSearchParams({ limit: '50' });
+      if (!reset && assetEventsNextBeforeId) params.set('before_id', String(assetEventsNextBeforeId));
+      if (assetEventType !== 'ALL') params.set('asset_type', assetEventType);
+      const res = await apiFetch(`/users/me/asset-events?${params.toString()}`);
+      if (!res.ok) {
+        toast('기록을 불러오지 못했습니다.', 'error');
+        return;
+      }
+      const data = await res.json() as AssetEventListResponse;
+      setAssetEvents((prev) => reset ? (data.entries || []) : [...prev, ...(data.entries || [])]);
+      setAssetEventsNextBeforeId(data.next_before_id || null);
+    } catch {
+      toast('서버와의 통신 오류가 발생했습니다.', 'error');
+    } finally {
+      setAssetEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    setMyInfoView(tab === 'records' ? 'records' : 'profile');
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!user || myInfoView !== 'records') return;
+    fetchMyAssetEvents(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, myInfoView, assetEventType]);
 
   const handleEquipTitle = async (titleId: number | null) => {
     setTitleSaving(true);
@@ -366,6 +420,61 @@ export const MyInfoTab: React.FC = () => {
     if (reward.type === 'cosmetic') return `${reward.label || `아이템#${reward.item_id}`} ×${(reward.quantity || 0).toLocaleString()}`;
     if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
     return `추가 무료 소환 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
+  };
+
+  const assetTypeLabel: Record<AssetEventAssetType | 'ALL', string> = {
+    ALL: '전체',
+    card: '카드',
+    point: '포인트',
+    cosmetic: '코스메틱',
+    ticket: '티켓',
+    title: '칭호',
+    unknown: '기타'
+  };
+
+  const assetActionLabel: Record<string, string> = {
+    add: '추가',
+    remove: '차감',
+    move: '이동',
+    delete: '삭제',
+    update: '수정',
+    spend: '사용',
+    refund: '환불',
+    reserve: '예약',
+    release: '해제',
+    equip: '장착',
+    unequip: '해제/반환'
+  };
+
+  const assetEventSubject = (event: AssetEventLogEntry) => {
+    if (event.asset_type === 'point') {
+      const amount = Number(event.amount || 0);
+      return `${amount > 0 ? '+' : ''}${amount.toLocaleString()}P`;
+    }
+    if (event.asset_type === 'card') {
+      const name = event.streamer_name || event.channel_id || '카드';
+      const serial = event.serial_number ? ` #${event.serial_number}` : '';
+      return `${name} ${event.star ?? 0}성${serial}`;
+    }
+    if (event.asset_type === 'cosmetic') {
+      return event.item_name || (event.item_id ? `아이템 #${event.item_id}` : '코스메틱');
+    }
+    if (event.asset_type === 'ticket') {
+      return `티켓 x${Number(event.quantity || 1).toLocaleString()}`;
+    }
+    return event.description || event.reason;
+  };
+
+  const assetEventRelationLabel = (event: AssetEventLogEntry) => {
+    if (event.from_user_id || event.to_user_id) {
+      const from = event.from_user_id === user.id ? '나' : (event.from_username || event.from_user_id || '출발 없음');
+      const to = event.to_user_id === user.id ? '나' : (event.to_username || event.to_user_id || '도착 없음');
+      return `${from} -> ${to}`;
+    }
+    if (event.counterparty_user_id) {
+      return `상대: ${event.counterparty_user_id === user.id ? '나' : (event.counterparty_username || event.counterparty_user_id)}`;
+    }
+    return null;
   };
 
   const handleClaimCoupon = async () => {
@@ -615,6 +724,118 @@ export const MyInfoTab: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
+      <div className="flex rounded-2xl bg-secondary/45 p-1">
+        {[
+          { id: 'profile' as const, label: '프로필', icon: User },
+          { id: 'records' as const, label: '기록', icon: History }
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const active = myInfoView === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleMyInfoViewChange(tab.id)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black transition ${active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {myInfoView === 'records' && (
+        <section className="cute-surface rounded-[2rem] p-6 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-black flex items-center gap-2">
+                <History className="h-4.5 w-4.5 text-primary" /> 내 자산 기록
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                내 계정이 직접 관련된 카드, 포인트, 코스메틱, 티켓 변동만 표시됩니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchMyAssetEvents(true)}
+              className="cute-wiggle-hover inline-flex items-center justify-center gap-1.5 rounded-2xl bg-secondary px-4 py-2 text-xs font-black text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${assetEventsLoading ? 'animate-spin' : ''}`} />
+              새로고침
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(assetTypeLabel).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setAssetEventType(value as AssetEventAssetType | 'ALL')}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-black transition ${assetEventType === value ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {assetEventsLoading && assetEvents.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">기록을 불러오는 중입니다.</div>
+            ) : assetEvents.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">표시할 기록이 없습니다.</div>
+            ) : (
+              assetEvents.map((event) => {
+                const relation = assetEventRelationLabel(event);
+                return (
+                  <article key={event.id} className="rounded-2xl border border-border bg-card/75 p-4 shadow-sm">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary">
+                            {assetTypeLabel[event.asset_type] || event.asset_type} · {assetActionLabel[event.action] || event.action}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">{event.created_at ? formatLocalDateTime(event.created_at) : '시간 없음'}</span>
+                        </div>
+                        <p className="mt-2 text-sm font-black text-foreground">{assetEventSubject(event)}</p>
+                        <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                          {relation && <span>{relation}</span>}
+                          {event.source_id && <span>출처 ID: {event.source_id}</span>}
+                          {event.balance_after != null && <span>잔액: {event.balance_after.toLocaleString()}P</span>}
+                        </div>
+                        {(event.description || event.reason) && (
+                          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{event.description || event.reason}</p>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-left text-[10px] text-muted-foreground sm:text-right">
+                        {event.card_id && <p>card #{event.card_id}</p>}
+                        {event.item_id && <p>item #{event.item_id}</p>}
+                        {event.channel_id && <p className="max-w-[180px] truncate">{event.channel_id}</p>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+
+          {assetEventsNextBeforeId && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => fetchMyAssetEvents(false)}
+                disabled={assetEventsLoading}
+                className="rounded-2xl border border-border px-5 py-2 text-xs font-black text-muted-foreground hover:text-foreground disabled:opacity-40"
+              >
+                더 보기
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {myInfoView === 'profile' && (
+        <>
 
       {/* 프로필 + 대표 카드 */}
       <section data-tour="my-info-profile" className="cute-surface rounded-[2rem] p-6">
@@ -1222,6 +1443,8 @@ export const MyInfoTab: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { getMysqlDb } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
+import { recordMysqlAssetEvent } from '../../services/assetEventLog';
 import { ICouponRepository, Coupon, CouponRedeemResult } from '../interfaces';
 import { couponToRewards, parseCouponRewards, rewardsToJson } from '../../utils/couponRewards';
 
@@ -124,13 +125,40 @@ export class MysqlCouponRepository implements ICouponRepository {
           const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', reward.channel_id);
           const baseSn = Number(latest?.max_sn || 0);
           for (let i = 1; i <= quantity; i++) {
-            await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, baseSn + i);
+            const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, baseSn + i);
+            await recordMysqlAssetEvent(tx, {
+              userId,
+              assetType: 'card',
+              action: 'add',
+              quantity: 1,
+              sourceType: 'coupon',
+              sourceId: couponId,
+              reason: 'coupon_card_reward',
+              description: `쿠폰 ${coupon.code} 카드 보상`,
+              cardId: Number(result.insertId),
+              channelId: reward.channel_id,
+              serialNumber: baseSn + i,
+              star: 0,
+              metadata: { coupon_id: couponId, coupon_code: coupon.code, reward_quantity: quantity }
+            });
           }
         } else if (reward.type === 'cosmetic') {
           await tx.run(`
             INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)
           `, userId, reward.item_id, Number(reward.quantity || 0));
+          await recordMysqlAssetEvent(tx, {
+            userId,
+            assetType: 'cosmetic',
+            action: 'add',
+            quantity: Number(reward.quantity || 0),
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_cosmetic_reward',
+            description: `쿠폰 ${coupon.code} 코스메틱 보상`,
+            itemId: Number(reward.item_id),
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'minigame_ticket') {
           const now = new Date().toISOString();
           await tx.run(`
@@ -138,8 +166,33 @@ export class MysqlCouponRepository implements ICouponRepository {
             VALUES (?, 5, ?, ?, ?)
             ON DUPLICATE KEY UPDATE bonus_tickets = bonus_tickets + VALUES(bonus_tickets), updated_at = VALUES(updated_at)
           `, userId, Number(reward.quantity || 0), now, now);
+          await recordMysqlAssetEvent(tx, {
+            userId,
+            assetType: 'ticket',
+            action: 'add',
+            quantity: Number(reward.quantity || 0),
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_minigame_ticket_reward',
+            description: `쿠폰 ${coupon.code} 미니게임 티켓 보상`,
+            itemType: 'minigame_ticket',
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         } else if (reward.type === 'free_draw_ticket') {
-          await tx.run('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?', Number(reward.quantity || 0), userId);
+          const quantity = Number(reward.quantity || 0);
+          await tx.run('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?', quantity, userId);
+          await recordMysqlAssetEvent(tx, {
+            userId,
+            assetType: 'ticket',
+            action: 'add',
+            quantity,
+            sourceType: 'coupon',
+            sourceId: couponId,
+            reason: 'coupon_free_draw_ticket_reward',
+            description: `쿠폰 ${coupon.code} 추가 무료 소환 티켓 보상`,
+            itemType: 'free_draw_ticket',
+            metadata: { coupon_id: couponId, coupon_code: coupon.code }
+          });
         }
       }
 
