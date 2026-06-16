@@ -256,6 +256,11 @@ export const ShopTab: React.FC = () => {
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
   const [purchasingListingId, setPurchasingListingId] = useState<number | null>(null);
+  const [auctionBuyConfirm, setAuctionBuyConfirm] = useState<{
+    listingId: number;
+    price: number;
+    streamerName: string;
+  } | null>(null);
   const [biddingListingId, setBiddingListingId] = useState<number | null>(null);
   const [bidInputs, setBidInputs] = useState<Record<number, string>>({});
   const [cancellingListingId, setCancellingListingId] = useState<number | null>(null);
@@ -844,6 +849,25 @@ export const ShopTab: React.FC = () => {
     } finally {
       setPurchasingListingId(null);
     }
+  };
+
+  const openAuctionBuyConfirm = (listingId: number, price: number, streamerName: string) => {
+    if (!user) {
+      toast('로그인이 필요합니다.', 'warning');
+      return;
+    }
+    if (user.point < price) {
+      toast('포인트가 부족합니다.', 'warning');
+      return;
+    }
+    setAuctionBuyConfirm({ listingId, price, streamerName });
+  };
+
+  const confirmAuctionBuyNow = () => {
+    if (!auctionBuyConfirm) return;
+    const target = auctionBuyConfirm;
+    setAuctionBuyConfirm(null);
+    handleBuyMarketItem(target.listingId, target.price, target.streamerName);
   };
 
   const handleCancelMarketItem = async (listingId: number) => {
@@ -1890,12 +1914,20 @@ export const ShopTab: React.FC = () => {
                               )}
                               {(!isAuction || buyNowPrice > 0) && (
                                 <button
-                                  onClick={() => handleBuyMarketItem(listing.id, isAuction ? buyNowPrice : listing.price, streamer?.name || '스트리머')}
+                                  onClick={() => {
+                                    const finalPrice = isAuction ? buyNowPrice : listing.price;
+                                    const streamerName = streamer?.name || '스트리머';
+                                    if (isAuction) {
+                                      openAuctionBuyConfirm(listing.id, finalPrice, streamerName);
+                                    } else {
+                                      handleBuyMarketItem(listing.id, finalPrice, streamerName);
+                                    }
+                                  }}
                                   disabled={purchasingListingId === listing.id || (isAuction && buyNowPrice <= 0)}
                                   className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-[10px] font-bold text-primary-foreground shadow-sm transition hover:bg-primary/95 active:scale-95 disabled:opacity-50"
                                 >
                                   <ShoppingBag className="h-3 w-3" />
-                                  {purchasingListingId === listing.id ? '처리 중...' : isAuction ? `${buyNowPrice.toLocaleString()}P 즉시구매` : '구매하기'}
+                                  {purchasingListingId === listing.id ? '처리 중...' : isAuction ? `${buyNowPrice.toLocaleString()}P 즉시낙찰` : '구매하기'}
                                 </button>
                               )}
                               {streamer?.channel_id && (
@@ -2283,6 +2315,57 @@ export const ShopTab: React.FC = () => {
               );
             })()}
           </section>
+        </div>
+      )}
+
+      {auctionBuyConfirm && (
+        <div
+          className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setAuctionBuyConfirm(null)}
+        >
+          <div
+            className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/12 text-violet-500">
+              <Gavel className="h-6 w-6" />
+            </div>
+            <h4 className="text-base font-black text-foreground">즉시 낙찰 확인</h4>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              <b className="text-foreground">{auctionBuyConfirm.streamerName}</b> 경매를 즉시 낙찰할까요?
+              확인하면 입찰 마감까지 기다리지 않고 바로 거래가 체결됩니다.
+            </p>
+            <div className="mt-4 rounded-2xl border border-violet-200/70 bg-violet-50/80 px-4 py-3 text-left dark:border-violet-300/15 dark:bg-violet-400/10">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-muted-foreground">즉시 낙찰가</span>
+                <span className="cute-number-font inline-flex items-center gap-1 font-black text-violet-600 dark:text-violet-200">
+                  <Coins className="h-3.5 w-3.5" />
+                  {auctionBuyConfirm.price.toLocaleString()} P
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                <span className="font-bold text-muted-foreground">낙찰 후 예상 보유 포인트</span>
+                <span className="cute-number-font font-black text-foreground">
+                  {Math.max(0, (user?.point || 0) - auctionBuyConfirm.price).toLocaleString()} P
+                </span>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-center gap-2">
+              <button
+                onClick={() => setAuctionBuyConfirm(null)}
+                className="rounded-xl bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground transition hover:bg-secondary/80"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmAuctionBuyNow}
+                className="cute-wiggle-hover inline-flex items-center gap-1 rounded-xl bg-violet-500 px-4 py-2 text-xs font-black text-white shadow-sm shadow-violet-500/20 transition hover:bg-violet-600"
+              >
+                <Gavel className="h-3.5 w-3.5" />
+                즉시 낙찰
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
