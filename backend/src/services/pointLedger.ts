@@ -10,6 +10,7 @@ export type PointLedgerSourceType =
   | 'market_sale'
   | 'market_bid'
   | 'market_bid_refund'
+  | 'card_delete_refund'
   | 'trade'
   | 'admin_reset'
   | 'manual_adjustment'

@@ -140,6 +140,7 @@ export const GachaTab: React.FC = () => {
   const [requestPoint, setRequestPoint] = useState(0); // 상대에게 요청할 포인트
   const [offerCards, setOfferCards] = useState<{ [channelId: string]: number }>({}); // 내가 제시할 카드 { channel_id: count }
   const [requestCards, setRequestCards] = useState<{ [channelId: string]: number }>({}); // 상대에게 요청할 카드 { channel_id: count }
+  const [tradeOfferWithCosmetics, setTradeOfferWithCosmetics] = useState(false);
   const [tradeBusy, setTradeBusy] = useState(false);
   // 상대 검색/선택 및 상대 보유 카드
   const [receiverSearch, setReceiverSearch] = useState('');
@@ -156,6 +157,7 @@ export const GachaTab: React.FC = () => {
   const [rejectTradeTarget, setRejectTradeTarget] = useState<any | null>(null);
   const [rejectTradeReason, setRejectTradeReason] = useState('');
   const [rejectTradeBusy, setRejectTradeBusy] = useState(false);
+  const [tradeConfirmCosmetics, setTradeConfirmCosmetics] = useState<Record<number, boolean>>({});
   // 교환 이력 모달 + 페이지네이션
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
@@ -682,13 +684,17 @@ export const GachaTab: React.FC = () => {
 
   const renderTradeOffer = (offer: any) => {
     const cards = Array.isArray(offer?.cards) ? offer.cards : [];
-    const items: { key: string; label: string; meta: string }[] = cards.map((c: any) => {
+    const items: { key: string; label: string; meta: string; cosmetics?: string[] }[] = cards.map((c: any) => {
       const star = Number(c.star || 0);
       const starLabel = star > 0 ? `${star}성` : '일반';
+      const cosmetics = (Array.isArray(c.cosmetics) ? c.cosmetics : [])
+        .flatMap((entry: any) => [entry?.border?.name, entry?.name_effect?.name])
+        .filter(Boolean);
       return {
         key: `${c.channel_id}#${star}`,
         label: tradeStreamerName(String(c.channel_id || ''), c.streamer_name),
-        meta: `${starLabel} ${Number(c.count || 0).toLocaleString()}장`
+        meta: `${starLabel} ${Number(c.count || 0).toLocaleString()}장`,
+        cosmetics
       };
     });
 
@@ -706,10 +712,31 @@ export const GachaTab: React.FC = () => {
 
     return (
       <div className="space-y-1">
+        {cards.length > 0 && (
+          <p className={`rounded-md border px-2 py-1 text-[9.5px] font-black ${
+            offer?.with_cosmetics
+              ? 'border-violet-400/25 bg-violet-400/10 text-violet-600 dark:text-violet-300'
+              : 'border-border/60 bg-background/35 text-muted-foreground'
+          }`}>
+            {offer?.with_cosmetics ? '코스메틱 포함' : '코스메틱은 해제 후 반환'}
+          </p>
+        )}
         {items.map((item) => (
           <div key={item.key} className="min-w-0 rounded-md bg-background/40 px-2 py-1">
             <p className="truncate font-bold text-foreground/85">{item.label}</p>
             <p className="text-[10px] font-semibold text-muted-foreground">{item.meta}</p>
+            {!!item.cosmetics?.length && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {item.cosmetics.slice(0, 4).map((name, index) => (
+                  <span key={`${item.key}-cosmetic-${index}`} className="rounded-full border border-violet-400/25 bg-violet-400/10 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 dark:text-violet-300">
+                    {name}
+                  </span>
+                ))}
+                {item.cosmetics.length > 4 && (
+                  <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">외 {item.cosmetics.length - 4}</span>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -727,8 +754,21 @@ export const GachaTab: React.FC = () => {
 
   const getOfferPoint = (offer: any) => Number(offer?.point || 0);
 
+  const selectionHasEquippedCosmetics = (selection: Record<string, number>) => Object.entries(selection).some(([key, count]) => {
+    if (count <= 0) return false;
+    const [channelId, starStr] = key.split('#');
+    const star = Number(starStr) || 0;
+    return inventory
+      .filter((card) => card.channel_id === channelId && (card.star || 0) === star)
+      .slice(0, count)
+      .some((card) => !!card.border || !!card.name_effect);
+  });
+
+  const offerHasEquippedCosmetics = selectionHasEquippedCosmetics(offerCards);
+
   const resetTradeForm = () => {
     setOfferCards({});
+    setTradeOfferWithCosmetics(false);
     setOfferPoint(0);
     setRequestPoint(0);
     setRequestCards({});
@@ -765,7 +805,7 @@ export const GachaTab: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({
           receiver_id: selectedReceiver.id,
-          sender_offer: { cards: offerList, point: offerPoint },
+          sender_offer: { cards: offerList, point: offerPoint, with_cosmetics: offerHasEquippedCosmetics && tradeOfferWithCosmetics },
           receiver_offer: { cards: reqList, point: requestPoint }
         })
       });
@@ -786,9 +826,12 @@ export const GachaTab: React.FC = () => {
   };
 
   // 교환 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED)
-  const handleConfirmTrade = async (tradeId: number) => {
+  const handleConfirmTrade = async (tradeId: number, withCosmetics = false) => {
     try {
-      const res = await apiFetch(`/trades/${tradeId}/confirm`, { method: 'POST' });
+      const res = await apiFetch(`/trades/${tradeId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ with_cosmetics: withCosmetics })
+      });
       const data = await res.json();
       showAlert(res.ok ? '동의 완료' : '처리 실패', data.message || '', res.ok ? 'success' : 'error');
       fetchActiveTrades();
@@ -1173,6 +1216,25 @@ export const GachaTab: React.FC = () => {
                     onChange={(e) => setOfferPoint(Math.max(0, Number(e.target.value)))}
                     className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none" />
                 </div>
+                <div className="flex items-start gap-2 rounded-lg border border-border/50 bg-secondary/20 p-2.5">
+                  <input
+                    type="checkbox"
+                    id="tradeOfferWithCosmetics"
+                    checked={offerHasEquippedCosmetics && tradeOfferWithCosmetics}
+                    disabled={!offerHasEquippedCosmetics}
+                    onChange={(e) => setTradeOfferWithCosmetics(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-border bg-secondary text-primary focus:ring-primary disabled:opacity-50"
+                  />
+                  <label
+                    htmlFor="tradeOfferWithCosmetics"
+                    className={`min-w-0 text-[11px] font-bold leading-relaxed select-none ${offerHasEquippedCosmetics ? 'cursor-pointer text-foreground' : 'text-muted-foreground'}`}
+                  >
+                    내가 보내는 카드에 장착된 코스메틱 포함
+                    <span className="block text-[9.5px] font-semibold text-muted-foreground">
+                      체크하지 않으면 체결 시 코스메틱은 내 보관함으로 돌아와요.
+                    </span>
+                  </label>
+                </div>
               </div>
 
               {/* 내가 요청: 상대 보유 카드(검색) + 포인트 */}
@@ -1225,7 +1287,7 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <p className="mt-4 text-[10px] leading-relaxed text-muted-foreground">
-              ※ 카드에 장착된 코스메틱(테두리·이름 효과)은 카드와 함께 상대에게 소유권이 넘어갑니다.
+              ※ 코스메틱 포함을 선택한 쪽만 장착 효과가 카드와 함께 넘어갑니다. 선택하지 않은 쪽의 코스메틱은 체결 시 원래 소유자 보관함으로 반환됩니다.
             </p>
 
             <div className="mt-2 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
@@ -1357,6 +1419,9 @@ export const GachaTab: React.FC = () => {
               const counterpartName = incoming ? (t.sender_username || t.sender_id) : (t.receiver_username || t.receiver_id);
               const confirmed = t.status === 'CONFIRMED';
               const givePoint = getOfferPoint(giveOffer);
+              const giveOfferHasCosmetics = (giveOffer?.cards || []).some((card: any) =>
+                (card.cosmetics || []).some((entry: any) => entry?.border || entry?.name_effect)
+              );
               // 단계 안내 라벨
               const stageLabel = confirmed
                 ? (incoming ? '내가 동의함 · 제안자 최종 승인 대기' : '상대가 동의함 · 내 최종 승인 필요')
@@ -1427,8 +1492,25 @@ export const GachaTab: React.FC = () => {
                       동의하면 내가 건네야 할 {givePoint.toLocaleString()}P가 최종 승인 전까지 예약됩니다.
                     </p>
                   )}
+                  {incoming && !confirmed && (giveOffer?.cards || []).length > 0 && (
+                    <label className="mt-2 flex items-start gap-2 rounded-lg border border-border/60 bg-background/35 px-2.5 py-2">
+                      <input
+                        type="checkbox"
+                        checked={giveOfferHasCosmetics && tradeConfirmCosmetics[t.id] === true}
+                        disabled={!giveOfferHasCosmetics}
+                        onChange={(e) => setTradeConfirmCosmetics((prev) => ({ ...prev, [t.id]: e.target.checked }))}
+                        className="mt-0.5 h-4 w-4 rounded border-border bg-secondary text-primary focus:ring-primary disabled:opacity-50"
+                      />
+                      <span className={`min-w-0 text-[10px] font-bold leading-relaxed ${giveOfferHasCosmetics ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        내가 건네는 카드에 코스메틱 포함
+                        <span className="block text-[9px] font-semibold text-muted-foreground">
+                          기본은 해제예요. 체크하지 않으면 내 보관함으로 반환됩니다.
+                        </span>
+                      </span>
+                    </label>
+                  )}
                   <p className="mt-2 text-[9.5px] leading-relaxed text-muted-foreground">
-                    ※ 카드에 장착된 코스메틱(테두리·이름 효과)은 카드와 함께 소유권이 이전됩니다.
+                    ※ 코스메틱 포함을 선택한 쪽만 장착 효과가 카드와 함께 이전됩니다.
                   </p>
                   <div className="mt-2 flex justify-end gap-2">
                     {/* 수신자: PENDING이면 '동의' 가능. 제안자: CONFIRMED면 '최종 승인' 가능. 양측 항상 취소/거절 가능 */}
@@ -1436,7 +1518,7 @@ export const GachaTab: React.FC = () => {
                       {incoming ? '거절' : '취소'}
                     </button>
                     {incoming && !confirmed && (
-                      <button onClick={() => handleConfirmTrade(t.id)} className="rounded-lg bg-primary px-4 py-1.5 text-[11px] font-bold text-primary-foreground hover:bg-primary/90">동의 (1단계)</button>
+                      <button onClick={() => handleConfirmTrade(t.id, giveOfferHasCosmetics && tradeConfirmCosmetics[t.id] === true)} className="rounded-lg bg-primary px-4 py-1.5 text-[11px] font-bold text-primary-foreground hover:bg-primary/90">동의 (1단계)</button>
                     )}
                     {!incoming && confirmed && (
                       <button onClick={() => handleFinalizeTrade(t.id)} className="rounded-lg bg-emerald-600 px-4 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700">최종 승인 (2단계)</button>
@@ -1992,6 +2074,7 @@ export const GachaTab: React.FC = () => {
         const exceedsMax = resultStar > 5;
         const canSubmit = selectedCount > 0 && !exceedsMax && resultStar > star && !fuseBusy;
         const resultValue = Math.round((streamer.base_value || 0) * starMult(Math.min(resultStar, 5)));
+        const hasEquippedCosmetic = !!(card.border || card.name_effect || (card as any).border_item_id || (card as any).name_effect_item_id);
 
         return (
           <div
@@ -2037,12 +2120,10 @@ export const GachaTab: React.FC = () => {
                     <div
                       style={{
                         height: '256px',
-                        containerType: 'inline-size',
-                        ...(borderClass(card.border) ? {} : (borderStyle(card.border) || {}))
+                        containerType: 'inline-size'
                       }}
                       className={`relative flex flex-col justify-between overflow-hidden rounded-2xl border border-border/80 bg-card shadow-xl ${resultStar >= 1 && resultStar <= 5 ? `card-star card-star-${resultStar}` : ''}`}
                     >
-                      <CosmeticFrame border={card.border} />
                       <div className="absolute inset-0 z-0 flex items-center justify-center bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 text-7xl font-black text-slate-500 dark:from-slate-700 dark:via-slate-800 dark:to-slate-950 dark:text-slate-500">
                         ?
                       </div>
@@ -2059,9 +2140,7 @@ export const GachaTab: React.FC = () => {
                               <span key={i} className="text-amber-300 text-[11px] leading-none">★</span>
                             ))}
                           </div>
-                          <CosmeticName effect={card.name_effect} className="block truncate text-sm font-black drop-shadow">
-                            {streamer.name}
-                          </CosmeticName>
+                          <span className="block truncate text-sm font-black drop-shadow">{streamer.name}</span>
                           <div className="flex items-center justify-between border-t border-white/15 pt-1">
                             <span className="text-[8.5px] text-zinc-300">예상 가치</span>
                             <span className="text-xs font-black text-emerald-300">{resultValue.toLocaleString()} P</span>
@@ -2085,6 +2164,11 @@ export const GachaTab: React.FC = () => {
                       같은 별의 카드를 재료로 쓸 때는 대상 카드 1장을 제외한 수량만 선택할 수 있습니다.
                     </p>
                   </div>
+                  {hasEquippedCosmetic && (
+                    <div className="rounded-[1.25rem] border border-amber-400/30 bg-amber-400/10 p-3 text-[11px] font-bold leading-relaxed text-amber-700 dark:text-amber-200">
+                      한계돌파가 완료되면 대상 카드에 장착된 코스메틱은 자동으로 해제되어 보유함으로 돌아갑니다.
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     {FUSE_STARS.map((materialStar) => {

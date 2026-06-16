@@ -11,12 +11,14 @@ import {
   reportRepository,
   streamerRepository,
   titleRepository,
+  tradeRepository,
   userCardRepository,
   userRepository
 } from '../repositories';
 import { getUserProfile, getUserRankings } from '../controllers/playController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
+import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
 
 /**
  * 실제 in-memory SQLite( better-sqlite3 )에 init-db.sql 스키마를 적재하여
@@ -472,6 +474,60 @@ describe('UserCardRepository 별 등급 분리', () => {
     expect((await userRepository.findById('seller'))?.point).toBe(2600);
   });
 
+  it('카드 삭제 보상은 뽑기비보다 비싼 카드는 포인트로, 그 외 카드는 티켓으로 지급한다', async () => {
+    seedUser(db, 'delete-low-holder', 100);
+    seedUser(db, 'delete-high-holder', 200);
+    seedUser(db, 'delete-mixed-holder', 300);
+    seedStreamer(db, 'delete-comp-channel', '삭제 보상 스트리머');
+    db.prepare("UPDATE streamers SET base_value = 5000 WHERE channel_id = 'delete-comp-channel'").run();
+    db.prepare("UPDATE system_configs SET value = '10000' WHERE key = 'draw_cost'").run();
+    db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('delete-low-holder', 'delete-comp-channel', 1, 0),
+             ('delete-high-holder', 'delete-comp-channel', 2, 5),
+             ('delete-mixed-holder', 'delete-comp-channel', 3, 0),
+             ('delete-mixed-holder', 'delete-comp-channel', 4, 4)
+    `).run();
+
+    const streamer = await streamerRepository.findById('delete-comp-channel');
+    const cards = await userCardRepository.findByChannel('delete-comp-channel');
+    const result = await grantCardDeletionCompensations(streamer!, cards);
+
+    expect(result).toMatchObject({
+      affected_users: 3,
+      cards_removed: 4,
+      total_point_refunded: 46000,
+      total_free_draw_tickets_granted: 2,
+      high_value_cards_refunded: 2,
+      ticket_compensated_cards: 2
+    });
+    expect((await userRepository.findById('delete-low-holder'))?.bonus_free_draw_tickets).toBe(1);
+    expect((await userRepository.findById('delete-high-holder'))?.point).toBe(25200);
+    expect((await userRepository.findById('delete-mixed-holder'))?.point).toBe(21300);
+    expect((await userRepository.findById('delete-mixed-holder'))?.bonus_free_draw_tickets).toBe(1);
+    expect(db.prepare(`
+      SELECT user_id, amount, balance_after, source_type, reason
+        FROM point_ledger_entries
+       WHERE source_type = 'card_delete_refund'
+       ORDER BY user_id
+    `).all()).toEqual([
+      {
+        user_id: 'delete-high-holder',
+        amount: 25000,
+        balance_after: 25200,
+        source_type: 'card_delete_refund',
+        reason: 'card_delete_refund'
+      },
+      {
+        user_id: 'delete-mixed-holder',
+        amount: 21000,
+        balance_after: 21300,
+        source_type: 'card_delete_refund',
+        reason: 'card_delete_refund'
+      }
+    ]);
+  });
+
   it('한계돌파는 대상과 같은 별 카드가 아니라 0성 카드만 재료로 소모한다', async () => {
     seedUser(db, 'fuser');
     seedStreamer(db, 'fuse-channel', '한계돌파 스트리머');
@@ -493,6 +549,153 @@ describe('UserCardRepository 별 등급 분리', () => {
       { serial_number: 1, star: 4 },
       { serial_number: 2, star: 3 }
     ]);
+  });
+
+  it('한계돌파는 대상과 재료 카드에 장착된 코스메틱을 보유함으로 반환하고 슬롯을 비운다', async () => {
+    seedUser(db, 'cosmetic-fuser');
+    seedStreamer(db, 'cosmetic-fuse-channel', '코스메틱 한계돌파 스트리머');
+    await createItem({
+      type: 'border',
+      name: '반환 테두리',
+      description: null,
+      price: 100,
+      style_json: null,
+      font_url: null,
+      font_family: null,
+      purchase_limit: 0
+    });
+    await createItem({
+      type: 'name_effect',
+      name: '반환 이름표',
+      description: null,
+      price: 100,
+      style_json: null,
+      font_url: null,
+      font_family: null,
+      purchase_limit: 0
+    });
+    const items = await getAllItems();
+    const borderItem = items.find((item) => item.type === 'border')!;
+    const nameItem = items.find((item) => item.type === 'name_effect')!;
+    db.prepare(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES ('cosmetic-fuser', ?, 0),
+             ('cosmetic-fuser', ?, 0)
+    `).run(borderItem.id, nameItem.id);
+    const targetId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id)
+      VALUES ('cosmetic-fuser', 'cosmetic-fuse-channel', 1, 1, ?)
+    `).run(borderItem.id).lastInsertRowid);
+    const materialId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, name_effect_item_id)
+      VALUES ('cosmetic-fuser', 'cosmetic-fuse-channel', 2, 0, ?)
+    `).run(nameItem.id).lastInsertRowid);
+
+    expect(await userCardRepository.fuse('cosmetic-fuser', 'cosmetic-fuse-channel', 1)).toEqual({
+      ok: true,
+      reason: 'OK',
+      newStar: 2
+    });
+
+    expect(db.prepare(`
+      SELECT star, border_item_id, name_effect_item_id
+        FROM user_cards
+       WHERE id = ?
+    `).get(targetId)).toEqual({
+      star: 2,
+      border_item_id: null,
+      name_effect_item_id: null
+    });
+    expect(db.prepare('SELECT id FROM user_cards WHERE id = ?').get(materialId)).toBeUndefined();
+    expect(db.prepare(`
+      SELECT item_id, quantity
+        FROM user_cosmetics
+       WHERE user_id = 'cosmetic-fuser'
+       ORDER BY item_id ASC
+    `).all()).toEqual([
+      { item_id: borderItem.id, quantity: 1 },
+      { item_id: nameItem.id, quantity: 1 }
+    ]);
+  });
+});
+
+describe('TradeRepository 코스메틱 포함 옵션', () => {
+  it('교환 체결 시 포함하지 않은 코스메틱은 원소유자에게 반환하고 포함한 코스메틱은 카드와 함께 이전한다', async () => {
+    seedUser(db, 'trade-sender', 1000);
+    seedUser(db, 'trade-receiver', 1000);
+    seedStreamer(db, 'trade-sender-channel', '보내는 카드');
+    seedStreamer(db, 'trade-receiver-channel', '받는 카드');
+    const borderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '교환 테두리', 100, '{"border":"1px solid cyan"}')
+    `).run().lastInsertRowid);
+    const nameEffectId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('name_effect', '교환 이름표', 100, '{"color":"cyan"}')
+    `).run().lastInsertRowid);
+    db.prepare(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES ('trade-sender', ?, 0),
+             ('trade-receiver', ?, 0)
+    `).run(borderId, nameEffectId);
+    const senderCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id)
+      VALUES ('trade-sender', 'trade-sender-channel', 1, 2, ?)
+    `).run(borderId).lastInsertRowid);
+    const receiverCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, name_effect_item_id)
+      VALUES ('trade-receiver', 'trade-receiver-channel', 1, 1, ?)
+    `).run(nameEffectId).lastInsertRowid);
+
+    const trade = await tradeRepository.create({
+      sender_id: 'trade-sender',
+      receiver_id: 'trade-receiver',
+      sender_offer: {
+        cards: [{ channel_id: 'trade-sender-channel', star: 2, count: 1 }],
+        point: 0,
+        with_cosmetics: false
+      },
+      receiver_offer: {
+        cards: [{ channel_id: 'trade-receiver-channel', star: 1, count: 1 }],
+        point: 0
+      }
+    });
+
+    expect(await tradeRepository.confirm(trade.id as number, 'trade-receiver', { receiverWithCosmetics: true }))
+      .toEqual({ ok: true, reason: 'OK' });
+    expect(await tradeRepository.finalize(trade.id as number, 'trade-sender'))
+      .toEqual({ ok: true, reason: 'OK' });
+
+    expect(db.prepare(`
+      SELECT user_id, border_item_id, name_effect_item_id
+        FROM user_cards
+       WHERE id = ?
+    `).get(senderCardId)).toEqual({
+      user_id: 'trade-receiver',
+      border_item_id: null,
+      name_effect_item_id: null
+    });
+    expect(db.prepare(`
+      SELECT user_id, border_item_id, name_effect_item_id
+        FROM user_cards
+       WHERE id = ?
+    `).get(receiverCardId)).toEqual({
+      user_id: 'trade-sender',
+      border_item_id: null,
+      name_effect_item_id: nameEffectId
+    });
+    expect(db.prepare(`
+      SELECT item_id, quantity
+        FROM user_cosmetics
+       WHERE user_id = ?
+       ORDER BY item_id ASC
+    `).all('trade-sender')).toEqual([{ item_id: borderId, quantity: 1 }]);
+    expect(db.prepare(`
+      SELECT item_id, quantity
+        FROM user_cosmetics
+       WHERE user_id = ?
+       ORDER BY item_id ASC
+    `).all('trade-receiver')).toEqual([{ item_id: nameEffectId, quantity: 0 }]);
   });
 });
 

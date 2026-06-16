@@ -1283,9 +1283,21 @@ export const AdminTab: React.FC = () => {
     if (cards.length === 0) return null;
     return (
       <div className="mt-1 flex flex-wrap gap-1">
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+          offer?.with_cosmetics
+            ? 'border-violet-400/25 bg-violet-400/10 text-violet-600 dark:text-violet-300'
+            : 'border-border bg-secondary/60 text-muted-foreground'
+        }`}>
+          {offer?.with_cosmetics ? '코스메틱 포함' : '코스메틱 제외'}
+        </span>
         {cards.slice(0, 4).map((card, index) => (
           <span key={`${card.channel_id}-${card.star ?? 0}-${index}`} className="rounded-full bg-secondary/70 px-2 py-0.5 text-[10px] text-muted-foreground">
             {card.streamer_name || card.channel_id} {card.star ?? 0}성 x{card.count}
+            {card.cosmetics?.length ? ` · ${card.cosmetics
+              .flatMap((entry) => [entry.border?.name, entry.name_effect?.name])
+              .filter(Boolean)
+              .slice(0, 2)
+              .join(', ')}` : ''}
           </span>
         ))}
         {cards.length > 4 && (

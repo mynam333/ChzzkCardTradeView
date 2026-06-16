@@ -163,6 +163,7 @@ export interface Announcement {
 
 export interface CosmeticRef {
   id: number;
+  name?: string | null;
   style_json?: string | null;
   font_url?: string | null;
   font_family?: string | null;
@@ -351,8 +352,20 @@ export interface IAnnouncementRepository {
 // 거래 제안 한쪽의 제시 내용 (카드 묶음 + 포인트)
 export interface TradeOffer {
   // star: 별(0~5성) 구분. 레거시 데이터는 star가 없을 수 있음(미지정 시 별 무관 처리)
-  cards: { channel_id: string; star?: number; count: number }[];
+  cards: {
+    channel_id: string;
+    star?: number;
+    count: number;
+    streamer_name?: string | null;
+    streamer_logo_url?: string | null;
+    cosmetics?: {
+      border?: { id: number; name?: string | null } | null;
+      name_effect?: { id: number; name?: string | null } | null;
+    }[];
+  }[];
   point: number;
+  /** true일 때만 장착 코스메틱을 카드와 함께 이전합니다. 기본값은 false입니다. */
+  with_cosmetics?: boolean;
 }
 
 export interface Trade {
@@ -398,7 +411,7 @@ export interface ITradeRepository {
   listForAdmin(options: AdminTradeListOptions): Promise<AdminTradeListResult>;
   updateStatus(id: number, status: Trade['status']): Promise<void>;
   /** 1단계: 수신자가 조건에 동의 (PENDING → CONFIRMED). actorId는 수신자여야 합니다. */
-  confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }>;
+  confirm(id: number, actorId: string, options?: { receiverWithCosmetics?: boolean }): Promise<{ ok: boolean; reason: string }>;
   /** 2단계: 제안자가 최종 승인하여 원자적으로 체결 (CONFIRMED → ACCEPTED). actorId는 제안자여야 합니다. */
   finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }>;
   countCompleted(): Promise<number>;

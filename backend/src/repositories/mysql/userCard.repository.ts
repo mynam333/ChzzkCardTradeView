@@ -153,6 +153,28 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         }
 
         if (materialIds.length === 0) throw new Error('NO_FODDER');
+        const affectedIds = [Number(target.id), ...materialIds];
+        const affectedPlaceholders = affectedIds.map(() => '?').join(',');
+        const equippedRows = await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
+          `SELECT id, border_item_id, name_effect_item_id
+             FROM user_cards
+            WHERE id IN (${affectedPlaceholders})
+              AND user_id = ?
+            FOR UPDATE`,
+          ...affectedIds,
+          userId
+        );
+        for (const row of equippedRows) {
+          for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+            if (!itemId) continue;
+            await tx.run(`
+              INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+              ON DUPLICATE KEY UPDATE quantity = quantity + 1
+            `, userId, itemId);
+          }
+        }
+        await tx.run(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${affectedPlaceholders}) AND user_id = ?`, ...affectedIds, userId);
+
         const deletePlaceholders = materialIds.map(() => '?').join(',');
         await tx.run('UPDATE user_cards SET star = ? WHERE id = ?', newStar, target.id);
         await tx.run(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`, ...materialIds);
@@ -175,8 +197,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       is_hidden: row.is_hidden === 1 || row.is_hidden === true,
       favorite_order: row.favorite_order ?? null,
       favorite_at: row.favorite_at ?? null,
-      border: row.border_id ? { id: row.border_id, style_json: row.border_style } : null,
-      name_effect: row.name_id ? { id: row.name_id, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
+      border: row.border_id ? { id: row.border_id, name: row.border_name ?? null, style_json: row.border_style } : null,
+      name_effect: row.name_id ? { id: row.name_id, name: row.name_name ?? null, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
       acquired_at: row.acquired_at,
       streamer: {
         channel_id: row.channel_id,
@@ -209,8 +231,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
              s.base_value as streamer_base_value, s.follower_count as streamer_follower,
              s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned,
              s.serial_number as streamer_serial,
-             bi.id as border_id, bi.style_json as border_style,
-             ni.id as name_id, ni.style_json as name_style, ni.font_url as name_font_url, ni.font_family as name_font_family
+             bi.id as border_id, bi.name as border_name, bi.style_json as border_style,
+             ni.id as name_id, ni.name as name_name, ni.style_json as name_style, ni.font_url as name_font_url, ni.font_family as name_font_family
       FROM user_cards uc
       JOIN streamers s ON uc.channel_id = s.channel_id
       LEFT JOIN shop_items bi ON uc.border_item_id = bi.id

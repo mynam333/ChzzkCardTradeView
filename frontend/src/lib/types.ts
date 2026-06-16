@@ -114,6 +114,7 @@ export type PointLedgerSourceType =
   | 'market_sale'
   | 'market_bid'
   | 'market_bid_refund'
+  | 'card_delete_refund'
   | 'trade'
   | 'admin_reset'
   | 'manual_adjustment'
@@ -162,11 +163,16 @@ export interface TradeOfferCard {
   count: number;
   streamer_name?: string | null;
   streamer_logo_url?: string | null;
+  cosmetics?: {
+    border?: { id: number; name?: string | null } | null;
+    name_effect?: { id: number; name?: string | null } | null;
+  }[];
 }
 
 export interface TradeOffer {
   cards: TradeOfferCard[];
   point: number;
+  with_cosmetics?: boolean;
 }
 
 export type TradeStatus = 'PENDING' | 'CONFIRMED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';

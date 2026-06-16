@@ -88,7 +88,7 @@ const normalizeOffer = (raw: any): TradeOffer => {
         .filter((c: any) => c.channel_id && c.count > 0)
     : [];
   const point = Math.max(0, Math.floor(Number(raw?.point) || 0));
-  return { cards, point };
+  return { cards, point, with_cosmetics: raw?.with_cosmetics === true };
 };
 
 const isEmptyOffer = (offer: TradeOffer): boolean => offer.cards.length === 0 && offer.point === 0;
@@ -98,9 +98,51 @@ const collectOfferChannelIds = (trade: Trade) => [
   ...(trade.receiver_offer?.cards || [])
 ].map((card) => card.channel_id).filter(Boolean);
 
-const enrichOffer = (offer: TradeOffer, streamerMap: Map<string, { name: string; logo_url: string | null }>) => ({
+type UserCardForTrade = Awaited<ReturnType<typeof userCardRepository.findByUserId>>[number];
+
+const cosmeticName = (type: 'border' | 'name_effect', item?: { id?: number; name?: string | null } | null) => {
+  if (!item?.id) return null;
+  return item.name || (type === 'border' ? `테두리 #${item.id}` : `이름 효과 #${item.id}`);
+};
+
+const decorateOfferCosmetics = (offer: TradeOffer, ownerCards: UserCardForTrade[] = []): TradeOffer['cards'] => {
+  const buckets = new Map<string, UserCardForTrade[]>();
+  for (const card of ownerCards) {
+    const key = cardKey(card.channel_id, card.star);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(card);
+  }
+
+  return (offer.cards || []).map((card) => {
+    const star = card.star ?? 0;
+    const key = cardKey(card.channel_id, star);
+    const selectedCards = (buckets.get(key) || []).splice(0, Math.max(0, Number(card.count || 0)));
+    const cosmetics = selectedCards
+      .map((ownedCard) => {
+        const borderName = cosmeticName('border', ownedCard.border);
+        const nameEffectName = cosmeticName('name_effect', ownedCard.name_effect);
+        if (!borderName && !nameEffectName) return null;
+        return {
+          border: ownedCard.border?.id ? { id: ownedCard.border.id, name: borderName } : null,
+          name_effect: ownedCard.name_effect?.id ? { id: ownedCard.name_effect.id, name: nameEffectName } : null
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item);
+    return {
+      ...card,
+      cosmetics
+    };
+  });
+};
+
+const enrichOffer = (
+  offer: TradeOffer,
+  streamerMap: Map<string, { name: string; logo_url: string | null }>,
+  ownerCards: UserCardForTrade[] = []
+) => ({
   ...offer,
-  cards: (offer.cards || []).map((card) => {
+  with_cosmetics: offer.with_cosmetics === true,
+  cards: decorateOfferCosmetics(offer, ownerCards).map((card) => {
     const streamer = streamerMap.get(card.channel_id);
     return {
       ...card,
@@ -119,11 +161,19 @@ const enrichTradesForUser = async (trades: Trade[], userId: string) => {
     streamer.channel_id,
     { name: streamer.name, logo_url: streamer.logo_url }
   ]));
+  const participantIds = [...new Set(trades.flatMap((trade) => [
+    (trade.sender_offer?.cards || []).length > 0 ? trade.sender_id : null,
+    (trade.receiver_offer?.cards || []).length > 0 ? trade.receiver_id : null
+  ]).filter((id): id is string => !!id))];
+  const cardsByUser = new Map<string, UserCardForTrade[]>();
+  await Promise.all(participantIds.map(async (participantId) => {
+    cardsByUser.set(participantId, await userCardRepository.findByUserId(participantId).catch(() => []));
+  }));
 
   return trades.map((trade) => ({
     ...trade,
-    sender_offer: enrichOffer(trade.sender_offer, streamerMap),
-    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap),
+    sender_offer: enrichOffer(trade.sender_offer, streamerMap, cardsByUser.get(trade.sender_id)),
+    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap, cardsByUser.get(trade.receiver_id)),
     direction: trade.sender_id === userId ? 'outgoing' : 'incoming'
   }));
 };
@@ -137,11 +187,19 @@ const enrichTradesForAdmin = async (trades: Trade[]) => {
     streamer.channel_id,
     { name: streamer.name, logo_url: streamer.logo_url }
   ]));
+  const participantIds = [...new Set(trades.flatMap((trade) => [
+    (trade.sender_offer?.cards || []).length > 0 ? trade.sender_id : null,
+    (trade.receiver_offer?.cards || []).length > 0 ? trade.receiver_id : null
+  ]).filter((id): id is string => !!id))];
+  const cardsByUser = new Map<string, UserCardForTrade[]>();
+  await Promise.all(participantIds.map(async (participantId) => {
+    cardsByUser.set(participantId, await userCardRepository.findByUserId(participantId).catch(() => []));
+  }));
 
   return trades.map((trade) => ({
     ...trade,
-    sender_offer: enrichOffer(trade.sender_offer, streamerMap),
-    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap)
+    sender_offer: enrichOffer(trade.sender_offer, streamerMap, cardsByUser.get(trade.sender_id)),
+    receiver_offer: enrichOffer(trade.receiver_offer, streamerMap, cardsByUser.get(trade.receiver_id))
   }));
 };
 
@@ -448,7 +506,9 @@ export const confirmTrade = async (req: AuthenticatedRequest, res: Response) => 
         receiverReservations.points
       ));
     }
-    const result = await tradeRepository.confirm(tradeId, user.id);
+    const result = await tradeRepository.confirm(tradeId, user.id, {
+      receiverWithCosmetics: req.body?.with_cosmetics === true
+    });
     if (!result.ok) {
       return res.status(reasonToStatus(result.reason)).json({
         error: 'TradeFailed', reason: result.reason, message: REASON_MESSAGES[result.reason] || '거래 동의 처리에 실패했습니다.'

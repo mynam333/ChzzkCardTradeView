@@ -146,15 +146,15 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     if (itemIds.length > 0) {
       const { data: items } = await this.getClient()
         .from('shop_items')
-        .select('id, style_json, font_url, font_family')
+        .select('id, name, style_json, font_url, font_family')
         .in('id', itemIds);
       for (const it of items || []) itemMap[it.id] = it;
     }
     for (const c of cards) {
       const b = c.border_item_id ? itemMap[c.border_item_id] : null;
       const n = c.name_effect_item_id ? itemMap[c.name_effect_item_id] : null;
-      c.border = b ? { id: b.id, style_json: b.style_json } : null;
-      c.name_effect = n ? { id: n.id, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
+      c.border = b ? { id: b.id, name: b.name ?? null, style_json: b.style_json } : null;
+      c.name_effect = n ? { id: n.id, name: n.name ?? null, style_json: n.style_json, font_url: n.font_url, font_family: n.font_family } : null;
     }
     return cards;
   }

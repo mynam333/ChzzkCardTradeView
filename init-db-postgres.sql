@@ -677,78 +677,215 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트 양방향 이전을 단일 트랜잭션으로 수행
+-- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트/코스메틱을 단일 트랜잭션으로 정산
 -- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE'
---       | 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT' | 'FAILED:<msg>'
+--       | 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT' | 'USER_NOT_FOUND' | 'FAILED:<msg>'
 CREATE OR REPLACE FUNCTION finalize_trade(p_trade_id INTEGER, p_actor TEXT)
 RETURNS TEXT AS $$
 DECLARE
-  t            trades%ROWTYPE;
-  item         JSONB;
-  cid          TEXT;
-  cnt          INTEGER;
-  star_val     INTEGER;
-  moved        INTEGER;
-  sender_out   INTEGER;
-  receiver_out INTEGER;
-  s_point      INTEGER;
-  r_point      INTEGER;
+  t                     trades%ROWTYPE;
+  item                  JSONB;
+  cid                   TEXT;
+  cnt                   INTEGER;
+  star_val              INTEGER;
+  picked_ids            INTEGER[];
+  picked_count          INTEGER;
+  sender_out            INTEGER;
+  receiver_out          INTEGER;
+  s_point               INTEGER;
+  r_point               INTEGER;
+  sender_balance_after  INTEGER;
+  receiver_balance_after INTEGER;
+  sender_delta          INTEGER;
+  receiver_delta        INTEGER;
+  sender_with_cosmetics BOOLEAN;
+  receiver_with_cosmetics BOOLEAN;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('finalize_trade:' || p_trade_id::TEXT));
+
   SELECT * INTO t FROM trades WHERE id = p_trade_id FOR UPDATE;
   IF NOT FOUND THEN RETURN 'NOT_FOUND'; END IF;
   IF t.status <> 'CONFIRMED' THEN RETURN 'NOT_CONFIRMED'; END IF;
   IF t.sender_id <> p_actor THEN RETURN 'FORBIDDEN'; END IF;
 
-  sender_out   := COALESCE((t.sender_offer->>'point')::INTEGER, 0);
-  receiver_out := COALESCE((t.receiver_offer->>'point')::INTEGER, 0);
+  sender_out := GREATEST(COALESCE((t.sender_offer->>'point')::INTEGER, 0), 0);
+  receiver_out := GREATEST(COALESCE((t.receiver_offer->>'point')::INTEGER, 0), 0);
+  sender_with_cosmetics := COALESCE((t.sender_offer->>'with_cosmetics')::BOOLEAN, FALSE);
+  receiver_with_cosmetics := COALESCE((t.receiver_offer->>'with_cosmetics')::BOOLEAN, FALSE);
 
   -- 포인트 잔액 검증
   SELECT point INTO s_point FROM users WHERE id = t.sender_id FOR UPDATE;
   SELECT point INTO r_point FROM users WHERE id = t.receiver_id FOR UPDATE;
+  IF s_point IS NULL OR r_point IS NULL THEN RETURN 'USER_NOT_FOUND'; END IF;
   IF s_point < sender_out THEN RETURN 'SENDER_POINT_SHORT'; END IF;
   IF r_point < receiver_out THEN RETURN 'RECEIVER_POINT_SHORT'; END IF;
 
-  -- 보낸 사람 카드 → 받는 사람 (별 지정 시 해당 별만)
+  -- 보낸 사람 카드 → 받는 사람. 마켓에 등록된 카드는 제외하고, 포함 미선택 시 코스메틱을 원소유자에게 반환한다.
   FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.sender_offer->'cards', '[]'::jsonb)) LOOP
     cid := item->>'channel_id';
     cnt := (item->>'count')::INTEGER;
-    star_val := (item->>'star')::INTEGER;
+    star_val := COALESCE((item->>'star')::INTEGER, 0);
     IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
-    UPDATE user_cards SET user_id = t.receiver_id
-     WHERE id IN (
-       SELECT id FROM user_cards
-        WHERE user_id = t.sender_id AND channel_id = cid
-          AND (star_val IS NULL OR star = star_val)
-        ORDER BY id ASC LIMIT cnt FOR UPDATE
-     );
-    GET DIAGNOSTICS moved = ROW_COUNT;
-    IF moved < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+
+    SELECT ARRAY_AGG(id), COUNT(*)::INTEGER
+      INTO picked_ids, picked_count
+      FROM (
+        SELECT uc.id
+          FROM user_cards uc
+         WHERE uc.user_id = t.sender_id
+           AND uc.channel_id = cid
+           AND COALESCE(uc.star, 0) = star_val
+           AND NOT EXISTS (
+             SELECT 1 FROM market_listings ml
+              WHERE ml.user_card_id = uc.id
+                AND ml.status = 'PENDING'
+           )
+         ORDER BY uc.id ASC
+         LIMIT cnt
+         FOR UPDATE
+      ) picked;
+
+    IF COALESCE(picked_count, 0) < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+
+    IF NOT sender_with_cosmetics THEN
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      SELECT t.sender_id, border_item_id, COUNT(*)::INTEGER
+        FROM user_cards
+       WHERE id = ANY(picked_ids)
+         AND border_item_id IS NOT NULL
+       GROUP BY border_item_id
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      SELECT t.sender_id, name_effect_item_id, COUNT(*)::INTEGER
+        FROM user_cards
+       WHERE id = ANY(picked_ids)
+         AND name_effect_item_id IS NOT NULL
+       GROUP BY name_effect_item_id
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+
+      UPDATE user_cards
+         SET border_item_id = NULL,
+             name_effect_item_id = NULL
+       WHERE id = ANY(picked_ids);
+    END IF;
+
+    UPDATE user_cards
+       SET user_id = t.receiver_id
+     WHERE id = ANY(picked_ids);
   END LOOP;
 
-  -- 받는 사람 카드 → 보낸 사람 (별 지정 시 해당 별만)
+  -- 받는 사람 카드 → 보낸 사람. 마켓에 등록된 카드는 제외하고, 포함 미선택 시 코스메틱을 원소유자에게 반환한다.
   FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(t.receiver_offer->'cards', '[]'::jsonb)) LOOP
     cid := item->>'channel_id';
     cnt := (item->>'count')::INTEGER;
-    star_val := (item->>'star')::INTEGER;
+    star_val := COALESCE((item->>'star')::INTEGER, 0);
     IF cnt IS NULL OR cnt <= 0 THEN CONTINUE; END IF;
-    UPDATE user_cards SET user_id = t.sender_id
-     WHERE id IN (
-       SELECT id FROM user_cards
-        WHERE user_id = t.receiver_id AND channel_id = cid
-          AND (star_val IS NULL OR star = star_val)
-        ORDER BY id ASC LIMIT cnt FOR UPDATE
-     );
-    GET DIAGNOSTICS moved = ROW_COUNT;
-    IF moved < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+
+    SELECT ARRAY_AGG(id), COUNT(*)::INTEGER
+      INTO picked_ids, picked_count
+      FROM (
+        SELECT uc.id
+          FROM user_cards uc
+         WHERE uc.user_id = t.receiver_id
+           AND uc.channel_id = cid
+           AND COALESCE(uc.star, 0) = star_val
+           AND NOT EXISTS (
+             SELECT 1 FROM market_listings ml
+              WHERE ml.user_card_id = uc.id
+                AND ml.status = 'PENDING'
+           )
+         ORDER BY uc.id ASC
+         LIMIT cnt
+         FOR UPDATE
+      ) picked;
+
+    IF COALESCE(picked_count, 0) < cnt THEN RAISE EXCEPTION 'CARD_SHORTAGE'; END IF;
+
+    IF NOT receiver_with_cosmetics THEN
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      SELECT t.receiver_id, border_item_id, COUNT(*)::INTEGER
+        FROM user_cards
+       WHERE id = ANY(picked_ids)
+         AND border_item_id IS NOT NULL
+       GROUP BY border_item_id
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      SELECT t.receiver_id, name_effect_item_id, COUNT(*)::INTEGER
+        FROM user_cards
+       WHERE id = ANY(picked_ids)
+         AND name_effect_item_id IS NOT NULL
+       GROUP BY name_effect_item_id
+      ON CONFLICT (user_id, item_id)
+      DO UPDATE SET quantity = user_cosmetics.quantity + EXCLUDED.quantity;
+
+      UPDATE user_cards
+         SET border_item_id = NULL,
+             name_effect_item_id = NULL
+       WHERE id = ANY(picked_ids);
+    END IF;
+
+    UPDATE user_cards
+       SET user_id = t.sender_id
+     WHERE id = ANY(picked_ids);
   END LOOP;
 
   -- 포인트 정산 (양방향)
-  UPDATE users SET point = point - sender_out + receiver_out WHERE id = t.sender_id;
-  UPDATE users SET point = point - receiver_out + sender_out WHERE id = t.receiver_id;
+  UPDATE users
+     SET point = point - sender_out + receiver_out
+   WHERE id = t.sender_id
+   RETURNING point INTO sender_balance_after;
+
+  UPDATE users
+     SET point = point - receiver_out + sender_out
+   WHERE id = t.receiver_id
+   RETURNING point INTO receiver_balance_after;
+
+  sender_delta := receiver_out - sender_out;
+  receiver_delta := sender_out - receiver_out;
+
+  IF sender_delta <> 0 THEN
+    INSERT INTO point_ledger_entries
+      (user_id, counterparty_user_id, amount, balance_after, source_type, source_id, reason, description, metadata)
+    VALUES (
+      t.sender_id,
+      t.receiver_id,
+      sender_delta,
+      sender_balance_after,
+      'trade',
+      p_trade_id::TEXT,
+      'trade_finalize',
+      '1:1 교환 체결 #' || p_trade_id::TEXT,
+      jsonb_build_object('trade_id', p_trade_id, 'sender_out', sender_out, 'receiver_out', receiver_out)
+    );
+  END IF;
+
+  IF receiver_delta <> 0 THEN
+    INSERT INTO point_ledger_entries
+      (user_id, counterparty_user_id, amount, balance_after, source_type, source_id, reason, description, metadata)
+    VALUES (
+      t.receiver_id,
+      t.sender_id,
+      receiver_delta,
+      receiver_balance_after,
+      'trade',
+      p_trade_id::TEXT,
+      'trade_finalize',
+      '1:1 교환 체결 #' || p_trade_id::TEXT,
+      jsonb_build_object('trade_id', p_trade_id, 'sender_out', sender_out, 'receiver_out', receiver_out)
+    );
+  END IF;
 
   UPDATE trades SET status = 'ACCEPTED', completed_at = NOW() WHERE id = p_trade_id;
   RETURN 'OK';
 EXCEPTION
+  WHEN SQLSTATE 'P0001' THEN
+    IF SQLERRM = 'CARD_SHORTAGE' THEN RETURN 'CARD_SHORTAGE'; END IF;
+    RETURN 'FAILED:' || SQLERRM;
   WHEN OTHERS THEN
     RETURN 'FAILED:' || SQLERRM;
 END;

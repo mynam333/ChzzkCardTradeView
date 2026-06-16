@@ -166,12 +166,22 @@ export class SupabaseTradeRepository implements ITradeRepository {
   }
 
   // 1단계: 수신자 동의 (PENDING → CONFIRMED)
-  async confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+  async confirm(id: number, actorId: string, options: { receiverWithCosmetics?: boolean } = {}): Promise<{ ok: boolean; reason: string }> {
     const trade = await this.findById(id);
     if (!trade) return { ok: false, reason: 'NOT_FOUND' };
     if (trade.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
     if (trade.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
-    await this.updateStatus(id, 'CONFIRMED');
+    const { error } = await this.getClient()
+      .from('trades')
+      .update({
+        receiver_offer: {
+          ...trade.receiver_offer,
+          with_cosmetics: options.receiverWithCosmetics === true
+        },
+        status: 'CONFIRMED'
+      })
+      .eq('id', id);
+    if (error) throw error;
     return { ok: true, reason: 'OK' };
   }
 

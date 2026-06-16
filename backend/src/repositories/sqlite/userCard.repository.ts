@@ -183,6 +183,26 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       }
 
       if (materialIds.length === 0) throw new Error('NO_FODDER');
+      const affectedIds = [Number(target.id), ...materialIds];
+      const affectedPlaceholders = affectedIds.map(() => '?').join(',');
+      const equippedRows = db.prepare(`
+        SELECT id, border_item_id, name_effect_item_id
+          FROM user_cards
+         WHERE id IN (${affectedPlaceholders})
+           AND user_id = ?
+      `).all(...affectedIds, userId) as { id: number; border_item_id: number | null; name_effect_item_id: number | null }[];
+      for (const row of equippedRows) {
+        for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+          if (!itemId) continue;
+          db.prepare(`
+            INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+          `).run(userId, itemId);
+        }
+      }
+      db.prepare(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${affectedPlaceholders}) AND user_id = ?`)
+        .run(...affectedIds, userId);
+
       const deletePlaceholders = materialIds.map(() => '?').join(',');
       db.prepare('UPDATE user_cards SET star = ? WHERE id = ?').run(newStar, target.id);
       db.prepare(`DELETE FROM user_cards WHERE id IN (${deletePlaceholders})`).run(...materialIds);
@@ -203,8 +223,8 @@ export class SqliteUserCardRepository implements IUserCardRepository {
              s.base_value as streamer_base_value, s.follower_count as streamer_follower,
              s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned,
              s.serial_number as streamer_serial,
-             bi.id as border_id, bi.style_json as border_style,
-             ni.id as name_id, ni.style_json as name_style, ni.font_url as name_font_url, ni.font_family as name_font_family
+             bi.id as border_id, bi.name as border_name, bi.style_json as border_style,
+             ni.id as name_id, ni.name as name_name, ni.style_json as name_style, ni.font_url as name_font_url, ni.font_family as name_font_family
       FROM user_cards uc
       JOIN streamers s ON uc.channel_id = s.channel_id
       LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
@@ -224,8 +244,8 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       is_hidden: row.is_hidden === 1,
       favorite_order: row.favorite_order ?? null,
       favorite_at: row.favorite_at ?? null,
-      border: row.border_id ? { id: row.border_id, style_json: row.border_style } : null,
-      name_effect: row.name_id ? { id: row.name_id, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
+      border: row.border_id ? { id: row.border_id, name: row.border_name ?? null, style_json: row.border_style } : null,
+      name_effect: row.name_id ? { id: row.name_id, name: row.name_name ?? null, style_json: row.name_style, font_url: row.name_font_url, font_family: row.name_font_family } : null,
       acquired_at: row.acquired_at,
       streamer: {
         channel_id: row.channel_id,

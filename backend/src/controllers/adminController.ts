@@ -20,6 +20,11 @@ import { CardReport, Streamer } from '../repositories/interfaces';
 import { listPointLedgerForUser } from '../services/pointLedger';
 import { isPlaceholderProfileImageUrl } from '../services/chzzkService';
 import {
+  formatCardDeletionCompensationBody,
+  formatCardDeletionCompensationSummary,
+  grantCardDeletionCompensations
+} from '../services/cardDeletionCompensation';
+import {
   addPuzzleExcludedImage,
   getPuzzleExcludedImageKeys,
   normalizePuzzleImageKey
@@ -108,21 +113,14 @@ const deleteStreamerWithCompensation = async (
   const cards = await userCardRepository.findByChannel(channelId);
   const pendingReports = (options.pendingReports || await reportRepository.findAll().catch(() => []))
     .filter((report) => report.channel_id === channelId && report.status === 'pending');
+  const compensation = await grantCardDeletionCompensations(streamer, cards);
 
-  const cardsByUser: Record<string, number> = {};
-  for (const c of cards) {
-    cardsByUser[c.user_id] = (cardsByUser[c.user_id] || 0) + 1;
-  }
-
-  let totalFreeDrawTicketsGranted = 0;
-  for (const [userId, deletedCount] of Object.entries(cardsByUser)) {
-    if (deletedCount <= 0) continue;
-    await userRepository.addBonusFreeDrawTickets(userId, 1);
-    totalFreeDrawTicketsGranted += 1;
+  for (const userCompensation of compensation.users) {
+    if (userCompensation.deleted_count <= 0) continue;
     const title = '보유 카드 삭제 및 보상 지급';
-    const body = `'${streamer.name}' 카드 ${deletedCount.toLocaleString()}장이 삭제되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
-    sendPushToUser(userId, title, body, '/shop');
-    notificationRepository.create({ user_id: userId, title, body, link: 'shop' }).catch(() => { /* 무시 */ });
+    const body = formatCardDeletionCompensationBody(streamer.name, userCompensation);
+    sendPushToUser(userCompensation.user_id, title, body, '/shop');
+    notificationRepository.create({ user_id: userCompensation.user_id, title, body, link: 'shop' }).catch(() => { /* 무시 */ });
   }
 
   const removed = await userCardRepository.deleteByChannel(channelId);
@@ -137,7 +135,7 @@ const deleteStreamerWithCompensation = async (
   for (const report of pendingReports) {
     await notifyReportResult(report, 'resolved', {
       targetName: streamer.name,
-      detail: options.reportDetail || `신고 대상 카드가 삭제되었고 보유자에게 추가 무료 소환 티켓 보상이 지급되었습니다.${options.preventReregistration ? ' 해당 채널의 카드 재등록도 차단되었습니다.' : ''}`
+      detail: options.reportDetail || `신고 대상 카드가 삭제되었고 보유자에게 ${formatCardDeletionCompensationSummary(compensation)} 보상이 지급되었습니다.${options.preventReregistration ? ' 해당 채널의 카드 재등록도 차단되었습니다.' : ''}`
     }).catch(() => { /* 알림 실패는 카드 삭제 처리를 막지 않습니다. */ });
   }
 
@@ -146,16 +144,21 @@ const deleteStreamerWithCompensation = async (
   return {
     channel_id: channelId,
     name: streamer.name,
-    affected_users: Object.keys(cardsByUser).length,
+    affected_users: compensation.affected_users,
     cards_removed: removed,
-    total_free_draw_tickets_granted: totalFreeDrawTicketsGranted,
+    total_free_draw_tickets_granted: compensation.total_free_draw_tickets_granted,
+    total_point_refunded: compensation.total_point_refunded,
+    high_value_cards_refunded: compensation.high_value_cards_refunded,
+    ticket_compensated_cards: compensation.ticket_compensated_cards,
+    draw_cost: compensation.draw_cost,
     registration_blocked: options.preventReregistration === true
   };
 };
 
 /**
- * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 추가 무료 소환 티켓 보상 지급
- * - 삭제 대상 카드를 1장 이상 보유한 유저당 추가 무료 소환 티켓 1장을 지급
+ * 특정 스트리머의 카드를 전량 삭제(스트리머 폐기)하고, 보유자에게 카드 가치 기준 보상 지급
+ * - 카드 가치가 뽑기 비용보다 높으면 해당 카드 가치만큼 포인트 환불
+ * - 그 외 카드는 기존처럼 보유자당 추가 무료 소환 티켓 1장 지급
  * - 이후 해당 스트리머의 카드를 모두 삭제하고 스트리머 레코드도 제거(시세이력/신고 CASCADE)
  */
 export const deleteStreamerCards = async (req: Request, res: Response) => {
@@ -179,14 +182,19 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
       blockedBy: (req as AuthenticatedRequest).user?.id || null
     });
     clearRankingCaches();
+    const summary = formatCardDeletionCompensationSummary(result);
 
     return res.status(200).json({
-      message: `'${streamer.name}' 스트리머 카드를 삭제했습니다. 보유자 ${result.affected_users}명에게 추가 무료 소환 티켓 1장씩 지급했습니다. (삭제 카드 ${result.cards_removed}장)${preventReregistration ? ' 재등록 금지도 적용했습니다.' : ''}`,
+      message: `'${streamer.name}' 스트리머 카드를 삭제했습니다. 보유자 ${result.affected_users}명에게 ${summary} 보상을 지급했습니다. (삭제 카드 ${result.cards_removed}장)${preventReregistration ? ' 재등록 금지도 적용했습니다.' : ''}`,
       channel_id,
       affected_users: result.affected_users,
       cards_removed: result.cards_removed,
-      compensation_type: 'free_draw_ticket',
+      compensation_type: 'card_value_or_free_draw_ticket',
       total_free_draw_tickets_granted: result.total_free_draw_tickets_granted,
+      total_point_refunded: result.total_point_refunded,
+      high_value_cards_refunded: result.high_value_cards_refunded,
+      ticket_compensated_cards: result.ticket_compensated_cards,
+      draw_cost: result.draw_cost,
       registration_blocked: preventReregistration
     });
   } catch (err: any) {
@@ -233,8 +241,9 @@ export const deleteMissingProfileImageStreamers = async (req: Request, res: Resp
         deleted_streamers: 0,
         affected_users: 0,
         cards_removed: 0,
-        compensation_type: 'free_draw_ticket',
+        compensation_type: 'card_value_or_free_draw_ticket',
         total_free_draw_tickets_granted: 0,
+        total_point_refunded: 0,
         results: []
       });
     }
@@ -244,7 +253,7 @@ export const deleteMissingProfileImageStreamers = async (req: Request, res: Resp
     for (const streamer of streamers) {
       const result = await deleteStreamerWithCompensation(streamer, {
         pendingReports,
-        reportDetail: '프로필 이미지가 설정되지 않은 스트리머 정리로 카드가 삭제되었고 보유자에게 추가 무료 소환 티켓 보상이 지급되었습니다.'
+        reportDetail: '프로필 이미지가 설정되지 않은 스트리머 정리로 카드가 삭제되었고 보유자에게 카드 가치 기준 보상이 지급되었습니다.'
       });
       results.push(result);
     }
@@ -253,14 +262,16 @@ export const deleteMissingProfileImageStreamers = async (req: Request, res: Resp
     const affectedUsers = results.reduce((sum, item) => sum + item.affected_users, 0);
     const cardsRemoved = results.reduce((sum, item) => sum + item.cards_removed, 0);
     const ticketsGranted = results.reduce((sum, item) => sum + item.total_free_draw_tickets_granted, 0);
+    const pointsRefunded = results.reduce((sum, item) => sum + item.total_point_refunded, 0);
 
     return res.status(200).json({
-      message: `프로필 이미지가 설정되지 않은 스트리머 ${results.length}명을 삭제했습니다. 보유자 보상 ${ticketsGranted}건, 삭제 카드 ${cardsRemoved}장.`,
+      message: `프로필 이미지가 설정되지 않은 스트리머 ${results.length}명을 삭제했습니다. 보유자 보상 ${formatCardDeletionCompensationSummary({ total_point_refunded: pointsRefunded, total_free_draw_tickets_granted: ticketsGranted })}, 삭제 카드 ${cardsRemoved}장.`,
       deleted_streamers: results.length,
       affected_users: affectedUsers,
       cards_removed: cardsRemoved,
-      compensation_type: 'free_draw_ticket',
+      compensation_type: 'card_value_or_free_draw_ticket',
       total_free_draw_tickets_granted: ticketsGranted,
+      total_point_refunded: pointsRefunded,
       results
     });
   } catch (err: any) {

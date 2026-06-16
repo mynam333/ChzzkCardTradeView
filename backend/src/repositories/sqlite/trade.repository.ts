@@ -161,12 +161,16 @@ export class SqliteTradeRepository implements ITradeRepository {
   }
 
   // 1단계: 수신자 동의 (PENDING → CONFIRMED)
-  async confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+  async confirm(id: number, actorId: string, options: { receiverWithCosmetics?: boolean } = {}): Promise<{ ok: boolean; reason: string }> {
     const row = this.getDb().prepare('SELECT * FROM trades WHERE id = ?').get(id) as any;
     if (!row) return { ok: false, reason: 'NOT_FOUND' };
     if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
     if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
-    this.getDb().prepare("UPDATE trades SET status = 'CONFIRMED' WHERE id = ?").run(id);
+    const receiverOffer = JSON.parse(row.receiver_offer);
+    receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
+    this.getDb()
+      .prepare("UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ?")
+      .run(JSON.stringify(receiverOffer), id);
     return { ok: true, reason: 'OK' };
   }
 
@@ -175,13 +179,13 @@ export class SqliteTradeRepository implements ITradeRepository {
     const db = this.getDb();
 
     // 카드 channel_id(+star)+count 만큼 소유자를 from→to로 이전하는 헬퍼 (부족 시 throw)
-    const moveCards = (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[]) => {
+    const moveCards = (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[], withCosmetics: boolean) => {
       for (const c of cards) {
         if (!c.channel_id || !c.count || c.count <= 0) continue;
         const hasStar = c.star !== undefined && c.star !== null;
         const owned = hasStar
           ? db.prepare(
-              `SELECT id
+              `SELECT id, border_item_id, name_effect_item_id
                  FROM user_cards uc
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
@@ -192,9 +196,9 @@ export class SqliteTradeRepository implements ITradeRepository {
                   )
                 ORDER BY uc.id ASC
                 LIMIT ?`
-            ).all(fromId, c.channel_id, c.star, c.count) as { id: number }[]
+            ).all(fromId, c.channel_id, c.star, c.count) as { id: number; border_item_id: number | null; name_effect_item_id: number | null }[]
           : db.prepare(
-              `SELECT id
+              `SELECT id, border_item_id, name_effect_item_id
                  FROM user_cards uc
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
@@ -204,12 +208,24 @@ export class SqliteTradeRepository implements ITradeRepository {
                   )
                 ORDER BY uc.id ASC
                 LIMIT ?`
-            ).all(fromId, c.channel_id, c.count) as { id: number }[];
+            ).all(fromId, c.channel_id, c.count) as { id: number; border_item_id: number | null; name_effect_item_id: number | null }[];
         if (owned.length < c.count) {
           throw new Error('CARD_SHORTAGE');
         }
         const ids = owned.map(o => o.id);
         const placeholders = ids.map(() => '?').join(',');
+        if (!withCosmetics) {
+          for (const row of owned) {
+            for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+              if (!itemId) continue;
+              db.prepare(`
+                INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+                ON CONFLICT(user_id, item_id) DO UPDATE SET quantity = quantity + 1
+              `).run(fromId, itemId);
+            }
+          }
+          db.prepare(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${placeholders})`).run(...ids);
+        }
         db.prepare(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`).run(toId, ...ids);
       }
     };
@@ -233,8 +249,8 @@ export class SqliteTradeRepository implements ITradeRepository {
       if (receiver.point < receiverOut) throw new Error('RECEIVER_POINT_SHORT');
 
       // 카드 이전 (양방향)
-      moveCards(row.sender_id, row.receiver_id, senderOffer.cards || []);
-      moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || []);
+      moveCards(row.sender_id, row.receiver_id, senderOffer.cards || [], senderOffer.with_cosmetics === true);
+      moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || [], receiverOffer.with_cosmetics === true);
 
       // 포인트 정산 (양방향 동시 반영)
       db.prepare('UPDATE users SET point = point - ? + ? WHERE id = ?').run(senderOut, receiverOut, row.sender_id);

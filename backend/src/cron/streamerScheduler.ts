@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { notificationRepository, streamerRepository, userCardRepository, userRepository } from '../repositories';
+import { notificationRepository, streamerRepository, userCardRepository } from '../repositories';
 import { sendPushToUser } from '../controllers/pushController';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
 import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
@@ -7,6 +7,11 @@ import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { clearRankingCaches } from '../controllers/playController';
+import {
+  formatCardDeletionCompensationReward,
+  formatCardDeletionCompensationSummary,
+  grantCardDeletionCompensations
+} from '../services/cardDeletionCompensation';
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
 const SCHEDULE_INTERVAL_MINUTES = 2;
@@ -285,17 +290,17 @@ const isThreeMonthsInactive = (lastLiveAt?: string | null): boolean => {
 
 const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inactive' | 'not_found', lastLiveAt?: string) => {
   const holders = await userCardRepository.findByChannel(streamer.channel_id);
-  const userIds = Array.from(new Set(holders.map((card) => card.user_id)));
+  const compensation = await grantCardDeletionCompensations(streamer, holders);
 
-  for (const userId of userIds) {
-    await userRepository.addBonusFreeDrawTickets(userId, 1);
+  for (const userCompensation of compensation.users) {
     const title = '보유 카드 삭제 및 보상 지급';
+    const reward = formatCardDeletionCompensationReward(userCompensation);
     const body = reason === 'not_found'
-      ? `'${streamer.name}' 카드 정보를 더 이상 불러올 수 없어 카드가 정리되고 추가 무료 소환 티켓 1장이 지급되었습니다.`
-      : `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 추가 무료 소환 티켓 1장이 지급되었습니다.`;
-    sendPushToUser(userId, title, body, '/shop');
+      ? `'${streamer.name}' 카드 정보를 더 이상 불러올 수 없어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 정리되었고 ${reward}이 지급되었습니다.`
+      : `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 삭제되었고 ${reward}이 지급되었습니다.`;
+    sendPushToUser(userCompensation.user_id, title, body, '/shop');
     notificationRepository.create({
-      user_id: userId,
+      user_id: userCompensation.user_id,
       title,
       body,
       link: 'shop'
@@ -305,7 +310,7 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inact
   await streamerRepository.delete(streamer.channel_id);
   console.log(
     `[LiveStatusScheduler] 스트리머 삭제: ${streamer.name}(${streamer.channel_id}), ` +
-    `reason=${reason}, lastLiveAt=${lastLiveAt || '-'}, 보상 ${userIds.length}명`
+    `reason=${reason}, lastLiveAt=${lastLiveAt || '-'}, 보상 ${compensation.affected_users}명(${formatCardDeletionCompensationSummary(compensation)})`
   );
 };
 

@@ -138,12 +138,18 @@ export class MysqlTradeRepository implements ITradeRepository {
     return row?.c || 0;
   }
 
-  async confirm(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
+  async confirm(id: number, actorId: string, options: { receiverWithCosmetics?: boolean } = {}): Promise<{ ok: boolean; reason: string }> {
     const row = await this.getDb().get('SELECT * FROM trades WHERE id = ?', id);
     if (!row) return { ok: false, reason: 'NOT_FOUND' };
     if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
     if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
-    await this.getDb().run("UPDATE trades SET status = 'CONFIRMED' WHERE id = ?", id);
+    const receiverOffer = JSON.parse(row.receiver_offer);
+    receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
+    await this.getDb().run(
+      "UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ?",
+      JSON.stringify(receiverOffer),
+      id
+    );
     return { ok: true, reason: 'OK' };
   }
 
@@ -166,13 +172,13 @@ export class MysqlTradeRepository implements ITradeRepository {
         if (Number(sender.point || 0) < senderOut) throw new Error('SENDER_POINT_SHORT');
         if (Number(receiver.point || 0) < receiverOut) throw new Error('RECEIVER_POINT_SHORT');
 
-        const moveCards = async (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[]) => {
+        const moveCards = async (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[], withCosmetics: boolean) => {
           for (const c of cards) {
             if (!c.channel_id || !c.count || c.count <= 0) continue;
             const hasStar = c.star !== undefined && c.star !== null;
             const owned = hasStar
-              ? await tx.all<{ id: number }>(
-                  `SELECT id
+              ? await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
+                  `SELECT id, border_item_id, name_effect_item_id
                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
@@ -185,8 +191,8 @@ export class MysqlTradeRepository implements ITradeRepository {
                     LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.star, c.count
                 )
-              : await tx.all<{ id: number }>(
-                  `SELECT id
+              : await tx.all<{ id: number; border_item_id: number | null; name_effect_item_id: number | null }>(
+                  `SELECT id, border_item_id, name_effect_item_id
                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
@@ -201,12 +207,29 @@ export class MysqlTradeRepository implements ITradeRepository {
             if (owned.length < c.count) throw new Error('CARD_SHORTAGE');
             const ids = owned.map((o) => o.id);
             const placeholders = ids.map(() => '?').join(',');
-            await tx.run(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`, [toId, ...ids]);
+            if (!withCosmetics) {
+              for (const row of owned) {
+                for (const itemId of [row.border_item_id, row.name_effect_item_id]) {
+                  if (!itemId) continue;
+                  await tx.run(
+                    `INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
+                     ON DUPLICATE KEY UPDATE quantity = quantity + 1`,
+                    fromId,
+                    itemId
+                  );
+                }
+              }
+              await tx.run(
+                `UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${placeholders})`,
+                ...ids
+              );
+            }
+            await tx.run(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`, toId, ...ids);
           }
         };
 
-        await moveCards(row.sender_id, row.receiver_id, senderOffer.cards || []);
-        await moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || []);
+        await moveCards(row.sender_id, row.receiver_id, senderOffer.cards || [], senderOffer.with_cosmetics === true);
+        await moveCards(row.receiver_id, row.sender_id, receiverOffer.cards || [], receiverOffer.with_cosmetics === true);
         await tx.run('UPDATE users SET point = point - ? + ? WHERE id = ?', senderOut, receiverOut, row.sender_id);
         await tx.run('UPDATE users SET point = point - ? + ? WHERE id = ?', receiverOut, senderOut, row.receiver_id);
         const senderDelta = receiverOut - senderOut;
