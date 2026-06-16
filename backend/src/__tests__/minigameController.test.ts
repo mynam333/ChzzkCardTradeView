@@ -111,6 +111,11 @@ const cropDetectiveRounds = Array.from({ length: 5 }, (_, round) => ({
   ]
 }));
 
+const getTestRotatedCropSafeMargin = (size: number, rotation: number) => {
+  const radians = (rotation * Math.PI) / 180;
+  return Math.min(0.48, (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2 + 0.025);
+};
+
 const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
   findSessionById.mockResolvedValue({
     id: 'puzzle-session',
@@ -829,6 +834,11 @@ describe('daily minigame selection', () => {
       expect(round.crop.size).toBeLessThanOrEqual(0.10);
       expect(round.crop.rotation).toBeGreaterThanOrEqual(0);
       expect(round.crop.rotation).toBeLessThan(360);
+      const safeMargin = getTestRotatedCropSafeMargin(round.crop.size, round.crop.rotation);
+      expect(round.crop.x).toBeGreaterThanOrEqual(safeMargin - 0.001);
+      expect(round.crop.x).toBeLessThanOrEqual(1 - safeMargin + 0.001);
+      expect(round.crop.y).toBeGreaterThanOrEqual(safeMargin - 0.001);
+      expect(round.crop.y).toBeLessThanOrEqual(1 - safeMargin + 0.001);
       expect(round.source_image_url).toMatch(/^https:\/\/example\.com\/\d+\.png$/);
       expect(round.choices).toHaveLength(4);
     }

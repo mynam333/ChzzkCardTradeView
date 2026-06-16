@@ -23,6 +23,7 @@ const CROP_DETECTIVE_ROUND_COUNT = 5;
 const CROP_DETECTIVE_ROUND_TIME_MS = 10_000;
 const CROP_DETECTIVE_MIN_CORRECT = 3;
 const CROP_DETECTIVE_CHOICES = 4;
+const CROP_DETECTIVE_EDGE_PADDING = 0.025;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
@@ -404,18 +405,28 @@ const getUniquePlayableImageCards = (streamers: any[]) => {
   return Array.from(byChannel.values()).map((cards) => shuffle(cards)[0]);
 };
 
+const getRotatedCropSafeMargin = (size: number, rotation: number) => {
+  const radians = (rotation * Math.PI) / 180;
+  const rotatedHalfExtent = (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
+  return Math.min(0.48, rotatedHalfExtent + CROP_DETECTIVE_EDGE_PADDING);
+};
+
 const buildCrop = (roundIndex: number) => {
   const minSize = 0.05;
   const maxSize = 0.10;
   const size = Number((maxSize - (roundIndex / Math.max(1, CROP_DETECTIVE_ROUND_COUNT - 1)) * (maxSize - minSize)).toFixed(3));
-  const min = size / 2 + 0.05;
-  const max = 1 - size / 2 - 0.05;
-  const pick = () => Number((min + Math.random() * Math.max(0.01, max - min)).toFixed(3));
+  const rotation = Math.floor(Math.random() * 360);
+  const min = getRotatedCropSafeMargin(size, rotation);
+  const max = 1 - min;
+  const pick = () => {
+    if (max <= min) return 0.5;
+    return Number((min + Math.random() * (max - min)).toFixed(3));
+  };
   return {
     x: pick(),
     y: pick(),
     size,
-    rotation: Math.floor(Math.random() * 360)
+    rotation
   };
 };
 

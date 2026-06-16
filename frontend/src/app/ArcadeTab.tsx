@@ -776,6 +776,17 @@ const isValueDuelRound = (round: ValueDuelRound | CropDetectiveRound | undefined
 const isCropDetectiveRound = (round: ValueDuelRound | CropDetectiveRound | undefined): round is CropDetectiveRound =>
   Boolean(round && 'choices' in round && 'source_image_url' in round);
 
+const clampCropValue = (value: number, min: number, max: number) => {
+  if (max <= min) return 0.5;
+  return Math.max(min, Math.min(max, value));
+};
+
+const getRotatedCropSafeMargin = (size: number, rotation: number) => {
+  const radians = (rotation * Math.PI) / 180;
+  const rotatedHalfExtent = (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
+  return Math.min(0.48, rotatedHalfExtent + 0.025);
+};
+
 const CardImageTile: React.FC<{
   card: ArcadeCardOption;
   selected?: boolean;
@@ -818,10 +829,11 @@ const CardImageTile: React.FC<{
 
 const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
-  const x = Math.max(0, Math.min(1, Number(round.crop?.x || 0.5)));
-  const y = Math.max(0, Math.min(1, Number(round.crop?.y || 0.5)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
-  const rotationSafeScale = Math.SQRT2;
+  const safeMargin = getRotatedCropSafeMargin(size, rotation);
+  const x = clampCropValue(Number(round.crop?.x || 0.5), safeMargin, 1 - safeMargin);
+  const y = clampCropValue(Number(round.crop?.y || 0.5), safeMargin, 1 - safeMargin);
+  const imageScalePercent = 100 / size;
   return (
     <div
       role="img"
@@ -829,15 +841,21 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
     >
       <div
-        className="absolute left-1/2 top-1/2 aspect-square w-[142%] origin-center -translate-x-1/2 -translate-y-1/2"
-        style={{
-          backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
-          backgroundRepeat: 'no-repeat',
-          backgroundSize: `${100 / (size * rotationSafeScale)}% ${100 / (size * rotationSafeScale)}%`,
-          backgroundPosition: `${x * 100}% ${y * 100}%`,
-          transform: `translate(-50%, -50%) rotate(${rotation}deg)`
-        }}
-      />
+        className="absolute inset-0 origin-center"
+        style={{ transform: `rotate(${rotation}deg)` }}
+      >
+        <div
+          className="absolute left-1/2 top-1/2 aspect-square origin-top-left"
+          style={{
+            width: `${imageScalePercent}%`,
+            backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: '100% 100%',
+            backgroundPosition: 'center',
+            transform: `translate(${-x * 100}%, ${-y * 100}%)`
+          }}
+        />
+      </div>
       <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
       <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-black tracking-[0.14em] text-white/80">
         ZOOM CROP

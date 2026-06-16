@@ -199,7 +199,7 @@ export const GachaTab: React.FC = () => {
   };
 
   // 카드 정렬 및 필터링 상태 추가
-  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc'>('acquired-desc');
+  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc' | 'star-desc' | 'star-asc'>('acquired-desc');
   const [liveFilter, setLiveFilter] = useState<'all' | 'live' | 'offline'>('all');
 
   // 우클릭 컨텍스트 메뉴 상태
@@ -1100,10 +1100,13 @@ export const GachaTab: React.FC = () => {
       const nameB = b.streamer?.name || '';
       const valA = a.streamer?.base_value || 0;
       const valB = b.streamer?.base_value || 0;
+      const starA = a.star || 0;
+      const starB = b.star || 0;
       const timeA = new Date(a.acquired_at || 0).getTime();
       const timeB = new Date(b.acquired_at || 0).getTime();
       const idA = a.id || 0;
       const idB = b.id || 0;
+      const byNameAsc = nameA.localeCompare(nameB, 'ko') || timeB - timeA || idB - idA;
 
       switch (sortBy) {
         case 'name-asc':
@@ -1120,6 +1123,10 @@ export const GachaTab: React.FC = () => {
           return valB - valA;
         case 'value-asc':
           return valA - valB;
+        case 'star-desc':
+          return starB - starA || byNameAsc;
+        case 'star-asc':
+          return starA - starB || byNameAsc;
         default:
           return timeB - timeA;
       }
@@ -1678,6 +1685,8 @@ export const GachaTab: React.FC = () => {
               <option value="acquired-asc">과거 획득순</option>
               <option value="name-asc">이름 가나다순</option>
               <option value="name-desc">이름 역순</option>
+              <option value="star-desc">등급 높은순</option>
+              <option value="star-asc">등급 낮은순</option>
               <option value="value-desc">가치 높은순</option>
               <option value="value-asc">가치 낮은순</option>
             </select>
