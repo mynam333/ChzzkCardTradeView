@@ -511,6 +511,15 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     if (pathname.startsWith('/arcade')) return 'arcade';
     return 'main';
   })();
+  const realtimeTopics = React.useMemo(() => {
+    const topics = new Set(['maintenance']);
+    if (pathname === '/' || pathname.startsWith('/ranking')) topics.add('ranking');
+    if (pathname.startsWith('/shop')) {
+      topics.add('shop');
+      topics.add('market');
+    }
+    return Array.from(topics).join(',');
+  }, [pathname]);
 
   const setActiveTab = (tab: TabId) => {
     const route = tab === 'main' ? '/' : `/${tab}`;
@@ -566,7 +575,8 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
 
-    const source = new EventSource(`${API_BASE_URL}/realtime/stream`, { withCredentials: true });
+    const streamUrl = `${API_BASE_URL}/realtime/stream?topics=${encodeURIComponent(realtimeTopics)}`;
+    const source = new EventSource(streamUrl, { withCredentials: true });
 
     const handleMaintenance = (event: MessageEvent<string>) => {
       try {
@@ -609,7 +619,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       source.removeEventListener('shop', handleShop as EventListener);
       source.close();
     };
-  }, []);
+  }, [realtimeTopics]);
 
   useEffect(() => {
     checkMaintenanceStatus();

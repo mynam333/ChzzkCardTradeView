@@ -386,6 +386,30 @@ body::before {
       inset 0 1px 0 rgba(255, 255, 255, 0.5);
   }
 
+  .shop-cosmetic-card {
+    content-visibility: auto;
+    contain: layout paint style;
+    contain-intrinsic-size: 276px;
+  }
+
+  .cosmetic-list-preview,
+  .cosmetic-list-preview *,
+  .cosmetic-list-preview *::before,
+  .cosmetic-list-preview *::after {
+    animation-play-state: paused !important;
+  }
+
+  .cosmetic-list-preview {
+    contain: paint;
+  }
+
+  .shop-cosmetic-card:is(:hover, :focus-within) .cosmetic-list-preview,
+  .shop-cosmetic-card:is(:hover, :focus-within) .cosmetic-list-preview *,
+  .shop-cosmetic-card:is(:hover, :focus-within) .cosmetic-list-preview *::before,
+  .shop-cosmetic-card:is(:hover, :focus-within) .cosmetic-list-preview *::after {
+    animation-play-state: running !important;
+  }
+
   .cute-wiggle-hover:hover svg,
   .cute-wiggle-hover:hover img {
     animation: cute-wiggle 520ms ease-in-out;

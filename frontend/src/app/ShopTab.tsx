@@ -275,6 +275,14 @@ export const ShopTab: React.FC = () => {
   const lastMarketRefreshAtRef = useRef(0);
   const shopRefreshTimerRef = useRef<number | null>(null);
   const lastShopRefreshAtRef = useRef(0);
+  const hasMarketCountdown = React.useMemo(
+    () => marketListings.some((listing) => listing.listing_type === 'auction' && listing.auction_ends_at),
+    [marketListings]
+  );
+  const hasShopCountdown = React.useMemo(
+    () => items.some((item) => item.sale_start_at || item.sale_end_at),
+    [items]
+  );
 
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
@@ -575,12 +583,21 @@ export const ShopTab: React.FC = () => {
     }
   }, [subTab, marketPage, marketSort, marketType]);
 
-  // 경매/한정판매 남은 시간을 위한 1초 카운트다운 (필요한 탭에서만 작동)
+  // 경매 남은 시간은 초 단위로 보여야 하므로 마켓 탭에서 실제 경매가 있을 때만 1초 틱을 켭니다.
   useEffect(() => {
-    if (subTab !== 'market' && subTab !== 'gacha_shop') return;
+    if (subTab !== 'market' || !hasMarketCountdown) return;
+    setNowTs(Date.now());
     const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [subTab]);
+  }, [subTab, hasMarketCountdown]);
+
+  // 코스메틱 상점의 한정판매 문구는 분 단위 표시라 1초 리렌더가 불필요합니다.
+  useEffect(() => {
+    if (subTab !== 'gacha_shop' || !hasShopCountdown) return;
+    setNowTs(Date.now());
+    const timer = window.setInterval(() => setNowTs(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [subTab, hasShopCountdown]);
 
   useEffect(() => {
     if (subTab !== 'gacha_shop') return;
@@ -676,10 +693,10 @@ export const ShopTab: React.FC = () => {
     const handleMarketUpdated = (event: Event) => {
       const detail = (event as CustomEvent<MarketRealtimeDetail>).detail;
       applyMarketRealtimeEvent(detail);
-      if (detail?.reason === 'auction_bid' && marketSort !== 'bid_desc') {
+      if (detail?.reason === 'auction_bid' && marketSort !== 'latest' && marketSort !== 'bid_desc') {
         return;
       }
-      scheduleMarketRefresh(detail?.reason === 'auction_bid' ? 2000 : 700);
+      scheduleMarketRefresh(detail?.reason === 'auction_bid' ? 300 : 700, detail?.reason === 'auction_bid' ? 0 : 3500);
     };
     const handleVisible = () => {
       if (document.visibilityState === 'visible') scheduleMarketRefresh(200, 0);
@@ -898,7 +915,7 @@ export const ShopTab: React.FC = () => {
         if (data?.listing) {
           applyMarketRealtimeEvent({ reason: 'auction_bid', listing: data.listing });
         }
-        if (marketSort === 'bid_desc') {
+        if (marketSort === 'latest' || marketSort === 'bid_desc') {
           scheduleMarketRefresh(300, 0);
         }
         refreshUserData();
@@ -1430,7 +1447,7 @@ export const ShopTab: React.FC = () => {
                             setPreviewCosmetic(item);
                           }
                         }}
-                        className={`cute-card-pop grid min-h-[17.25rem] cursor-pointer grid-rows-[5.5rem_minmax(3.25rem,auto)_1fr_auto] rounded-[1.25rem] border p-3 text-center transition hover:border-primary/40 ${saleState.isLimited
+                        className={`shop-cosmetic-card cute-card-pop grid min-h-[17.25rem] cursor-pointer grid-rows-[5.5rem_minmax(3.25rem,auto)_1fr_auto] rounded-[1.25rem] border p-3 text-center transition hover:border-primary/40 ${saleState.isLimited
                           ? 'border-amber-300/55 bg-gradient-to-b from-amber-100/45 via-secondary/25 to-card shadow-[0_14px_35px_rgba(245,158,11,0.12)] dark:border-amber-300/20 dark:from-amber-400/10 dark:via-secondary/20 dark:to-card'
                           : 'border-border bg-secondary/25 hover:bg-secondary/35'
                         }`}
@@ -1443,7 +1460,7 @@ export const ShopTab: React.FC = () => {
                             </span>
                           )}
                           {item.type === 'border' ? (
-                            <div className="relative h-[5.2rem] w-[3.25rem] overflow-visible">
+                            <div className="cosmetic-list-preview relative h-[5.2rem] w-[3.25rem] overflow-visible">
                               <div
                                 className="pointer-events-none absolute left-0 top-0"
                                 style={{
@@ -1453,11 +1470,11 @@ export const ShopTab: React.FC = () => {
                                   transformOrigin: 'top left'
                                 }}
                               >
-                                <CardPreview border={item} />
+                                <CardPreview border={item} className="cosmetic-list-preview" />
                               </div>
                             </div>
                           ) : (
-                            <div className="flex h-[5.2rem] w-full min-w-0 items-center justify-center px-2">
+                            <div className="cosmetic-list-preview flex h-[5.2rem] w-full min-w-0 items-center justify-center px-2">
                               <CosmeticName
                                 effect={item}
                                 className="block max-w-full text-center text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg"
