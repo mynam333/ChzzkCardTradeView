@@ -116,6 +116,7 @@ import {
 } from '../controllers/playController';
 import {
   getAdminStats,
+  getAdminInsights,
   getCoupons,
   listUsers
 } from '../controllers/adminController';
@@ -599,6 +600,7 @@ router.post('/admin/reports/:report_id/puzzle-exclude', authMiddleware, adminMid
 
 // 관리자 대시보드 통계
 router.get('/admin/stats', authMiddleware, adminMiddleware, getAdminStats);
+router.get('/admin/insights', authMiddleware, adminMiddleware, getAdminInsights);
 
 // 관리자 자산 변동 감사 로그 및 의심 계정 요약
 router.get('/admin/asset-events', authMiddleware, adminMiddleware, getAdminAssetEvents);

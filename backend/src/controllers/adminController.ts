@@ -29,6 +29,7 @@ import {
   getPuzzleExcludedImageKeys,
   normalizePuzzleImageKey
 } from '../services/puzzleImageExclusionService';
+import { getPosthogInsights, normalizeInsightsRange } from '../services/posthogInsightsService';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -695,6 +696,22 @@ export const getAdminStats = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '통계 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const getAdminInsights = async (req: Request, res: Response) => {
+  try {
+    const range = normalizeInsightsRange(req.query.range);
+    const data = await getPosthogInsights(range);
+    res.set('Cache-Control', 'private, max-age=30');
+    return res.status(200).json(data);
+  } catch (err: any) {
+    console.error('[AdminController] getAdminInsights 에러:', err?.message || err);
+    return res.status(500).json({
+      error: 'PostHogInsightsFailed',
+      message: '사이트 인사이트를 불러오지 못했습니다.',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
   }
 };
 

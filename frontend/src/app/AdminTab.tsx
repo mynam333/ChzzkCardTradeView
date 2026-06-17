@@ -61,6 +61,28 @@ import { analyticsSettings } from '@/lib/analytics';
 
 type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
+type InsightsRange = '24h' | '7d' | '30d';
+
+interface AdminInsights {
+  enabled: boolean;
+  range: InsightsRange;
+  generated_at: string;
+  cached_until: string | null;
+  summary: {
+    page_views: number;
+    sessions: number;
+    visitors: number;
+    active_sessions_5m: number;
+    avg_duration_seconds: number;
+  };
+  hourly: Array<{ bucket: string; views: number; sessions: number; visitors: number }>;
+  active_hourly: Array<{ bucket: string; active_sessions: number; heartbeats: number }>;
+  pages: Array<{ path: string; route_group: string; views: number; sessions: number; avg_duration_seconds: number; duration_samples: number }>;
+  devices: Array<{ device_type: string; browser_name: string; os_name: string; views: number; sessions: number }>;
+  route_groups: Array<{ route_group: string; views: number; sessions: number }>;
+  navigation: Array<{ from_tab: string; to_tab: string; surface: string; count: number }>;
+  notifications: Array<{ group_key: string; opens: number }>;
+}
 
 interface PushFormState {
   title: string;
@@ -110,45 +132,38 @@ const filterAdminStreamers = (streamers: any[], query: string): any[] => {
     .map((item) => item.streamer);
 };
 
-const insightMetricCards = [
-  {
-    label: '접속자 추이',
-    value: '실시간/시간대별',
-    description: '언제 접속자가 몰리는지 시간대별로 확인',
-    icon: BarChart3,
-    color: 'text-sky-500'
-  },
-  {
-    label: '페이지 체류',
-    value: '경로별 초 단위',
-    description: '어느 페이지에서 오래 머무는지 확인',
-    icon: Clock3,
-    color: 'text-emerald-500'
-  },
-  {
-    label: '기기 분석',
-    value: 'PC/모바일/태블릿',
-    description: '브라우저, OS, 화면 크기까지 분류',
-    icon: MonitorSmartphone,
-    color: 'text-fuchsia-500'
-  },
-  {
-    label: '기능 이용',
-    value: '핵심 이벤트',
-    description: '네비게이션, 알림 클릭 등 직접 이벤트 추적',
-    icon: MousePointerClick,
-    color: 'text-amber-500'
-  }
-];
+const insightRangeLabel: Record<InsightsRange, string> = {
+  '24h': '최근 24시간',
+  '7d': '최근 7일',
+  '30d': '최근 30일'
+};
 
-const insightEventCatalog = [
-  { name: 'chikapo_page_view', description: '페이지 진입. 경로, 라우트 그룹, 기기, 브라우저, OS, 로그인 여부를 포함합니다.' },
-  { name: 'chikapo_page_duration', description: '페이지 이탈 또는 이동 시 체류 시간. duration_ms/duration_seconds로 분석합니다.' },
-  { name: 'chikapo_page_heartbeat', description: '보이는 탭에서 30초마다 활성 상태 확인. 시간대별 활성 접속 추정에 사용합니다.' },
-  { name: 'chikapo_navigation_select', description: '하단바/사이드바 주요 메뉴 이동. PC/모바일 사용 흐름 비교에 사용합니다.' },
-  { name: 'chikapo_notification_open', description: '사이트 알림 클릭. 어떤 알림 그룹이 실제 이동을 유도하는지 확인합니다.' },
-  { name: 'chikapo_logout', description: '로그아웃 실행. 세션 종료 흐름 확인용입니다.' }
-];
+const formatInsightDuration = (seconds: number) => {
+  const safe = Math.max(0, Math.round(Number(seconds) || 0));
+  if (safe < 60) return `${safe}초`;
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  if (minutes < 60) return rest ? `${minutes}분 ${rest}초` : `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRest = minutes % 60;
+  return minuteRest ? `${hours}시간 ${minuteRest}분` : `${hours}시간`;
+};
+
+const routeGroupLabel = (routeGroup: string) => {
+  const labels: Record<string, string> = {
+    main: '메인',
+    shop: '상점',
+    inventory: '보관함',
+    ranking: '랭킹',
+    friends: '친구',
+    'my-info': '내 정보',
+    admin: '관리자',
+    arcade: '미니게임',
+    login: '로그인',
+    maintenance: '점검'
+  };
+  return labels[routeGroup] || routeGroup || '기타';
+};
 
 export const AdminTab: React.FC = () => {
   const { user, toast, checkMaintenanceStatus } = useApp();
@@ -196,6 +211,10 @@ export const AdminTab: React.FC = () => {
 
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
+  const [insightsRange, setInsightsRange] = useState<InsightsRange>('7d');
+  const [insights, setInsights] = useState<AdminInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState('');
 
   // 스트리머 이미지 검색/페이지네이션
   const [streamerSearch, setStreamerSearch] = useState('');
@@ -356,6 +375,11 @@ export const AdminTab: React.FC = () => {
   }, [subTab, isAdmin, sentPushesPage]);
 
   useEffect(() => {
+    if (!isAdmin || subTab !== 'insights') return;
+    fetchInsights(insightsRange);
+  }, [insightsRange, subTab, isAdmin]);
+
+  useEffect(() => {
     if (!isAdmin || subTab !== 'trades') return;
     const t = setTimeout(() => {
       setAdminTradesPage(1);
@@ -409,6 +433,23 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/stats');
       if (res.ok) setStats(await res.json());
     } catch { /* noop */ }
+  };
+  const fetchInsights = async (range: InsightsRange = insightsRange) => {
+    setInsightsLoading(true);
+    setInsightsError('');
+    try {
+      const res = await apiFetch(`/admin/insights?range=${encodeURIComponent(range)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setInsightsError(data.message || '사이트 인사이트를 불러오지 못했습니다.');
+        return;
+      }
+      setInsights(data as AdminInsights);
+    } catch {
+      setInsightsError('사이트 인사이트 조회 중 통신 오류가 발생했습니다.');
+    } finally {
+      setInsightsLoading(false);
+    }
   };
   const fetchCoupons = async () => {
     try {
@@ -1530,6 +1571,11 @@ export const AdminTab: React.FC = () => {
     { id: 'maintenance', label: 'DB 초기화', icon: Database }
   ];
 
+  const maxHourlyViews = Math.max(1, ...(insights?.hourly || []).map((item) => item.views));
+  const maxPageViews = Math.max(1, ...(insights?.pages || []).map((item) => item.views));
+  const maxDeviceViews = Math.max(1, ...(insights?.devices || []).map((item) => item.views));
+  const maxRouteViews = Math.max(1, ...(insights?.route_groups || []).map((item) => item.views));
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex items-center gap-2 text-red-500">
@@ -1597,24 +1643,65 @@ export const AdminTab: React.FC = () => {
                   <h3 className="text-base font-black text-foreground">사이트 인사이트</h3>
                 </div>
                 <p className="mt-2 max-w-2xl text-xs font-bold leading-relaxed text-muted-foreground">
-                  방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 PostHog와 Cloudflare Web Analytics에서 확인합니다.
-                  분석 이벤트는 브라우저에서 외부 분석 도구로 직접 전송되어 치카포 백엔드와 MySQL에 부하를 주지 않습니다.
+                  PostHog Query API에서 방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 읽어옵니다.
+                  백엔드는 PostHog 결과를 짧게 캐시하므로 치카포 MySQL에는 분석 부하가 생기지 않습니다.
                 </p>
               </div>
-              <a
-                href={analyticsSettings.dashboardUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs font-black text-primary-foreground shadow-md shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95"
-              >
-                PostHog 열기
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-2xl border border-border bg-card/80 p-1 shadow-sm">
+                  {(['24h', '7d', '30d'] as InsightsRange[]).map((range) => (
+                    <button
+                      key={range}
+                      type="button"
+                      onClick={() => setInsightsRange(range)}
+                      className={`rounded-xl px-3 py-1.5 text-[11px] font-black transition ${insightsRange === range ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {insightRangeLabel[range]}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchInsights(insightsRange)}
+                  disabled={insightsLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-muted-foreground shadow-sm transition hover:-translate-y-0.5 hover:text-foreground disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${insightsLoading ? 'animate-spin' : ''}`} />
+                  새로고침
+                </button>
+                <a
+                  href={analyticsSettings.dashboardUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground shadow-md shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95"
+                >
+                  PostHog
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {insightMetricCards.map((metric) => {
+          {insightsError && (
+            <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-xs font-bold text-rose-600 dark:text-rose-200">
+              {insightsError}
+            </div>
+          )}
+
+          {insights && !insights.enabled && (
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-xs font-bold leading-relaxed text-amber-700 dark:text-amber-200">
+              PostHog 서버 조회 설정이 아직 없습니다. 백엔드 환경변수에 POSTHOG_PROJECT_ID와 POSTHOG_PERSONAL_API_KEY를 넣으면 이 화면에 실제 인사이트가 표시됩니다.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {[
+              { label: '페이지뷰', value: insights?.summary.page_views, icon: BarChart3, color: 'text-sky-500' },
+              { label: '세션', value: insights?.summary.sessions, icon: Activity, color: 'text-emerald-500' },
+              { label: '방문자', value: insights?.summary.visitors, icon: Users, color: 'text-fuchsia-500' },
+              { label: '현재 활성', value: insights?.summary.active_sessions_5m, icon: MonitorSmartphone, color: 'text-amber-500' },
+              { label: '평균 체류', value: insights ? formatInsightDuration(insights.summary.avg_duration_seconds) : null, icon: Clock3, color: 'text-primary' }
+            ].map((metric) => {
               const Icon = metric.icon;
               return (
                 <div key={metric.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -1622,73 +1709,182 @@ export const AdminTab: React.FC = () => {
                     <span className="text-xs font-black text-foreground">{metric.label}</span>
                     <Icon className={`h-4 w-4 ${metric.color}`} />
                   </div>
-                  <p className="mt-2 text-lg font-black text-foreground">{metric.value}</p>
-                  <p className="mt-1 text-[11px] font-bold leading-relaxed text-muted-foreground">{metric.description}</p>
+                  <p className="mt-2 text-2xl font-black text-foreground">
+                    {typeof metric.value === 'number' ? metric.value.toLocaleString() : (metric.value || '—')}
+                  </p>
                 </div>
               );
             })}
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-black">
+                  <BarChart3 className="h-4 w-4 text-sky-500" />
+                  시간대별 접속 흐름
+                </h3>
+                <span className="text-[10px] font-bold text-muted-foreground">
+                  {insights?.generated_at ? `갱신 ${formatLocalDateTime(insights.generated_at)}` : '데이터 대기'}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {(insights?.hourly || []).slice(-24).map((row) => (
+                  <div key={row.bucket} className="grid grid-cols-[5.5rem_1fr_5rem] items-center gap-2">
+                    <span className="text-[10px] font-bold text-muted-foreground">{formatLocalDateTime(row.bucket, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: undefined })}</span>
+                    <div className="h-3 overflow-hidden rounded-full bg-secondary">
+                      <div className="h-full rounded-full bg-gradient-to-r from-primary to-sky-300" style={{ width: `${Math.max(4, Math.min(100, (row.views / maxHourlyViews) * 100))}%` }} />
+                    </div>
+                    <span className="text-right text-[11px] font-black text-foreground">{row.views.toLocaleString()}</span>
+                  </div>
+                ))}
+                {(!insights || insights.hourly.length === 0) && (
+                  <p className="py-8 text-center text-xs font-bold text-muted-foreground">아직 집계된 방문 데이터가 없습니다.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="flex items-center gap-1.5 text-sm font-black">
+                <MonitorSmartphone className="h-4 w-4 text-fuchsia-500" />
+                기기·브라우저
+              </h3>
+              <div className="mt-4 space-y-2">
+                {(insights?.devices || []).slice(0, 10).map((row) => (
+                  <div key={`${row.device_type}-${row.browser_name}-${row.os_name}`} className="rounded-xl bg-secondary/30 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-[11px] font-black text-foreground">{row.device_type} · {row.browser_name}</span>
+                      <span className="text-[10px] font-black text-muted-foreground">{row.views.toLocaleString()}뷰</span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-background/70">
+                      <div className="h-full rounded-full bg-fuchsia-400" style={{ width: `${Math.max(4, Math.min(100, (row.views / maxDeviceViews) * 100))}%` }} />
+                    </div>
+                    <p className="mt-1 text-[10px] font-bold text-muted-foreground">{row.os_name} · 세션 {row.sessions.toLocaleString()}</p>
+                  </div>
+                ))}
+                {(!insights || insights.devices.length === 0) && (
+                  <p className="py-8 text-center text-xs font-bold text-muted-foreground">기기 데이터가 없습니다.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="flex items-center gap-1.5 text-sm font-black">
+                <Clock3 className="h-4 w-4 text-emerald-500" />
+                페이지별 조회·체류
+              </h3>
+              <div className="mt-4 space-y-2">
+                {(insights?.pages || []).slice(0, 12).map((row) => (
+                  <div key={row.path} className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-black text-foreground">{row.path}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">{routeGroupLabel(row.route_group)} · 세션 {row.sessions.toLocaleString()}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs font-black text-foreground">{row.views.toLocaleString()}뷰</p>
+                        <p className="text-[10px] font-bold text-muted-foreground">{row.duration_samples > 0 ? formatInsightDuration(row.avg_duration_seconds) : '체류 없음'}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-background/70">
+                      <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-primary" style={{ width: `${Math.max(4, Math.min(100, (row.views / maxPageViews) * 100))}%` }} />
+                    </div>
+                  </div>
+                ))}
+                {(!insights || insights.pages.length === 0) && (
+                  <p className="py-8 text-center text-xs font-bold text-muted-foreground">페이지 데이터가 없습니다.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="flex items-center gap-1.5 text-sm font-black">
+                  <Layers className="h-4 w-4 text-primary" />
+                  화면 그룹
+                </h3>
+                <div className="mt-4 space-y-2">
+                  {(insights?.route_groups || []).map((row) => (
+                    <div key={row.route_group} className="rounded-xl bg-secondary/30 px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black">{routeGroupLabel(row.route_group)}</span>
+                        <span className="text-[10px] font-black text-muted-foreground">{row.views.toLocaleString()}뷰</span>
+                      </div>
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-background/70">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, Math.min(100, (row.views / maxRouteViews) * 100))}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="flex items-center gap-1.5 text-sm font-black">
+                  <MousePointerClick className="h-4 w-4 text-amber-500" />
+                  메뉴 이동
+                </h3>
+                <div className="mt-4 space-y-2">
+                  {(insights?.navigation || []).slice(0, 8).map((row) => (
+                    <div key={`${row.from_tab}-${row.to_tab}-${row.surface}`} className="flex items-center justify-between rounded-xl bg-secondary/30 px-3 py-2">
+                      <span className="truncate text-[11px] font-bold">{routeGroupLabel(row.from_tab)} → {routeGroupLabel(row.to_tab)} <span className="text-muted-foreground">({row.surface})</span></span>
+                      <span className="shrink-0 text-[10px] font-black text-foreground">{row.count.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  {(!insights || insights.navigation.length === 0) && (
+                    <p className="py-6 text-center text-xs font-bold text-muted-foreground">메뉴 이동 데이터가 없습니다.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="flex items-center gap-1.5 text-sm font-black">
+                <BellRing className="h-4 w-4 text-sky-500" />
+                알림 클릭 그룹
+              </h3>
+              <div className="mt-4 space-y-2">
+                {(insights?.notifications || []).slice(0, 10).map((row) => (
+                  <div key={row.group_key} className="flex items-center justify-between rounded-xl bg-secondary/30 px-3 py-2">
+                    <span className="truncate text-[11px] font-bold">{row.group_key}</span>
+                    <span className="shrink-0 text-[10px] font-black text-foreground">{row.opens.toLocaleString()}회</span>
+                  </div>
+                ))}
+                {(!insights || insights.notifications.length === 0) && (
+                  <p className="py-6 text-center text-xs font-bold text-muted-foreground">알림 클릭 데이터가 없습니다.</p>
+                )}
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
               <h3 className="flex items-center gap-1.5 text-sm font-black">
                 <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                수집 상태
+                수집·보안 상태
               </h3>
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[11px] font-bold text-muted-foreground">PostHog</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${analyticsSettings.enabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
-                    {analyticsSettings.enabled ? '활성' : '키 미설정'}
-                  </span>
+              <div className="mt-4 grid gap-2 md:grid-cols-2">
+                <div className="rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[10px] font-bold text-muted-foreground">브라우저 수집</span>
+                  <p className={`mt-0.5 text-xs font-black ${analyticsSettings.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>{analyticsSettings.enabled ? 'PostHog 이벤트 전송 활성' : 'NEXT_PUBLIC_POSTHOG_KEY 미설정'}</p>
                 </div>
-                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[11px] font-bold text-muted-foreground">Cloudflare Web Analytics</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${analyticsSettings.cloudflareEnabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground'}`}>
-                    {analyticsSettings.cloudflareEnabled ? '활성' : '선택 설정'}
-                  </span>
+                <div className="rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[10px] font-bold text-muted-foreground">서버 조회</span>
+                  <p className={`mt-0.5 text-xs font-black ${insights?.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>{insights?.enabled ? 'PostHog Query API 연결' : '백엔드 키 미설정'}</p>
                 </div>
-                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[11px] font-bold text-muted-foreground">전송 대상</span>
-                  <span className="max-w-[12rem] truncate text-right text-[10px] font-black text-foreground">{analyticsSettings.postHogHost}</span>
+                <div className="rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[10px] font-bold text-muted-foreground">Cloudflare Web Analytics</span>
+                  <p className={`mt-0.5 text-xs font-black ${analyticsSettings.cloudflareEnabled ? 'text-emerald-600' : 'text-muted-foreground'}`}>{analyticsSettings.cloudflareEnabled ? '토큰 방식 활성' : '선택 설정'}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[10px] font-bold text-muted-foreground">PostHog Host</span>
+                  <p className="mt-0.5 truncate text-xs font-black text-foreground">{analyticsSettings.postHogHost}</p>
                 </div>
               </div>
               <p className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2.5 text-[11px] font-bold leading-relaxed text-muted-foreground">
                 자동 클릭/폼 캡처와 세션 리플레이는 꺼져 있습니다. 닉네임, 채팅 내용, 검색어 원문, 쿠폰 코드 같은 내용 데이터는 분석 이벤트에 포함하지 않습니다.
               </p>
-            </div>
-
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="flex items-center gap-1.5 text-sm font-black">
-                <Activity className="h-4 w-4 text-primary" />
-                이벤트 카탈로그
-              </h3>
-              <div className="mt-4 space-y-2">
-                {insightEventCatalog.map((event) => (
-                  <div key={event.name} className="rounded-xl border border-border/70 bg-secondary/25 px-3 py-2.5">
-                    <p className="font-mono text-[11px] font-black text-primary">{event.name}</p>
-                    <p className="mt-1 text-[11px] font-bold leading-relaxed text-muted-foreground">{event.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-black">PostHog에서 만들 대시보드 권장 위젯</h3>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {[
-                '시간대별 chikapo_page_heartbeat 고유 세션 수',
-                'path별 chikapo_page_view 및 평균 chikapo_page_duration',
-                'device_type/browser_name/os_name별 방문 비율',
-                'route_group별 재방문·이탈 흐름',
-                'chikapo_navigation_select의 from_tab -> to_tab 전환',
-                'chikapo_notification_open의 group_key별 클릭 수'
-              ].map((item) => (
-                <div key={item} className="rounded-xl bg-secondary/35 px-3 py-2 text-[11px] font-bold text-muted-foreground">
-                  {item}
-                </div>
-              ))}
             </div>
           </div>
         </section>

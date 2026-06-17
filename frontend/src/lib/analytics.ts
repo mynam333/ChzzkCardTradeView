@@ -15,6 +15,10 @@ const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || '';
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
 const POSTHOG_DASHBOARD_URL = process.env.NEXT_PUBLIC_POSTHOG_DASHBOARD_URL || 'https://us.posthog.com';
 const ANALYTICS_ENV_ENABLED = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED !== 'false';
+const HEARTBEAT_INTERVAL_MS = Math.max(
+  30_000,
+  Number(process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || 60_000)
+);
 
 let initialized = false;
 let identifiedUserId: string | null = null;
@@ -31,7 +35,8 @@ export const analyticsSettings = {
   hasPostHogKey: Boolean(POSTHOG_KEY),
   postHogHost: POSTHOG_HOST,
   dashboardUrl: POSTHOG_DASHBOARD_URL,
-  cloudflareEnabled: Boolean(process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN)
+  cloudflareEnabled: Boolean(process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN),
+  heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS
 };
 
 const getSessionId = () => {

@@ -10,7 +10,8 @@ import {
   trackFeatureEvent,
   trackPageDuration,
   trackPageHeartbeat,
-  trackPageView
+  trackPageView,
+  analyticsSettings
 } from '@/lib/analytics';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
@@ -627,7 +628,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     const timer = window.setInterval(() => {
       const currentVisit = pageVisitRef.current;
       if (currentVisit) trackPageHeartbeat(currentVisit, userRef.current);
-    }, 30_000);
+    }, analyticsSettings.heartbeatIntervalMs);
     return () => window.clearInterval(timer);
   }, []);
 
