@@ -364,6 +364,65 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     }));
   }
 
+  async findInventoryGroupsByUserId(userId: string): Promise<any[]> {
+    const rows = this.getDb().prepare(`
+      SELECT
+        uc.channel_id,
+        COALESCE(uc.star, 0) AS star,
+        COUNT(*) AS count,
+        SUM(CASE WHEN COALESCE(uc.is_hidden, 0) = 1 THEN 1 ELSE 0 END) AS hidden_count,
+        SUM(CASE WHEN COALESCE(uc.is_locked, 0) = 1 THEN 1 ELSE 0 END) AS locked_count,
+        SUM(CASE WHEN uc.favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count,
+        MIN(uc.id) AS first_card_id,
+        MIN(uc.favorite_order) AS favorite_order,
+        s.name as streamer_name, s.logo_url as streamer_logo, s.custom_image_url as streamer_custom_image,
+        s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+        s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+        s.base_value as streamer_base_value, s.follower_count as streamer_follower,
+        s.is_active as streamer_is_active, s.is_image_banned as streamer_is_image_banned,
+        s.serial_number as streamer_serial
+      FROM user_cards uc
+      JOIN streamers s ON uc.channel_id = s.channel_id
+      WHERE uc.user_id = ?
+      GROUP BY
+        uc.channel_id, COALESCE(uc.star, 0),
+        s.name, s.logo_url, s.custom_image_url, s.custom_image_url_1, s.custom_image_url_2,
+        s.custom_image_url_3, s.custom_image_url_4, s.custom_image_url_5,
+        s.base_value, s.follower_count, s.is_active, s.is_image_banned, s.serial_number
+      ORDER BY CASE WHEN MIN(uc.favorite_order) IS NULL THEN 1 ELSE 0 END, MIN(uc.favorite_order) ASC, MAX(uc.id) DESC
+    `).all(userId) as any[];
+    return rows.map((row: any) => ({
+      channel_id: row.channel_id,
+      star: Number(row.star || 0),
+      count: Number(row.count || 0),
+      hidden_count: Number(row.hidden_count || 0),
+      locked_count: Number(row.locked_count || 0),
+      favorite_count: Number(row.favorite_count || 0),
+      first_card_id: row.first_card_id == null ? null : Number(row.first_card_id),
+      favorite_order: row.favorite_order == null ? null : Number(row.favorite_order),
+      streamer: {
+        channel_id: row.channel_id,
+        name: row.streamer_name,
+        logo_url: row.streamer_logo,
+        custom_image_url: formatUploadUrl(row.streamer_custom_image),
+        custom_images: [
+          formatUploadUrl(row.streamer_custom_image) ?? null,
+          formatUploadUrl(row.sci1) ?? null,
+          formatUploadUrl(row.sci2) ?? null,
+          formatUploadUrl(row.sci3) ?? null,
+          formatUploadUrl(row.sci4) ?? null,
+          formatUploadUrl(row.sci5) ?? null
+        ],
+        base_value: row.streamer_base_value,
+        follower_count: row.streamer_follower,
+        is_image_banned: row.streamer_is_image_banned === 1,
+        activity_score: 0,
+        is_active: row.streamer_is_active === 1,
+        serial_number: row.streamer_serial || undefined
+      }
+    }));
+  }
+
   async findLatestSerialNumber(channelId: string): Promise<number> {
     const row = this.getDb().prepare(
       'SELECT MAX(serial_number) as max_sn FROM user_cards WHERE channel_id = ?'
@@ -451,6 +510,29 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       border_item_id: r.border_item_id ?? null,
       name_effect_item_id: r.name_effect_item_id ?? null
     }));
+  }
+
+  async countByChannelIds(channelIds: string[]): Promise<Record<string, { card_count: number; affected_users: number }>> {
+    const uniqueIds = Array.from(new Set(channelIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return {};
+    const result: Record<string, { card_count: number; affected_users: number }> = {};
+    for (let i = 0; i < uniqueIds.length; i += 500) {
+      const group = uniqueIds.slice(i, i + 500);
+      const placeholders = group.map(() => '?').join(',');
+      const rows = this.getDb().prepare(`
+        SELECT channel_id, COUNT(*) AS card_count, COUNT(DISTINCT user_id) AS affected_users
+        FROM user_cards
+        WHERE channel_id IN (${placeholders})
+        GROUP BY channel_id
+      `).all(...group) as any[];
+      rows.forEach((row: any) => {
+        result[row.channel_id] = {
+          card_count: Number(row.card_count || 0),
+          affected_users: Number(row.affected_users || 0)
+        };
+      });
+    }
+    return result;
   }
 
   async deleteByChannel(channelId: string): Promise<number> {

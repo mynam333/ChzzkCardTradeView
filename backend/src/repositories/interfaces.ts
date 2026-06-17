@@ -188,6 +188,18 @@ export interface UserCard {
   name_effect?: CosmeticRef | null;
 }
 
+export interface UserCardInventoryGroup {
+  channel_id: string;
+  star: number;
+  count: number;
+  hidden_count: number;
+  locked_count: number;
+  favorite_count: number;
+  first_card_id: number | null;
+  favorite_order: number | null;
+  streamer: Streamer;
+}
+
 // 1. 유저 리포지토리 인터페이스
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
@@ -334,6 +346,7 @@ export interface ICouponRepository {
 // 4. 신고 리포지토리 인터페이스
 export interface IReportRepository {
   findAll(): Promise<CardReport[]>;
+  findById(reportId: number): Promise<CardReport | null>;
   create(report: CardReport): Promise<CardReport>;
   updateStatus(reportId: number, status: 'resolved' | 'rejected'): Promise<void>;
   countPending(): Promise<number>;
@@ -467,6 +480,7 @@ export interface IUserCardRepository {
     bonus_free_draw_tickets_left?: number;
   }>;
   findByUserId(userId: string): Promise<(UserCard & { streamer: Streamer })[]>;
+  findInventoryGroupsByUserId(userId: string): Promise<UserCardInventoryGroup[]>;
   findLatestSerialNumber(channelId: string): Promise<number>;
   findAllocatedSerialNumbers(channelId: string): Promise<number[]>;
   deleteCards(userId: string, channelId: string, count: number): Promise<number>;
@@ -488,6 +502,7 @@ export interface IUserCardRepository {
     border_item_id?: number | null;
     name_effect_item_id?: number | null;
   }[]>;
+  countByChannelIds(channelIds: string[]): Promise<Record<string, { card_count: number; affected_users: number }>>;
   /** 특정 스트리머 카드를 모두 삭제하고 삭제된 수를 반환합니다. */
   deleteByChannel(channelId: string): Promise<number>;
   /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */

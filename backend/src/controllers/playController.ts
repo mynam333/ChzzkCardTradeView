@@ -20,6 +20,7 @@ import { acquireSchedulerLock } from '../services/schedulerLock';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
+const userCardGroupsInFlight = new Map<string, Promise<any[]>>();
 
 // getUserMe는 /play/me 호출마다 치지직 외부 API로 프로필을 동기화해 왔습니다(외부 HTTP + DB write).
 // 닉네임/프로필 이미지는 실시간성이 낮으므로 유저당 일정 주기에 1회만 동기화해 외부 호출을 절감합니다.
@@ -47,8 +48,22 @@ const findUserCardsCoalesced = (userId: string): Promise<any[]> => {
   return request;
 };
 
+const findUserCardGroupsCoalesced = (userId: string): Promise<any[]> => {
+  const existing = userCardGroupsInFlight.get(userId);
+  if (existing) return existing;
+
+  const request = userCardRepository.findInventoryGroupsByUserId(userId).finally(() => {
+    if (userCardGroupsInFlight.get(userId) === request) {
+      userCardGroupsInFlight.delete(userId);
+    }
+  });
+  userCardGroupsInFlight.set(userId, request);
+  return request;
+};
+
 const clearUserCardsInFlight = (userId: string) => {
   userCardsInFlight.delete(userId);
+  userCardGroupsInFlight.delete(userId);
 };
 
 const loadDrawPool = async (): Promise<any[]> => {
@@ -86,6 +101,7 @@ const pruneProfileSyncCache = (now = Date.now()) => {
 export const getPlayControllerStats = () => ({
   drawLocks: DRAW_LOCKS.size,
   userCardsInFlight: userCardsInFlight.size,
+  userCardGroupsInFlight: userCardGroupsInFlight.size,
   profileSyncCache: profileSyncAt.size,
   drawPoolCached: !!drawPoolCache && drawPoolCache.expiresAt > Date.now(),
   drawPoolInFlight: !!drawPoolInFlight
@@ -1048,6 +1064,30 @@ export const getUserCards = async (req: Request, res: Response) => {
       return res.status(503).json({
         error: 'DatabaseBusy',
         message: '카드 목록 조회가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.',
+        details: IS_PRODUCTION ? undefined : err.message
+      });
+    }
+    return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const getUserCardGroups = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  }
+
+  try {
+    const groups = await findUserCardGroupsCoalesced(userId);
+    res.set('Cache-Control', 'private, no-store');
+    return res.status(200).json(groups);
+  } catch (err: any) {
+    console.error('[PlayController] getUserCardGroups 에러:', err);
+    if (isDbStatementTimeout(err)) {
+      res.set('Retry-After', '3');
+      return res.status(503).json({
+        error: 'DatabaseBusy',
+        message: '카드 보관함 요약 조회가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.',
         details: IS_PRODUCTION ? undefined : err.message
       });
     }

@@ -160,6 +160,43 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return cards;
   }
 
+  async findInventoryGroupsByUserId(userId: string): Promise<any[]> {
+    const cards = await this.findByUserId(userId);
+    const groups = new Map<string, any>();
+    for (const card of cards) {
+      const star = Number(card.star || 0);
+      const key = `${card.channel_id}:${star}`;
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          channel_id: card.channel_id,
+          star,
+          count: 1,
+          hidden_count: card.is_hidden ? 1 : 0,
+          locked_count: card.is_locked ? 1 : 0,
+          favorite_count: card.favorite_order == null ? 0 : 1,
+          first_card_id: card.id ?? null,
+          favorite_order: card.favorite_order ?? null,
+          streamer: card.streamer
+        });
+        continue;
+      }
+      existing.count += 1;
+      if (card.is_hidden) existing.hidden_count += 1;
+      if (card.is_locked) existing.locked_count += 1;
+      if (card.favorite_order != null) {
+        existing.favorite_count += 1;
+        existing.favorite_order = existing.favorite_order == null
+          ? card.favorite_order
+          : Math.min(existing.favorite_order, card.favorite_order);
+      }
+      if (card.id != null && (existing.first_card_id == null || card.id < existing.first_card_id)) {
+        existing.first_card_id = card.id;
+      }
+    }
+    return Array.from(groups.values());
+  }
+
   async fuse(
     userId: string,
     channelId: string,
@@ -273,6 +310,34 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       .eq('channel_id', channelId);
     if (error || !data) return [];
     return data.map((r: any) => ({ user_id: r.user_id, star: r.star || 0 }));
+  }
+
+  async countByChannelIds(channelIds: string[]): Promise<Record<string, { card_count: number; affected_users: number }>> {
+    const uniqueIds = Array.from(new Set(channelIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return {};
+    const result: Record<string, { card_count: number; affected_users: number }> = {};
+    for (let i = 0; i < uniqueIds.length; i += 500) {
+      const group = uniqueIds.slice(i, i + 500);
+      const { data, error } = await this.getClient()
+        .from('user_cards')
+        .select('channel_id, user_id')
+        .in('channel_id', group);
+      if (error || !data) continue;
+      const usersByChannel = new Map<string, Set<string>>();
+      data.forEach((row: any) => {
+        const channelId = String(row.channel_id || '');
+        if (!channelId) return;
+        const current = result[channelId] || { card_count: 0, affected_users: 0 };
+        current.card_count += 1;
+        result[channelId] = current;
+        if (!usersByChannel.has(channelId)) usersByChannel.set(channelId, new Set());
+        if (row.user_id) usersByChannel.get(channelId)!.add(row.user_id);
+      });
+      usersByChannel.forEach((users, channelId) => {
+        result[channelId].affected_users = users.size;
+      });
+    }
+    return result;
   }
 
   async deleteByChannel(channelId: string): Promise<number> {

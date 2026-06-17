@@ -27,6 +27,9 @@ const CROP_DETECTIVE_EDGE_PADDING = 0.025;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
+const MINIGAME_POOL_CACHE_TTL = Math.max(5_000, Number(process.env.MINIGAME_POOL_CACHE_TTL_MS || 60_000));
+let minigamePoolCache: { data: any[]; expiresAt: number } | null = null;
+let minigamePoolInFlight: Promise<any[]> | null = null;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
 
@@ -356,6 +359,25 @@ export function getCardImageUrl(streamer: any, star: number): string {
   return streamer.logo_url || '';
 }
 
+const loadMinigamePool = async (): Promise<any[]> => {
+  const now = Date.now();
+  if (minigamePoolCache && minigamePoolCache.expiresAt > now) {
+    return minigamePoolCache.data;
+  }
+  if (minigamePoolInFlight) return minigamePoolInFlight;
+
+  minigamePoolInFlight = streamerRepository.findAll()
+    .then((streamers) => {
+      minigamePoolCache = { data: streamers, expiresAt: Date.now() + MINIGAME_POOL_CACHE_TTL };
+      return streamers;
+    })
+    .finally(() => {
+      minigamePoolInFlight = null;
+    });
+
+  return minigamePoolInFlight;
+};
+
 const buildCardOption = (streamer: any, star: number) => ({
   channel_id: streamer.channel_id,
   name: streamer.name,
@@ -662,7 +684,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     // 2. 문제 은행 데이터 가져오기
-    const streamers = await streamerRepository.findAll();
+    const streamers = await loadMinigamePool();
     if (streamers.length < 4) {
       return res.status(400).json({ error: 'BadRequest', message: '등록된 스트리머가 부족하여 미니게임을 시작할 수 없습니다. (최소 4명 필요)' });
     }

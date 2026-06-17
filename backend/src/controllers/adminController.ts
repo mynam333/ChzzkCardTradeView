@@ -206,15 +206,16 @@ export const deleteStreamerCards = async (req: Request, res: Response) => {
 export const listMissingProfileImageStreamers = async (_req: Request, res: Response) => {
   try {
     const streamers = (await streamerRepository.findAll()).filter(hasMissingProfileImage);
-    const enriched = await Promise.all(streamers.map(async (streamer) => {
-      const cards = await userCardRepository.findByChannel(streamer.channel_id).catch(() => []);
-      const affectedUsers = new Set(cards.map((card) => card.user_id)).size;
+    const cardCounts: Record<string, { card_count: number; affected_users: number }> =
+      await userCardRepository.countByChannelIds(streamers.map((streamer) => streamer.channel_id)).catch(() => ({}));
+    const enriched = streamers.map((streamer) => {
+      const counts = cardCounts[streamer.channel_id] || { card_count: 0, affected_users: 0 };
       return {
         ...streamer,
-        card_count: cards.length,
-        affected_users: affectedUsers
+        card_count: counts.card_count,
+        affected_users: counts.affected_users
       };
-    }));
+    });
 
     return res.status(200).json({
       streamers: enriched.sort((a, b) => b.card_count - a.card_count),
@@ -609,7 +610,7 @@ export const resolveReport = async (req: Request, res: Response) => {
 
   try {
     const reportId = Number(report_id);
-    const report = (await reportRepository.findAll()).find((item) => item.id === reportId);
+    const report = await reportRepository.findById(reportId);
     if (!report) {
       return res.status(404).json({ error: 'NotFound', message: '처리할 신고를 찾을 수 없습니다.' });
     }
@@ -646,7 +647,7 @@ export const excludeReportImageFromPuzzle = async (req: AuthenticatedRequest, re
   }
 
   try {
-    const report = (await reportRepository.findAll()).find((item) => item.id === reportId);
+    const report = await reportRepository.findById(reportId);
     if (!report) {
       return res.status(404).json({ error: 'NotFound', message: '신고를 찾을 수 없습니다.' });
     }

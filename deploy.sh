@@ -229,6 +229,7 @@ if [ -z "${DB_PASSWORD_VALUE}" ]; then DB_PASSWORD_VALUE="$(env_value DB_PASSWOR
 DB_NAME_VALUE="$(env_value MYSQL_DATABASE)"
 if [ -z "${DB_NAME_VALUE}" ]; then DB_NAME_VALUE="$(env_value DB_NAME)"; fi
 DB_CONNECT_TIMEOUT="${DB_CONNECT_TIMEOUT:-10}"
+DB_COMMAND_TIMEOUT="${DB_COMMAND_TIMEOUT:-30}"
 DB_BACKUP_RETRIES="${DB_BACKUP_RETRIES:-3}"
 DB_BACKUP_RETRY_DELAY="${DB_BACKUP_RETRY_DELAY:-5}"
 DB_SCHEMA_RETRIES="${DB_SCHEMA_RETRIES:-3}"
@@ -239,27 +240,47 @@ CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
 
 run_with_db_timeout() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${DB_CONNECT_TIMEOUT}s" "$@"
+    timeout "${DB_COMMAND_TIMEOUT}s" "$@"
   else
     "$@"
+  fi
+}
+
+print_db_error() {
+  local label="$1"
+  local log_file="$2"
+  local status="$3"
+
+  if [ "${status}" = "124" ]; then
+    echo "[deploy] ${label} timed out after ${DB_COMMAND_TIMEOUT}s"
+  fi
+  if [ -s "${log_file}" ]; then
+    echo "[deploy] ${label} error: $(tail -n 1 "${log_file}" | sed -E 's/(password: )[^\r\n]+/\1****/Ig')"
   fi
 }
 
 run_mysql_backup() {
   local output_file="$1"
   local tmp_file="${output_file}.tmp"
+  local err_file="${output_file}.err"
   local attempt=1
+  local status=0
 
   while [ "${attempt}" -le "${DB_BACKUP_RETRIES}" ]; do
+    status=0
     if run_with_db_timeout env MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump \
       -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
       --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
-      "${DB_NAME_VALUE}" > "${tmp_file}"; then
+      "${DB_NAME_VALUE}" > "${tmp_file}" 2> "${err_file}"; then
       mv "${tmp_file}" "${output_file}"
+      rm -f "${err_file}"
       return 0
+    else
+      status="$?"
     fi
 
     rm -f "${tmp_file}"
+    print_db_error "mysql backup" "${err_file}" "${status}"
     if [ "${attempt}" -lt "${DB_BACKUP_RETRIES}" ]; then
       echo "[deploy] mysql backup failed; retry ${attempt}/${DB_BACKUP_RETRIES} after ${DB_BACKUP_RETRY_DELAY}s"
       sleep "${DB_BACKUP_RETRY_DELAY}"
@@ -267,18 +288,26 @@ run_mysql_backup() {
     attempt="$((attempt + 1))"
   done
 
+  rm -f "${err_file}"
   return 1
 }
 
 run_mysql_schema() {
   local attempt=1
+  local err_file="backups/mysql-schema-${TIMESTAMP}.err"
+  local status=0
 
   while [ "${attempt}" -le "${DB_SCHEMA_RETRIES}" ]; do
+    status=0
     if run_with_db_timeout env MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql \
-      -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql; then
+      -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql 2> "${err_file}"; then
+      rm -f "${err_file}"
       return 0
+    else
+      status="$?"
     fi
 
+    print_db_error "mysql schema" "${err_file}" "${status}"
     if [ "${attempt}" -lt "${DB_SCHEMA_RETRIES}" ]; then
       echo "[deploy] mysql schema apply failed; retry ${attempt}/${DB_SCHEMA_RETRIES} after ${DB_SCHEMA_RETRY_DELAY}s"
       sleep "${DB_SCHEMA_RETRY_DELAY}"
@@ -286,6 +315,7 @@ run_mysql_schema() {
     attempt="$((attempt + 1))"
   done
 
+  rm -f "${err_file}"
   return 1
 }
 

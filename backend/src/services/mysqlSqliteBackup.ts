@@ -178,6 +178,24 @@ const getMysqlColumns = async (table: string): Promise<ColumnInfo[]> => {
   }));
 };
 
+const buildMysqlKeysetWhere = (orderColumns: string[], lastRow: any | null) => {
+  if (!lastRow) return { clause: '', params: [] as any[] };
+  const parts: string[] = [];
+  const params: any[] = [];
+
+  orderColumns.forEach((column, index) => {
+    const previousColumns = orderColumns.slice(0, index);
+    const equalPrefix = previousColumns.map((prevColumn) => `${quoteMysqlIdent(prevColumn)} <=> ?`).join(' AND ');
+    previousColumns.forEach((prevColumn) => params.push(lastRow[prevColumn]));
+    params.push(lastRow[column]);
+    parts.push(equalPrefix
+      ? `(${equalPrefix} AND ${quoteMysqlIdent(column)} > ?)`
+      : `(${quoteMysqlIdent(column)} > ?)`);
+  });
+
+  return { clause: `WHERE ${parts.join(' OR ')}`, params };
+};
+
 const copyTable = async (sqlite: Database.Database, table: string, batchSize: number) => {
   const sqliteColumns = getSqliteColumns(sqlite, table);
   const mysqlColumns = await getMysqlColumns(table).catch((err) => {
@@ -188,18 +206,9 @@ const copyTable = async (sqlite: Database.Database, table: string, batchSize: nu
   const columns = sqliteColumns.filter((column) => mysqlColumnNames.has(column));
   if (columns.length === 0) return 0;
 
-  const totalRow = await getMysqlDb().get<any>(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)}`);
-  const total = Number(totalRow?.count || 0);
-  if (total === 0) return 0;
-
   const primaryColumns = mysqlColumns.filter((column) => column.isPrimary && columns.includes(column.name)).map((column) => column.name);
   const orderColumns = primaryColumns.length > 0 ? primaryColumns : [columns[0]];
-  const selectSql = `
-    SELECT ${columns.map(quoteMysqlIdent).join(', ')}
-      FROM ${quoteMysqlIdent(table)}
-     ORDER BY ${orderColumns.map(quoteMysqlIdent).join(', ')}
-     LIMIT ? OFFSET ?
-  `;
+  const orderBySql = orderColumns.map(quoteMysqlIdent).join(', ');
   const insertSql = `
     INSERT INTO ${quoteSqliteIdent(table)} (${columns.map(quoteSqliteIdent).join(', ')})
     VALUES (${columns.map(() => '?').join(', ')})
@@ -212,11 +221,21 @@ const copyTable = async (sqlite: Database.Database, table: string, batchSize: nu
   });
 
   let copied = 0;
-  for (let offset = 0; offset < total; offset += batchSize) {
-    const rows = await getMysqlDb().all(selectSql, batchSize, offset);
+  let lastRow: any | null = null;
+  while (true) {
+    const keyset = buildMysqlKeysetWhere(orderColumns, lastRow);
+    const rows = await getMysqlDb().all(`
+      SELECT ${columns.map(quoteMysqlIdent).join(', ')}
+        FROM ${quoteMysqlIdent(table)}
+        ${keyset.clause}
+       ORDER BY ${orderBySql}
+       LIMIT ?
+    `, [...keyset.params, batchSize]);
     if (rows.length === 0) break;
     insertMany(rows);
     copied += rows.length;
+    lastRow = rows[rows.length - 1];
+    if (rows.length < batchSize) break;
   }
 
   return copied;

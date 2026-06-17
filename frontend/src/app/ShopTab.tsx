@@ -549,6 +549,14 @@ export const ShopTab: React.FC = () => {
     }
   };
 
+  const shouldRefreshMarketAfterRealtime = (detail: MarketRealtimeDetail | null | undefined) => {
+    if (!detail) return true;
+    if (detail.reason === 'auction_bid' && detail.listing?.id) {
+      return marketSort === 'bid_desc';
+    }
+    return true;
+  };
+
   const fetchMyListings = async () => {
     try {
       const res = await apiFetch('/market/my');
@@ -703,7 +711,7 @@ export const ShopTab: React.FC = () => {
     const handleMarketUpdated = (event: Event) => {
       const detail = (event as CustomEvent<MarketRealtimeDetail>).detail;
       applyMarketRealtimeEvent(detail);
-      if (detail?.reason === 'auction_bid' && marketSort !== 'latest' && marketSort !== 'bid_desc') {
+      if (!shouldRefreshMarketAfterRealtime(detail)) {
         return;
       }
       scheduleMarketRefresh(detail?.reason === 'auction_bid' ? 300 : 700, detail?.reason === 'auction_bid' ? 0 : 3500);
@@ -963,7 +971,7 @@ export const ShopTab: React.FC = () => {
         if (data?.listing) {
           applyMarketRealtimeEvent({ reason: 'auction_bid', listing: data.listing });
         }
-        if (marketSort === 'latest' || marketSort === 'bid_desc') {
+        if (marketSort === 'bid_desc') {
           scheduleMarketRefresh(300, 0);
         }
         refreshUserData();

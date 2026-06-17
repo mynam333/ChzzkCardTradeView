@@ -39,6 +39,21 @@ export class SqliteReportRepository implements IReportRepository {
     }));
   }
 
+  async findById(reportId: number): Promise<CardReport | null> {
+    const row = this.getDb().prepare('SELECT * FROM card_reports WHERE id = ?').get(reportId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      reporter_id: row.reporter_id,
+      channel_id: row.channel_id,
+      reported_image_url: row.reported_image_url,
+      star: row.star ?? 0,
+      reason: row.reason,
+      status: row.status,
+      created_at: row.created_at
+    };
+  }
+
   async create(report: CardReport): Promise<CardReport> {
     const result = this.getDb().prepare(
       'INSERT INTO card_reports (reporter_id, channel_id, reported_image_url, star, reason, status) VALUES (?, ?, ?, ?, ?, ?)'

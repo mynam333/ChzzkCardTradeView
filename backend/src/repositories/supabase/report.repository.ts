@@ -35,6 +35,17 @@ export class SupabaseReportRepository implements IReportRepository {
     return (data || []) as CardReport[];
   }
 
+  async findById(reportId: number): Promise<CardReport | null> {
+    const { data, error } = await this.getClient()
+      .from('card_reports')
+      .select('*')
+      .eq('id', reportId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return (data || null) as CardReport | null;
+  }
+
   async create(report: CardReport): Promise<CardReport> {
     const { data, error } = await this.getClient()
       .from('card_reports')

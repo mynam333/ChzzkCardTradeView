@@ -16,6 +16,8 @@ import {
 
 const PUSH_SEND_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SEND_BATCH_SIZE || 25));
 const PUSH_SEND_BATCH_DELAY_MS = Math.max(0, Number(process.env.PUSH_SEND_BATCH_DELAY_MS || 200));
+const PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE = Math.max(1, Number(process.env.PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE || 500));
+const PUSH_SCHEDULED_MAX_PER_TICK = Math.max(1, Number(process.env.PUSH_SCHEDULED_MAX_PER_TICK || 5));
 let warnedMissingPushOriginColumn = false;
 let warnedMissingPushEndpointUniqueIndex = false;
 const pushSubscribeLocks = new Map<string, Promise<void>>();
@@ -244,6 +246,31 @@ const deleteExpiredSubscriptions = async (dbMode: string, ids: any[]) => {
   }
 };
 
+const loadPushSubscriptionBatch = async (dbMode: string, afterId: number | null) => {
+  if (dbMode === 'SUPABASE') {
+    const query = getSupabaseClient()
+      .from('push_subscriptions')
+      .select('*')
+      .order('id', { ascending: true })
+      .limit(PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE);
+    const { data, error } = afterId == null ? await query : await query.gt('id', afterId);
+    if (error || !data) return [];
+    return data;
+  }
+
+  if (dbMode === 'MYSQL') {
+    return getMysqlDb().all(
+      'SELECT * FROM push_subscriptions WHERE id > ? ORDER BY id ASC LIMIT ?',
+      afterId ?? 0,
+      PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE
+    );
+  }
+
+  return getSqliteDb().prepare(
+    'SELECT * FROM push_subscriptions WHERE id > ? ORDER BY id ASC LIMIT ?'
+  ).all(afterId ?? 0, PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE) as any[];
+};
+
 const sendPushBatch = async (subscriptions: any[], payload: string, dbMode: string) => {
   const targets = uniqueByEndpoint(
     filterPushSubscriptionsByOrigin(
@@ -362,27 +389,34 @@ export const scheduleNotification = async (req: Request, res: Response) => {
 const sendPushToAll = async (title: string, body: string, url = '/') => {
   try {
     const dbMode = getDbMode();
-    let subscriptions: any[] = [];
+    const payload = JSON.stringify({ title, body, url });
+    const seenEndpoints = new Set<string>();
+    const stats = { targets: 0, sent: 0, failed: 0, expired: 0 };
+    let afterId: number | null = null;
 
-    if (dbMode === 'SUPABASE') {
-      const client = getSupabaseClient();
-      const { data, error } = await client.from('push_subscriptions').select('*');
-      if (!error && data) {
-        subscriptions = data;
-      }
-    } else if (dbMode === 'MYSQL') {
-      subscriptions = await getMysqlDb().all('SELECT * FROM push_subscriptions');
-    } else {
-      const db = getSqliteDb();
-      subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
+    while (true) {
+      const subscriptions = await loadPushSubscriptionBatch(dbMode, afterId);
+      if (subscriptions.length === 0) break;
+      const uniqueSubscriptions = subscriptions.filter((sub) => {
+        if (!sub?.endpoint || seenEndpoints.has(sub.endpoint)) return false;
+        seenEndpoints.add(sub.endpoint);
+        return true;
+      });
+      const batchStats = await sendPushBatch(uniqueSubscriptions, payload, dbMode);
+      stats.targets += batchStats.targets;
+      stats.sent += batchStats.sent;
+      stats.failed += batchStats.failed;
+      stats.expired += batchStats.expired;
+
+      const nextAfterId = Number(subscriptions[subscriptions.length - 1]?.id);
+      if (!Number.isFinite(nextAfterId) || subscriptions.length < PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE) break;
+      afterId = nextAfterId;
     }
 
-    const payload = JSON.stringify({ title, body, url });
-    const stats = await sendPushBatch(subscriptions, payload, dbMode);
     console.log(
       `[Push] 푸시 알림 전송 완료 ` +
       `(대상 ${stats.targets}대 / 성공 ${stats.sent} / 실패 ${stats.failed} / 만료정리 ${stats.expired}, ` +
-      `배치 ${PUSH_SEND_BATCH_SIZE}, 지연 ${PUSH_SEND_BATCH_DELAY_MS}ms)`
+      `발송배치 ${PUSH_SEND_BATCH_SIZE}, 조회배치 ${PUSH_SUBSCRIPTION_FETCH_BATCH_SIZE}, 지연 ${PUSH_SEND_BATCH_DELAY_MS}ms)`
     );
   } catch (err) {
     console.error('[Push] 푸시 알림 일괄 전송 도중 에러:', err);
@@ -512,15 +546,31 @@ export const startPushNotificationScheduler = () => {
 
       if (dbMode === 'SUPABASE') {
         const client = getSupabaseClient();
-        const { data, error } = await client
+        const { data: dueRows, error: dueError } = await client
           .from('push_notifications')
-          .update({ status: 'sending' })
+          .select('id')
           .eq('status', 'pending')
           .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`)
+          .order('scheduled_at', { ascending: true, nullsFirst: true })
+          .order('id', { ascending: true })
+          .limit(PUSH_SCHEDULED_MAX_PER_TICK);
+
+        if (dueError) {
+          console.warn('[Scheduler] 예약 푸시 조회 실패:', dueError.message);
+        }
+
+        const ids = (dueRows || []).map((row: any) => row.id);
+        if (ids.length > 0) {
+          const { data, error } = await client
+          .from('push_notifications')
+          .update({ status: 'sending' })
+          .in('id', ids)
+          .eq('status', 'pending')
           .select('*');
-        
-        if (!error && data) {
-          pendingNotifs = data;
+
+          if (!error && data) {
+            pendingNotifs = data;
+          }
         }
       } else if (dbMode === 'MYSQL') {
         pendingNotifs = await getMysqlDb().transaction(async (tx) => {
@@ -528,8 +578,10 @@ export const startPushNotificationScheduler = () => {
             SELECT * FROM push_notifications
             WHERE status = 'pending'
               AND (scheduled_at IS NULL OR scheduled_at <= ?)
+            ORDER BY scheduled_at IS NULL DESC, scheduled_at ASC, id ASC
+            LIMIT ?
             FOR UPDATE
-          `, nowIso) as any[];
+          `, nowIso, PUSH_SCHEDULED_MAX_PER_TICK) as any[];
           if (rows.length === 0) return rows;
           const placeholders = rows.map(() => '?').join(',');
           await tx.run(`UPDATE push_notifications SET status = 'sending' WHERE id IN (${placeholders}) AND status = 'pending'`, rows.map((r) => r.id));
@@ -542,7 +594,9 @@ export const startPushNotificationScheduler = () => {
             SELECT * FROM push_notifications
             WHERE status = 'pending'
               AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
-          `).all(nowIso) as any[];
+            ORDER BY scheduled_at IS NULL DESC, scheduled_at ASC, id ASC
+            LIMIT ?
+          `).all(nowIso, PUSH_SCHEDULED_MAX_PER_TICK) as any[];
           if (rows.length === 0) return rows;
 
           const placeholders = rows.map(() => '?').join(',');

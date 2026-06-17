@@ -24,6 +24,11 @@ export class MysqlReportRepository implements IReportRepository {
     return rows.map((row) => this.mapRow(row));
   }
 
+  async findById(reportId: number): Promise<CardReport | null> {
+    const row = await this.getDb().get('SELECT * FROM card_reports WHERE id = ?', reportId);
+    return row ? this.mapRow(row) : null;
+  }
+
   async create(report: CardReport): Promise<CardReport> {
     const result = await this.getDb().run(
       'INSERT INTO card_reports (reporter_id, channel_id, reported_image_url, star, reason, status) VALUES (?, ?, ?, ?, ?, ?)',
