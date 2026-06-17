@@ -176,6 +176,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
             `SELECT uc.id, uc.serial_number, COALESCE(uc.star, 0) AS star
                FROM user_cards uc
               WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+                AND COALESCE(uc.is_locked, 0) = 0
                 AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
               ORDER BY uc.id ASC
               FOR UPDATE`,
@@ -287,6 +288,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       border_item_id: row.border_item_id ?? null,
       name_effect_item_id: row.name_effect_item_id ?? null,
       is_hidden: row.is_hidden === 1 || row.is_hidden === true,
+      is_locked: row.is_locked === 1 || row.is_locked === true,
       favorite_order: row.favorite_order ?? null,
       favorite_at: row.favorite_at ?? null,
       border: row.border_id ? { id: row.border_id, name: row.border_name ?? null, style_json: row.border_style } : null,
@@ -365,9 +367,14 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     return result.changes > 0;
   }
 
+  async setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean> {
+    const result = await this.getDb().run('UPDATE user_cards SET is_locked = ? WHERE id = ? AND user_id = ?', locked ? 1 : 0, cardId, userId);
+    return result.changes > 0;
+  }
+
   async deleteCards(userId: string, channelId: string, count: number): Promise<number> {
     const rows = await this.getDb().all<{ id: number }>(
-      'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?',
+      'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(is_locked, 0) = 0 ORDER BY id ASC LIMIT ?',
       userId, channelId, count
     );
     if (rows.length === 0) return 0;
@@ -460,8 +467,9 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         }>(
           `SELECT uc.id, uc.channel_id, uc.serial_number, COALESCE(uc.star, 0) AS star,
                   uc.border_item_id, uc.name_effect_item_id
-             FROM user_cards uc
+            FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND COALESCE(uc.is_locked, 0) = 0
               AND NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING')
             ORDER BY uc.id ASC
             LIMIT ?

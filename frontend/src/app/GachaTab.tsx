@@ -17,7 +17,8 @@ import {
   Store,
   Coins,
   Star,
-  EyeOff
+  EyeOff,
+  Lock
 } from 'lucide-react';
 import { apiFetch, isAuthed } from '@/lib/api';
 import { borderStyle, borderClass, nameEffectStyle, cardImage } from '@/lib/cosmetics';
@@ -51,6 +52,7 @@ interface UserCard {
   border?: CosmeticRef | null;
   name_effect?: CosmeticRef | null;
   is_hidden?: boolean;
+  is_locked?: boolean;
   favorite_order?: number | null;
   favorite_at?: string | null;
   acquired_at: string;
@@ -365,11 +367,12 @@ export const GachaTab: React.FC = () => {
 
   const getAvailableCount = (channelId: string, star: number) => {
     const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
+    const locked = owned.filter(c => c.is_locked).length;
     const total = owned.length;
     const key = `${channelId}#${star}`;
     const reserved = reservations.cardsByStar[key] || 0;
     const pendingMarket = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
-    return Math.max(0, total - reserved - pendingMarket);
+    return Math.max(0, total - locked - reserved - pendingMarket);
   };
 
   const getFuseMaterialMax = (channelId: string, baseStar: number, materialStar: number) => {
@@ -386,6 +389,10 @@ export const GachaTab: React.FC = () => {
     FUSE_STARS.some((materialStar) => getFuseMaterialMax(channelId, baseStar, materialStar) > 0);
 
   const openFuseModal = (card: UserCard, streamer: Streamer, star: number) => {
+    if (card.is_locked) {
+      showAlert('작업 불가', '잠금된 카드는 한계돌파 대상이 될 수 없습니다.', 'warning');
+      return;
+    }
     const initial: Record<number, number> = {};
     const firstValidStar = FUSE_STARS.find((materialStar) =>
       getFuseMaterialMax(streamer.channel_id, star, materialStar) > 0
@@ -507,6 +514,10 @@ export const GachaTab: React.FC = () => {
   const handleMarketRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!marketRegisterCard) return;
+    if (marketRegisterCard.is_locked) {
+      showAlert('등록 실패', '잠금된 카드는 오픈마켓에 등록할 수 없습니다.', 'warning');
+      return;
+    }
     const buyNowPrice = Math.floor(Number(marketPriceInput)) || 0;
     const startingBid = Math.floor(Number(marketStartingBidInput)) || 0;
     if (marketListingType === 'fixed' && buyNowPrice < 100) {
@@ -597,9 +608,9 @@ export const GachaTab: React.FC = () => {
       const star = c.star || 0;
       const key = `${c.channel_id}#${star}`;
       if (!map[key]) map[key] = { key, channel_id: c.channel_id, star, count: 0, streamer: c.streamer };
-      map[key].count += 1;
+      map[key].count = getAvailableCount(c.channel_id, star);
     }
-    return Object.values(map).sort((a, b) => {
+    return Object.values(map).filter((item) => item.count > 0).sort((a, b) => {
       const an = a.streamer?.name || '', bn = b.streamer?.name || '';
       return an === bn ? a.star - b.star : an.localeCompare(bn);
     });
@@ -749,7 +760,7 @@ export const GachaTab: React.FC = () => {
     const [channelId, starStr] = key.split('#');
     const star = Number(starStr) || 0;
     return inventory
-      .filter((card) => card.channel_id === channelId && (card.star || 0) === star)
+      .filter((card) => card.channel_id === channelId && (card.star || 0) === star && !card.is_locked && !marketPendingCardIds.includes(card.id))
       .slice(0, count)
       .some((card) => !!card.border || !!card.name_effect);
   });
@@ -1046,6 +1057,23 @@ export const GachaTab: React.FC = () => {
       if (res.ok) fetchInventory();
     } catch {
       showAlert('통신 오류', '즐겨찾기 설정 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  const handleToggleLocked = async (card: UserCard, locked = !card.is_locked) => {
+    try {
+      const res = await apiFetch(`/cards/${card.id}/lock`, {
+        method: 'PATCH',
+        body: JSON.stringify({ locked })
+      });
+      const data = await res.json();
+      showAlert(res.ok ? '설정 완료' : '설정 실패', data.message || '', res.ok ? 'success' : 'error');
+      if (res.ok) {
+        await fetchInventory();
+        await fetchMarketPending();
+      }
+    } catch {
+      showAlert('통신 오류', '카드 잠금 설정 중 오류가 발생했습니다.', 'error');
     }
   };
 
@@ -1800,6 +1828,10 @@ export const GachaTab: React.FC = () => {
                   const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
                   const avail = getAvailableCount(streamer.channel_id, star);
                   const pendingMarketCount = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
+                  const lockedCount = owned.filter(c => c.is_locked).length;
+                  const actionReserved = reservations.cardsByStar[key] || 0;
+                  const actionCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
+                  const actionCard = actionCards.length > actionReserved ? actionCards[actionReserved] : null;
 
                   // 우클릭 이벤트 핸들러
                   const handleContextMenu = (e: React.MouseEvent) => {
@@ -1819,7 +1851,7 @@ export const GachaTab: React.FC = () => {
                     const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
                     const key = `${streamer.channel_id}#${star}`;
                     const reserved = reservations.cardsByStar[key] || 0;
-                    const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+                    const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
                     const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
 
                     const menuPosition = clampContextMenuPosition(e.clientX, e.clientY);
@@ -1829,7 +1861,7 @@ export const GachaTab: React.FC = () => {
                       open: true,
                       channel_id: streamer.channel_id,
                       star: star,
-                      card: availableCard || pendingCard || card
+                      card: availableCard || owned.find(c => c.is_locked) || pendingCard || card
                     });
                   };
 
@@ -1887,7 +1919,7 @@ export const GachaTab: React.FC = () => {
                       const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
                       const key = `${streamer.channel_id}#${star}`;
                       const reserved = reservations.cardsByStar[key] || 0;
-                      const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+                      const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
                       const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
                       setContextMenu({
                         x: menuPosition.x,
@@ -1895,7 +1927,7 @@ export const GachaTab: React.FC = () => {
                         open: true,
                         channel_id: streamer.channel_id,
                         star: star,
-                        card: availableCard || pendingCard || card
+                        card: availableCard || owned.find(c => c.is_locked) || pendingCard || card
                       });
                       if (navigator.vibrate) navigator.vibrate(40);
                     }, 500);
@@ -1943,6 +1975,16 @@ export const GachaTab: React.FC = () => {
                         <div className="absolute top-2.5 left-2.5 z-30 flex h-5 w-5 items-center justify-center rounded-md border border-primary bg-background shadow transition">
                           {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
                         </div>
+                      )}
+
+                      {!selectionMode && lockedCount > 0 && (
+                        <span
+                          title={lockedCount > 1 ? `잠금 카드 ${lockedCount}장` : '잠금 카드'}
+                          className="absolute left-2 top-2 z-30 inline-flex h-7 min-w-7 items-center justify-center gap-0.5 rounded-full border border-white/30 bg-slate-950/65 px-1.5 text-[9px] font-black text-white shadow-lg backdrop-blur-md"
+                        >
+                          <Lock className="h-3.5 w-3.5" />
+                          {lockedCount > 1 && <span>{lockedCount}</span>}
+                        </span>
                       )}
 
                       <button
@@ -2036,11 +2078,11 @@ export const GachaTab: React.FC = () => {
                           {/* 한계돌파 버튼 (같은 스트리머 카드를 재료로 소모) */}
                           {(() => {
                             if (selectionMode || star >= 5) return null;
-                            const canFuse = avail >= 1 && hasFuseMaterial(streamer.channel_id, star);
+                            const canFuse = !!actionCard && hasFuseMaterial(streamer.channel_id, star);
                             if (!canFuse) return null;
                             return (
                               <button
-                                onClick={(e) => { e.stopPropagation(); openFuseModal(card, streamer, star); }}
+                                onClick={(e) => { e.stopPropagation(); openFuseModal(actionCard!, streamer, star); }}
                                 className="mt-1 w-full rounded-md bg-amber-500/90 py-1 text-[9px] font-black text-black hover:bg-amber-400 transition"
                               >
                                 ⭐ 한계돌파 강화
@@ -2351,15 +2393,16 @@ export const GachaTab: React.FC = () => {
         const star = contextMenu.star;
         const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
         const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+        const lockedCard = owned.find(c => c.is_locked);
         
         // 가용한 카드 찾기
         const key = `${channelId}#${star}`;
         const reserved = reservations.cardsByStar[key] || 0;
-        const availableCards = owned.filter(c => !marketPendingCardIds.includes(c.id));
+        const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
         const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
 
         // 대표로 사용할 카드 객체
-        const displayCard = availableCard || pendingCard || contextMenu.card;
+        const displayCard = availableCard || lockedCard || pendingCard || contextMenu.card;
         if (!displayCard) return null;
 
         return (
@@ -2425,10 +2468,32 @@ export const GachaTab: React.FC = () => {
             >
               {displayCard.is_hidden ? '👁️ 외부 공개 켜기' : '🙈 외부 공개 숨기기'}
             </button>
+            {availableCard && (
+              <button
+                onClick={() => {
+                  handleToggleLocked(availableCard, true);
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                🔒 카드 1장 잠금
+              </button>
+            )}
+            {lockedCard && (
+              <button
+                onClick={() => {
+                  handleToggleLocked(lockedCard, false);
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                🔓 잠금 카드 1장 해제
+              </button>
+            )}
             <button
               onClick={() => {
                 if (!availableCard) {
-                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
+                  showAlert('작업 불가', '가용한 카드가 없습니다. (잠금, 판매 중, 교환 예약됨)', 'warning');
                 } else {
                   setEquipCard(availableCard);
                 }
@@ -2441,10 +2506,10 @@ export const GachaTab: React.FC = () => {
             <button
               onClick={() => {
                 if (!availableCard) {
-                  showAlert('작업 불가', '가용한 카드가 없습니다. (판매 중이거나 교환 예약됨)', 'warning');
+                  showAlert('작업 불가', '가용한 카드가 없습니다. (잠금, 판매 중, 교환 예약됨)', 'warning');
                 } else {
-                  setSellingStreamer(displayCard.streamer || null);
-                  setSellingStar(displayCard.star || 0);
+                  setSellingStreamer(availableCard.streamer || null);
+                  setSellingStar(availableCard.star || 0);
                   setSellQuantity(1);
                   setSellModalOpen(true);
                 }

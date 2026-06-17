@@ -224,6 +224,7 @@ const getOwnedByStarMap = async (userId: string): Promise<Record<string, number>
   const cards = await userCardRepository.findByUserId(userId);
   const map: Record<string, number> = {};
   for (const c of cards) {
+    if (c.is_locked) continue;
     map[cardKey(c.channel_id, c.star)] = (map[cardKey(c.channel_id, c.star)] || 0) + 1;
   }
   return map;
@@ -257,7 +258,7 @@ const validateOfferCardAvailability = async (
 };
 
 const tradeUnavailableMessage = (targetLabel: string) =>
-  `${targetLabel} 카드 중 마켓 판매 중이거나 다른 교환에 묶인 카드가 있어 교환할 수 없습니다.`;
+  `${targetLabel} 카드 중 잠금, 마켓 판매 중, 다른 교환에 묶인 카드가 있어 교환할 수 없습니다.`;
 
 /**
  * 진행 중인 거래에 묶여(에스크로) 있는 유저의 카드/포인트 예약량을 계산합니다.

@@ -178,6 +178,9 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     if (!targetCard) {
       return res.status(404).json({ error: 'NotFound', message: '소유하고 있지 않은 카드입니다.' });
     }
+    if (targetCard.is_locked) {
+      return res.status(400).json({ error: 'CardLocked', message: '잠금된 카드는 오픈마켓에 등록할 수 없습니다.' });
+    }
 
     // 2) 이미 이 카드가 마켓에 PENDING 상태로 올라가 있는지 중복 확인 및 등록 한도 체크 (최대 5개)
     const pendingCardIds = await marketRepository.findPendingCardIdsByUser(user.id);
@@ -191,7 +194,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     // 3) 에스크로(교환 예약 등) 검증
     const reservations = await getUserReservations(user.id);
     const key = `${targetCard.channel_id}#${targetCard.star ?? 0}`;
-    const ownedCount = myCards.filter(c => c.channel_id === targetCard.channel_id && (c.star ?? 0) === (targetCard.star ?? 0)).length;
+    const ownedCount = myCards.filter(c => !c.is_locked && c.channel_id === targetCard.channel_id && (c.star ?? 0) === (targetCard.star ?? 0)).length;
     const reservedCount = reservations.cardsByStar[key] || 0;
 
     if (ownedCount - reservedCount <= 0) {
@@ -221,6 +224,9 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     return res.json({ ok: true, listing });
   } catch (err: any) {
     console.error('[MarketController] createListing 에러:', err);
+    if (err?.message === 'CARD_LOCKED_OR_NOT_FOUND') {
+      return res.status(400).json({ error: 'CardLocked', message: '잠금되었거나 소유하지 않은 카드는 오픈마켓에 등록할 수 없습니다.' });
+    }
     return res.status(500).json({ error: 'ServerError', message: '매물 등록 중 오류가 발생했습니다.' });
   }
 };

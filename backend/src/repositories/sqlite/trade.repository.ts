@@ -191,6 +191,7 @@ export class SqliteTradeRepository implements ITradeRepository {
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
                   AND uc.star = ?
+                  AND COALESCE(uc.is_locked, 0) = 0
                   AND NOT EXISTS (
                     SELECT 1 FROM market_listings ml
                      WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
@@ -203,6 +204,7 @@ export class SqliteTradeRepository implements ITradeRepository {
                  FROM user_cards uc
                 WHERE uc.user_id = ?
                   AND uc.channel_id = ?
+                  AND COALESCE(uc.is_locked, 0) = 0
                   AND NOT EXISTS (
                     SELECT 1 FROM market_listings ml
                      WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'

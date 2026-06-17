@@ -256,6 +256,11 @@ export const ShopTab: React.FC = () => {
   const [myListings, setMyListings] = useState<any[]>([]);
   const [isLoadingMarket, setIsLoadingMarket] = useState(false);
   const [purchasingListingId, setPurchasingListingId] = useState<number | null>(null);
+  const [marketBuyConfirm, setMarketBuyConfirm] = useState<{
+    listingId: number;
+    price: number;
+    streamerName: string;
+  } | null>(null);
   const [auctionBuyConfirm, setAuctionBuyConfirm] = useState<{
     listingId: number;
     price: number;
@@ -849,6 +854,25 @@ export const ShopTab: React.FC = () => {
     } finally {
       setPurchasingListingId(null);
     }
+  };
+
+  const openMarketBuyConfirm = (listingId: number, price: number, streamerName: string) => {
+    if (!user) {
+      toast('로그인이 필요합니다.', 'warning');
+      return;
+    }
+    if (user.point < price) {
+      toast('포인트가 부족합니다.', 'warning');
+      return;
+    }
+    setMarketBuyConfirm({ listingId, price, streamerName });
+  };
+
+  const confirmMarketBuyNow = () => {
+    if (!marketBuyConfirm) return;
+    const target = marketBuyConfirm;
+    setMarketBuyConfirm(null);
+    handleBuyMarketItem(target.listingId, target.price, target.streamerName);
   };
 
   const openAuctionBuyConfirm = (listingId: number, price: number, streamerName: string) => {
@@ -1920,7 +1944,7 @@ export const ShopTab: React.FC = () => {
                                     if (isAuction) {
                                       openAuctionBuyConfirm(listing.id, finalPrice, streamerName);
                                     } else {
-                                      handleBuyMarketItem(listing.id, finalPrice, streamerName);
+                                      openMarketBuyConfirm(listing.id, finalPrice, streamerName);
                                     }
                                   }}
                                   disabled={purchasingListingId === listing.id || (isAuction && buyNowPrice <= 0)}
@@ -2315,6 +2339,58 @@ export const ShopTab: React.FC = () => {
               );
             })()}
           </section>
+        </div>
+      )}
+
+      {marketBuyConfirm && (
+        <div
+          className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setMarketBuyConfirm(null)}
+        >
+          <div
+            className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+              <ShoppingBag className="h-6 w-6" />
+            </div>
+            <h4 className="text-base font-black text-foreground">구매 확인</h4>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              <b className="text-foreground">{marketBuyConfirm.streamerName}</b> 카드를 구매할까요?
+              확인하면 포인트가 차감되고 카드가 보관함으로 이동합니다.
+            </p>
+            <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-left">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-muted-foreground">구매 가격</span>
+                <span className="cute-number-font inline-flex items-center gap-1 font-black text-primary">
+                  <Coins className="h-3.5 w-3.5" />
+                  {marketBuyConfirm.price.toLocaleString()} P
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                <span className="font-bold text-muted-foreground">구매 후 예상 보유 포인트</span>
+                <span className="cute-number-font font-black text-foreground">
+                  {Math.max(0, (user?.point || 0) - marketBuyConfirm.price).toLocaleString()} P
+                </span>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-center gap-2">
+              <button
+                onClick={() => setMarketBuyConfirm(null)}
+                className="rounded-xl bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground transition hover:bg-secondary/80"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmMarketBuyNow}
+                disabled={purchasingListingId === marketBuyConfirm.listingId}
+                className="cute-wiggle-hover inline-flex items-center gap-1 rounded-xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground shadow-sm shadow-primary/20 transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                <ShoppingBag className="h-3.5 w-3.5" />
+                {purchasingListingId === marketBuyConfirm.listingId ? '처리 중...' : '구매하기'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -72,6 +72,7 @@ import {
   updateMyStatusMessage,
   updateMyCardVisibility,
   updateMyCardFavorite,
+  updateMyCardLock,
   drawCard,
   drawCards,
   searchChzzkStreamer,
@@ -312,6 +313,7 @@ router.post('/cards/draw', authMiddleware, banCheckMiddleware, accountInteractio
 router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCards);
 router.patch('/cards/:card_id/visibility', authMiddleware, banCheckMiddleware, updateMyCardVisibility);
 router.patch('/cards/:card_id/favorite', authMiddleware, banCheckMiddleware, updateMyCardFavorite);
+router.patch('/cards/:card_id/lock', authMiddleware, banCheckMiddleware, updateMyCardLock);
 router.post('/cards/sell', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, sellCards);
 router.post('/cards/fuse', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, fuseCards);
 

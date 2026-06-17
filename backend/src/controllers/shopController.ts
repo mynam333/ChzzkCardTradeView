@@ -92,7 +92,7 @@ export const equipToCard = async (req: AuthenticatedRequest, res: Response) => {
     const r = await shop.equipCosmetic(userId, cardId, itemId);
     if (!r.ok) {
       const msg = r.reason === 'NOT_OWNED' ? '보유하지 않은 코스메틱입니다.' : r.reason === 'CARD_NOT_FOUND' ? '내 카드가 아닙니다.' : '장착에 실패했습니다.';
-      return res.status(400).json({ error: 'EquipFailed', reason: r.reason, message: msg });
+      return res.status(400).json({ error: 'EquipFailed', reason: r.reason, message: r.reason === 'CARD_LOCKED' ? '잠금된 카드에는 코스메틱을 장착할 수 없습니다.' : msg });
     }
     return res.status(200).json({ message: '장착되었습니다.' });
   } catch (err) { return fail(res, '장착 처리 실패', err); }
@@ -109,7 +109,7 @@ export const unequipFromCard = async (req: AuthenticatedRequest, res: Response) 
   }
   try {
     const r = await shop.unequipCosmetic(userId, cardId, type);
-    if (!r.ok) return res.status(400).json({ error: 'UnequipFailed', reason: r.reason, message: '해제에 실패했습니다.' });
+    if (!r.ok) return res.status(400).json({ error: 'UnequipFailed', reason: r.reason, message: r.reason === 'CARD_LOCKED' ? '잠금된 카드는 코스메틱을 해제할 수 없습니다.' : '해제에 실패했습니다.' });
     return res.status(200).json({ message: '해제되어 보유함으로 반환되었습니다.' });
   } catch (err) { return fail(res, '해제 처리 실패', err); }
 };

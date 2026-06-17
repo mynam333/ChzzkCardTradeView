@@ -307,6 +307,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await db.run("UPDATE shop_items SET listed_at = COALESCE(created_at, UTC_TIMESTAMP()) WHERE active = 1 AND listed_at IS NULL");
   await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_active_listed', '(active, listed_at, id)');
   await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_limited_sale', '(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
+  await ensureMysqlColumn(db, 'user_cards', 'is_locked', 'is_locked TINYINT NOT NULL DEFAULT 0');
+  await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_locked', '(user_id, is_locked)');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
   await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
@@ -1073,7 +1075,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_order INTEGER;");
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN favorite_at TEXT;");
       }
+      try {
+        sqliteDb.prepare("SELECT is_locked FROM user_cards LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_cards 테이블에 카드 잠금 컬럼을 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0;");
+      }
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id, id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);");

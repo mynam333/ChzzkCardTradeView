@@ -203,8 +203,9 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       const selectAvailableIds = (st: number, count: number, excludeIds: number[] = []) => {
         const rows = db.prepare(
           `SELECT uc.id, uc.serial_number, COALESCE(uc.star, 0) AS star
-             FROM user_cards uc
+            FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND COALESCE(uc.is_locked, 0) = 0
               AND NOT EXISTS (
                 SELECT 1 FROM market_listings ml
                  WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
@@ -334,6 +335,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       border_item_id: row.border_item_id ?? null,
       name_effect_item_id: row.name_effect_item_id ?? null,
       is_hidden: row.is_hidden === 1,
+      is_locked: row.is_locked === 1,
       favorite_order: row.favorite_order ?? null,
       favorite_at: row.favorite_at ?? null,
       border: row.border_id ? { id: row.border_id, name: row.border_name ?? null, style_json: row.border_style } : null,
@@ -401,10 +403,17 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return result.changes > 0;
   }
 
+  async setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean> {
+    const result = this.getDb().prepare(
+      'UPDATE user_cards SET is_locked = ? WHERE id = ? AND user_id = ?'
+    ).run(locked ? 1 : 0, cardId, userId);
+    return result.changes > 0;
+  }
+
   async deleteCards(userId: string, channelId: string, count: number): Promise<number> {
     // 특정 개수만큼만 삭제하기 위해 rowid 또는 id를 조회해서 IN 절로 삭제합니다.
     const rows = this.getDb().prepare(
-      'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? ORDER BY id ASC LIMIT ?'
+      'SELECT id FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(is_locked, 0) = 0 ORDER BY id ASC LIMIT ?'
     ).all(userId, channelId, count) as { id: number }[];
     
     if (rows.length === 0) return 0;
@@ -499,8 +508,9 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         const rows = db.prepare(
           `SELECT uc.id, uc.channel_id, uc.serial_number, COALESCE(uc.star, 0) AS star,
                   uc.border_item_id, uc.name_effect_item_id
-             FROM user_cards uc
+            FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
+              AND COALESCE(uc.is_locked, 0) = 0
               AND NOT EXISTS (
                 SELECT 1 FROM market_listings ml
                  WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'

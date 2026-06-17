@@ -104,6 +104,7 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
         border_item_id,
         name_effect_item_id,
         is_hidden,
+        is_locked,
         favorite_order,
         favorite_at,
         acquired_at,
@@ -241,6 +242,7 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       .select('id')
       .eq('user_id', userId)
       .eq('channel_id', channelId)
+      .or('is_locked.is.null,is_locked.eq.false')
       .order('id', { ascending: true })
       .limit(count);
 
@@ -345,6 +347,18 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     const { data, error } = await this.getClient()
       .from('user_cards')
       .update({ favorite_order: nextOrder, favorite_at: new Date().toISOString() })
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  async setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .update({ is_locked: locked })
       .eq('id', cardId)
       .eq('user_id', userId)
       .select('id')

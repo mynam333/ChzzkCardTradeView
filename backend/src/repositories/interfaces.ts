@@ -180,6 +180,7 @@ export interface UserCard {
   border_item_id?: number | null;
   name_effect_item_id?: number | null;
   is_hidden?: boolean;
+  is_locked?: boolean;
   favorite_order?: number | null;
   favorite_at?: string | null;
   border?: CosmeticRef | null;
@@ -491,6 +492,7 @@ export interface IUserCardRepository {
   sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number>;
   updateVisibility(userId: string, cardId: number, hidden: boolean): Promise<boolean>;
   setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean>;
+  setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean>;
 }
 
 // 8. 시스템 설정 리포지토리 인터페이스

@@ -540,6 +540,15 @@ const slotColumn = (type: 'border' | 'name_effect') => (type === 'border' ? 'bor
 // ---- 장착 ----
 export const equipCosmetic = async (userId: string, cardId: number, itemId: number): Promise<{ ok: boolean; reason: string }> => {
   if (getDbMode() === 'SUPABASE') {
+    const { data: card, error: cardError } = await getSupabaseClient()
+      .from('user_cards')
+      .select('is_locked')
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (cardError) throw cardError;
+    if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (card.is_locked) return { ok: false, reason: 'CARD_LOCKED' };
     const { data, error } = await getSupabaseClient().rpc('equip_cosmetic_atomic', {
       p_user_id: userId,
       p_card_id: cardId,
@@ -558,8 +567,9 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
       const item = await tx.get('SELECT * FROM shop_items WHERE id = ?', itemId) as any;
       if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
       const col = slotColumn(item.type);
-      const card = await tx.get(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
+      const card = await tx.get(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
       if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+      if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
       if (card.current === itemId) return { ok: true, reason: 'OK' };
       const owned = await tx.get('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId) as any;
       if ((owned?.q || 0) < 1) return { ok: false, reason: 'NOT_OWNED' };
@@ -606,9 +616,10 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
     const item = db.prepare('SELECT * FROM shop_items WHERE id = ?').get(itemId) as any;
     if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
     const col = slotColumn(item.type);
-    const card = db.prepare(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ?`)
+    const card = db.prepare(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ?`)
       .get(cardId, userId) as any;
     if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
     if (card.current === itemId) return { ok: true, reason: 'OK' };
 
     const owned = db.prepare('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ?')
@@ -658,6 +669,15 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
 // ---- 해제 (보유로 반환) ----
 export const unequipCosmetic = async (userId: string, cardId: number, type: 'border' | 'name_effect'): Promise<{ ok: boolean; reason: string }> => {
   if (getDbMode() === 'SUPABASE') {
+    const { data: card, error: cardError } = await getSupabaseClient()
+      .from('user_cards')
+      .select('is_locked')
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (cardError) throw cardError;
+    if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (card.is_locked) return { ok: false, reason: 'CARD_LOCKED' };
     const { data, error } = await getSupabaseClient().rpc('unequip_cosmetic_atomic', {
       p_user_id: userId,
       p_card_id: cardId,
@@ -674,8 +694,9 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
   if (getDbMode() === 'MYSQL') {
     return getMysqlDb().transaction(async (tx) => {
       const col = slotColumn(type);
-      const card = await tx.get(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
+      const card = await tx.get(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
       if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+      if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
       if (!card.current) return { ok: true, reason: 'OK' };
       await tx.run(`
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
@@ -702,9 +723,10 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
   const db = getSqliteDb();
   return db.transaction(() => {
     const col = slotColumn(type);
-    const card = db.prepare(`SELECT ${col} AS current FROM user_cards WHERE id = ? AND user_id = ?`)
+    const card = db.prepare(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ?`)
       .get(cardId, userId) as any;
     if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
+    if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
     if (!card.current) return { ok: true, reason: 'OK' };
 
     db.prepare(`

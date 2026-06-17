@@ -1099,6 +1099,29 @@ export const updateMyCardFavorite = async (req: Request, res: Response) => {
   }
 };
 
+export const updateMyCardLock = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const cardId = Number(req.params.card_id);
+  if (!Number.isFinite(cardId)) return res.status(400).json({ error: 'BadRequest', message: '카드 ID가 올바르지 않습니다.' });
+  try {
+    const locked = !!req.body?.locked;
+    if (locked) {
+      const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
+      if (pendingMarketIds.has(cardId)) {
+        return res.status(400).json({ error: 'CardUnavailable', message: '오픈마켓에 등록된 카드는 판매 취소 후 잠글 수 있습니다.' });
+      }
+    }
+    clearUserCardsInFlight(userId);
+    const ok = await userCardRepository.setLocked(userId, cardId, locked);
+    if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    clearUserCardsInFlight(userId);
+    return res.status(200).json({ message: locked ? '카드를 잠갔습니다.' : '카드 잠금을 해제했습니다.', locked });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '카드 잠금 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
 /**
  * 4. 카드 팩 1회 소환 (가챠 뽑기)
  */
@@ -1447,16 +1470,17 @@ export const sellCards = async (req: Request, res: Response) => {
 
       const key = `${channelId}#${star}`;
       const owned = userCardsByKey[key] || [];
+      const locked = owned.filter((card) => card.is_locked).length;
       // reservations.cardsByStar 는 교환 에스크로 + 오픈마켓 PENDING 매물을 모두 포함합니다.
       // 여기서 마켓 매물을 또 빼면 이중 차감이 되어 정상 판매가 막히므로 reservedTotal만 차감합니다.
       const reservedTotal = reservations.cardsByStar[key] || 0;
       const pendingMarket = owned.filter((card) => pendingMarketIds.has(card.id)).length;
       const escrowReserved = Math.max(0, reservedTotal - pendingMarket); // 안내 메시지용 교환 에스크로 추정치
-      const sellable = owned.length - reservedTotal;
+      const sellable = owned.length - locked - reservedTotal;
       if (sellable < count) {
         return res.status(400).json({
           error: 'InsufficientCards',
-          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 교환 중 ${escrowReserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
+          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 잠금 ${locked}장, 교환 중 ${escrowReserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
         });
       }
 
@@ -1563,6 +1587,7 @@ export const fuseCards = async (req: Request, res: Response) => {
         c.channel_id === channel_id
         && (c.star || 0) === st
         && c.id != null
+        && !c.is_locked
         && !pendingMarketIds.has(c.id)
       ).length
       - (tradeReservedByStar[key(st)] || 0);
@@ -1571,7 +1596,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       return res.status(400).json({
         error: 'FuseFailed',
         reason: 'RESERVED_OR_SHORT',
-        message: `${starNum}성 대상 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.`
+        message: `${starNum}성 대상 카드가 부족합니다. 잠금, 진행 중인 교환, 장터에 묶인 카드는 사용할 수 없습니다.`
       });
     }
 
@@ -1581,7 +1606,7 @@ export const fuseCards = async (req: Request, res: Response) => {
         return res.status(400).json({
           error: 'FuseFailed',
           reason: 'RESERVED_OR_SHORT',
-          message: `${material.star}성 재료 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.`
+          message: `${material.star}성 재료 카드가 부족합니다. 잠금, 진행 중인 교환, 장터에 묶인 카드는 사용할 수 없습니다.`
         });
       }
     }
@@ -1591,7 +1616,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       let msg = '한계돌파에 실패했습니다.';
       if (result.reason === 'MAX_STAR') msg = '이미 최고 등급(5성)입니다.';
       else if (result.reason === 'NO_TARGET') msg = `${starNum}성 카드를 보유하고 있지 않습니다.`;
-      else if (result.reason === 'NO_FODDER') msg = '한계돌파에 사용할 수 있는 재료 카드가 부족합니다. 진행 중인 교환이나 장터에 묶인 카드는 사용할 수 없습니다.';
+      else if (result.reason === 'NO_FODDER') msg = '한계돌파에 사용할 수 있는 재료 카드가 부족합니다. 잠금, 진행 중인 교환, 장터에 묶인 카드는 사용할 수 없습니다.';
       else if (result.reason === 'INVALID_MATERIALS') msg = '한계돌파 재료 선택이 올바르지 않습니다.';
       else if (result.reason === 'EXCEEDS_MAX_STAR') msg = '선택한 재료를 모두 합치면 최고 등급(5성)을 초과합니다.';
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });

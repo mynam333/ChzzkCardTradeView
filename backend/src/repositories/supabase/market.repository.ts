@@ -119,6 +119,16 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if ((listingType === 'auction' ? startingBid : listing.price) < 100) {
       throw new Error('MIN_PRICE_LIMIT');
     }
+    const { data: card, error: cardError } = await this.getClient()
+      .from('user_cards')
+      .select('id')
+      .eq('id', listing.user_card_id)
+      .eq('user_id', listing.seller_id)
+      .or('is_locked.is.null,is_locked.eq.false')
+      .maybeSingle();
+    if (cardError) throw cardError;
+    if (!card) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+
     const { data, error } = await this.getClient()
       .from('market_listings')
       .insert([{

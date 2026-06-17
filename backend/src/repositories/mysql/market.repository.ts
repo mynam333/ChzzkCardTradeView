@@ -114,12 +114,14 @@ export class MysqlMarketRepository implements IMarketRepository {
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
+      const card = await tx.get(
+        'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0 FOR UPDATE',
+        listing.user_card_id,
+        listing.seller_id
+      );
+      if (!card) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+
       if (!listing.with_cosmetics) {
-        const card = await tx.get(
-          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE',
-          listing.user_card_id,
-          listing.seller_id
-        );
         if (card?.border_item_id) {
           await tx.run(
             'INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE quantity = quantity + 1',
