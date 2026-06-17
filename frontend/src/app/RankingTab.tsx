@@ -14,6 +14,7 @@ import { ProfileModal } from './ProfileModal';
 import { StreamerDetailModal } from './StreamerDetailModal';
 import { StreamerTooltip } from './StreamerTooltip';
 import { fuzzyScore, fuzzySearch, normalizeSearchText } from '@/lib/search';
+import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
 
@@ -356,9 +357,9 @@ export const RankingTab: React.FC = () => {
 
   const formatLastSeen = (value?: string | null) => {
     if (!value) return '접속 기록 없음';
-    const time = new Date(value).getTime();
-    if (!Number.isFinite(time)) return '접속 기록 없음';
-    const diffMs = Date.now() - time;
+    const date = parseAppDate(value);
+    if (!date) return '접속 기록 없음';
+    const diffMs = Math.max(0, Date.now() - date.getTime());
     const minute = 60 * 1000;
     const hour = 60 * minute;
     const day = 24 * hour;
@@ -371,9 +372,9 @@ export const RankingTab: React.FC = () => {
 
   const lastSeenTone = (value?: string | null) => {
     if (!value) return 'border-border/60 bg-secondary/45 text-muted-foreground';
-    const time = new Date(value).getTime();
-    if (!Number.isFinite(time)) return 'border-border/60 bg-secondary/45 text-muted-foreground';
-    const diffMs = Date.now() - time;
+    const date = parseAppDate(value);
+    if (!date) return 'border-border/60 bg-secondary/45 text-muted-foreground';
+    const diffMs = Math.max(0, Date.now() - date.getTime());
     const day = 24 * 60 * 60 * 1000;
     if (diffMs < day) return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300';
     if (diffMs < 7 * day) return 'border-sky-400/25 bg-sky-400/10 text-sky-600 dark:text-sky-300';
@@ -518,7 +519,7 @@ export const RankingTab: React.FC = () => {
                       <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-black ${lastSeenTone(ur.last_seen_at)}`}
-                        title={ur.last_seen_at ? new Date(ur.last_seen_at).toLocaleString() : '접속 기록 없음'}
+                        title={ur.last_seen_at ? formatLocalDateTime(ur.last_seen_at) : '접속 기록 없음'}
                       >
                         <Clock3 className="h-2.5 w-2.5" />
                         {formatLastSeen(ur.last_seen_at)}
