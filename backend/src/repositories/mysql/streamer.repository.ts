@@ -394,10 +394,17 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     const cutoff = this.toUtcString(new Date(cutoffMs));
     const windowStart = this.toUtcString(new Date(cutoffMs - MysqlStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000));
     const rows = await this.getDb().all(
-      `SELECT channel_id, value, recorded_at
-         FROM value_history
-        WHERE recorded_at >= ? AND recorded_at <= ?
-        ORDER BY recorded_at DESC`,
+      `SELECT vh.channel_id, vh.value, vh.recorded_at
+         FROM value_history vh
+         JOIN (
+           SELECT channel_id, MAX(recorded_at) AS recorded_at
+             FROM value_history
+            WHERE recorded_at >= ?
+              AND recorded_at <= ?
+            GROUP BY channel_id
+         ) latest
+           ON latest.channel_id = vh.channel_id
+          AND latest.recorded_at = vh.recorded_at`,
       windowStart, cutoff
     );
     const map: Record<string, number> = {};

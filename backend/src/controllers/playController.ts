@@ -624,33 +624,29 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForUserRankingSnapshot = async (attempts = 8, delayMs = 250): Promise<boolean> => {
   if (getDbMode() !== 'MYSQL') return false;
-  const db = getMysqlDb();
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const row = await db.get<{ c: number }>('SELECT COUNT(*) AS c FROM user_asset_rankings');
-    if (Number(row?.c || 0) > 0) return true;
+    if (await hasUserRankingSnapshot()) return true;
     await sleep(delayMs);
   }
   return false;
 };
 
+const hasUserRankingSnapshot = async (): Promise<boolean> => {
+  if (getDbMode() !== 'MYSQL') return false;
+  const row = await getMysqlDb().get<{ present: number }>('SELECT 1 AS present FROM user_asset_rankings LIMIT 1');
+  return !!row;
+};
+
 const refreshUserRankingSnapshot = async (): Promise<boolean> => {
   const mode = getDbMode();
   if (mode === 'SUPABASE') return false;
-  if (userRankingSnapshotExpiresAt > Date.now()) {
-    const counts = mode === 'MYSQL'
-      ? await getMysqlDb().get<{ users_count: number; snapshot_count: number }>(
-        `SELECT
-            (SELECT COUNT(*) FROM users u WHERE ${mysqlDateValueSql('u.banned_until')} IS NULL OR ${mysqlDateValueSql('u.banned_until')} <= UTC_TIMESTAMP()) AS users_count,
-            (SELECT COUNT(*) FROM user_asset_rankings) AS snapshot_count`
-      )
-      : getSqliteDb().prepare(
-        `SELECT
-            (SELECT COUNT(*) FROM users WHERE banned_until IS NULL OR datetime(banned_until) <= datetime('now')) AS users_count,
-            (SELECT COUNT(*) FROM user_asset_rankings) AS snapshot_count`
-      ).get() as { users_count: number; snapshot_count: number };
-    if (Number(counts?.users_count || 0) === 0 || Number(counts?.snapshot_count || 0) > 0) return true;
+  if (userRankingSnapshotExpiresAt > Date.now()) return true;
+  if (userRankingSnapshotInFlight) {
+    if (mode === 'MYSQL' && await hasUserRankingSnapshot()) return true;
+    return userRankingSnapshotInFlight;
   }
-  if (userRankingSnapshotInFlight) return userRankingSnapshotInFlight;
+
+  const canServeStaleSnapshot = mode === 'MYSQL' && await hasUserRankingSnapshot();
 
   userRankingSnapshotInFlight = (async () => {
     if (mode === 'MYSQL') {
@@ -658,12 +654,13 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
       const releaseLock = await acquireSchedulerLock('snapshot:user-ranking', 60_000);
       if (!releaseLock) return waitForUserRankingSnapshot();
       try {
-        await db.transaction(async (tx) => {
-          await tx.run('DELETE FROM user_asset_rankings');
-          await tx.run(`
-            INSERT INTO user_asset_rankings
-              (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
-               card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+        await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
+        await db.run('DROP TABLE IF EXISTS user_asset_rankings_next');
+        await db.run('CREATE TABLE user_asset_rankings_next LIKE user_asset_rankings');
+        await db.run(`
+          INSERT INTO user_asset_rankings_next
+            (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
+             card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
             WITH NormalizedUsers AS (
               SELECT u.id, u.username, u.avatar_url, u.role, u.point,
                      ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
@@ -693,8 +690,9 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
             SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                    card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
               FROM RankedUsers
-          `);
-        });
+        `);
+        await db.run('RENAME TABLE user_asset_rankings TO user_asset_rankings_old, user_asset_rankings_next TO user_asset_rankings');
+        await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
       } finally {
         await releaseLock().catch(() => undefined);
       }
@@ -740,6 +738,7 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
       userRankingSnapshotInFlight = null;
     });
 
+  if (canServeStaleSnapshot) return true;
   return userRankingSnapshotInFlight;
 };
 

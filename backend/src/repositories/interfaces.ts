@@ -639,5 +639,5 @@ export interface IMinigameRepository {
   completeSession(sessionId: string, earnedPoints: number): Promise<{ ok: boolean; reason?: string; newPoints?: number }>;
   findSessionById(id: string): Promise<MinigameSession | null>;
   findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null>;
-  expireSessions(olderThanMinutes: number): Promise<void>;
+  expireSessions(olderThanMinutes: number, limit?: number): Promise<void>;
 }

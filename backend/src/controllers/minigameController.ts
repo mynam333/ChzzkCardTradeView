@@ -28,8 +28,12 @@ const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
 const MINIGAME_POOL_CACHE_TTL = Math.max(5_000, Number(process.env.MINIGAME_POOL_CACHE_TTL_MS || 60_000));
+const MINIGAME_SESSION_EXPIRE_INTERVAL_MS = Math.max(30_000, Number(process.env.MINIGAME_SESSION_EXPIRE_INTERVAL_MS || 60_000));
+const MINIGAME_SESSION_EXPIRE_BATCH_LIMIT = Math.max(10, Math.min(500, Number(process.env.MINIGAME_SESSION_EXPIRE_BATCH_LIMIT || 50)));
 let minigamePoolCache: { data: any[]; expiresAt: number } | null = null;
 let minigamePoolInFlight: Promise<any[]> | null = null;
+let minigameSessionExpireInFlight: Promise<void> | null = null;
+let minigameSessionExpireLastRunAt = 0;
 
 type DailyMinigameType = typeof DAILY_MINIGAMES[number];
 
@@ -68,6 +72,22 @@ const parseDbKstTimeMs = (value: string | undefined | null): number => {
 const getGamePreplayMs = (gameType: DailyMinigameType): number => {
   if (gameType === 'match') return COUNTDOWN_MS + MATCH_REVEAL_MS;
   return COUNTDOWN_MS;
+};
+
+const scheduleMinigameSessionExpiry = (force = false): Promise<void> | null => {
+  const now = Date.now();
+  if (minigameSessionExpireInFlight) return minigameSessionExpireInFlight;
+  if (!force && now - minigameSessionExpireLastRunAt < MINIGAME_SESSION_EXPIRE_INTERVAL_MS) return null;
+  minigameSessionExpireLastRunAt = now;
+  minigameSessionExpireInFlight = minigameRepository
+    .expireSessions(STARTED_SESSION_RECOVERY_MINUTES, MINIGAME_SESSION_EXPIRE_BATCH_LIMIT)
+    .catch((err) => {
+      console.warn('[MinigameController] stale session cleanup failed:', err?.message || err);
+    })
+    .finally(() => {
+      minigameSessionExpireInFlight = null;
+    });
+  return minigameSessionExpireInFlight;
 };
 
 const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
@@ -637,11 +657,9 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     if (!practiceMode) {
-      await minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES).catch((err) => {
-        console.warn('[MinigameController] stale session cleanup failed:', err);
-      });
+      scheduleMinigameSessionExpiry();
 
-      const activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
+      let activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
       if (activeSession) {
         let activeTarget: any = null;
         try {
@@ -668,6 +686,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           await minigameRepository.completeSession(activeSession.id, 0).catch((err) => {
             console.warn('[MinigameController] expired active session close failed:', err);
           });
+          activeSession = null;
         }
       }
 
@@ -868,7 +887,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(500).json({ error: 'InternalServerError', message: startResult.reason || '게임 세션 시작에 실패했습니다.' });
     }
 
-    minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES).catch(() => { });
+    scheduleMinigameSessionExpiry();
 
     return res.status(200).json({
       session_id: sessionId,

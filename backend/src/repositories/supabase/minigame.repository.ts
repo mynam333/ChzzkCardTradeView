@@ -286,15 +286,18 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
     return data as MinigameSession;
   }
 
-  async expireSessions(olderThanMinutes: number): Promise<void> {
+  async expireSessions(olderThanMinutes: number, limit = 50): Promise<void> {
     const client = this.getClient();
     const limitDate = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString();
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)));
 
     const { data: sessions, error: selectError } = await client
       .from('minigame_sessions')
       .select('*')
       .eq('status', 'STARTED')
-      .lt('created_at', limitDate);
+      .lt('created_at', limitDate)
+      .order('created_at', { ascending: true })
+      .limit(safeLimit);
 
     if (selectError || !sessions?.length) return;
 

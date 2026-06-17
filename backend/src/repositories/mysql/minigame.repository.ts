@@ -156,16 +156,19 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     return row ? this.mapSession(row) : null;
   }
 
-  async expireSessions(olderThanMinutes: number): Promise<void> {
+  async expireSessions(olderThanMinutes: number, limit = 50): Promise<void> {
     await this.getDb().transaction(async (tx) => {
       const cutoff = formatKstDbTime(Date.now() - olderThanMinutes * 60 * 1000);
+      const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)));
       const expired = await tx.all(`
         SELECT *
         FROM minigame_sessions
         WHERE status = 'STARTED'
           AND created_at < ?
+        ORDER BY created_at ASC
+        LIMIT ?
         FOR UPDATE
-      `, cutoff);
+      `, cutoff, safeLimit);
       for (const session of expired) {
         const update = await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND status = 'STARTED'", formatKstDbTime(), session.id);
         if (update.changes <= 0) continue;

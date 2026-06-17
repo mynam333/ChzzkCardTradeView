@@ -222,16 +222,19 @@ export class SqliteMinigameRepository implements IMinigameRepository {
     };
   }
 
-  async expireSessions(olderThanMinutes: number): Promise<void> {
+  async expireSessions(olderThanMinutes: number, limit = 50): Promise<void> {
     const db = this.getDb();
     const txn = db.transaction(() => {
       const cutoff = formatKstDbTime(Date.now() - olderThanMinutes * 60 * 1000);
+      const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)));
       const expired = db.prepare(`
         SELECT *
         FROM minigame_sessions
         WHERE status = 'STARTED'
           AND created_at < ?
-      `).all(cutoff) as any[];
+        ORDER BY datetime(created_at) ASC
+        LIMIT ?
+      `).all(cutoff, safeLimit) as any[];
 
       for (const session of expired) {
         const update = db.prepare(`

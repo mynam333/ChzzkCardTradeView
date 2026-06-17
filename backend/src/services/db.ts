@@ -569,6 +569,12 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'notifications', 'group_key', 'group_key VARCHAR(191) NULL AFTER link');
   await ensureMysqlIndex(db, 'notifications', 'idx_notifications_group_key', '(user_id, group_key, deleted_at)');
   await ensureMysqlIndex(db, 'streamers', 'idx_streamers_base_value', '(base_value DESC, channel_id)');
+  await ensureMysqlIndex(db, 'value_history', 'idx_value_history_channel_recorded', '(channel_id, recorded_at DESC)');
+  await ensureMysqlIndex(db, 'value_history', 'idx_value_history_recorded_channel', '(recorded_at DESC, channel_id)');
+  await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_status_created', '(status, created_at, id)');
+  await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_user_game_status_created', '(user_id, game_type, status, created_at DESC)');
+  await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible', '(user_id, is_hidden)');
+  await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_channel_star_visible', '(channel_id, star, is_hidden)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_updated', '(status, updated_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_updated', '(status, listing_type, updated_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_created', '(status, listing_type, created_at, id)');
@@ -1427,6 +1433,8 @@ export const initDatabaseConnection = async (): Promise<void> => {
         earned_points INTEGER DEFAULT 0,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_minigame_sessions_status_created ON minigame_sessions(status, created_at, id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_minigame_sessions_user_game_status_created ON minigame_sessions(user_id, game_type, status, created_at DESC);");
 
       try {
         sqliteDb.prepare("SELECT ticket_spent_type FROM minigame_sessions LIMIT 1").get();

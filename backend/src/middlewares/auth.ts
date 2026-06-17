@@ -73,7 +73,6 @@ const touchLastSeen = (userId: string) => {
       if (cached?.user) cached.user.last_seen_at = seenAt;
     })
     .catch((err: any) => {
-      lastSeenTouches.delete(userId);
       console.warn('[Auth] 최근 접속일 갱신 실패:', err?.message || err);
     });
 };
