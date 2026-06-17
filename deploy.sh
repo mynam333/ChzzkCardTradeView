@@ -237,14 +237,21 @@ USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
 PORT_VALUE="$(env_value PORT 5000)"
 CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
 
+run_with_db_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${DB_CONNECT_TIMEOUT}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 run_mysql_backup() {
   local output_file="$1"
   local tmp_file="${output_file}.tmp"
   local attempt=1
 
   while [ "${attempt}" -le "${DB_BACKUP_RETRIES}" ]; do
-    if MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump \
-      --connect-timeout="${DB_CONNECT_TIMEOUT}" \
+    if run_with_db_timeout env MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump \
       -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
       --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
       "${DB_NAME_VALUE}" > "${tmp_file}"; then
@@ -267,8 +274,7 @@ run_mysql_schema() {
   local attempt=1
 
   while [ "${attempt}" -le "${DB_SCHEMA_RETRIES}" ]; do
-    if MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql \
-      --connect-timeout="${DB_CONNECT_TIMEOUT}" \
+    if run_with_db_timeout env MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql \
       -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql; then
       return 0
     fi
