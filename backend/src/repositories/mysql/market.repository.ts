@@ -16,6 +16,12 @@ export class MysqlMarketRepository implements IMarketRepository {
     const sellerJoin = includeHistoricalRefs
       ? 'LEFT JOIN users u ON u.id COLLATE utf8mb4_unicode_ci = ml.seller_id COLLATE utf8mb4_unicode_ci'
       : 'JOIN users u ON u.id = ml.seller_id';
+    const buyerJoin = includeHistoricalRefs
+      ? 'LEFT JOIN users bu ON bu.id COLLATE utf8mb4_unicode_ci = ml.buyer_id COLLATE utf8mb4_unicode_ci'
+      : 'LEFT JOIN users bu ON bu.id = ml.buyer_id';
+    const currentBidderJoin = includeHistoricalRefs
+      ? 'LEFT JOIN users cb ON cb.id COLLATE utf8mb4_unicode_ci = ml.current_bidder_id COLLATE utf8mb4_unicode_ci'
+      : 'LEFT JOIN users cb ON cb.id = ml.current_bidder_id';
     const auditJoin = includeHistoricalRefs
       ? "LEFT JOIN market_transaction_audit_logs mat ON mat.listing_id = ml.id AND mat.event_type = 'sold'"
       : '';
@@ -42,8 +48,8 @@ export class MysqlMarketRepository implements IMarketRepository {
              ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
         FROM market_listings ml
         ${sellerJoin}
-        LEFT JOIN users bu ON bu.id COLLATE utf8mb4_unicode_ci = ml.buyer_id COLLATE utf8mb4_unicode_ci
-        LEFT JOIN users cb ON cb.id COLLATE utf8mb4_unicode_ci = ml.current_bidder_id COLLATE utf8mb4_unicode_ci
+        ${buyerJoin}
+        ${currentBidderJoin}
         ${auditJoin}
         ${cardJoin}
         ${streamerJoin}
