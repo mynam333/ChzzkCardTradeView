@@ -30,6 +30,7 @@ type FriendUser = {
   username: string;
   avatar_url: string;
   role?: 'USER' | 'ADMIN';
+  last_seen_at?: string | null;
 };
 
 type FriendRequest = {
@@ -134,6 +135,34 @@ const parseChatDate = (value?: string) => {
   const normalized = timezoneLessDateTime.test(value) ? `${value.replace(' ', 'T')}Z` : value;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+const formatLastSeen = (value?: string | null) => {
+  if (!value) return '접속 기록 없음';
+  const date = parseChatDate(value);
+  if (!date) return '접속 기록 없음';
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < 10 * minute) return '방금 접속';
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}분 전 접속`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}시간 전 접속`;
+  if (diffMs < 30 * day) return `${Math.floor(diffMs / day)}일 전 접속`;
+  return '30일 이상 미접속';
+};
+const formatLastSeenTitle = (value?: string | null) => {
+  const date = parseChatDate(value || undefined);
+  return date ? date.toLocaleString() : '접속 기록 없음';
+};
+const lastSeenDotClass = (value?: string | null) => {
+  const date = parseChatDate(value || undefined);
+  if (!date) return 'bg-muted-foreground/35';
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const day = 24 * 60 * 60 * 1000;
+  if (diffMs < 10 * 60 * 1000) return 'bg-emerald-400';
+  if (diffMs < day) return 'bg-sky-400';
+  if (diffMs < 7 * day) return 'bg-amber-400';
+  return 'bg-muted-foreground/35';
 };
 const chatRoomSortTime = (room: ChatRoom) => parseChatDate(room.last_message?.created_at || room.updated_at || undefined)?.getTime() || 0;
 const sortChatRooms = (rooms: ChatRoom[]) => [...rooms].sort((a, b) => (
@@ -1234,7 +1263,13 @@ export const FriendTab: React.FC = () => {
             >
               <button type="button" onClick={() => openDraftChat(friend)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
                 <img src={friend.avatar_url || avatarFallback(friend.id)} alt={friend.username} className="h-9 w-9 rounded-full border border-border object-cover" />
-                <p className="truncate text-xs font-black">{friend.username}</p>
+                <span className="min-w-0">
+                  <p className="truncate text-xs font-black">{friend.username}</p>
+                  <p title={formatLastSeenTitle(friend.last_seen_at)} className="mt-0.5 flex items-center gap-1 text-[9px] font-black text-muted-foreground">
+                    <span className={`h-1.5 w-1.5 rounded-full ${lastSeenDotClass(friend.last_seen_at)}`} />
+                    {formatLastSeen(friend.last_seen_at)}
+                  </p>
+                </span>
               </button>
               <button type="button" onClick={() => removeFriendUser(friend.id)} className="rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-black text-rose-500">삭제</button>
             </div>
@@ -1297,6 +1332,10 @@ export const FriendTab: React.FC = () => {
                       <BellOff className="h-3 w-3" />
                     </span>
                   )}
+                </p>
+                <p title={formatLastSeenTitle(room.other_user.last_seen_at)} className="mt-0.5 flex items-center gap-1 text-[9px] font-black opacity-70">
+                  <span className={`h-1.5 w-1.5 rounded-full ${lastSeenDotClass(room.other_user.last_seen_at)}`} />
+                  {formatLastSeen(room.other_user.last_seen_at)}
                 </p>
                 <p className="truncate text-[11px] font-bold opacity-70 lg:text-[10px]">{room.closed_at ? '닫힌 톡방' : room.last_message?.body || '메시지 없음'}</p>
               </div>
@@ -1389,8 +1428,12 @@ export const FriendTab: React.FC = () => {
                 <img src={activeChatRoom.other_user.avatar_url || avatarFallback(activeChatRoom.other_user.id)} alt={activeChatRoom.other_user.username} className="h-10 w-10 shrink-0 rounded-full border border-border object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black">{activeChatRoom.other_user.username}</p>
-                  <p className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
                     <span>{isDraftRoom(activeChatRoom) ? '첫 메시지를 보내면 톡방이 시작됩니다.' : activeChatRoom.closed_at ? '닫힌 톡방' : activeChatRoom.is_admin_room ? '관리자 1:1 톡' : '1:1 톡'}</span>
+                    <span title={formatLastSeenTitle(activeChatRoom.other_user.last_seen_at)} className="inline-flex items-center gap-1 rounded-full bg-secondary/60 px-1.5 py-0.5">
+                      <span className={`h-1.5 w-1.5 rounded-full ${lastSeenDotClass(activeChatRoom.other_user.last_seen_at)}`} />
+                      {formatLastSeen(activeChatRoom.other_user.last_seen_at)}
+                    </span>
                     {activeRoomIsReal && activeChatRoom.is_muted && (
                       <span title="알림 꺼짐" className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
                         <BellOff className="h-3 w-3" /> 알림 꺼짐

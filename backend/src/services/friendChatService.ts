@@ -10,6 +10,7 @@ export type ChatUserSummary = {
   username: string;
   avatar_url: string | null;
   role?: 'USER' | 'ADMIN';
+  last_seen_at?: string | null;
 };
 
 export type FriendRequestRow = {
@@ -109,7 +110,8 @@ const mapUser = (row: any): ChatUserSummary => ({
   id: row.id,
   username: row.username,
   avatar_url: row.avatar_url || avatarFallback(row.id),
-  role: row.role
+  role: row.role,
+  last_seen_at: row.last_seen_at ? normalizeUtcDateTime(row.last_seen_at) : null
 });
 
 const mapMessage = (row: any): ChatMessageRow => ({
@@ -168,7 +170,8 @@ const mapRoom = (row: any): ChatRoomRow => ({
     id: row.other_id,
     username: row.other_username,
     avatar_url: row.other_avatar_url,
-    role: row.other_role
+    role: row.other_role,
+    last_seen_at: row.other_last_seen_at
   }),
   last_message: row.last_message_id ? mapMessage({
     id: row.last_message_id,
@@ -185,14 +188,14 @@ const mapRoom = (row: any): ChatRoomRow => ({
 export const getUserSummary = async (userId: string): Promise<ChatUserSummary | null> => {
   const mode = getDbMode();
   if (mode === 'MYSQL') {
-    const row = await getMysqlDb().get<any>('SELECT id, username, avatar_url, role FROM users WHERE id = ?', userId);
+    const row = await getMysqlDb().get<any>('SELECT id, username, avatar_url, role, last_seen_at FROM users WHERE id = ?', userId);
     return row ? mapUser(row) : null;
   }
   if (mode === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('users').select('id, username, avatar_url, role').eq('id', userId).maybeSingle();
+    const { data } = await getSupabaseClient().from('users').select('id, username, avatar_url, role, last_seen_at').eq('id', userId).maybeSingle();
     return data ? mapUser(data) : null;
   }
-  const row = getSqliteDb().prepare('SELECT id, username, avatar_url, role FROM users WHERE id = ?').get(userId) as any;
+  const row = getSqliteDb().prepare('SELECT id, username, avatar_url, role, last_seen_at FROM users WHERE id = ?').get(userId) as any;
   return row ? mapUser(row) : null;
 };
 
@@ -212,7 +215,7 @@ export const areFriends = async (a: string, b: string): Promise<boolean> => {
 export const listFriends = async (userId: string): Promise<ChatUserSummary[]> => {
   const mode = getDbMode();
   const mysqlSql = `
-    SELECT u.id, u.username, u.avatar_url, u.role
+    SELECT u.id, u.username, u.avatar_url, u.role, u.last_seen_at
       FROM friendships f
       JOIN users u
         ON u.id COLLATE utf8mb4_unicode_ci = (
@@ -223,7 +226,7 @@ export const listFriends = async (userId: string): Promise<ChatUserSummary[]> =>
      ORDER BY u.username ASC
   `;
   const sql = `
-    SELECT u.id, u.username, u.avatar_url, u.role
+    SELECT u.id, u.username, u.avatar_url, u.role, u.last_seen_at
       FROM friendships f
       JOIN users u ON u.id = CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END
      WHERE f.user_a_id = ? OR f.user_b_id = ?
@@ -237,7 +240,7 @@ export const listFriends = async (userId: string): Promise<ChatUserSummary[]> =>
       .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`);
     const ids = (data || []).map((f: any) => f.user_a_id === userId ? f.user_b_id : f.user_a_id);
     if (ids.length === 0) return [];
-    const { data: users } = await getSupabaseClient().from('users').select('id, username, avatar_url, role').in('id', ids);
+    const { data: users } = await getSupabaseClient().from('users').select('id, username, avatar_url, role, last_seen_at').in('id', ids);
     return (users || []).map(mapUser).sort((a, b) => a.username.localeCompare(b.username));
   }
   return (getSqliteDb().prepare(sql).all(userId, userId, userId) as any[]).map(mapUser);
@@ -485,6 +488,7 @@ const roomSelectSql = (viewerId: string) => `
          u.username AS other_username,
          u.avatar_url AS other_avatar_url,
          u.role AS other_role,
+         u.last_seen_at AS other_last_seen_at,
          lm.id AS last_message_id,
          lm.sender_id AS last_sender_id,
          lm.body AS last_body,
@@ -521,6 +525,7 @@ const roomSelectMysqlSql = (viewerId: string) => `
          u.username AS other_username,
          u.avatar_url AS other_avatar_url,
          u.role AS other_role,
+         u.last_seen_at AS other_last_seen_at,
          lm.id AS last_message_id,
          lm.sender_id AS last_sender_id,
          lm.body AS last_body,

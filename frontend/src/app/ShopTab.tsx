@@ -297,6 +297,7 @@ export const ShopTab: React.FC = () => {
   // ---- 거래 이력 ----
   const [marketHistory, setMarketHistory] = useState<any[]>([]);
   const [marketHistoryPage, setMarketHistoryPage] = useState(initialHistoryPage);
+  const [marketHistoryPageInput, setMarketHistoryPageInput] = useState(String(initialHistoryPage));
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyScope, setHistoryScope] = useState<'all' | 'mine'>(initialHistoryScope); // 전체 / 내 거래 이력
 
@@ -384,12 +385,14 @@ export const ShopTab: React.FC = () => {
   const handleHistoryScopeChange = (scope: 'all' | 'mine') => {
     setHistoryScope(scope);
     setMarketHistoryPage(1);
+    setMarketHistoryPageInput('1');
     pushShopRoute({ tab: 'history', scope: scope === 'all' ? null : scope, historyPage: null });
   };
 
   const handleHistoryPageChange = (page: number) => {
     const nextPage = Math.max(1, Math.floor(page));
     setMarketHistoryPage(nextPage);
+    setMarketHistoryPageInput(String(nextPage));
     pushShopRoute({ tab: 'history', historyPage: nextPage === 1 ? null : nextPage });
   };
 
@@ -503,6 +506,10 @@ export const ShopTab: React.FC = () => {
     setMarketPageInput(String(marketPage));
   }, [marketPage]);
 
+  useEffect(() => {
+    setMarketHistoryPageInput(String(marketHistoryPage));
+  }, [marketHistoryPage]);
+
   const goToMarketPage = () => {
     const parsed = Math.floor(Number(marketPageInput));
     if (!Number.isFinite(parsed)) {
@@ -511,6 +518,16 @@ export const ShopTab: React.FC = () => {
     }
     const nextPage = Math.min(Math.max(1, parsed), Math.max(1, marketTotalPages));
     handleMarketPageChange(nextPage);
+  };
+
+  const goToHistoryPage = (totalPages: number) => {
+    const parsed = Math.floor(Number(marketHistoryPageInput));
+    const maxPage = Math.max(1, totalPages);
+    if (!Number.isFinite(parsed)) {
+      setMarketHistoryPageInput(String(Math.min(marketHistoryPage, maxPage)));
+      return;
+    }
+    handleHistoryPageChange(Math.min(Math.max(1, parsed), maxPage));
   };
 
   const scheduleMarketRefresh = (delayMs = 1200, minGapMs = 3500) => {
@@ -2213,9 +2230,10 @@ export const ShopTab: React.FC = () => {
             ) : (() => {
               const historyPerPage = 10;
               const historyTotalPages = Math.ceil(marketHistory.length / historyPerPage);
+              const historyCurrentPage = Math.min(Math.max(1, marketHistoryPage), Math.max(1, historyTotalPages));
               const paginatedHistory = marketHistory.slice(
-                (marketHistoryPage - 1) * historyPerPage,
-                marketHistoryPage * historyPerPage
+                (historyCurrentPage - 1) * historyPerPage,
+                historyCurrentPage * historyPerPage
               );
 
               return (
@@ -2314,33 +2332,63 @@ export const ShopTab: React.FC = () => {
 
                   {/* 영수증 페이지네이션 */}
                   {historyTotalPages > 1 && (
-                    <div className="flex items-center justify-center gap-2 mt-4 pt-2">
-                      <button
-                        onClick={() => handleHistoryPageChange(marketHistoryPage - 1)}
-                        disabled={marketHistoryPage === 1}
-                        className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                    <div className="mt-4 flex flex-col items-center justify-center gap-3 border-t border-border/30 pt-4 sm:flex-row sm:flex-wrap">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleHistoryPageChange(historyCurrentPage - 1)}
+                          disabled={historyCurrentPage === 1}
+                          className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        {getPaginationItems(historyCurrentPage, historyTotalPages).map((item, index) => {
+                          if (item === 'ellipsis') {
+                            return <span key={`history-ellipsis-${index}`} className="px-1 text-xs font-black text-muted-foreground">...</span>;
+                          }
+                          const p = item;
+                          return (
+                            <button
+                              key={p}
+                              onClick={() => handleHistoryPageChange(p)}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${historyCurrentPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
+                            >
+                              {p}
+                            </button>
+                          );
+                        })}
+                        <button
+                          onClick={() => handleHistoryPageChange(historyCurrentPage + 1)}
+                          disabled={historyCurrentPage === historyTotalPages}
+                          className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <form
+                        className="flex items-center gap-1.5"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          goToHistoryPage(historyTotalPages);
+                        }}
                       >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      {Array.from({ length: historyTotalPages }).map((_, i) => {
-                        const p = i + 1;
-                        return (
-                          <button
-                            key={p}
-                            onClick={() => handleHistoryPageChange(p)}
-                            className={`px-3 py-1 rounded-lg text-xs font-bold transition ${marketHistoryPage === p ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground hover:bg-secondary/40'}`}
-                          >
-                            {p}
-                          </button>
-                        );
-                      })}
-                      <button
-                        onClick={() => handleHistoryPageChange(marketHistoryPage + 1)}
-                        disabled={marketHistoryPage === historyTotalPages}
-                        className="rounded-lg border border-border bg-card p-1.5 hover:bg-secondary/40 disabled:opacity-30 disabled:pointer-events-none transition"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
+                        <input
+                          type="number"
+                          min={1}
+                          max={historyTotalPages}
+                          value={marketHistoryPageInput}
+                          onChange={(event) => setMarketHistoryPageInput(event.target.value)}
+                          onBlur={() => goToHistoryPage(historyTotalPages)}
+                          className="h-8 w-16 rounded-lg border border-border bg-card px-2 text-center text-xs font-black focus:border-primary focus:outline-none"
+                          aria-label="이동할 거래 이력 페이지"
+                        />
+                        <span className="text-[11px] font-bold text-muted-foreground">/ {historyTotalPages.toLocaleString()}</span>
+                        <button
+                          type="submit"
+                          className="h-8 rounded-lg border border-border bg-card px-3 text-xs font-black text-foreground transition hover:bg-secondary/40"
+                        >
+                          이동
+                        </button>
+                      </form>
                     </div>
                   )}
                 </div>
