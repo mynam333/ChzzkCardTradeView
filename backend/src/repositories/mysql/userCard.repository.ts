@@ -352,6 +352,17 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     return result.changes > 0;
   }
 
+  async updateVisibilityByGroup(userId: string, channelId: string, star: number, hidden: boolean): Promise<number> {
+    const result = await this.getDb().run(
+      'UPDATE user_cards SET is_hidden = ? WHERE user_id = ? AND channel_id = ? AND COALESCE(star, 0) = ?',
+      hidden ? 1 : 0,
+      userId,
+      channelId,
+      star
+    );
+    return result.changes || 0;
+  }
+
   async setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean> {
     if (!favorite) {
       const result = await this.getDb().run('UPDATE user_cards SET favorite_order = NULL, favorite_at = NULL WHERE id = ? AND user_id = ?', cardId, userId);

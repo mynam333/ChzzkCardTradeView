@@ -17,6 +17,7 @@ export interface User {
   access_token?: string | null;
   refresh_token?: string | null;
   token_expires_at?: string | null; // 치지직 access_token 만료 시각(ISO)
+  last_seen_at?: string | null;
   created_at?: string;
   is_deleted?: boolean;
   deleted_at?: string | null;
@@ -217,6 +218,7 @@ export interface IUserRepository {
   updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void>;
   /** 치지직 OAuth 토큰 및 만료 시각을 갱신합니다(토큰 리프레시 결과 저장용). */
   updateTokens(id: string, accessToken: string | null, refreshToken: string | null, tokenExpiresAt: string | null): Promise<void>;
+  updateLastSeen(id: string, seenAt: string): Promise<void>;
   updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void>;
   updateStatusMessage(id: string, message: string | null): Promise<void>;
   findRankings(limit: number, keyword?: string, options?: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null }): Promise<UserRanking[]>;
@@ -491,6 +493,7 @@ export interface IUserCardRepository {
   /** 카드 삭제와 판매 포인트 가산을 단일 트랜잭션/RPC로 처리합니다. */
   sellCardsAtomic(userId: string, actions: { channelId: string; star: number; count: number; baseValue: number }[]): Promise<number>;
   updateVisibility(userId: string, cardId: number, hidden: boolean): Promise<boolean>;
+  updateVisibilityByGroup(userId: string, channelId: string, star: number, hidden: boolean): Promise<number>;
   setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean>;
   setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean>;
 }

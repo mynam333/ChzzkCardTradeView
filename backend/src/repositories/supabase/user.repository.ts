@@ -190,9 +190,10 @@ export class SupabaseUserRepository implements IUserRepository {
   }
 
   async create(user: User): Promise<User> {
+    const payload = { ...user, last_seen_at: user.last_seen_at || new Date().toISOString() };
     const { data, error } = await this.getClient()
       .from('users')
-      .insert([user])
+      .insert([payload])
       .select()
       .single();
 
@@ -431,6 +432,14 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error) throw error;
   }
 
+  async updateLastSeen(id: string, seenAt: string): Promise<void> {
+    const { error } = await this.getClient()
+      .from('users')
+      .update({ last_seen_at: seenAt })
+      .eq('id', id);
+    if (error) throw error;
+  }
+
   async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
     const { error } = await this.getClient()
       .from('users')
@@ -517,6 +526,7 @@ export class SupabaseUserRepository implements IUserRepository {
         last_free_draw: row.last_free_draw,
         banned_until: row.banned_until,
         status_message: row.status_message ?? null,
+        last_seen_at: row.last_seen_at ?? null,
         created_at: row.created_at,
         card_count: Number(row.card_count) || 0,
         cards_value: Number(row.cards_value) || Math.max(0, Number(row.total_asset || 0) - Number(row.point || 0)),

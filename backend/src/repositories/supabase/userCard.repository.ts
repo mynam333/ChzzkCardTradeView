@@ -311,6 +311,18 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
     return !!data;
   }
 
+  async updateVisibilityByGroup(userId: string, channelId: string, star: number, hidden: boolean): Promise<number> {
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .update({ is_hidden: hidden })
+      .eq('user_id', userId)
+      .eq('channel_id', channelId)
+      .eq('star', star)
+      .select('id');
+    if (error) throw error;
+    return data?.length || 0;
+  }
+
   async setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean> {
     if (!favorite) {
       const { data, error } = await this.getClient()

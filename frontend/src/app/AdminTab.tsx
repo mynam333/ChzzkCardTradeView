@@ -23,7 +23,13 @@ import {
   Pin,
   Award,
   Ticket,
-  Activity
+  Activity,
+  BarChart3,
+  ExternalLink,
+  Clock3,
+  MonitorSmartphone,
+  MousePointerClick,
+  ShieldCheck
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type {
@@ -51,8 +57,9 @@ import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
+import { analyticsSettings } from '@/lib/analytics';
 
-type AdminSubTab = 'dashboard' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
 
 interface PushFormState {
@@ -103,6 +110,46 @@ const filterAdminStreamers = (streamers: any[], query: string): any[] => {
     .map((item) => item.streamer);
 };
 
+const insightMetricCards = [
+  {
+    label: '접속자 추이',
+    value: '실시간/시간대별',
+    description: '언제 접속자가 몰리는지 시간대별로 확인',
+    icon: BarChart3,
+    color: 'text-sky-500'
+  },
+  {
+    label: '페이지 체류',
+    value: '경로별 초 단위',
+    description: '어느 페이지에서 오래 머무는지 확인',
+    icon: Clock3,
+    color: 'text-emerald-500'
+  },
+  {
+    label: '기기 분석',
+    value: 'PC/모바일/태블릿',
+    description: '브라우저, OS, 화면 크기까지 분류',
+    icon: MonitorSmartphone,
+    color: 'text-fuchsia-500'
+  },
+  {
+    label: '기능 이용',
+    value: '핵심 이벤트',
+    description: '네비게이션, 알림 클릭 등 직접 이벤트 추적',
+    icon: MousePointerClick,
+    color: 'text-amber-500'
+  }
+];
+
+const insightEventCatalog = [
+  { name: 'chikapo_page_view', description: '페이지 진입. 경로, 라우트 그룹, 기기, 브라우저, OS, 로그인 여부를 포함합니다.' },
+  { name: 'chikapo_page_duration', description: '페이지 이탈 또는 이동 시 체류 시간. duration_ms/duration_seconds로 분석합니다.' },
+  { name: 'chikapo_page_heartbeat', description: '보이는 탭에서 30초마다 활성 상태 확인. 시간대별 활성 접속 추정에 사용합니다.' },
+  { name: 'chikapo_navigation_select', description: '하단바/사이드바 주요 메뉴 이동. PC/모바일 사용 흐름 비교에 사용합니다.' },
+  { name: 'chikapo_notification_open', description: '사이트 알림 클릭. 어떤 알림 그룹이 실제 이동을 유도하는지 확인합니다.' },
+  { name: 'chikapo_logout', description: '로그아웃 실행. 세션 종료 흐름 확인용입니다.' }
+];
+
 export const AdminTab: React.FC = () => {
   const { user, toast, checkMaintenanceStatus } = useApp();
   const searchParams = useSearchParams();
@@ -112,6 +159,7 @@ export const AdminTab: React.FC = () => {
   const tabParam = searchParams.get('tab') as AdminSubTab | null;
   const initialSubTab: AdminSubTab = (
     tabParam === 'dashboard' ||
+    tabParam === 'insights' ||
     tabParam === 'users' ||
     tabParam === 'titles' ||
     tabParam === 'coupons' ||
@@ -131,7 +179,7 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
-      'dashboard', 'users', 'titles', 'coupons', 'announcements',
+      'dashboard', 'insights', 'users', 'titles', 'coupons', 'announcements',
       'push', 'reports', 'trades', 'asset-events', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
@@ -1468,6 +1516,7 @@ export const AdminTab: React.FC = () => {
 
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
+    { id: 'insights', label: '인사이트', icon: BarChart3 },
     { id: 'users', label: '유저', icon: Users },
     { id: 'titles', label: '칭호', icon: Award },
     { id: 'coupons', label: '쿠폰', icon: Tag },
@@ -1534,6 +1583,113 @@ export const AdminTab: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {subTab === 'insights' && (
+        <section className="space-y-5">
+          <div className="overflow-hidden rounded-[2rem] border border-primary/15 bg-gradient-to-br from-primary/10 via-card to-sky-400/10 p-5 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-primary">
+                  <BarChart3 className="h-5 w-5" />
+                  <h3 className="text-base font-black text-foreground">사이트 인사이트</h3>
+                </div>
+                <p className="mt-2 max-w-2xl text-xs font-bold leading-relaxed text-muted-foreground">
+                  방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 PostHog와 Cloudflare Web Analytics에서 확인합니다.
+                  분석 이벤트는 브라우저에서 외부 분석 도구로 직접 전송되어 치카포 백엔드와 MySQL에 부하를 주지 않습니다.
+                </p>
+              </div>
+              <a
+                href={analyticsSettings.dashboardUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs font-black text-primary-foreground shadow-md shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95"
+              >
+                PostHog 열기
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {insightMetricCards.map((metric) => {
+              const Icon = metric.icon;
+              return (
+                <div key={metric.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-foreground">{metric.label}</span>
+                    <Icon className={`h-4 w-4 ${metric.color}`} />
+                  </div>
+                  <p className="mt-2 text-lg font-black text-foreground">{metric.value}</p>
+                  <p className="mt-1 text-[11px] font-bold leading-relaxed text-muted-foreground">{metric.description}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="flex items-center gap-1.5 text-sm font-black">
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                수집 상태
+              </h3>
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">PostHog</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${analyticsSettings.enabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
+                    {analyticsSettings.enabled ? '활성' : '키 미설정'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">Cloudflare Web Analytics</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${analyticsSettings.cloudflareEnabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground'}`}>
+                    {analyticsSettings.cloudflareEnabled ? '활성' : '선택 설정'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-secondary/35 px-3 py-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">전송 대상</span>
+                  <span className="max-w-[12rem] truncate text-right text-[10px] font-black text-foreground">{analyticsSettings.postHogHost}</span>
+                </div>
+              </div>
+              <p className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2.5 text-[11px] font-bold leading-relaxed text-muted-foreground">
+                자동 클릭/폼 캡처와 세션 리플레이는 꺼져 있습니다. 닉네임, 채팅 내용, 검색어 원문, 쿠폰 코드 같은 내용 데이터는 분석 이벤트에 포함하지 않습니다.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h3 className="flex items-center gap-1.5 text-sm font-black">
+                <Activity className="h-4 w-4 text-primary" />
+                이벤트 카탈로그
+              </h3>
+              <div className="mt-4 space-y-2">
+                {insightEventCatalog.map((event) => (
+                  <div key={event.name} className="rounded-xl border border-border/70 bg-secondary/25 px-3 py-2.5">
+                    <p className="font-mono text-[11px] font-black text-primary">{event.name}</p>
+                    <p className="mt-1 text-[11px] font-bold leading-relaxed text-muted-foreground">{event.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <h3 className="text-sm font-black">PostHog에서 만들 대시보드 권장 위젯</h3>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {[
+                '시간대별 chikapo_page_heartbeat 고유 세션 수',
+                'path별 chikapo_page_view 및 평균 chikapo_page_duration',
+                'device_type/browser_name/os_name별 방문 비율',
+                'route_group별 재방문·이탈 흐름',
+                'chikapo_navigation_select의 from_tab -> to_tab 전환',
+                'chikapo_notification_open의 group_key별 클릭 수'
+              ].map((item) => (
+                <div key={item} className="rounded-xl bg-secondary/35 px-3 py-2 text-[11px] font-bold text-muted-foreground">
+                  {item}
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       )}

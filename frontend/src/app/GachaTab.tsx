@@ -1032,11 +1032,21 @@ export const GachaTab: React.FC = () => {
     return getAvailableCount(channelId, star);
   };
 
+  const getCardGroup = (card: UserCard) =>
+    inventory.filter(c => c.channel_id === card.channel_id && (c.star ?? 0) === (card.star ?? 0));
+
+  const isCardGroupHidden = (card: UserCard) => {
+    const group = getCardGroup(card);
+    return group.length > 0 && group.every(c => c.is_hidden);
+  };
+
   const handleToggleHidden = async (card: UserCard) => {
+    const star = card.star ?? 0;
+    const hidden = !isCardGroupHidden(card);
     try {
-      const res = await apiFetch(`/cards/${card.id}/visibility`, {
+      const res = await apiFetch('/cards/visibility', {
         method: 'PATCH',
-        body: JSON.stringify({ hidden: !card.is_hidden })
+        body: JSON.stringify({ channel_id: card.channel_id, star, hidden })
       });
       const data = await res.json();
       showAlert(res.ok ? '설정 완료' : '설정 실패', data.message || '', res.ok ? 'success' : 'error');
@@ -1829,6 +1839,7 @@ export const GachaTab: React.FC = () => {
                   const avail = getAvailableCount(streamer.channel_id, star);
                   const pendingMarketCount = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
                   const lockedCount = owned.filter(c => c.is_locked).length;
+                  const hiddenCount = owned.filter(c => c.is_hidden).length;
                   const actionReserved = reservations.cardsByStar[key] || 0;
                   const actionCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
                   const actionCard = actionCards.length > actionReserved ? actionCards[actionReserved] : null;
@@ -2007,9 +2018,12 @@ export const GachaTab: React.FC = () => {
                         <Star className={`h-4 w-4 ${card.favorite_order == null ? '' : 'fill-current'}`} />
                       </button>
 
-                      {card.is_hidden && (
-                        <span className="absolute left-2 top-10 z-30 inline-flex items-center gap-1 rounded-full border border-white/25 bg-slate-950/55 px-2 py-1 text-[9px] font-black text-white shadow-md backdrop-blur-md">
-                          <EyeOff className="h-3 w-3" /> 숨김
+                      {hiddenCount > 0 && (
+                        <span
+                          title={hiddenCount === count ? '묶음 전체 숨김' : `숨김 카드 ${hiddenCount}장`}
+                          className="absolute left-2 top-10 z-30 inline-flex items-center gap-1 rounded-full border border-white/25 bg-slate-950/55 px-2 py-1 text-[9px] font-black text-white shadow-md backdrop-blur-md"
+                        >
+                          <EyeOff className="h-3 w-3" /> 숨김{hiddenCount > 1 && ` ${hiddenCount}`}
                         </span>
                       )}
 
@@ -2394,6 +2408,7 @@ export const GachaTab: React.FC = () => {
         const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
         const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
         const lockedCard = owned.find(c => c.is_locked);
+        const allHidden = owned.length > 0 && owned.every(c => c.is_hidden);
         
         // 가용한 카드 찾기
         const key = `${channelId}#${star}`;
@@ -2466,7 +2481,7 @@ export const GachaTab: React.FC = () => {
               }}
               className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
             >
-              {displayCard.is_hidden ? '👁️ 외부 공개 켜기' : '🙈 외부 공개 숨기기'}
+              {allHidden ? '👁️ 외부 공개 켜기' : '🙈 외부 공개 숨기기'}
             </button>
             {availableCard && (
               <button

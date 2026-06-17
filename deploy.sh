@@ -195,6 +195,30 @@ env_value() {
   fi
 }
 
+set_env_file_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+
+  [ -f "${file}" ] || return 0
+
+  if grep -Eq "^(export[[:space:]]+)?${key}=" "${file}"; then
+    sed -i -E "s|^(export[[:space:]]+)?${key}=.*|\\1${key}=${value}|" "${file}"
+  else
+    printf '\n%s=%s\n' "${key}" "${value}" >> "${file}"
+  fi
+}
+
+DEPLOY_MYSQL_HOST="${DEPLOY_MYSQL_HOST-127.0.0.1}"
+if [ -n "${DEPLOY_MYSQL_HOST}" ]; then
+  for env_file in ".env" "backend/.env" ".env.deploy"; do
+    if [ -f "${env_file}" ]; then
+      echo "[deploy] set MYSQL_HOST=${DEPLOY_MYSQL_HOST} in ${env_file}"
+      set_env_file_value "${env_file}" "MYSQL_HOST" "${DEPLOY_MYSQL_HOST}"
+    fi
+  done
+fi
+
 DB_HOST_VALUE="$(env_value MYSQL_HOST)"
 if [ -z "${DB_HOST_VALUE}" ]; then DB_HOST_VALUE="$(env_value DB_HOST)"; fi
 DB_PORT_VALUE="$(env_value MYSQL_PORT "$(env_value DB_PORT 3306)")"
@@ -204,9 +228,60 @@ DB_PASSWORD_VALUE="$(env_value MYSQL_PASSWORD)"
 if [ -z "${DB_PASSWORD_VALUE}" ]; then DB_PASSWORD_VALUE="$(env_value DB_PASSWORD)"; fi
 DB_NAME_VALUE="$(env_value MYSQL_DATABASE)"
 if [ -z "${DB_NAME_VALUE}" ]; then DB_NAME_VALUE="$(env_value DB_NAME)"; fi
+DB_CONNECT_TIMEOUT="${DB_CONNECT_TIMEOUT:-10}"
+DB_BACKUP_RETRIES="${DB_BACKUP_RETRIES:-3}"
+DB_BACKUP_RETRY_DELAY="${DB_BACKUP_RETRY_DELAY:-5}"
+DB_SCHEMA_RETRIES="${DB_SCHEMA_RETRIES:-3}"
+DB_SCHEMA_RETRY_DELAY="${DB_SCHEMA_RETRY_DELAY:-5}"
 USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
 PORT_VALUE="$(env_value PORT 5000)"
 CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
+
+run_mysql_backup() {
+  local output_file="$1"
+  local tmp_file="${output_file}.tmp"
+  local attempt=1
+
+  while [ "${attempt}" -le "${DB_BACKUP_RETRIES}" ]; do
+    if MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump \
+      --connect-timeout="${DB_CONNECT_TIMEOUT}" \
+      -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
+      --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
+      "${DB_NAME_VALUE}" > "${tmp_file}"; then
+      mv "${tmp_file}" "${output_file}"
+      return 0
+    fi
+
+    rm -f "${tmp_file}"
+    if [ "${attempt}" -lt "${DB_BACKUP_RETRIES}" ]; then
+      echo "[deploy] mysql backup failed; retry ${attempt}/${DB_BACKUP_RETRIES} after ${DB_BACKUP_RETRY_DELAY}s"
+      sleep "${DB_BACKUP_RETRY_DELAY}"
+    fi
+    attempt="$((attempt + 1))"
+  done
+
+  return 1
+}
+
+run_mysql_schema() {
+  local attempt=1
+
+  while [ "${attempt}" -le "${DB_SCHEMA_RETRIES}" ]; do
+    if MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql \
+      --connect-timeout="${DB_CONNECT_TIMEOUT}" \
+      -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql; then
+      return 0
+    fi
+
+    if [ "${attempt}" -lt "${DB_SCHEMA_RETRIES}" ]; then
+      echo "[deploy] mysql schema apply failed; retry ${attempt}/${DB_SCHEMA_RETRIES} after ${DB_SCHEMA_RETRY_DELAY}s"
+      sleep "${DB_SCHEMA_RETRY_DELAY}"
+    fi
+    attempt="$((attempt + 1))"
+  done
+
+  return 1
+}
 
 echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
 mkdir -p "${RELEASE_DIR}"
@@ -231,9 +306,16 @@ if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2
     if mysqldump --help 2>/dev/null | grep -q -- '--set-gtid-purged'; then
       MYSQLDUMP_GTID_ARG="--set-gtid-purged=OFF"
     fi
-    MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
-      --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
-      "${DB_NAME_VALUE}" > "backups/mysql-before-update-${TIMESTAMP}.sql"
+    if ! run_mysql_backup "backups/mysql-before-update-${TIMESTAMP}.sql"; then
+      echo "[deploy] mysql backup failed after ${DB_BACKUP_RETRIES} attempts: ${DB_HOST_VALUE}:${DB_PORT_VALUE}/${DB_NAME_VALUE}"
+      echo "[deploy] check DB VM/service, private IP route, firewall/security-list, MYSQL_HOST/MYSQL_PORT, and DB credentials."
+      if [ "${SKIP_DB_BACKUP_ON_FAILURE:-false}" = "true" ]; then
+        echo "[deploy] continue because SKIP_DB_BACKUP_ON_FAILURE=true"
+      else
+        echo "[deploy] aborting before app replacement to avoid deploying without a fresh DB backup."
+        exit 2
+      fi
+    fi
   else
     echo "[deploy] mysql backup skipped: MYSQL_* or DB_* env is incomplete"
   fi
@@ -293,7 +375,11 @@ mv backend/dist.next backend/dist
 if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; then
   if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
     echo "[deploy] apply mysql schema"
-    MYSQL_PWD="${DB_PASSWORD_VALUE}" mysql -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" "${DB_NAME_VALUE}" < init-db-mysql.sql
+    if ! run_mysql_schema; then
+      echo "[deploy] mysql schema apply failed after ${DB_SCHEMA_RETRIES} attempts: ${DB_HOST_VALUE}:${DB_PORT_VALUE}/${DB_NAME_VALUE}"
+      echo "[deploy] check DB connectivity before re-running deployment."
+      exit 2
+    fi
   else
     echo "[deploy] schema skipped: MYSQL_* or DB_* env is incomplete"
   fi

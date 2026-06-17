@@ -3,6 +3,15 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { API_BASE_URL, apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
+import {
+  identifyAnalyticsUser,
+  initAnalytics,
+  resetAnalyticsUser,
+  trackFeatureEvent,
+  trackPageDuration,
+  trackPageHeartbeat,
+  trackPageView
+} from '@/lib/analytics';
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
@@ -337,6 +346,12 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
   };
 
   const openNotification = async (n: AppNotificationItem) => {
+    trackFeatureEvent('chikapo_notification_open', {
+      notification_id: n.id,
+      was_read: n.is_read,
+      has_link: Boolean(n.link),
+      group_key: n.group_key || null
+    }, user);
     if (!n.is_read) {
       setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x)));
       setUnreadCount((c) => Math.max(0, c - 1));
@@ -523,14 +538,98 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
   const setActiveTab = (tab: TabId) => {
     const route = tab === 'main' ? '/' : `/${tab}`;
+    trackFeatureEvent('chikapo_navigation_select', {
+      from_tab: activeTab,
+      to_tab: tab,
+      surface: typeof window !== 'undefined' && window.innerWidth < 768 ? 'mobile' : 'desktop'
+    }, userRef.current);
     router.push(route);
   };
 
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [analyticsLocationKey, setAnalyticsLocationKey] = useState('');
   // 이벤트 핸들러 클로저에서 최신 user를 참조하기 위한 ref
   const userRef = useRef<AppContextType['user']>(null);
   useEffect(() => { userRef.current = user; }, [user]);
+  const pageVisitRef = useRef<{ path: string; startedAt: number } | null>(null);
+  const analyticsPath = React.useMemo(() => {
+    if (analyticsLocationKey) return analyticsLocationKey;
+    return pathname;
+  }, [pathname, analyticsLocationKey]);
+
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const readLocation = () => setAnalyticsLocationKey(`${window.location.pathname}${window.location.search}`);
+    readLocation();
+
+    const originalPushState = window.history.pushState;
+    const originalReplaceState = window.history.replaceState;
+    window.history.pushState = function pushState(...args) {
+      const result = originalPushState.apply(this, args);
+      window.dispatchEvent(new Event('chikapo:location-change'));
+      return result;
+    };
+    window.history.replaceState = function replaceState(...args) {
+      const result = originalReplaceState.apply(this, args);
+      window.dispatchEvent(new Event('chikapo:location-change'));
+      return result;
+    };
+
+    window.addEventListener('popstate', readLocation);
+    window.addEventListener('chikapo:location-change', readLocation);
+    return () => {
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+      window.removeEventListener('popstate', readLocation);
+      window.removeEventListener('chikapo:location-change', readLocation);
+    };
+  }, []);
+
+  useEffect(() => {
+    initAnalytics();
+    if (user?.id) identifyAnalyticsUser({ id: user.id, role: user.role });
+    else resetAnalyticsUser();
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    initAnalytics();
+    const now = Date.now();
+    const previousVisit = pageVisitRef.current;
+    if (previousVisit) {
+      trackPageDuration(previousVisit, now, userRef.current);
+    }
+    const nextVisit = { path: analyticsPath, startedAt: now };
+    pageVisitRef.current = nextVisit;
+    trackPageView(nextVisit, userRef.current);
+  }, [analyticsPath]);
+
+  useEffect(() => {
+    const flushCurrentVisit = () => {
+      const currentVisit = pageVisitRef.current;
+      if (!currentVisit) return;
+      trackPageDuration(currentVisit, Date.now(), userRef.current);
+      pageVisitRef.current = null;
+    };
+
+    window.addEventListener('pagehide', flushCurrentVisit);
+    return () => {
+      window.removeEventListener('pagehide', flushCurrentVisit);
+      flushCurrentVisit();
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const currentVisit = pageVisitRef.current;
+      if (currentVisit) trackPageHeartbeat(currentVisit, userRef.current);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [maintenanceActive, setMaintenanceActive] = useState<boolean | null>(null);
   const [maintenanceStartAt, setMaintenanceStartAt] = useState<string | null>(null);
@@ -714,6 +813,9 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   }, [user?.id]);
 
   const logout = () => {
+    trackFeatureEvent('chikapo_logout', {
+      source_tab: activeTab
+    }, userRef.current);
     apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
     clearAuthFlag();
     setUser(null);

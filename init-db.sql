@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     access_token TEXT,                         -- 치지직 OAuth access_token (암호화 저장)
     refresh_token TEXT,                        -- 치지직 OAuth refresh_token (암호화 저장)
     token_expires_at TEXT,                     -- 치지직 access_token 만료 시각 (ISO String)
+    last_seen_at TEXT,                         -- 마지막 접속/활동 감지 시각
     created_at TEXT DEFAULT (datetime('now'))  -- 계정 생성 일시
 );
 
@@ -179,6 +180,7 @@ CREATE TABLE IF NOT EXISTS user_cards (
     border_item_id INTEGER,                    -- 장착된 테두리 코스메틱 ID
     name_effect_item_id INTEGER,               -- 장착된 이름 이펙트 코스메틱 ID
     is_hidden INTEGER NOT NULL DEFAULT 0,       -- 외부 보유 카드 노출 숨김
+    is_locked INTEGER NOT NULL DEFAULT 0,       -- 거래/합성 등 이동 잠금 여부
     favorite_order INTEGER,                    -- 즐겨찾기 고정 정렬 순서
     favorite_at TEXT,                          -- 즐겨찾기 설정 일시
     acquired_at TEXT DEFAULT (datetime('now')),-- 획득 일시
@@ -188,6 +190,7 @@ CREATE TABLE IF NOT EXISTS user_cards (
     FOREIGN KEY(name_effect_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL;
@@ -202,6 +205,7 @@ CREATE TABLE IF NOT EXISTS user_asset_rankings (
     banned_until TEXT,
     ban_reason TEXT,
     status_message TEXT,
+    last_seen_at TEXT,
     created_at TEXT,
     card_count INTEGER NOT NULL DEFAULT 0,
     cards_value INTEGER NOT NULL DEFAULT 0,

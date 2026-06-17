@@ -14,6 +14,8 @@ const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_C
 const MARKET_SETTLE_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.MARKET_SETTLE_MIN_INTERVAL_MS || 15_000));
 const MARKET_STALE_LISTING_DAYS = Math.max(1, Number(process.env.MARKET_STALE_LISTING_DAYS || 7));
 const MARKET_STALE_CANCEL_BATCH = Math.max(1, Math.min(500, Number(process.env.MARKET_STALE_CANCEL_BATCH || 200)));
+const MARKET_HISTORY_DEFAULT_LIMIT = Math.max(100, Number(process.env.MARKET_HISTORY_DEFAULT_LIMIT || 1000));
+const MARKET_HISTORY_MAX_LIMIT = Math.max(MARKET_HISTORY_DEFAULT_LIMIT, Number(process.env.MARKET_HISTORY_MAX_LIMIT || 5000));
 
 const marketListCache = new Map<string, { data: any; expiresAt: number }>();
 let marketSettleInFlight: Promise<void> | null = null;
@@ -468,8 +470,12 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
   try {
     // scope=all → 전체 공개 거래 장부(완료된 SOLD 거래), 그 외 → 내 거래 이력
     const scope = req.query.scope === 'all' ? 'all' : 'mine';
+    const requestedLimit = Math.floor(Number(req.query.limit || MARKET_HISTORY_DEFAULT_LIMIT));
+    const historyLimit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.min(MARKET_HISTORY_MAX_LIMIT, requestedLimit))
+      : MARKET_HISTORY_DEFAULT_LIMIT;
     const history = scope === 'all'
-      ? await marketRepository.listAllHistory(100)
+      ? await marketRepository.listAllHistory(historyLimit)
       : await marketRepository.listHistory(user.id);
     return res.json(history);
   } catch (err: any) {

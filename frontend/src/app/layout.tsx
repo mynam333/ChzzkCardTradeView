@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 import { AppProvider } from "./AppContext";
 import { TutorialGuide } from "./TutorialGuide";
 import { WebsiteJsonLd, WebAppJsonLd } from "./JsonLd";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://chikapo.yuaru.com";
+const CLOUDFLARE_WEB_ANALYTICS_TOKEN = process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN || "";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -86,6 +88,13 @@ export default function RootLayout({
         <WebAppJsonLd />
       </head>
       <body lang="ko-KR" className="min-h-full flex flex-col bg-background text-foreground transition-colors duration-200">
+        {CLOUDFLARE_WEB_ANALYTICS_TOKEN ? (
+          <Script
+            src="https://static.cloudflareinsights.com/beacon.min.js"
+            strategy="afterInteractive"
+            data-cf-beacon={JSON.stringify({ token: CLOUDFLARE_WEB_ANALYTICS_TOKEN })}
+          />
+        ) : null}
         <AppProvider>
           {children}
           {/* 튜토리얼은 라우트(탭) 전환 시에도 유지되도록 루트 레이아웃에 마운트 */}

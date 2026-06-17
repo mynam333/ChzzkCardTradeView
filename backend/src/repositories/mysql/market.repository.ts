@@ -11,10 +11,22 @@ export class MysqlMarketRepository implements IMarketRepository {
     return getMysqlDb();
   }
 
-  private listingSelectWhere(where: string) {
+  private listingSelectWhere(where: string, options: { includeHistoricalRefs?: boolean } = {}) {
+    const includeHistoricalRefs = !!options.includeHistoricalRefs;
+    const sellerJoin = includeHistoricalRefs ? 'LEFT JOIN users u ON u.id = ml.seller_id' : 'JOIN users u ON u.id = ml.seller_id';
+    const auditJoin = includeHistoricalRefs
+      ? "LEFT JOIN market_transaction_audit_logs mat ON mat.listing_id = ml.id AND mat.event_type = 'sold'"
+      : '';
+    const cardJoin = includeHistoricalRefs ? 'LEFT JOIN user_cards uc ON uc.id = ml.user_card_id' : 'JOIN user_cards uc ON uc.id = ml.user_card_id';
+    const channelExpr = includeHistoricalRefs ? 'COALESCE(uc.channel_id, mat.channel_id)' : 'uc.channel_id';
+    const serialExpr = includeHistoricalRefs ? 'COALESCE(uc.serial_number, mat.serial_number)' : 'uc.serial_number';
+    const starExpr = includeHistoricalRefs ? 'COALESCE(uc.star, mat.star, 0)' : 'uc.star';
+    const streamerJoin = includeHistoricalRefs
+      ? `LEFT JOIN streamers s ON s.channel_id = ${channelExpr}`
+      : 'JOIN streamers s ON s.channel_id = uc.channel_id';
     return `
       SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
-             uc.user_id AS card_user_id, uc.channel_id, uc.serial_number, uc.star,
+             uc.user_id AS card_user_id, ${channelExpr} AS channel_id, ${serialExpr} AS serial_number, ${starExpr} AS star,
              uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
              s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
              s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
@@ -25,11 +37,12 @@ export class MysqlMarketRepository implements IMarketRepository {
              bi.id AS border_id, bi.style_json AS border_style,
              ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
         FROM market_listings ml
-        JOIN users u ON u.id = ml.seller_id
+        ${sellerJoin}
         LEFT JOIN users bu ON bu.id = ml.buyer_id
         LEFT JOIN users cb ON cb.id = ml.current_bidder_id
-        JOIN user_cards uc ON uc.id = ml.user_card_id
-        JOIN streamers s ON s.channel_id = uc.channel_id
+        ${auditJoin}
+        ${cardJoin}
+        ${streamerJoin}
         LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
         LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
        ${where}
@@ -498,18 +511,86 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async listHistory(userId: string): Promise<MarketListing[]> {
     const rows = await this.getDb().all(
-      `${this.listingSelectWhere("WHERE (ml.seller_id = ? OR ml.buyer_id = ?) AND ml.status IN ('SOLD', 'CANCELLED')")} ORDER BY ml.updated_at DESC`,
+      `${this.listingSelectWhere("WHERE (ml.seller_id = ? OR ml.buyer_id = ?) AND ml.status IN ('SOLD', 'CANCELLED')", { includeHistoricalRefs: true })} ORDER BY ml.updated_at DESC`,
       userId, userId
     );
-    return rows.map((r) => this.mapRow(r));
+    const auditOnlyRows = await this.getDb().all(
+      `SELECT COALESCE(mat.listing_id, mat.id) AS id,
+              mat.seller_id, mat.user_card_id, mat.price, mat.status, mat.buyer_id,
+              COALESCE(mat.listing_type, 'fixed') AS listing_type,
+              NULL AS buy_now_price, NULL AS starting_bid, mat.current_bid, mat.current_bidder_id,
+              NULL AS auction_ends_at, mat.bid_reserved, mat.fee, NULL AS fee_rate,
+              mat.settled_amount, 0 AS with_cosmetics, NULL AS seller_hidden_at,
+              mat.listing_created_at AS created_at, COALESCE(mat.listing_updated_at, mat.recorded_at) AS updated_at,
+              su.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
+              NULL AS card_user_id, mat.channel_id, mat.serial_number, COALESCE(mat.star, 0) AS star,
+              NULL AS border_item_id, NULL AS name_effect_item_id, NULL AS acquired_at,
+              s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
+              s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+              s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+              s.base_value AS streamer_base_value, s.follower_count AS streamer_follower,
+              s.is_active AS streamer_is_active, s.is_image_banned AS streamer_is_image_banned,
+              s.serial_number AS streamer_serial,
+              NULL AS border_id, NULL AS border_style,
+              NULL AS name_id, NULL AS name_style, NULL AS name_font_url, NULL AS name_font_family
+         FROM market_transaction_audit_logs mat
+         LEFT JOIN market_listings ml ON ml.id = mat.listing_id
+         LEFT JOIN users su ON su.id = mat.seller_id
+         LEFT JOIN users bu ON bu.id = mat.buyer_id
+         LEFT JOIN users cb ON cb.id = mat.current_bidder_id
+         LEFT JOIN streamers s ON s.channel_id = mat.channel_id
+        WHERE mat.event_type = 'sold'
+          AND ml.id IS NULL
+          AND (mat.seller_id = ? OR mat.buyer_id = ?)
+        ORDER BY COALESCE(mat.listing_updated_at, mat.recorded_at) DESC`,
+      userId, userId
+    );
+    return [...rows, ...auditOnlyRows]
+      .map((r) => this.mapRow(r))
+      .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
   }
 
   async listAllHistory(limit: number): Promise<MarketListing[]> {
+    const safeLimit = Math.max(1, Math.floor(limit));
     const rows = await this.getDb().all(
-      `${this.listingSelectWhere("WHERE ml.status = 'SOLD'")} ORDER BY ml.updated_at DESC LIMIT ?`,
-      Math.max(1, Math.floor(limit))
+      `${this.listingSelectWhere("WHERE ml.status = 'SOLD'", { includeHistoricalRefs: true })} ORDER BY ml.updated_at DESC LIMIT ?`,
+      safeLimit
     );
-    return rows.map((r) => this.mapRow(r));
+    const auditOnlyRows = await this.getDb().all(
+      `SELECT COALESCE(mat.listing_id, mat.id) AS id,
+              mat.seller_id, mat.user_card_id, mat.price, mat.status, mat.buyer_id,
+              COALESCE(mat.listing_type, 'fixed') AS listing_type,
+              NULL AS buy_now_price, NULL AS starting_bid, mat.current_bid, mat.current_bidder_id,
+              NULL AS auction_ends_at, mat.bid_reserved, mat.fee, NULL AS fee_rate,
+              mat.settled_amount, 0 AS with_cosmetics, NULL AS seller_hidden_at,
+              mat.listing_created_at AS created_at, COALESCE(mat.listing_updated_at, mat.recorded_at) AS updated_at,
+              su.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
+              NULL AS card_user_id, mat.channel_id, mat.serial_number, COALESCE(mat.star, 0) AS star,
+              NULL AS border_item_id, NULL AS name_effect_item_id, NULL AS acquired_at,
+              s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
+              s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
+              s.custom_image_url_4 as sci4, s.custom_image_url_5 as sci5,
+              s.base_value AS streamer_base_value, s.follower_count AS streamer_follower,
+              s.is_active AS streamer_is_active, s.is_image_banned AS streamer_is_image_banned,
+              s.serial_number AS streamer_serial,
+              NULL AS border_id, NULL AS border_style,
+              NULL AS name_id, NULL AS name_style, NULL AS name_font_url, NULL AS name_font_family
+         FROM market_transaction_audit_logs mat
+         LEFT JOIN market_listings ml ON ml.id = mat.listing_id
+         LEFT JOIN users su ON su.id = mat.seller_id
+         LEFT JOIN users bu ON bu.id = mat.buyer_id
+         LEFT JOIN users cb ON cb.id = mat.current_bidder_id
+         LEFT JOIN streamers s ON s.channel_id = mat.channel_id
+        WHERE mat.event_type = 'sold'
+          AND ml.id IS NULL
+        ORDER BY COALESCE(mat.listing_updated_at, mat.recorded_at) DESC
+        LIMIT ?`,
+      safeLimit
+    );
+    return [...rows, ...auditOnlyRows]
+      .map((r) => this.mapRow(r))
+      .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())
+      .slice(0, safeLimit);
   }
 
   async getRecentPrice(channelId: string): Promise<number | null> {

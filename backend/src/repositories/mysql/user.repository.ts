@@ -35,6 +35,7 @@ export class MysqlUserRepository implements IUserRepository {
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       token_expires_at: row.token_expires_at ?? null,
+      last_seen_at: row.last_seen_at ?? null,
       created_at: row.created_at,
       is_deleted: row.is_deleted === 1 || row.is_deleted === true,
       deleted_at: row.deleted_at ?? null,
@@ -78,8 +79,8 @@ export class MysqlUserRepository implements IUserRepository {
 
   async create(user: User): Promise<User> {
     await this.getDb().run(
-      'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null
+      'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null, toMysqlDateTime(user.last_seen_at || new Date().toISOString())
     );
     return user;
   }
@@ -329,6 +330,10 @@ export class MysqlUserRepository implements IUserRepository {
     await this.getDb().run('UPDATE users SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?', accessToken, refreshToken, toMysqlDateTime(tokenExpiresAt), id);
   }
 
+  async updateLastSeen(id: string, seenAt: string): Promise<void> {
+    await this.getDb().run('UPDATE users SET last_seen_at = ? WHERE id = ?', toMysqlDateTime(seenAt), id);
+  }
+
   async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
     await this.getDb().run('UPDATE users SET representative_card_channel_id = ?, representative_card_star = ? WHERE id = ?', channelId, star, id);
   }
@@ -455,19 +460,20 @@ export class MysqlUserRepository implements IUserRepository {
                ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
                ${mysqlDateValueSql('u.banned_until')} AS banned_until,
                u.ban_reason, u.status_message,
+               ${mysqlDateValueSql('u.last_seen_at')} AS last_seen_at,
                ${mysqlDateValueSql('u.created_at')} AS created_at
           FROM users u
       ),
       UserCardValues AS (
         SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-               u.status_message, u.created_at,
+               u.status_message, u.last_seen_at, u.created_at,
                COUNT(uc.id) AS card_count,
                COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
         FROM NormalizedUsers u
         LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
         LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
         WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
-        GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
+        GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.last_seen_at, u.created_at
       ),
       RankedUsers AS (
         SELECT *,
@@ -500,6 +506,7 @@ export class MysqlUserRepository implements IUserRepository {
       banned_until: row.banned_until,
       ban_reason: row.ban_reason ?? null,
       status_message: row.status_message ?? null,
+      last_seen_at: row.last_seen_at ?? null,
       created_at: row.created_at,
       card_count: Number(row.card_count || 0),
       cards_value: Math.round(Number(row.cards_value || 0)),

@@ -309,9 +309,11 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_limited_sale', '(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
   await ensureMysqlColumn(db, 'user_cards', 'is_locked', 'is_locked TINYINT NOT NULL DEFAULT 0');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_locked', '(user_id, is_locked)');
+  await ensureMysqlColumn(db, 'users', 'last_seen_at', 'last_seen_at DATETIME NULL AFTER token_expires_at');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');
   await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
+  await normalizeMysqlIsoDateColumn(db, 'users', 'last_seen_at');
   await db.run(`
     CREATE TABLE IF NOT EXISTS puzzle_excluded_images (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -410,6 +412,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       banned_until DATETIME NULL,
       ban_reason VARCHAR(255) NULL,
       status_message VARCHAR(160) NULL,
+      last_seen_at DATETIME NULL,
       created_at DATETIME NULL,
       card_count BIGINT NOT NULL DEFAULT 0,
       cards_value BIGINT NOT NULL DEFAULT 0,
@@ -423,6 +426,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   await ensureMysqlTableCollation(db, 'user_asset_rankings');
+  await ensureMysqlColumn(db, 'user_asset_rankings', 'last_seen_at', 'last_seen_at DATETIME NULL AFTER status_message');
   await db.run(`
     CREATE TABLE IF NOT EXISTS subscription_title_rules (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -826,6 +830,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE users ADD COLUMN token_expires_at TEXT;");
       }
       try {
+        sqliteDb.prepare("SELECT last_seen_at FROM users LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] users 테이블에 last_seen_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE users ADD COLUMN last_seen_at TEXT;");
+      }
+      try {
         sqliteDb.prepare("SELECT free_draw_tickets FROM users LIMIT 1").get();
       } catch (e) {
         console.log('[DB Migration] users 테이블에 free_draw_tickets 컬럼이 없어 추가합니다.');
@@ -1098,6 +1108,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
           banned_until TEXT,
           ban_reason TEXT,
           status_message TEXT,
+          last_seen_at TEXT,
           created_at TEXT,
           card_count INTEGER NOT NULL DEFAULT 0,
           cards_value INTEGER NOT NULL DEFAULT 0,
@@ -1107,6 +1118,12 @@ export const initDatabaseConnection = async (): Promise<void> => {
           snapshot_at TEXT DEFAULT (datetime('now'))
         );
       `);
+      try {
+        sqliteDb.prepare("SELECT last_seen_at FROM user_asset_rankings LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] user_asset_rankings 테이블에 last_seen_at 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE user_asset_rankings ADD COLUMN last_seen_at TEXT;");
+      }
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings(total_rank, user_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings(cards_rank, user_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_username ON user_asset_rankings(username);");

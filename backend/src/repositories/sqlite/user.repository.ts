@@ -46,6 +46,7 @@ export class SqliteUserRepository implements IUserRepository {
       access_token: row.access_token,
       refresh_token: row.refresh_token,
       token_expires_at: row.token_expires_at ?? null,
+      last_seen_at: row.last_seen_at ?? null,
       created_at: row.created_at,
       is_deleted: row.is_deleted === 1 || row.is_deleted === true,
       deleted_at: row.deleted_at ?? null,
@@ -177,8 +178,8 @@ export class SqliteUserRepository implements IUserRepository {
 
   async create(user: User): Promise<User> {
     this.getDb().prepare(
-      'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null);
+      'INSERT INTO users (id, username, avatar_url, role, point, access_token, refresh_token, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(user.id, user.username, user.avatar_url, user.role, user.point, user.access_token || null, user.refresh_token || null, user.last_seen_at || new Date().toISOString());
     return user;
   }
 
@@ -430,6 +431,10 @@ export class SqliteUserRepository implements IUserRepository {
       .run(accessToken, refreshToken, tokenExpiresAt, id);
   }
 
+  async updateLastSeen(id: string, seenAt: string): Promise<void> {
+    this.getDb().prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(seenAt, id);
+  }
+
   async updateRepresentativeCard(id: string, channelId: string | null, star: number | null): Promise<void> {
     this.getDb().prepare(
       'UPDATE users SET representative_card_channel_id = ?, representative_card_star = ? WHERE id = ?'
@@ -494,7 +499,7 @@ export class SqliteUserRepository implements IUserRepository {
     const rows = this.getDb().prepare(`
       WITH UserCardValues AS (
         SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-               u.status_message, u.created_at,
+               u.status_message, u.last_seen_at, u.created_at,
                COUNT(uc.id) AS card_count,
                COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
         FROM users u
@@ -534,6 +539,7 @@ export class SqliteUserRepository implements IUserRepository {
       banned_until: row.banned_until,
       ban_reason: row.ban_reason ?? null,
       status_message: row.status_message ?? null,
+      last_seen_at: row.last_seen_at ?? null,
       created_at: row.created_at,
       card_count: row.card_count,
       cards_value: Math.round(row.cards_value),

@@ -385,6 +385,13 @@ export class SqliteUserCardRepository implements IUserCardRepository {
     return result.changes > 0;
   }
 
+  async updateVisibilityByGroup(userId: string, channelId: string, star: number, hidden: boolean): Promise<number> {
+    const result = this.getDb().prepare(
+      'UPDATE user_cards SET is_hidden = ? WHERE user_id = ? AND channel_id = ? AND COALESCE(star, 0) = ?'
+    ).run(hidden ? 1 : 0, userId, channelId, star);
+    return result.changes || 0;
+  }
+
   async setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean> {
     const db = this.getDb();
     if (!favorite) {

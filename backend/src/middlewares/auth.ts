@@ -10,9 +10,11 @@ const AUTH_USER_LOOKUP_TIMEOUT_MS = Math.max(500, Number(process.env.AUTH_USER_L
 const AUTH_BEARER_ENABLED =
   process.env.AUTH_BEARER_ENABLED === 'true' ||
   (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
+const LAST_SEEN_TOUCH_INTERVAL_MS = Math.max(60_000, Number(process.env.LAST_SEEN_TOUCH_INTERVAL_MS || 600_000));
 
 const userCache = new Map<string, { user: any; expiresAt: number }>();
 const userLookups = new Map<string, Promise<any>>();
+const lastSeenTouches = new Map<string, number>();
 
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -59,6 +61,23 @@ const findUserCached = async (userId: string) => {
   }
 };
 
+const touchLastSeen = (userId: string) => {
+  const now = Date.now();
+  const lastTouchedAt = lastSeenTouches.get(userId) || 0;
+  if (now - lastTouchedAt < LAST_SEEN_TOUCH_INTERVAL_MS) return;
+  lastSeenTouches.set(userId, now);
+  const seenAt = new Date(now).toISOString();
+  userRepository.updateLastSeen(userId, seenAt)
+    .then(() => {
+      const cached = userCache.get(userId);
+      if (cached?.user) cached.user.last_seen_at = seenAt;
+    })
+    .catch((err: any) => {
+      lastSeenTouches.delete(userId);
+      console.warn('[Auth] 최근 접속일 갱신 실패:', err?.message || err);
+    });
+};
+
 /**
  * 사용자 JWT 토큰 검증 및 req.user 할당 미들웨어.
  * 우선순위: httpOnly 세션 쿠키 → Authorization: Bearer 헤더 (둘 다 지원하여 점진적 전환).
@@ -99,6 +118,7 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
     }
 
     req.user = user;
+    touchLastSeen(decoded.id);
     next();
   } catch (err: any) {
     if (err?.message === 'AuthUserLookupTimeout') {

@@ -646,26 +646,27 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
           await tx.run('DELETE FROM user_asset_rankings');
           await tx.run(`
             INSERT INTO user_asset_rankings
-              (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+              (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
             WITH NormalizedUsers AS (
               SELECT u.id, u.username, u.avatar_url, u.role, u.point,
                      ${mysqlDateValueSql('u.last_free_draw')} AS last_free_draw,
                      ${mysqlDateValueSql('u.banned_until')} AS banned_until,
                      u.ban_reason, u.status_message,
+                     ${mysqlDateValueSql('u.last_seen_at')} AS last_seen_at,
                      ${mysqlDateValueSql('u.created_at')} AS created_at
                 FROM users u
             ),
             UserCardValues AS (
               SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                     u.status_message, u.created_at,
+                     u.status_message, u.last_seen_at, u.created_at,
                      COUNT(uc.id) AS card_count,
                      COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
                 FROM NormalizedUsers u
                 LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
                 LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
                WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
-               GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.created_at
+               GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.last_seen_at, u.created_at
             ),
             RankedUsers AS (
               SELECT *,
@@ -673,7 +674,7 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
                      ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
                 FROM UserCardValues
             )
-            SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+            SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                    card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
               FROM RankedUsers
           `);
@@ -688,7 +689,7 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
         db.prepare(`
           WITH UserCardValues AS (
             SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                   u.status_message, u.created_at,
+                   u.status_message, u.last_seen_at, u.created_at,
                    COUNT(uc.id) AS card_count,
                    COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
               FROM users u
@@ -704,9 +705,9 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
               FROM UserCardValues
           )
           INSERT INTO user_asset_rankings
-            (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+            (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
              card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
-          SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, created_at,
+          SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                  card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, datetime('now')
             FROM RankedUsers
         `).run();
@@ -779,6 +780,7 @@ const readUserRankingsFromSnapshot = async (
     banned_until: row.banned_until,
     ban_reason: row.ban_reason ?? null,
     status_message: row.status_message ?? null,
+    last_seen_at: row.last_seen_at ?? null,
     created_at: row.created_at,
     card_count: Number(row.card_count || 0),
     cards_value: Math.round(Number(row.cards_value || 0)),
@@ -942,6 +944,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
         total_asset: u.total_asset,
         rank: u.rank,
         status_message: u.status_message || null,
+        last_seen_at: u.last_seen_at || null,
         titles: (titlesByUser[u.id] || []).filter((title) => title.is_equipped),
         is_streamer: !!linkedStreamer,
         is_live: linkedStreamer?.is_active === true
@@ -1078,6 +1081,34 @@ export const updateMyCardVisibility = async (req: Request, res: Response) => {
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
     return res.status(200).json({ message: req.body?.hidden ? '카드를 외부 공개에서 숨겼습니다.' : '카드 공개 숨김을 해제했습니다.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'InternalServerError', message: '카드 숨김 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+export const updateMyCardGroupVisibility = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+
+  const channelId = typeof req.body?.channel_id === 'string' ? req.body.channel_id.trim() : '';
+  const star = Number(req.body?.star ?? 0);
+  const hidden = !!req.body?.hidden;
+  if (!channelId) return res.status(400).json({ error: 'BadRequest', message: '스트리머 정보가 올바르지 않습니다.' });
+  if (!Number.isInteger(star) || star < 0 || star > 5) {
+    return res.status(400).json({ error: 'BadRequest', message: '카드 등급이 올바르지 않습니다.' });
+  }
+
+  try {
+    clearUserCardsInFlight(userId);
+    const updated = await userCardRepository.updateVisibilityByGroup(userId, channelId, star, hidden);
+    if (updated <= 0) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
+    clearUserCardsInFlight(userId);
+    return res.status(200).json({
+      message: hidden
+        ? `${updated}장의 카드를 외부 공개에서 숨겼습니다.`
+        : `${updated}장의 카드 공개 숨김을 해제했습니다.`,
+      updated
+    });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '카드 숨김 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
   }

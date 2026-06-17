@@ -6,7 +6,8 @@ import {
   TrendingUp,
   Search,
   RefreshCw,
-  MessageCircleHeart
+  MessageCircleHeart,
+  Clock3
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { ProfileModal } from './ProfileModal';
@@ -39,6 +40,7 @@ interface UserRank {
   cards_value?: number;
   total_asset?: number;
   status_message?: string | null;
+  last_seen_at?: string | null;
   rank?: number;
   titles: UserTitle[];
   is_streamer: boolean;
@@ -352,6 +354,33 @@ export const RankingTab: React.FC = () => {
   const rankColor = (rank: number) =>
     rank === 1 ? 'text-amber-500' : rank === 2 ? 'text-zinc-500 dark:text-zinc-400' : rank === 3 ? 'text-amber-700' : 'text-muted-foreground';
 
+  const formatLastSeen = (value?: string | null) => {
+    if (!value) return '접속 기록 없음';
+    const time = new Date(value).getTime();
+    if (!Number.isFinite(time)) return '접속 기록 없음';
+    const diffMs = Date.now() - time;
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diffMs < 10 * minute) return '방금 접속';
+    if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}분 전 접속`;
+    if (diffMs < day) return `${Math.floor(diffMs / hour)}시간 전 접속`;
+    if (diffMs < 30 * day) return `${Math.floor(diffMs / day)}일 전 접속`;
+    return '30일 이상 미접속';
+  };
+
+  const lastSeenTone = (value?: string | null) => {
+    if (!value) return 'border-border/60 bg-secondary/45 text-muted-foreground';
+    const time = new Date(value).getTime();
+    if (!Number.isFinite(time)) return 'border-border/60 bg-secondary/45 text-muted-foreground';
+    const diffMs = Date.now() - time;
+    const day = 24 * 60 * 60 * 1000;
+    if (diffMs < day) return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300';
+    if (diffMs < 7 * day) return 'border-sky-400/25 bg-sky-400/10 text-sky-600 dark:text-sky-300';
+    if (diffMs < 30 * day) return 'border-amber-400/25 bg-amber-400/10 text-amber-600 dark:text-amber-300';
+    return 'border-zinc-400/25 bg-zinc-400/10 text-muted-foreground';
+  };
+
   const subTabs: { id: SubTab; label: string }[] = [
     { id: 'value', label: '스트리머 시세' },
     { id: 'change', label: '스트리머 등락률' },
@@ -485,7 +514,16 @@ export const RankingTab: React.FC = () => {
                       <h4 className="truncate text-xs font-bold text-foreground">{ur.username}</h4>
                       <UserTitleList titles={ur.titles} compact />
                     </div>
-                    <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <p className="text-[10px] text-muted-foreground">총 {ur.card_count}장 소장 중</p>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-black ${lastSeenTone(ur.last_seen_at)}`}
+                        title={ur.last_seen_at ? new Date(ur.last_seen_at).toLocaleString() : '접속 기록 없음'}
+                      >
+                        <Clock3 className="h-2.5 w-2.5" />
+                        {formatLastSeen(ur.last_seen_at)}
+                      </span>
+                    </div>
                     {ur.status_message && (
                       <StreamerTooltip
                         content={ur.status_message}
