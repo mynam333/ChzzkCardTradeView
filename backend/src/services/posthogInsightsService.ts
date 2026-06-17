@@ -249,7 +249,7 @@ const refreshPosthogInsights = (range: InsightsRange, cacheKey: string): Promise
       () => posthogQuery(`
         SELECT
           properties.path AS path,
-          avg(toFloat64OrNull(properties.duration_seconds)) AS avg_duration_seconds,
+          avg(toFloatOrDefault(properties.duration_seconds, 0)) AS avg_duration_seconds,
           count() AS duration_samples
         FROM events
         WHERE event = 'chikapo_page_duration'

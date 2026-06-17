@@ -13,16 +13,20 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   private listingSelectWhere(where: string, options: { includeHistoricalRefs?: boolean } = {}) {
     const includeHistoricalRefs = !!options.includeHistoricalRefs;
-    const sellerJoin = includeHistoricalRefs ? 'LEFT JOIN users u ON u.id = ml.seller_id' : 'JOIN users u ON u.id = ml.seller_id';
+    const sellerJoin = includeHistoricalRefs
+      ? 'LEFT JOIN users u ON u.id COLLATE utf8mb4_unicode_ci = ml.seller_id COLLATE utf8mb4_unicode_ci'
+      : 'JOIN users u ON u.id = ml.seller_id';
     const auditJoin = includeHistoricalRefs
       ? "LEFT JOIN market_transaction_audit_logs mat ON mat.listing_id = ml.id AND mat.event_type = 'sold'"
       : '';
     const cardJoin = includeHistoricalRefs ? 'LEFT JOIN user_cards uc ON uc.id = ml.user_card_id' : 'JOIN user_cards uc ON uc.id = ml.user_card_id';
-    const channelExpr = includeHistoricalRefs ? 'COALESCE(uc.channel_id, mat.channel_id)' : 'uc.channel_id';
+    const channelExpr = includeHistoricalRefs
+      ? 'COALESCE(uc.channel_id COLLATE utf8mb4_unicode_ci, mat.channel_id COLLATE utf8mb4_unicode_ci)'
+      : 'uc.channel_id';
     const serialExpr = includeHistoricalRefs ? 'COALESCE(uc.serial_number, mat.serial_number)' : 'uc.serial_number';
     const starExpr = includeHistoricalRefs ? 'COALESCE(uc.star, mat.star, 0)' : 'uc.star';
     const streamerJoin = includeHistoricalRefs
-      ? `LEFT JOIN streamers s ON s.channel_id = ${channelExpr}`
+      ? `LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = (${channelExpr}) COLLATE utf8mb4_unicode_ci`
       : 'JOIN streamers s ON s.channel_id = uc.channel_id';
     return `
       SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
@@ -38,8 +42,8 @@ export class MysqlMarketRepository implements IMarketRepository {
              ni.id AS name_id, ni.style_json AS name_style, ni.font_url AS name_font_url, ni.font_family AS name_font_family
         FROM market_listings ml
         ${sellerJoin}
-        LEFT JOIN users bu ON bu.id = ml.buyer_id
-        LEFT JOIN users cb ON cb.id = ml.current_bidder_id
+        LEFT JOIN users bu ON bu.id COLLATE utf8mb4_unicode_ci = ml.buyer_id COLLATE utf8mb4_unicode_ci
+        LEFT JOIN users cb ON cb.id COLLATE utf8mb4_unicode_ci = ml.current_bidder_id COLLATE utf8mb4_unicode_ci
         ${auditJoin}
         ${cardJoin}
         ${streamerJoin}
@@ -535,13 +539,16 @@ export class MysqlMarketRepository implements IMarketRepository {
               NULL AS name_id, NULL AS name_style, NULL AS name_font_url, NULL AS name_font_family
          FROM market_transaction_audit_logs mat
          LEFT JOIN market_listings ml ON ml.id = mat.listing_id
-         LEFT JOIN users su ON su.id = mat.seller_id
-         LEFT JOIN users bu ON bu.id = mat.buyer_id
-         LEFT JOIN users cb ON cb.id = mat.current_bidder_id
-         LEFT JOIN streamers s ON s.channel_id = mat.channel_id
+         LEFT JOIN users su ON su.id COLLATE utf8mb4_unicode_ci = mat.seller_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users bu ON bu.id COLLATE utf8mb4_unicode_ci = mat.buyer_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users cb ON cb.id COLLATE utf8mb4_unicode_ci = mat.current_bidder_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = mat.channel_id COLLATE utf8mb4_unicode_ci
         WHERE mat.event_type = 'sold'
           AND ml.id IS NULL
-          AND (mat.seller_id = ? OR mat.buyer_id = ?)
+          AND (
+            mat.seller_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            OR mat.buyer_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+          )
         ORDER BY COALESCE(mat.listing_updated_at, mat.recorded_at) DESC`,
       userId, userId
     );
@@ -577,10 +584,10 @@ export class MysqlMarketRepository implements IMarketRepository {
               NULL AS name_id, NULL AS name_style, NULL AS name_font_url, NULL AS name_font_family
          FROM market_transaction_audit_logs mat
          LEFT JOIN market_listings ml ON ml.id = mat.listing_id
-         LEFT JOIN users su ON su.id = mat.seller_id
-         LEFT JOIN users bu ON bu.id = mat.buyer_id
-         LEFT JOIN users cb ON cb.id = mat.current_bidder_id
-         LEFT JOIN streamers s ON s.channel_id = mat.channel_id
+         LEFT JOIN users su ON su.id COLLATE utf8mb4_unicode_ci = mat.seller_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users bu ON bu.id COLLATE utf8mb4_unicode_ci = mat.buyer_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN users cb ON cb.id COLLATE utf8mb4_unicode_ci = mat.current_bidder_id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = mat.channel_id COLLATE utf8mb4_unicode_ci
         WHERE mat.event_type = 'sold'
           AND ml.id IS NULL
         ORDER BY COALESCE(mat.listing_updated_at, mat.recorded_at) DESC
