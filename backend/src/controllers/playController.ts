@@ -1069,7 +1069,7 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const rawLimit = typeof req.query.limit === 'string' ? req.query.limit.trim().toLowerCase() : '';
     const limit = rawLimit === 'all'
-      ? STREAMER_RANKING_MAX_LIMIT
+      ? Number.MAX_SAFE_INTEGER
       : Math.max(1, Math.min(STREAMER_RANKING_MAX_LIMIT, Math.floor(Number(req.query.limit || 100)) || 100));
     const cacheKey = `${mode}|${keyword}|${limit}`;
     const now = Date.now();
