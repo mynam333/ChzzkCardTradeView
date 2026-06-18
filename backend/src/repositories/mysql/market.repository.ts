@@ -298,9 +298,6 @@ export class MysqlMarketRepository implements IMarketRepository {
     const countRow = await this.getDb().get<{ total: number }>(`
       SELECT COUNT(*) AS total
         FROM market_listings ml
-        JOIN users u ON u.id = ml.seller_id
-        JOIN user_cards uc ON uc.id = ml.user_card_id
-        JOIN streamers s ON s.channel_id = uc.channel_id
        ${whereSql}
     `, params);
     const offset = (options.page - 1) * options.limit;

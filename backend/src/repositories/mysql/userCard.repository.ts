@@ -10,6 +10,23 @@ export class MysqlUserCardRepository implements IUserCardRepository {
     return getMysqlDb();
   }
 
+  private async nextSerialNumber(
+    tx: { run: (...args: any[]) => Promise<any>; get: <T = any>(sql: string, ...args: any[]) => Promise<T | undefined> },
+    channelId: string
+  ): Promise<number> {
+    await tx.run(
+      `INSERT INTO user_card_serials (channel_id, last_serial)
+       SELECT ?, COALESCE(MAX(serial_number), 0) + 1
+         FROM user_cards
+        WHERE channel_id = ?
+       ON DUPLICATE KEY UPDATE last_serial = GREATEST(last_serial + 1, VALUES(last_serial))`,
+      channelId,
+      channelId
+    );
+    const row = await tx.get<{ last_serial: number }>('SELECT last_serial FROM user_card_serials WHERE channel_id = ?', channelId);
+    return Number(row?.last_serial || 1);
+  }
+
   async create(card: any): Promise<any> {
     const result = await this.getDb().run(
       'INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, ?)',
@@ -123,8 +140,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         });
       }
 
-      const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', channelId);
-      const serialNumber = Number(latest?.max_sn || 0) + 1;
+      const serialNumber = await this.nextSerialNumber(tx, channelId);
       const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, channelId, serialNumber);
       await recordMysqlAssetEvent(tx, {
         userId,

@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS user_cards (
     acquired_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     KEY idx_user_cards_user_visible (user_id, is_hidden),
     KEY idx_user_cards_channel_id (channel_id, id),
+    KEY idx_user_cards_channel_serial (channel_id, serial_number),
     KEY idx_user_cards_channel_star_visible (channel_id, star, is_hidden),
     KEY idx_user_cards_user_inventory_order (user_id, favorite_order, id),
     KEY idx_user_cards_user_favorite_max (user_id, favorite_order),
@@ -183,6 +184,13 @@ CREATE TABLE IF NOT EXISTS user_cards (
     CONSTRAINT fk_user_cards_streamer FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE,
     CONSTRAINT fk_user_cards_border FOREIGN KEY(border_item_id) REFERENCES shop_items(id) ON DELETE SET NULL,
     CONSTRAINT fk_user_cards_name_effect FOREIGN KEY(name_effect_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_card_serials (
+    channel_id VARCHAR(191) PRIMARY KEY,
+    last_serial BIGINT NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_card_serials_streamer FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS trades (

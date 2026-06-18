@@ -9,6 +9,23 @@ export class MysqlCouponRepository implements ICouponRepository {
     return getMysqlDb();
   }
 
+  private async nextSerialNumber(
+    tx: { run: (...args: any[]) => Promise<any>; get: <T = any>(sql: string, ...args: any[]) => Promise<T | undefined> },
+    channelId: string
+  ): Promise<number> {
+    await tx.run(
+      `INSERT INTO user_card_serials (channel_id, last_serial)
+       SELECT ?, COALESCE(MAX(serial_number), 0) + 1
+         FROM user_cards
+        WHERE channel_id = ?
+       ON DUPLICATE KEY UPDATE last_serial = GREATEST(last_serial + 1, VALUES(last_serial))`,
+      channelId,
+      channelId
+    );
+    const row = await tx.get<{ last_serial: number }>('SELECT last_serial FROM user_card_serials WHERE channel_id = ?', channelId);
+    return Number(row?.last_serial || 1);
+  }
+
   private mapCoupon(row: any): Coupon {
     return {
       id: row.id,
@@ -123,10 +140,9 @@ export class MysqlCouponRepository implements ICouponRepository {
           });
         } else if (reward.type === 'card') {
           const quantity = Number(reward.quantity || 0);
-          const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', reward.channel_id);
-          const baseSn = Number(latest?.max_sn || 0);
-          for (let i = 1; i <= quantity; i++) {
-            const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, baseSn + i);
+          for (let i = 0; i < quantity; i++) {
+            const serialNumber = await this.nextSerialNumber(tx, reward.channel_id as string);
+            const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, serialNumber);
             await recordMysqlAssetEvent(tx, {
               userId,
               assetType: 'card',
@@ -138,7 +154,7 @@ export class MysqlCouponRepository implements ICouponRepository {
               description: `쿠폰 ${coupon.code} 카드 보상`,
               cardId: Number(result.insertId),
               channelId: reward.channel_id,
-              serialNumber: baseSn + i,
+              serialNumber,
               star: 0,
               metadata: { coupon_id: couponId, coupon_code: coupon.code, reward_quantity: quantity }
             });

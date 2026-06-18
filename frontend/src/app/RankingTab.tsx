@@ -266,7 +266,7 @@ export const RankingTab: React.FC = () => {
         const [rankings, streamerOptions] = await Promise.all([
           apiFetch(`/users/ranking${query ? `?${query}` : ''}`).then((res) => res.ok ? res.json() : null),
           supportsCardHolderFilter
-            ? apiFetch('/streamers/ranking?mode=value&limit=all').then((res) => res.ok ? res.json() : null)
+            ? apiFetch('/streamers/ranking?mode=value&limit=500').then((res) => res.ok ? res.json() : null)
             : Promise.resolve(null)
         ]);
         if (!isCurrentRequest()) return;

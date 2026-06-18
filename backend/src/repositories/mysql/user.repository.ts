@@ -13,8 +13,28 @@ const mysqlDateValueSql = (column: string) => `
 `;
 
 export class MysqlUserRepository implements IUserRepository {
+  private static readonly SEARCH_POOL_CACHE_TTL_MS = Math.max(1_000, Number(process.env.USER_SEARCH_POOL_CACHE_TTL_MS || 30_000));
+  private searchPoolCache: { rows: any[]; expiresAt: number } | null = null;
+  private searchPoolInFlight: Promise<any[]> | null = null;
+
   private getDb() {
     return getMysqlDb();
+  }
+
+  private async loadSearchPool(): Promise<any[]> {
+    if (this.searchPoolCache && this.searchPoolCache.expiresAt > Date.now()) return this.searchPoolCache.rows;
+    if (this.searchPoolInFlight) return this.searchPoolInFlight;
+    this.searchPoolInFlight = this.getDb().all(
+      'SELECT id, username, avatar_url, role, point, last_free_draw, free_draw_tickets, bonus_free_draw_tickets, banned_until, ban_reason, representative_card_channel_id, representative_card_star, status_message, token_expires_at, last_seen_at, created_at FROM users'
+    )
+      .then((rows) => {
+        this.searchPoolCache = { rows, expiresAt: Date.now() + MysqlUserRepository.SEARCH_POOL_CACHE_TTL_MS };
+        return rows;
+      })
+      .finally(() => {
+        this.searchPoolInFlight = null;
+      });
+    return this.searchPoolInFlight;
   }
 
   private mapUser(row: any): User {
@@ -63,12 +83,20 @@ export class MysqlUserRepository implements IUserRepository {
   async searchByUsername(keyword: string, limit: number): Promise<User[]> {
     const kw = (keyword || '').trim();
     if (!kw) return [];
-    const rows = await this.getDb().all('SELECT * FROM users');
-    const exactRows = rows
+    const exactRows = await this.getDb().all('SELECT * FROM users WHERE username = ? ORDER BY created_at ASC LIMIT ?', kw, limit);
+    if (exactRows.length > 0) return exactRows.map((r) => this.mapUser(r));
+
+    const sqlCandidates = await this.getDb().all(
+      'SELECT * FROM users WHERE username LIKE ? ORDER BY username ASC, created_at ASC LIMIT ?',
+      `%${kw}%`,
+      Math.max(limit * 5, 50)
+    );
+    const exactLikeRows = sqlCandidates
       .filter((r) => isExactSearchMatch(r.username || '', kw))
       .sort((a, b) => String(a.username).localeCompare(String(b.username)) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
-    if (exactRows.length > 0) return exactRows.slice(0, limit).map((r) => this.mapUser(r));
+    if (exactLikeRows.length > 0) return exactLikeRows.slice(0, limit).map((r) => this.mapUser(r));
 
+    const rows = sqlCandidates.length > 0 ? sqlCandidates : await this.loadSearchPool();
     return rows
       .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
       .filter((x): x is { r: any; score: number } => x.score !== null)

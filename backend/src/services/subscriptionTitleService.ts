@@ -16,11 +16,19 @@ export type SubscriptionTitleRule = {
 const DEFAULT_CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const ERROR_RETRY_MS = 30 * 60 * 1000;
 const SUBSCRIBER_PAGE_SIZE = 50;
+const RULES_CACHE_TTL_MS = Math.max(1_000, Number(process.env.SUBSCRIPTION_TITLE_RULES_CACHE_TTL_MS || 60_000));
 
 type SubscriberSetResult = { ok: true; subscribers: Set<string> } | { ok: false; reason: string };
 
 const subscriberListCache = new Map<string, { expiresAt: number; fetchedAt: number; subscribers: Set<string> }>();
 const subscriberListInFlight = new Map<string, Promise<SubscriberSetResult>>();
+let rulesCache: { data: SubscriptionTitleRule[]; expiresAt: number } | null = null;
+let rulesInFlight: Promise<SubscriptionTitleRule[]> | null = null;
+
+const clearSubscriptionTitleRulesCache = () => {
+  rulesCache = null;
+  rulesInFlight = null;
+};
 
 const getCheckTtlMs = () => {
   const hours = Number(process.env.CHZZK_SUBSCRIPTION_CHECK_TTL_HOURS || 6);
@@ -148,32 +156,47 @@ const verifyChzzkSubscription = async (
 };
 
 export const listSubscriptionTitleRules = async (): Promise<SubscriptionTitleRule[]> => {
-  const mode = getDbMode();
-  if (mode === 'MYSQL') {
-    const rows = await getMysqlDb().all(`
+  const now = Date.now();
+  if (rulesCache && rulesCache.expiresAt > now) return rulesCache.data;
+  if (rulesInFlight) return rulesInFlight;
+
+  rulesInFlight = (async () => {
+    const mode = getDbMode();
+    if (mode === 'MYSQL') {
+      const rows = await getMysqlDb().all(`
+        SELECT r.*, t.name AS title_name
+          FROM subscription_title_rules r
+          LEFT JOIN titles t ON t.id = r.title_id
+         ORDER BY r.active DESC, r.id DESC
+      `);
+      return rows.map(mapRule);
+    }
+    if (mode === 'SUPABASE') {
+      const { data, error } = await getSupabaseClient()
+        .from('subscription_title_rules')
+        .select('*, title:titles(name)')
+        .order('active', { ascending: false })
+        .order('id', { ascending: false });
+      if (error) throw error;
+      return (data || []).map((row: any) => mapRule({ ...row, title_name: row.title?.name ?? null }));
+    }
+    const rows = getSqliteDb().prepare(`
       SELECT r.*, t.name AS title_name
         FROM subscription_title_rules r
         LEFT JOIN titles t ON t.id = r.title_id
        ORDER BY r.active DESC, r.id DESC
-    `);
+    `).all() as any[];
     return rows.map(mapRule);
-  }
-  if (mode === 'SUPABASE') {
-    const { data, error } = await getSupabaseClient()
-      .from('subscription_title_rules')
-      .select('*, title:titles(name)')
-      .order('active', { ascending: false })
-      .order('id', { ascending: false });
-    if (error) throw error;
-    return (data || []).map((row: any) => mapRule({ ...row, title_name: row.title?.name ?? null }));
-  }
-  const rows = getSqliteDb().prepare(`
-    SELECT r.*, t.name AS title_name
-      FROM subscription_title_rules r
-      LEFT JOIN titles t ON t.id = r.title_id
-     ORDER BY r.active DESC, r.id DESC
-  `).all() as any[];
-  return rows.map(mapRule);
+  })()
+    .then((rules) => {
+      rulesCache = { data: rules, expiresAt: Date.now() + RULES_CACHE_TTL_MS };
+      return rules;
+    })
+    .finally(() => {
+      rulesInFlight = null;
+    });
+
+  return rulesInFlight;
 };
 
 export const saveSubscriptionTitleRule = async (input: {
@@ -203,6 +226,7 @@ export const saveSubscriptionTitleRule = async (input: {
       const row = await getMysqlDb().get('SELECT * FROM subscription_title_rules WHERE id = ?', input.id);
       const nextRule = mapRule(row);
       await cleanupStaleSubscriptionRuleGrant(previousRule, nextRule);
+      clearSubscriptionTitleRulesCache();
       return nextRule;
     }
     const result = await getMysqlDb().run(
@@ -211,6 +235,7 @@ export const saveSubscriptionTitleRule = async (input: {
       broadcasterChannelId, broadcasterName, titleId, input.active ? 1 : 0
     );
     const row = await getMysqlDb().get('SELECT * FROM subscription_title_rules WHERE id = ?', result.insertId);
+    clearSubscriptionTitleRulesCache();
     return mapRule(row);
   }
 
@@ -223,6 +248,7 @@ export const saveSubscriptionTitleRule = async (input: {
     if (error) throw error;
     const nextRule = mapRule(data);
     await cleanupStaleSubscriptionRuleGrant(previousRule, nextRule);
+    clearSubscriptionTitleRulesCache();
     return nextRule;
   }
 
@@ -234,12 +260,14 @@ export const saveSubscriptionTitleRule = async (input: {
     ).run(broadcasterChannelId, broadcasterName, titleId, input.active ? 1 : 0, input.id);
     const nextRule = mapRule(getSqliteDb().prepare('SELECT * FROM subscription_title_rules WHERE id = ?').get(input.id));
     await cleanupStaleSubscriptionRuleGrant(previousRule, nextRule);
+    clearSubscriptionTitleRulesCache();
     return nextRule;
   }
   const result = getSqliteDb().prepare(
     `INSERT INTO subscription_title_rules (broadcaster_channel_id, broadcaster_name, title_id, active)
      VALUES (?, ?, ?, ?)`
   ).run(broadcasterChannelId, broadcasterName, titleId, input.active ? 1 : 0);
+  clearSubscriptionTitleRulesCache();
   return mapRule(getSqliteDb().prepare('SELECT * FROM subscription_title_rules WHERE id = ?').get(result.lastInsertRowid));
 };
 
@@ -256,6 +284,7 @@ export const deleteSubscriptionTitleRule = async (id: number): Promise<void> => 
     const { error } = await getSupabaseClient().from('subscription_title_rules').delete().eq('id', id);
     if (error) throw error;
   } else getSqliteDb().prepare('DELETE FROM subscription_title_rules WHERE id = ?').run(id);
+  clearSubscriptionTitleRulesCache();
 };
 
 const getState = async (userId: string, ruleId: number): Promise<any | null> => {

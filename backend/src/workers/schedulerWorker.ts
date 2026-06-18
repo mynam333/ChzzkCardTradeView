@@ -12,14 +12,16 @@ const start = async () => {
     { getRuntimeStats },
     { setRuntimeStatsProvider, startRuntimeStatsLogging },
     { initVapid, startPushNotificationScheduler },
-    { startMarketSettlementScheduler }
+    { startMarketSettlementScheduler },
+    { startUserRankingSnapshotScheduler }
   ] = await Promise.all([
     import('../services/db'),
     import('../repositories'),
     import('../services/runtimeStats'),
     import('../services/fileLogger'),
     import('../controllers/pushController'),
-    import('../cron/marketScheduler')
+    import('../cron/marketScheduler'),
+    import('../controllers/playController')
   ]);
 
   setRuntimeStatsProvider(getRuntimeStats);
@@ -30,7 +32,8 @@ const start = async () => {
   initRepositories();
   startPushNotificationScheduler();
   startMarketSettlementScheduler();
-  console.log('[SchedulerWorker] 푸시/마켓 스케줄러 worker가 시작되었습니다.');
+  startUserRankingSnapshotScheduler();
+  console.log('[SchedulerWorker] 푸시/마켓/랭킹 스냅샷 스케줄러 worker가 시작되었습니다.');
 };
 
 start().catch((err: any) => {

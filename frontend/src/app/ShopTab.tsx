@@ -700,7 +700,7 @@ export const ShopTab: React.FC = () => {
   // 관심 매물 알림의 스트리머 이름 검색용 목록 로드 (마켓 탭 진입 시 1회)
   useEffect(() => {
     if (subTab !== 'market' || !user?.id || streamerOptions.length > 0) return;
-    apiFetch('/streamers/ranking?mode=value&limit=all')
+    apiFetch('/streamers/ranking?mode=value&limit=500')
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => setStreamerOptions((prev) => mergeStreamerOptions(prev, Array.isArray(data) ? data : [])))
       .catch(() => { /* 검색 목록 로드 실패는 무시 */ });

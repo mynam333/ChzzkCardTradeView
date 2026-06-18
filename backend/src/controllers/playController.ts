@@ -597,6 +597,11 @@ const USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL = Math.max(
   60_000,
   Number(process.env.USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL_MS || 180_000)
 );
+const USER_RANKING_SNAPSHOT_REFRESH_IN_API = process.env.USER_RANKING_SNAPSHOT_REFRESH_IN_API === 'true';
+const USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS || 300_000)
+);
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
@@ -610,6 +615,7 @@ const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RA
 let userRankingSnapshotExpiresAt = 0;
 let userRankingSnapshotLastBuiltAt = 0;
 let userRankingSnapshotInFlight: Promise<boolean> | null = null;
+let userRankingSnapshotSchedulerTimer: NodeJS.Timeout | null = null;
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -667,9 +673,13 @@ const hasUserRankingSnapshot = async (): Promise<boolean> => {
   return !!row?.ranking_present && !!row?.card_filter_present;
 };
 
-const refreshUserRankingSnapshot = async (): Promise<boolean> => {
+export const refreshUserRankingSnapshot = async (options: { force?: boolean } = {}): Promise<boolean> => {
   const mode = getDbMode();
   if (mode === 'SUPABASE') return false;
+  const force = options.force === true;
+  if (!force && mode === 'MYSQL' && !USER_RANKING_SNAPSHOT_REFRESH_IN_API && await hasUserRankingSnapshot()) {
+    return true;
+  }
   if (userRankingSnapshotExpiresAt > Date.now()) return true;
   if (userRankingSnapshotInFlight) {
     if (mode === 'MYSQL' && await hasUserRankingSnapshot()) return true;
@@ -799,6 +809,19 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
 
   if (canServeStaleSnapshot) return true;
   return userRankingSnapshotInFlight;
+};
+
+export const startUserRankingSnapshotScheduler = () => {
+  if (userRankingSnapshotSchedulerTimer) return;
+  const run = () => {
+    refreshUserRankingSnapshot({ force: true }).catch((err: any) => {
+      console.warn('[RankingSnapshot] 예약 갱신 실패:', err?.message || err);
+    });
+  };
+  const initialDelay = Math.max(5_000, Number(process.env.USER_RANKING_SNAPSHOT_INITIAL_DELAY_MS || 15_000));
+  setTimeout(run, initialDelay).unref?.();
+  userRankingSnapshotSchedulerTimer = setInterval(run, USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS);
+  userRankingSnapshotSchedulerTimer.unref?.();
 };
 
 const readUserRankingsFromSnapshot = async (
@@ -1046,7 +1069,7 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     const keyword = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const rawLimit = typeof req.query.limit === 'string' ? req.query.limit.trim().toLowerCase() : '';
     const limit = rawLimit === 'all'
-      ? Number.MAX_SAFE_INTEGER
+      ? STREAMER_RANKING_MAX_LIMIT
       : Math.max(1, Math.min(STREAMER_RANKING_MAX_LIMIT, Math.floor(Number(req.query.limit || 100)) || 100));
     const cacheKey = `${mode}|${keyword}|${limit}`;
     const now = Date.now();

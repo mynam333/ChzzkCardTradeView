@@ -309,6 +309,15 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'shop_items', 'idx_shop_items_limited_sale', '(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
   await ensureMysqlColumn(db, 'user_cards', 'is_locked', 'is_locked TINYINT NOT NULL DEFAULT 0');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_locked', '(user_id, is_locked)');
+  await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_channel_serial', '(channel_id, serial_number)');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS user_card_serials (
+      channel_id VARCHAR(191) PRIMARY KEY,
+      last_serial BIGINT NOT NULL DEFAULT 0,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_user_card_serials_streamer FOREIGN KEY(channel_id) REFERENCES streamers(channel_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
   await ensureMysqlColumn(db, 'users', 'last_seen_at', 'last_seen_at DATETIME NULL AFTER token_expires_at');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_free_draw');
   await normalizeMysqlIsoDateColumn(db, 'users', 'banned_until');

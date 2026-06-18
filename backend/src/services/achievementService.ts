@@ -1945,6 +1945,23 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
 
 const rewardSourceId = (achievement: Achievement, repeatKey: string) => `${achievement.code}:${repeatKey}`;
 
+const nextMysqlCardSerialNumber = async (
+  tx: { run: (...args: any[]) => Promise<any>; get: <T = any>(sql: string, ...args: any[]) => Promise<T | undefined> },
+  channelId: string
+): Promise<number> => {
+  await tx.run(
+    `INSERT INTO user_card_serials (channel_id, last_serial)
+     SELECT ?, COALESCE(MAX(serial_number), 0) + 1
+       FROM user_cards
+      WHERE channel_id = ?
+     ON DUPLICATE KEY UPDATE last_serial = GREATEST(last_serial + 1, VALUES(last_serial))`,
+    channelId,
+    channelId
+  );
+  const row = await tx.get<{ last_serial: number }>('SELECT last_serial FROM user_card_serials WHERE channel_id = ?', channelId);
+  return Number(row?.last_serial || 1);
+};
+
 const grantSqliteReward = (db: any, userId: string, achievement: Achievement, repeatKey: string, reward: AchievementReward): AchievementReward => {
   const sourceId = rewardSourceId(achievement, repeatKey);
   if (reward.type === 'point') {
@@ -2033,11 +2050,10 @@ const grantMysqlReward = async (tx: any, userId: string, achievement: Achievemen
     });
   } else if (reward.type === 'card') {
     const quantity = Math.trunc(Number(reward.quantity || 0));
-    const latest = await tx.get('SELECT COALESCE(MAX(serial_number), 0) AS max_sn FROM user_cards WHERE channel_id = ? FOR UPDATE', reward.channel_id);
-    const baseSn = Number(latest?.max_sn || 0);
-    for (let i = 1; i <= quantity; i++) {
-      const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, baseSn + i);
-      await recordMysqlAssetEvent(tx, { userId, assetType: 'card', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_card_reward', description: `업적 보상: ${achievement.name}`, cardId: Number(result.insertId), channelId: reward.channel_id, serialNumber: baseSn + i, star: 0, metadata: { achievement_id: achievement.id, achievement_code: achievement.code } });
+    for (let i = 0; i < quantity; i++) {
+      const serialNumber = await nextMysqlCardSerialNumber(tx, reward.channel_id as string);
+      const result = await tx.run('INSERT INTO user_cards (user_id, channel_id, serial_number, star) VALUES (?, ?, ?, 0)', userId, reward.channel_id, serialNumber);
+      await recordMysqlAssetEvent(tx, { userId, assetType: 'card', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_card_reward', description: `업적 보상: ${achievement.name}`, cardId: Number(result.insertId), channelId: reward.channel_id, serialNumber, star: 0, metadata: { achievement_id: achievement.id, achievement_code: achievement.code } });
     }
   } else if (reward.type === 'cosmetic') {
     const quantity = Math.trunc(Number(reward.quantity || 0));
