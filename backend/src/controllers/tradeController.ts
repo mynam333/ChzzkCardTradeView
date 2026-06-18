@@ -4,6 +4,7 @@ import { TradeOffer, User, Trade } from '../repositories/interfaces';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
+import { recordAchievementEvent } from '../services/achievementService';
 
 /** 푸시 + 인앱 알림함 동시 기록 (실패해도 무시) */
 const notify = (userId: string, title: string, body: string) => {
@@ -598,6 +599,24 @@ export const finalizeTrade = async (req: AuthenticatedRequest, res: Response) =>
     }
     // 수신자에게 체결 완료 알림
     if (trade) notify(trade.receiver_id, '교환 체결 🤝', `${user.username}님과의 카드 교환이 완료되었어요!`);
+    Promise.all([
+      recordAchievementEvent({
+        userId: trade.sender_id,
+        eventType: 'trade.completed',
+        eventKey: `trade:completed:${trade.sender_id}:${tradeId}`,
+        metadata: { trade_id: tradeId, counterparty_user_id: trade.receiver_id },
+        stats: { 'trade.completed.count': 1 },
+        refreshSnapshots: true
+      }),
+      recordAchievementEvent({
+        userId: trade.receiver_id,
+        eventType: 'trade.completed',
+        eventKey: `trade:completed:${trade.receiver_id}:${tradeId}`,
+        metadata: { trade_id: tradeId, counterparty_user_id: trade.sender_id },
+        stats: { 'trade.completed.count': 1 },
+        refreshSnapshots: true
+      })
+    ]).catch(() => undefined);
     return res.status(200).json({ message: '교환이 성공적으로 체결되었습니다.' });
   } catch (err: any) {
     console.error('[TradeController] finalizeTrade 에러:', err);

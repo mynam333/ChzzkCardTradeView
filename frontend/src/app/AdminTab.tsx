@@ -23,6 +23,7 @@ import {
   Pin,
   Award,
   Ticket,
+  Trophy,
   Activity,
   BarChart3,
   ExternalLink,
@@ -48,7 +49,8 @@ import type {
   AssetEventLogEntry,
   AssetEventListResponse,
   AssetEventSuspect,
-  AssetEventSuspectResponse
+  AssetEventSuspectResponse,
+  UserTitle
 } from '@/lib/types';
 import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
@@ -56,10 +58,11 @@ import { fuzzyScore } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
+import { AdminAchievementsTab } from './AdminAchievementsTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
 import { analyticsSettings } from '@/lib/analytics';
 
-type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'achievements' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
 type InsightsRange = '24h' | '7d' | '30d';
 
@@ -105,6 +108,7 @@ const emptyCouponRewardDraft = {
   points: 1000,
   channel_id: '',
   item_id: 0,
+  title_id: 0,
   quantity: 1
 };
 
@@ -177,6 +181,7 @@ export const AdminTab: React.FC = () => {
     tabParam === 'insights' ||
     tabParam === 'users' ||
     tabParam === 'titles' ||
+    tabParam === 'achievements' ||
     tabParam === 'coupons' ||
     tabParam === 'announcements' ||
     tabParam === 'push' ||
@@ -194,7 +199,7 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
-      'dashboard', 'insights', 'users', 'titles', 'coupons', 'announcements',
+      'dashboard', 'insights', 'users', 'titles', 'achievements', 'coupons', 'announcements',
       'push', 'reports', 'trades', 'asset-events', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
@@ -264,6 +269,7 @@ export const AdminTab: React.FC = () => {
   const [couponRewardDraft, setCouponRewardDraft] = useState({ ...emptyCouponRewardDraft });
   // 쿠폰 코스메틱 보상용 상점 아이템 목록
   const [couponCosmetics, setCouponCosmetics] = useState<any[]>([]);
+  const [couponTitles, setCouponTitles] = useState<UserTitle[]>([]);
 
   // 공지
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -340,7 +346,7 @@ export const AdminTab: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
     if (subTab === 'dashboard') fetchStats();
-    if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); fetchCouponCosmetics(); }
+    if (subTab === 'coupons') { fetchCoupons(); fetchCouponStreamers(); fetchCouponCosmetics(); fetchCouponTitles(); }
     if (subTab === 'announcements') fetchAnnouncements();
     if (subTab === 'reports') {
       fetchReports();
@@ -463,6 +469,12 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setCouponCosmetics(await res.json());
     } catch { /* noop */ }
   };
+  const fetchCouponTitles = async () => {
+    try {
+      const res = await apiFetch('/admin/titles');
+      if (res.ok) setCouponTitles(await res.json());
+    } catch { /* noop */ }
+  };
   const fetchCouponStreamers = async (force = false) => {
     if (!force && couponStreamers.length > 0) return;
     try {
@@ -490,17 +502,21 @@ export const AdminTab: React.FC = () => {
     couponStreamers.find((s) => s.channel_id === channelId)?.name || channelId;
   const couponItemName = (itemId?: number | null) =>
     couponCosmetics.find((it) => it.id === itemId)?.name || `아이템#${itemId}`;
+  const couponTitleName = (titleId?: number | null) =>
+    couponTitles.find((title) => title.id === titleId)?.name || `칭호#${titleId}`;
   const couponRewards = (coupon: Coupon): CouponReward[] => {
     if (Array.isArray(coupon.rewards) && coupon.rewards.length > 0) return coupon.rewards;
     if (coupon.reward_type === 'point') return [{ type: 'point', points: coupon.points || 0 }];
     if (coupon.reward_type === 'card') return [{ type: 'card', channel_id: coupon.reward_channel_id, quantity: coupon.reward_quantity || 0 }];
     if (coupon.reward_type === 'cosmetic') return [{ type: 'cosmetic', item_id: coupon.reward_item_id, quantity: coupon.reward_quantity || 0 }];
+    if (coupon.reward_type === 'title') return [{ type: 'title', title_id: coupon.reward_item_id || null }];
     return [{ type: coupon.reward_type, quantity: coupon.reward_quantity || 0 }];
   };
   const rewardText = (reward: CouponReward) => {
     if (reward.type === 'point') return `💰 ${(reward.points || 0).toLocaleString()}P`;
     if (reward.type === 'card') return `🃏 ${reward.label || streamerName(reward.channel_id || '')} 카드 ×${(reward.quantity || 0).toLocaleString()}`;
     if (reward.type === 'cosmetic') return `🎨 ${reward.label || couponItemName(reward.item_id)} ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'title') return `🏅 ${reward.label || couponTitleName(reward.title_id)} 칭호`;
     if (reward.type === 'minigame_ticket') return `🎮 추가 미니게임 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
     return `🎟 추가 무료 소환 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
   };
@@ -533,6 +549,12 @@ export const AdminTab: React.FC = () => {
         return;
       }
       reward = { type, item_id: Number(couponRewardDraft.item_id), quantity: Number(couponRewardDraft.quantity) };
+    } else if (type === 'title') {
+      if (!couponRewardDraft.title_id) {
+        toast('지급할 칭호를 선택해 주세요.');
+        return;
+      }
+      reward = { type, title_id: Number(couponRewardDraft.title_id) };
     } else {
       if (!couponRewardDraft.quantity || couponRewardDraft.quantity <= 0) {
         toast(type === 'free_draw_ticket' ? '지급할 추가 무료 소환 티켓 수량을 입력해 주세요.' : '지급할 추가 미니게임 티켓 수량을 입력해 주세요.');
@@ -1560,6 +1582,7 @@ export const AdminTab: React.FC = () => {
     { id: 'insights', label: '인사이트', icon: BarChart3 },
     { id: 'users', label: '유저', icon: Users },
     { id: 'titles', label: '칭호', icon: Award },
+    { id: 'achievements', label: '업적', icon: Trophy },
     { id: 'coupons', label: '쿠폰', icon: Tag },
     { id: 'announcements', label: '공지', icon: Megaphone },
     { id: 'push', label: '푸시', icon: BellRing },
@@ -1893,6 +1916,7 @@ export const AdminTab: React.FC = () => {
       {/* 유저 목록 (자기완결형 컴포넌트로 분리) */}
       {subTab === 'users' && <AdminUsersTab />}
       {subTab === 'titles' && <AdminTitlesTab />}
+      {subTab === 'achievements' && <AdminAchievementsTab />}
 
       {/* 쿠폰 */}
       {subTab === 'coupons' && (
@@ -1934,6 +1958,7 @@ export const AdminTab: React.FC = () => {
                   <option value="cosmetic">코스메틱 아이템</option>
                   <option value="minigame_ticket">추가 미니게임 티켓</option>
                   <option value="free_draw_ticket">추가 무료 소환 티켓</option>
+                  <option value="title">칭호</option>
                 </select>
               </div>
 
@@ -2004,6 +2029,25 @@ export const AdminTab: React.FC = () => {
                     onChange={(e) => setCouponRewardDraft({ ...couponRewardDraft, quantity: Number(e.target.value) })}
                     className="w-20 rounded-lg border border-border bg-card px-2 py-1.5 text-xs" />
                 </div>
+              </div>
+              )}
+
+              {couponRewardDraft.type === 'title' && (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-card/70 p-2.5">
+                {couponTitles.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground py-2 text-center">등록된 칭호가 없습니다. 칭호 탭에서 먼저 추가하세요.</p>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {couponTitles.map((title) => (
+                      <button key={title.id}
+                        onClick={() => setCouponRewardDraft({ ...couponRewardDraft, title_id: title.id })}
+                        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition ${couponRewardDraft.title_id === title.id ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-secondary/60'}`}>
+                        <span className="truncate text-[11px] font-bold">{title.name}</span>
+                        <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">#{title.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               )}
 

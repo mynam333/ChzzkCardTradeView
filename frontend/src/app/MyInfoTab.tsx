@@ -59,10 +59,11 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 type ClaimedCouponReward = {
-  type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+  type: 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket' | 'title';
   points?: number;
   channel_id?: string | null;
   item_id?: number | null;
+  title_id?: number | null;
   quantity?: number;
   label?: string;
 };
@@ -418,6 +419,7 @@ export const MyInfoTab: React.FC = () => {
     if (reward.type === 'point') return `${(reward.points || 0).toLocaleString()}P`;
     if (reward.type === 'card') return `${reward.label || reward.channel_id || '스트리머'} 카드 ×${(reward.quantity || 0).toLocaleString()}`;
     if (reward.type === 'cosmetic') return `${reward.label || `아이템#${reward.item_id}`} ×${(reward.quantity || 0).toLocaleString()}`;
+    if (reward.type === 'title') return `${reward.label || `칭호#${reward.title_id}`} 칭호`;
     if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
     return `추가 무료 소환 티켓 ×${(reward.quantity || 0).toLocaleString()}`;
   };
@@ -494,6 +496,7 @@ export const MyInfoTab: React.FC = () => {
         const rewards = Array.isArray(data.rewards) ? data.rewards as ClaimedCouponReward[] : [];
         if (data.points_added) updatePoints(Number(data.points_added));
         if (rewards.some((reward) => reward.type === 'card') || data.reward_type === 'card') fetchInventory();
+        if (rewards.some((reward) => reward.type === 'title') || data.reward_type === 'title') refreshUserData().catch(() => undefined);
         setLastCouponClaim({ message: data.message || '쿠폰 보상이 지급되었습니다.', rewards });
         setCouponCode('');
       } else {

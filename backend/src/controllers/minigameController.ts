@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { UserMinigameTicket, MinigameSession, MinigameType } from '../repositories/interfaces';
 import { getPuzzleExcludedImageKeys, normalizePuzzleImageKey } from '../services/puzzleImageExclusionService';
+import { recordAchievementEvent } from '../services/achievementService';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
@@ -1161,6 +1162,19 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const completeResult = await minigameRepository.completeSession(session_id, earnedPoints);
     if (!completeResult.ok) {
       return res.status(500).json({ error: 'InternalServerError', message: completeResult.reason || '포인트 지급에 실패했습니다.' });
+    }
+    if (isCorrect && !practiceMode) {
+      recordAchievementEvent({
+        userId,
+        eventType: 'minigame.success',
+        eventKey: `minigame:success:${userId}:${session_id}`,
+        metadata: { session_id, game_type: session.game_type, earned_points: earnedPoints },
+        stats: {
+          'minigame.success.count': 1,
+          [`minigame.success.${session.game_type}.count`]: 1
+        },
+        refreshSnapshots: true
+      }).catch(() => undefined);
     }
 
     return res.status(200).json({

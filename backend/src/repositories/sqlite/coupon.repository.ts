@@ -34,7 +34,7 @@ export class SqliteCouponRepository implements ICouponRepository {
       id: row.id,
       code: row.code,
       coupon_type: row.coupon_type as 'single' | 'multi',
-      reward_type: (row.reward_type || 'point') as 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket',
+      reward_type: (row.reward_type || 'point') as Coupon['reward_type'],
       points: row.points,
       reward_channel_id: row.reward_channel_id ?? null,
       reward_item_id: row.reward_item_id ?? null,
@@ -124,6 +124,7 @@ export class SqliteCouponRepository implements ICouponRepository {
         if (reward.type === 'point' && Number(reward.points || 0) <= 0) return { ok: false, reason: 'INVALID_REWARD' };
         if (reward.type === 'card' && (!reward.channel_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
         if (reward.type === 'cosmetic' && (!reward.item_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
+        if (reward.type === 'title' && !reward.title_id) return { ok: false, reason: 'INVALID_REWARD' };
         if ((reward.type === 'minigame_ticket' || reward.type === 'free_draw_ticket') && quantity <= 0) return { ok: false, reason: 'INVALID_REWARD' };
       }
 
@@ -236,6 +237,26 @@ export class SqliteCouponRepository implements ICouponRepository {
             itemType: 'free_draw_ticket',
             metadata: { coupon_id: couponId, coupon_code: coupon.code }
           });
+        } else if (reward.type === 'title') {
+          const result = db.prepare(`
+            INSERT INTO user_titles (user_id, title_id, grant_source)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, title_id) DO NOTHING
+          `).run(userId, reward.title_id, 'coupon');
+          if (Number(result.changes || 0) > 0) {
+            recordSqliteAssetEvent(db, {
+              userId,
+              assetType: 'title',
+              action: 'add',
+              quantity: 1,
+              sourceType: 'coupon',
+              sourceId: couponId,
+              reason: 'coupon_title_reward',
+              description: `쿠폰 ${coupon.code} 칭호 보상`,
+              itemId: Number(reward.title_id),
+              metadata: { coupon_id: couponId, coupon_code: coupon.code }
+            });
+          }
         }
       }
       const updated = db.prepare('SELECT point FROM users WHERE id = ?').get(userId) as any;

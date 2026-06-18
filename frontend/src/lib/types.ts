@@ -297,13 +297,14 @@ export interface AdminReport {
 }
 
 /** 쿠폰 */
-export type CouponRewardType = 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket';
+export type CouponRewardType = 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket' | 'title';
 
 export interface CouponReward {
   type: CouponRewardType;
   points?: number;
   channel_id?: string | null;
   item_id?: number | null;
+  title_id?: number | null;
   quantity?: number;
   label?: string;
 }
@@ -340,4 +341,82 @@ export interface OrphanImage {
   rel: string;
   size: number;
   url: string;
+}
+
+export type AchievementCategory =
+  | 'start'
+  | 'collection'
+  | 'growth'
+  | 'economy'
+  | 'trade'
+  | 'market'
+  | 'minigame'
+  | 'community'
+  | 'streamer'
+  | 'event'
+  | 'hidden';
+
+export type AchievementTier = 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary' | 'event';
+export type AchievementStatus = 'locked' | 'in_progress' | 'completed' | 'claimed' | 'expired';
+export type AchievementRewardType = 'point' | 'card' | 'cosmetic' | 'minigame_ticket' | 'free_draw_ticket' | 'title';
+
+export interface AchievementReward {
+  type: AchievementRewardType;
+  points?: number;
+  channel_id?: string;
+  item_id?: number;
+  title_id?: number;
+  quantity?: number;
+}
+
+export interface UserAchievement {
+  achievement_id: number;
+  code: string | null;
+  name: string;
+  description: string | null;
+  category: AchievementCategory;
+  tier: AchievementTier;
+  icon: string | null;
+  icon_color: string | null;
+  is_hidden: boolean;
+  is_secret: boolean;
+  status: AchievementStatus;
+  progress_current: number;
+  progress_target: number;
+  progress_percent: number;
+  completed_at: string | null;
+  claimed_at: string | null;
+  rewards: AchievementReward[];
+}
+
+export interface UserAchievementsResponse {
+  items: UserAchievement[];
+  summary: Record<string, number>;
+}
+
+export interface AdminAchievement {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  category: AchievementCategory;
+  tier: AchievementTier;
+  icon: string | null;
+  icon_color: string | null;
+  is_active: boolean;
+  is_hidden: boolean;
+  is_secret: boolean;
+  criteria_json: string | Record<string, unknown>;
+  rewards_json: string | AchievementReward[];
+  hidden_hint?: string | null;
+  sort_order: number;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  progress_mode: string;
+  repeat_policy: string;
+  claim_policy: string;
+  completed_users?: number;
+  claimed_users?: number;
+  created_at?: string | null;
+  updated_at?: string | null;
 }

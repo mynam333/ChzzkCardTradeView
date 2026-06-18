@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
 import { fuzzyScore } from '@/lib/search';
+import { isDesktopEasterEggSurface, resolveEasterEggTerminalCode } from '@/lib/easterEgg';
 import { borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib/cosmetics';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
@@ -380,6 +381,18 @@ export const ShopTab: React.FC = () => {
     setMarketPage(nextPage);
     setMarketPageInput(String(nextPage));
     pushShopRoute({ tab: 'market', page: nextPage === 1 ? null : nextPage });
+  };
+
+  const handleMarketSearchChange = (value: string) => {
+    const terminalCode = isDesktopEasterEggSurface() ? resolveEasterEggTerminalCode(value) : null;
+    if (terminalCode) {
+      setMarketSearch('');
+      window.dispatchEvent(new CustomEvent('chikapo:easter-egg-command', {
+        detail: { command: 'terminalCode', code: terminalCode }
+      }));
+      return;
+    }
+    setMarketSearch(value);
   };
 
   const handleHistoryScopeChange = (scope: 'all' | 'mine') => {
@@ -1683,7 +1696,7 @@ export const ShopTab: React.FC = () => {
                   type="text"
                   placeholder="스트리머 또는 판매자 검색..."
                   value={marketSearch}
-                  onChange={(e) => setMarketSearch(e.target.value)}
+                  onChange={(e) => handleMarketSearchChange(e.target.value)}
                   className="w-full rounded-lg border border-border bg-secondary/20 pl-9 pr-3 py-2 text-xs focus:border-primary focus:outline-none"
                 />
                 {marketSearch && (

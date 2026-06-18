@@ -17,6 +17,7 @@ import { getActiveAccountInteractionRestriction } from '../services/accountInter
 import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService';
 import { getDbMode, getMysqlDb, getSqliteDb } from '../services/db';
 import { acquireSchedulerLock } from '../services/schedulerLock';
+import { recordAchievementEvent } from '../services/achievementService';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -250,6 +251,19 @@ export const getUserMe = async (req: Request, res: Response) => {
     ]);
     const interactionRestrictedUntil = getActiveAccountInteractionRestriction(deletedAccount);
     const titles = ownedTitles.filter((title) => title.is_equipped);
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const kstDate = `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+    recordAchievementEvent({
+      eventKey: `login:daily:${user.id}:${kstDate}`,
+      userId: user.id,
+      eventType: 'login.daily',
+      sourceType: 'auth',
+      sourceId: kstDate,
+      value: 1,
+      metadata: { kst_date: kstDate },
+      stats: { 'login.count': 1, 'login.daily.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
 
     return res.status(200).json({
       id: user.id,
@@ -1103,6 +1117,17 @@ export const updateMyStatusMessage = async (req: Request, res: Response) => {
   }
   try {
     await userRepository.updateStatusMessage(userId, message);
+    if (message.trim()) {
+      recordAchievementEvent({
+        eventKey: `profile:status:${userId}:${Date.now()}`,
+        userId,
+        eventType: 'profile.status_message.set',
+        sourceType: 'profile',
+        value: 1,
+        stats: { 'profile.status_message.set': 1 },
+        refreshSnapshots: true
+      }).catch(() => undefined);
+    }
     return res.status(200).json({ message: '상태 메시지를 저장했습니다.', status_message: message.trim() || null });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '상태 메시지 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -1119,6 +1144,16 @@ export const updateMyCardVisibility = async (req: Request, res: Response) => {
     const ok = await userCardRepository.updateVisibility(userId, cardId, !!req.body?.hidden);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:visibility:${userId}:${cardId}:${req.body?.hidden ? 'hide' : 'show'}:${Date.now()}`,
+      userId,
+      eventType: 'card.visibility.update',
+      sourceType: 'card',
+      sourceId: cardId,
+      value: 1,
+      metadata: { hidden: !!req.body?.hidden },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: req.body?.hidden ? '카드를 외부 공개에서 숨겼습니다.' : '카드 공개 숨김을 해제했습니다.' });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '카드 숨김 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -1142,6 +1177,16 @@ export const updateMyCardGroupVisibility = async (req: Request, res: Response) =
     const updated = await userCardRepository.updateVisibilityByGroup(userId, channelId, star, hidden);
     if (updated <= 0) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:visibility-group:${userId}:${channelId}:${star}:${hidden ? 'hide' : 'show'}:${Date.now()}`,
+      userId,
+      eventType: 'card.visibility.update',
+      sourceType: 'card_group',
+      sourceId: `${channelId}#${star}`,
+      value: updated,
+      metadata: { channel_id: channelId, star, hidden },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({
       message: hidden
         ? `${updated}장의 카드를 외부 공개에서 숨겼습니다.`
@@ -1163,6 +1208,16 @@ export const updateMyCardFavorite = async (req: Request, res: Response) => {
     const ok = await userCardRepository.setFavorite(userId, cardId, !!req.body?.favorite);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:favorite:${userId}:${cardId}:${req.body?.favorite ? 'on' : 'off'}:${Date.now()}`,
+      userId,
+      eventType: 'card.favorite.update',
+      sourceType: 'card',
+      sourceId: cardId,
+      value: 1,
+      metadata: { favorite: !!req.body?.favorite },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: req.body?.favorite ? '즐겨찾기에 고정했습니다.' : '즐겨찾기 고정을 해제했습니다.' });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '즐겨찾기 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -1186,6 +1241,16 @@ export const updateMyCardLock = async (req: Request, res: Response) => {
     const ok = await userCardRepository.setLocked(userId, cardId, locked);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:lock:${userId}:${cardId}:${locked ? 'on' : 'off'}:${Date.now()}`,
+      userId,
+      eventType: 'card.lock.update',
+      sourceType: 'card',
+      sourceId: cardId,
+      value: 1,
+      metadata: { locked },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: locked ? '카드를 잠갔습니다.' : '카드 잠금을 해제했습니다.', locked });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '카드 잠금 설정 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -1230,6 +1295,17 @@ export const drawCard = async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'InternalServerError', message: '카드 뽑기 처리에 실패했습니다.' });
     }
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:draw:${userId}:${draw.card?.id || luckyStreamer.channel_id}`,
+      userId,
+      eventType: 'card.acquired',
+      sourceType: 'gacha_draw',
+      sourceId: draw.card?.id || luckyStreamer.channel_id,
+      value: 1,
+      metadata: { channel_id: luckyStreamer.channel_id, star: 0, free: !!draw.is_free },
+      stats: { 'card.acquired.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
 
     return res.status(200).json({
       message: draw.is_free
@@ -1319,6 +1395,16 @@ export const drawCards = async (req: Request, res: Response) => {
         });
       }
       clearUserCardsInFlight(userId);
+      recordAchievementEvent({
+        eventKey: `card:draw-many:${userId}:${Date.now()}:${cards.length}`,
+        userId,
+        eventType: 'card.acquired',
+        sourceType: 'gacha_draw_many',
+        value: cards.length,
+        metadata: { quantity: cards.length, free_count: freeCount },
+        stats: { 'card.acquired.count': cards.length },
+        refreshSnapshots: true
+      }).catch(() => undefined);
 
       return res.status(200).json({
         message: `10연차 소환으로 카드 ${cards.length}장을 획득했습니다!`,
@@ -1476,6 +1562,18 @@ export const registerStreamer = async (req: Request, res: Response) => {
     await streamerRepository.save(newStreamer);
     clearDrawPoolCache();
     streamerRankingsCache.clear();
+    const actorId = (req as any).user?.id || newStreamer.registered_by;
+    if (actorId) {
+      recordAchievementEvent({
+        eventKey: `streamer:register:${actorId}:${newStreamer.channel_id}`,
+        userId: actorId,
+        eventType: 'streamer.registered',
+        sourceType: 'streamer',
+        sourceId: newStreamer.channel_id,
+        value: 1,
+        metadata: { channel_id: newStreamer.channel_id }
+      }).catch(() => undefined);
+    }
 
     return res.status(200).json({
       message: `${verifiedName} 스트리머가 신규 카드 리스트로 성공적으로 등록되었습니다.`,
@@ -1570,6 +1668,17 @@ export const sellCards = async (req: Request, res: Response) => {
     const refreshed = await userRepository.findById(userId);
     const nextPoint = refreshed ? refreshed.point : user.point + actualGainedPoints;
     clearUserCardsInFlight(userId);
+    const soldCount = sellActions.reduce((sum, item) => sum + item.count, 0);
+    recordAchievementEvent({
+      eventKey: `card:sell:${userId}:${Date.now()}:${soldCount}`,
+      userId,
+      eventType: 'card.sold',
+      sourceType: 'card_sell',
+      value: soldCount,
+      metadata: { quantity: soldCount, points_gained: actualGainedPoints },
+      stats: { 'card.sold.count': soldCount },
+      refreshSnapshots: true
+    }).catch(() => undefined);
 
     return res.status(200).json({
       message: `성공적으로 카드 판매가 완료되었습니다. 총 ${actualGainedPoints.toLocaleString()} 포인트를 획득하였습니다!`,
@@ -1692,6 +1801,20 @@ export const fuseCards = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
     }
     clearUserCardsInFlight(userId);
+    recordAchievementEvent({
+      eventKey: `card:fuse:${userId}:${channel_id}:${starNum}:${Date.now()}`,
+      userId,
+      eventType: 'card.fused',
+      sourceType: 'card_fuse',
+      sourceId: channel_id,
+      value: 1,
+      metadata: { channel_id, previous_star: starNum, new_star: result.newStar || 0 },
+      stats: {
+        'card.fused.count': 1,
+        ...(Number(result.newStar || 0) >= 5 ? { 'card.star.5.count': 1 } : {})
+      },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: `한계돌파 성공! ${result.newStar}성 카드가 되었습니다. ⭐`, new_star: result.newStar });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '합성 처리 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -1865,6 +1988,19 @@ export const setRepresentativeCard = async (req: Request, res: Response) => {
     } else {
       // null 전달 시 대표 카드 해제
       await userRepository.updateRepresentativeCard(userId, null, null);
+    }
+    if (channel_id) {
+      recordAchievementEvent({
+        eventKey: `profile:representative:${userId}:${channel_id}:${star}:${Date.now()}`,
+        userId,
+        eventType: 'profile.representative.set',
+        sourceType: 'profile',
+        sourceId: channel_id,
+        value: 1,
+        metadata: { channel_id, star },
+        stats: { 'profile.representative.set': 1 },
+        refreshSnapshots: true
+      }).catch(() => undefined);
     }
 
     return res.status(200).json({

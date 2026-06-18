@@ -91,6 +91,7 @@ export class MysqlCouponRepository implements ICouponRepository {
         if (reward.type === 'point' && Number(reward.points || 0) <= 0) return { ok: false, reason: 'INVALID_REWARD' };
         if (reward.type === 'card' && (!reward.channel_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
         if (reward.type === 'cosmetic' && (!reward.item_id || quantity <= 0)) return { ok: false, reason: 'INVALID_REWARD' };
+        if (reward.type === 'title' && !reward.title_id) return { ok: false, reason: 'INVALID_REWARD' };
         if ((reward.type === 'minigame_ticket' || reward.type === 'free_draw_ticket') && quantity <= 0) {
           return { ok: false, reason: 'INVALID_REWARD' };
         }
@@ -193,6 +194,22 @@ export class MysqlCouponRepository implements ICouponRepository {
             itemType: 'free_draw_ticket',
             metadata: { coupon_id: couponId, coupon_code: coupon.code }
           });
+        } else if (reward.type === 'title') {
+          const result = await tx.run('INSERT IGNORE INTO user_titles (user_id, title_id, grant_source) VALUES (?, ?, ?)', userId, reward.title_id, 'coupon');
+          if (Number(result.changes || result.affectedRows || 0) > 0) {
+            await recordMysqlAssetEvent(tx, {
+              userId,
+              assetType: 'title',
+              action: 'add',
+              quantity: 1,
+              sourceType: 'coupon',
+              sourceId: couponId,
+              reason: 'coupon_title_reward',
+              description: `쿠폰 ${coupon.code} 칭호 보상`,
+              itemId: Number(reward.title_id),
+              metadata: { coupon_id: couponId, coupon_code: coupon.code }
+            });
+          }
         }
       }
 

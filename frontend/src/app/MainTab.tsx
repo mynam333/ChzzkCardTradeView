@@ -28,6 +28,7 @@ export const MainTab: React.FC = () => {
   const [selectedNotice, setSelectedNotice] = useState<Announcement | null>(null);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const fortuneClicksRef = React.useRef<number[]>([]);
 
   // 치지직 실시간 스트리머 상위 가치 3명 (메인 노출용)
   const [hotStreamers, setHotStreamers] = useState<any[]>([]);
@@ -135,6 +136,19 @@ export const MainTab: React.FC = () => {
     setSelectedNotice(null);
   };
 
+  const handleFortuneBadgeClick = () => {
+    const now = Date.now();
+    const clicks = [...fortuneClicksRef.current.filter((time) => now - time <= 5000), now];
+    if (clicks.length >= 3) {
+      fortuneClicksRef.current = [];
+      window.dispatchEvent(new CustomEvent('chikapo:easter-egg-command', {
+        detail: { command: 'fortune' }
+      }));
+      return;
+    }
+    fortuneClicksRef.current = clicks;
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
 
@@ -194,9 +208,13 @@ export const MainTab: React.FC = () => {
               스트리머의 인기가 오를수록 내 카드의 가치도 함께 올라갑니다.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <div className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white">
+              <button
+                type="button"
+                onClick={handleFortuneBadgeClick}
+                className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white"
+              >
                 <Flame className="h-3.5 w-3.5 fill-primary text-primary dark:fill-white dark:text-white" /> 매일 무료 가챠
-              </div>
+              </button>
               <div className="cute-wiggle-hover flex items-center gap-1.5 rounded-full border border-white/55 bg-white/82 px-4 py-1.5 text-xs font-black text-[#0b4b7a] shadow-sm backdrop-blur-sm dark:border-white/20 dark:bg-white/14 dark:text-white">
                 <Award className="h-3.5 w-3.5 text-primary dark:text-white" /> 컬렉터 랭킹 경쟁
               </div>

@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import * as shop from '../services/shopService';
 import { minifyCss } from '../utils/css';
 import { publishRealtimeEvent } from '../services/realtimeStream';
+import { recordAchievementEvent } from '../services/achievementService';
 
 const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });
@@ -77,6 +78,14 @@ export const buyShopItem = async (req: AuthenticatedRequest, res: Response) => {
     if (r.catalogChanged) {
       publishShopUpdated('item_purchased', { itemId });
     }
+    recordAchievementEvent({
+      userId,
+      eventType: 'shop.purchase',
+      eventKey: `shop:purchase:${userId}:${itemId}:${crypto.randomUUID()}`,
+      metadata: { item_id: itemId },
+      stats: { 'shop.purchase.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: '구매가 완료되었습니다.', catalogChanged: !!r.catalogChanged });
   } catch (err) { return fail(res, '구매 처리 실패', err); }
 };
@@ -94,6 +103,14 @@ export const equipToCard = async (req: AuthenticatedRequest, res: Response) => {
       const msg = r.reason === 'NOT_OWNED' ? '보유하지 않은 코스메틱입니다.' : r.reason === 'CARD_NOT_FOUND' ? '내 카드가 아닙니다.' : '장착에 실패했습니다.';
       return res.status(400).json({ error: 'EquipFailed', reason: r.reason, message: r.reason === 'CARD_LOCKED' ? '잠금된 카드에는 코스메틱을 장착할 수 없습니다.' : msg });
     }
+    recordAchievementEvent({
+      userId,
+      eventType: 'cosmetic.equip',
+      eventKey: `cosmetic:equip:${userId}:${cardId}:${itemId}:${crypto.randomUUID()}`,
+      metadata: { card_id: cardId, item_id: itemId },
+      stats: { 'cosmetic.equip.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
     return res.status(200).json({ message: '장착되었습니다.' });
   } catch (err) { return fail(res, '장착 처리 실패', err); }
 };

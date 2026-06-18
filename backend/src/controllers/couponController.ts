@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { couponRepository, streamerRepository } from '../repositories';
+import { couponRepository, streamerRepository, titleRepository } from '../repositories';
 import crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
@@ -7,6 +7,7 @@ import { getItem as getShopItem } from '../services/shopService';
 import { normalizeCouponCode } from '../utils/couponCode';
 import { CouponReward } from '../repositories/interfaces';
 import { COUPON_REWARD_TYPES, couponToRewards } from '../utils/couponRewards';
+import { recordAchievementEvent } from '../services/achievementService';
 
 const normalizePositiveInt = (value: unknown) => {
   const n = Number(value);
@@ -21,6 +22,7 @@ const normalizeRewardsFromBody = (body: any): { rewards?: CouponReward[]; messag
         points: body.points,
         channel_id: body.reward_channel_id,
         item_id: body.reward_item_id,
+        title_id: body.reward_title_id,
         quantity: body.reward_quantity
   }];
 
@@ -30,7 +32,7 @@ const normalizeRewardsFromBody = (body: any): { rewards?: CouponReward[]; messag
   for (const rawReward of rawRewards) {
     const type = rawReward?.type;
     if (!COUPON_REWARD_TYPES.includes(type)) {
-      return { message: '보상 종류는 point · card · cosmetic · minigame_ticket · free_draw_ticket만 가능합니다.' };
+      return { message: '보상 종류는 point · card · cosmetic · minigame_ticket · free_draw_ticket · title만 가능합니다.' };
     }
 
     if (type === 'point') {
@@ -49,6 +51,10 @@ const normalizeRewardsFromBody = (body: any): { rewards?: CouponReward[]; messag
       if (!itemId) return { message: '코스메틱 보상은 지급할 상점 아이템을 선택해야 합니다.' };
       if (quantity <= 0) return { message: '코스메틱 보상은 0보다 큰 지급 수량이 필요합니다.' };
       rewards.push({ type, item_id: itemId, quantity });
+    } else if (type === 'title') {
+      const titleId = normalizePositiveInt(rawReward.title_id ?? rawReward.item_id);
+      if (!titleId) return { message: '칭호 보상은 지급할 칭호를 선택해야 합니다.' };
+      rewards.push({ type, title_id: titleId });
     } else {
       const quantity = normalizePositiveInt(rawReward.quantity);
       if (quantity <= 0) {
@@ -65,14 +71,15 @@ const legacyFieldsFromReward = (reward: CouponReward) => ({
   reward_type: reward.type,
   points: reward.type === 'point' ? Number(reward.points || 0) : 0,
   reward_channel_id: reward.type === 'card' ? reward.channel_id || null : null,
-  reward_item_id: reward.type === 'cosmetic' ? Number(reward.item_id || 0) : null,
-  reward_quantity: reward.type === 'point' ? 0 : Number(reward.quantity || 0)
+  reward_item_id: reward.type === 'cosmetic' ? Number(reward.item_id || 0) : reward.type === 'title' ? Number(reward.title_id || 0) : null,
+  reward_quantity: reward.type === 'point' || reward.type === 'title' ? 0 : Number(reward.quantity || 0)
 });
 
 const rewardSummary = (reward: CouponReward) => {
   if (reward.type === 'point') return `${Number(reward.points || 0).toLocaleString()}P`;
   if (reward.type === 'card') return `${reward.label || reward.channel_id || '스트리머'} 카드 ×${Number(reward.quantity || 0).toLocaleString()}`;
   if (reward.type === 'cosmetic') return `${reward.label || `아이템#${reward.item_id}`} ×${Number(reward.quantity || 0).toLocaleString()}`;
+  if (reward.type === 'title') return `${reward.label || `칭호#${reward.title_id}`} 칭호`;
   if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ×${Number(reward.quantity || 0).toLocaleString()}`;
   return `추가 무료 소환 티켓 ×${Number(reward.quantity || 0).toLocaleString()}`;
 };
@@ -80,6 +87,7 @@ const rewardSummary = (reward: CouponReward) => {
 const enrichRewards = async (rewards: CouponReward[]): Promise<{ rewards?: CouponReward[]; status?: number; message?: string }> => {
   const streamerNames = new Map<string, string>();
   const itemNames = new Map<number, string>();
+  const titleNames = new Map<number, string>();
   const enriched: CouponReward[] = [];
 
   for (const reward of rewards) {
@@ -99,6 +107,14 @@ const enrichRewards = async (rewards: CouponReward[]): Promise<{ rewards?: Coupo
         itemNames.set(itemId, item.name);
       }
       enriched.push({ ...reward, label: itemNames.get(itemId) });
+    } else if (reward.type === 'title') {
+      const titleId = Number(reward.title_id || 0);
+      if (!titleNames.has(titleId)) {
+        const title = await titleRepository.findById(titleId);
+        if (!title) return { status: 404, message: '지급할 칭호를 찾을 수 없습니다.' };
+        titleNames.set(titleId, title.name);
+      }
+      enriched.push({ ...reward, label: titleNames.get(titleId) });
     } else {
       enriched.push(reward);
     }
@@ -113,7 +129,7 @@ const enrichRewards = async (rewards: CouponReward[]): Promise<{ rewards?: Coupo
  * 지원 옵션:
  *  - code: 미입력 시 랜덤 생성
  *  - coupon_type: 'single'(선착순 발급 갯수 제한) | 'multi'(기간 내 1인 1회·총량 무제한)
- *  - reward_type: 'point'(재화) | 'card'(스트리머 카드) | 'cosmetic'(코스메틱) | 'minigame_ticket'(추가 미니게임 티켓) | 'free_draw_ticket'(추가 무료 소환 티켓)
+ *  - reward_type: 'point'(재화) | 'card'(스트리머 카드) | 'cosmetic'(코스메틱) | 'minigame_ticket'(추가 미니게임 티켓) | 'free_draw_ticket'(추가 무료 소환 티켓) | 'title'(칭호)
  *  - points: reward_type='point' 지급 재화량
  *  - reward_channel_id / reward_quantity: reward_type='card' 스트리머 채널과 수량
  *  - max_uses: single 발급 갯수 (multi는 0=무제한)
@@ -241,6 +257,14 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
     const message = rewardList.length === 1
       ? `쿠폰이 등록되어 ${rewardSummary(rewardList[0])} 보상이 지급되었습니다.`
       : `쿠폰이 등록되어 ${rewardList.length}개의 보상이 지급되었습니다: ${rewardList.map(rewardSummary).join(', ')}`;
+    recordAchievementEvent({
+      userId,
+      eventType: 'coupon.claim',
+      eventKey: `coupon:claim:${userId}:${coupon.id}`,
+      metadata: { coupon_id: coupon.id, reward_count: rewardList.length, reward_types: rewardList.map((reward) => reward.type) },
+      stats: { 'coupon.claim.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
 
     return res.status(200).json({
       message,

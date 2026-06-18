@@ -156,6 +156,123 @@ body::before {
     linear-gradient(120deg, transparent 0 18%, rgba(67, 228, 210, 0.08) 18.2% 19%, transparent 19.2% 100%);
 }
 
+html.easter-egg-mode {
+  --easter-egg-glow: 22 214 190;
+  --easter-egg-warn: 250 204 21;
+}
+
+html.easter-egg-mode body::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 50%, rgba(0, 0, 0, 0.025) 50%),
+    radial-gradient(circle at 50% 20%, rgba(var(--easter-egg-glow), 0.14), transparent 42%);
+  background-size: 100% 4px, 100% 100%;
+  mix-blend-mode: soft-light;
+}
+
+html.easter-egg-mode .cute-surface,
+html.easter-egg-mode .cute-card-pop,
+html.easter-egg-mode .bg-card {
+  box-shadow:
+    0 0 0 1px rgba(var(--easter-egg-glow), 0.14),
+    0 18px 48px rgba(var(--easter-egg-glow), 0.14),
+    var(--cute-shadow-soft);
+}
+
+html.easter-egg-mode .card-star,
+html.easter-egg-mode .card-container {
+  filter: saturate(1.1);
+}
+
+.easter-egg-logo-pulse {
+  animation: easterEggLogoPulse 420ms ease-in-out;
+}
+
+.lost-card-scene {
+  perspective: 1100px;
+}
+
+.lost-card {
+  position: relative;
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-style: preserve-3d;
+  transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.lost-card-flipped {
+  transform: rotateY(180deg);
+}
+
+.lost-card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.38);
+  border-radius: 1.65rem;
+  padding: 1.35rem;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow:
+    0 28px 80px rgba(8, 47, 73, 0.32),
+    0 0 0 8px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.lost-card-face::before {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.28), transparent 22%),
+    linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.42), transparent 58%);
+  opacity: 0.75;
+  transform: rotate(8deg);
+}
+
+.lost-card-front {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(45, 212, 191, 0.38), transparent 28%),
+    linear-gradient(145deg, #06233a, #0b4f6b 48%, #0f766e);
+}
+
+.lost-card-back {
+  transform: rotateY(180deg);
+  background:
+    repeating-linear-gradient(0deg, rgba(45, 212, 191, 0.08) 0 1px, transparent 1px 8px),
+    linear-gradient(145deg, #031525, #062f3e 55%, #064e3b);
+}
+
+.lost-card-face > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes easterEggLogoPulse {
+  0%,
+  100% {
+    transform: translateX(0) rotate(0deg);
+    filter: saturate(1);
+  }
+
+  25% {
+    transform: translateX(-2px) rotate(-4deg);
+  }
+
+  55% {
+    transform: translateX(2px) rotate(4deg);
+    filter: saturate(1.6) drop-shadow(0 0 12px rgba(45, 212, 191, 0.65));
+  }
+}
+
 @keyframes cute-float {
 
   0%,
@@ -195,6 +312,10 @@ body::before {
 }
 
 @layer components {
+  .field-input {
+    @apply w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-normal outline-none focus:border-primary;
+  }
+
   .bg-card {
     box-shadow: var(--cute-shadow-soft);
   }

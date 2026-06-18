@@ -16,13 +16,14 @@ import {
 import { registerServiceWorker, subscribeToPush, isPushSupported } from '@/lib/push';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { AlertModal } from './AlertModal';
+import { EasterEggProvider } from './EasterEggProvider';
 import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
-export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'friends' | 'my-info' | 'admin' | 'arcade';
+export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'achievements' | 'friends' | 'my-info' | 'admin' | 'arcade';
 type ShopSubTabId = 'gacha_shop' | 'market' | 'my_listings' | 'history';
 
-const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'friends', 'my-info', 'admin', 'arcade'];
+const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'achievements', 'friends', 'my-info', 'admin', 'arcade'];
 const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'my_listings', 'history'];
 
 const parseNotificationLink = (link: string | null): { tab: TabId; shopSubTab?: ShopSubTabId } | null => {
@@ -521,6 +522,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     if (pathname.startsWith('/shop')) return 'shop';
     if (pathname.startsWith('/inventory')) return 'inventory';
     if (pathname.startsWith('/ranking')) return 'ranking';
+    if (pathname.startsWith('/achievements')) return 'achievements';
     if (pathname.startsWith('/friends')) return 'friends';
     if (pathname.startsWith('/my-info')) return 'my-info';
     if (pathname.startsWith('/admin')) return 'admin';
@@ -905,32 +907,34 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       checkMaintenanceStatus
     }}>
       <NotificationProvider user={user} setActiveTab={setActiveTab}>
-        {isInitializing ? (
-          <div className="fixed inset-0 z-50 flex select-none flex-col items-center justify-center overflow-hidden bg-background text-foreground">
-            <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-white/70 blur-2xl pointer-events-none dark:bg-primary/10"></div>
-            <div className="absolute right-[-4rem] top-16 h-80 w-80 rounded-full bg-primary/18 blur-[80px] pointer-events-none"></div>
-            <div className="absolute bottom-[-5rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-accent/45 blur-[90px] pointer-events-none"></div>
-            <div className="flex flex-col items-center space-y-6 relative z-10">
-              <div className="relative flex h-24 w-24 items-center justify-center">
-                <div className="absolute h-full w-full animate-ping rounded-[2rem] bg-primary/10 opacity-75 duration-[1800ms]"></div>
-                <div className="absolute h-18 w-18 animate-spin rounded-[1.75rem] border-[3px] border-primary/12 border-t-primary"></div>
-                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-white/90 p-2 shadow-xl shadow-primary/20 dark:bg-card/90">
-                  <img src="/favicon.ico" alt="치카포" className="h-8 w-8 object-contain" />
+        <EasterEggProvider toast={toast}>
+          {isInitializing ? (
+            <div className="fixed inset-0 z-50 flex select-none flex-col items-center justify-center overflow-hidden bg-background text-foreground">
+              <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-white/70 blur-2xl pointer-events-none dark:bg-primary/10"></div>
+              <div className="absolute right-[-4rem] top-16 h-80 w-80 rounded-full bg-primary/18 blur-[80px] pointer-events-none"></div>
+              <div className="absolute bottom-[-5rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-accent/45 blur-[90px] pointer-events-none"></div>
+              <div className="flex flex-col items-center space-y-6 relative z-10">
+                <div className="relative flex h-24 w-24 items-center justify-center">
+                  <div className="absolute h-full w-full animate-ping rounded-[2rem] bg-primary/10 opacity-75 duration-[1800ms]"></div>
+                  <div className="absolute h-18 w-18 animate-spin rounded-[1.75rem] border-[3px] border-primary/12 border-t-primary"></div>
+                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-white/90 p-2 shadow-xl shadow-primary/20 dark:bg-card/90">
+                    <img src="/favicon.ico" alt="치카포" className="h-8 w-8 object-contain" />
+                  </div>
+                </div>
+                <div className="text-center space-y-2">
+                  <h1 className="cute-loading-logo text-4xl font-black animate-pulse">
+                    치카포
+                  </h1>
+                  <p className="rounded-full border border-primary/15 bg-card/70 px-4 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground shadow-sm backdrop-blur">
+                    치지직 카드 포럼을 불러오는 중입니다...
+                  </p>
                 </div>
               </div>
-              <div className="text-center space-y-2">
-                <h1 className="cute-loading-logo text-4xl font-black animate-pulse">
-                  치카포
-                </h1>
-                <p className="rounded-full border border-primary/15 bg-card/70 px-4 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground shadow-sm backdrop-blur">
-                  치지직 카드 포럼을 불러오는 중입니다...
-                </p>
-              </div>
             </div>
-          </div>
-        ) : (
-          children
-        )}
+          ) : (
+            children
+          )}
+        </EasterEggProvider>
         {/* 전역 공용 AlertModal 마운트 */}
         <AlertModal
           open={alertModal.open}

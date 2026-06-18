@@ -5,7 +5,8 @@ export const COUPON_REWARD_TYPES: CouponRewardType[] = [
   'card',
   'cosmetic',
   'minigame_ticket',
-  'free_draw_ticket'
+  'free_draw_ticket',
+  'title'
 ];
 
 export const parseCouponRewards = (value: unknown): CouponReward[] => {
@@ -38,6 +39,12 @@ export const couponToRewards = (coupon: Coupon): CouponReward[] => {
       quantity: Number(coupon.reward_quantity || 0)
     }];
   }
+  if (coupon.reward_type === 'title') {
+    return [{
+      type: 'title',
+      title_id: coupon.reward_item_id ?? null
+    }];
+  }
   return [{
     type: coupon.reward_type,
     quantity: Number(coupon.reward_quantity || 0)
@@ -49,7 +56,8 @@ export const rewardsToJson = (rewards: CouponReward[]) => JSON.stringify(rewards
   points: reward.type === 'point' ? Number(reward.points || 0) : undefined,
   channel_id: reward.type === 'card' ? reward.channel_id || null : undefined,
   item_id: reward.type === 'cosmetic' ? Number(reward.item_id || 0) : undefined,
-  quantity: reward.type === 'point' ? undefined : Number(reward.quantity || 0)
+  title_id: reward.type === 'title' ? Number(reward.title_id || 0) : undefined,
+  quantity: reward.type === 'point' || reward.type === 'title' ? undefined : Number(reward.quantity || 0)
 })));
 
 const safeJsonParse = (value: string): unknown => {
@@ -66,5 +74,6 @@ const normalizeStoredReward = (value: any): CouponReward | null => {
   if (type === 'point') return { type, points: Number(value.points || 0) };
   if (type === 'card') return { type, channel_id: value.channel_id || null, quantity: Number(value.quantity || 0) };
   if (type === 'cosmetic') return { type, item_id: value.item_id ?? null, quantity: Number(value.quantity || 0) };
+  if (type === 'title') return { type, title_id: value.title_id ?? value.item_id ?? null };
   return { type, quantity: Number(value.quantity || 0) };
 };

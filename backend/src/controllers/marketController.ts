@@ -8,6 +8,7 @@ import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '..
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { clearUserRankingCaches } from './playController';
 import type { MarketListing } from '../repositories/interfaces';
+import { recordAchievementEvent } from '../services/achievementService';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000));
@@ -222,6 +223,16 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     });
     await notifyMatchingWatches(listing);
     publishMarketUpdated('listing_created', listing);
+    recordAchievementEvent({
+      eventKey: `market:list:${user.id}:${listing.id || cardId}`,
+      userId: user.id,
+      eventType: 'market.listed',
+      sourceType: 'market_listing',
+      sourceId: listing.id || cardId,
+      value: 1,
+      metadata: { listing_type: listingType, price: listingPrice, with_cosmetics: !!with_cosmetics },
+      stats: { 'market.listed.count': 1 }
+    }).catch(() => undefined);
 
     return res.json({ ok: true, listing });
   } catch (err: any) {
@@ -371,6 +382,28 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
     const updatedListing = await marketRepository.findById(id).catch(() => null);
     publishMarketUpdated('listing_purchased', updatedListing || { ...listing, status: 'SOLD', price });
     publishRankingUpdated('market_purchase');
+    recordAchievementEvent({
+      eventKey: `market:purchase:${user.id}:${id}`,
+      userId: user.id,
+      eventType: 'market.purchase',
+      sourceType: 'market_listing',
+      sourceId: id,
+      value: 1,
+      metadata: { price, seller_id: listing.seller_id, listing_type: listing.listing_type || 'fixed' },
+      stats: { 'market.purchase.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
+    recordAchievementEvent({
+      eventKey: `market:sale:${listing.seller_id}:${id}`,
+      userId: listing.seller_id,
+      eventType: 'market.sale',
+      sourceType: 'market_listing',
+      sourceId: id,
+      value: 1,
+      metadata: { price, buyer_id: user.id, listing_type: listing.listing_type || 'fixed' },
+      stats: { 'market.sale.count': 1 },
+      refreshSnapshots: true
+    }).catch(() => undefined);
 
     return res.json({ ok: true, settledAmount });
   } catch (err: any) {
@@ -420,6 +453,16 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     current_bidder_username: updatedListing?.current_bidder_username ?? user.username,
     auction_ends_at: result.auction_ends_at ?? null
   });
+  recordAchievementEvent({
+    eventKey: `market:bid:${user.id}:${id}:${amount}`,
+    userId: user.id,
+    eventType: 'market.bid',
+    sourceType: 'market_listing',
+    sourceId: id,
+    value: 1,
+    metadata: { amount },
+    stats: { 'market.bid.count': 1 }
+  }).catch(() => undefined);
   return res.status(200).json({ ...result, listing: listingPatch });
 };
 
@@ -445,6 +488,15 @@ export const upsertMarketWatch = async (req: AuthenticatedRequest, res: Response
   const maxPrice = rawMaxPrice === null ? null : Math.max(100, rawMaxPrice);
   if (!channelId) return res.status(400).json({ error: 'BadRequest', message: '스트리머를 선택해 주세요.' });
   const watch = await marketRepository.upsertWatch({ user_id: user.id, channel_id: channelId, star, max_price: maxPrice });
+  recordAchievementEvent({
+    eventKey: `market:watch:${user.id}:${channelId}:${star ?? 'all'}`,
+    userId: user.id,
+    eventType: 'market.watch',
+    sourceType: 'market_watch',
+    sourceId: channelId,
+    value: 1,
+    metadata: { channel_id: channelId, star: star ?? -1, max_price: maxPrice ?? 0 }
+  }).catch(() => undefined);
   return res.status(200).json({ ok: true, watch });
 };
 

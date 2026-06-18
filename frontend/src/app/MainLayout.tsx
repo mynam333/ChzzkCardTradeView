@@ -13,7 +13,8 @@ import {
   Coins,
   Shield,
   Store,
-  Gamepad2
+  Gamepad2,
+  Award
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
@@ -24,6 +25,7 @@ type NavItem = { id: TabId; label: string; icon: typeof Home };
 
 const loopIndex = (index: number, length: number) => ((index % length) + length) % length;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const LOGO_EASTER_EGG_SESSION_KEY = 'chikapo:easter-egg:logo-clicks';
 
 export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
@@ -31,14 +33,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const dockTouchStartY = React.useRef<number | null>(null);
   const dockClickSuppressed = React.useRef(false);
   const dockSnapTimer = React.useRef<number | null>(null);
+  const logoEasterEggClicks = React.useRef<number[]>([]);
+  const logoEasterEggPulseTimer = React.useRef<number | null>(null);
   const [dockDragDelta, setDockDragDelta] = React.useState(0);
   const [dockPressedId, setDockPressedId] = React.useState<TabId | null>(null);
   const [dockIsDragging, setDockIsDragging] = React.useState(false);
   const [dockIsSettling, setDockIsSettling] = React.useState(false);
   const [dockVisualTab, setDockVisualTab] = React.useState<{ tab: TabId; from: TabId } | null>(null);
+  const [logoEasterEggPulse, setLogoEasterEggPulse] = React.useState(false);
 
   React.useEffect(() => () => {
     if (dockSnapTimer.current !== null) window.clearTimeout(dockSnapTimer.current);
+    if (logoEasterEggPulseTimer.current !== null) window.clearTimeout(logoEasterEggPulseTimer.current);
   }, []);
 
   const handleLogin = async () => {
@@ -61,6 +67,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     { id: 'shop', label: '상점', icon: Store },
     { id: 'inventory', label: '보관함', icon: Layers },
     { id: 'arcade', label: '미니게임', icon: Gamepad2 },
+    { id: 'achievements', label: '업적', icon: Award },
     { id: 'ranking', label: '실시간 랭킹', icon: TrendingUp },
     { id: 'friends', label: '친구', icon: MessageCircle },
     { id: 'my-info', label: '내 정보', icon: User },
@@ -69,7 +76,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       : []),
   ];
 
-  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
+  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'achievements', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
   const mobileNavItems = mobileNavOrder
     .map((id) => navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));
@@ -87,6 +94,35 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       navigator.vibrate?.(10);
     }
+  };
+
+  const handleDesktopLogoClick = () => {
+    setActiveTab('main');
+    const now = Date.now();
+    let persistedClicks: number[] = [];
+    try {
+      persistedClicks = JSON.parse(window.sessionStorage.getItem(LOGO_EASTER_EGG_SESSION_KEY) || '[]') as number[];
+    } catch {
+      persistedClicks = [];
+    }
+    const clicks = [...logoEasterEggClicks.current, ...persistedClicks, now]
+      .filter((time, index, all) => Number.isFinite(time) && now - time <= 7000 && all.indexOf(time) === index);
+    if (clicks.length >= 7) {
+      logoEasterEggClicks.current = [];
+      try { window.sessionStorage.removeItem(LOGO_EASTER_EGG_SESSION_KEY); } catch { /* ignore */ }
+      setLogoEasterEggPulse(true);
+      if (logoEasterEggPulseTimer.current !== null) window.clearTimeout(logoEasterEggPulseTimer.current);
+      logoEasterEggPulseTimer.current = window.setTimeout(() => {
+        setLogoEasterEggPulse(false);
+        logoEasterEggPulseTimer.current = null;
+      }, 420);
+      window.dispatchEvent(new CustomEvent('chikapo:easter-egg-command', {
+        detail: { command: 'themeToggle' }
+      }));
+      return;
+    }
+    logoEasterEggClicks.current = clicks;
+    try { window.sessionStorage.setItem(LOGO_EASTER_EGG_SESSION_KEY, JSON.stringify(clicks)); } catch { /* ignore */ }
   };
 
   const settleMobileDockToOffset = (offset: number) => {
@@ -194,11 +230,11 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         <div className="mb-8 flex items-center gap-3 px-2">
           <button
             type="button"
-            onClick={() => setActiveTab('main')}
+            onClick={handleDesktopLogoClick}
             className="flex min-w-0 flex-1 appearance-none items-center gap-3 border-0 bg-transparent p-0 text-left"
             aria-label="메인 페이지로 이동"
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10">
+            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-white/80 p-1.5 shadow-[0_10px_24px_rgba(22,136,240,0.18)] dark:bg-white/10 ${logoEasterEggPulse ? 'easter-egg-logo-pulse' : ''}`}>
               <Image
                 src="/icon.png"
                 alt="치카포 로고"
