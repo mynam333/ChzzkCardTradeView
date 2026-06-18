@@ -603,6 +603,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_price', '(status, price, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_auction_end', '(status, listing_type, auction_ends_at, id)');
+  await normalizeMysqlIsoDateColumn(db, 'market_listings', 'auction_ends_at');
   const marketBidsTable = await db.get<{ present: number }>(
     `SELECT 1 AS present
        FROM information_schema.tables

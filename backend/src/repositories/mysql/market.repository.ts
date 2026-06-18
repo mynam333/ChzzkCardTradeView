@@ -243,8 +243,12 @@ export class MysqlMarketRepository implements IMarketRepository {
     type?: 'all' | 'fixed' | 'auction' | 'bidding';
     bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
-    const where: string[] = ["ml.status = 'PENDING'"];
-    const params: any[] = [];
+    const where: string[] = [
+      "ml.status = 'PENDING'",
+      "(COALESCE(ml.listing_type, 'fixed') <> 'auction' OR ml.auction_ends_at IS NULL OR ml.auction_ends_at > ?)"
+    ];
+    const params: any[] = [toMysqlDateTime(new Date())];
+    const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.current_bid, ml.starting_bid, ml.price, 0) ELSE ml.price END";
 
     if (options.type === 'bidding') {
       if (!options.bidderId) return { listings: [], total: 0 };
@@ -260,10 +264,10 @@ export class MysqlMarketRepository implements IMarketRepository {
 
     const orderBy = (() => {
       if (options.sort === 'oldest') return 'ml.created_at ASC, ml.id ASC';
-      if (options.sort === 'price_desc') return 'ml.price DESC, ml.id DESC';
-      if (options.sort === 'price_asc') return 'ml.price ASC, ml.id ASC';
+      if (options.sort === 'price_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
+      if (options.sort === 'price_asc') return `${visiblePriceExpr} ASC, ml.id ASC`;
       if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
-      if (options.sort === 'bid_desc') return 'COALESCE(ml.current_bid, ml.starting_bid, 0) DESC, ml.id DESC';
+      if (options.sort === 'bid_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
       return 'ml.updated_at DESC, ml.id DESC';
     })();
 
@@ -704,84 +708,123 @@ export class MysqlMarketRepository implements IMarketRepository {
       now
     );
     const completed: MarketListing[] = [];
+    const loadCompletedListing = async (id: number, status: MarketListing['status']): Promise<MarketListing | null> => {
+      const joined = await this.findById(id).catch(() => null);
+      if (joined) return joined;
+      const raw = await this.getDb().get('SELECT * FROM market_listings WHERE id = ?', id).catch(() => null);
+      if (!raw) return null;
+      return {
+        id,
+        seller_id: raw.seller_id,
+        user_card_id: Number(raw.user_card_id || 0),
+        price: Number(raw.price || raw.current_bid || raw.starting_bid || 0),
+        status,
+        buyer_id: raw.buyer_id ?? null,
+        listing_type: raw.listing_type || 'auction',
+        buy_now_price: raw.buy_now_price ?? null,
+        starting_bid: raw.starting_bid ?? null,
+        current_bid: raw.current_bid ?? null,
+        current_bidder_id: raw.current_bidder_id ?? null,
+        auction_ends_at: raw.auction_ends_at ?? null,
+        bid_reserved: Number(raw.bid_reserved || 0),
+        fee: Number(raw.fee || 0),
+        fee_rate: Number(raw.fee_rate ?? FIXED_MARKET_FEE_RATE),
+        settled_amount: Number(raw.settled_amount || 0),
+        with_cosmetics: raw.with_cosmetics === 1 || raw.with_cosmetics === true,
+        seller_hidden_at: raw.seller_hidden_at ?? null,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at
+      };
+    };
+
     for (const row of expiredRows) {
-      const listing = await this.findById(row.id);
-      if (!listing) continue;
-      if (!listing.current_bidder_id || !listing.current_bid || listing.current_bid < (listing.starting_bid || 0)) {
-        await this.updateStatus(row.id, 'AUCTION_ENDED');
-        completed.push({ ...listing, status: 'AUCTION_ENDED' });
-        continue;
-      }
-      const sold = await this.getDb().transaction(async (tx) => {
-        const locked = await tx.get("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' FOR UPDATE", row.id);
-        if (!locked) return false;
-        const reserved = Number(locked.bid_reserved || 0);
-        const buyer = await tx.get('SELECT point FROM users WHERE id = ? FOR UPDATE', locked.current_bidder_id);
-        if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < Number(locked.current_bid || 0))) {
-          await tx.run("UPDATE market_listings SET status = 'AUCTION_ENDED', pending_user_card_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", row.id);
-          return 'ended';
-        }
-        const price = Number(locked.current_bid || 0);
-        const { fee, settledAmount } = calculateMarketFee(price, Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE));
-        if (reserved <= 0) {
-          await tx.run('UPDATE users SET point = point - ? WHERE id = ?', price, locked.current_bidder_id);
+      try {
+        const result = await this.getDb().transaction(async (tx) => {
+          const locked = await tx.get("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction' FOR UPDATE", row.id);
+          if (!locked) return false;
+          const reserved = Number(locked.bid_reserved || 0);
+          const price = Number(locked.current_bid || locked.starting_bid || locked.price || 0);
+          const startingBid = Number(locked.starting_bid || 0);
+          if (!locked.current_bidder_id || !price || price < startingBid) {
+            await this.refundReservedBid(tx, locked);
+            await tx.run("UPDATE market_listings SET status = 'AUCTION_ENDED', pending_user_card_id = NULL, bid_reserved = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?", row.id);
+            return 'ended';
+          }
+
+          const buyer = await tx.get('SELECT point FROM users WHERE id = ? FOR UPDATE', locked.current_bidder_id);
+          if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < price)) {
+            await this.refundReservedBid(tx, locked);
+            await tx.run("UPDATE market_listings SET status = 'AUCTION_ENDED', pending_user_card_id = NULL, bid_reserved = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?", row.id);
+            return 'ended';
+          }
+
+          const { fee, settledAmount } = calculateMarketFee(price, Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE));
+          if (reserved <= 0) {
+            await tx.run('UPDATE users SET point = point - ? WHERE id = ?', price, locked.current_bidder_id);
+            await recordMysqlPointLedger(tx, {
+              userId: locked.current_bidder_id,
+              counterpartyUserId: locked.seller_id,
+              amount: -price,
+              sourceType: 'market_purchase',
+              sourceId: row.id,
+              reason: 'auction_win_charge',
+              description: `경매 #${row.id} 낙찰 대금 차감`,
+              metadata: { listing_id: row.id, price }
+            });
+          }
+          await tx.run('UPDATE users SET point = point + ? WHERE id = ?', settledAmount, locked.seller_id);
           await recordMysqlPointLedger(tx, {
-            userId: locked.current_bidder_id,
-            counterpartyUserId: locked.seller_id,
-            amount: -price,
-            sourceType: 'market_purchase',
-            sourceId: row.id,
-            reason: 'auction_win_charge',
-            description: `경매 #${row.id} 낙찰 대금 차감`,
-            metadata: { listing_id: row.id, price }
-          });
-        }
-        await tx.run('UPDATE users SET point = point + ? WHERE id = ?', settledAmount, locked.seller_id);
-        await recordMysqlPointLedger(tx, {
-          userId: locked.seller_id,
-          counterpartyUserId: locked.current_bidder_id,
-          amount: settledAmount,
-          sourceType: 'market_sale',
-          sourceId: row.id,
-          reason: 'auction_sale_settlement',
-          description: `경매 #${row.id} 낙찰 판매 정산`,
-          metadata: { listing_id: row.id, price, fee, settled_amount: settledAmount }
-        });
-        await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", locked.current_bidder_id, price, fee, settledAmount, row.id);
-        await this.recordTransactionAudit(tx, row.id, 'sold');
-        const movingCard = await tx.get(
-          'SELECT channel_id, serial_number, COALESCE(star, 0) AS star FROM user_cards WHERE id = ? FOR UPDATE',
-          locked.user_card_id
-        );
-        await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', locked.current_bidder_id, locked.user_card_id);
-        if (movingCard) {
-          await recordMysqlAssetEvent(tx, {
             userId: locked.seller_id,
             counterpartyUserId: locked.current_bidder_id,
-            fromUserId: locked.seller_id,
-            toUserId: locked.current_bidder_id,
-            assetType: 'card',
-            action: 'move',
-            quantity: 1,
-            sourceType: 'market_purchase',
+            amount: settledAmount,
+            sourceType: 'market_sale',
             sourceId: row.id,
-            reason: 'auction_card_move',
-            description: `경매 #${row.id} 낙찰 카드 이동`,
-            cardId: locked.user_card_id,
-            channelId: movingCard.channel_id,
-            serialNumber: Number(movingCard.serial_number),
-            star: Number(movingCard.star || 0),
-            metadata: { listing_id: row.id, price }
+            reason: 'auction_sale_settlement',
+            description: `경매 #${row.id} 낙찰 판매 정산`,
+            metadata: { listing_id: row.id, price, fee, settled_amount: settledAmount }
           });
+          await tx.run("UPDATE market_listings SET status = 'SOLD', pending_user_card_id = NULL, buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", locked.current_bidder_id, price, fee, settledAmount, row.id);
+          await this.recordTransactionAudit(tx, row.id, 'sold');
+          const movingCard = await tx.get(
+            'SELECT channel_id, serial_number, COALESCE(star, 0) AS star FROM user_cards WHERE id = ? FOR UPDATE',
+            locked.user_card_id
+          );
+          await tx.run('UPDATE user_cards SET user_id = ? WHERE id = ?', locked.current_bidder_id, locked.user_card_id);
+          if (movingCard) {
+            await recordMysqlAssetEvent(tx, {
+              userId: locked.seller_id,
+              counterpartyUserId: locked.current_bidder_id,
+              fromUserId: locked.seller_id,
+              toUserId: locked.current_bidder_id,
+              assetType: 'card',
+              action: 'move',
+              quantity: 1,
+              sourceType: 'market_purchase',
+              sourceId: row.id,
+              reason: 'auction_card_move',
+              description: `경매 #${row.id} 낙찰 카드 이동`,
+              cardId: locked.user_card_id,
+              channelId: movingCard.channel_id,
+              serialNumber: Number(movingCard.serial_number),
+              star: Number(movingCard.star || 0),
+              metadata: { listing_id: row.id, price }
+            });
+          }
+          return 'sold';
+        });
+        if (result === 'sold' || result === 'ended') {
+          const item = await loadCompletedListing(row.id, result === 'sold' ? 'SOLD' : 'AUCTION_ENDED');
+          if (item) completed.push(item);
         }
-        return 'sold';
-      });
-      if (sold === 'sold') {
-        const item = await this.findById(row.id);
-        if (item) completed.push(item);
-      } else if (sold === 'ended') {
-        const item = await this.findById(row.id);
-        if (item) completed.push(item);
+      } catch (err: any) {
+        console.warn('[MysqlMarketRepository] 만료 경매 정리 실패, 경매 종료 처리 시도:', row.id, err?.message || err);
+        try {
+          await this.updateStatus(row.id, 'AUCTION_ENDED');
+          const item = await loadCompletedListing(row.id, 'AUCTION_ENDED');
+          if (item) completed.push(item);
+        } catch (fallbackErr: any) {
+          console.warn('[MysqlMarketRepository] 만료 경매 강제 종료 실패:', row.id, fallbackErr?.message || fallbackErr);
+        }
       }
     }
     return completed;

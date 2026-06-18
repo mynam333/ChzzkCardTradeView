@@ -582,7 +582,7 @@ export const ShopTab: React.FC = () => {
   const shouldRefreshMarketAfterRealtime = (detail: MarketRealtimeDetail | null | undefined) => {
     if (!detail) return true;
     if (detail.reason === 'auction_bid' && detail.listing?.id) {
-      return marketSort === 'bid_desc';
+      return marketType === 'bidding' || marketSort === 'bid_desc' || marketSort === 'price_desc' || marketSort === 'price_asc';
     }
     return true;
   };
@@ -638,6 +638,23 @@ export const ShopTab: React.FC = () => {
     const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [subTab, hasMarketCountdown]);
+
+  useEffect(() => {
+    if (subTab !== 'market' || marketListings.length === 0) return;
+    const now = Date.now();
+    const nextAuctionEndMs = marketListings.reduce<number | null>((nearest, listing) => {
+      if (listing.listing_type !== 'auction') return nearest;
+      const endsAt = parseAppDate(listing.auction_ends_at)?.getTime();
+      if (typeof endsAt !== 'number' || !Number.isFinite(endsAt) || endsAt <= now) return nearest;
+      return nearest === null ? endsAt : Math.min(nearest, endsAt);
+    }, null);
+    if (nextAuctionEndMs === null) return;
+    const timer = window.setTimeout(() => {
+      setNowTs(Date.now());
+      scheduleMarketRefresh(0, 0);
+    }, Math.min(Math.max(0, nextAuctionEndMs - now + 500), 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [subTab, marketListings, marketType, marketSort, marketSearch, marketPage]);
 
   // 코스메틱 상점의 한정판매 문구는 분 단위 표시라 1초 리렌더가 불필요합니다.
   useEffect(() => {

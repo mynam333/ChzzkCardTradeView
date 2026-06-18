@@ -469,6 +469,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
     KEY idx_market_listings_card (user_card_id),
     KEY idx_market_listings_buyer (buyer_id),
     KEY idx_market_listings_current_bidder (current_bidder_id),
+    KEY idx_market_listings_status_type_auction_end (status, listing_type, auction_ends_at, id),
     CONSTRAINT fk_market_listings_seller FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_market_listings_card FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
     CONSTRAINT fk_market_listings_current_bidder FOREIGN KEY(current_bidder_id) REFERENCES users(id) ON DELETE SET NULL,

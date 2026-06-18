@@ -34,6 +34,16 @@ const setMarketListCacheHeaders = (res: Response) => {
   res.set('Pragma', 'no-cache');
 };
 
+const hasExpiredAuctionListing = (data: any) => {
+  const listings = Array.isArray(data?.listings) ? data.listings : [];
+  const now = Date.now();
+  return listings.some((listing: any) => {
+    if (listing?.status !== 'PENDING' || listing?.listing_type !== 'auction' || !listing?.auction_ends_at) return false;
+    const endsAt = new Date(listing.auction_ends_at).getTime();
+    return Number.isFinite(endsAt) && endsAt <= now;
+  });
+};
+
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (
   userId: string,
@@ -94,12 +104,18 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type, bidderId: bidderId || '' });
   const now = Date.now();
   const cached = marketListCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
+  if (cached && cached.expiresAt > now && !hasExpiredAuctionListing(cached.data)) {
     setMarketListCacheHeaders(res);
     return res.json(cached.data);
   }
+  if (cached) {
+    marketListCache.delete(cacheKey);
+  }
 
   try {
+    await settleExpiredAuctions().catch((err: any) => {
+      console.warn('[MarketController] 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
+    });
     const result = await marketRepository.listActive({ page, limit, search, sort, type, bidderId });
     marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
     if (marketListCache.size > 200) {

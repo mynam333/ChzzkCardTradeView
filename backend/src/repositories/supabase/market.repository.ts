@@ -253,7 +253,14 @@ export class SupabaseMarketRepository implements IMarketRepository {
       }
     }
 
-    let listings = listingsData.map(l => this.mapRow(l, cardsMap[l.user_card_id]));
+    const now = Date.now();
+    let listings = listingsData
+      .map(l => this.mapRow(l, cardsMap[l.user_card_id]))
+      .filter((item) => {
+        if ((item.listing_type || 'fixed') !== 'auction' || !item.auction_ends_at) return true;
+        const endTime = new Date(item.auction_ends_at).getTime();
+        return !Number.isFinite(endTime) || endTime > now;
+      });
 
     // 유사도 검색 적용
     if (options.search && options.search.trim()) {
@@ -266,19 +273,22 @@ export class SupabaseMarketRepository implements IMarketRepository {
     }
 
     // 정렬 적용
+    const visiblePrice = (listing: MarketListing) => (listing.listing_type === 'auction'
+      ? Number(listing.current_bid ?? listing.starting_bid ?? listing.price ?? 0)
+      : Number(listing.price || 0));
     listings.sort((a, b) => {
       if (options.sort === 'latest') {
         return new Date(b.updated_at || b.created_at || '').getTime() - new Date(a.updated_at || a.created_at || '').getTime();
       } else if (options.sort === 'oldest') {
         return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
       } else if (options.sort === 'price_desc') {
-        return b.price - a.price;
+        return visiblePrice(b) - visiblePrice(a);
       } else if (options.sort === 'price_asc') {
-        return a.price - b.price;
+        return visiblePrice(a) - visiblePrice(b);
       } else if (options.sort === 'ending_soon') {
         return new Date(a.auction_ends_at || '9999-12-31').getTime() - new Date(b.auction_ends_at || '9999-12-31').getTime();
       } else if (options.sort === 'bid_desc') {
-        return Number(b.current_bid || b.price || 0) - Number(a.current_bid || a.price || 0);
+        return visiblePrice(b) - visiblePrice(a);
       }
       return 0;
     });
@@ -613,56 +623,72 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if (error || !rows?.length) return [];
 
     const settled: MarketListing[] = [];
+    const pushEnded = async (row: any) => {
+      await this.updateStatus(row.id, 'AUCTION_ENDED');
+      const cardData = await this.getCardDetail(row.user_card_id).catch(() => null);
+      settled.push(this.mapRow({ ...row, status: 'AUCTION_ENDED', bid_reserved: 0 }, cardData));
+    };
+
     for (const row of rows) {
-      const amount = Number(row.current_bid || row.starting_bid || row.price || 0);
-      const bidderId = row.current_bidder_id as string | null;
-      if (!bidderId || amount <= 0) {
-        await this.updateStatus(row.id, 'AUCTION_ENDED');
-        continue;
-      }
+      try {
+        const amount = Number(row.current_bid || row.starting_bid || row.price || 0);
+        const startingBid = Number(row.starting_bid || 0);
+        const bidderId = row.current_bidder_id as string | null;
+        if (!bidderId || amount <= 0 || amount < startingBid) {
+          await pushEnded(row);
+          continue;
+        }
 
-      const reserved = Number(row.bid_reserved || 0);
-      const { data: bidder } = await this.getClient()
-        .from('users')
-        .select('point')
-        .eq('id', bidderId)
-        .maybeSingle();
-      if (!bidder || (reserved <= 0 && Number(bidder.point || 0) < amount)) {
-        await this.updateStatus(row.id, 'AUCTION_ENDED');
-        continue;
-      }
-
-      const feeRate = Number(row.fee_rate ?? FIXED_MARKET_FEE_RATE);
-      const { fee, settledAmount } = calculateMarketFee(amount, feeRate);
-      const client = this.getClient();
-      if (reserved <= 0) {
-        const { error: buyerError } = await client
+        const reserved = Number(row.bid_reserved || 0);
+        const { data: bidder } = await this.getClient()
           .from('users')
-          .update({ point: Number(bidder.point || 0) - amount })
+          .select('point')
           .eq('id', bidderId)
-          .gte('point', amount);
-        if (buyerError) throw buyerError;
+          .maybeSingle();
+        if (!bidder || (reserved <= 0 && Number(bidder.point || 0) < amount)) {
+          await pushEnded(row);
+          continue;
+        }
+
+        const feeRate = Number(row.fee_rate ?? FIXED_MARKET_FEE_RATE);
+        const { fee, settledAmount } = calculateMarketFee(amount, feeRate);
+        const client = this.getClient();
+        if (reserved <= 0) {
+          const { error: buyerError } = await client
+            .from('users')
+            .update({ point: Number(bidder.point || 0) - amount })
+            .eq('id', bidderId)
+            .gte('point', amount);
+          if (buyerError) throw buyerError;
+        }
+
+        await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
+        await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
+        const { error: listingError } = await client
+          .from('market_listings')
+          .update({
+            status: 'SOLD',
+            buyer_id: bidderId,
+            price: amount,
+            fee,
+            bid_reserved: 0,
+            settled_amount: settledAmount,
+            updated_at: nowIso
+          })
+          .eq('id', row.id)
+          .eq('status', 'PENDING');
+        if (listingError) throw listingError;
+
+        const cardData = await this.getCardDetail(row.user_card_id);
+        settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
+      } catch (err: any) {
+        console.warn('[SupabaseMarketRepository] 만료 경매 정리 실패, 경매 종료 처리 시도:', row.id, err?.message || err);
+        try {
+          await pushEnded(row);
+        } catch (fallbackErr: any) {
+          console.warn('[SupabaseMarketRepository] 만료 경매 강제 종료 실패:', row.id, fallbackErr?.message || fallbackErr);
+        }
       }
-
-      await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
-      await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
-      const { error: listingError } = await client
-        .from('market_listings')
-        .update({
-          status: 'SOLD',
-          buyer_id: bidderId,
-          price: amount,
-          fee,
-          bid_reserved: 0,
-          settled_amount: settledAmount,
-          updated_at: nowIso
-        })
-        .eq('id', row.id)
-        .eq('status', 'PENDING');
-      if (listingError) throw listingError;
-
-      const cardData = await this.getCardDetail(row.user_card_id);
-      settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
     }
     return settled;
   }

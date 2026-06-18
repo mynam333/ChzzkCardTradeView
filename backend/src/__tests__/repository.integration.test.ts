@@ -1178,6 +1178,55 @@ describe('MarketRepository 재등록 제약', () => {
     ]);
   });
 
+  it('만료 경매 정리는 상세 조인이 불가능한 오류 데이터도 방치하지 않고 다른 경매까지 처리한다', async () => {
+    seedUser(db, 'broken-auction-seller');
+    seedUser(db, 'healthy-auction-seller');
+    seedUser(db, 'healthy-auction-bidder', 5000);
+    seedStreamer(db, 'healthy-auction-channel', '정상 경매 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('healthy-auction-seller', 'healthy-auction-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    db.pragma('foreign_keys = OFF');
+    const brokenListingId = Number(db.prepare(`
+      INSERT INTO market_listings
+        (seller_id, user_card_id, price, status, listing_type, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics)
+      VALUES
+        ('broken-auction-seller', 999999, 1000, 'PENDING', 'auction', 1000, 1000, datetime('now', '-2 minute'), 0, 5, 0)
+    `).run().lastInsertRowid);
+    db.pragma('foreign_keys = ON');
+
+    const healthyListing = await marketRepository.create({
+      seller_id: 'healthy-auction-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    expect(await marketRepository.placeBid(healthyListing.id as number, 'healthy-auction-bidder', 1500)).toMatchObject({ ok: true });
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(healthyListing.id);
+
+    const completed = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+
+    expect(completed.map((listing) => ({ id: listing.id, status: listing.status }))).toEqual(
+      expect.arrayContaining([
+        { id: brokenListingId, status: 'AUCTION_ENDED' },
+        { id: healthyListing.id, status: 'SOLD' }
+      ])
+    );
+    expect(db.prepare('SELECT status, bid_reserved FROM market_listings WHERE id = ?').get(brokenListingId)).toEqual({
+      status: 'AUCTION_ENDED',
+      bid_reserved: 0
+    });
+    expect(db.prepare('SELECT status, buyer_id, bid_reserved FROM market_listings WHERE id = ?').get(healthyListing.id)).toEqual({
+      status: 'SOLD',
+      buyer_id: 'healthy-auction-bidder',
+      bid_reserved: 0
+    });
+  });
+
   it('최신순 오픈마켓 목록은 입찰로 갱신된 경매를 앞으로 올린다', async () => {
     seedUser(db, 'activity-seller-a');
     seedUser(db, 'activity-seller-b');
@@ -1217,6 +1266,47 @@ describe('MarketRepository 재등록 제약', () => {
     expect(await marketRepository.placeBid(older.id as number, 'activity-bidder', 1200)).toMatchObject({ ok: true });
 
     expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(older.id);
+  });
+
+  it('오픈마켓 활성 목록은 만료 경매를 제외하고 경매 현재가 기준으로 가격 정렬한다', async () => {
+    seedUser(db, 'market-sort-seller-a');
+    seedUser(db, 'market-sort-seller-b');
+    seedUser(db, 'market-sort-bidder', 10000);
+    seedStreamer(db, 'market-sort-channel-a', '정렬 A');
+    seedStreamer(db, 'market-sort-channel-b', '정렬 B');
+    const cardA = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('market-sort-seller-a', 'market-sort-channel-a', 1, 0)
+    `).run().lastInsertRowid);
+    const cardB = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('market-sort-seller-b', 'market-sort-channel-b', 1, 0)
+    `).run().lastInsertRowid);
+
+    const auction = await marketRepository.create({
+      seller_id: 'market-sort-seller-a',
+      user_card_id: cardA,
+      price: 5000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+    const fixed = await marketRepository.create({
+      seller_id: 'market-sort-seller-b',
+      user_card_id: cardB,
+      price: 3000
+    });
+
+    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'price_desc', type: 'all' })).listings.map((item) => item.id))
+      .toEqual([fixed.id, auction.id]);
+
+    expect(await marketRepository.placeBid(auction.id as number, 'market-sort-bidder', 4000)).toMatchObject({ ok: true });
+    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'price_desc', type: 'all' })).listings.map((item) => item.id))
+      .toEqual([auction.id, fixed.id]);
+
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(auction.id);
+    const activeAfterEnd = await marketRepository.listActive({ page: 1, limit: 10, sort: 'ending_soon', type: 'bidding', bidderId: 'market-sort-bidder' });
+    expect(activeAfterEnd.total).toBe(0);
   });
 
   it('완료/취소된 내 등록 매물은 화면에서만 숨기고 DB 기록은 유지한다', async () => {

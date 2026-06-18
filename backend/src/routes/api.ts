@@ -475,9 +475,8 @@ router.get('/streamers', async (req, res) => {
       if (!streamersCacheInFlight) {
         streamersCacheInFlight = (async () => {
           const streamers = await streamerRepository.findAll();
-          // 24시간/1시간 전 시세를 조회하여 등락률·등락 랭킹 계산에 활용
-          const [value24hMap, value1hMap, titlesByUser] = await Promise.all([
-            loadStreamerValueMap('24시간 전', () => streamerRepository.getValue24hAgoMap()),
+          // 1시간 전 시세는 등락률 계산에만 필요합니다. 24h 표시값은 streamers.prev_value를 사용해 전체 이력 조회를 피합니다.
+          const [value1hMap, titlesByUser] = await Promise.all([
             loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
             loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
           ]);
@@ -495,7 +494,7 @@ router.get('/streamers', async (req, res) => {
             is_active: s.is_active,
             serial_number: s.serial_number,
             titles: (titlesByUser[s.channel_id] || []).filter((title) => title.is_equipped),
-            prev_value: value24hMap[s.channel_id] ?? s.prev_value,
+            prev_value: s.prev_value,
             value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
           }));
 

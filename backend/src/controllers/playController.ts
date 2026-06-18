@@ -937,12 +937,7 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
       .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
 
     const channelIds = ranked.map((item) => item.streamer.channel_id);
-    const [titlesByUser, value24hMap] = await Promise.all([
-      titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>)),
-      mode === 'value'
-        ? streamerRepository.getValue24hAgoMapForChannels(channelIds)
-        : Promise.resolve({} as Record<string, number>)
-    ]);
+    const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
 
     const data = ranked.map(({ streamer, rank }) => ({
       channel_id: streamer.channel_id,
@@ -954,7 +949,7 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
       is_active: streamer.is_active,
       rank,
       titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
-      prev_value: mode === 'value' ? (value24hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
+      prev_value: mode === 'value' ? (streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
       value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
     }));
     streamerRankingSnapshots.set(mode, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
@@ -1980,7 +1975,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
       }
 
       // 24h 등락률 계산용 24h 전 시세
-      const value24hMap = await streamerRepository.getValue24hAgoMap();
+      const value24hMap = await streamerRepository.getValue24hAgoMapForChannels([channel_id]);
       const prevValue24h = value24hMap[channel_id] ?? streamer.prev_value ?? streamer.base_value;
 
       // 최근 마켓 거래 체결가 조회

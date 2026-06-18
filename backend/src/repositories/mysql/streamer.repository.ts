@@ -396,17 +396,11 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     const cutoff = this.toUtcString(new Date(cutoffMs));
     const windowStart = this.toUtcString(new Date(cutoffMs - MysqlStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000));
     const rows = await this.getDb().all(
-      `SELECT s.channel_id,
-              (
-                SELECT vh.value
-                  FROM value_history vh FORCE INDEX (idx_value_history_channel_recorded)
-                 WHERE vh.channel_id = s.channel_id
-                   AND vh.recorded_at <= ?
-                   AND vh.recorded_at >= ?
-                 ORDER BY vh.recorded_at DESC
-                 LIMIT 1
-              ) AS value
-         FROM streamers s`,
+      `SELECT vh.channel_id, vh.value
+         FROM value_history vh FORCE INDEX (idx_value_history_recorded_channel)
+        WHERE vh.recorded_at <= ?
+          AND vh.recorded_at >= ?
+        ORDER BY vh.recorded_at DESC`,
       cutoff, windowStart
     );
     return this.mapValueAgoRows(rows);
