@@ -6,6 +6,13 @@ import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent } from '../../services/assetEventLog';
 
+const toMysqlDateTime = (value: string | Date | null | undefined): string | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+};
+
 export class MysqlMarketRepository implements IMarketRepository {
   private getDb() {
     return getMysqlDb();
@@ -135,6 +142,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     const startingBid = listingType === 'auction' ? Math.max(100, Number(listing.starting_bid || listing.price)) : null;
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
+    const auctionEndsAt = listingType === 'auction' ? toMysqlDateTime(listing.auction_ends_at) : null;
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
       const card = await tx.get(
@@ -198,7 +206,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         INSERT INTO market_listings
           (seller_id, user_card_id, pending_user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
-      `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, listing.auction_ends_at ?? null, feeRate, listing.with_cosmetics ? 1 : 0);
+      `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, auctionEndsAt, feeRate, listing.with_cosmetics ? 1 : 0);
       return Number(result.insertId);
     });
     const created = await this.findById(insertId);
@@ -665,9 +673,10 @@ export class MysqlMarketRepository implements IMarketRepository {
         const nowMs = Date.now();
         const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
         const remainingMs = endsAtMs - nowMs;
-        const extendedEndsAt = remainingMs > 0 && remainingMs <= 3 * 60_000
+        const extendedEndsAtIso = remainingMs > 0 && remainingMs <= 3 * 60_000
           ? new Date(nowMs + 3 * 60_000).toISOString()
           : null;
+        const extendedEndsAt = toMysqlDateTime(extendedEndsAtIso);
         if (extendedEndsAt) {
           await tx.run('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, auction_ends_at = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', amount, bidderId, amount, extendedEndsAt, listingId);
         } else {
@@ -681,9 +690,10 @@ export class MysqlMarketRepository implements IMarketRepository {
   }
 
   async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {
+    const now = toMysqlDateTime(nowIso) ?? toMysqlDateTime(new Date());
     const expiredRows = await this.getDb().all<{ id: number }>(
       "SELECT id FROM market_listings WHERE status = 'PENDING' AND listing_type = 'auction' AND auction_ends_at IS NOT NULL AND auction_ends_at <= ?",
-      nowIso
+      now
     );
     const completed: MarketListing[] = [];
     for (const row of expiredRows) {
@@ -766,7 +776,7 @@ export class MysqlMarketRepository implements IMarketRepository {
   }
 
   async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
-    const cutoff = cutoffIso.slice(0, 19).replace('T', ' ');
+    const cutoff = toMysqlDateTime(cutoffIso) ?? toMysqlDateTime(new Date());
     const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
     const staleRows = await this.getDb().all<any>(
       `${this.listingSelectWhere("WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND ml.created_at <= ?")}

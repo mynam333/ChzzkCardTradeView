@@ -44,6 +44,50 @@ const metricOptions = [
   'user.point_balance'
 ];
 
+const metricLabels: Record<string, string> = {
+  'login.count': '로그인 횟수',
+  'login.daily.count': '로그인 일수',
+  'card.acquired.count': '카드 획득 수',
+  'card.sold.count': '카드 판매 수',
+  'card.fused.count': '카드 한계돌파 횟수',
+  'card.star.5.count': '5성 카드 획득 수',
+  'trade.completed.count': '교환 완료 수',
+  'market.listed.count': '마켓 등록 수',
+  'market.purchase.count': '마켓 구매 수',
+  'market.sale.count': '마켓 판매 수',
+  'market.bid.count': '마켓 입찰 수',
+  'minigame.success.count': '미니게임 성공 수',
+  'minigame.success.quiz.count': '퀴즈 성공 수',
+  'minigame.success.puzzle.count': '퍼즐 성공 수',
+  'minigame.success.match.count': '매치 성공 수',
+  'minigame.success.value_duel.count': '가치 대결 성공 수',
+  'minigame.success.crop_detective.count': '크롭 탐정 성공 수',
+  'minigame.perfect.count': '미니게임 퍼펙트 수',
+  'minigame.speed_bonus.count': '미니게임 속도 보너스 수',
+  'shop.purchase.count': '상점 구매 수',
+  'cosmetic.equip.count': '코스메틱 장착 수',
+  'coupon.claim.count': '쿠폰 사용 수',
+  'profile.representative.set': '대표 카드 설정 여부',
+  'profile.status_message.set': '상태 메시지 설정 여부',
+  'inventory.card_count': '보유 카드 수',
+  'inventory.unique_streamer_count': '보유 스트리머 카드 종류',
+  'inventory.star.5.count': '보유 5성 카드 수',
+  'inventory.locked_count': '잠금 카드 수',
+  'inventory.hidden_count': '숨김 카드 수',
+  'inventory.favorite_count': '즐겨찾기 카드 수',
+  'user.title_count': '보유 칭호 수',
+  'user.cosmetic_count': '보유 코스메틱 수',
+  'user.point_balance': '보유 포인트'
+};
+
+const conditionPreview = (condition: ConditionForm) => {
+  const target = Math.max(1, Math.floor(Number(condition.target || 1)));
+  const label = metricLabels[condition.metric] || condition.metric;
+  if (condition.metric === 'profile.representative.set' || condition.metric === 'profile.status_message.set') return label.replace(' 여부', '');
+  if (condition.metric === 'user.point_balance') return `${target.toLocaleString()}P 이상 보유`;
+  return `${label} ${target.toLocaleString()} 이상`;
+};
+
 const categories: AchievementCategory[] = ['start', 'collection', 'growth', 'economy', 'trade', 'market', 'minigame', 'community', 'streamer', 'event', 'hidden'];
 const tiers: AchievementTier[] = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'event'];
 const rewardTypes: AchievementRewardType[] = ['point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket', 'title'];
@@ -262,7 +306,7 @@ export const AdminAchievementsTab: React.FC = () => {
             <h3 className="flex items-center gap-1.5 text-sm font-bold">
               <Award className="h-4 w-4 text-primary" /> {form.id ? '업적 수정' : '새 업적 생성'}
             </h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">조건은 서버 허용 메트릭만 저장됩니다.</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">조건은 한글로 선택하고 서버에는 안전한 메트릭 키로 저장됩니다.</p>
           </div>
           <div className="flex gap-2">
             {form.id > 0 && (
@@ -366,12 +410,15 @@ export const AdminAchievementsTab: React.FC = () => {
             {form.conditions.map((condition, index) => (
               <div key={index} className="grid gap-2 sm:grid-cols-[1fr_120px_auto]">
                 <select value={condition.metric} onChange={(e) => updateCondition(index, { metric: e.target.value })} className="field-input">
-                  {metricOptions.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
+                  {metricOptions.map((metric) => <option key={metric} value={metric}>{metricLabels[metric] || metric}</option>)}
                 </select>
                 <input type="number" min={1} value={condition.target} onChange={(e) => updateCondition(index, { target: Number(e.target.value) })} className="field-input" />
                 <button disabled={form.conditions.length <= 1} onClick={() => setForm({ ...form, conditions: form.conditions.filter((_, i) => i !== index) })} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-bold text-red-500 disabled:opacity-40">
                   삭제
                 </button>
+                <p className="text-[10px] font-bold text-muted-foreground sm:col-span-3">
+                  {conditionPreview(condition)}
+                </p>
               </div>
             ))}
           </div>

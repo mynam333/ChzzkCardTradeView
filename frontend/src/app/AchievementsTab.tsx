@@ -246,6 +246,9 @@ export const AchievementsTab: React.FC = () => {
                   <p className="mt-1 line-clamp-2 min-h-[2.25rem] text-xs leading-relaxed text-muted-foreground">
                     {item.description || (masked ? '달성 전까지 내용이 공개되지 않습니다.' : '설명 없음')}
                   </p>
+                  <p className="mt-2 rounded-lg bg-secondary/45 px-2.5 py-1.5 text-[10px] font-bold leading-relaxed text-muted-foreground">
+                    {masked ? '달성 조건 비공개' : `달성 조건: ${item.condition_text || '조건 없음'}`}
+                  </p>
                 </div>
               </div>
 

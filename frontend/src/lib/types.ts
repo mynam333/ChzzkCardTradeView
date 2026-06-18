@@ -374,6 +374,7 @@ export interface UserAchievement {
   code: string | null;
   name: string;
   description: string | null;
+  condition_text?: string | null;
   category: AchievementCategory;
   tier: AchievementTier;
   icon: string | null;

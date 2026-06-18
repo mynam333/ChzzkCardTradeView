@@ -64,6 +64,7 @@ export type UserAchievementView = {
   code: string | null;
   name: string;
   description: string | null;
+  condition_text: string | null;
   category: AchievementCategory | 'hidden';
   tier: AchievementTier;
   icon: string | null;
@@ -99,6 +100,21 @@ const allowedTiers: AchievementTier[] = ['bronze', 'silver', 'gold', 'platinum',
 const allowedRepeatPolicies: AchievementRepeatPolicy[] = ['once', 'daily', 'weekly', 'monthly', 'seasonal', 'repeatable'];
 const allowedClaimPolicies: AchievementClaimPolicy[] = ['manual', 'auto'];
 const allowedProgressModes: AchievementProgressMode[] = ['incremental', 'snapshot', 'composite'];
+const tierRank: Record<AchievementTier, number> = {
+  legendary: 0,
+  event: 1,
+  platinum: 2,
+  gold: 3,
+  silver: 4,
+  bronze: 5
+};
+const recommendedStatusRank: Record<AchievementStatus, number> = {
+  completed: 0,
+  in_progress: 1,
+  locked: 2,
+  expired: 3,
+  claimed: 4
+};
 
 const allowedMetrics = new Set([
   'login.count',
@@ -136,6 +152,52 @@ const allowedMetrics = new Set([
   'user.point_balance'
 ]);
 
+const metricConditionText: Record<string, (target: number) => string> = {
+  'login.count': (target) => `${target.toLocaleString()}회 로그인`,
+  'login.daily.count': (target) => `${target.toLocaleString()}일 로그인`,
+  'card.acquired.count': (target) => `카드 ${target.toLocaleString()}장 획득`,
+  'card.sold.count': (target) => `카드 ${target.toLocaleString()}장 판매`,
+  'card.fused.count': (target) => `카드 ${target.toLocaleString()}회 한계돌파`,
+  'card.star.5.count': (target) => `5성 카드 ${target.toLocaleString()}장 획득`,
+  'trade.completed.count': (target) => `교환 ${target.toLocaleString()}회 완료`,
+  'market.listed.count': (target) => `마켓에 카드 ${target.toLocaleString()}회 등록`,
+  'market.purchase.count': (target) => `마켓에서 카드 ${target.toLocaleString()}회 구매`,
+  'market.sale.count': (target) => `마켓에서 카드 ${target.toLocaleString()}회 판매`,
+  'market.bid.count': (target) => `마켓 입찰 ${target.toLocaleString()}회 참여`,
+  'minigame.success.count': (target) => `미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.success.quiz.count': (target) => `퀴즈 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.success.puzzle.count': (target) => `퍼즐 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.success.match.count': (target) => `매치 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.success.value_duel.count': (target) => `가치 대결 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.success.crop_detective.count': (target) => `크롭 탐정 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.perfect.count': (target) => `미니게임 퍼펙트 ${target.toLocaleString()}회 달성`,
+  'minigame.speed_bonus.count': (target) => `미니게임 속도 보너스 ${target.toLocaleString()}회 달성`,
+  'shop.purchase.count': (target) => `상점에서 ${target.toLocaleString()}회 구매`,
+  'cosmetic.equip.count': (target) => `코스메틱 ${target.toLocaleString()}회 장착`,
+  'coupon.claim.count': (target) => `쿠폰 ${target.toLocaleString()}회 사용`,
+  'profile.representative.set': () => '대표 카드 설정',
+  'profile.status_message.set': () => '상태 메시지 설정',
+  'inventory.card_count': (target) => `카드 ${target.toLocaleString()}장 보유`,
+  'inventory.unique_streamer_count': (target) => `서로 다른 스트리머 카드 ${target.toLocaleString()}종 보유`,
+  'inventory.star.5.count': (target) => `5성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.locked_count': (target) => `잠금 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.hidden_count': (target) => `숨김 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.favorite_count': (target) => `즐겨찾기 카드 ${target.toLocaleString()}장 설정`,
+  'user.title_count': (target) => `칭호 ${target.toLocaleString()}개 보유`,
+  'user.cosmetic_count': (target) => `코스메틱 ${target.toLocaleString()}개 보유`,
+  'user.point_balance': (target) => `${target.toLocaleString()}P 보유`
+};
+
+const formatCondition = (condition: { metric: string; target: number }) => {
+  const target = Math.max(1, Math.floor(Number(condition.target || 1)));
+  return metricConditionText[condition.metric]?.(target) || `${condition.metric} ${target.toLocaleString()} 달성`;
+};
+
+const formatAchievementConditionText = (criteria: AchievementCriteria) => {
+  if (criteria.type === 'stat') return formatCondition(criteria);
+  return criteria.conditions.map(formatCondition).join(' · ');
+};
+
 const clampLimit = (value: unknown, fallback = 80, max = 200) =>
   Math.max(1, Math.min(max, Math.floor(Number(value || fallback))));
 
@@ -163,6 +225,14 @@ let sqliteReady: object | null = null;
 let mysqlReady = false;
 let achievementCache: { data: Achievement[]; expiresAt: number } | null = null;
 const ACHIEVEMENT_CACHE_TTL_MS = 60_000;
+
+const isSupabaseMissingRelationError = (error: any) => {
+  const code = String(error?.code || '');
+  const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`;
+  return code === '42P01'
+    || code === 'PGRST205'
+    || /relation .* does not exist|could not find the table|schema cache|does not exist/i.test(message);
+};
 
 const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updated_at' | 'criteria_json' | 'rewards_json'> & {
   criteria_json: AchievementCriteria;
@@ -376,6 +446,13 @@ const normalizeDateValue = (value: any): string | null => {
   return String(value);
 };
 
+const toMysqlDateTime = (value: string | Date | null | undefined): string | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+};
+
 const mapAchievementRow = (row: any): Achievement => ({
   id: Number(row.id),
   code: row.code,
@@ -400,6 +477,13 @@ const mapAchievementRow = (row: any): Achievement => ({
   created_at: normalizeDateValue(row.created_at),
   updated_at: normalizeDateValue(row.updated_at)
 });
+
+const defaultAchievements = (): Achievement[] => DEFAULT_ACHIEVEMENTS.map((achievement, index) => ({
+  ...achievement,
+  id: index + 1,
+  created_at: null,
+  updated_at: null
+}));
 
 export const ensureAchievementTables = async (): Promise<void> => {
   const mode = getDbMode();
@@ -788,8 +872,11 @@ export const listAchievements = async (options: { includeInactive?: boolean } = 
     let query = getSupabaseClient().from('achievements').select('*').order('sort_order', { ascending: true }).order('id', { ascending: true });
     if (!options.includeInactive) query = query.eq('is_active', true);
     const { data, error } = await query;
-    if (error) throw error;
-    rows = data || [];
+    if (error) {
+      if (isSupabaseMissingRelationError(error)) return defaultAchievements();
+      throw error;
+    }
+    rows = data && data.length > 0 ? data : defaultAchievements();
   }
   const mapped = rows.map(mapAchievementRow);
   if (!options.includeInactive) achievementCache = { data: mapped, expiresAt: now + ACHIEVEMENT_CACHE_TTL_MS };
@@ -807,6 +894,7 @@ const getUserStats = async (userId: string): Promise<Record<string, number>> => 
     return Object.fromEntries(rows.map((row: any) => [row.stat_key, Number(row.stat_value || 0)]));
   }
   const { data, error } = await getSupabaseClient().from('user_achievement_stats').select('stat_key, stat_value').eq('user_id', userId);
+  if (error && isSupabaseMissingRelationError(error)) return {};
   if (error) throw error;
   return Object.fromEntries((data || []).map((row: any) => [row.stat_key, Number(row.stat_value || 0)]));
 };
@@ -959,14 +1047,18 @@ export const incrementAchievementStats = async (userId: string, stats: Record<st
     // Supabase deployments should create tables/RPC separately; best-effort read-modify-write avoids blocking core flows.
     const client = getSupabaseClient();
     for (const [key, value] of entries) {
-      const { data } = await client.from('user_achievement_stats').select('stat_value').eq('user_id', userId).eq('stat_key', key).maybeSingle();
-      await client.from('user_achievement_stats').upsert({
+      const { data, error: selectError } = await client.from('user_achievement_stats').select('stat_value').eq('user_id', userId).eq('stat_key', key).maybeSingle();
+      if (selectError && isSupabaseMissingRelationError(selectError)) return;
+      if (selectError) throw selectError;
+      const { error: upsertError } = await client.from('user_achievement_stats').upsert({
         user_id: userId,
         stat_key: key,
         stat_value: Number(data?.stat_value || 0) + Math.trunc(Number(value)),
         metadata_json: {},
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id,stat_key' });
+      if (upsertError && isSupabaseMissingRelationError(upsertError)) return;
+      if (upsertError) throw upsertError;
     }
   }
 };
@@ -1021,6 +1113,7 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
     txn();
   } else if (getDbMode() === 'MYSQL') {
     const db = getMysqlDb();
+    const nowMysql = toMysqlDateTime(nowIso);
     for (const achievement of achievements) {
       if (!activeInWindow(achievement)) continue;
       const repeatKey = getRepeatKey(achievement);
@@ -1050,10 +1143,48 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
         result.rawCurrent,
         result.target,
         JSON.stringify(result.details),
-        result.complete ? nowIso : null,
-        nowIso,
+        result.complete ? nowMysql : null,
+        nowMysql,
         repeatKey
       );
+    }
+  } else {
+    const client = getSupabaseClient();
+    const { data: existingRows, error: selectError } = await client
+      .from('user_achievements')
+      .select('*')
+      .eq('user_id', userId);
+    if (selectError && isSupabaseMissingRelationError(selectError)) return;
+    if (selectError) throw selectError;
+
+    const existingByKey = new Map((existingRows || []).map((row: any) => [`${Number(row.achievement_id)}:${row.repeat_key || 'once'}`, row]));
+    const updates: any[] = [];
+    for (const achievement of achievements) {
+      if (!activeInWindow(achievement)) continue;
+      const repeatKey = getRepeatKey(achievement);
+      const current = existingByKey.get(`${achievement.id}:${repeatKey}`);
+      if (current?.status === 'claimed') continue;
+      const result = evaluateCriteria(achievement.criteria_json, stats);
+      const status: AchievementStatus = result.complete ? 'completed' : (result.rawCurrent > 0 ? 'in_progress' : 'locked');
+      updates.push({
+        user_id: userId,
+        achievement_id: achievement.id,
+        status: current?.status === 'completed' ? 'completed' : status,
+        progress_current: result.rawCurrent,
+        progress_target: result.target,
+        progress_json: result.details,
+        completed_at: current?.completed_at || (result.complete ? nowIso : null),
+        claimed_at: current?.claimed_at || null,
+        last_evaluated_at: nowIso,
+        repeat_key: repeatKey
+      });
+    }
+    if (updates.length > 0) {
+      const { error: upsertError } = await client
+        .from('user_achievements')
+        .upsert(updates, { onConflict: 'user_id,achievement_id,repeat_key' });
+      if (upsertError && isSupabaseMissingRelationError(upsertError)) return;
+      if (upsertError) throw upsertError;
     }
   }
 };
@@ -1094,7 +1225,7 @@ export const recordAchievementEvent = async (input: AchievementEventInput): Prom
         input.sourceId == null ? null : String(input.sourceId),
         value,
         JSON.stringify(metadata),
-        input.occurredAt || new Date().toISOString()
+        toMysqlDateTime(input.occurredAt || new Date()) || toMysqlDateTime(new Date())
       );
       inserted = Number(result.changes || result.affectedRows || 0) > 0;
     } else {
@@ -1135,8 +1266,9 @@ export const listUserAchievements = async (
     rows = await getMysqlDb().all('SELECT * FROM user_achievements WHERE user_id = ?', userId);
   } else {
     const { data, error } = await getSupabaseClient().from('user_achievements').select('*').eq('user_id', userId);
-    if (error) throw error;
-    rows = data || [];
+    if (error && isSupabaseMissingRelationError(error)) rows = [];
+    else if (error) throw error;
+    else rows = data || [];
   }
   const stateByAchievement = new Map(rows.map((row) => [Number(row.achievement_id), row]));
   const items = achievements.map((achievement) => {
@@ -1151,6 +1283,7 @@ export const listUserAchievements = async (
       code: null,
       name: '???',
       description: '조건을 달성하면 공개됩니다.',
+      condition_text: null,
       category: 'hidden',
       tier: achievement.tier,
       icon: 'Lock',
@@ -1170,6 +1303,7 @@ export const listUserAchievements = async (
       code: achievement.code,
       name: achievement.name,
       description: achievement.description,
+      condition_text: formatAchievementConditionText(achievement.criteria_json),
       category: achievement.category,
       tier: achievement.tier,
       icon: achievement.icon,
@@ -1196,8 +1330,15 @@ export const listUserAchievements = async (
   });
   const sort = options.sort || 'default';
   filtered.sort((a, b) => {
-    if (sort === 'near') return (b.progress_percent ?? -1) - (a.progress_percent ?? -1);
+    if (sort === 'recommended') {
+      return (recommendedStatusRank[a.status] ?? 9) - (recommendedStatusRank[b.status] ?? 9)
+        || (b.progress_percent ?? -1) - (a.progress_percent ?? -1)
+        || a.sort_order - b.sort_order;
+    }
+    if (sort === 'progress' || sort === 'near') return (b.progress_percent ?? -1) - (a.progress_percent ?? -1) || a.sort_order - b.sort_order;
     if (sort === 'completed') return new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime();
+    if (sort === 'tier') return (tierRank[a.tier] ?? 9) - (tierRank[b.tier] ?? 9) || a.sort_order - b.sort_order;
+    if (sort === 'name') return String(a.name).localeCompare(String(b.name), 'ko-KR') || a.sort_order - b.sort_order;
     if (sort === 'category') return String(a.category).localeCompare(String(b.category), 'ko-KR') || a.sort_order - b.sort_order;
     return a.sort_order - b.sort_order;
   });
@@ -1410,12 +1551,14 @@ export const createAchievement = async (payload: any, createdBy: string | null) 
     return { ok: true as const, achievement: { ...a, id: Number(result.lastInsertRowid) } };
   }
   if (getDbMode() === 'MYSQL') {
+    const startsAt = toMysqlDateTime(a.starts_at);
+    const endsAt = toMysqlDateTime(a.ends_at);
     const result = await getMysqlDb().run(`
       INSERT INTO achievements
         (code, name, description, category, tier, icon, icon_color, is_active, is_hidden, hidden_hint, sort_order,
          starts_at, ends_at, repeat_policy, claim_policy, progress_mode, criteria_json, rewards_json, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
+    `, a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
     invalidateAchievementCache();
     return { ok: true as const, achievement: { ...a, id: Number(result.insertId) } };
   }
@@ -1439,13 +1582,15 @@ export const updateAchievement = async (id: number, payload: any) => {
        WHERE id = ?
     `).run(a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
   } else if (getDbMode() === 'MYSQL') {
+    const startsAt = toMysqlDateTime(a.starts_at);
+    const endsAt = toMysqlDateTime(a.ends_at);
     await getMysqlDb().run(`
       UPDATE achievements
          SET name = ?, description = ?, category = ?, tier = ?, icon = ?, icon_color = ?, is_active = ?, is_hidden = ?,
              hidden_hint = ?, sort_order = ?, starts_at = ?, ends_at = ?, repeat_policy = ?, claim_policy = ?,
              progress_mode = ?, criteria_json = ?, rewards_json = ?, updated_at = UTC_TIMESTAMP()
        WHERE id = ?
-    `, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
+    `, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
   } else return { ok: false as const, message: '현재 DB 모드에서는 관리자 업적 수정을 지원하지 않습니다.' };
   invalidateAchievementCache();
   return { ok: true as const };

@@ -100,7 +100,6 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   }
 
   try {
-    await settleExpiredAuctions();
     const result = await marketRepository.listActive({ page, limit, search, sort, type, bidderId });
     marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
     if (marketListCache.size > 200) {
@@ -546,6 +545,9 @@ export const settleExpiredAuctions = async () => {
     const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
     const staleCutoffIso = new Date(Date.now() - MARKET_STALE_LISTING_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const cancelledListings = await marketRepository.cancelStaleListings(staleCutoffIso, MARKET_STALE_CANCEL_BATCH);
+    if (soldListings.length > 0 || cancelledListings.length > 0) {
+      console.log(`[MarketScheduler] 정리 완료: 만료 경매 ${soldListings.length}건, 오래된 고정가 매물 자동 취소 ${cancelledListings.length}건`);
+    }
     for (const listing of soldListings) {
       const streamerName = listing.card?.streamer?.name || '스트리머';
       const star = listing.card?.star ?? 0;
