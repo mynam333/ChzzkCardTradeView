@@ -100,6 +100,11 @@ type SubmitPayload = {
   answers?: Array<{ round: number; selected_channel_id: string }>;
 };
 
+type SubmitRetryState = {
+  payload: SubmitPayload;
+  attempt: number;
+};
+
 type RoundFeedback = {
   round: number;
   selected_channel_id?: string;
@@ -887,6 +892,7 @@ export const ArcadeTab: React.FC = () => {
   const [gameData, setGameData] = useState<MinigameData | null>(null);
   const [gameBusy, setGameBusy] = useState(false);
   const submitInFlightRef = useRef(false);
+  const [submitRetry, setSubmitRetry] = useState<SubmitRetryState | null>(null);
 
   // 공통 결과 화면 상태
   const [gameResult, setGameResult] = useState<MinigameResult | null>(null);
@@ -974,6 +980,7 @@ export const ArcadeTab: React.FC = () => {
   // 로비로 퇴장
   const handleExitGame = useCallback(() => {
     submitInFlightRef.current = false;
+    setSubmitRetry(null);
     setActiveGame(null);
     setGameData(null);
     setGameResult(null);
@@ -1022,6 +1029,10 @@ export const ArcadeTab: React.FC = () => {
   const submitResult = useCallback(async (payload: SubmitPayload) => {
     if (!sessionId) return;
     if (submitInFlightRef.current) return;
+    const isTerminalSuccess = payload.success === true && (activeGame === 'puzzle' || activeGame === 'match');
+    if (isTerminalSuccess) {
+      setIsGameOver(true);
+    }
     const clientRemainingMs =
       activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
         : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
@@ -1042,15 +1053,22 @@ export const ArcadeTab: React.FC = () => {
           }
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
+        setSubmitRetry(null);
         setGameResult(data as MinigameResult);
         if (!data.practice_mode) refreshUserData(); // 일반 게임에서만 보유 자산 갱신
+      } else if (isTerminalSuccess && res.status >= 500) {
+        setSubmitRetry(prev => ({ payload, attempt: (prev?.attempt || 0) + 1 }));
       } else {
         toast(data.message || '결과 처리 중 에러가 발생했습니다.', 'error');
         handleExitGame();
       }
     } catch {
+      if (isTerminalSuccess) {
+        setSubmitRetry(prev => ({ payload, attempt: (prev?.attempt || 0) + 1 }));
+        return;
+      }
       toast('결과 전송에 실패했습니다. 연결이 복구되면 다시 시도해 주세요.', 'warning');
       restoreActiveTimer(clientRemainingMs);
       if (activeGame === 'quiz') {
@@ -1063,6 +1081,15 @@ export const ArcadeTab: React.FC = () => {
       setGameBusy(false);
     }
   }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
+
+  useEffect(() => {
+    if (!submitRetry || gameResult || !sessionId) return;
+    const retryDelayMs = Math.min(5000, 1200 + submitRetry.attempt * 600);
+    const retryTimer = window.setTimeout(() => {
+      submitResult(submitRetry.payload);
+    }, retryDelayMs);
+    return () => window.clearTimeout(retryTimer);
+  }, [gameResult, sessionId, submitResult, submitRetry]);
 
   useEffect(() => {
     if (user) {
@@ -1194,6 +1221,27 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, revealActive, gameBusy, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
 
+  useEffect(() => {
+    if (
+      activeGame !== 'match' ||
+      matchCards.length === 0 ||
+      revealActive ||
+      gameBusy ||
+      gameResult ||
+      isGameOver ||
+      (countdownLeft !== null && countdownLeft > 0)
+    ) {
+      return;
+    }
+
+    if (matchCards.every(card => card.isMatched)) {
+      submitResult({
+        success: true,
+        matched_channel_ids: matchCards.map(card => card.channel_id)
+      });
+    }
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, matchCards, revealActive, submitResult]);
+
   // 회전 퍼즐 120초 인게임 타이머 구동
   useEffect(() => {
     if (activeGame !== 'puzzle' || gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
@@ -1311,6 +1359,7 @@ export const ArcadeTab: React.FC = () => {
 
     setGameBusy(true);
     submitInFlightRef.current = false;
+    setSubmitRetry(null);
     setGameResult(null);
     setSelectedQuizChoice(null);
     setFlippedIndices([]);
@@ -1636,14 +1685,6 @@ export const ArcadeTab: React.FC = () => {
                 ? { ...card, isFlipped: true, isMatched: true }
                 : card
             );
-            
-            // 12장 모두 매치되었는지 확인
-            if (matchedDeck.every(c => c.isMatched)) {
-              submitResult({
-                success: true,
-                matched_channel_ids: matchedDeck.map((card) => card.channel_id)
-              });
-            }
             return matchedDeck;
           });
           setFlippedIndices([]);
@@ -2214,6 +2255,18 @@ export const ArcadeTab: React.FC = () => {
               <p className="text-xs text-white/90 font-bold">
                 {isPracticeMode ? '연습 게임 결과 확인 중...' : '결과 채점 및 포인트 지급 처리 중...'}
               </p>
+            </div>
+          )}
+
+          {submitRetry && !gameBusy && !gameResult && (
+            <div className="absolute inset-0 z-45 flex flex-col items-center justify-center bg-black/55 backdrop-blur-xs px-6 text-center">
+              <div className="rounded-3xl border border-primary/25 bg-card/95 px-5 py-4 shadow-xl">
+                <RefreshCw className="mx-auto mb-2 h-7 w-7 animate-spin text-primary" />
+                <p className="text-sm font-black text-foreground">결과 전송을 다시 시도 중입니다</p>
+                <p className="mt-1 text-[11px] font-bold text-muted-foreground">
+                  성공 기록은 유지한 채 연결이 복구되는 대로 자동 제출합니다.
+                </p>
+              </div>
             </div>
           )}
 

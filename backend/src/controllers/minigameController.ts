@@ -13,6 +13,10 @@ const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detectiv
 const COUNTDOWN_MS = 3_000;
 const SUBMISSION_GRACE_MS = 2_000;
 const CLIENT_REPORTED_GRACE_MS = 8_000;
+const TERMINAL_SUCCESS_RETRY_GRACE_MS = Math.max(
+  CLIENT_REPORTED_GRACE_MS,
+  Number(process.env.MINIGAME_TERMINAL_SUCCESS_RETRY_GRACE_MS || 60_000)
+);
 const PUZZLE_TIME_LIMIT_MS = 120_000;
 const PUZZLE_PIECE_COUNT = 12;
 const MATCH_REVEAL_MS = 2_000;
@@ -183,6 +187,16 @@ const isSolvedMatchPayload = (payloadChannelIds: unknown, targetChannelIds: unkn
     if (actualCounts.get(id) !== count) return false;
   }
   return actualCounts.size === expectedCounts.size;
+};
+
+const getMatchTargetChannelIds = (target: any): string[] => {
+  if (Array.isArray(target?.channel_ids)) {
+    return target.channel_ids.map((id: unknown) => String(id || '').trim()).filter(Boolean);
+  }
+  if (Array.isArray(target?.cards)) {
+    return target.cards.map((card: any) => String(card?.channel_id || '').trim()).filter(Boolean);
+  }
+  return [];
 };
 
 const isRoundGameType = (gameType: string): gameType is 'value_duel' | 'crop_detective' =>
@@ -938,7 +952,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           : session.game_type === 'puzzle'
             ? isSolvedPuzzlePayload(payload?.puzzle_pieces)
             : session.game_type === 'match'
-              ? isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids)
+              ? isSolvedMatchPayload(payload?.matched_channel_ids, getMatchTargetChannelIds(target))
               : isRoundGameType(session.game_type)
                 ? (() => {
                   const parsed = toRoundAnswers(payload?.answers);
@@ -964,9 +978,9 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
     const serverElapsedMs = Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0;
     const clientRemainingMs = Math.max(0, Math.floor(Number(payload?.client_remaining_ms || 0)));
-    const exceededTimeLimit = (allowedMs: number) => {
+    const exceededTimeLimit = (allowedMs: number, clientReportedGraceMs = CLIENT_REPORTED_GRACE_MS) => {
       if (serverElapsedMs <= allowedMs + SUBMISSION_GRACE_MS) return false;
-      return !(clientRemainingMs > 0 && serverElapsedMs <= allowedMs + CLIENT_REPORTED_GRACE_MS);
+      return !(clientRemainingMs > 0 && serverElapsedMs <= allowedMs + clientReportedGraceMs);
     };
 
     let isCorrect = false;
@@ -1017,9 +1031,13 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     } else if (session.game_type === 'puzzle') {
       const { success } = payload || {};
+      const solvedPuzzle = isSolvedPuzzlePayload(payload?.puzzle_pieces);
 
       // 120초 시간 제한 초과 검증 (카운트다운 3초 + 120초 플레이 + RTT 2초 = 125000ms 초과 시 실패)
-      if (exceededTimeLimit(COUNTDOWN_MS + PUZZLE_TIME_LIMIT_MS)) {
+      if (exceededTimeLimit(
+        COUNTDOWN_MS + PUZZLE_TIME_LIMIT_MS,
+        success === true && solvedPuzzle ? TERMINAL_SUCCESS_RETRY_GRACE_MS : CLIENT_REPORTED_GRACE_MS
+      )) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -1040,7 +1058,6 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
       }
 
-      const solvedPuzzle = isSolvedPuzzlePayload(payload?.puzzle_pieces);
       if (success === true && !solvedPuzzle) {
         return res.status(400).json({ error: 'BadRequest', message: '퍼즐 완료 상태를 서버에서 검증할 수 없습니다.' });
       }
@@ -1062,9 +1079,13 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     } else if (session.game_type === 'match') {
       const { success } = payload || {};
+      const solvedMatch = isSolvedMatchPayload(payload?.matched_channel_ids, getMatchTargetChannelIds(target));
 
       // 30초 시간 제한 초과 검증 (카운트다운 3초 + 2초 선공개 + 30초 플레이 + RTT 2초 = 37000ms 초과 시 실패)
-      if (exceededTimeLimit(COUNTDOWN_MS + MATCH_REVEAL_MS + MATCH_TIME_LIMIT_MS)) {
+      if (exceededTimeLimit(
+        COUNTDOWN_MS + MATCH_REVEAL_MS + MATCH_TIME_LIMIT_MS,
+        success === true && solvedMatch ? TERMINAL_SUCCESS_RETRY_GRACE_MS : CLIENT_REPORTED_GRACE_MS
+      )) {
         await minigameRepository.completeSession(session_id, 0);
         const user = await userRepository.findById(userId);
         return res.status(200).json({
@@ -1084,7 +1105,6 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
       }
 
-      const solvedMatch = isSolvedMatchPayload(payload?.matched_channel_ids, target.channel_ids);
       if (success === true && !solvedMatch) {
         return res.status(400).json({ error: 'BadRequest', message: '짝맞추기 완료 상태를 서버에서 검증할 수 없습니다.' });
       }
