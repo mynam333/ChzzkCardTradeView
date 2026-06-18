@@ -26,6 +26,9 @@ type NavItem = { id: TabId; label: string; icon: typeof Home };
 const loopIndex = (index: number, length: number) => ((index % length) + length) % length;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const LOGO_EASTER_EGG_SESSION_KEY = 'chikapo:easter-egg:logo-clicks';
+const LOGO_EASTER_EGG_REQUIRED_CLICKS = 9;
+const LOGO_EASTER_EGG_WINDOW_MS = 3600;
+const LOGO_EASTER_EGG_MAX_GAP_MS = 520;
 
 export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
@@ -105,9 +108,14 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     } catch {
       persistedClicks = [];
     }
-    const clicks = [...logoEasterEggClicks.current, ...persistedClicks, now]
-      .filter((time, index, all) => Number.isFinite(time) && now - time <= 7000 && all.indexOf(time) === index);
-    if (clicks.length >= 7) {
+    const previousClicks = [...logoEasterEggClicks.current, ...persistedClicks]
+      .filter((time, index, all) => Number.isFinite(time) && now - time <= LOGO_EASTER_EGG_WINDOW_MS && all.indexOf(time) === index)
+      .sort((a, b) => a - b);
+    const lastClick = previousClicks.at(-1);
+    const clicks = lastClick && now - lastClick > LOGO_EASTER_EGG_MAX_GAP_MS
+      ? [now]
+      : [...previousClicks, now];
+    if (clicks.length >= LOGO_EASTER_EGG_REQUIRED_CLICKS) {
       logoEasterEggClicks.current = [];
       try { window.sessionStorage.removeItem(LOGO_EASTER_EGG_SESSION_KEY); } catch { /* ignore */ }
       setLogoEasterEggPulse(true);
@@ -221,12 +229,12 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col text-foreground md:flex-row">
+    <div className="main-layout-shell relative flex min-h-screen w-full flex-col text-foreground md:flex-row">
       <div className="pointer-events-none fixed left-4 top-6 -z-10 hidden h-24 w-24 rounded-full bg-white/55 blur-2xl md:block dark:bg-primary/10" />
       <div className="pointer-events-none fixed bottom-10 right-8 -z-10 hidden h-40 w-40 rounded-full bg-primary/12 blur-3xl md:block dark:bg-primary/10" />
       
       {/* PC Side Navigation (md 이상 브레이크포인트에서 활성화) */}
-      <aside className="cute-surface scrollbar-none sticky top-0 z-20 hidden h-screen w-72 flex-col overflow-y-auto overscroll-contain rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
+      <aside className="main-layout-sidebar cute-surface scrollbar-none sticky top-0 z-20 hidden h-screen w-72 flex-col overflow-y-auto overscroll-contain rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
         <div className="mb-8 flex items-center gap-3 px-2">
           <button
             type="button"
@@ -332,7 +340,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       </aside>
 
       {/* 모바일 상단 바 (Mobile Top Bar) */}
-      <header className="cute-surface sticky top-0 z-40 mx-3 mt-3 flex items-center justify-between rounded-3xl px-4 py-3.5 md:hidden">
+      <header className="main-layout-mobile-header cute-surface sticky top-0 z-40 mx-3 mt-3 flex items-center justify-between rounded-3xl px-4 py-3.5 md:hidden">
         <button
           type="button"
           onClick={() => setActiveTab('main')}
@@ -381,7 +389,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       </header>
 
       {/* Main Content Area */}
-      <main className="relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-8 md:py-8">
+      <main className="main-layout-content relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-8 md:py-8">
         {children}
         <p className="mx-auto mt-8 max-w-3xl text-center text-[10px] font-bold leading-relaxed text-muted-foreground/80">
           치카포는 비공식 서드파티 서비스이며 네이버/치지직과 제휴 또는 공식 서비스가 아님을 밝힙니다.
@@ -390,6 +398,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       {/* 모바일 루프형 하단 도크 */}
       <nav
+        data-easter-nav="mobile-dock"
         className="fixed bottom-2 left-0 right-0 z-50 px-3 md:hidden"
         aria-label="모바일 주요 메뉴"
         onPointerDown={handleDockPointerDown}

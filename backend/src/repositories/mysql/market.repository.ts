@@ -6,11 +6,22 @@ import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent } from '../../services/assetEventLog';
 
+const parseMysqlUtcTime = (value: string | Date | null | undefined): number => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  const trimmed = String(value).trim();
+  if (!trimmed) return 0;
+  const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+  const normalized = hasTimezone ? trimmed : `${trimmed.replace(' ', 'T')}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isNaN(time) ? 0 : time;
+};
+
 const toMysqlDateTime = (value: string | Date | null | undefined): string | null => {
   if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  const time = parseMysqlUtcTime(value);
+  if (!time) return null;
+  return new Date(time).toISOString().slice(0, 19).replace('T', ' ');
 };
 
 export class MysqlMarketRepository implements IMarketRepository {
@@ -631,7 +642,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         const listing = await tx.get("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction' FOR UPDATE", listingId);
         if (!listing) throw new Error('NOT_FOUND_OR_NOT_AUCTION');
         if (listing.seller_id === bidderId) throw new Error('CANNOT_BID_OWN_ITEM');
-        if (listing.auction_ends_at && new Date(listing.auction_ends_at).getTime() <= Date.now()) throw new Error('AUCTION_ENDED');
+        if (listing.auction_ends_at && parseMysqlUtcTime(listing.auction_ends_at) <= Date.now()) throw new Error('AUCTION_ENDED');
         const currentBid = Number(listing.current_bid || listing.starting_bid || 0);
         const currentReserved = Number(listing.bid_reserved || 0);
         const hasActiveBid = Boolean(listing.current_bidder_id) && currentReserved > 0;
@@ -671,7 +682,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         }
 
         const nowMs = Date.now();
-        const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
+        const endsAtMs = parseMysqlUtcTime(listing.auction_ends_at);
         const remainingMs = endsAtMs - nowMs;
         const extendedEndsAtIso = remainingMs > 0 && remainingMs <= 3 * 60_000
           ? new Date(nowMs + 3 * 60_000).toISOString()
@@ -701,6 +712,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       if (!listing) continue;
       if (!listing.current_bidder_id || !listing.current_bid || listing.current_bid < (listing.starting_bid || 0)) {
         await this.updateStatus(row.id, 'AUCTION_ENDED');
+        completed.push({ ...listing, status: 'AUCTION_ENDED' });
         continue;
       }
       const sold = await this.getDb().transaction(async (tx) => {
@@ -710,7 +722,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         const buyer = await tx.get('SELECT point FROM users WHERE id = ? FOR UPDATE', locked.current_bidder_id);
         if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < Number(locked.current_bid || 0))) {
           await tx.run("UPDATE market_listings SET status = 'AUCTION_ENDED', pending_user_card_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", row.id);
-          return false;
+          return 'ended';
         }
         const price = Number(locked.current_bid || 0);
         const { fee, settledAmount } = calculateMarketFee(price, Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE));
@@ -765,9 +777,12 @@ export class MysqlMarketRepository implements IMarketRepository {
             metadata: { listing_id: row.id, price }
           });
         }
-        return true;
+        return 'sold';
       });
-      if (sold) {
+      if (sold === 'sold') {
+        const item = await this.findById(row.id);
+        if (item) completed.push(item);
+      } else if (sold === 'ended') {
         const item = await this.findById(row.id);
         if (item) completed.push(item);
       }

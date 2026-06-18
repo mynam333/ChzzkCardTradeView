@@ -428,6 +428,18 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlTableCollation(db, 'user_asset_rankings');
   await ensureMysqlColumn(db, 'user_asset_rankings', 'last_seen_at', 'last_seen_at DATETIME NULL AFTER status_message');
   await db.run(`
+    CREATE TABLE IF NOT EXISTS user_asset_ranking_cards (
+      user_id VARCHAR(191) NOT NULL,
+      channel_id VARCHAR(191) NOT NULL,
+      star INT NOT NULL DEFAULT 0,
+      card_count BIGINT NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, channel_id, star),
+      INDEX idx_user_asset_ranking_cards_channel_star_user (channel_id, star, user_id),
+      INDEX idx_user_asset_ranking_cards_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await ensureMysqlTableCollation(db, 'user_asset_ranking_cards');
+  await db.run(`
     CREATE TABLE IF NOT EXISTS subscription_title_rules (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       broadcaster_channel_id VARCHAR(191) NOT NULL,
@@ -574,6 +586,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_status_created', '(status, created_at, id)');
   await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_user_game_status_created', '(user_id, game_type, status, created_at DESC)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible', '(user_id, is_hidden)');
+  await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible_channel_star', '(user_id, is_hidden, channel_id, star)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_channel_star_visible', '(channel_id, star, is_hidden)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_updated', '(status, updated_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_updated', '(status, listing_type, updated_at DESC, id DESC)');
@@ -1098,6 +1111,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
         sqliteDb.exec("ALTER TABLE user_cards ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0;");
       }
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible_channel_star ON user_cards(user_id, is_hidden, channel_id, star);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id, id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);");
@@ -1133,6 +1147,17 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings(total_rank, user_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings(cards_rank, user_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_username ON user_asset_rankings(username);");
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS user_asset_ranking_cards (
+          user_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          star INTEGER NOT NULL DEFAULT 0,
+          card_count INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (user_id, channel_id, star)
+        );
+      `);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_ranking_cards_channel_star_user ON user_asset_ranking_cards(channel_id, star, user_id);");
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_asset_ranking_cards_user ON user_asset_ranking_cards(user_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_streamers_base_value ON streamers(base_value DESC, channel_id);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_value_history_recorded_channel ON value_history(recorded_at DESC, channel_id);");

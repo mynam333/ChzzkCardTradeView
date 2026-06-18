@@ -20,6 +20,10 @@ const DUST_MESSAGES = [
   '아무것도 추가되지 않았지만 예뻐졌습니다.'
 ];
 
+const LOST_CARD_MODE_REQUIRED_CLICKS = 7;
+const LOST_CARD_MODE_WINDOW_MS = 2600;
+const LOST_CARD_MODE_MAX_GAP_MS = 460;
+
 export default function NotFound() {
   const router = useRouter();
   const pathname = usePathname();
@@ -27,7 +31,7 @@ export default function NotFound() {
   const [flipped, setFlipped] = React.useState(false);
   const [dustIndex, setDustIndex] = React.useState(0);
   const [dusting, setDusting] = React.useState(false);
-  const flipClicksRef = React.useRef(0);
+  const flipClicksRef = React.useRef<number[]>([]);
   const dustTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
@@ -45,14 +49,23 @@ export default function NotFound() {
   const handleCardClick = () => {
     setFlipped((current) => !current);
     if (!isDesktopEasterEggSurface()) return;
-    flipClicksRef.current += 1;
-    if (flipClicksRef.current >= 4) {
-      flipClicksRef.current = 0;
+    const now = Date.now();
+    const recentClicks = flipClicksRef.current
+      .filter((time) => now - time <= LOST_CARD_MODE_WINDOW_MS)
+      .sort((a, b) => a - b);
+    const lastClick = recentClicks.at(-1);
+    const clicks = lastClick && now - lastClick > LOST_CARD_MODE_MAX_GAP_MS
+      ? [now]
+      : [...recentClicks, now];
+    if (clicks.length >= LOST_CARD_MODE_REQUIRED_CLICKS) {
+      flipClicksRef.current = [];
       recordEasterEggDiscovery('lostCard404');
       window.dispatchEvent(new CustomEvent('chikapo:easter-egg-command', {
         detail: { command: 'lostCard404' }
       }));
+      return;
     }
+    flipClicksRef.current = clicks;
   };
 
   const dustCard = () => {

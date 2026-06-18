@@ -6,6 +6,8 @@ import { formatUploadUrl } from '../../services/imageService';
 export class MysqlStreamerRepository implements IStreamerRepository {
   private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(5_000, Number(process.env.VALUE_AGO_CACHE_TTL_MS || 60_000));
   private static readonly VALUE_AGO_LOOKBACK_HOURS = Math.max(1, Number(process.env.VALUE_AGO_LOOKBACK_HOURS || 3));
+  private static readonly VALUE_AGO_CHANNEL_QUERY_THRESHOLD = Math.max(50, Number(process.env.VALUE_AGO_CHANNEL_QUERY_THRESHOLD || 200));
+  private static readonly VALUE_AGO_CHANNEL_CHUNK_SIZE = Math.max(25, Number(process.env.VALUE_AGO_CHANNEL_CHUNK_SIZE || 200));
   private static readonly SCHEDULE_UPDATE_CHUNK_SIZE = Math.max(25, Number(process.env.STREAMER_SCHEDULE_UPDATE_CHUNK_SIZE || 100));
   private static readonly VALUE_HISTORY_INSERT_CHUNK_SIZE = Math.max(50, Number(process.env.VALUE_HISTORY_INSERT_CHUNK_SIZE || 500));
   private valueAgoCache = new Map<number, { data: Record<string, number>; expiresAt: number }>();
@@ -394,53 +396,67 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     const cutoff = this.toUtcString(new Date(cutoffMs));
     const windowStart = this.toUtcString(new Date(cutoffMs - MysqlStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000));
     const rows = await this.getDb().all(
-      `SELECT vh.channel_id, vh.value, vh.recorded_at
-         FROM value_history vh
-         JOIN (
-           SELECT channel_id, MAX(recorded_at) AS recorded_at
-             FROM value_history
-            WHERE recorded_at >= ?
-              AND recorded_at <= ?
-            GROUP BY channel_id
-         ) latest
-           ON latest.channel_id = vh.channel_id
-          AND latest.recorded_at = vh.recorded_at`,
-      windowStart, cutoff
+      `SELECT s.channel_id,
+              (
+                SELECT vh.value
+                  FROM value_history vh FORCE INDEX (idx_value_history_channel_recorded)
+                 WHERE vh.channel_id = s.channel_id
+                   AND vh.recorded_at <= ?
+                   AND vh.recorded_at >= ?
+                 ORDER BY vh.recorded_at DESC
+                 LIMIT 1
+              ) AS value
+         FROM streamers s`,
+      cutoff, windowStart
     );
-    const map: Record<string, number> = {};
-    for (const r of rows) {
-      if (map[r.channel_id] === undefined) map[r.channel_id] = Number(r.value);
-    }
-    return map;
+    return this.mapValueAgoRows(rows);
   }
 
   private async loadValueAgoMapForChannels(hours: number, channelIds: string[]): Promise<Record<string, number>> {
     const uniqueChannelIds = Array.from(new Set(channelIds.filter(Boolean)));
     if (uniqueChannelIds.length === 0) return {};
 
+    if (uniqueChannelIds.length >= MysqlStreamerRepository.VALUE_AGO_CHANNEL_QUERY_THRESHOLD) {
+      const allMap = await this.valueAgoMap(hours);
+      const map: Record<string, number> = {};
+      for (const channelId of uniqueChannelIds) {
+        if (allMap[channelId] !== undefined) map[channelId] = allMap[channelId];
+      }
+      return map;
+    }
+
     const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
     const cutoff = this.toUtcString(new Date(cutoffMs));
     const windowStart = this.toUtcString(new Date(cutoffMs - MysqlStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000));
-    const placeholders = uniqueChannelIds.map(() => '?').join(',');
-    const rows = await this.getDb().all(
-      `SELECT vh.channel_id, vh.value, vh.recorded_at
-         FROM value_history vh
-         JOIN (
-           SELECT channel_id, MAX(recorded_at) AS recorded_at
-             FROM value_history
-            WHERE channel_id IN (${placeholders})
-              AND recorded_at >= ?
-              AND recorded_at <= ?
-            GROUP BY channel_id
-         ) latest
-           ON latest.channel_id = vh.channel_id
-          AND latest.recorded_at = vh.recorded_at`,
-      ...uniqueChannelIds,
-      windowStart,
-      cutoff
-    );
+    const map: Record<string, number> = {};
+    for (const chunk of this.chunk(uniqueChannelIds, MysqlStreamerRepository.VALUE_AGO_CHANNEL_CHUNK_SIZE)) {
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = await this.getDb().all(
+        `SELECT s.channel_id,
+                (
+                  SELECT vh.value
+                    FROM value_history vh FORCE INDEX (idx_value_history_channel_recorded)
+                   WHERE vh.channel_id = s.channel_id
+                     AND vh.recorded_at <= ?
+                     AND vh.recorded_at >= ?
+                   ORDER BY vh.recorded_at DESC
+                   LIMIT 1
+                ) AS value
+           FROM streamers s
+          WHERE s.channel_id IN (${placeholders})`,
+        cutoff,
+        windowStart,
+        ...chunk
+      );
+      Object.assign(map, this.mapValueAgoRows(rows));
+    }
+    return map;
+  }
+
+  private mapValueAgoRows(rows: any[]): Record<string, number> {
     const map: Record<string, number> = {};
     for (const row of rows) {
+      if (!row?.channel_id || row.value == null) continue;
       if (map[row.channel_id] === undefined) map[row.channel_id] = Number(row.value);
     }
     return map;

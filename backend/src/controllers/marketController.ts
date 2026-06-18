@@ -421,6 +421,11 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
   }
   const result = await marketRepository.placeBid(id, user.id, amount);
   if (!result.ok) {
+    if (result.reason === 'AUCTION_ENDED') {
+      settleExpiredAuctions().catch((err: any) => {
+        console.warn('[MarketController] 종료 경매 즉시 정리 실패:', err?.message || err);
+      });
+    }
     const messageMap: Record<string, string> = {
       NOT_FOUND_OR_NOT_AUCTION: '진행 중인 경매 매물을 찾을 수 없습니다.',
       CANNOT_BID_OWN_ITEM: '본인의 경매에는 입찰할 수 없습니다.',
@@ -542,11 +547,12 @@ export const settleExpiredAuctions = async () => {
 
   marketSettleInFlight = (async () => {
     lastMarketSettleAt = now;
-    const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+    const settledAuctionListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+    const soldListings = settledAuctionListings.filter((listing) => listing.status === 'SOLD');
     const staleCutoffIso = new Date(Date.now() - MARKET_STALE_LISTING_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const cancelledListings = await marketRepository.cancelStaleListings(staleCutoffIso, MARKET_STALE_CANCEL_BATCH);
-    if (soldListings.length > 0 || cancelledListings.length > 0) {
-      console.log(`[MarketScheduler] 정리 완료: 만료 경매 ${soldListings.length}건, 오래된 고정가 매물 자동 취소 ${cancelledListings.length}건`);
+    if (settledAuctionListings.length > 0 || cancelledListings.length > 0) {
+      console.log(`[MarketScheduler] 정리 완료: 만료 경매 ${settledAuctionListings.length}건(낙찰 ${soldListings.length}건), 오래된 고정가 매물 자동 취소 ${cancelledListings.length}건`);
     }
     for (const listing of soldListings) {
       const streamerName = listing.card?.streamer?.name || '스트리머';
@@ -568,8 +574,8 @@ export const settleExpiredAuctions = async () => {
         `market-stale:${listing.id}`
       );
     }
-    if (soldListings.length > 0 || cancelledListings.length > 0) {
-      const changedListings = [...soldListings, ...cancelledListings];
+    if (settledAuctionListings.length > 0 || cancelledListings.length > 0) {
+      const changedListings = [...settledAuctionListings, ...cancelledListings];
       publishMarketUpdated('market_scheduled_cleanup', null, {
         listingIds: changedListings.map((listing) => listing.id).filter(Boolean),
         listings: changedListings.map(realtimeListingPatch).filter(Boolean)

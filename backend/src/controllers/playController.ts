@@ -592,7 +592,11 @@ export const getUserProfile = async (req: Request, res: Response) => {
 // 프론트는 주로 SSE(ranking 이벤트)로 갱신하고 폴링은 긴 fallback만 돌리지만, 시세는 2분 주기로
 // 갱신되므로 실시간일 필요가 없습니다. 동일 파라미터 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
 const RANKINGS_CACHE_TTL = 60_000; // 60초
-const USER_RANKING_SNAPSHOT_TTL = Math.max(30_000, Number(process.env.USER_RANKING_SNAPSHOT_TTL_MS || 60_000));
+const USER_RANKING_SNAPSHOT_TTL = Math.max(60_000, Number(process.env.USER_RANKING_SNAPSHOT_TTL_MS || 300_000));
+const USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL = Math.max(
+  60_000,
+  Number(process.env.USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL_MS || 180_000)
+);
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
@@ -604,6 +608,7 @@ const streamerDetailInFlight = new Map<string, Promise<any>>();
 const STREAMER_DETAIL_CACHE_TTL = 30_000;
 const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RANKING_MAX_LIMIT || 10_000));
 let userRankingSnapshotExpiresAt = 0;
+let userRankingSnapshotLastBuiltAt = 0;
 let userRankingSnapshotInFlight: Promise<boolean> | null = null;
 
 const mysqlDateValueSql = (column: string) => `
@@ -617,7 +622,14 @@ export const clearUserRankingCaches = () => {
   rankingsCache.clear();
   rankingsInFlight.clear();
   rankingPoolCache.clear();
-  userRankingSnapshotExpiresAt = 0;
+  if (userRankingSnapshotLastBuiltAt > 0) {
+    userRankingSnapshotExpiresAt = Math.max(
+      userRankingSnapshotExpiresAt,
+      userRankingSnapshotLastBuiltAt + USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL
+    );
+  } else {
+    userRankingSnapshotExpiresAt = 0;
+  }
 };
 
 export const clearRankingCaches = () => {
@@ -647,8 +659,12 @@ const waitForUserRankingSnapshot = async (attempts = 8, delayMs = 250): Promise<
 
 const hasUserRankingSnapshot = async (): Promise<boolean> => {
   if (getDbMode() !== 'MYSQL') return false;
-  const row = await getMysqlDb().get<{ present: number }>('SELECT 1 AS present FROM user_asset_rankings LIMIT 1');
-  return !!row;
+  const row = await getMysqlDb().get<{ ranking_present: number | null; card_filter_present: number | null }>(`
+    SELECT
+      (SELECT 1 FROM user_asset_rankings LIMIT 1) AS ranking_present,
+      (SELECT 1 FROM user_asset_ranking_cards LIMIT 1) AS card_filter_present
+  `);
+  return !!row?.ranking_present && !!row?.card_filter_present;
 };
 
 const refreshUserRankingSnapshot = async (): Promise<boolean> => {
@@ -669,8 +685,11 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
       if (!releaseLock) return waitForUserRankingSnapshot();
       try {
         await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
+        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
         await db.run('DROP TABLE IF EXISTS user_asset_rankings_next');
+        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_next');
         await db.run('CREATE TABLE user_asset_rankings_next LIKE user_asset_rankings');
+        await db.run('CREATE TABLE user_asset_ranking_cards_next LIKE user_asset_ranking_cards');
         await db.run(`
           INSERT INTO user_asset_rankings_next
             (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
@@ -705,8 +724,24 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
                    card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
               FROM RankedUsers
         `);
-        await db.run('RENAME TABLE user_asset_rankings TO user_asset_rankings_old, user_asset_rankings_next TO user_asset_rankings');
+        await db.run(`
+          INSERT INTO user_asset_ranking_cards_next (user_id, channel_id, star, card_count)
+          SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
+            FROM user_cards uc
+            JOIN user_asset_rankings_next r
+              ON r.user_id = uc.user_id
+           WHERE COALESCE(uc.is_hidden, 0) = 0
+           GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
+        `);
+        await db.run(
+          `RENAME TABLE
+             user_asset_rankings TO user_asset_rankings_old,
+             user_asset_rankings_next TO user_asset_rankings,
+             user_asset_ranking_cards TO user_asset_ranking_cards_old,
+             user_asset_ranking_cards_next TO user_asset_ranking_cards`
+        );
         await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
+        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
       } finally {
         await releaseLock().catch(() => undefined);
       }
@@ -714,6 +749,7 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
       const db = getSqliteDb();
       db.transaction(() => {
         db.prepare('DELETE FROM user_asset_rankings').run();
+        db.prepare('DELETE FROM user_asset_ranking_cards').run();
         db.prepare(`
           WITH UserCardValues AS (
             SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
@@ -739,9 +775,18 @@ const refreshUserRankingSnapshot = async (): Promise<boolean> => {
                  card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, datetime('now')
             FROM RankedUsers
         `).run();
+        db.prepare(`
+          INSERT INTO user_asset_ranking_cards (user_id, channel_id, star, card_count)
+          SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
+            FROM user_cards uc
+            JOIN user_asset_rankings r ON r.user_id = uc.user_id
+           WHERE COALESCE(uc.is_hidden, 0) = 0
+           GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
+        `).run();
       })();
     }
-    userRankingSnapshotExpiresAt = Date.now() + USER_RANKING_SNAPSHOT_TTL;
+    userRankingSnapshotLastBuiltAt = Date.now();
+    userRankingSnapshotExpiresAt = userRankingSnapshotLastBuiltAt + USER_RANKING_SNAPSHOT_TTL;
     return true;
   })()
     .catch((err) => {
@@ -771,31 +816,25 @@ const readUserRankingsFromSnapshot = async (
   const usernameFilter = isMysql
     ? '? = \'\' OR r.username COLLATE utf8mb4_unicode_ci LIKE ? COLLATE utf8mb4_unicode_ci'
     : "? = '' OR r.username LIKE ?";
-  const userCardUserFilter = isMysql
-    ? 'fc.user_id COLLATE utf8mb4_unicode_ci = r.user_id COLLATE utf8mb4_unicode_ci'
-    : 'fc.user_id = r.user_id';
-  const userCardChannelFilter = isMysql
-    ? 'fc.channel_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci'
-    : 'fc.channel_id = ?';
+  const cardFilterJoin = channelId
+    ? `JOIN (
+         SELECT DISTINCT user_id
+           FROM user_asset_ranking_cards
+          WHERE channel_id = ?
+            AND (? IS NULL OR star = ?)
+       ) rc ON rc.user_id = r.user_id`
+    : '';
   const sql = `
     SELECT r.*, r.${rankColumn} AS user_rank
       FROM user_asset_rankings r
+      ${cardFilterJoin}
      WHERE (${usernameFilter})
-       AND (
-         ? = ''
-         OR EXISTS (
-           SELECT 1
-             FROM user_cards fc
-            WHERE ${userCardUserFilter}
-              AND COALESCE(fc.is_hidden, 0) = 0
-              AND ${userCardChannelFilter}
-              AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
-         )
-       )
      ORDER BY r.${rankColumn} ASC, r.user_id ASC
      LIMIT ?
   `;
-  const params = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
+  const params = channelId
+    ? [channelId, star, star, keyword, `%${keyword}%`, limit]
+    : [keyword, `%${keyword}%`, limit];
   const rows = isMysql
     ? await getMysqlDb().all<any>(sql, ...params)
     : getSqliteDb().prepare(sql).all(...params) as any[];

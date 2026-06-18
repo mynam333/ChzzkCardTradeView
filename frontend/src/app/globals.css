@@ -275,6 +275,215 @@ html.easter-egg-mode .card-container {
   filter: saturate(1.1);
 }
 
+@media (min-width: 768px) {
+  html.easter-egg-mode .main-layout-shell {
+    display: grid;
+    grid-template-columns: minmax(15.5rem, 18rem) minmax(0, 1fr);
+    align-items: start;
+    gap: 1.1rem;
+    min-height: 100vh;
+    padding: 1rem;
+  }
+
+  html.easter-egg-mode .main-layout-shell::before {
+    content: "FUN MODE";
+    pointer-events: none;
+    position: fixed;
+    right: 1.25rem;
+    top: 1.15rem;
+    z-index: 64;
+    border: 2px solid rgba(var(--easter-egg-pink), 0.36);
+    border-radius: 999px;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(204, 251, 241, 0.76));
+    padding: 0.55rem 0.85rem;
+    color: #0f5163;
+    font-family: var(--font-number);
+    font-size: 0.68rem;
+    font-weight: 1000;
+    letter-spacing: 0.18em;
+    box-shadow:
+      0 12px 28px rgba(20, 184, 166, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    transform: rotate(3deg);
+  }
+
+  .dark.easter-egg-mode .main-layout-shell::before {
+    background:
+      linear-gradient(135deg, rgba(6, 24, 39, 0.92), rgba(14, 116, 144, 0.72));
+    color: #ccfbf1;
+  }
+
+  html.easter-egg-mode .main-layout-sidebar {
+    position: sticky;
+    top: 1rem;
+    width: auto;
+    height: calc(100vh - 2rem);
+    border: 2px dashed rgba(var(--easter-egg-glow), 0.5) !important;
+    border-radius: 2rem !important;
+    padding: 1rem;
+    transform: rotate(-0.55deg);
+    background:
+      radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.8) 0 2rem, transparent 2.2rem),
+      repeating-linear-gradient(135deg, rgba(var(--easter-egg-blue), 0.08) 0 10px, rgba(var(--easter-egg-pink), 0.07) 10px 20px),
+      color-mix(in srgb, var(--card) 88%, var(--secondary) 12%) !important;
+    box-shadow:
+      0 24px 70px rgba(7, 89, 133, 0.18),
+      0 0 0 8px rgba(255, 255, 255, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.82) !important;
+  }
+
+  .dark.easter-egg-mode .main-layout-sidebar {
+    background:
+      radial-gradient(circle at 20% 10%, rgba(67, 228, 210, 0.15) 0 2rem, transparent 2.2rem),
+      repeating-linear-gradient(135deg, rgba(var(--easter-egg-blue), 0.08) 0 10px, rgba(var(--easter-egg-pink), 0.06) 10px 20px),
+      color-mix(in srgb, var(--card) 84%, #061827 16%) !important;
+  }
+
+  html.easter-egg-mode .main-layout-sidebar::before {
+    content: "CARD CONSOLE";
+    position: absolute;
+    right: 1rem;
+    top: 0.85rem;
+    border: 1px solid rgba(var(--easter-egg-glow), 0.34);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.64);
+    padding: 0.25rem 0.55rem;
+    color: color-mix(in srgb, var(--primary) 76%, #0f5163);
+    font-family: var(--font-number);
+    font-size: 0.52rem;
+    font-weight: 1000;
+    letter-spacing: 0.16em;
+  }
+
+  .dark.easter-egg-mode .main-layout-sidebar::before {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccfbf1;
+  }
+
+  html.easter-egg-mode .main-layout-sidebar > div:first-child {
+    margin-bottom: 1rem;
+    border-bottom: 2px dotted rgba(var(--easter-egg-glow), 0.36);
+    padding-bottom: 1rem;
+  }
+
+  html.easter-egg-mode .main-layout-sidebar nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  html.easter-egg-mode .main-layout-sidebar nav button {
+    min-height: 4.15rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.35rem;
+    border: 1px solid rgba(var(--easter-egg-glow), 0.24);
+    border-radius: 1.25rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.18));
+    text-align: center;
+    font-size: 0.68rem;
+    line-height: 1.15;
+    box-shadow:
+      0 10px 22px rgba(7, 89, 133, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  }
+
+  .dark.easter-egg-mode .main-layout-sidebar nav button {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(67, 228, 210, 0.05));
+  }
+
+  html.easter-egg-mode .main-layout-sidebar nav button[aria-current="page"],
+  html.easter-egg-mode .main-layout-sidebar nav button.bg-primary {
+    outline: 3px solid rgba(var(--easter-egg-warn), 0.22);
+  }
+
+  html.easter-egg-mode .main-layout-sidebar nav button:hover {
+    transform: translateY(-3px) rotate(-1.2deg);
+  }
+
+  html.easter-egg-mode .main-layout-sidebar .cute-card-pop,
+  html.easter-egg-mode .main-layout-sidebar [class*="rounded-3xl"] {
+    border-radius: 1.35rem !important;
+  }
+
+  html.easter-egg-mode .main-layout-content {
+    position: relative;
+    width: 100%;
+    max-width: none;
+    min-height: calc(100vh - 2rem);
+    margin: 0;
+    overflow: visible;
+    border: 2px solid rgba(var(--easter-egg-blue), 0.32);
+    border-radius: 2.2rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.28)),
+      repeating-linear-gradient(0deg, rgba(var(--easter-egg-blue), 0.05) 0 1px, transparent 1px 18px),
+      color-mix(in srgb, var(--background) 72%, white 28%);
+    padding: 1.25rem 1.25rem 2rem;
+    box-shadow:
+      0 30px 90px rgba(7, 89, 133, 0.16),
+      inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    transform: rotate(0.25deg);
+  }
+
+  .dark.easter-egg-mode .main-layout-content {
+    background:
+      linear-gradient(180deg, rgba(14, 38, 57, 0.88), rgba(6, 24, 39, 0.76)),
+      repeating-linear-gradient(0deg, rgba(var(--easter-egg-blue), 0.06) 0 1px, transparent 1px 18px),
+      color-mix(in srgb, var(--background) 86%, black 14%);
+  }
+
+  html.easter-egg-mode .main-layout-content::before {
+    content: "CHIKAPO PLAYMAT";
+    position: absolute;
+    left: 2rem;
+    top: -0.75rem;
+    z-index: 5;
+    border: 1px solid rgba(var(--easter-egg-warn), 0.45);
+    border-radius: 999px;
+    background:
+      linear-gradient(135deg, #fef08a, #ccfbf1);
+    padding: 0.35rem 0.8rem;
+    color: #0f5163;
+    font-family: var(--font-number);
+    font-size: 0.58rem;
+    font-weight: 1000;
+    letter-spacing: 0.18em;
+    box-shadow: 0 10px 24px rgba(250, 204, 21, 0.18);
+    transform: rotate(-2deg);
+  }
+
+  html.easter-egg-mode .main-layout-content::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0.85rem;
+    border: 1px dashed rgba(var(--easter-egg-glow), 0.24);
+    border-radius: 1.7rem;
+  }
+
+  html.easter-egg-mode .main-layout-content > div {
+    position: relative;
+    z-index: 1;
+  }
+
+  html.easter-egg-mode .main-layout-content > p {
+    position: relative;
+    z-index: 1;
+    border: 1px dashed rgba(var(--easter-egg-glow), 0.28);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.52);
+    padding: 0.6rem 1rem;
+  }
+
+  .dark.easter-egg-mode .main-layout-content > p {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
 .easter-egg-logo-pulse {
   animation: easterEggLogoPulse 420ms ease-in-out;
 }

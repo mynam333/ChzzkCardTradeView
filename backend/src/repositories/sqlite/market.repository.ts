@@ -860,6 +860,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (!listing) continue;
       if (!listing.current_bidder_id || !listing.current_bid || listing.current_bid < (listing.starting_bid || 0)) {
         await this.updateStatus(row.id, 'AUCTION_ENDED');
+        completed.push({ ...listing, status: 'AUCTION_ENDED' });
         continue;
       }
 
@@ -870,7 +871,7 @@ export class SqliteMarketRepository implements IMarketRepository {
         const buyer = db.prepare('SELECT point FROM users WHERE id = ?').get(locked.current_bidder_id) as any;
         if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < Number(locked.current_bid || 0))) {
           db.prepare("UPDATE market_listings SET status = 'AUCTION_ENDED', updated_at = datetime('now') WHERE id = ?").run(row.id);
-          return false;
+          return 'ended';
         }
         const price = Number(locked.current_bid || 0);
         const feeRate = Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE);
@@ -929,11 +930,14 @@ export class SqliteMarketRepository implements IMarketRepository {
             metadata: { listing_id: row.id, price }
           });
         }
-        return true;
+        return 'sold';
       })();
-      if (result) {
+      if (result === 'sold') {
         const sold = await this.findById(row.id);
         if (sold) completed.push(sold);
+      } else if (result === 'ended') {
+        const ended = await this.findById(row.id);
+        if (ended) completed.push(ended);
       }
     }
     return completed;
