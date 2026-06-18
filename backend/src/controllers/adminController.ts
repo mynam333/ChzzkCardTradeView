@@ -6,7 +6,6 @@ import {
   couponRepository,
   userCardRepository,
   tradeRepository,
-  notificationRepository,
   systemConfigRepository,
   titleRepository
 } from '../repositories';
@@ -30,6 +29,7 @@ import {
   normalizePuzzleImageKey
 } from '../services/puzzleImageExclusionService';
 import { getPosthogInsights, normalizeInsightsRange } from '../services/posthogInsightsService';
+import { createRealtimeNotification } from '../services/notificationDelivery';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -69,7 +69,7 @@ const notifyReportResult = async (
     ? `신고하신 ${target} 신고가 기각되었습니다. 신고 사유: "${reason}". 검토 결과 별도 조치가 필요하지 않은 것으로 판단되었습니다.`
     : `신고하신 ${target} 신고가 처리되었습니다. 신고 사유: "${reason}". 처리 내용: ${options.detail || options.actionLabel || '관리자 검토 완료'}.`;
 
-  await notificationRepository.create({
+  await createRealtimeNotification({
     user_id: report.reporter_id,
     title,
     body,
@@ -85,7 +85,7 @@ const notifyReportResult = async (
   const targetTitle = '카드 이미지 신고 처리 안내';
   const targetBody = `${target}에 "${reason}" 사유로 접수된 신고가 처리되었습니다. 처리 내용: ${options.detail || options.actionLabel || '관리자 검토 완료'}.`;
   for (const userId of targetUserIds) {
-    await notificationRepository.create({
+    await createRealtimeNotification({
       user_id: userId,
       title: targetTitle,
       body: targetBody,
@@ -121,7 +121,7 @@ const deleteStreamerWithCompensation = async (
     const title = '보유 카드 삭제 및 보상 지급';
     const body = formatCardDeletionCompensationBody(streamer.name, userCompensation);
     sendPushToUser(userCompensation.user_id, title, body, '/shop');
-    notificationRepository.create({ user_id: userCompensation.user_id, title, body, link: 'shop' }).catch(() => { /* 무시 */ });
+    createRealtimeNotification({ user_id: userCompensation.user_id, title, body, link: 'shop' }).catch(() => { /* 무시 */ });
   }
 
   const removed = await userCardRepository.deleteByChannel(channelId);

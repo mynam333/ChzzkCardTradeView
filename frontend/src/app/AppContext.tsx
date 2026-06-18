@@ -305,7 +305,7 @@ export interface AppNotificationItem {
 interface NotificationContextType {
   notifications: AppNotificationItem[];
   unreadCount: number;
-  fetchNotifications: () => Promise<void>;
+  fetchNotifications: (options?: { force?: boolean }) => Promise<void>;
   openNotification: (n: AppNotificationItem) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
   hideReadNotification: (id: number) => Promise<void>;
@@ -328,22 +328,35 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
   const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const lastNotificationFetchAtRef = useRef(0);
+  const notificationFetchInFlightRef = useRef<Promise<void> | null>(null);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (options: { force?: boolean } = { force: true }) => {
     if (!isAuthed()) {
       setNotifications([]);
       setUnreadCount(0);
       return;
     }
-    try {
+    const now = Date.now();
+    if (!options.force && now - lastNotificationFetchAtRef.current < 60_000) return;
+    if (notificationFetchInFlightRef.current) return notificationFetchInFlightRef.current;
+
+    const task = (async () => {
       const res = await apiFetch('/notifications');
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.items || []);
         setUnreadCount(data.unread || 0);
+        lastNotificationFetchAtRef.current = Date.now();
       }
+    })();
+    notificationFetchInFlightRef.current = task;
+    try {
+      await task;
     } catch (e) {
       console.error('[NotificationProvider] 알림 조회 실패:', e);
+    } finally {
+      notificationFetchInFlightRef.current = null;
     }
   };
 
@@ -403,9 +416,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
     setNotifications((prev) => prev.filter((item) => item.id !== id));
     try {
       const res = await apiFetch(`/notifications/${id}`, { method: 'DELETE' });
-      if (!res.ok) fetchNotifications();
+      if (!res.ok) fetchNotifications({ force: true });
     } catch {
-      fetchNotifications();
+      fetchNotifications({ force: true });
     }
   };
 
@@ -415,12 +428,21 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
       setUnreadCount(0);
       return;
     }
-    fetchNotifications();
+    fetchNotifications({ force: true });
     const fallbackMs = typeof EventSource === 'undefined' ? 120_000 : 600_000;
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchNotifications();
+      if (document.visibilityState === 'visible') fetchNotifications({ force: false });
     }, fallbackMs);
-    return () => clearInterval(timer);
+    const syncOnVisible = () => {
+      if (document.visibilityState === 'visible') fetchNotifications({ force: false });
+    };
+    window.addEventListener('focus', syncOnVisible);
+    document.addEventListener('visibilitychange', syncOnVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', syncOnVisible);
+      document.removeEventListener('visibilitychange', syncOnVisible);
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -449,8 +471,11 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ user
     };
 
     source.addEventListener('notification', handleNotification as EventListener);
+    const handleConnected = () => fetchNotifications({ force: false });
+    source.addEventListener('connected', handleConnected as EventListener);
     return () => {
       source.removeEventListener('notification', handleNotification as EventListener);
+      source.removeEventListener('connected', handleConnected as EventListener);
       source.close();
     };
   }, [user?.id]);

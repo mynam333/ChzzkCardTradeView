@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { notificationRepository, streamerRepository, userCardRepository } from '../repositories';
+import { streamerRepository, userCardRepository } from '../repositories';
 import { sendPushToUser } from '../controllers/pushController';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
 import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
@@ -12,6 +12,7 @@ import {
   formatCardDeletionCompensationSummary,
   grantCardDeletionCompensations
 } from '../services/cardDeletionCompensation';
+import { createRealtimeNotification } from '../services/notificationDelivery';
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
 const SCHEDULE_INTERVAL_MINUTES = 2;
@@ -299,7 +300,7 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inact
       ? `'${streamer.name}' 카드 정보를 더 이상 불러올 수 없어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 정리되었고 ${reward}이 지급되었습니다.`
       : `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 삭제되었고 ${reward}이 지급되었습니다.`;
     sendPushToUser(userCompensation.user_id, title, body, '/shop');
-    notificationRepository.create({
+    createRealtimeNotification({
       user_id: userCompensation.user_id,
       title,
       body,

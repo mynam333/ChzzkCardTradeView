@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
-import { notificationRepository, titleRepository, userRepository } from '../repositories';
+import { titleRepository, userRepository } from '../repositories';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
 import { minifyCss } from '../utils/css';
+import { createRealtimeNotification } from '../services/notificationDelivery';
 import {
   deleteSubscriptionTitleRule,
   listSubscriptionTitleRules,
@@ -160,7 +161,7 @@ export const awardTitle = async (req: Request, res: Response) => {
     const [title, user] = await Promise.all([titleRepository.findById(id), userRepository.findById(userId)]);
     if (!title || !user) return res.status(404).json({ error: 'NotFound', message: '칭호 또는 유저를 찾을 수 없습니다.' });
     await titleRepository.award(userId, id);
-    await notificationRepository.create({
+    await createRealtimeNotification({
       user_id: userId,
       title: '새 칭호를 획득했습니다',
       body: `[${title.name}] 칭호가 수여되었습니다.`,
@@ -195,7 +196,7 @@ export const awardTitleToMany = async (req: Request, res: Response) => {
     for (let offset = 0; offset < newUserIds.length; offset += 25) {
       await Promise.all(newUserIds.slice(offset, offset + 25).map((userId) => {
         sendPushToUser(userId, '새 칭호를 획득했습니다', `[${title.name}] 칭호가 수여되었습니다.`, '/my-info');
-        return notificationRepository.create({
+        return createRealtimeNotification({
           user_id: userId,
           title: '새 칭호를 획득했습니다',
           body: `[${title.name}] 칭호가 수여되었습니다.`,

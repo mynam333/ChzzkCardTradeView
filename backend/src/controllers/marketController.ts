@@ -3,7 +3,7 @@ import { marketRepository, userCardRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
-import { createRealtimeNotification } from './notificationController';
+import { createRealtimeNotification } from '../services/notificationDelivery';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { clearUserRankingCaches } from './playController';

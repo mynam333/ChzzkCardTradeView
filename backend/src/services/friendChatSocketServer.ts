@@ -2,7 +2,7 @@ import http from 'http';
 import jwt from 'jsonwebtoken';
 import WebSocket, { WebSocketServer } from 'ws';
 import { JWT_SECRET, isConfiguredCorsOriginAllowed } from '../config';
-import { createRealtimeNotification } from '../controllers/notificationController';
+import { createRealtimeNotification } from './notificationDelivery';
 import { sendPushToUser } from '../controllers/pushController';
 import { userRepository } from '../repositories';
 import { SESSION_COOKIE_NAMES } from './sessionCookie';

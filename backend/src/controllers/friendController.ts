@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { userRepository } from '../repositories';
-import { createRealtimeNotification } from './notificationController';
+import { createRealtimeNotification } from '../services/notificationDelivery';
 import { sendPushToUser } from './pushController';
 import {
   CHAT_ATTACHMENT_MAX_ACTIVE_BYTES,

@@ -2,18 +2,7 @@ import { Response } from 'express';
 import { notificationRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
-import { AppNotification } from '../repositories/interfaces';
-import { publishNotification, subscribeNotificationStream } from '../services/notificationStream';
-
-export const createRealtimeNotification = async (
-  n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key?: string | null }
-): Promise<AppNotification> => {
-  const notification = n.group_key
-    ? await notificationRepository.upsertByGroupKey({ ...n, group_key: n.group_key })
-    : await notificationRepository.create(n);
-  publishNotification(notification);
-  return notification;
-};
+import { subscribeNotificationStream } from '../services/notificationStream';
 
 /**
  * 내 인앱 알림 목록 + 미읽음 수 조회

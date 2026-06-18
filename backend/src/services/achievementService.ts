@@ -1,7 +1,7 @@
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
-import { notificationRepository } from '../repositories';
+import { createRealtimeNotification } from './notificationDelivery';
 
 export type AchievementCategory =
   | 'start'
@@ -1901,7 +1901,7 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
     });
     const result = txn();
     if (result.ok) {
-      notificationRepository.create({
+      createRealtimeNotification({
         user_id: userId,
         title: '업적 보상 수령',
         body: `${achievement.name} 업적 보상을 수령했습니다.`,
@@ -1930,7 +1930,7 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
       return { ok: true, reason: 'OK', rewards: displayRewards, new_points: Number(user?.point || 0) };
     });
     if (result.ok) {
-      notificationRepository.create({
+      createRealtimeNotification({
         user_id: userId,
         title: '업적 보상 수령',
         body: `${achievement.name} 업적 보상을 수령했습니다.`,
