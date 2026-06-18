@@ -367,6 +367,8 @@ export interface AchievementReward {
   item_id?: number;
   title_id?: number;
   quantity?: number;
+  label?: string;
+  revoke_when_unmet?: boolean;
 }
 
 export interface UserAchievement {

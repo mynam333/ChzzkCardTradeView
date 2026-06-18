@@ -29,10 +29,10 @@ type AchievementCriteria =
 export type AchievementReward =
   | { type: 'point'; points: number; label?: string }
   | { type: 'card'; channel_id: string; quantity: number; label?: string }
-  | { type: 'cosmetic'; item_id: number; quantity: number; label?: string }
+  | { type: 'cosmetic'; item_id: number; quantity: number; label?: string; revoke_when_unmet?: boolean; granted?: boolean }
   | { type: 'minigame_ticket'; quantity: number; label?: string }
   | { type: 'free_draw_ticket'; quantity: number; label?: string }
-  | { type: 'title'; title_id: number; label?: string };
+  | { type: 'title'; title_id: number; label?: string; revoke_when_unmet?: boolean; granted?: boolean };
 
 export type Achievement = {
   id: number;
@@ -141,15 +141,48 @@ const allowedMetrics = new Set([
   'coupon.claim.count',
   'profile.representative.set',
   'profile.status_message.set',
+  'achievement.completed_count',
+  'achievement.claimed_count',
+  'achievement.claimable_count',
   'inventory.card_count',
   'inventory.unique_streamer_count',
+  'inventory.star.0.count',
+  'inventory.star.1.count',
+  'inventory.star.2.count',
+  'inventory.star.3.count',
+  'inventory.star.4.count',
   'inventory.star.5.count',
+  'inventory.total_star_sum',
+  'inventory.unique_star_level_count',
+  'inventory.low_serial.1.count',
+  'inventory.low_serial.10.count',
+  'inventory.low_serial.100.count',
   'inventory.locked_count',
   'inventory.hidden_count',
   'inventory.favorite_count',
+  'inventory.cosmetic_equipped_count',
+  'inventory.border_equipped_count',
+  'inventory.name_effect_equipped_count',
   'user.title_count',
   'user.cosmetic_count',
-  'user.point_balance'
+  'user.unique_cosmetic_count',
+  'user.border_cosmetic_count',
+  'user.name_effect_cosmetic_count',
+  'user.point_balance',
+  'user.free_draw_ticket_balance',
+  'user.bonus_free_draw_ticket_balance',
+  'user.minigame_ticket_balance',
+  'user.account_age_days',
+  'market.active_listing_count',
+  'market.active_fixed_listing_count',
+  'market.active_auction_listing_count',
+  'market.sold_listing_count',
+  'market.bought_listing_count',
+  'market.active_bid_count',
+  'market.watch_count',
+  'shop.unique_purchase_count',
+  'coupon.redeemed_unique_count',
+  'community.friend_count'
 ]);
 
 const metricConditionText: Record<string, (target: number) => string> = {
@@ -177,15 +210,48 @@ const metricConditionText: Record<string, (target: number) => string> = {
   'coupon.claim.count': (target) => `쿠폰 ${target.toLocaleString()}회 사용`,
   'profile.representative.set': () => '대표 카드 설정',
   'profile.status_message.set': () => '상태 메시지 설정',
+  'achievement.completed_count': (target) => `업적 ${target.toLocaleString()}개 달성`,
+  'achievement.claimed_count': (target) => `업적 보상 ${target.toLocaleString()}개 수령`,
+  'achievement.claimable_count': (target) => `수령 가능한 업적 ${target.toLocaleString()}개 보유`,
   'inventory.card_count': (target) => `카드 ${target.toLocaleString()}장 보유`,
   'inventory.unique_streamer_count': (target) => `서로 다른 스트리머 카드 ${target.toLocaleString()}종 보유`,
+  'inventory.star.0.count': (target) => `0성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.star.1.count': (target) => `1성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.star.2.count': (target) => `2성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.star.3.count': (target) => `3성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.star.4.count': (target) => `4성 카드 ${target.toLocaleString()}장 보유`,
   'inventory.star.5.count': (target) => `5성 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.total_star_sum': (target) => `보유 카드 별 합계 ${target.toLocaleString()} 달성`,
+  'inventory.unique_star_level_count': (target) => `서로 다른 카드 등급 ${target.toLocaleString()}종 보유`,
+  'inventory.low_serial.1.count': (target) => `시리얼 1번 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.low_serial.10.count': (target) => `시리얼 10번 이하 카드 ${target.toLocaleString()}장 보유`,
+  'inventory.low_serial.100.count': (target) => `시리얼 100번 이하 카드 ${target.toLocaleString()}장 보유`,
   'inventory.locked_count': (target) => `잠금 카드 ${target.toLocaleString()}장 보유`,
   'inventory.hidden_count': (target) => `숨김 카드 ${target.toLocaleString()}장 보유`,
   'inventory.favorite_count': (target) => `즐겨찾기 카드 ${target.toLocaleString()}장 설정`,
+  'inventory.cosmetic_equipped_count': (target) => `코스메틱 장착 슬롯 ${target.toLocaleString()}개 사용`,
+  'inventory.border_equipped_count': (target) => `테두리 코스메틱 ${target.toLocaleString()}개 장착`,
+  'inventory.name_effect_equipped_count': (target) => `이름 이펙트 ${target.toLocaleString()}개 장착`,
   'user.title_count': (target) => `칭호 ${target.toLocaleString()}개 보유`,
   'user.cosmetic_count': (target) => `코스메틱 ${target.toLocaleString()}개 보유`,
-  'user.point_balance': (target) => `${target.toLocaleString()}P 보유`
+  'user.unique_cosmetic_count': (target) => `서로 다른 코스메틱 ${target.toLocaleString()}종 보유`,
+  'user.border_cosmetic_count': (target) => `테두리 코스메틱 ${target.toLocaleString()}개 보유`,
+  'user.name_effect_cosmetic_count': (target) => `이름 이펙트 ${target.toLocaleString()}개 보유`,
+  'user.point_balance': (target) => `${target.toLocaleString()}P 보유`,
+  'user.free_draw_ticket_balance': (target) => `무료 소환권 ${target.toLocaleString()}장 보유`,
+  'user.bonus_free_draw_ticket_balance': (target) => `추가 무료 소환권 ${target.toLocaleString()}장 보유`,
+  'user.minigame_ticket_balance': (target) => `미니게임 티켓 ${target.toLocaleString()}장 보유`,
+  'user.account_age_days': (target) => `가입 후 ${target.toLocaleString()}일 경과`,
+  'market.active_listing_count': (target) => `마켓 판매 등록 ${target.toLocaleString()}건 유지`,
+  'market.active_fixed_listing_count': (target) => `마켓 고정가 판매 등록 ${target.toLocaleString()}건 유지`,
+  'market.active_auction_listing_count': (target) => `마켓 경매 등록 ${target.toLocaleString()}건 유지`,
+  'market.sold_listing_count': (target) => `마켓 판매 완료 ${target.toLocaleString()}건 달성`,
+  'market.bought_listing_count': (target) => `마켓 구매 완료 ${target.toLocaleString()}건 달성`,
+  'market.active_bid_count': (target) => `진행 중인 경매 입찰 ${target.toLocaleString()}건 보유`,
+  'market.watch_count': (target) => `마켓 관심 알림 ${target.toLocaleString()}개 설정`,
+  'shop.unique_purchase_count': (target) => `서로 다른 상점 아이템 ${target.toLocaleString()}종 구매`,
+  'coupon.redeemed_unique_count': (target) => `서로 다른 쿠폰 ${target.toLocaleString()}개 사용`,
+  'community.friend_count': (target) => `친구 ${target.toLocaleString()}명 보유`
 };
 
 const formatCondition = (condition: { metric: string; target: number }) => {
@@ -219,6 +285,85 @@ const compactMetadata = (metadata: Record<string, unknown> | null | undefined) =
     else if (typeof value === 'number' || typeof value === 'boolean') out[key] = value;
   }
   return out;
+};
+
+const uniquePositiveIds = (ids: number[]) =>
+  Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0).map((id) => Math.floor(id))));
+
+const loadAchievementRewardLabels = async (rewardGroups: AchievementReward[][]) => {
+  const cosmeticIds = uniquePositiveIds(rewardGroups.flatMap((rewards) =>
+    rewards.map((reward) => reward.type === 'cosmetic' ? Number(reward.item_id || 0) : 0)
+  ));
+  const titleIds = uniquePositiveIds(rewardGroups.flatMap((rewards) =>
+    rewards.map((reward) => reward.type === 'title' ? Number(reward.title_id || 0) : 0)
+  ));
+  const cosmeticNames = new Map<number, string>();
+  const titleNames = new Map<number, string>();
+
+  try {
+    if (getDbMode() === 'LOCAL_SQL') {
+      const db = getSqliteDb();
+      if (cosmeticIds.length > 0) {
+        const placeholders = cosmeticIds.map(() => '?').join(',');
+        const rows = db.prepare(`SELECT id, name FROM shop_items WHERE id IN (${placeholders})`).all(...cosmeticIds) as any[];
+        rows.forEach((row) => cosmeticNames.set(Number(row.id), String(row.name || `아이템#${row.id}`)));
+      }
+      if (titleIds.length > 0) {
+        const placeholders = titleIds.map(() => '?').join(',');
+        const rows = db.prepare(`SELECT id, name FROM titles WHERE id IN (${placeholders})`).all(...titleIds) as any[];
+        rows.forEach((row) => titleNames.set(Number(row.id), String(row.name || `칭호#${row.id}`)));
+      }
+    } else if (getDbMode() === 'MYSQL') {
+      const db = getMysqlDb();
+      if (cosmeticIds.length > 0) {
+        const placeholders = cosmeticIds.map(() => '?').join(',');
+        const rows = await db.all(`SELECT id, name FROM shop_items WHERE id IN (${placeholders})`, cosmeticIds);
+        rows.forEach((row: any) => cosmeticNames.set(Number(row.id), String(row.name || `아이템#${row.id}`)));
+      }
+      if (titleIds.length > 0) {
+        const placeholders = titleIds.map(() => '?').join(',');
+        const rows = await db.all(`SELECT id, name FROM titles WHERE id IN (${placeholders})`, titleIds);
+        rows.forEach((row: any) => titleNames.set(Number(row.id), String(row.name || `칭호#${row.id}`)));
+      }
+    } else {
+      const client = getSupabaseClient();
+      if (cosmeticIds.length > 0) {
+        const { data, error } = await client.from('shop_items').select('id,name').in('id', cosmeticIds);
+        if (!error) (data || []).forEach((row: any) => cosmeticNames.set(Number(row.id), String(row.name || `아이템#${row.id}`)));
+      }
+      if (titleIds.length > 0) {
+        const { data, error } = await client.from('titles').select('id,name').in('id', titleIds);
+        if (!error) (data || []).forEach((row: any) => titleNames.set(Number(row.id), String(row.name || `칭호#${row.id}`)));
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Achievement] 보상 라벨 조회 실패:', err?.message || err);
+  }
+
+  return { cosmeticNames, titleNames };
+};
+
+const applyAchievementRewardLabels = (
+  rewards: AchievementReward[],
+  labels: Awaited<ReturnType<typeof loadAchievementRewardLabels>>
+): AchievementReward[] => rewards.map((reward) => {
+  if (reward.type === 'cosmetic') {
+    const label = reward.label || labels.cosmeticNames.get(Number(reward.item_id));
+    return label ? { ...reward, label } : reward;
+  }
+  if (reward.type === 'title') {
+    const label = reward.label || labels.titleNames.get(Number(reward.title_id));
+    return label ? { ...reward, label } : reward;
+  }
+  return reward;
+});
+
+const enrichAchievementsWithRewardLabels = async (achievements: Achievement[]): Promise<Achievement[]> => {
+  const labels = await loadAchievementRewardLabels(achievements.map((achievement) => achievement.rewards_json || []));
+  return achievements.map((achievement) => ({
+    ...achievement,
+    rewards_json: applyAchievementRewardLabels(achievement.rewards_json || [], labels)
+  }));
 };
 
 let sqliteReady: object | null = null;
@@ -577,6 +722,11 @@ export const ensureAchievementTables = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_achievements_active_sort ON achievements(is_active, sort_order);
       CREATE INDEX IF NOT EXISTS idx_achievements_category_active ON achievements(category, is_active);
     `);
+    try {
+      db.prepare('SELECT revoked_at FROM achievement_grant_logs LIMIT 1').get();
+    } catch {
+      db.exec('ALTER TABLE achievement_grant_logs ADD COLUMN revoked_at TEXT;');
+    }
     sqliteReady = db;
     await seedDefaultAchievements();
     return;
@@ -670,6 +820,11 @@ export const ensureAchievementTables = async (): Promise<void> => {
         UNIQUE KEY uniq_achievement_grant (user_id, achievement_id, repeat_key)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    try {
+      await db.run('ALTER TABLE achievement_grant_logs ADD COLUMN revoked_at DATETIME NULL AFTER error_message');
+    } catch (err: any) {
+      if (err?.code !== 'ER_DUP_FIELDNAME' && !String(err?.message || '').includes('Duplicate column')) throw err;
+    }
     await db.run(`
       CREATE TABLE IF NOT EXISTS achievement_evaluation_queue (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -799,28 +954,48 @@ export const validateAchievementPayload = (payload: any): { ok: true; normalized
   const rewards = safeJsonParse<AchievementReward[]>(payload.rewards_json, payload.rewards_json || []);
   if (!Array.isArray(rewards) || rewards.length > 8) return { ok: false, message: '업적 보상은 최대 8개까지 설정할 수 있습니다.' };
   let economicRisk = 0;
+  const normalizedRewards: AchievementReward[] = [];
   for (const reward of rewards) {
     if (!reward || typeof reward !== 'object') return { ok: false, message: '업적 보상 형식이 올바르지 않습니다.' };
     if (reward.type === 'point') {
       const points = Math.floor(Number(reward.points));
       if (!Number.isFinite(points) || points <= 0 || points > 10_000_000) return { ok: false, message: '포인트 보상은 1~10,000,000 범위여야 합니다.' };
+      if ((reward as any).revoke_when_unmet === true) return { ok: false, message: '조건 미달 시 회수는 코스메틱 또는 칭호 보상에만 사용할 수 있습니다.' };
       economicRisk += points;
+      normalizedRewards.push({ type: 'point', points, ...(reward.label ? { label: String(reward.label).slice(0, 120) } : {}) });
     } else if (reward.type === 'card') {
       if (!String((reward as any).channel_id || '').trim()) return { ok: false, message: '카드 보상은 스트리머 채널 ID가 필요합니다.' };
       const qty = Math.floor(Number((reward as any).quantity));
       if (!Number.isFinite(qty) || qty <= 0 || qty > 100) return { ok: false, message: '카드 보상 수량은 1~100 범위여야 합니다.' };
+      if ((reward as any).revoke_when_unmet === true) return { ok: false, message: '조건 미달 시 회수는 코스메틱 또는 칭호 보상에만 사용할 수 있습니다.' };
       economicRisk += 50_000 * qty;
+      normalizedRewards.push({ type: 'card', channel_id: String((reward as any).channel_id).trim(), quantity: qty, ...(reward.label ? { label: String(reward.label).slice(0, 120) } : {}) });
     } else if (reward.type === 'cosmetic') {
       const itemId = Math.floor(Number((reward as any).item_id));
       const qty = Math.floor(Number((reward as any).quantity));
       if (!itemId || qty <= 0 || qty > 100) return { ok: false, message: '코스메틱 보상은 아이템과 1~100 수량이 필요합니다.' };
+      normalizedRewards.push({
+        type: 'cosmetic',
+        item_id: itemId,
+        quantity: qty,
+        ...(reward.label ? { label: String(reward.label).slice(0, 120) } : {}),
+        ...((reward as any).revoke_when_unmet === true ? { revoke_when_unmet: true } : {})
+      });
     } else if (reward.type === 'minigame_ticket' || reward.type === 'free_draw_ticket') {
       const qty = Math.floor(Number((reward as any).quantity));
       if (!Number.isFinite(qty) || qty <= 0 || qty > 100) return { ok: false, message: '티켓 보상 수량은 1~100 범위여야 합니다.' };
+      if ((reward as any).revoke_when_unmet === true) return { ok: false, message: '조건 미달 시 회수는 코스메틱 또는 칭호 보상에만 사용할 수 있습니다.' };
       economicRisk += reward.type === 'free_draw_ticket' ? 10_000 * qty : 1_000 * qty;
+      normalizedRewards.push({ type: reward.type, quantity: qty, ...(reward.label ? { label: String(reward.label).slice(0, 120) } : {}) } as AchievementReward);
     } else if (reward.type === 'title') {
       const titleId = Math.floor(Number((reward as any).title_id));
       if (!titleId) return { ok: false, message: '칭호 보상은 title_id가 필요합니다.' };
+      normalizedRewards.push({
+        type: 'title',
+        title_id: titleId,
+        ...(reward.label ? { label: String(reward.label).slice(0, 120) } : {}),
+        ...((reward as any).revoke_when_unmet === true ? { revoke_when_unmet: true } : {})
+      });
     } else {
       return { ok: false, message: '지원하지 않는 업적 보상 타입입니다.' };
     }
@@ -853,7 +1028,7 @@ export const validateAchievementPayload = (payload: any): { ok: true; normalized
       claim_policy: claimPolicy,
       progress_mode: progressMode,
       criteria_json: criteria,
-      rewards_json: rewards
+      rewards_json: normalizedRewards
     }
   };
 };
@@ -951,28 +1126,108 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
     const cardStats = db.prepare(`
       SELECT COUNT(*) AS card_count,
              COUNT(DISTINCT channel_id) AS unique_streamer_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 0 THEN 1 ELSE 0 END) AS star0_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 1 THEN 1 ELSE 0 END) AS star1_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 2 THEN 1 ELSE 0 END) AS star2_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 3 THEN 1 ELSE 0 END) AS star3_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 4 THEN 1 ELSE 0 END) AS star4_count,
              SUM(CASE WHEN COALESCE(star, 0) = 5 THEN 1 ELSE 0 END) AS star5_count,
+             COALESCE(SUM(COALESCE(star, 0)), 0) AS total_star_sum,
+             COUNT(DISTINCT COALESCE(star, 0)) AS unique_star_level_count,
+             SUM(CASE WHEN serial_number = 1 THEN 1 ELSE 0 END) AS low_serial_1_count,
+             SUM(CASE WHEN serial_number <= 10 THEN 1 ELSE 0 END) AS low_serial_10_count,
+             SUM(CASE WHEN serial_number <= 100 THEN 1 ELSE 0 END) AS low_serial_100_count,
              SUM(CASE WHEN COALESCE(is_locked, 0) = 1 THEN 1 ELSE 0 END) AS locked_count,
              SUM(CASE WHEN COALESCE(is_hidden, 0) = 1 THEN 1 ELSE 0 END) AS hidden_count,
-             SUM(CASE WHEN favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count
+             SUM(CASE WHEN favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count,
+             SUM(CASE WHEN border_item_id IS NOT NULL THEN 1 ELSE 0 END) AS border_equipped_count,
+             SUM(CASE WHEN name_effect_item_id IS NOT NULL THEN 1 ELSE 0 END) AS name_effect_equipped_count,
+             SUM(CASE WHEN border_item_id IS NOT NULL THEN 1 ELSE 0 END) + SUM(CASE WHEN name_effect_item_id IS NOT NULL THEN 1 ELSE 0 END) AS cosmetic_equipped_count
         FROM user_cards
        WHERE user_id = ?
     `).get(userId) as any;
     const titleStats = db.prepare('SELECT COUNT(*) AS c FROM user_titles WHERE user_id = ?').get(userId) as any;
-    const cosmeticStats = db.prepare('SELECT COALESCE(SUM(quantity), 0) AS c FROM user_cosmetics WHERE user_id = ?').get(userId) as any;
-    const user = db.prepare('SELECT point, representative_card_channel_id, status_message FROM users WHERE id = ?').get(userId) as any;
+    const cosmeticStats = db.prepare(`
+      SELECT COALESCE(SUM(uc.quantity), 0) AS c,
+             COUNT(DISTINCT uc.item_id) AS unique_count,
+             COALESCE(SUM(CASE WHEN si.type = 'border' THEN uc.quantity ELSE 0 END), 0) AS border_count,
+             COALESCE(SUM(CASE WHEN si.type = 'name_effect' THEN uc.quantity ELSE 0 END), 0) AS name_effect_count
+        FROM user_cosmetics uc
+        LEFT JOIN shop_items si ON si.id = uc.item_id
+       WHERE uc.user_id = ?
+    `).get(userId) as any;
+    const achievementStats = db.prepare(`
+      SELECT SUM(CASE WHEN status IN ('completed', 'claimed') THEN 1 ELSE 0 END) AS completed_count,
+             SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_count,
+             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS claimable_count
+        FROM user_achievements
+       WHERE user_id = ?
+    `).get(userId) as any;
+    const marketStats = db.prepare(`
+      SELECT SUM(CASE WHEN seller_id = ? AND status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
+             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count,
+             SUM(CASE WHEN current_bidder_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_bid_count
+        FROM market_listings
+    `).get(userId, userId, userId, userId, userId, userId) as any;
+    const watchStats = db.prepare('SELECT COUNT(*) AS c FROM market_watches WHERE user_id = ?').get(userId) as any;
+    const shopStats = db.prepare('SELECT COUNT(*) AS c FROM shop_purchases WHERE user_id = ?').get(userId) as any;
+    const couponStats = db.prepare('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?').get(userId) as any;
+    const friendStats = db.prepare('SELECT COUNT(*) AS c FROM friendships WHERE user_a_id = ? OR user_b_id = ?').get(userId, userId) as any;
+    const minigameTicketStats = db.prepare('SELECT COALESCE(current_tickets, 0) + COALESCE(bonus_tickets, 0) AS c FROM user_minigame_tickets WHERE user_id = ?').get(userId) as any;
+    const user = db.prepare(`
+      SELECT point, free_draw_tickets, bonus_free_draw_tickets, representative_card_channel_id, status_message,
+             CAST(MAX(0, julianday('now') - julianday(COALESCE(created_at, datetime('now')))) AS INTEGER) AS account_age_days
+        FROM users
+       WHERE id = ?
+    `).get(userId) as any;
     const stats: Record<string, number> = {
+      'achievement.completed_count': Number(achievementStats?.completed_count || 0),
+      'achievement.claimed_count': Number(achievementStats?.claimed_count || 0),
+      'achievement.claimable_count': Number(achievementStats?.claimable_count || 0),
       'inventory.card_count': Number(cardStats?.card_count || 0),
       'inventory.unique_streamer_count': Number(cardStats?.unique_streamer_count || 0),
+      'inventory.star.0.count': Number(cardStats?.star0_count || 0),
+      'inventory.star.1.count': Number(cardStats?.star1_count || 0),
+      'inventory.star.2.count': Number(cardStats?.star2_count || 0),
+      'inventory.star.3.count': Number(cardStats?.star3_count || 0),
+      'inventory.star.4.count': Number(cardStats?.star4_count || 0),
       'inventory.star.5.count': Number(cardStats?.star5_count || 0),
+      'inventory.total_star_sum': Number(cardStats?.total_star_sum || 0),
+      'inventory.unique_star_level_count': Number(cardStats?.unique_star_level_count || 0),
+      'inventory.low_serial.1.count': Number(cardStats?.low_serial_1_count || 0),
+      'inventory.low_serial.10.count': Number(cardStats?.low_serial_10_count || 0),
+      'inventory.low_serial.100.count': Number(cardStats?.low_serial_100_count || 0),
       'inventory.locked_count': Number(cardStats?.locked_count || 0),
       'inventory.hidden_count': Number(cardStats?.hidden_count || 0),
       'inventory.favorite_count': Number(cardStats?.favorite_count || 0),
+      'inventory.cosmetic_equipped_count': Number(cardStats?.cosmetic_equipped_count || 0),
+      'inventory.border_equipped_count': Number(cardStats?.border_equipped_count || 0),
+      'inventory.name_effect_equipped_count': Number(cardStats?.name_effect_equipped_count || 0),
       'user.title_count': Number(titleStats?.c || 0),
       'user.cosmetic_count': Number(cosmeticStats?.c || 0),
+      'user.unique_cosmetic_count': Number(cosmeticStats?.unique_count || 0),
+      'user.border_cosmetic_count': Number(cosmeticStats?.border_count || 0),
+      'user.name_effect_cosmetic_count': Number(cosmeticStats?.name_effect_count || 0),
       'user.point_balance': Number(user?.point || 0),
+      'user.free_draw_ticket_balance': Number(user?.free_draw_tickets || 0) + Number(user?.bonus_free_draw_tickets || 0),
+      'user.bonus_free_draw_ticket_balance': Number(user?.bonus_free_draw_tickets || 0),
+      'user.minigame_ticket_balance': Number(minigameTicketStats?.c || 0),
+      'user.account_age_days': Number(user?.account_age_days || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
-      'profile.status_message.set': user?.status_message ? 1 : 0
+      'profile.status_message.set': user?.status_message ? 1 : 0,
+      'market.active_listing_count': Number(marketStats?.active_listing_count || 0),
+      'market.active_fixed_listing_count': Number(marketStats?.active_fixed_listing_count || 0),
+      'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
+      'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
+      'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
+      'market.active_bid_count': Number(marketStats?.active_bid_count || 0),
+      'market.watch_count': Number(watchStats?.c || 0),
+      'shop.unique_purchase_count': Number(shopStats?.c || 0),
+      'coupon.redeemed_unique_count': Number(couponStats?.c || 0),
+      'community.friend_count': Number(friendStats?.c || 0)
     };
     const stmt = db.prepare(`
       INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
@@ -988,28 +1243,108 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
     const cardStats = await db.get(`
       SELECT COUNT(*) AS card_count,
              COUNT(DISTINCT channel_id) AS unique_streamer_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 0 THEN 1 ELSE 0 END) AS star0_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 1 THEN 1 ELSE 0 END) AS star1_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 2 THEN 1 ELSE 0 END) AS star2_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 3 THEN 1 ELSE 0 END) AS star3_count,
+             SUM(CASE WHEN COALESCE(star, 0) = 4 THEN 1 ELSE 0 END) AS star4_count,
              SUM(CASE WHEN COALESCE(star, 0) = 5 THEN 1 ELSE 0 END) AS star5_count,
+             COALESCE(SUM(COALESCE(star, 0)), 0) AS total_star_sum,
+             COUNT(DISTINCT COALESCE(star, 0)) AS unique_star_level_count,
+             SUM(CASE WHEN serial_number = 1 THEN 1 ELSE 0 END) AS low_serial_1_count,
+             SUM(CASE WHEN serial_number <= 10 THEN 1 ELSE 0 END) AS low_serial_10_count,
+             SUM(CASE WHEN serial_number <= 100 THEN 1 ELSE 0 END) AS low_serial_100_count,
              SUM(CASE WHEN COALESCE(is_locked, 0) = 1 THEN 1 ELSE 0 END) AS locked_count,
              SUM(CASE WHEN COALESCE(is_hidden, 0) = 1 THEN 1 ELSE 0 END) AS hidden_count,
-             SUM(CASE WHEN favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count
+             SUM(CASE WHEN favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count,
+             SUM(CASE WHEN border_item_id IS NOT NULL THEN 1 ELSE 0 END) AS border_equipped_count,
+             SUM(CASE WHEN name_effect_item_id IS NOT NULL THEN 1 ELSE 0 END) AS name_effect_equipped_count,
+             SUM(CASE WHEN border_item_id IS NOT NULL THEN 1 ELSE 0 END) + SUM(CASE WHEN name_effect_item_id IS NOT NULL THEN 1 ELSE 0 END) AS cosmetic_equipped_count
         FROM user_cards
        WHERE user_id = ?
     `, userId);
     const titleStats = await db.get('SELECT COUNT(*) AS c FROM user_titles WHERE user_id = ?', userId);
-    const cosmeticStats = await db.get('SELECT COALESCE(SUM(quantity), 0) AS c FROM user_cosmetics WHERE user_id = ?', userId);
-    const user = await db.get('SELECT point, representative_card_channel_id, status_message FROM users WHERE id = ?', userId);
+    const cosmeticStats = await db.get(`
+      SELECT COALESCE(SUM(uc.quantity), 0) AS c,
+             COUNT(DISTINCT uc.item_id) AS unique_count,
+             COALESCE(SUM(CASE WHEN si.type = 'border' THEN uc.quantity ELSE 0 END), 0) AS border_count,
+             COALESCE(SUM(CASE WHEN si.type = 'name_effect' THEN uc.quantity ELSE 0 END), 0) AS name_effect_count
+        FROM user_cosmetics uc
+        LEFT JOIN shop_items si ON si.id = uc.item_id
+       WHERE uc.user_id = ?
+    `, userId);
+    const achievementStats = await db.get(`
+      SELECT SUM(CASE WHEN status IN ('completed', 'claimed') THEN 1 ELSE 0 END) AS completed_count,
+             SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed_count,
+             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS claimable_count
+        FROM user_achievements
+       WHERE user_id = ?
+    `, userId);
+    const marketStats = await db.get(`
+      SELECT SUM(CASE WHEN seller_id = ? AND status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
+             SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
+             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count,
+             SUM(CASE WHEN current_bidder_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_bid_count
+        FROM market_listings
+    `, userId, userId, userId, userId, userId, userId);
+    const watchStats = await db.get('SELECT COUNT(*) AS c FROM market_watches WHERE user_id = ?', userId);
+    const shopStats = await db.get('SELECT COUNT(*) AS c FROM shop_purchases WHERE user_id = ?', userId);
+    const couponStats = await db.get('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?', userId);
+    const friendStats = await db.get('SELECT COUNT(*) AS c FROM friendships WHERE user_a_id = ? OR user_b_id = ?', userId, userId);
+    const minigameTicketStats = await db.get('SELECT COALESCE(current_tickets, 0) + COALESCE(bonus_tickets, 0) AS c FROM user_minigame_tickets WHERE user_id = ?', userId);
+    const user = await db.get(`
+      SELECT point, free_draw_tickets, bonus_free_draw_tickets, representative_card_channel_id, status_message,
+             GREATEST(0, TIMESTAMPDIFF(DAY, COALESCE(created_at, UTC_TIMESTAMP()), UTC_TIMESTAMP())) AS account_age_days
+        FROM users
+       WHERE id = ?
+    `, userId);
     const stats: Record<string, number> = {
+      'achievement.completed_count': Number(achievementStats?.completed_count || 0),
+      'achievement.claimed_count': Number(achievementStats?.claimed_count || 0),
+      'achievement.claimable_count': Number(achievementStats?.claimable_count || 0),
       'inventory.card_count': Number(cardStats?.card_count || 0),
       'inventory.unique_streamer_count': Number(cardStats?.unique_streamer_count || 0),
+      'inventory.star.0.count': Number(cardStats?.star0_count || 0),
+      'inventory.star.1.count': Number(cardStats?.star1_count || 0),
+      'inventory.star.2.count': Number(cardStats?.star2_count || 0),
+      'inventory.star.3.count': Number(cardStats?.star3_count || 0),
+      'inventory.star.4.count': Number(cardStats?.star4_count || 0),
       'inventory.star.5.count': Number(cardStats?.star5_count || 0),
+      'inventory.total_star_sum': Number(cardStats?.total_star_sum || 0),
+      'inventory.unique_star_level_count': Number(cardStats?.unique_star_level_count || 0),
+      'inventory.low_serial.1.count': Number(cardStats?.low_serial_1_count || 0),
+      'inventory.low_serial.10.count': Number(cardStats?.low_serial_10_count || 0),
+      'inventory.low_serial.100.count': Number(cardStats?.low_serial_100_count || 0),
       'inventory.locked_count': Number(cardStats?.locked_count || 0),
       'inventory.hidden_count': Number(cardStats?.hidden_count || 0),
       'inventory.favorite_count': Number(cardStats?.favorite_count || 0),
+      'inventory.cosmetic_equipped_count': Number(cardStats?.cosmetic_equipped_count || 0),
+      'inventory.border_equipped_count': Number(cardStats?.border_equipped_count || 0),
+      'inventory.name_effect_equipped_count': Number(cardStats?.name_effect_equipped_count || 0),
       'user.title_count': Number(titleStats?.c || 0),
       'user.cosmetic_count': Number(cosmeticStats?.c || 0),
+      'user.unique_cosmetic_count': Number(cosmeticStats?.unique_count || 0),
+      'user.border_cosmetic_count': Number(cosmeticStats?.border_count || 0),
+      'user.name_effect_cosmetic_count': Number(cosmeticStats?.name_effect_count || 0),
       'user.point_balance': Number(user?.point || 0),
+      'user.free_draw_ticket_balance': Number(user?.free_draw_tickets || 0) + Number(user?.bonus_free_draw_tickets || 0),
+      'user.bonus_free_draw_ticket_balance': Number(user?.bonus_free_draw_tickets || 0),
+      'user.minigame_ticket_balance': Number(minigameTicketStats?.c || 0),
+      'user.account_age_days': Number(user?.account_age_days || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
-      'profile.status_message.set': user?.status_message ? 1 : 0
+      'profile.status_message.set': user?.status_message ? 1 : 0,
+      'market.active_listing_count': Number(marketStats?.active_listing_count || 0),
+      'market.active_fixed_listing_count': Number(marketStats?.active_fixed_listing_count || 0),
+      'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
+      'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
+      'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
+      'market.active_bid_count': Number(marketStats?.active_bid_count || 0),
+      'market.watch_count': Number(watchStats?.c || 0),
+      'shop.unique_purchase_count': Number(shopStats?.c || 0),
+      'coupon.redeemed_unique_count': Number(couponStats?.c || 0),
+      'community.friend_count': Number(friendStats?.c || 0)
     };
     for (const [key, value] of Object.entries(stats)) {
       await db.run(`
@@ -1063,6 +1398,155 @@ export const incrementAchievementStats = async (userId: string, stats: Record<st
   }
 };
 
+const isRevocableReward = (reward: AchievementReward) =>
+  (reward.type === 'cosmetic' || reward.type === 'title') && reward.revoke_when_unmet === true;
+
+const hasRevocableRewards = (achievement: Achievement) =>
+  (achievement.rewards_json || []).some(isRevocableReward);
+
+const sameRewardTarget = (a: AchievementReward, b: AchievementReward) => {
+  if (a.type !== b.type) return false;
+  if (a.type === 'cosmetic' && b.type === 'cosmetic') return Number(a.item_id) === Number(b.item_id);
+  if (a.type === 'title' && b.type === 'title') return Number(a.title_id) === Number(b.title_id);
+  return false;
+};
+
+const revocableGrantedRewards = (achievement: Achievement, loggedRewards: AchievementReward[]) =>
+  loggedRewards.filter((logged) => {
+    if (logged.type !== 'cosmetic' && logged.type !== 'title') return false;
+    if ((logged as any).granted === false) return false;
+    return logged.revoke_when_unmet === true || (achievement.rewards_json || []).some((current) => isRevocableReward(current) && sameRewardTarget(current, logged));
+  });
+
+const revokeSqliteCosmeticReward = (db: any, userId: string, achievement: Achievement, reward: Extract<AchievementReward, { type: 'cosmetic' }>) => {
+  let remaining = Math.max(1, Math.trunc(Number(reward.quantity || 1)));
+  const itemId = Number(reward.item_id);
+  const owned = db.prepare('SELECT quantity FROM user_cosmetics WHERE user_id = ? AND item_id = ?').get(userId, itemId) as any;
+  const fromInventory = Math.min(remaining, Math.max(0, Number(owned?.quantity || 0)));
+  if (fromInventory > 0) {
+    const nextQty = Number(owned.quantity || 0) - fromInventory;
+    if (nextQty > 0) db.prepare('UPDATE user_cosmetics SET quantity = ? WHERE user_id = ? AND item_id = ?').run(nextQty, userId, itemId);
+    else db.prepare('DELETE FROM user_cosmetics WHERE user_id = ? AND item_id = ?').run(userId, itemId);
+    remaining -= fromInventory;
+  }
+  if (remaining > 0) {
+    const cards = db.prepare(`
+      SELECT id, border_item_id, name_effect_item_id
+        FROM user_cards
+       WHERE user_id = ?
+         AND (border_item_id = ? OR name_effect_item_id = ?)
+       ORDER BY id ASC
+       LIMIT ?
+    `).all(userId, itemId, itemId, remaining) as any[];
+    for (const card of cards) {
+      db.prepare(`
+        UPDATE user_cards
+           SET border_item_id = CASE WHEN border_item_id = ? THEN NULL ELSE border_item_id END,
+               name_effect_item_id = CASE WHEN name_effect_item_id = ? THEN NULL ELSE name_effect_item_id END
+         WHERE id = ?
+      `).run(itemId, itemId, card.id);
+    }
+  }
+  recordSqliteAssetEvent(db, {
+    userId,
+    assetType: 'cosmetic',
+    action: 'delete',
+    quantity: Math.max(1, Math.trunc(Number(reward.quantity || 1))),
+    sourceType: 'achievement',
+    sourceId: achievement.id,
+    reason: 'achievement_reward_revoked',
+    description: `업적 조건 미달로 보상 회수: ${achievement.name}`,
+    itemId
+  });
+};
+
+const revokeSqliteReward = (db: any, userId: string, achievement: Achievement, reward: AchievementReward) => {
+  if (reward.type === 'cosmetic') {
+    revokeSqliteCosmeticReward(db, userId, achievement, reward);
+  } else if (reward.type === 'title') {
+    const result = db.prepare("DELETE FROM user_titles WHERE user_id = ? AND title_id = ? AND grant_source = 'achievement'").run(userId, reward.title_id);
+    if (Number(result.changes || 0) > 0) {
+      recordSqliteAssetEvent(db, { userId, assetType: 'title', action: 'delete', quantity: 1, sourceType: 'achievement', sourceId: achievement.id, reason: 'achievement_reward_revoked', description: `업적 조건 미달로 보상 회수: ${achievement.name}`, itemId: reward.title_id });
+    }
+  }
+};
+
+const revokeSqliteRevocableRewards = (db: any, userId: string, achievement: Achievement, repeatKey: string): boolean => {
+  const log = db.prepare("SELECT * FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ? AND repeat_key = ? AND status = 'success'").get(userId, achievement.id, repeatKey) as any;
+  if (!log) return false;
+  const rewards = revocableGrantedRewards(achievement, safeJsonParse<AchievementReward[]>(log.reward_json, []));
+  if (rewards.length === 0) return false;
+  for (const reward of rewards) revokeSqliteReward(db, userId, achievement, reward);
+  db.prepare("UPDATE achievement_grant_logs SET status = 'revoked', revoked_at = datetime('now'), error_message = ? WHERE id = ?").run('condition_unmet', log.id);
+  return true;
+};
+
+const revokeMysqlCosmeticReward = async (tx: any, userId: string, achievement: Achievement, reward: Extract<AchievementReward, { type: 'cosmetic' }>) => {
+  let remaining = Math.max(1, Math.trunc(Number(reward.quantity || 1)));
+  const itemId = Number(reward.item_id);
+  const owned = await tx.get('SELECT quantity FROM user_cosmetics WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId);
+  const fromInventory = Math.min(remaining, Math.max(0, Number(owned?.quantity || 0)));
+  if (fromInventory > 0) {
+    const nextQty = Number(owned.quantity || 0) - fromInventory;
+    if (nextQty > 0) await tx.run('UPDATE user_cosmetics SET quantity = ? WHERE user_id = ? AND item_id = ?', nextQty, userId, itemId);
+    else await tx.run('DELETE FROM user_cosmetics WHERE user_id = ? AND item_id = ?', userId, itemId);
+    remaining -= fromInventory;
+  }
+  if (remaining > 0) {
+    const cards = await tx.all(`
+      SELECT id
+        FROM user_cards
+       WHERE user_id = ?
+         AND (border_item_id = ? OR name_effect_item_id = ?)
+       ORDER BY id ASC
+       LIMIT ?
+       FOR UPDATE
+    `, userId, itemId, itemId, remaining);
+    for (const card of cards) {
+      await tx.run(`
+        UPDATE user_cards
+           SET border_item_id = CASE WHEN border_item_id = ? THEN NULL ELSE border_item_id END,
+               name_effect_item_id = CASE WHEN name_effect_item_id = ? THEN NULL ELSE name_effect_item_id END
+         WHERE id = ?
+      `, itemId, itemId, card.id);
+    }
+  }
+  await recordMysqlAssetEvent(tx, {
+    userId,
+    assetType: 'cosmetic',
+    action: 'delete',
+    quantity: Math.max(1, Math.trunc(Number(reward.quantity || 1))),
+    sourceType: 'achievement',
+    sourceId: achievement.id,
+    reason: 'achievement_reward_revoked',
+    description: `업적 조건 미달로 보상 회수: ${achievement.name}`,
+    itemId
+  });
+};
+
+const revokeMysqlReward = async (tx: any, userId: string, achievement: Achievement, reward: AchievementReward) => {
+  if (reward.type === 'cosmetic') {
+    await revokeMysqlCosmeticReward(tx, userId, achievement, reward);
+  } else if (reward.type === 'title') {
+    const result = await tx.run("DELETE FROM user_titles WHERE user_id = ? AND title_id = ? AND grant_source = 'achievement'", userId, reward.title_id);
+    if (Number(result.changes || result.affectedRows || 0) > 0) {
+      await recordMysqlAssetEvent(tx, { userId, assetType: 'title', action: 'delete', quantity: 1, sourceType: 'achievement', sourceId: achievement.id, reason: 'achievement_reward_revoked', description: `업적 조건 미달로 보상 회수: ${achievement.name}`, itemId: reward.title_id });
+    }
+  }
+};
+
+const revokeMysqlRevocableRewards = async (userId: string, achievement: Achievement, repeatKey: string): Promise<boolean> => {
+  return getMysqlDb().transaction(async (tx) => {
+    const log = await tx.get("SELECT * FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ? AND repeat_key = ? AND status = 'success' FOR UPDATE", userId, achievement.id, repeatKey);
+    if (!log) return false;
+    const rewards = revocableGrantedRewards(achievement, safeJsonParse<AchievementReward[]>(log.reward_json, []));
+    if (rewards.length === 0) return false;
+    for (const reward of rewards) await revokeMysqlReward(tx, userId, achievement, reward);
+    await tx.run("UPDATE achievement_grant_logs SET status = 'revoked', revoked_at = UTC_TIMESTAMP(), error_message = ? WHERE id = ?", 'condition_unmet', log.id);
+    return true;
+  });
+};
+
 export const evaluateUserAchievements = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   await recomputeSnapshotStats(userId).catch(() => undefined);
@@ -1075,18 +1559,15 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
     const select = db.prepare('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?');
     const insert = db.prepare(`
       INSERT INTO user_achievements
-        (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, last_evaluated_at, repeat_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, claimed_at, last_evaluated_at, repeat_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, achievement_id, repeat_key) DO UPDATE SET
-        status = CASE
-          WHEN user_achievements.status = 'claimed' THEN user_achievements.status
-          WHEN user_achievements.status = 'completed' THEN user_achievements.status
-          ELSE excluded.status
-        END,
+        status = excluded.status,
         progress_current = excluded.progress_current,
         progress_target = excluded.progress_target,
         progress_json = excluded.progress_json,
-        completed_at = COALESCE(user_achievements.completed_at, excluded.completed_at),
+        completed_at = excluded.completed_at,
+        claimed_at = excluded.claimed_at,
         last_evaluated_at = excluded.last_evaluated_at
     `);
     const txn = db.transaction(() => {
@@ -1094,17 +1575,30 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
         if (!activeInWindow(achievement)) continue;
         const repeatKey = getRepeatKey(achievement);
         const current = select.get(userId, achievement.id, repeatKey) as any;
-        if (current?.status === 'claimed') continue;
+        const revocable = hasRevocableRewards(achievement);
+        if (current?.status === 'claimed' && !revocable) continue;
         const result = evaluateCriteria(achievement.criteria_json, stats);
         const status: AchievementStatus = result.complete ? 'completed' : (result.rawCurrent > 0 ? 'in_progress' : 'locked');
+        const wasClaimed = current?.status === 'claimed';
+        if (revocable && wasClaimed && !result.complete) {
+          revokeSqliteRevocableRewards(db, userId, achievement, repeatKey);
+        }
+        const nextStatus: AchievementStatus = revocable
+          ? (wasClaimed && result.complete ? 'claimed' : status)
+          : (current?.status === 'completed' ? 'completed' : status);
+        const nextCompletedAt = result.complete
+          ? (current?.completed_at || nowIso)
+          : (revocable ? null : current?.completed_at || null);
+        const nextClaimedAt = nextStatus === 'claimed' ? (current?.claimed_at || nowIso) : null;
         insert.run(
           userId,
           achievement.id,
-          current?.status === 'completed' ? 'completed' : status,
+          nextStatus,
           result.rawCurrent,
           result.target,
           JSON.stringify(result.details),
-          result.complete ? nowIso : null,
+          nextCompletedAt,
+          nextClaimedAt,
           nowIso,
           repeatKey
         );
@@ -1118,32 +1612,44 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
       if (!activeInWindow(achievement)) continue;
       const repeatKey = getRepeatKey(achievement);
       const current = await db.get('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?', userId, achievement.id, repeatKey);
-      if (current?.status === 'claimed') continue;
+      const revocable = hasRevocableRewards(achievement);
+      if (current?.status === 'claimed' && !revocable) continue;
       const result = evaluateCriteria(achievement.criteria_json, stats);
       const status: AchievementStatus = result.complete ? 'completed' : (result.rawCurrent > 0 ? 'in_progress' : 'locked');
+      const wasClaimed = current?.status === 'claimed';
+      if (revocable && wasClaimed && !result.complete) {
+        await revokeMysqlRevocableRewards(userId, achievement, repeatKey);
+      }
+      const nextStatus: AchievementStatus = revocable
+        ? (wasClaimed && result.complete ? 'claimed' : status)
+        : (current?.status === 'completed' ? 'completed' : status);
+      const nextCompletedAt = result.complete
+        ? (normalizeDateValue(current?.completed_at) ? toMysqlDateTime(current.completed_at) : nowMysql)
+        : (revocable ? null : toMysqlDateTime(current?.completed_at));
+      const nextClaimedAt = nextStatus === 'claimed'
+        ? (normalizeDateValue(current?.claimed_at) ? toMysqlDateTime(current.claimed_at) : nowMysql)
+        : null;
       await db.run(`
         INSERT INTO user_achievements
-          (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, last_evaluated_at, repeat_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, claimed_at, last_evaluated_at, repeat_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
-          status = CASE
-            WHEN status = 'claimed' THEN status
-            WHEN status = 'completed' THEN status
-            ELSE VALUES(status)
-          END,
+          status = VALUES(status),
           progress_current = VALUES(progress_current),
           progress_target = VALUES(progress_target),
           progress_json = VALUES(progress_json),
-          completed_at = COALESCE(completed_at, VALUES(completed_at)),
+          completed_at = VALUES(completed_at),
+          claimed_at = VALUES(claimed_at),
           last_evaluated_at = VALUES(last_evaluated_at)
       `,
         userId,
         achievement.id,
-        current?.status === 'completed' ? 'completed' : status,
+        nextStatus,
         result.rawCurrent,
         result.target,
         JSON.stringify(result.details),
-        result.complete ? nowMysql : null,
+        nextCompletedAt,
+        nextClaimedAt,
         nowMysql,
         repeatKey
       );
@@ -1163,18 +1669,23 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
       if (!activeInWindow(achievement)) continue;
       const repeatKey = getRepeatKey(achievement);
       const current = existingByKey.get(`${achievement.id}:${repeatKey}`);
-      if (current?.status === 'claimed') continue;
+      const revocable = hasRevocableRewards(achievement);
+      if (current?.status === 'claimed' && !revocable) continue;
       const result = evaluateCriteria(achievement.criteria_json, stats);
       const status: AchievementStatus = result.complete ? 'completed' : (result.rawCurrent > 0 ? 'in_progress' : 'locked');
+      const wasClaimed = current?.status === 'claimed';
+      const nextStatus: AchievementStatus = revocable
+        ? (wasClaimed && result.complete ? 'claimed' : status)
+        : (current?.status === 'completed' ? 'completed' : status);
       updates.push({
         user_id: userId,
         achievement_id: achievement.id,
-        status: current?.status === 'completed' ? 'completed' : status,
+        status: nextStatus,
         progress_current: result.rawCurrent,
         progress_target: result.target,
         progress_json: result.details,
-        completed_at: current?.completed_at || (result.complete ? nowIso : null),
-        claimed_at: current?.claimed_at || null,
+        completed_at: result.complete ? (current?.completed_at || nowIso) : (revocable ? null : current?.completed_at || null),
+        claimed_at: nextStatus === 'claimed' ? (current?.claimed_at || nowIso) : null,
         last_evaluated_at: nowIso,
         repeat_key: repeatKey
       });
@@ -1258,7 +1769,7 @@ export const listUserAchievements = async (
   options: { status?: string; category?: string; hidden?: string; sort?: string; limit?: number } = {}
 ): Promise<{ items: UserAchievementView[]; summary: Record<string, number> }> => {
   await evaluateUserAchievements(userId);
-  const achievements = await listAchievements();
+  const achievements = await enrichAchievementsWithRewardLabels(await listAchievements());
   let rows: any[] = [];
   if (getDbMode() === 'LOCAL_SQL') {
     rows = getSqliteDb().prepare('SELECT * FROM user_achievements WHERE user_id = ?').all(userId) as any[];
@@ -1362,6 +1873,8 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
   await ensureAchievementTables();
   const achievement = await findAchievementById(achievementId);
   if (!achievement) return { ok: false, reason: 'NOT_FOUND' };
+  const labels = await loadAchievementRewardLabels([achievement.rewards_json || []]);
+  const displayRewards = applyAchievementRewardLabels(achievement.rewards_json || [], labels);
   const repeatKey = getRepeatKey(achievement);
   const rewards = achievement.rewards_json || [];
   if (getDbMode() === 'LOCAL_SQL') {
@@ -1369,18 +1882,22 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
     const txn = db.transaction(() => {
       const state = db.prepare('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?').get(userId, achievementId, repeatKey) as any;
       if (!state || state.status !== 'completed') return { ok: false, reason: state?.status === 'claimed' ? 'ALREADY_CLAIMED' : 'NOT_COMPLETED' };
-      try {
+      const existingLog = db.prepare('SELECT status FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?').get(userId, achievementId, repeatKey) as any;
+      if (existingLog?.status === 'success') return { ok: false, reason: 'ALREADY_CLAIMED' };
+      if (existingLog) {
+        db.prepare("UPDATE achievement_grant_logs SET reward_json = '[]', status = 'pending', error_message = NULL, revoked_at = NULL WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?")
+          .run(userId, achievementId, repeatKey);
+      } else {
         db.prepare('INSERT INTO achievement_grant_logs (user_id, achievement_id, repeat_key, reward_json, status) VALUES (?, ?, ?, ?, ?)')
-          .run(userId, achievementId, repeatKey, JSON.stringify(rewards), 'success');
-      } catch (err: any) {
-        if (err?.code?.startsWith?.('SQLITE_CONSTRAINT')) return { ok: false, reason: 'ALREADY_CLAIMED' };
-        throw err;
+          .run(userId, achievementId, repeatKey, '[]', 'pending');
       }
-      for (const reward of rewards) grantSqliteReward(db, userId, achievement, repeatKey, reward);
+      const grantedRewards = rewards.map((reward) => grantSqliteReward(db, userId, achievement, repeatKey, reward));
+      db.prepare("UPDATE achievement_grant_logs SET reward_json = ?, status = 'success', error_message = NULL, revoked_at = NULL WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?")
+        .run(JSON.stringify(grantedRewards), userId, achievementId, repeatKey);
       db.prepare("UPDATE user_achievements SET status = 'claimed', claimed_at = datetime('now') WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?")
         .run(userId, achievementId, repeatKey);
       const user = db.prepare('SELECT point FROM users WHERE id = ?').get(userId) as any;
-      return { ok: true, reason: 'OK', rewards, new_points: Number(user?.point || 0) };
+      return { ok: true, reason: 'OK', rewards: displayRewards, new_points: Number(user?.point || 0) };
     });
     const result = txn();
     if (result.ok) {
@@ -1398,12 +1915,19 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
     const result = await getMysqlDb().transaction(async (tx) => {
       const state = await tx.get('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ? FOR UPDATE', userId, achievementId, repeatKey);
       if (!state || state.status !== 'completed') return { ok: false, reason: state?.status === 'claimed' ? 'ALREADY_CLAIMED' : 'NOT_COMPLETED' };
-      const inserted = await tx.run('INSERT IGNORE INTO achievement_grant_logs (user_id, achievement_id, repeat_key, reward_json, status) VALUES (?, ?, ?, ?, ?)', userId, achievementId, repeatKey, JSON.stringify(rewards), 'success');
-      if (inserted.changes === 0) return { ok: false, reason: 'ALREADY_CLAIMED' };
-      for (const reward of rewards) await grantMysqlReward(tx, userId, achievement, repeatKey, reward);
+      const existingLog = await tx.get('SELECT status FROM achievement_grant_logs WHERE user_id = ? AND achievement_id = ? AND repeat_key = ? FOR UPDATE', userId, achievementId, repeatKey);
+      if (existingLog?.status === 'success') return { ok: false, reason: 'ALREADY_CLAIMED' };
+      if (existingLog) {
+        await tx.run("UPDATE achievement_grant_logs SET reward_json = ?, status = 'pending', error_message = NULL, revoked_at = NULL WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?", JSON.stringify([]), userId, achievementId, repeatKey);
+      } else {
+        await tx.run('INSERT INTO achievement_grant_logs (user_id, achievement_id, repeat_key, reward_json, status) VALUES (?, ?, ?, ?, ?)', userId, achievementId, repeatKey, JSON.stringify([]), 'pending');
+      }
+      const grantedRewards: AchievementReward[] = [];
+      for (const reward of rewards) grantedRewards.push(await grantMysqlReward(tx, userId, achievement, repeatKey, reward));
+      await tx.run("UPDATE achievement_grant_logs SET reward_json = ?, status = 'success', error_message = NULL, revoked_at = NULL WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?", JSON.stringify(grantedRewards), userId, achievementId, repeatKey);
       await tx.run("UPDATE user_achievements SET status = 'claimed', claimed_at = UTC_TIMESTAMP() WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?", userId, achievementId, repeatKey);
       const user = await tx.get('SELECT point FROM users WHERE id = ?', userId);
-      return { ok: true, reason: 'OK', rewards, new_points: Number(user?.point || 0) };
+      return { ok: true, reason: 'OK', rewards: displayRewards, new_points: Number(user?.point || 0) };
     });
     if (result.ok) {
       notificationRepository.create({
@@ -1421,11 +1945,11 @@ export const claimAchievementReward = async (userId: string, achievementId: numb
 
 const rewardSourceId = (achievement: Achievement, repeatKey: string) => `${achievement.code}:${repeatKey}`;
 
-const grantSqliteReward = (db: any, userId: string, achievement: Achievement, repeatKey: string, reward: AchievementReward) => {
+const grantSqliteReward = (db: any, userId: string, achievement: Achievement, repeatKey: string, reward: AchievementReward): AchievementReward => {
   const sourceId = rewardSourceId(achievement, repeatKey);
   if (reward.type === 'point') {
     const points = Math.trunc(Number(reward.points || 0));
-    if (points <= 0) return;
+    if (points <= 0) return reward;
     db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(points, userId);
     recordSqlitePointLedger(db, {
       userId,
@@ -1479,19 +2003,24 @@ const grantSqliteReward = (db: any, userId: string, achievement: Achievement, re
     db.prepare('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?').run(quantity, userId);
     recordSqliteAssetEvent(db, { userId, assetType: 'ticket', action: 'add', quantity, sourceType: 'achievement', sourceId, reason: 'achievement_free_draw_ticket_reward', description: `업적 보상: ${achievement.name}`, itemType: 'free_draw_ticket' });
   } else if (reward.type === 'title') {
-    db.prepare(`
+    const result = db.prepare(`
       INSERT INTO user_titles (user_id, title_id, grant_source) VALUES (?, ?, ?)
       ON CONFLICT(user_id, title_id) DO NOTHING
     `).run(userId, reward.title_id, 'achievement');
-    recordSqliteAssetEvent(db, { userId, assetType: 'title', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_title_reward', description: `업적 보상: ${achievement.name}`, itemId: reward.title_id });
+    const granted = Number(result.changes || 0) > 0;
+    if (granted) {
+      recordSqliteAssetEvent(db, { userId, assetType: 'title', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_title_reward', description: `업적 보상: ${achievement.name}`, itemId: reward.title_id });
+    }
+    return { ...reward, granted };
   }
+  return reward;
 };
 
-const grantMysqlReward = async (tx: any, userId: string, achievement: Achievement, repeatKey: string, reward: AchievementReward) => {
+const grantMysqlReward = async (tx: any, userId: string, achievement: Achievement, repeatKey: string, reward: AchievementReward): Promise<AchievementReward> => {
   const sourceId = rewardSourceId(achievement, repeatKey);
   if (reward.type === 'point') {
     const points = Math.trunc(Number(reward.points || 0));
-    if (points <= 0) return;
+    if (points <= 0) return reward;
     await tx.run('UPDATE users SET point = point + ? WHERE id = ?', points, userId);
     await recordMysqlPointLedger(tx, {
       userId,
@@ -1530,9 +2059,14 @@ const grantMysqlReward = async (tx: any, userId: string, achievement: Achievemen
     await tx.run('UPDATE users SET bonus_free_draw_tickets = COALESCE(bonus_free_draw_tickets, 0) + ? WHERE id = ?', quantity, userId);
     await recordMysqlAssetEvent(tx, { userId, assetType: 'ticket', action: 'add', quantity, sourceType: 'achievement', sourceId, reason: 'achievement_free_draw_ticket_reward', description: `업적 보상: ${achievement.name}`, itemType: 'free_draw_ticket' });
   } else if (reward.type === 'title') {
-    await tx.run('INSERT IGNORE INTO user_titles (user_id, title_id, grant_source) VALUES (?, ?, ?)', userId, reward.title_id, 'achievement');
-    await recordMysqlAssetEvent(tx, { userId, assetType: 'title', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_title_reward', description: `업적 보상: ${achievement.name}`, itemId: reward.title_id });
+    const result = await tx.run('INSERT IGNORE INTO user_titles (user_id, title_id, grant_source) VALUES (?, ?, ?)', userId, reward.title_id, 'achievement');
+    const granted = Number(result.changes || result.affectedRows || 0) > 0;
+    if (granted) {
+      await recordMysqlAssetEvent(tx, { userId, assetType: 'title', action: 'add', quantity: 1, sourceType: 'achievement', sourceId, reason: 'achievement_title_reward', description: `업적 보상: ${achievement.name}`, itemId: reward.title_id });
+    }
+    return { ...reward, granted };
   }
+  return reward;
 };
 
 export const createAchievement = async (payload: any, createdBy: string | null) => {
@@ -1598,7 +2132,7 @@ export const updateAchievement = async (id: number, payload: any) => {
 
 export const adminListAchievementProgress = async () => {
   await ensureAchievementTables();
-  const achievements = await listAchievements({ includeInactive: true });
+  const achievements = await enrichAchievementsWithRewardLabels(await listAchievements({ includeInactive: true }));
   let rows: any[] = [];
   if (getDbMode() === 'LOCAL_SQL') {
     rows = getSqliteDb().prepare(`

@@ -55,13 +55,14 @@ const tierStyles: Record<string, string> = {
 
 const rewardText = (reward: AchievementReward) => {
   const quantity = Number(reward.quantity || 0);
+  const suffix = reward.revoke_when_unmet ? ' (유지 중)' : '';
   if (reward.type === 'point') return `${Number(reward.points || 0).toLocaleString()}P`;
-  if (reward.type === 'card') return `카드 x${quantity.toLocaleString()}`;
-  if (reward.type === 'cosmetic') return `코스메틱 x${quantity.toLocaleString()}`;
-  if (reward.type === 'minigame_ticket') return `미니게임 티켓 x${quantity.toLocaleString()}`;
-  if (reward.type === 'free_draw_ticket') return `무료 소환권 x${quantity.toLocaleString()}`;
-  if (reward.type === 'title') return '칭호';
-  return '보상';
+  if (reward.type === 'card') return `${reward.label || '스트리머 카드'} ${quantity.toLocaleString()}장`;
+  if (reward.type === 'cosmetic') return `${reward.label || '코스메틱'} ${quantity.toLocaleString()}개${suffix}`;
+  if (reward.type === 'minigame_ticket') return `미니게임 티켓 ${quantity.toLocaleString()}장`;
+  if (reward.type === 'free_draw_ticket') return `무료 소환권 ${quantity.toLocaleString()}장`;
+  if (reward.type === 'title') return `${reward.label || '칭호'} 칭호${suffix}`;
+  return `보상${suffix}`;
 };
 
 const AchievementIcon = ({ item }: { item: UserAchievement }) => {

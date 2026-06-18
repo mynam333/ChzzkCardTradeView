@@ -169,7 +169,7 @@ html.easter-egg-mode body::after {
   z-index: 80;
   background:
     linear-gradient(rgba(255, 255, 255, 0.035) 50%, rgba(0, 0, 0, 0.025) 50%),
-    radial-gradient(circle at 50% 20%, rgba(var(--easter-egg-glow), 0.14), transparent 42%);
+    repeating-linear-gradient(90deg, transparent 0 44px, rgba(var(--easter-egg-glow), 0.05) 44px 45px);
   background-size: 100% 4px, 100% 100%;
   mix-blend-mode: soft-light;
 }
@@ -194,6 +194,7 @@ html.easter-egg-mode .card-container {
 
 .lost-card-scene {
   perspective: 1100px;
+  filter: drop-shadow(0 28px 54px rgba(8, 47, 73, 0.28));
 }
 
 .lost-card {
@@ -227,6 +228,20 @@ html.easter-egg-mode .card-container {
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
+.lost-card-face::after {
+  content: "";
+  position: absolute;
+  left: -18%;
+  right: -18%;
+  top: 2.2rem;
+  height: 2.4rem;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 9px, rgba(255, 255, 255, 0.06) 9px 18px);
+  opacity: 0.9;
+  transform: rotate(-12deg);
+}
+
 .lost-card-face::before {
   content: "";
   position: absolute;
@@ -253,7 +268,176 @@ html.easter-egg-mode .card-container {
 
 .lost-card-face > * {
   position: relative;
+  z-index: 2;
+}
+
+.lost-card-ribbon {
+  align-self: flex-start;
+  border: 1px solid rgba(204, 251, 241, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 0.35rem 0.75rem;
+  color: rgba(204, 251, 241, 0.86);
+  font-size: 0.625rem;
+  font-weight: 1000;
+  letter-spacing: 0.2em;
+}
+
+.lost-path-receipt {
+  border: 1px dashed color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 1.35rem;
+  background:
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--card) 88%, transparent) 0 10px, color-mix(in srgb, var(--secondary) 42%, transparent) 10px 11px),
+    color-mix(in srgb, var(--card) 82%, white 18%);
+  padding: 0.85rem 1rem;
+  box-shadow: 0 12px 26px rgba(43, 151, 219, 0.1);
+}
+
+.dark .lost-path-receipt {
+  background:
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--card) 88%, transparent) 0 10px, rgba(67, 228, 210, 0.04) 10px 11px),
+    color-mix(in srgb, var(--card) 88%, black 12%);
+}
+
+.easter-live-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid rgba(153, 246, 228, 0.62);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 47, 73, 0.92));
+  padding: 0.42rem 0.6rem 0.42rem 0.45rem;
+  color: #ccfbf1;
+  box-shadow:
+    0 18px 50px rgba(20, 184, 166, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.easter-modal-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: 1.65rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 94%, white 6%), color-mix(in srgb, var(--card) 86%, var(--secondary) 14%));
+  padding: 1.25rem;
+  box-shadow:
+    0 26px 78px rgba(7, 89, 133, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.dark .easter-modal-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 94%, white 3%), color-mix(in srgb, var(--card) 82%, #061827 18%));
+  box-shadow:
+    0 26px 78px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.easter-modal-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 22px, color-mix(in srgb, var(--primary) 7%, transparent) 22px 23px),
+    linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.28) 48%, transparent 58%);
+  opacity: 0.42;
+}
+
+.easter-modal-card > * {
+  position: relative;
   z-index: 1;
+}
+
+.easter-icon-tile {
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary) 12%, var(--card)), color-mix(in srgb, var(--accent) 52%, var(--card)));
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--primary) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.58);
+}
+
+.easter-status-chip {
+  border: 1px solid color-mix(in srgb, var(--border) 78%, white 12%);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--card) 72%, var(--secondary) 28%);
+  padding: 0.65rem 0.75rem;
+}
+
+.easter-status-chip span {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.56rem;
+  letter-spacing: 0.16em;
+}
+
+.easter-status-chip b {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--foreground);
+}
+
+.easter-terminal-log,
+.easter-terminal-ticket {
+  border: 1px solid rgba(153, 246, 228, 0.28);
+  border-radius: 1.25rem;
+  background:
+    repeating-linear-gradient(0deg, rgba(45, 212, 191, 0.07) 0 1px, transparent 1px 8px),
+    linear-gradient(145deg, #031525, #062f3e 58%, #064e3b);
+  color: #ccfbf1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.69rem;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.easter-terminal-log {
+  padding: 0.85rem 1rem;
+}
+
+.easter-terminal-log span {
+  margin-right: 0.55rem;
+  color: rgba(153, 246, 228, 0.55);
+}
+
+.easter-terminal-ticket {
+  padding: 1.1rem;
+  box-shadow: 0 24px 74px rgba(3, 21, 37, 0.44);
+}
+
+.easter-fortune-ticket {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, white 10%);
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 86%, white 14%), color-mix(in srgb, var(--secondary) 56%, var(--card) 44%));
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+.easter-fortune-ticket::before,
+.easter-fortune-ticket::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 76%, var(--secondary) 24%);
+  transform: translateY(-50%);
+}
+
+.easter-fortune-ticket::before {
+  left: -0.5rem;
+}
+
+.easter-fortune-ticket::after {
+  right: -0.5rem;
 }
 
 @keyframes easterEggLogoPulse {

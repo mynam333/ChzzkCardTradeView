@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Award, Edit3, Eye, EyeOff, Gift, Plus, RefreshCw, Save } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useApp } from './AppContext';
-import type { AchievementCategory, AchievementReward, AchievementRewardType, AchievementTier, AdminAchievement, UserTitle } from '@/lib/types';
+import type { AchievementCategory, AchievementReward, AchievementRewardType, AchievementTier, AdminAchievement, ShopItem, UserTitle } from '@/lib/types';
 
 type ConditionForm = { metric: string; target: number };
 
@@ -33,15 +33,48 @@ const metricOptions = [
   'coupon.claim.count',
   'profile.representative.set',
   'profile.status_message.set',
+  'achievement.completed_count',
+  'achievement.claimed_count',
+  'achievement.claimable_count',
   'inventory.card_count',
   'inventory.unique_streamer_count',
+  'inventory.star.0.count',
+  'inventory.star.1.count',
+  'inventory.star.2.count',
+  'inventory.star.3.count',
+  'inventory.star.4.count',
   'inventory.star.5.count',
+  'inventory.total_star_sum',
+  'inventory.unique_star_level_count',
+  'inventory.low_serial.1.count',
+  'inventory.low_serial.10.count',
+  'inventory.low_serial.100.count',
   'inventory.locked_count',
   'inventory.hidden_count',
   'inventory.favorite_count',
+  'inventory.cosmetic_equipped_count',
+  'inventory.border_equipped_count',
+  'inventory.name_effect_equipped_count',
   'user.title_count',
   'user.cosmetic_count',
-  'user.point_balance'
+  'user.unique_cosmetic_count',
+  'user.border_cosmetic_count',
+  'user.name_effect_cosmetic_count',
+  'user.point_balance',
+  'user.free_draw_ticket_balance',
+  'user.bonus_free_draw_ticket_balance',
+  'user.minigame_ticket_balance',
+  'user.account_age_days',
+  'market.active_listing_count',
+  'market.active_fixed_listing_count',
+  'market.active_auction_listing_count',
+  'market.sold_listing_count',
+  'market.bought_listing_count',
+  'market.active_bid_count',
+  'market.watch_count',
+  'shop.unique_purchase_count',
+  'coupon.redeemed_unique_count',
+  'community.friend_count'
 ];
 
 const metricLabels: Record<string, string> = {
@@ -69,15 +102,48 @@ const metricLabels: Record<string, string> = {
   'coupon.claim.count': '쿠폰 사용 수',
   'profile.representative.set': '대표 카드 설정 여부',
   'profile.status_message.set': '상태 메시지 설정 여부',
+  'achievement.completed_count': '달성한 업적 수',
+  'achievement.claimed_count': '보상 수령한 업적 수',
+  'achievement.claimable_count': '보상 수령 대기 업적 수',
   'inventory.card_count': '보유 카드 수',
   'inventory.unique_streamer_count': '보유 스트리머 카드 종류',
+  'inventory.star.0.count': '보유 0성 카드 수',
+  'inventory.star.1.count': '보유 1성 카드 수',
+  'inventory.star.2.count': '보유 2성 카드 수',
+  'inventory.star.3.count': '보유 3성 카드 수',
+  'inventory.star.4.count': '보유 4성 카드 수',
   'inventory.star.5.count': '보유 5성 카드 수',
+  'inventory.total_star_sum': '보유 카드 별 합계',
+  'inventory.unique_star_level_count': '보유 카드 등급 종류',
+  'inventory.low_serial.1.count': '시리얼 1번 카드 수',
+  'inventory.low_serial.10.count': '시리얼 10번 이하 카드 수',
+  'inventory.low_serial.100.count': '시리얼 100번 이하 카드 수',
   'inventory.locked_count': '잠금 카드 수',
   'inventory.hidden_count': '숨김 카드 수',
   'inventory.favorite_count': '즐겨찾기 카드 수',
+  'inventory.cosmetic_equipped_count': '장착 코스메틱 슬롯 수',
+  'inventory.border_equipped_count': '장착 테두리 수',
+  'inventory.name_effect_equipped_count': '장착 이름 이펙트 수',
   'user.title_count': '보유 칭호 수',
   'user.cosmetic_count': '보유 코스메틱 수',
-  'user.point_balance': '보유 포인트'
+  'user.unique_cosmetic_count': '보유 코스메틱 종류',
+  'user.border_cosmetic_count': '보유 테두리 코스메틱 수',
+  'user.name_effect_cosmetic_count': '보유 이름 이펙트 수',
+  'user.point_balance': '보유 포인트',
+  'user.free_draw_ticket_balance': '보유 무료 소환권 수',
+  'user.bonus_free_draw_ticket_balance': '보유 추가 무료 소환권 수',
+  'user.minigame_ticket_balance': '보유 미니게임 티켓 수',
+  'user.account_age_days': '가입 후 경과일',
+  'market.active_listing_count': '진행 중인 마켓 판매 등록 수',
+  'market.active_fixed_listing_count': '진행 중인 고정가 판매 등록 수',
+  'market.active_auction_listing_count': '진행 중인 경매 등록 수',
+  'market.sold_listing_count': '마켓 판매 완료 수',
+  'market.bought_listing_count': '마켓 구매 완료 수',
+  'market.active_bid_count': '진행 중인 경매 입찰 수',
+  'market.watch_count': '마켓 관심 알림 수',
+  'shop.unique_purchase_count': '구매한 상점 아이템 종류',
+  'coupon.redeemed_unique_count': '사용한 쿠폰 종류',
+  'community.friend_count': '친구 수'
 };
 
 const conditionPreview = (condition: ConditionForm) => {
@@ -85,6 +151,7 @@ const conditionPreview = (condition: ConditionForm) => {
   const label = metricLabels[condition.metric] || condition.metric;
   if (condition.metric === 'profile.representative.set' || condition.metric === 'profile.status_message.set') return label.replace(' 여부', '');
   if (condition.metric === 'user.point_balance') return `${target.toLocaleString()}P 이상 보유`;
+  if (condition.metric === 'user.account_age_days') return `가입 후 ${target.toLocaleString()}일 이상`;
   return `${label} ${target.toLocaleString()} 이상`;
 };
 
@@ -104,6 +171,20 @@ const categoryLabels: Record<AchievementCategory, string> = {
   streamer: '스트리머',
   event: '이벤트',
   hidden: '숨김'
+};
+
+const rewardTypeLabels: Record<AchievementRewardType, string> = {
+  point: '포인트',
+  card: '스트리머 카드',
+  cosmetic: '코스메틱',
+  minigame_ticket: '미니게임 티켓',
+  free_draw_ticket: '무료 소환권',
+  title: '칭호'
+};
+
+const cosmeticTypeLabels: Record<ShopItem['type'], string> = {
+  border: '테두리',
+  name_effect: '이름 이펙트'
 };
 
 const emptyReward = (): AchievementReward => ({ type: 'point', points: 1000 });
@@ -141,11 +222,30 @@ const parseJsonValue = <T,>(value: unknown, fallback: T): T => {
   }
 };
 
-const normalizeReward = (reward: AchievementReward): AchievementReward => {
+const normalizeReward = (reward: AchievementReward, cosmetics: ShopItem[] = [], titles: UserTitle[] = []): AchievementReward => {
   if (reward.type === 'point') return { type: 'point', points: Math.max(1, Math.floor(Number(reward.points || 0))) };
   if (reward.type === 'card') return { type: 'card', channel_id: String(reward.channel_id || '').trim(), quantity: Math.max(1, Math.floor(Number(reward.quantity || 1))) };
-  if (reward.type === 'cosmetic') return { type: 'cosmetic', item_id: Math.max(1, Math.floor(Number(reward.item_id || 0))), quantity: Math.max(1, Math.floor(Number(reward.quantity || 1))) };
-  if (reward.type === 'title') return { type: 'title', title_id: Math.floor(Number(reward.title_id || 0)) };
+  if (reward.type === 'cosmetic') {
+    const itemId = Math.max(1, Math.floor(Number(reward.item_id || 0)));
+    const item = cosmetics.find((cosmetic) => cosmetic.id === itemId);
+    return {
+      type: 'cosmetic',
+      item_id: itemId,
+      quantity: Math.max(1, Math.floor(Number(reward.quantity || 1))),
+      ...(item ? { label: item.name } : {}),
+      ...(reward.revoke_when_unmet ? { revoke_when_unmet: true } : {})
+    };
+  }
+  if (reward.type === 'title') {
+    const titleId = Math.floor(Number(reward.title_id || 0));
+    const title = titles.find((item) => item.id === titleId);
+    return {
+      type: 'title',
+      title_id: titleId,
+      ...(title ? { label: title.name } : {}),
+      ...(reward.revoke_when_unmet ? { revoke_when_unmet: true } : {})
+    };
+  }
   return { type: reward.type, quantity: Math.max(1, Math.floor(Number(reward.quantity || 1))) };
 };
 
@@ -153,6 +253,7 @@ export const AdminAchievementsTab: React.FC = () => {
   const { toast } = useApp();
   const [items, setItems] = useState<AdminAchievement[]>([]);
   const [titles, setTitles] = useState<UserTitle[]>([]);
+  const [cosmetics, setCosmetics] = useState<ShopItem[]>([]);
   const [form, setForm] = useState({ ...emptyForm });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -189,13 +290,42 @@ export const AdminAchievementsTab: React.FC = () => {
     }
   };
 
+  const fetchCosmetics = async () => {
+    try {
+      const res = await apiFetch('/admin/shop/items');
+      if (res.ok) setCosmetics(await res.json());
+    } catch {
+      // 코스메틱 목록 조회 실패는 숫자 ID 저장 폴백으로 처리합니다.
+    }
+  };
+
   useEffect(() => {
     void fetchAchievements();
     void fetchTitles();
+    void fetchCosmetics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resetForm = () => setForm({ ...emptyForm, rewards: [emptyReward()], conditions: [{ metric: 'card.acquired.count', target: 1 }] });
+
+  const cosmeticName = (itemId?: number) =>
+    cosmetics.find((item) => item.id === Number(itemId || 0))?.name || `아이템#${itemId || 0}`;
+
+  const titleName = (titleId?: number) =>
+    titles.find((title) => title.id === Number(titleId || 0))?.name || `칭호#${titleId || 0}`;
+
+  const rewardPreview = (reward: AchievementReward) => {
+    const quantity = Math.max(1, Math.floor(Number(reward.quantity || 1)));
+    if (reward.type === 'point') return `${Number(reward.points || 0).toLocaleString()}P 지급`;
+    if (reward.type === 'card') return `${reward.channel_id || '스트리머 채널'} 카드 ${quantity.toLocaleString()}장 지급`;
+    if (reward.type === 'cosmetic') return `${cosmeticName(reward.item_id)} ${quantity.toLocaleString()}개 지급`;
+    if (reward.type === 'title') return `${titleName(reward.title_id)} 칭호 지급`;
+    if (reward.type === 'minigame_ticket') return `추가 미니게임 티켓 ${quantity.toLocaleString()}장 지급`;
+    return `추가 무료 소환권 ${quantity.toLocaleString()}장 지급`;
+  };
+
+  const rewardPreviewText = (reward: AchievementReward) =>
+    `${rewardPreview(reward)}${reward.revoke_when_unmet ? ' · 조건 미달 시 회수' : ''}`;
 
   const editAchievement = (achievement: AdminAchievement) => {
     const criteria = parseJsonValue<any>(achievement.criteria_json, { type: 'stat', metric: 'card.acquired.count', target: 1 });
@@ -247,7 +377,7 @@ export const AdminAchievementsTab: React.FC = () => {
         if (patch.type) {
           if (nextType === 'point') return { type: 'point', points: 1000 };
           if (nextType === 'card') return { type: 'card', channel_id: '', quantity: 1 };
-          if (nextType === 'cosmetic') return { type: 'cosmetic', item_id: 0, quantity: 1 };
+          if (nextType === 'cosmetic') return { type: 'cosmetic', item_id: cosmetics[0]?.id || 0, quantity: 1, ...(cosmetics[0] ? { label: cosmetics[0].name } : {}) };
           if (nextType === 'title') return { type: 'title', title_id: 0 };
           return { type: nextType, quantity: 1 };
         }
@@ -275,7 +405,7 @@ export const AdminAchievementsTab: React.FC = () => {
       claim_policy: form.claim_policy,
       progress_mode: form.criteria_type === 'all' ? 'composite' : form.progress_mode,
       criteria_json: criteriaJson,
-      rewards_json: form.rewards.map(normalizeReward),
+      rewards_json: form.rewards.map((reward) => normalizeReward(reward, cosmetics, titles)),
       confirm_hidden_economic_reward: form.confirm_hidden_economic_reward,
       confirm_repeat_reward: form.confirm_repeat_reward
     };
@@ -440,14 +570,35 @@ export const AdminAchievementsTab: React.FC = () => {
             {form.rewards.map((reward, index) => (
               <div key={index} className="grid gap-2 sm:grid-cols-[160px_1fr_110px_auto]">
                 <select value={reward.type} onChange={(e) => updateReward(index, { type: e.target.value as AchievementRewardType })} className="field-input">
-                  {rewardTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                  {rewardTypes.map((type) => <option key={type} value={type}>{rewardTypeLabels[type]}</option>)}
                 </select>
                 {reward.type === 'point' && <input type="number" value={reward.points || 0} onChange={(e) => updateReward(index, { points: Number(e.target.value) })} className="field-input" placeholder="포인트" />}
                 {reward.type === 'card' && <input value={reward.channel_id || ''} onChange={(e) => updateReward(index, { channel_id: e.target.value })} className="field-input" placeholder="스트리머 채널 ID" />}
-                {reward.type === 'cosmetic' && <input type="number" value={reward.item_id || 0} onChange={(e) => updateReward(index, { item_id: Number(e.target.value) })} className="field-input" placeholder="아이템 ID" />}
+                {reward.type === 'cosmetic' && (
+                  cosmetics.length > 0 ? (
+                    <select value={reward.item_id || 0} onChange={(e) => {
+                      const itemId = Number(e.target.value);
+                      const item = cosmetics.find((cosmetic) => cosmetic.id === itemId);
+                      updateReward(index, { item_id: itemId, label: item?.name });
+                    }} className="field-input">
+                      <option value={0}>코스메틱 선택</option>
+                      {cosmetics.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          [{cosmeticTypeLabels[item.type]}] {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="field-input flex items-center text-muted-foreground">상점 관리에서 먼저 추가</span>
+                  )
+                )}
                 {reward.type === 'title' && (
                   titles.length > 0 ? (
-                    <select value={reward.title_id || 0} onChange={(e) => updateReward(index, { title_id: Number(e.target.value) })} className="field-input">
+                    <select value={reward.title_id || 0} onChange={(e) => {
+                      const titleId = Number(e.target.value);
+                      const title = titles.find((item) => item.id === titleId);
+                      updateReward(index, { title_id: titleId, label: title?.name });
+                    }} className="field-input">
                       <option value={0}>칭호 선택</option>
                       {titles.map((title) => <option key={title.id} value={title.id}>{title.name}</option>)}
                     </select>
@@ -462,6 +613,19 @@ export const AdminAchievementsTab: React.FC = () => {
                 <button onClick={() => setForm({ ...form, rewards: form.rewards.filter((_, i) => i !== index) })} className="rounded-lg bg-red-500/10 px-3 py-2 text-xs font-bold text-red-500">
                   삭제
                 </button>
+                <p className="text-[10px] font-bold text-muted-foreground sm:col-span-4">
+                  {rewardPreviewText(reward)}
+                </p>
+                {(reward.type === 'cosmetic' || reward.type === 'title') && (
+                  <label className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground sm:col-span-4">
+                    <input
+                      type="checkbox"
+                      checked={reward.revoke_when_unmet === true}
+                      onChange={(e) => updateReward(index, { revoke_when_unmet: e.target.checked })}
+                    />
+                    조건을 더 이상 만족하지 않으면 이 보상 회수
+                  </label>
+                )}
               </div>
             ))}
             {form.rewards.length === 0 && <p className="rounded-xl border border-dashed border-border py-6 text-center text-xs text-muted-foreground">보상 없이 저장됩니다.</p>}
