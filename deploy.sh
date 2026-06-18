@@ -229,7 +229,7 @@ if [ -z "${DB_PASSWORD_VALUE}" ]; then DB_PASSWORD_VALUE="$(env_value DB_PASSWOR
 DB_NAME_VALUE="$(env_value MYSQL_DATABASE)"
 if [ -z "${DB_NAME_VALUE}" ]; then DB_NAME_VALUE="$(env_value DB_NAME)"; fi
 DB_CONNECT_TIMEOUT="${DB_CONNECT_TIMEOUT:-10}"
-DB_COMMAND_TIMEOUT="${DB_COMMAND_TIMEOUT:-30}"
+DB_COMMAND_TIMEOUT="${DB_COMMAND_TIMEOUT:-90}"
 DB_BACKUP_RETRIES="${DB_BACKUP_RETRIES:-3}"
 DB_BACKUP_RETRY_DELAY="${DB_BACKUP_RETRY_DELAY:-5}"
 DB_SCHEMA_RETRIES="${DB_SCHEMA_RETRIES:-3}"
@@ -265,12 +265,27 @@ run_mysql_backup() {
   local err_file="${output_file}.err"
   local attempt=1
   local status=0
+  local dump_args=(--single-transaction --routines --triggers)
+
+  if [ -n "${MYSQLDUMP_GTID_ARG:-}" ]; then
+    dump_args+=("${MYSQLDUMP_GTID_ARG}")
+  fi
+  if [ "${MYSQLDUMP_INCLUDE_DERIVED_TABLES:-false}" != "true" ]; then
+    dump_args+=(
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_rankings"
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_rankings_old"
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_rankings_next"
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_ranking_cards"
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_ranking_cards_old"
+      "--ignore-table=${DB_NAME_VALUE}.user_asset_ranking_cards_next"
+    )
+  fi
 
   while [ "${attempt}" -le "${DB_BACKUP_RETRIES}" ]; do
     status=0
     if run_with_db_timeout env MYSQL_PWD="${DB_PASSWORD_VALUE}" mysqldump \
       -h "${DB_HOST_VALUE}" -P "${DB_PORT_VALUE}" -u "${DB_USER_VALUE}" \
-      --single-transaction --routines --triggers ${MYSQLDUMP_GTID_ARG} \
+      "${dump_args[@]}" \
       "${DB_NAME_VALUE}" > "${tmp_file}" 2> "${err_file}"; then
       mv "${tmp_file}" "${output_file}"
       rm -f "${err_file}"

@@ -1,0 +1,366 @@
+/* ============================================================
+   치카포 이름 이펙트: 훈민단청 이름표
+   적용 클래스명: ne-hunmin-dancheong
+
+   - CSS 하나만 붙여넣는 클래스 방식 이름 이펙트
+   - 글자 span 자체에 적용되는 자기완결형 CSS
+   - 자식 마크업 불필요
+   ============================================================ */
+
+@font-face {
+  font-family: 'HancomHunminjeongeum';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2406-1@1.0/HancomHoonminjeongeumH.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'GMarketSans';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff') format('woff');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 클래스명: ne-hunmin-dancheong */
+.ne-hunmin-dancheong {
+  --ne-hd-ink: rgba(10, 16, 24, .88);
+  --ne-hd-jade: rgba(55, 147, 135, .88);
+  --ne-hd-blue: rgba(33, 69, 104, .92);
+  --ne-hd-red: rgba(126, 44, 32, .88);
+  --ne-hd-gold: rgba(232, 184, 92, .98);
+  --ne-hd-pale: rgba(255, 246, 201, .98);
+
+  position: relative;
+  isolation: isolate;
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: baseline;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  padding: .16em .64em .22em;
+  border: 1px solid transparent;
+  border-radius: .52em .18em .52em .18em;
+
+  font-family: 'HancomHunminjeongeum', 'GMarketSans', 'Apple SD Gothic Neo', 'Malgun Gothic', serif;
+  font-weight: normal;
+  line-height: 1.22;
+  letter-spacing: .045em;
+  word-spacing: .04em;
+
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: .018em rgba(45, 20, 8, .52);
+  paint-order: stroke fill;
+
+  /*
+    배경 레이어 순서:
+    1) 글자 위 비단 광택
+    2) 금·옥·주홍 글자 그라데이션
+    3) 이름표 내부 운문/비단 결
+    4) 짙은 청록 단청 바탕
+    5) 금빛 테두리
+  */
+  background-image:
+    linear-gradient(
+      108deg,
+      transparent 0%,
+      transparent 41%,
+      rgba(255, 255, 255, .96) 47%,
+      rgba(255, 236, 170, .78) 50%,
+      transparent 57%,
+      transparent 100%
+    ),
+    linear-gradient(
+      92deg,
+      #fff9d7 0%,
+      #e9bd5e 13%,
+      #b94e35 25%,
+      #fff0b3 38%,
+      #5ec8ba 52%,
+      #f3ce78 66%,
+      #fff8d8 79%,
+      #a64331 91%,
+      #fff9d7 100%
+    ),
+    radial-gradient(circle at 14% 24%, rgba(255, 238, 172, .20) 0 .045em, transparent .052em),
+    linear-gradient(
+      135deg,
+      rgba(15, 43, 58, .88) 0%,
+      rgba(23, 82, 86, .86) 32%,
+      rgba(51, 24, 38, .87) 66%,
+      rgba(14, 27, 41, .90) 100%
+    ),
+    linear-gradient(
+      90deg,
+      #6e2f1d 0%,
+      #d6a853 13%,
+      #fff0b8 22%,
+      #2e716d 36%,
+      #d8ad55 50%,
+      #8d3726 64%,
+      #f3d178 78%,
+      #2b5f73 90%,
+      #6e2f1d 100%
+    );
+
+  background-size:
+    230% 100%,
+    320% 100%,
+    .78em .78em,
+    100% 100%,
+    260% 100%;
+
+  /*
+    끊김 방지:
+    반복 레이어는 각 background-size의 정확한 한 주기만큼 이동한다.
+    CSS background-position %는 (컨테이너 - 배경 이미지) 차이를 기준으로 보간되므로
+    230% 레이어는 176.923077%, 320% 레이어는 145.454545%,
+    260% 레이어는 162.5%가 시각적으로 완전한 1회전 주기다.
+  */
+  background-repeat:
+    repeat,
+    repeat,
+    repeat,
+    no-repeat,
+    repeat;
+
+  background-position:
+    -170% 50%,
+    0% 50%,
+    0 0,
+    50% 50%,
+    0% 50%;
+
+  background-origin: border-box;
+  -webkit-background-clip:
+    text,
+    text,
+    padding-box,
+    padding-box,
+    border-box;
+  background-clip:
+    text,
+    text,
+    padding-box,
+    padding-box,
+    border-box;
+
+  box-shadow:
+    inset 0 .06em .10em rgba(255, 245, 198, .20),
+    inset 0 -.10em .16em rgba(0, 0, 0, .34),
+    0 .05em .08em rgba(18, 7, 0, .72),
+    0 0 .26em rgba(227, 179, 87, .34),
+    0 0 .46em rgba(38, 129, 126, .18);
+
+  filter:
+    drop-shadow(0 .045em .045em rgba(17, 7, 0, .88))
+    drop-shadow(0 0 .12em rgba(235, 185, 95, .42))
+    drop-shadow(0 0 .26em rgba(48, 150, 140, .20));
+
+  text-shadow: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: background-position, filter, transform;
+  animation:
+    ne-hunmin-dancheong-flow 9.5s linear infinite,
+    ne-hunmin-dancheong-breath 3.8s ease-in-out infinite;
+}
+
+/* 얇은 비단 광선: 글자를 복제하지 않고 이름표 내부만 스친다 */
+.ne-hunmin-dancheong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: .22;
+  background:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      transparent 34%,
+      rgba(255, 255, 255, .52) 44%,
+      rgba(255, 223, 133, .36) 49%,
+      transparent 60%,
+      transparent 100%
+    );
+  transform: translateX(-125%) skewX(-14deg);
+  mix-blend-mode: screen;
+  animation: ne-hunmin-dancheong-silk 5.8s ease-in-out infinite;
+}
+
+/* 안쪽 금실 테두리 */
+.ne-hunmin-dancheong::after {
+  content: "";
+  position: absolute;
+  inset: .105em .155em;
+  pointer-events: none;
+  border-radius: .40em .12em .40em .12em;
+  opacity: .82;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 235, 166, .80), transparent) top / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, rgba(190, 61, 41, .58), rgba(255, 231, 154, .74), transparent) bottom / 100% 1px no-repeat,
+    linear-gradient(180deg, transparent, rgba(255, 235, 166, .64), transparent) left / 1px 100% no-repeat,
+    linear-gradient(180deg, transparent, rgba(255, 235, 166, .64), transparent) right / 1px 100% no-repeat;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 244, 190, .12),
+    0 0 .12em rgba(234, 183, 84, .22);
+  animation: ne-hunmin-dancheong-thread 4.4s ease-in-out infinite;
+}
+
+@keyframes ne-hunmin-dancheong-flow {
+  0% {
+    background-position:
+      -170% 50%,
+      0% 50%,
+      0 0,
+      50% 50%,
+      0% 50%;
+  }
+
+  25% {
+    background-position:
+      -125.769231% 50%,
+      36.363636% 50%,
+      .195em .195em,
+      50% 50%,
+      40.625% 50%;
+  }
+
+  50% {
+    background-position:
+      -81.538462% 50%,
+      72.727273% 50%,
+      .39em .39em,
+      50% 50%,
+      81.25% 50%;
+  }
+
+  75% {
+    background-position:
+      -37.307692% 50%,
+      109.090909% 50%,
+      .585em .585em,
+      50% 50%,
+      121.875% 50%;
+  }
+
+  100% {
+    background-position:
+      6.923077% 50%,
+      145.454545% 50%,
+      .78em .78em,
+      50% 50%,
+      162.5% 50%;
+  }
+}
+
+@keyframes ne-hunmin-dancheong-breath {
+  0%, 100% {
+    transform: translateY(0) translateZ(0);
+    filter:
+      drop-shadow(0 .045em .045em rgba(17, 7, 0, .88))
+      drop-shadow(0 0 .12em rgba(235, 185, 95, .42))
+      drop-shadow(0 0 .26em rgba(48, 150, 140, .20));
+  }
+
+  50% {
+    transform: translateY(-.018em) translateZ(0);
+    filter:
+      drop-shadow(0 .055em .050em rgba(17, 7, 0, .78))
+      drop-shadow(0 0 .20em rgba(255, 215, 125, .62))
+      drop-shadow(0 0 .42em rgba(70, 177, 166, .28));
+  }
+}
+
+@keyframes ne-hunmin-dancheong-silk {
+  0%, 12%, 100% {
+    opacity: 0;
+    transform: translateX(-135%) skewX(-14deg);
+  }
+
+  38% {
+    opacity: .24;
+  }
+
+  58% {
+    opacity: .12;
+    transform: translateX(135%) skewX(-14deg);
+  }
+
+  70% {
+    opacity: 0;
+    transform: translateX(135%) skewX(-14deg);
+  }
+}
+
+@keyframes ne-hunmin-dancheong-thread {
+  0%, 100% {
+    opacity: .72;
+    filter: drop-shadow(0 0 .03em rgba(226, 181, 86, .18));
+  }
+
+  50% {
+    opacity: .96;
+    filter: drop-shadow(0 0 .08em rgba(255, 224, 145, .36));
+  }
+}
+
+/* background-clip:text 미지원 환경용 안전 폴백 */
+@supports not (-webkit-background-clip: text) {
+  .ne-hunmin-dancheong {
+    color: #ffe8a5;
+    -webkit-text-fill-color: #ffe8a5;
+    background-image:
+      radial-gradient(circle at 14% 24%, rgba(255, 238, 172, .20) 0 .045em, transparent .052em),
+      linear-gradient(135deg, rgba(15, 43, 58, .88), rgba(23, 82, 86, .86) 32%, rgba(51, 24, 38, .87) 66%, rgba(14, 27, 41, .90)),
+      linear-gradient(90deg, #6e2f1d, #d6a853, #fff0b8, #2e716d, #d8ad55, #8d3726, #f3d178, #2b5f73, #6e2f1d);
+    background-size: .78em .78em, 100% 100%, 260% 100%;
+    background-position: 0 0, 50% 50%, 0% 50%;
+    -webkit-background-clip: padding-box, padding-box, border-box;
+    background-clip: padding-box, padding-box, border-box;
+    text-shadow:
+      0 1px 0 rgba(80, 38, 12, .82),
+      0 0 .18em rgba(255, 224, 145, .62),
+      0 0 .32em rgba(55, 147, 135, .32);
+  }
+}
+
+/* 모션 최소화 사용자는 모든 반복 애니메이션 정지 */
+@media (prefers-reduced-motion: reduce) {
+  .ne-hunmin-dancheong,
+  .ne-hunmin-dancheong::before,
+  .ne-hunmin-dancheong::after {
+    animation: none !important;
+  }
+
+  .ne-hunmin-dancheong {
+    background-position:
+      50% 50%,
+      50% 50%,
+      0 0,
+      50% 50%,
+      50% 50%;
+    transform: none;
+    filter:
+      drop-shadow(0 .045em .045em rgba(17, 7, 0, .86))
+      drop-shadow(0 0 .15em rgba(235, 185, 95, .45));
+  }
+
+  .ne-hunmin-dancheong::before {
+    opacity: .10;
+    transform: none;
+  }
+
+  .ne-hunmin-dancheong::after {
+    opacity: .86;
+    filter: none;
+  }
+}
