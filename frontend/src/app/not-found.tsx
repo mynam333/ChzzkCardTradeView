@@ -13,12 +13,26 @@ const LOST_CARD_NAMES = [
   '돌아오지 않은 검색 결과'
 ];
 
+const DUST_MESSAGES = [
+  '카드 표면의 먼지가 살짝 반짝입니다.',
+  '없는 경로가 조금 더 또렷해졌습니다.',
+  '카드 모서리가 기분 좋게 빛났습니다.',
+  '아무것도 추가되지 않았지만 예뻐졌습니다.'
+];
+
 export default function NotFound() {
   const router = useRouter();
   const pathname = usePathname();
   const [cardName, setCardName] = React.useState(LOST_CARD_NAMES[0]);
   const [flipped, setFlipped] = React.useState(false);
+  const [dustIndex, setDustIndex] = React.useState(0);
+  const [dusting, setDusting] = React.useState(false);
   const flipClicksRef = React.useRef(0);
+  const dustTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => () => {
+    if (dustTimerRef.current !== null) window.clearTimeout(dustTimerRef.current);
+  }, []);
 
   const reshuffleCard = () => {
     setCardName((current) => {
@@ -39,6 +53,16 @@ export default function NotFound() {
         detail: { command: 'lostCard404' }
       }));
     }
+  };
+
+  const dustCard = () => {
+    setDustIndex((current) => (current + 1) % DUST_MESSAGES.length);
+    setDusting(true);
+    if (dustTimerRef.current !== null) window.clearTimeout(dustTimerRef.current);
+    dustTimerRef.current = window.setTimeout(() => {
+      setDusting(false);
+      dustTimerRef.current = null;
+    }, 700);
   };
 
   return (
@@ -89,7 +113,17 @@ export default function NotFound() {
             >
               <RotateCcw className="h-4 w-4" /> 카드 다시 확인
             </button>
+            <button
+              type="button"
+              onClick={dustCard}
+              className="inline-flex items-center gap-2 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-2 text-xs font-black text-teal-700 hover:bg-teal-100 dark:border-teal-300/20 dark:bg-teal-400/10 dark:text-teal-100"
+            >
+              카드 먼지 털기
+            </button>
           </div>
+          <p className="max-w-xl rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-xs font-bold text-muted-foreground shadow-sm">
+            {DUST_MESSAGES[dustIndex]}
+          </p>
         </div>
 
         <button
@@ -98,7 +132,7 @@ export default function NotFound() {
           className="lost-card-scene mx-auto h-[26rem] w-[17rem] max-w-full"
           aria-label="분실 카드 뒤집기"
         >
-          <span className={`lost-card ${flipped ? 'lost-card-flipped' : ''}`}>
+          <span className={`lost-card ${flipped ? 'lost-card-flipped' : ''} ${dusting ? 'lost-card-dusting' : ''}`}>
             <span className="lost-card-face lost-card-front">
               <span className="lost-card-ribbon">UNKNOWN</span>
               <span className="mt-8 rounded-full border border-white/20 bg-white/10 px-3 py-1 font-mono text-[10px] font-black tracking-[0.18em] text-teal-50">No.0404</span>
