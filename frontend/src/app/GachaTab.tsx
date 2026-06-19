@@ -2034,6 +2034,7 @@ export const GachaTab: React.FC = () => {
                           src={inventoryCardImage(streamer, star)}
                           alt={streamer.name}
                           loading="lazy"
+                          imageBlindMenuEnabled={false}
                           className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                         />
                       </div>
@@ -2356,7 +2357,7 @@ export const GachaTab: React.FC = () => {
 
                   {/* 카드 이미지 배경 */}
                   <div className="absolute inset-0 z-0">
-                    <BlindableCardImage src={inventoryCardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
+                    <BlindableCardImage src={inventoryCardImage(s, star)} alt={s.name} imageBlindMenuEnabled={false} className="h-full w-full object-cover" />
                   </div>
                   
                   {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2673,7 +2674,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={live.border} />
                     <div className="absolute inset-0 z-0">
-                      <BlindableCardImage src={inventoryCardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
+                      <BlindableCardImage src={inventoryCardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} imageBlindMenuEnabled={false} className="h-full w-full object-cover opacity-80" />
                     </div>
                     
                     {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2736,6 +2737,7 @@ export const GachaTab: React.FC = () => {
               <BlindableCardImage
                 src={inventoryCardImage(sellingStreamer, sellingStar)}
                 alt={sellingStreamer.name}
+                imageBlindMenuEnabled={false}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
               />
               <div className="flex-1 min-w-0">
@@ -2868,6 +2870,7 @@ export const GachaTab: React.FC = () => {
                       <BlindableCardImage
                         src={inventoryCardImage(streamer, star)}
                         alt={streamer.name}
+                        imageBlindMenuEnabled={false}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
                       />
                       <div className="min-w-0">
@@ -3020,7 +3023,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={marketRegisterCard.border} />
                     <div className="absolute inset-0 z-0">
-                      <BlindableCardImage src={inventoryCardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
+                      <BlindableCardImage src={inventoryCardImage(streamer, star)} alt={streamer.name} imageBlindMenuEnabled={false} className="h-full w-full object-cover opacity-80" />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
                   </div>

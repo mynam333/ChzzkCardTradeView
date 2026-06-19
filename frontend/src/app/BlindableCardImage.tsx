@@ -9,6 +9,7 @@ type BlindableCardImageProps = React.ImgHTMLAttributes<HTMLImageElement> & {
   src?: string | null;
   placeholderClassName?: string;
   allowUnblind?: boolean;
+  imageBlindMenuEnabled?: boolean;
 };
 
 export const BlindableCardImage: React.FC<BlindableCardImageProps> = ({
@@ -17,6 +18,7 @@ export const BlindableCardImage: React.FC<BlindableCardImageProps> = ({
   className = '',
   placeholderClassName = '',
   allowUnblind = false,
+  imageBlindMenuEnabled = true,
   onContextMenu,
   ...props
 }) => {
@@ -39,7 +41,7 @@ export const BlindableCardImage: React.FC<BlindableCardImageProps> = ({
 
   const handleContextMenu = (event: React.MouseEvent) => {
     onContextMenu?.(event as React.MouseEvent<HTMLImageElement>);
-    if (event.defaultPrevented || !showMenu) return;
+    if (!imageBlindMenuEnabled || event.defaultPrevented || !showMenu) return;
     event.preventDefault();
     event.stopPropagation();
     setMenu({
