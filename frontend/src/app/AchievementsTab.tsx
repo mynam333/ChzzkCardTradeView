@@ -24,6 +24,7 @@ type SortOption = 'recommended' | 'progress' | 'completed' | 'tier' | 'name';
 
 const categoryLabels: Record<AchievementCategory, string> = {
   start: '시작',
+  attendance: '출석',
   collection: '수집',
   growth: '성장',
   economy: '경제',

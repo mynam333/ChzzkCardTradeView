@@ -345,6 +345,7 @@ export interface OrphanImage {
 
 export type AchievementCategory =
   | 'start'
+  | 'attendance'
   | 'collection'
   | 'growth'
   | 'economy'

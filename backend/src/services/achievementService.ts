@@ -5,6 +5,7 @@ import { createRealtimeNotification } from './notificationDelivery';
 
 export type AchievementCategory =
   | 'start'
+  | 'attendance'
   | 'collection'
   | 'growth'
   | 'economy'
@@ -95,7 +96,7 @@ export type AchievementEventInput = {
   evaluate?: boolean;
 };
 
-const allowedCategories: AchievementCategory[] = ['start', 'collection', 'growth', 'economy', 'trade', 'market', 'minigame', 'community', 'streamer', 'event', 'hidden'];
+const allowedCategories: AchievementCategory[] = ['start', 'attendance', 'collection', 'growth', 'economy', 'trade', 'market', 'minigame', 'community', 'streamer', 'event', 'hidden'];
 const allowedTiers: AchievementTier[] = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'event'];
 const allowedRepeatPolicies: AchievementRepeatPolicy[] = ['once', 'daily', 'weekly', 'monthly', 'seasonal', 'repeatable'];
 const allowedClaimPolicies: AchievementClaimPolicy[] = ['manual', 'auto'];
@@ -119,6 +120,8 @@ const recommendedStatusRank: Record<AchievementStatus, number> = {
 const allowedMetrics = new Set([
   'login.count',
   'login.daily.count',
+  'login.current_streak_days',
+  'login.max_streak_days',
   'card.acquired.count',
   'card.sold.count',
   'card.fused.count',
@@ -188,6 +191,8 @@ const allowedMetrics = new Set([
 const metricConditionText: Record<string, (target: number) => string> = {
   'login.count': (target) => `${target.toLocaleString()}회 로그인`,
   'login.daily.count': (target) => `${target.toLocaleString()}일 로그인`,
+  'login.current_streak_days': (target) => `연속 출석 ${target.toLocaleString()}일 유지`,
+  'login.max_streak_days': (target) => `최대 연속 출석 ${target.toLocaleString()}일 달성`,
   'card.acquired.count': (target) => `카드 ${target.toLocaleString()}장 획득`,
   'card.sold.count': (target) => `카드 ${target.toLocaleString()}장 판매`,
   'card.fused.count': (target) => `카드 ${target.toLocaleString()}회 한계돌파`,
@@ -1118,9 +1123,116 @@ const getRepeatKey = (achievement: Achievement, date = new Date()) => {
   return `${y}-${m}-${d}`;
 };
 
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const formatUtcDateKey = (date: Date) =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+
+const getKstDateKey = (value: string | Date | null | undefined = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return formatUtcDateKey(new Date(safeDate.getTime() + KST_OFFSET_MS));
+};
+
+const offsetDateKey = (dateKey: string, offsetDays: number) => {
+  const parts = String(dateKey || '').split('-').map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+  return formatUtcDateKey(new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]) + offsetDays * DAY_MS));
+};
+
+const isDateKey = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+
+type AchievementStatRow = { stat_value: number; metadata_json?: unknown } | null;
+
+const readAchievementStat = async (userId: string, statKey: string): Promise<AchievementStatRow> => {
+  if (getDbMode() === 'LOCAL_SQL') {
+    const row = getSqliteDb().prepare('SELECT stat_value, metadata_json FROM user_achievement_stats WHERE user_id = ? AND stat_key = ?').get(userId, statKey) as any;
+    return row ? { stat_value: Number(row.stat_value || 0), metadata_json: row.metadata_json } : null;
+  }
+  if (getDbMode() === 'MYSQL') {
+    const row = await getMysqlDb().get('SELECT stat_value, metadata_json FROM user_achievement_stats WHERE user_id = ? AND stat_key = ?', userId, statKey) as any;
+    return row ? { stat_value: Number(row.stat_value || 0), metadata_json: row.metadata_json } : null;
+  }
+  const { data, error } = await getSupabaseClient()
+    .from('user_achievement_stats')
+    .select('stat_value, metadata_json')
+    .eq('user_id', userId)
+    .eq('stat_key', statKey)
+    .maybeSingle();
+  if (error && isSupabaseMissingRelationError(error)) return null;
+  if (error) throw error;
+  return data ? { stat_value: Number((data as any).stat_value || 0), metadata_json: (data as any).metadata_json } : null;
+};
+
+const setAchievementStat = async (userId: string, statKey: string, statValue: number, metadata: Record<string, unknown> = {}) => {
+  const value = Math.max(0, Math.trunc(Number(statValue || 0)));
+  if (getDbMode() === 'LOCAL_SQL') {
+    getSqliteDb().prepare(`
+      INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(user_id, stat_key) DO UPDATE SET
+        stat_value = excluded.stat_value,
+        metadata_json = excluded.metadata_json,
+        updated_at = excluded.updated_at
+    `).run(userId, statKey, value, JSON.stringify(metadata));
+    return;
+  }
+  if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run(`
+      INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
+      VALUES (?, ?, ?, ?, UTC_TIMESTAMP())
+      ON DUPLICATE KEY UPDATE
+        stat_value = VALUES(stat_value),
+        metadata_json = VALUES(metadata_json),
+        updated_at = VALUES(updated_at)
+    `, userId, statKey, value, JSON.stringify(metadata));
+    return;
+  }
+  const { error } = await getSupabaseClient().from('user_achievement_stats').upsert({
+    user_id: userId,
+    stat_key: statKey,
+    stat_value: value,
+    metadata_json: metadata,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,stat_key' });
+  if (error && isSupabaseMissingRelationError(error)) return;
+  if (error) throw error;
+};
+
+const getStatLastDate = (row: AchievementStatRow) =>
+  safeJsonParse<{ last_date?: string }>(row?.metadata_json, {}).last_date || null;
+
+const recordDailyLoginStreak = async (userId: string, occurredAt?: string | Date | null) => {
+  const today = getKstDateKey(occurredAt);
+  const yesterday = offsetDateKey(today, -1);
+  const currentRow = await readAchievementStat(userId, 'login.current_streak_days');
+  const maxRow = await readAchievementStat(userId, 'login.max_streak_days');
+  const lastDate = getStatLastDate(currentRow);
+  let currentStreak = Math.max(0, Math.trunc(Number(currentRow?.stat_value || 0)));
+  if (lastDate === today) currentStreak = Math.max(1, currentStreak);
+  else if (lastDate === yesterday) currentStreak += 1;
+  else currentStreak = 1;
+  const maxStreak = Math.max(Math.max(0, Math.trunc(Number(maxRow?.stat_value || 0))), currentStreak);
+  const metadata = { last_date: today };
+  await setAchievementStat(userId, 'login.current_streak_days', currentStreak, metadata);
+  await setAchievementStat(userId, 'login.max_streak_days', maxStreak, metadata);
+};
+
+const expireDailyLoginStreakIfNeeded = async (userId: string) => {
+  const row = await readAchievementStat(userId, 'login.current_streak_days');
+  const lastDate = getStatLastDate(row);
+  if (!isDateKey(lastDate)) return;
+  const yesterday = offsetDateKey(getKstDateKey(), -1);
+  if (!yesterday || String(lastDate) >= yesterday) return;
+  if (Number(row?.stat_value || 0) <= 0) return;
+  await setAchievementStat(userId, 'login.current_streak_days', 0, { last_date: lastDate });
+};
+
 export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   if (!userId) return;
+  await expireDailyLoginStreakIfNeeded(userId).catch(() => undefined);
   if (getDbMode() === 'LOCAL_SQL') {
     const db = getSqliteDb();
     const cardStats = db.prepare(`
@@ -1757,6 +1869,7 @@ export const recordAchievementEvent = async (input: AchievementEventInput): Prom
     }
     if (!inserted) return;
     if (input.stats) await incrementAchievementStats(input.userId, input.stats);
+    if (input.eventType === 'login.daily') await recordDailyLoginStreak(input.userId, input.occurredAt || new Date());
     if (input.refreshSnapshots) await recomputeSnapshotStats(input.userId).catch(() => undefined);
     if (input.evaluate !== false) await evaluateUserAchievements(input.userId).catch((err) => console.warn('[Achievement] evaluate failed:', err?.message || err));
   } catch (err: any) {

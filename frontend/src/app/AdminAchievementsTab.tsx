@@ -11,6 +11,8 @@ type ConditionForm = { metric: string; target: number };
 const metricOptions = [
   'login.count',
   'login.daily.count',
+  'login.current_streak_days',
+  'login.max_streak_days',
   'card.acquired.count',
   'card.sold.count',
   'card.fused.count',
@@ -80,6 +82,8 @@ const metricOptions = [
 const metricLabels: Record<string, string> = {
   'login.count': '로그인 횟수',
   'login.daily.count': '로그인 일수',
+  'login.current_streak_days': '현재 연속 출석일',
+  'login.max_streak_days': '최대 연속 출석일',
   'card.acquired.count': '카드 획득 수',
   'card.sold.count': '카드 판매 수',
   'card.fused.count': '카드 한계돌파 횟수',
@@ -150,17 +154,20 @@ const conditionPreview = (condition: ConditionForm) => {
   const target = Math.max(1, Math.floor(Number(condition.target || 1)));
   const label = metricLabels[condition.metric] || condition.metric;
   if (condition.metric === 'profile.representative.set' || condition.metric === 'profile.status_message.set') return label.replace(' 여부', '');
+  if (condition.metric === 'login.current_streak_days') return `연속 출석 ${target.toLocaleString()}일 유지`;
+  if (condition.metric === 'login.max_streak_days') return `최대 연속 출석 ${target.toLocaleString()}일 이상`;
   if (condition.metric === 'user.point_balance') return `${target.toLocaleString()}P 이상 보유`;
   if (condition.metric === 'user.account_age_days') return `가입 후 ${target.toLocaleString()}일 이상`;
   return `${label} ${target.toLocaleString()} 이상`;
 };
 
-const categories: AchievementCategory[] = ['start', 'collection', 'growth', 'economy', 'trade', 'market', 'minigame', 'community', 'streamer', 'event', 'hidden'];
+const categories: AchievementCategory[] = ['start', 'attendance', 'collection', 'growth', 'economy', 'trade', 'market', 'minigame', 'community', 'streamer', 'event', 'hidden'];
 const tiers: AchievementTier[] = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'event'];
 const rewardTypes: AchievementRewardType[] = ['point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket', 'title'];
 
 const categoryLabels: Record<AchievementCategory, string> = {
   start: '시작',
+  attendance: '출석',
   collection: '수집',
   growth: '성장',
   economy: '경제',
