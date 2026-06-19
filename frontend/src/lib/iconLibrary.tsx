@@ -29,10 +29,20 @@ const mdiPath = (name: string) => (mdiIcons as Record<string, string | undefined
 
 const isMdiName = (name: string) => /^mdi[:_-]?/i.test(name) || /^mdi[A-Z]/.test(name);
 
+const mdiOptionName = (exportName: string) =>
+  `mdi:${exportName
+    .replace(/^mdi/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()}`;
+
+const mdiIconOptions = Object.keys(mdiIcons)
+  .filter((key) => /^mdi[A-Z]/.test(key) && typeof (mdiIcons as Record<string, unknown>)[key] === 'string')
+  .map(mdiOptionName)
+  .sort((a, b) => a.localeCompare(b));
+
 export const suggestedIconOptions = [
   'Award', 'BadgeCheck', 'Crown', 'Diamond', 'Flame', 'Gem', 'Heart', 'Medal', 'ShieldCheck', 'Sparkles', 'Star', 'Trophy', 'Zap',
-  'mdi:crown', 'mdi:account-star', 'mdi:badge-account', 'mdi:calendar-check', 'mdi:cards-playing', 'mdi:diamond-stone', 'mdi:fire',
-  'mdi:gamepad-variant', 'mdi:gift', 'mdi:medal', 'mdi:shield-check', 'mdi:star', 'mdi:ticket', 'mdi:trophy'
+  ...mdiIconOptions
 ];
 
 export const appIconExists = (name?: string | null) => {

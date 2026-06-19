@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Award, Edit3, Eye, EyeOff, Gift, Plus, RefreshCw, Save } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { suggestedIconOptions } from '@/lib/iconLibrary';
+import { appIconExists, suggestedIconOptions } from '@/lib/iconLibrary';
 import { useApp } from './AppContext';
 import type { AchievementCategory, AchievementReward, AchievementRewardType, AchievementTier, AdminAchievement, ShopItem, UserTitle } from '@/lib/types';
 
@@ -399,6 +399,7 @@ export const AdminAchievementsTab: React.FC = () => {
   const saveAchievement = async () => {
     if (!form.code.trim()) return toast('업적 코드를 입력해 주세요.', 'warning');
     if (!form.name.trim()) return toast('업적 이름을 입력해 주세요.', 'warning');
+    if (!appIconExists(form.icon)) return toast('존재하는 Lucide 또는 MDI 아이콘명을 입력해 주세요.', 'warning');
     const payload = {
       code: form.code,
       name: form.name,
@@ -485,8 +486,15 @@ export const AdminAchievementsTab: React.FC = () => {
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="field-input" placeholder="업적 설명" />
           </Field>
           <Field label="아이콘">
-            <input list="achievement-icon-options" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} className="field-input" placeholder="Award 또는 mdi:trophy" />
+            <input
+              list="achievement-icon-options"
+              value={form.icon}
+              onChange={(e) => setForm({ ...form, icon: e.target.value })}
+              className={`field-input ${appIconExists(form.icon) ? '' : 'border-red-500'}`}
+              placeholder="Award 또는 mdi:trophy"
+            />
             <datalist id="achievement-icon-options">{suggestedIconOptions.map((name) => <option key={name} value={name} />)}</datalist>
+            {!appIconExists(form.icon) && <span className="text-[10px] text-red-500">Lucide 또는 @mdi/js에 없는 아이콘입니다.</span>}
           </Field>
           <Field label="아이콘 색상">
             <input value={form.icon_color} onChange={(e) => setForm({ ...form, icon_color: e.target.value })} className="field-input font-mono" />

@@ -758,7 +758,7 @@ export const ensureAchievementTables = async (): Promise<void> => {
         description VARCHAR(500) NULL,
         category VARCHAR(40) NOT NULL,
         tier VARCHAR(24) NOT NULL DEFAULT 'bronze',
-        icon VARCHAR(64) NULL,
+        icon VARCHAR(120) NULL,
         icon_color VARCHAR(32) NULL,
         is_active TINYINT NOT NULL DEFAULT 1,
         is_hidden TINYINT NOT NULL DEFAULT 0,
@@ -845,6 +845,11 @@ export const ensureAchievementTables = async (): Promise<void> => {
       await db.run('ALTER TABLE achievements ADD COLUMN limited_winner_count INT NULL AFTER progress_mode');
     } catch (err: any) {
       if (err?.code !== 'ER_DUP_FIELDNAME' && !String(err?.message || '').includes('Duplicate column')) throw err;
+    }
+    try {
+      await db.run('ALTER TABLE achievements MODIFY COLUMN icon VARCHAR(120) NULL');
+    } catch (err: any) {
+      if (!String(err?.message || '').includes('check that column/key exists')) throw err;
     }
     await db.run(`
       CREATE TABLE IF NOT EXISTS achievement_evaluation_queue (
@@ -944,11 +949,26 @@ const validateStatCondition = (condition: any): string | null => {
   return null;
 };
 
+const normalizeIconName = (value: unknown): string | null => {
+  const icon = String(value || '').trim();
+  if (!icon) return null;
+  if (icon.length > 120 || !/^(?:[A-Za-z][A-Za-z0-9]*|lucide:[A-Za-z][A-Za-z0-9]*|mdi(?::[a-z0-9][a-z0-9-]*|[A-Z][A-Za-z0-9]*))$/.test(icon)) {
+    throw new Error('업적 아이콘명은 Lucide 또는 MDI 형식이어야 합니다.');
+  }
+  return icon;
+};
+
 export const validateAchievementPayload = (payload: any): { ok: true; normalized: Partial<Achievement> } | { ok: false; message: string } => {
   const code = String(payload.code || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9_-]{2,119}$/.test(code)) return { ok: false, message: '업적 코드는 영문/숫자/언더스코어/하이픈 3~120자로 입력해야 합니다.' };
   const name = String(payload.name || '').trim();
   if (!name || name.length > 120) return { ok: false, message: '업적 이름은 1~120자여야 합니다.' };
+  let icon: string | null = null;
+  try {
+    icon = normalizeIconName(payload.icon);
+  } catch (err: any) {
+    return { ok: false, message: err?.message || '업적 아이콘명이 올바르지 않습니다.' };
+  }
   const category = allowedCategories.includes(payload.category) ? payload.category : null;
   if (!category) return { ok: false, message: '업적 카테고리가 올바르지 않습니다.' };
   const tier = allowedTiers.includes(payload.tier) ? payload.tier : 'bronze';
@@ -1042,7 +1062,7 @@ export const validateAchievementPayload = (payload: any): { ok: true; normalized
       description: payload.description ? String(payload.description).slice(0, 500) : null,
       category,
       tier,
-      icon: payload.icon ? String(payload.icon).slice(0, 64) : null,
+      icon,
       icon_color: payload.icon_color ? String(payload.icon_color).slice(0, 32) : null,
       is_active: payload.is_active !== false,
       is_hidden: payload.is_hidden === true,

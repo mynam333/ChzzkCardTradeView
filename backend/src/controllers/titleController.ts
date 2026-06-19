@@ -28,7 +28,9 @@ const normalizePayload = (body: any) => {
   if (!name || name.length > 40) throw new Error('칭호명은 1~40자로 입력해 주세요.');
   if (description.length > 300) throw new Error('칭호 설명은 300자 이하로 입력해 주세요.');
   if (css.length > 20000) throw new Error('CSS는 20,000자 이하로 입력해 주세요.');
-  if (iconName && !/^[A-Za-z][A-Za-z0-9]*$/.test(iconName)) throw new Error('Lucide 아이콘명이 올바르지 않습니다.');
+  if (iconName && (iconName.length > 120 || !/^(?:[A-Za-z][A-Za-z0-9]*|lucide:[A-Za-z][A-Za-z0-9]*|mdi(?::[a-z0-9][a-z0-9-]*|[A-Z][A-Za-z0-9]*))$/.test(iconName))) {
+    throw new Error('Lucide 또는 MDI 아이콘명이 올바르지 않습니다.');
+  }
   if (!/^#[0-9a-fA-F]{6}$/.test(iconColor)) throw new Error('아이콘 색상은 6자리 HEX 값이어야 합니다.');
 
   return {
