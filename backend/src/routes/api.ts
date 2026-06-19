@@ -152,6 +152,11 @@ import {
   hideReadNotification
 } from '../controllers/notificationController';
 import {
+  addMyImageBlind,
+  getMyImageBlinds,
+  removeMyImageBlind
+} from '../controllers/imageBlindController';
+import {
   clearRoomViewing,
   closeChatRoom,
   createChatImageMessage,
@@ -324,6 +329,9 @@ router.post('/tutorial/rewards/gacha-ticket', authMiddleware, banCheckMiddleware
 router.get('/users/me/blocks', authMiddleware, banCheckMiddleware, getMyBlocks);
 router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
 router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
+router.get('/users/me/image-blinds', authMiddleware, banCheckMiddleware, getMyImageBlinds);
+router.post('/users/me/image-blinds', authMiddleware, banCheckMiddleware, addMyImageBlind);
+router.delete('/users/me/image-blinds/:image_key', authMiddleware, banCheckMiddleware, removeMyImageBlind);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCard);
 router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCards);
 router.patch('/cards/visibility', authMiddleware, banCheckMiddleware, updateMyCardGroupVisibility);

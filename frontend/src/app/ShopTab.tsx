@@ -11,6 +11,7 @@ import { borderClass, borderStyle, cardImage, streamerProfileImage } from '@/lib
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { CardPreview } from './CardPreview';
+import { BlindableCardImage } from './BlindableCardImage';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel, Hourglass, BadgePercent } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 
@@ -207,7 +208,7 @@ const getSortedStreamerOptionMatches = (streamers: any[], query: string, limit =
 };
 
 export const ShopTab: React.FC = () => {
-  const { user, updatePoints, refreshUserData, toast, setActiveTab } = useApp();
+  const { user, updatePoints, refreshUserData, toast, setActiveTab, blindImage, unblindImage, isImageBlinded } = useApp();
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -272,6 +273,13 @@ export const ShopTab: React.FC = () => {
   const [cancellingListingId, setCancellingListingId] = useState<number | null>(null);
   const [hidingListingId, setHidingListingId] = useState<number | null>(null);
   const [marketWatches, setMarketWatches] = useState<any[]>([]);
+  const [imageBlindMenu, setImageBlindMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    imageUrl: string;
+    name: string;
+  }>({ open: false, x: 0, y: 0, imageUrl: '', name: '' });
   const [watchChannelId, setWatchChannelId] = useState('');
   const [watchStar, setWatchStar] = useState('');
   const [watchMaxPrice, setWatchMaxPrice] = useState('');
@@ -340,6 +348,16 @@ export const ShopTab: React.FC = () => {
     const historyPageParam = Number(searchParams.get('historyPage') || '1');
     setMarketHistoryPage(Number.isFinite(historyPageParam) && historyPageParam > 0 ? Math.floor(historyPageParam) : 1);
   }, [searchParams]);
+
+  useEffect(() => {
+    const close = () => setImageBlindMenu((prev) => prev.open ? { ...prev, open: false } : prev);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, []);
 
   const pushShopRoute = (updates: Record<string, string | number | null | undefined>) => {
     const newParams = new URLSearchParams(window.location.search);
@@ -1871,6 +1889,7 @@ export const ShopTab: React.FC = () => {
                     const isEnded = !!endsAt && remainingMs <= 0;
                     const isUrgent = isAuction && !isEnded && remainingMs <= 3 * 60_000; // 3분 이하
                     const isSoon = isAuction && !isEnded && remainingMs < 5 * 60_000;   // 5분 미만
+                    const listingImageUrl = cardImage(streamer, star);
 
                     return (
                       <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
@@ -1881,11 +1900,22 @@ export const ShopTab: React.FC = () => {
                             ...(borderClass(border) ? {} : (borderStyle(border) || {}))
                           }}
                           className={`group relative flex aspect-[5/8] w-full flex-col justify-between overflow-hidden rounded-xl bg-card shadow-sm border border-border/80 ${star >= 1 ? `card-star card-star-${star}` : ''}`}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setImageBlindMenu({
+                              open: true,
+                              x: Math.min(event.clientX, window.innerWidth - 220),
+                              y: Math.min(event.clientY, window.innerHeight - 96),
+                              imageUrl: listingImageUrl,
+                              name: streamer?.name || '카드 이미지'
+                            });
+                          }}
                         >
                           <CosmeticFrame border={border} />
                           <div className="absolute inset-0 z-0">
-                            <img
-                              src={cardImage(streamer, star)}
+                            <BlindableCardImage
+                              src={listingImageUrl}
                               alt={streamer?.name || 'card'}
                               loading="lazy"
                               className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
@@ -2425,6 +2455,29 @@ export const ShopTab: React.FC = () => {
               );
             })()}
           </section>
+        </div>
+      )}
+
+      {imageBlindMenu.open && (
+        <div
+          className="fixed z-[95] w-52 overflow-hidden rounded-2xl border border-border bg-card/95 p-1.5 text-xs shadow-2xl backdrop-blur-md animate-in fade-in duration-100"
+          style={{ left: imageBlindMenu.x, top: imageBlindMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="px-3 py-2">
+            <p className="truncate text-[10px] font-black text-muted-foreground">{imageBlindMenu.name}</p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (isImageBlinded(imageBlindMenu.imageUrl)) await unblindImage(imageBlindMenu.imageUrl);
+              else await blindImage(imageBlindMenu.imageUrl);
+              setImageBlindMenu((prev) => ({ ...prev, open: false }));
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-black text-foreground transition hover:bg-secondary/80"
+          >
+            {isImageBlinded(imageBlindMenu.imageUrl) ? '👁️ 이미지 블라인드 해제' : '🚫 같은 이미지 블라인드'}
+          </button>
         </div>
       )}
 

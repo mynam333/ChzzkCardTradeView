@@ -205,6 +205,7 @@ const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
     ensureUniqueIndex(db, 'user_cosmetics', ['user_id', 'item_id'], 'idx_user_cosmetics_user_item_unique');
     ensureUniqueIndex(db, 'shop_purchases', ['user_id', 'item_id'], 'idx_shop_purchases_user_item_unique');
     ensureUniqueIndex(db, 'user_blocks', ['blocker_id', 'blocked_id'], 'idx_user_blocks_pair_unique');
+    ensureUniqueIndex(db, 'user_image_blinds', ['user_id', 'image_key'], 'idx_user_image_blinds_user_key_unique');
     ensureUniqueIndex(db, 'friend_requests', ['id'], 'idx_friend_requests_id_unique');
     ensureUniqueIndex(db, 'friendships', ['user_a_id', 'user_b_id'], 'idx_friendships_pair_unique');
     ensureUniqueIndex(db, 'chat_rooms', ['id'], 'idx_chat_rooms_id_unique');
@@ -339,6 +340,17 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_puzzle_excluded_images_report (source_report_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS user_image_blinds (
+      user_id VARCHAR(191) NOT NULL,
+      image_key VARCHAR(512) NOT NULL,
+      image_url TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, image_key),
+      INDEX idx_user_image_blinds_user_created (user_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await ensureMysqlTableCollation(db, 'user_image_blinds');
   await ensureMysqlColumn(db, 'user_titles', 'grant_source', "grant_source VARCHAR(64) NOT NULL DEFAULT 'manual' AFTER is_equipped");
   await ensureMysqlIndex(db, 'user_titles', 'idx_user_titles_grant_source', '(grant_source, title_id)');
   await db.run(`
@@ -1286,6 +1298,14 @@ export const initDatabaseConnection = async (): Promise<void> => {
       );`);
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_puzzle_excluded_images_channel_star ON puzzle_excluded_images(channel_id, star);");
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_puzzle_excluded_images_report ON puzzle_excluded_images(source_report_id);");
+      sqliteDb.exec(`CREATE TABLE IF NOT EXISTS user_image_blinds (
+        user_id TEXT NOT NULL,
+        image_key TEXT NOT NULL,
+        image_url TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY(user_id, image_key)
+      );`);
+      sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_user_image_blinds_user_created ON user_image_blinds(user_id, created_at);");
       sqliteDb.exec(`CREATE TABLE IF NOT EXISTS streamer_registration_blocks (
         channel_id TEXT PRIMARY KEY,
         reason TEXT NOT NULL,

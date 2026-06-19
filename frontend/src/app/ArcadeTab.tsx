@@ -22,6 +22,7 @@ import {
   UserRound
 } from 'lucide-react';
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
+import { BlindableCardImage } from './BlindableCardImage';
 
 type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
 type QuizChoice = {
@@ -272,6 +273,8 @@ const CanvasBlurQuizImage: React.FC<{
   angle: number;
   mode: 'motion' | 'radial';
 }> = ({ src, intensity, angle, mode }) => {
+  const { isImageBlinded } = useApp();
+  const blinded = isImageBlinded(src);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const rafRef = React.useRef<number | null>(null);
@@ -415,6 +418,7 @@ const CanvasBlurQuizImage: React.FC<{
   useEffect(() => {
     setReady(false);
     imageRef.current = null;
+    if (blinded) return;
     const image = new Image();
     image.decoding = 'async';
     image.fetchPriority = 'high';
@@ -432,21 +436,26 @@ const CanvasBlurQuizImage: React.FC<{
       image.onload = null;
       if (imageRef.current === image) imageRef.current = null;
     };
-  }, [scheduleDraw, src]);
+  }, [blinded, scheduleDraw, src]);
 
   useEffect(() => {
+    if (blinded) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const observer = new ResizeObserver(scheduleDraw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [scheduleDraw]);
+  }, [blinded, scheduleDraw]);
 
   useEffect(() => {
     return () => {
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     };
   }, []);
+
+  if (blinded) {
+    return <BlindableCardImage src={src} alt="블러 퀴즈 카드" className="h-full w-full object-cover" />;
+  }
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-zinc-950 contain-paint">
@@ -475,6 +484,8 @@ const RadialBlurQuizImage: React.FC<{ src: string; intensity: number; angle: num
 );
 
 const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, intensity }) => {
+  const { isImageBlinded } = useApp();
+  const blinded = isImageBlinded(src);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const intensityRef = React.useRef(intensity);
@@ -569,6 +580,7 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
 
   useEffect(() => {
     imageRef.current = null;
+    if (blinded) return;
     const canvas = canvasRef.current;
     const context = canvas?.getContext('2d');
     if (canvas && context) {
@@ -588,15 +600,20 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
       image.onload = null;
       if (imageRef.current === image) imageRef.current = null;
     };
-  }, [drawCanvas, src]);
+  }, [blinded, drawCanvas, src]);
 
   useEffect(() => {
+    if (blinded) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const observer = new ResizeObserver(drawCanvas);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [drawCanvas]);
+  }, [blinded, drawCanvas]);
+
+  if (blinded) {
+    return <BlindableCardImage src={src} alt="모자이크 퀴즈 카드" className="h-full w-full object-cover" />;
+  }
 
   return (
     <canvas
@@ -609,11 +626,13 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
 };
 
 const PuzzlePieceImage: React.FC<{ src: string; pieceId: number }> = ({ src, pieceId }) => {
+  const { isImageBlinded } = useApp();
+  const blinded = isImageBlinded(src);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !src) return;
+    if (!canvas || !src || blinded) return;
 
     let cancelled = false;
     const image = new Image();
@@ -678,7 +697,11 @@ const PuzzlePieceImage: React.FC<{ src: string; pieceId: number }> = ({ src, pie
       cancelled = true;
       image.onload = null;
     };
-  }, [pieceId, src]);
+  }, [blinded, pieceId, src]);
+
+  if (blinded) {
+    return <BlindableCardImage src={src} alt="퍼즐 카드" className="h-full w-full object-cover" allowUnblind={false} />;
+  }
 
   return (
     <canvas
@@ -800,39 +823,67 @@ const CardImageTile: React.FC<{
   disabled?: boolean;
   showStarLabel?: boolean;
   onClick?: () => void;
-}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, showStarLabel = true, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    className={`cute-card-pop relative min-w-0 overflow-hidden rounded-2xl border bg-card text-left shadow-sm transition active:scale-95 disabled:pointer-events-none ${
-      correct
-        ? 'border-emerald-400 bg-emerald-500/12 ring-2 ring-emerald-400/50'
-        : wrong
-          ? 'border-rose-400 bg-rose-500/12 ring-2 ring-rose-400/50'
-          : selected
-            ? 'border-primary bg-primary/10 ring-2 ring-primary/35'
-            : 'border-border hover:-translate-y-0.5 hover:border-primary/35'
-    }`}
-  >
-    <div className="aspect-[4/5] w-full overflow-hidden bg-secondary/50">
-      <img
-        src={card.image_url || '/icon.png'}
-        alt={card.name}
-        className="h-full w-full object-cover"
-        draggable={false}
-      />
-    </div>
-    <div className="px-2.5 py-2 sm:px-3">
-      <p className="truncate text-[11px] font-black text-foreground sm:text-sm">{card.name}</p>
-      {showStarLabel && (
-        <p className="mt-0.5 text-[9px] font-bold text-muted-foreground">{card.star > 0 ? `${card.star}성 카드` : '기본 카드'}</p>
-      )}
-    </div>
-  </button>
-);
+}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, showStarLabel = true, onClick }) => {
+  const { blindImage, unblindImage, isImageBlinded } = useApp();
+  const imageUrl = card.image_url || '/icon.png';
+  const blinded = isImageBlinded(imageUrl);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (blinded) unblindImage(imageUrl);
+        else blindImage(imageUrl);
+      }}
+      disabled={disabled}
+      className={`cute-card-pop relative min-w-0 overflow-hidden rounded-2xl border bg-card text-left shadow-sm transition active:scale-95 disabled:pointer-events-none ${
+        correct
+          ? 'border-emerald-400 bg-emerald-500/12 ring-2 ring-emerald-400/50'
+          : wrong
+            ? 'border-rose-400 bg-rose-500/12 ring-2 ring-rose-400/50'
+            : selected
+              ? 'border-primary bg-primary/10 ring-2 ring-primary/35'
+              : 'border-border hover:-translate-y-0.5 hover:border-primary/35'
+      }`}
+      title="우클릭으로 같은 이미지를 블라인드/해제"
+    >
+      <div className="aspect-[4/5] w-full overflow-hidden bg-secondary/50">
+        <BlindableCardImage
+          src={imageUrl}
+          alt={card.name}
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+      </div>
+      <div className="px-2.5 py-2 sm:px-3">
+        <p className="truncate text-[11px] font-black text-foreground sm:text-sm">{card.name}</p>
+        {showStarLabel && (
+          <p className="mt-0.5 text-[9px] font-bold text-muted-foreground">{card.star > 0 ? `${card.star}성 카드` : '기본 카드'}</p>
+        )}
+      </div>
+    </button>
+  );
+};
 
 const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
+  const { blindImage, unblindImage, isImageBlinded } = useApp();
+  const imageUrl = round.source_image_url || '/icon.png';
+  if (isImageBlinded(imageUrl)) {
+    return (
+      <BlindableCardImage
+        src={imageUrl}
+        alt="확대된 카드 이미지 조각"
+        className="aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 object-cover shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          unblindImage(imageUrl);
+        }}
+      />
+    );
+  }
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
   const safeMargin = getRotatedCropSafeMargin(size, rotation);
@@ -844,6 +895,11 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
       role="img"
       aria-label="확대된 카드 이미지 조각"
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        blindImage(imageUrl);
+      }}
+      title="우클릭으로 같은 이미지를 블라인드"
     >
       <div
         className="absolute inset-0 origin-center"
@@ -853,7 +909,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
           className="absolute left-1/2 top-1/2 aspect-square origin-top-left"
           style={{
             width: `${imageScalePercent}%`,
-            backgroundImage: `url(${round.source_image_url || '/icon.png'})`,
+            backgroundImage: `url(${imageUrl})`,
             backgroundRepeat: 'no-repeat',
             backgroundSize: '100% 100%',
             backgroundPosition: 'center',
@@ -870,7 +926,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
 };
 
 export const ArcadeTab: React.FC = () => {
-  const { user, refreshUserData, toast } = useApp();
+  const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
   const searchParams = useSearchParams();
   const router = useRouter();
   const autoStartRef = useRef(false); // URL 파라미터 기반 연습 자동 시작 1회 가드
@@ -2309,11 +2365,21 @@ export const ArcadeTab: React.FC = () => {
                 </div>
 
                 {/* 카드 이미지 컨테이너 */}
-                <div className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-[1.75rem] border border-border/80 bg-sky-950 shadow-[0_18px_44px_rgba(7,89,133,0.26)]">
+                <div
+                  className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-[1.75rem] border border-border/80 bg-sky-950 shadow-[0_18px_44px_rgba(7,89,133,0.26)]"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    const imageUrl = gameData.image_url || '';
+                    if (!imageUrl) return;
+                    if (isImageBlinded(imageUrl)) unblindImage(imageUrl);
+                    else blindImage(imageUrl);
+                  }}
+                  title="우클릭으로 같은 이미지를 블라인드/해제"
+                >
 
                   {/* 가우시안 블러 모드 */}
                   {quizBlurType === 'gaussian' && (
-                    <img
+                    <BlindableCardImage
                       src={gameData.image_url}
                       alt="Quiz card"
                       style={{
@@ -2444,7 +2510,17 @@ export const ArcadeTab: React.FC = () => {
 
               {/* 원본의 중앙 3:4 영역을 실제 좌표로 크롭한 뒤 정사각형 12개로 분할 */}
               <div className="rounded-[1.75rem] border border-border bg-secondary/30 p-1.5 shadow-inner">
-                <div className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-2xl touch-none select-none">
+                <div
+                  className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-2xl touch-none select-none"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    const imageUrl = gameData.image_url || '';
+                    if (!imageUrl) return;
+                    if (isImageBlinded(imageUrl)) unblindImage(imageUrl);
+                    else blindImage(imageUrl);
+                  }}
+                  title="우클릭으로 같은 이미지를 블라인드/해제"
+                >
                   {puzzlePieces.map((piece, idx) => {
                     const isDragging = draggingPuzzleIndex === idx;
                     const isDropTarget = dragOverPuzzleIndex === idx;

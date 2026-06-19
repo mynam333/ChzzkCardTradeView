@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { API_BASE_URL, apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
+import { normalizeImageBlindKey } from '@/lib/imageBlind';
 import {
   identifyAnalyticsUser,
   initAnalytics,
@@ -529,6 +530,12 @@ interface AppContextType {
   refreshUserData: (showLoading?: boolean) => Promise<void>;
   updatePoints: (diff: number) => Promise<void>;
   toast: (message: string, type?: ToastType) => void;
+  imageBlindKeys: Set<string>;
+  imageBlindItems: Array<{ image_key: string; image_url?: string | null; created_at?: string | null }>;
+  isImageBlinded: (imageUrl?: string | null) => boolean;
+  blindImage: (imageUrl: string) => Promise<boolean>;
+  unblindImage: (imageKeyOrUrl: string) => Promise<boolean>;
+  refreshImageBlinds: () => Promise<void>;
   maintenanceActive: boolean | null;
   maintenanceStartAt: string | null;
   maintenanceEndAt: string | null;
@@ -662,6 +669,19 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   const [maintenanceActive, setMaintenanceActive] = useState<boolean | null>(null);
   const [maintenanceStartAt, setMaintenanceStartAt] = useState<string | null>(null);
   const [maintenanceEndAt, setMaintenanceEndAt] = useState<string | null>(null);
+  const [imageBlindItems, setImageBlindItems] = useState<Array<{ image_key: string; image_url?: string | null; created_at?: string | null }>>([]);
+  const imageBlindFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const imageBlindKeys = React.useMemo(
+    () => new Set(imageBlindItems.map((item) => item.image_key).filter(Boolean)),
+    [imageBlindItems]
+  );
+  const isImageBlinded = React.useCallback(
+    (imageUrl?: string | null) => {
+      const key = normalizeImageBlindKey(imageUrl);
+      return Boolean(key && imageBlindKeys.has(key));
+    },
+    [imageBlindKeys]
+  );
 
   // 전역 에러 모달 상태 추가
   const [alertModal, setAlertModal] = useState<{
@@ -899,6 +919,102 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     );
   };
 
+  const refreshImageBlinds = React.useCallback(async () => {
+    if (!isAuthed()) {
+      setImageBlindItems([]);
+      return;
+    }
+    if (imageBlindFetchInFlightRef.current) return imageBlindFetchInFlightRef.current;
+
+    const task = (async () => {
+      const res = await apiFetch('/users/me/image-blinds');
+      if (!res.ok) return;
+      const data = await res.json();
+      setImageBlindItems(Array.isArray(data.items) ? data.items : []);
+    })();
+
+    imageBlindFetchInFlightRef.current = task;
+    try {
+      await task;
+    } catch (err) {
+      console.error('[AppContext] 이미지 블라인드 목록 조회 실패:', err);
+    } finally {
+      imageBlindFetchInFlightRef.current = null;
+    }
+  }, []);
+
+  const blindImage = React.useCallback(async (imageUrl: string): Promise<boolean> => {
+    const imageKey = normalizeImageBlindKey(imageUrl);
+    if (!imageKey) {
+      toast('블라인드할 이미지 주소를 확인할 수 없습니다.', 'error');
+      return false;
+    }
+    if (!isAuthed()) {
+      toast('로그인 후 사용할 수 있습니다.', 'warning');
+      return false;
+    }
+
+    setImageBlindItems((prev) => (
+      prev.some((item) => item.image_key === imageKey)
+        ? prev
+        : [{ image_key: imageKey, image_url: imageUrl, created_at: new Date().toISOString() }, ...prev]
+    ));
+
+    try {
+      const res = await apiFetch('/users/me/image-blinds', {
+        method: 'POST',
+        body: JSON.stringify({ image_url: imageUrl })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        await refreshImageBlinds();
+        toast(data.message || '이미지 블라인드에 실패했습니다.', 'error');
+        return false;
+      }
+      setImageBlindItems((prev) => [
+        data.item || { image_key: imageKey, image_url: imageUrl, created_at: new Date().toISOString() },
+        ...prev.filter((item) => item.image_key !== imageKey)
+      ]);
+      toast('같은 이미지를 내 화면에서 블라인드했습니다.', 'success');
+      return true;
+    } catch (err) {
+      await refreshImageBlinds();
+      toast('이미지 블라인드 중 오류가 발생했습니다.', 'error');
+      return false;
+    }
+  }, [refreshImageBlinds, toast]);
+
+  const unblindImage = React.useCallback(async (imageKeyOrUrl: string): Promise<boolean> => {
+    const imageKey = normalizeImageBlindKey(imageKeyOrUrl);
+    if (!imageKey) return false;
+    if (!isAuthed()) {
+      toast('로그인 후 사용할 수 있습니다.', 'warning');
+      return false;
+    }
+
+    setImageBlindItems((prev) => prev.filter((item) => item.image_key !== imageKey));
+    try {
+      const res = await apiFetch(`/users/me/image-blinds/${encodeURIComponent(imageKey)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        await refreshImageBlinds();
+        toast(data.message || '이미지 블라인드 해제에 실패했습니다.', 'error');
+        return false;
+      }
+      toast('이미지 블라인드를 해제했습니다.', 'success');
+      return true;
+    } catch {
+      await refreshImageBlinds();
+      toast('이미지 블라인드 해제 중 오류가 발생했습니다.', 'error');
+      return false;
+    }
+  }, [refreshImageBlinds, toast]);
+
+  useEffect(() => {
+    if (user?.id) refreshImageBlinds();
+    else setImageBlindItems([]);
+  }, [refreshImageBlinds, user?.id]);
+
   const isMaintenanceRoute = pathname === '/maintenance';
   const isMaintenanceBypassRoute =
     isMaintenanceRoute ||
@@ -926,6 +1042,12 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       refreshUserData,
       updatePoints,
       toast,
+      imageBlindKeys,
+      imageBlindItems,
+      isImageBlinded,
+      blindImage,
+      unblindImage,
+      refreshImageBlinds,
       maintenanceActive,
       maintenanceStartAt,
       maintenanceEndAt,

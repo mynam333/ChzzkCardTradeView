@@ -28,6 +28,7 @@ import { fuzzySearch } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { ReportCardModal } from './ReportCardModal';
+import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 
@@ -109,7 +110,7 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 
 export const GachaTab: React.FC = () => {
-  const { user, refreshUserData, toast } = useApp();
+  const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
@@ -2029,7 +2030,7 @@ export const GachaTab: React.FC = () => {
 
                       {/* 카드 이미지 배경 */}
                       <div className="absolute inset-0 z-0">
-                        <img
+                        <BlindableCardImage
                           src={inventoryCardImage(streamer, star)}
                           alt={streamer.name}
                           loading="lazy"
@@ -2355,7 +2356,7 @@ export const GachaTab: React.FC = () => {
 
                   {/* 카드 이미지 배경 */}
                   <div className="absolute inset-0 z-0">
-                    <img src={inventoryCardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
+                    <BlindableCardImage src={inventoryCardImage(s, star)} alt={s.name} className="h-full w-full object-cover" />
                   </div>
                   
                   {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2419,6 +2420,10 @@ export const GachaTab: React.FC = () => {
         // 대표로 사용할 카드 객체
         const displayCard = availableCard || lockedCard || pendingCard || contextMenu.card;
         if (!displayCard) return null;
+        const displayImageUrl = displayCard.streamer
+          ? inventoryCardImage(displayCard.streamer, displayCard.star || 0)
+          : '';
+        const displayImageBlinded = isImageBlinded(displayImageUrl);
 
         return (
           <div
@@ -2483,6 +2488,18 @@ export const GachaTab: React.FC = () => {
             >
               {allHidden ? '👁️ 외부 공개 켜기' : '🙈 외부 공개 숨기기'}
             </button>
+            {displayImageUrl && (
+              <button
+                onClick={async () => {
+                  if (displayImageBlinded) await unblindImage(displayImageUrl);
+                  else await blindImage(displayImageUrl);
+                  setContextMenu(prev => ({ ...prev, open: false }));
+                }}
+                className="w-full text-left px-4 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-2"
+              >
+                {displayImageBlinded ? '👁️ 이미지 블라인드 해제' : '🚫 같은 이미지 블라인드'}
+              </button>
+            )}
             {availableCard && (
               <button
                 onClick={() => {
@@ -2656,7 +2673,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={live.border} />
                     <div className="absolute inset-0 z-0">
-                      <img src={inventoryCardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
+                      <BlindableCardImage src={inventoryCardImage(live.streamer, live.star || 0)} alt={live.streamer?.name} className="h-full w-full object-cover opacity-80" />
                     </div>
                     
                     {/* 하단 그라데이션 오버레이 (카드 테두리(z-10)보다 위에 배치하여 테두리 하단도 어둡게 덮음) */}
@@ -2716,7 +2733,7 @@ export const GachaTab: React.FC = () => {
             </h3>
 
             <div className="mt-4 flex items-center gap-4 bg-secondary/30 p-3.5 rounded-xl border border-border/50">
-              <img
+              <BlindableCardImage
                 src={inventoryCardImage(sellingStreamer, sellingStar)}
                 alt={sellingStreamer.name}
                 className="h-12 w-12 rounded-full border border-border/80 object-cover"
@@ -2848,7 +2865,7 @@ export const GachaTab: React.FC = () => {
                 return (
                   <div key={key} className="flex items-center justify-between gap-3 bg-secondary/30 p-2.5 rounded-xl border border-border/50">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <img
+                      <BlindableCardImage
                         src={inventoryCardImage(streamer, star)}
                         alt={streamer.name}
                         className="h-8 w-8 rounded-full border border-border/60 object-cover"
@@ -3003,7 +3020,7 @@ export const GachaTab: React.FC = () => {
                   >
                     <CosmeticFrame border={marketRegisterCard.border} />
                     <div className="absolute inset-0 z-0">
-                      <img src={inventoryCardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
+                      <BlindableCardImage src={inventoryCardImage(streamer, star)} alt={streamer.name} className="h-full w-full object-cover opacity-80" />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent z-15 pointer-events-none"></div>
                   </div>

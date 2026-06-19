@@ -313,6 +313,8 @@ export const AdminTab: React.FC = () => {
 
   // 스트리머 이미지 관리
   const [streamerChannelId, setStreamerChannelId] = useState('');
+  const [imageResetConfirm, setImageResetConfirm] = useState<{ channelId: string; name?: string; star?: number; imageUrl?: string | null } | null>(null);
+  const [resettingStreamerImage, setResettingStreamerImage] = useState(false);
   const [missingProfileStreamers, setMissingProfileStreamers] = useState<any[]>([]);
   const [missingProfileSummary, setMissingProfileSummary] = useState({
     count: 0,
@@ -1439,16 +1441,49 @@ export const AdminTab: React.FC = () => {
     }
   };
 
-  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string, star?: number) => {
+  const handleStreamerImageAction = async (action: 'reset' | 'ban' | 'unban', channelId?: string, star?: number): Promise<boolean> => {
     const target = (channelId || streamerChannelId).trim();
-    if (!target) { toast('스트리머 채널 ID를 입력해 주세요.'); return; }
+    if (!target) { toast('스트리머 채널 ID를 입력해 주세요.'); return false; }
     try {
       const body = action === 'reset' && star !== undefined ? JSON.stringify({ star }) : undefined;
       const res = await apiFetch(`/admin/streamers/${target}/image/${action}`, { method: 'POST', ...(body ? { body } : {}) });
       const data = await res.json();
-      toast(data.message || '처리되었습니다.');
+      if (!res.ok) {
+        toast(data.message || '처리에 실패했습니다.', 'error');
+        return false;
+      }
+      toast(data.message || '처리되었습니다.', 'success');
       fetchCouponStreamers(true); // 목록 갱신
-    } catch { toast('서버 통신 에러'); }
+      return true;
+    } catch {
+      toast('서버 통신 에러', 'error');
+      return false;
+    }
+  };
+
+  const openStreamerImageResetConfirm = (target?: { channelId?: string; name?: string; star?: number; imageUrl?: string | null }) => {
+    const channelId = (target?.channelId || streamerChannelId).trim();
+    if (!channelId) {
+      toast('스트리머 채널 ID를 입력해 주세요.', 'warning');
+      return;
+    }
+    setImageResetConfirm({
+      channelId,
+      name: target?.name,
+      star: target?.star,
+      imageUrl: target?.imageUrl ?? null
+    });
+  };
+
+  const confirmStreamerImageReset = async () => {
+    if (!imageResetConfirm) return;
+    setResettingStreamerImage(true);
+    try {
+      const ok = await handleStreamerImageAction('reset', imageResetConfirm.channelId, imageResetConfirm.star);
+      if (ok) setImageResetConfirm(null);
+    } finally {
+      setResettingStreamerImage(false);
+    }
   };
 
   const tradeStatusMeta: Record<TradeStatus, { label: string; className: string }> = {
@@ -3096,7 +3131,7 @@ export const AdminTab: React.FC = () => {
                           <p className="text-[10px] text-muted-foreground truncate">{s.channel_id}</p>
                         </div>
                         <div className="flex shrink-0 gap-1">
-                          <button onClick={() => handleStreamerImageAction('reset', s.channel_id)} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">전체 초기화</button>
+                          <button onClick={() => openStreamerImageResetConfirm({ channelId: s.channel_id, name: s.name })} className="rounded bg-secondary px-2 py-1 text-[10px] font-bold hover:bg-secondary/80">전체 초기화</button>
                           {s.is_image_banned ? (
                             <button onClick={() => handleStreamerImageAction('unban', s.channel_id)} className="rounded bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500 hover:bg-emerald-500/20">해제</button>
                           ) : (
@@ -3117,7 +3152,7 @@ export const AdminTab: React.FC = () => {
                               <span className="absolute left-0.5 top-0.5 rounded bg-black/55 px-1 text-[7px] font-black text-amber-300">{st}★</span>
                               {own ? (
                                 <button
-                                  onClick={() => handleStreamerImageAction('reset', s.channel_id, st)}
+                                  onClick={() => openStreamerImageResetConfirm({ channelId: s.channel_id, name: s.name, star: st, imageUrl: own })}
                                   title={`${st}성 이미지 초기화`}
                                   className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white shadow hover:bg-red-600"
                                 >×</button>
@@ -3220,7 +3255,7 @@ export const AdminTab: React.FC = () => {
                 onChange={(e) => setStreamerChannelId(e.target.value)}
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs" />
               <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => handleStreamerImageAction('reset')} className="rounded bg-secondary px-3 py-1.5 text-[11px] font-bold hover:bg-secondary/80">기본 이미지로 초기화</button>
+                <button onClick={() => openStreamerImageResetConfirm()} className="rounded bg-secondary px-3 py-1.5 text-[11px] font-bold hover:bg-secondary/80">기본 이미지로 초기화</button>
                 <button onClick={() => handleStreamerImageAction('ban')} className="rounded bg-red-500/10 px-3 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-500/20">이미지 차단</button>
                 <button onClick={() => handleStreamerImageAction('unban')} className="rounded bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/20">차단 해제</button>
               </div>
@@ -3281,6 +3316,50 @@ export const AdminTab: React.FC = () => {
           </section>
         );
       })()}
+
+      {/* 커스텀 스트리머 이미지 삭제 확인 모달 */}
+      {imageResetConfirm && (
+        <div
+          className="modal-backdrop modal-backdrop-center z-[90] bg-black/70 backdrop-blur-sm"
+          onClick={() => {
+            if (!resettingStreamerImage) setImageResetConfirm(null);
+          }}
+        >
+          <div className="modal-panel modal-panel-sm modal-panel-scroll rounded-2xl border border-border bg-card p-5 text-center shadow-2xl animate-in zoom-in-95 duration-200 sm:p-6" onClick={(e) => e.stopPropagation()}>
+            <Trash2 className="mx-auto mb-3 h-9 w-9 text-red-500" />
+            <h4 className="mb-2 text-sm font-black text-foreground">커스텀 이미지 삭제</h4>
+            {imageResetConfirm.imageUrl ? (
+              <div className="mx-auto mb-3 aspect-[5/8] w-20 overflow-hidden rounded-xl border border-border bg-secondary shadow-sm">
+                <img src={imageResetConfirm.imageUrl} alt="삭제할 커스텀 이미지" className="h-full w-full object-cover" />
+              </div>
+            ) : null}
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              <b className="text-foreground">{imageResetConfirm.name || imageResetConfirm.channelId}</b>
+              {imageResetConfirm.star !== undefined
+                ? ` ${imageResetConfirm.star}성 커스텀 이미지를 기본 이미지로 되돌립니다.`
+                : '의 모든 커스텀 이미지를 기본 이미지로 되돌립니다.'}
+              <br />
+              삭제된 커스텀 이미지는 복구할 수 없습니다.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setImageResetConfirm(null)}
+                disabled={resettingStreamerImage}
+                className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmStreamerImageReset}
+                disabled={resettingStreamerImage}
+                className="rounded-lg bg-red-500 px-5 py-2 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {resettingStreamerImage ? '삭제 중...' : imageResetConfirm.star !== undefined ? '이미지 삭제' : '전체 삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 스트리머 카드 삭제 확인 모달 */}
       {delTarget && (
