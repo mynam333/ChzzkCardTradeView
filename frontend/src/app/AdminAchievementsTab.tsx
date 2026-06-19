@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Award, Edit3, Eye, EyeOff, Gift, Plus, RefreshCw, Save } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { suggestedIconOptions } from '@/lib/iconLibrary';
 import { useApp } from './AppContext';
 import type { AchievementCategory, AchievementReward, AchievementRewardType, AchievementTier, AdminAchievement, ShopItem, UserTitle } from '@/lib/types';
 
@@ -212,6 +213,7 @@ const emptyForm = {
   progress_mode: 'incremental',
   repeat_policy: 'once',
   claim_policy: 'manual',
+  limited_winner_count: 0,
   criteria_type: 'stat' as 'stat' | 'all',
   conditions: [{ metric: 'card.acquired.count', target: 1 }] as ConditionForm[],
   rewards: [emptyReward()] as AchievementReward[],
@@ -360,6 +362,7 @@ export const AdminAchievementsTab: React.FC = () => {
       progress_mode: achievement.progress_mode || (criteria.type === 'all' ? 'composite' : 'incremental'),
       repeat_policy: achievement.repeat_policy || 'once',
       claim_policy: achievement.claim_policy || 'manual',
+      limited_winner_count: Math.max(0, Math.floor(Number(achievement.limited_winner_count || 0))),
       criteria_type: criteria.type === 'all' ? 'all' : 'stat',
       conditions: conditions.length > 0 ? conditions.slice(0, 8) : [{ metric: 'card.acquired.count', target: 1 }],
       rewards: rewards.length > 0 ? rewards : []
@@ -411,6 +414,7 @@ export const AdminAchievementsTab: React.FC = () => {
       repeat_policy: form.repeat_policy,
       claim_policy: form.claim_policy,
       progress_mode: form.criteria_type === 'all' ? 'composite' : form.progress_mode,
+      limited_winner_count: Math.max(0, Math.floor(Number(form.limited_winner_count || 0))),
       criteria_json: criteriaJson,
       rewards_json: form.rewards.map((reward) => normalizeReward(reward, cosmetics, titles)),
       confirm_hidden_economic_reward: form.confirm_hidden_economic_reward,
@@ -481,7 +485,8 @@ export const AdminAchievementsTab: React.FC = () => {
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="field-input" placeholder="업적 설명" />
           </Field>
           <Field label="아이콘">
-            <input value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} className="field-input" placeholder="Award" />
+            <input list="achievement-icon-options" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} className="field-input" placeholder="Award 또는 mdi:trophy" />
+            <datalist id="achievement-icon-options">{suggestedIconOptions.map((name) => <option key={name} value={name} />)}</datalist>
           </Field>
           <Field label="아이콘 색상">
             <input value={form.icon_color} onChange={(e) => setForm({ ...form, icon_color: e.target.value })} className="field-input font-mono" />
@@ -491,7 +496,7 @@ export const AdminAchievementsTab: React.FC = () => {
           </Field>
         </div>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-[180px_180px_1fr]">
+        <div className="mt-3 grid gap-3 lg:grid-cols-[180px_180px_180px_1fr]">
           <Field label="진행 방식">
             <select value={form.progress_mode} onChange={(e) => setForm({ ...form, progress_mode: e.target.value })} className="field-input" disabled={form.criteria_type === 'all'}>
               <option value="incremental">누적 이벤트</option>
@@ -508,6 +513,16 @@ export const AdminAchievementsTab: React.FC = () => {
               <option value="seasonal">시즌</option>
               <option value="repeatable">반복</option>
             </select>
+          </Field>
+          <Field label="선착순 한정">
+            <input
+              type="number"
+              min={0}
+              value={form.limited_winner_count}
+              onChange={(e) => setForm({ ...form, limited_winner_count: Math.max(0, Math.floor(Number(e.target.value || 0))) })}
+              className="field-input"
+              placeholder="0 = 무제한"
+            />
           </Field>
           <Field label="숨김 힌트">
             <input value={form.hidden_hint} onChange={(e) => setForm({ ...form, hidden_hint: e.target.value })} className="field-input" placeholder="숨김 업적 힌트" />
@@ -655,6 +670,11 @@ export const AdminAchievementsTab: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary">{achievement.tier}</span>
                     <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">{categoryLabels[achievement.category]}</span>
+                    {Number(achievement.limited_winner_count || 0) > 0 && (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-black text-amber-600">
+                        선착순 {Number(achievement.limited_winner_count).toLocaleString()}명
+                      </span>
+                    )}
                     {achievement.is_hidden ? <EyeOff className="h-3.5 w-3.5 text-muted-foreground" /> : <Eye className="h-3.5 w-3.5 text-muted-foreground" />}
                   </div>
                   <p className="mt-2 truncate text-sm font-black">{achievement.name}</p>

@@ -419,6 +419,7 @@ export interface AdminAchievement {
   progress_mode: string;
   repeat_policy: string;
   claim_policy: string;
+  limited_winner_count?: number | null;
   completed_users?: number;
   claimed_users?: number;
   created_at?: string | null;

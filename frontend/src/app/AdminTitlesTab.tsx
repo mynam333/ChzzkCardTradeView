@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Award, Edit3, Link2, RefreshCw, Search, Trash2, UserMinus, UserPlus, icons } from 'lucide-react';
+import { Award, Edit3, Link2, RefreshCw, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { appIconExists, suggestedIconOptions } from '@/lib/iconLibrary';
 import type { AdminUser, SubscriptionTitleRule, UserTitle } from '@/lib/types';
 import { useApp } from './AppContext';
 import { UserTitleBadge, UserTitleList } from './UserTitleBadge';
@@ -23,8 +24,6 @@ const emptySubscriptionRuleForm = {
   title_id: 0,
   active: true
 };
-
-const suggestedIcons = ['Award', 'BadgeCheck', 'Crown', 'Diamond', 'Flame', 'Gem', 'Heart', 'Medal', 'ShieldCheck', 'Sparkles', 'Star', 'Trophy', 'Zap'];
 
 export const AdminTitlesTab: React.FC = () => {
   const { toast } = useApp();
@@ -51,8 +50,8 @@ export const AdminTitlesTab: React.FC = () => {
     icon_name: form.icon_name || null,
     icon_color: form.icon_color
   };
-  const iconExists = !form.icon_name || Boolean(icons[form.icon_name as keyof typeof icons]);
-  const iconOptions = useMemo(() => suggestedIcons.filter((name) => icons[name as keyof typeof icons]), []);
+  const iconExists = appIconExists(form.icon_name);
+  const iconOptions = useMemo(() => suggestedIconOptions, []);
   const selectableUsers = selectedTitle
     ? users.filter((user) => {
       const ownsTitle = user.titles.some((title) => title.id === selectedTitle.id);
@@ -112,7 +111,7 @@ export const AdminTitlesTab: React.FC = () => {
 
   const saveTitle = async () => {
     if (!form.name.trim()) return toast('칭호명을 입력해 주세요.');
-    if (!iconExists) return toast('존재하는 Lucide 아이콘명을 입력해 주세요.');
+    if (!iconExists) return toast('존재하는 Lucide 또는 MDI 아이콘명을 입력해 주세요.');
     setSaving(true);
     try {
       const res = await apiFetch(form.id ? `/admin/titles/${form.id}` : '/admin/titles', {
@@ -392,11 +391,11 @@ export const AdminTitlesTab: React.FC = () => {
                 className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 font-normal" placeholder="예: 전설의 수집가" />
             </label>
             <label className="space-y-1 text-xs font-bold">
-              <span>Lucide 아이콘명</span>
+              <span>아이콘명</span>
               <input list="title-icon-options" value={form.icon_name} onChange={(e) => setForm({ ...form, icon_name: e.target.value.trim() })}
-                className={`w-full rounded-lg border bg-secondary/40 px-3 py-2 font-normal ${iconExists ? 'border-border' : 'border-red-500'}`} placeholder="Crown" />
+                className={`w-full rounded-lg border bg-secondary/40 px-3 py-2 font-normal ${iconExists ? 'border-border' : 'border-red-500'}`} placeholder="Crown 또는 mdi:crown" />
               <datalist id="title-icon-options">{iconOptions.map((name) => <option key={name} value={name} />)}</datalist>
-              {!iconExists && <span className="text-[10px] text-red-500">lucide-react에 없는 아이콘입니다.</span>}
+              {!iconExists && <span className="text-[10px] text-red-500">Lucide 또는 @mdi/js에 없는 아이콘입니다.</span>}
             </label>
           </div>
 

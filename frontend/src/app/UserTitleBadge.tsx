@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { Award, icons } from 'lucide-react';
+import { AppIcon } from '@/lib/iconLibrary';
 import type { UserTitle } from '@/lib/types';
 
 const generatedClass = (id: number) => `user-title-${id}`;
@@ -39,7 +39,6 @@ export const UserTitleBadge: React.FC<{ title: UserTitle; compact?: boolean }> =
     ensureTitleCss(title);
   }, [title]);
 
-  const Icon = (title.icon_name && icons[title.icon_name as keyof typeof icons]) || Award;
   const customClass = cssClassFromEffect(title);
   const description = title.description?.trim();
 
@@ -58,7 +57,7 @@ export const UserTitleBadge: React.FC<{ title: UserTitle; compact?: boolean }> =
         ].filter(Boolean).join(' ')}
         title={description ? undefined : title.name}
       >
-        <Icon aria-hidden="true" className={compact ? 'h-2.5 w-2.5' : 'h-3 w-3'} style={{ color: title.icon_color }} />
+        <AppIcon name={title.icon_name || 'Award'} aria-hidden="true" className={compact ? 'h-2.5 w-2.5' : 'h-3 w-3'} style={{ color: title.icon_color }} />
         <span>{title.name}</span>
       </span>
       {description && (

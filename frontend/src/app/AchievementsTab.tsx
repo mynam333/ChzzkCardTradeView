@@ -11,10 +11,10 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  Trophy,
-  icons
+  Trophy
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { AppIcon } from '@/lib/iconLibrary';
 import { useApp } from './AppContext';
 import type { AchievementCategory, AchievementReward, AchievementStatus, UserAchievement, UserAchievementsResponse } from '@/lib/types';
 
@@ -68,8 +68,7 @@ const rewardText = (reward: AchievementReward) => {
 
 const AchievementIcon = ({ item }: { item: UserAchievement }) => {
   const iconName = item.is_hidden && !item.code ? 'Lock' : item.icon || 'Award';
-  const Icon = (icons[iconName as keyof typeof icons] || Award) as typeof Award;
-  return <Icon className="h-5 w-5" style={{ color: item.icon_color || undefined }} />;
+  return <AppIcon name={iconName} className="h-5 w-5" style={{ color: item.icon_color || undefined }} />;
 };
 
 export const AchievementsTab: React.FC = () => {

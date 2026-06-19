@@ -53,6 +53,7 @@ export type Achievement = {
   repeat_policy: AchievementRepeatPolicy;
   claim_policy: AchievementClaimPolicy;
   progress_mode: AchievementProgressMode;
+  limited_winner_count: number | null;
   criteria_json: AchievementCriteria;
   rewards_json: AchievementReward[];
   created_by: string | null;
@@ -384,7 +385,8 @@ const isSupabaseMissingRelationError = (error: any) => {
     || /relation .* does not exist|could not find the table|schema cache|does not exist/i.test(message);
 };
 
-const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updated_at' | 'criteria_json' | 'rewards_json'> & {
+const DEFAULT_ACHIEVEMENTS: Array<Omit<Achievement, 'id' | 'created_at' | 'updated_at' | 'limited_winner_count' | 'criteria_json' | 'rewards_json'> & {
+  limited_winner_count?: number | null;
   criteria_json: AchievementCriteria;
   rewards_json: AchievementReward[];
 }> = [
@@ -621,6 +623,7 @@ const mapAchievementRow = (row: any): Achievement => ({
   repeat_policy: row.repeat_policy || 'once',
   claim_policy: row.claim_policy || 'manual',
   progress_mode: row.progress_mode || 'incremental',
+  limited_winner_count: Number(row.limited_winner_count || 0) > 0 ? Math.floor(Number(row.limited_winner_count)) : null,
   criteria_json: safeJsonParse<AchievementCriteria>(row.criteria_json, { type: 'stat', metric: 'login.count', target: 1 }),
   rewards_json: safeJsonParse<AchievementReward[]>(row.rewards_json, []),
   created_by: row.created_by ?? null,
@@ -631,6 +634,7 @@ const mapAchievementRow = (row: any): Achievement => ({
 const defaultAchievements = (): Achievement[] => DEFAULT_ACHIEVEMENTS.map((achievement, index) => ({
   ...achievement,
   id: index + 1,
+  limited_winner_count: achievement.limited_winner_count || null,
   created_at: null,
   updated_at: null
 }));
@@ -659,6 +663,7 @@ export const ensureAchievementTables = async (): Promise<void> => {
         repeat_policy TEXT NOT NULL DEFAULT 'once',
         claim_policy TEXT NOT NULL DEFAULT 'manual',
         progress_mode TEXT NOT NULL DEFAULT 'incremental',
+        limited_winner_count INTEGER,
         criteria_json TEXT NOT NULL,
         rewards_json TEXT NOT NULL DEFAULT '[]',
         created_by TEXT,
@@ -732,6 +737,11 @@ export const ensureAchievementTables = async (): Promise<void> => {
     } catch {
       db.exec('ALTER TABLE achievement_grant_logs ADD COLUMN revoked_at TEXT;');
     }
+    try {
+      db.prepare('SELECT limited_winner_count FROM achievements LIMIT 1').get();
+    } catch {
+      db.exec('ALTER TABLE achievements ADD COLUMN limited_winner_count INTEGER;');
+    }
     sqliteReady = db;
     await seedDefaultAchievements();
     return;
@@ -759,6 +769,7 @@ export const ensureAchievementTables = async (): Promise<void> => {
         repeat_policy VARCHAR(24) NOT NULL DEFAULT 'once',
         claim_policy VARCHAR(24) NOT NULL DEFAULT 'manual',
         progress_mode VARCHAR(24) NOT NULL DEFAULT 'incremental',
+        limited_winner_count INT NULL,
         criteria_json JSON NOT NULL,
         rewards_json JSON NOT NULL,
         created_by VARCHAR(191) NULL,
@@ -827,6 +838,11 @@ export const ensureAchievementTables = async (): Promise<void> => {
     `);
     try {
       await db.run('ALTER TABLE achievement_grant_logs ADD COLUMN revoked_at DATETIME NULL AFTER error_message');
+    } catch (err: any) {
+      if (err?.code !== 'ER_DUP_FIELDNAME' && !String(err?.message || '').includes('Duplicate column')) throw err;
+    }
+    try {
+      await db.run('ALTER TABLE achievements ADD COLUMN limited_winner_count INT NULL AFTER progress_mode');
     } catch (err: any) {
       if (err?.code !== 'ER_DUP_FIELDNAME' && !String(err?.message || '').includes('Duplicate column')) throw err;
     }
@@ -939,6 +955,11 @@ export const validateAchievementPayload = (payload: any): { ok: true; normalized
   const repeatPolicy = allowedRepeatPolicies.includes(payload.repeat_policy) ? payload.repeat_policy : 'once';
   const claimPolicy = allowedClaimPolicies.includes(payload.claim_policy) ? payload.claim_policy : 'manual';
   const progressMode = allowedProgressModes.includes(payload.progress_mode) ? payload.progress_mode : 'incremental';
+  const limitedWinnerCountRaw = Math.floor(Number(payload.limited_winner_count || 0));
+  if (!Number.isFinite(limitedWinnerCountRaw) || limitedWinnerCountRaw < 0 || limitedWinnerCountRaw > 1_000_000) {
+    return { ok: false, message: '선착순 한정 인원은 0~1,000,000 범위의 정수여야 합니다.' };
+  }
+  const limitedWinnerCount = limitedWinnerCountRaw > 0 ? limitedWinnerCountRaw : null;
   const criteria = safeJsonParse<AchievementCriteria>(payload.criteria_json, payload.criteria_json);
   if (!criteria || typeof criteria !== 'object') return { ok: false, message: '업적 조건이 올바르지 않습니다.' };
   if (criteria.type === 'stat') {
@@ -1032,6 +1053,7 @@ export const validateAchievementPayload = (payload: any): { ok: true; normalized
       repeat_policy: repeatPolicy,
       claim_policy: claimPolicy,
       progress_mode: progressMode,
+      limited_winner_count: limitedWinnerCount,
       criteria_json: criteria,
       rewards_json: normalizedRewards
     }
@@ -1659,6 +1681,12 @@ const revokeMysqlRevocableRewards = async (userId: string, achievement: Achievem
   });
 };
 
+const limitedWinnerLimit = (achievement: Achievement) =>
+  Math.max(0, Math.trunc(Number(achievement.limited_winner_count || 0)));
+
+const isAchievementWinnerStatus = (status: unknown) =>
+  status === 'completed' || status === 'claimed';
+
 export const evaluateUserAchievements = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   await recomputeSnapshotStats(userId).catch(() => undefined);
@@ -1669,6 +1697,7 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
   if (getDbMode() === 'LOCAL_SQL') {
     const db = getSqliteDb();
     const select = db.prepare('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ?');
+    const countLimitedWinners = db.prepare("SELECT COUNT(*) AS c FROM user_achievements WHERE achievement_id = ? AND repeat_key = ? AND status IN ('completed', 'claimed')");
     const insert = db.prepare(`
       INSERT INTO user_achievements
         (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, claimed_at, last_evaluated_at, repeat_key)
@@ -1695,10 +1724,14 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
         if (revocable && wasClaimed && !result.complete) {
           revokeSqliteRevocableRewards(db, userId, achievement, repeatKey);
         }
+        const limit = limitedWinnerLimit(achievement);
+        const limitedExhausted = limit > 0
+          && !isAchievementWinnerStatus(current?.status)
+          && Number((countLimitedWinners.get(achievement.id, repeatKey) as any)?.c || 0) >= limit;
         const nextStatus: AchievementStatus = revocable
-          ? (wasClaimed && result.complete ? 'claimed' : status)
-          : (current?.status === 'completed' ? 'completed' : status);
-        const nextCompletedAt = result.complete
+          ? (limitedExhausted ? 'expired' : (wasClaimed && result.complete ? 'claimed' : status))
+          : (limitedExhausted ? 'expired' : (current?.status === 'completed' ? 'completed' : status));
+        const nextCompletedAt = !limitedExhausted && result.complete
           ? (current?.completed_at || nowIso)
           : (revocable ? null : current?.completed_at || null);
         const nextClaimedAt = nextStatus === 'claimed' ? (current?.claimed_at || nowIso) : null;
@@ -1732,10 +1765,59 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
       if (revocable && wasClaimed && !result.complete) {
         await revokeMysqlRevocableRewards(userId, achievement, repeatKey);
       }
+      const limit = limitedWinnerLimit(achievement);
+      const alreadyWinner = isAchievementWinnerStatus(current?.status);
+      if (limit > 0 && result.complete && !alreadyWinner) {
+        await db.transaction(async (tx) => {
+          await tx.get('SELECT id FROM achievements WHERE id = ? FOR UPDATE', achievement.id);
+          const lockedCurrent = await tx.get('SELECT * FROM user_achievements WHERE user_id = ? AND achievement_id = ? AND repeat_key = ? FOR UPDATE', userId, achievement.id, repeatKey);
+          const lockedWinner = isAchievementWinnerStatus(lockedCurrent?.status);
+          const winnerCount = lockedWinner
+            ? 0
+            : Number((await tx.get("SELECT COUNT(*) AS c FROM user_achievements WHERE achievement_id = ? AND repeat_key = ? AND status IN ('completed', 'claimed')", achievement.id, repeatKey))?.c || 0);
+          const limitedExhausted = !lockedWinner && winnerCount >= limit;
+          const lockedWasClaimed = lockedCurrent?.status === 'claimed';
+          const limitedStatus: AchievementStatus = limitedExhausted ? 'expired' : (lockedWasClaimed && revocable ? 'claimed' : 'completed');
+          const limitedCompletedAt = !limitedExhausted
+            ? (normalizeDateValue(lockedCurrent?.completed_at) ? toMysqlDateTime(lockedCurrent.completed_at) : nowMysql)
+            : null;
+          const limitedClaimedAt = limitedStatus === 'claimed'
+            ? (normalizeDateValue(lockedCurrent?.claimed_at) ? toMysqlDateTime(lockedCurrent.claimed_at) : nowMysql)
+            : null;
+          await tx.run(`
+            INSERT INTO user_achievements
+              (user_id, achievement_id, status, progress_current, progress_target, progress_json, completed_at, claimed_at, last_evaluated_at, repeat_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              status = VALUES(status),
+              progress_current = VALUES(progress_current),
+              progress_target = VALUES(progress_target),
+              progress_json = VALUES(progress_json),
+              completed_at = VALUES(completed_at),
+              claimed_at = VALUES(claimed_at),
+              last_evaluated_at = VALUES(last_evaluated_at)
+          `,
+            userId,
+            achievement.id,
+            limitedStatus,
+            result.rawCurrent,
+            result.target,
+            JSON.stringify(result.details),
+            limitedCompletedAt,
+            limitedClaimedAt,
+            nowMysql,
+            repeatKey
+          );
+        });
+        continue;
+      }
+      const limitedExhausted = limit > 0
+        && !alreadyWinner
+        && Number((await db.get("SELECT COUNT(*) AS c FROM user_achievements WHERE achievement_id = ? AND repeat_key = ? AND status IN ('completed', 'claimed')", achievement.id, repeatKey))?.c || 0) >= limit;
       const nextStatus: AchievementStatus = revocable
-        ? (wasClaimed && result.complete ? 'claimed' : status)
-        : (current?.status === 'completed' ? 'completed' : status);
-      const nextCompletedAt = result.complete
+        ? (limitedExhausted ? 'expired' : (wasClaimed && result.complete ? 'claimed' : status))
+        : (limitedExhausted ? 'expired' : (current?.status === 'completed' ? 'completed' : status));
+      const nextCompletedAt = !limitedExhausted && result.complete
         ? (normalizeDateValue(current?.completed_at) ? toMysqlDateTime(current.completed_at) : nowMysql)
         : (revocable ? null : toMysqlDateTime(current?.completed_at));
       const nextClaimedAt = nextStatus === 'claimed'
@@ -1786,9 +1868,22 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
       const result = evaluateCriteria(achievement.criteria_json, stats);
       const status: AchievementStatus = result.complete ? 'completed' : (result.rawCurrent > 0 ? 'in_progress' : 'locked');
       const wasClaimed = current?.status === 'claimed';
+      const limit = limitedWinnerLimit(achievement);
+      let limitedExhausted = false;
+      if (limit > 0 && !isAchievementWinnerStatus(current?.status)) {
+        const { count, error: countError } = await client
+          .from('user_achievements')
+          .select('id', { count: 'exact', head: true })
+          .eq('achievement_id', achievement.id)
+          .eq('repeat_key', repeatKey)
+          .in('status', ['completed', 'claimed']);
+        if (countError && isSupabaseMissingRelationError(countError)) return;
+        if (countError) throw countError;
+        limitedExhausted = Number(count || 0) >= limit;
+      }
       const nextStatus: AchievementStatus = revocable
-        ? (wasClaimed && result.complete ? 'claimed' : status)
-        : (current?.status === 'completed' ? 'completed' : status);
+        ? (limitedExhausted ? 'expired' : (wasClaimed && result.complete ? 'claimed' : status))
+        : (limitedExhausted ? 'expired' : (current?.status === 'completed' ? 'completed' : status));
       updates.push({
         user_id: userId,
         achievement_id: achievement.id,
@@ -1796,7 +1891,7 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
         progress_current: result.rawCurrent,
         progress_target: result.target,
         progress_json: result.details,
-        completed_at: result.complete ? (current?.completed_at || nowIso) : (revocable ? null : current?.completed_at || null),
+        completed_at: !limitedExhausted && result.complete ? (current?.completed_at || nowIso) : (revocable ? null : current?.completed_at || null),
         claimed_at: nextStatus === 'claimed' ? (current?.claimed_at || nowIso) : null,
         last_evaluated_at: nowIso,
         repeat_key: repeatKey
@@ -2207,9 +2302,9 @@ export const createAchievement = async (payload: any, createdBy: string | null) 
     const result = getSqliteDb().prepare(`
       INSERT INTO achievements
         (code, name, description, category, tier, icon, icon_color, is_active, is_hidden, hidden_hint, sort_order,
-         starts_at, ends_at, repeat_policy, claim_policy, progress_mode, criteria_json, rewards_json, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
+         starts_at, ends_at, repeat_policy, claim_policy, progress_mode, limited_winner_count, criteria_json, rewards_json, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, a.limited_winner_count, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
     invalidateAchievementCache();
     return { ok: true as const, achievement: { ...a, id: Number(result.lastInsertRowid) } };
   }
@@ -2219,9 +2314,9 @@ export const createAchievement = async (payload: any, createdBy: string | null) 
     const result = await getMysqlDb().run(`
       INSERT INTO achievements
         (code, name, description, category, tier, icon, icon_color, is_active, is_hidden, hidden_hint, sort_order,
-         starts_at, ends_at, repeat_policy, claim_policy, progress_mode, criteria_json, rewards_json, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
+         starts_at, ends_at, repeat_policy, claim_policy, progress_mode, limited_winner_count, criteria_json, rewards_json, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, a.code, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, a.limited_winner_count, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), createdBy);
     invalidateAchievementCache();
     return { ok: true as const, achievement: { ...a, id: Number(result.insertId) } };
   }
@@ -2241,9 +2336,9 @@ export const updateAchievement = async (id: number, payload: any) => {
       UPDATE achievements
          SET name = ?, description = ?, category = ?, tier = ?, icon = ?, icon_color = ?, is_active = ?, is_hidden = ?,
              hidden_hint = ?, sort_order = ?, starts_at = ?, ends_at = ?, repeat_policy = ?, claim_policy = ?,
-             progress_mode = ?, criteria_json = ?, rewards_json = ?, updated_at = datetime('now')
+             progress_mode = ?, limited_winner_count = ?, criteria_json = ?, rewards_json = ?, updated_at = datetime('now')
        WHERE id = ?
-    `).run(a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
+    `).run(a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, a.starts_at, a.ends_at, a.repeat_policy, a.claim_policy, a.progress_mode, a.limited_winner_count, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
   } else if (getDbMode() === 'MYSQL') {
     const startsAt = toMysqlDateTime(a.starts_at);
     const endsAt = toMysqlDateTime(a.ends_at);
@@ -2251,9 +2346,9 @@ export const updateAchievement = async (id: number, payload: any) => {
       UPDATE achievements
          SET name = ?, description = ?, category = ?, tier = ?, icon = ?, icon_color = ?, is_active = ?, is_hidden = ?,
              hidden_hint = ?, sort_order = ?, starts_at = ?, ends_at = ?, repeat_policy = ?, claim_policy = ?,
-             progress_mode = ?, criteria_json = ?, rewards_json = ?, updated_at = UTC_TIMESTAMP()
+             progress_mode = ?, limited_winner_count = ?, criteria_json = ?, rewards_json = ?, updated_at = UTC_TIMESTAMP()
        WHERE id = ?
-    `, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
+    `, a.name, a.description, a.category, a.tier, a.icon, a.icon_color, a.is_active ? 1 : 0, a.is_hidden ? 1 : 0, a.hidden_hint, a.sort_order, startsAt, endsAt, a.repeat_policy, a.claim_policy, a.progress_mode, a.limited_winner_count, JSON.stringify(a.criteria_json), JSON.stringify(a.rewards_json), id);
   } else return { ok: false as const, message: '현재 DB 모드에서는 관리자 업적 수정을 지원하지 않습니다.' };
   invalidateAchievementCache();
   return { ok: true as const };
