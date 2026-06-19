@@ -111,6 +111,18 @@ const cropDetectiveRounds = Array.from({ length: 5 }, (_, round) => ({
   ]
 }));
 
+const quizRounds = Array.from({ length: 5 }, (_, round) => ({
+  round,
+  answer_channel_id: `quiz-answer-${round}`,
+  answer_name: `정답 ${round}`,
+  image_url: `https://example.com/quiz-answer-${round}.png`,
+  star: round % 6,
+  choices: [
+    { channel_id: `quiz-answer-${round}`, name: `정답 ${round}` },
+    { channel_id: `quiz-wrong-${round}`, name: `오답 ${round}` }
+  ]
+}));
+
 const getTestRotatedCropSafeMargin = (size: number, rotation: number) => {
   const radians = (rotation * Math.PI) / 180;
   return Math.min(0.48, (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2 + 0.025);
@@ -375,6 +387,81 @@ describe('round-based minigames', () => {
     vi.useRealTimers();
   });
 
+  it('awards base points when quiz has at least 3 correct answers', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'quiz-session',
+      user_id: 'user-1',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'quiz-session',
+        payload: {
+          answers: [
+            { round: 0, selected_channel_id: 'quiz-answer-0' },
+            { round: 1, selected_channel_id: 'quiz-answer-1' },
+            { round: 2, selected_channel_id: 'quiz-answer-2' },
+            { round: 3, selected_channel_id: 'quiz-wrong-3' },
+            { round: 4, selected_channel_id: 'quiz-wrong-4' }
+          ],
+          client_remaining_ms: 0
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('quiz-session', 1000);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 1000,
+      message: expect.stringContaining('3/5')
+    }));
+  });
+
+  it('awards bonus points when quiz has all 5 correct answers', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'quiz-session',
+      user_id: 'user-1',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'quiz-session',
+        payload: {
+          answers: quizRounds.map((round) => ({
+            round: round.round,
+            selected_channel_id: round.answer_channel_id
+          })),
+          client_remaining_ms: 0
+        }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await submitMinigameResult(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('quiz-session', 1200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 1200,
+      message: expect.stringContaining('5문제')
+    }));
+  });
+
   it('awards base points when value duel has at least 3 correct answers', async () => {
     findSessionById.mockResolvedValue({
       id: 'value-duel-session',
@@ -513,6 +600,36 @@ describe('round-based minigames', () => {
     expect(response.status).toHaveBeenCalledWith(400);
   });
 
+  it('returns immediate quiz round feedback without completing the session', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'quiz-session',
+      user_id: 'user-1',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
+      created_at: new Date(Date.now() - 10_000).toISOString()
+    });
+
+    const request = {
+      user: { id: 'user-1' },
+      body: {
+        session_id: 'quiz-session',
+        payload: { round: 0, selected_channel_id: 'quiz-answer-0' }
+      }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await checkMinigameRoundAnswer(request, response);
+
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      correct_channel_ids: ['quiz-answer-0']
+    }));
+  });
+
   it('returns immediate round feedback without completing the session', async () => {
     findSessionById.mockResolvedValue({
       id: 'value-duel-session',
@@ -645,22 +762,40 @@ describe('daily minigame selection', () => {
     }));
   });
 
+  it('issues quiz as five two-choice rounds without exposing answers', async () => {
+    findAllStreamers.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        channel_id: `channel-${index}`,
+        name: `streamer-${index}`,
+        logo_url: `https://example.com/${index}.png`
+      })) as never
+    );
+    startSession.mockResolvedValue({ ok: true });
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: 'quiz', practice_mode: true }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(responseBody.game_data.rounds).toHaveLength(5);
+    for (const round of responseBody.game_data.rounds) {
+      expect(round.choices).toHaveLength(2);
+      expect(round.image_url).toMatch(/^https:\/\/example\.com\/\d+\.png$/);
+      expect(round).not.toHaveProperty('answer_channel_id');
+      expect(round).not.toHaveProperty('star');
+    }
+  });
+
   it('resumes an active paid session before reading or spending another ticket', async () => {
     vi.setSystemTime(new Date('2026-06-07T03:00:00.000Z'));
     const todayGame = getDailyMinigame().game_type;
     const activeTarget = todayGame === 'quiz'
       ? {
         practice_mode: false,
-        correct_id: 'channel-answer',
-        correct_name: '정답 스트리머',
-        image_url: 'https://example.com/answer.png',
-        star: 3,
-        choices: [
-          { channel_id: 'channel-answer', name: '정답 스트리머' },
-          { channel_id: 'channel-2', name: '보기2' },
-          { channel_id: 'channel-3', name: '보기3' },
-          { channel_id: 'channel-4', name: '보기4' }
-        ]
+        rounds: quizRounds
       }
       : todayGame === 'puzzle'
         ? {
@@ -699,7 +834,9 @@ describe('daily minigame selection', () => {
       resumed: true,
       game_data: todayGame === 'match'
         ? expect.objectContaining({ cards: expect.arrayContaining([expect.objectContaining({ channel_id: 'channel-1' })]) })
-        : expect.objectContaining({ image_url: 'https://example.com/answer.png' })
+        : todayGame === 'quiz'
+          ? expect.objectContaining({ rounds: expect.arrayContaining([expect.objectContaining({ image_url: 'https://example.com/quiz-answer-0.png' })]) })
+          : expect.objectContaining({ image_url: 'https://example.com/answer.png' })
     }));
     expect(getTicketStatus).not.toHaveBeenCalled();
     expect(startSession).not.toHaveBeenCalled();

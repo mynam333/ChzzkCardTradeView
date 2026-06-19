@@ -43,6 +43,12 @@ type ValueDuelRound = {
   right: ArcadeCardOption;
 };
 
+type QuizRound = {
+  round: number;
+  image_url: string;
+  choices: QuizChoice[];
+};
+
 type CropDetectiveRound = {
   round: number;
   crop: {
@@ -76,7 +82,7 @@ type MinigameData = {
   image_url?: string;
   choices?: QuizChoice[];
   cards?: MatchCardSource[];
-  rounds?: Array<ValueDuelRound | CropDetectiveRound>;
+  rounds?: Array<QuizRound | ValueDuelRound | CropDetectiveRound>;
 };
 
 type MinigameResult = {
@@ -220,7 +226,7 @@ const PUZZLE_HINT_PENALTY_SECONDS = 10;
 const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
 const ROUND_GAME_ROUND_SECONDS = 10;
-const QUIZ_TIME_LIMIT_SECONDS = 15;
+const QUIZ_TIME_LIMIT_SECONDS = 10;
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 // 방향형(모션) 블러: 한 방향으로 강하게 밀린 듯한 선형 모션 스미어.
@@ -795,13 +801,16 @@ const createInitialPuzzlePieces = (): PuzzlePiece[] => {
   return pieces;
 };
 
-const isRoundGame = (game: GameType | null): game is 'value_duel' | 'crop_detective' =>
-  game === 'value_duel' || game === 'crop_detective';
+const isRoundGame = (game: GameType | null): game is 'quiz' | 'value_duel' | 'crop_detective' =>
+  game === 'quiz' || game === 'value_duel' || game === 'crop_detective';
 
-const isValueDuelRound = (round: ValueDuelRound | CropDetectiveRound | undefined): round is ValueDuelRound =>
+const isQuizRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is QuizRound =>
+  Boolean(round && 'image_url' in round && 'choices' in round && !('source_image_url' in round));
+
+const isValueDuelRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is ValueDuelRound =>
   Boolean(round && 'left' in round && 'right' in round);
 
-const isCropDetectiveRound = (round: ValueDuelRound | CropDetectiveRound | undefined): round is CropDetectiveRound =>
+const isCropDetectiveRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is CropDetectiveRound =>
   Boolean(round && 'choices' in round && 'source_image_url' in round);
 
 const clampCropValue = (value: number, min: number, max: number) => {
@@ -815,30 +824,122 @@ const getRotatedCropSafeMargin = (size: number, rotation: number) => {
   return Math.min(0.48, rotatedHalfExtent + 0.025);
 };
 
+const CROP_ALPHA_CANVAS_SIZE = 96;
+const CROP_ALPHA_GRID_SIZE = 9;
+const CROP_ALPHA_THRESHOLD = 32;
+const CROP_MIN_OPAQUE_RATIO = 0.68;
+const CROP_ALPHA_CANDIDATE_COUNT = 24;
+
+const hashStringToSeed = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const createSeededRandom = (seed: number) => {
+  let state = seed || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return ((state >>> 0) / 4294967296);
+  };
+};
+
+const buildCropCandidates = (
+  baseX: number,
+  baseY: number,
+  min: number,
+  max: number,
+  seedSource: string
+) => {
+  const clamp = (value: number) => clampCropValue(value, min, max);
+  const random = createSeededRandom(hashStringToSeed(seedSource));
+  const candidates: Array<{ x: number; y: number }> = [{ x: baseX, y: baseY }];
+  const range = Math.max(0, max - min);
+  const pushCandidate = (x: number, y: number) => {
+    const candidate = { x: clamp(x), y: clamp(y) };
+    const exists = candidates.some(item => Math.abs(item.x - candidate.x) < 0.001 && Math.abs(item.y - candidate.y) < 0.001);
+    if (!exists) candidates.push(candidate);
+  };
+
+  for (const radiusRatio of [0.18, 0.32, 0.46]) {
+    for (let step = 0; step < 6; step += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = range * radiusRatio * (0.55 + random() * 0.45);
+      pushCandidate(baseX + Math.cos(angle) * radius, baseY + Math.sin(angle) * radius);
+    }
+  }
+
+  while (candidates.length < CROP_ALPHA_CANDIDATE_COUNT) {
+    pushCandidate(min + random() * range, min + random() * range);
+  }
+
+  pushCandidate(0.5, 0.5);
+  return candidates;
+};
+
+const getCropOpaqueRatio = (
+  imageData: ImageData,
+  candidate: { x: number; y: number },
+  size: number,
+  rotation: number
+) => {
+  const { data, width, height } = imageData;
+  const radians = (-rotation * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  let opaque = 0;
+  let total = 0;
+
+  for (let row = 0; row < CROP_ALPHA_GRID_SIZE; row += 1) {
+    for (let col = 0; col < CROP_ALPHA_GRID_SIZE; col += 1) {
+      const dx = ((col + 0.5) / CROP_ALPHA_GRID_SIZE - 0.5) * size;
+      const dy = ((row + 0.5) / CROP_ALPHA_GRID_SIZE - 0.5) * size;
+      const sourceX = candidate.x + dx * cos - dy * sin;
+      const sourceY = candidate.y + dx * sin + dy * cos;
+      if (sourceX < 0 || sourceX > 1 || sourceY < 0 || sourceY > 1) continue;
+      const pixelX = Math.min(width - 1, Math.max(0, Math.floor(sourceX * width)));
+      const pixelY = Math.min(height - 1, Math.max(0, Math.floor(sourceY * height)));
+      const alpha = data[(pixelY * width + pixelX) * 4 + 3];
+      if (alpha >= CROP_ALPHA_THRESHOLD) opaque += 1;
+      total += 1;
+    }
+  }
+
+  return total > 0 ? opaque / total : 0;
+};
+
 const CardImageTile: React.FC<{
   card: ArcadeCardOption;
   selected?: boolean;
   correct?: boolean;
   wrong?: boolean;
   disabled?: boolean;
+  imageBlindEnabled?: boolean;
   showStarLabel?: boolean;
   onClick?: () => void;
-}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, showStarLabel = true, onClick }) => {
-  const { blindImage, unblindImage, isImageBlinded } = useApp();
+}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, imageBlindEnabled = false, showStarLabel = true, onClick }) => {
   const imageUrl = card.image_url || '/icon.png';
-  const blinded = isImageBlinded(imageUrl);
+  const nativeDisabled = disabled && !imageBlindEnabled;
 
   return (
     <button
       type="button"
-      onClick={onClick}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (blinded) unblindImage(imageUrl);
-        else blindImage(imageUrl);
+      onClick={() => {
+        if (disabled) return;
+        onClick?.();
       }}
-      disabled={disabled}
+      onContextMenu={(event) => {
+        if (!imageBlindEnabled) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      disabled={nativeDisabled}
       className={`cute-card-pop relative min-w-0 overflow-hidden rounded-2xl border bg-card text-left shadow-sm transition active:scale-95 disabled:pointer-events-none ${
         correct
           ? 'border-emerald-400 bg-emerald-500/12 ring-2 ring-emerald-400/50'
@@ -856,6 +957,7 @@ const CardImageTile: React.FC<{
           alt={card.name}
           className="h-full w-full object-cover"
           draggable={false}
+          imageBlindMenuEnabled={imageBlindEnabled}
         />
       </div>
       <div className="px-2.5 py-2 sm:px-3">
@@ -869,27 +971,70 @@ const CardImageTile: React.FC<{
 };
 
 const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
-  const { blindImage, unblindImage, isImageBlinded } = useApp();
   const imageUrl = round.source_image_url || '/icon.png';
-  if (isImageBlinded(imageUrl)) {
-    return (
-      <BlindableCardImage
-        src={imageUrl}
-        alt="확대된 카드 이미지 조각"
-        className="aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 object-cover shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
-        onContextMenu={(event) => {
-          event.preventDefault();
-          unblindImage(imageUrl);
-        }}
-      />
-    );
-  }
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
   const safeMargin = getRotatedCropSafeMargin(size, rotation);
   const x = clampCropValue(Number(round.crop?.x || 0.5), safeMargin, 1 - safeMargin);
   const y = clampCropValue(Number(round.crop?.y || 0.5), safeMargin, 1 - safeMargin);
+  const [visibleCrop, setVisibleCrop] = useState({ x, y });
   const imageScalePercent = 100 / size;
+
+  useEffect(() => {
+    let cancelled = false;
+    const baseCrop = { x, y };
+    setVisibleCrop(baseCrop);
+
+    if (!imageUrl || typeof document === 'undefined') return;
+
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.decoding = 'async';
+    image.onload = () => {
+      if (cancelled) return;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = CROP_ALPHA_CANVAS_SIZE;
+        canvas.height = CROP_ALPHA_CANVAS_SIZE;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return;
+
+        context.clearRect(0, 0, CROP_ALPHA_CANVAS_SIZE, CROP_ALPHA_CANVAS_SIZE);
+        context.drawImage(image, 0, 0, CROP_ALPHA_CANVAS_SIZE, CROP_ALPHA_CANVAS_SIZE);
+        const imageData = context.getImageData(0, 0, CROP_ALPHA_CANVAS_SIZE, CROP_ALPHA_CANVAS_SIZE);
+        const candidates = buildCropCandidates(
+          x,
+          y,
+          safeMargin,
+          1 - safeMargin,
+          `${imageUrl}:${round.round}:${size}:${rotation}:${x}:${y}`
+        );
+
+        let bestCrop = baseCrop;
+        let bestScore = getCropOpaqueRatio(imageData, baseCrop, size, rotation);
+        for (const candidate of candidates.slice(1)) {
+          const score = getCropOpaqueRatio(imageData, candidate, size, rotation);
+          if (score > bestScore) {
+            bestScore = score;
+            bestCrop = candidate;
+          }
+          if (score >= CROP_MIN_OPAQUE_RATIO) break;
+        }
+
+        if (!cancelled && bestScore > 0) {
+          setVisibleCrop(bestCrop);
+        }
+      } catch {
+        // Cross-origin images may block canvas reads. In that case, keep the server-issued crop.
+      }
+    };
+    image.src = imageUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrl, round.round, rotation, safeMargin, size, x, y]);
+
   return (
     <div
       role="img"
@@ -897,9 +1042,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => {
         event.preventDefault();
-        blindImage(imageUrl);
       }}
-      title="우클릭으로 같은 이미지를 블라인드"
     >
       <div
         className="absolute inset-0 origin-center"
@@ -913,7 +1056,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
             backgroundRepeat: 'no-repeat',
             backgroundSize: '100% 100%',
             backgroundPosition: 'center',
-            transform: `translate(${-x * 100}%, ${-y * 100}%)`
+            transform: `translate(${-visibleCrop.x * 100}%, ${-visibleCrop.y * 100}%)`
           }}
         />
       </div>
@@ -968,12 +1111,9 @@ export const ArcadeTab: React.FC = () => {
 
   // 1. 인물 퀴즈 전용 상태 (블러 퀴즈로 고도화)
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
-  const [selectedQuizChoice, setSelectedQuizChoice] = useState<string | null>(null);
   const [quizBlurType, setQuizBlurType] = useState<'gaussian' | 'mosaic' | 'motion' | 'radial'>('gaussian');
   const [quizBlurAngle, setQuizBlurAngle] = useState<number>(0);
   const [quizIntensity, setQuizIntensity] = useState<number>(100);
-  const [quizTimeLeft, setQuizTimeLeft] = useState<number>(15);
-  const quizDeadlineRef = useRef<number | null>(null);
 
   // 2. 카드 퍼즐 전용 상태
   const [puzzlePieces, setPuzzlePieces] = useState<PuzzlePiece[]>([]);
@@ -1010,6 +1150,29 @@ export const ArcadeTab: React.FC = () => {
   const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
   const [roundChecking, setRoundChecking] = useState(false);
   const roundDeadlineRef = useRef<number | null>(null);
+  const [imageBlindMenu, setImageBlindMenu] = useState<{ x: number; y: number; imageUrl: string } | null>(null);
+
+  useEffect(() => {
+    if (!imageBlindMenu) return;
+    const close = () => setImageBlindMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [imageBlindMenu]);
+
+  const openImageBlindMenu = (event: React.MouseEvent, imageUrl: string, enabled: boolean) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!enabled || !imageUrl) return;
+    setImageBlindMenu({
+      x: Math.min(event.clientX, window.innerWidth - 220),
+      y: Math.min(event.clientY, window.innerHeight - 96),
+      imageUrl
+    });
+  };
 
   // 티켓 상태 조회 API 호출
   const fetchStatus = useCallback(async () => {
@@ -1051,7 +1214,6 @@ export const ArcadeTab: React.FC = () => {
     setRoundCorrectCount(0);
     setRoundChecking(false);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-    quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
     roundDeadlineRef.current = null;
@@ -1067,8 +1229,8 @@ export const ArcadeTab: React.FC = () => {
     const deadline = Date.now() + safeRemainingMs;
 
     if (activeGame === 'quiz') {
-      setQuizTimeLeft(remainingSeconds);
-      quizDeadlineRef.current = deadline;
+      setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+      roundDeadlineRef.current = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
     } else if (activeGame === 'puzzle') {
       setPuzzleTimeLeft(remainingSeconds);
       puzzleDeadlineRef.current = deadline;
@@ -1090,8 +1252,7 @@ export const ArcadeTab: React.FC = () => {
       setIsGameOver(true);
     }
     const clientRemainingMs =
-      activeGame === 'quiz' ? Math.max(0, quizTimeLeft * 1000)
-        : activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
+      activeGame === 'puzzle' ? Math.max(0, puzzleTimeLeft * 1000)
           : activeGame === 'match' ? Math.max(0, gameTimeLeft * 1000)
             : 0;
     submitInFlightRef.current = true;
@@ -1127,16 +1288,14 @@ export const ArcadeTab: React.FC = () => {
       }
       toast('결과 전송에 실패했습니다. 연결이 복구되면 다시 시도해 주세요.', 'warning');
       restoreActiveTimer(clientRemainingMs);
-      if (activeGame === 'quiz') {
-        setSelectedQuizChoice(null);
-      } else if (isRoundGame(activeGame)) {
+      if (isRoundGame(activeGame)) {
         setRoundFeedback(null);
       }
     } finally {
       submitInFlightRef.current = false;
       setGameBusy(false);
     }
-  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, quizTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
+  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
 
   useEffect(() => {
     if (!submitRetry || gameResult || !sessionId) return;
@@ -1228,8 +1387,9 @@ export const ArcadeTab: React.FC = () => {
           const now = Date.now();
           if (activeGame === 'quiz') {
             setQuizStartTime(now);
-            quizDeadlineRef.current = now + QUIZ_TIME_LIMIT_SECONDS * 1000;
-            setQuizTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
+            setQuizIntensity(100);
+            roundDeadlineRef.current = now + QUIZ_TIME_LIMIT_SECONDS * 1000;
+            setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
           } else if (activeGame === 'puzzle') {
             puzzleDeadlineRef.current = now + PUZZLE_TIME_LIMIT_SECONDS * 1000;
             // 카운트다운 종료 후 바로 퍼즐 조작을 허용합니다.
@@ -1319,29 +1479,9 @@ export const ArcadeTab: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
 
-  // 인물 퀴즈 15초 제한시간 타이머 구동
-  useEffect(() => {
-    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameBusy || gameResult || selectedQuizChoice) return;
-    if (quizTimeLeft <= 0) {
-      const timeout = window.setTimeout(() => {
-        if (submitInFlightRef.current) return;
-        submitResult({ success: false });
-      }, 0);
-      return () => window.clearTimeout(timeout);
-    }
-    const timer = setInterval(() => {
-      setQuizTimeLeft(prev => {
-        const deadline = quizDeadlineRef.current;
-        if (!deadline) return Math.max(0, prev - 1);
-        return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [activeGame, countdownLeft, gameBusy, quizTimeLeft, gameResult, selectedQuizChoice, submitResult]);
-
   // 인물 퀴즈 블러 강도 감쇄 타이머 구동 (10초 동안 100 -> 0, 50ms 갱신)
   useEffect(() => {
-    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameBusy || gameResult || selectedQuizChoice) return;
+    if (activeGame !== 'quiz' || (countdownLeft !== null && countdownLeft > 0) || gameBusy || gameResult || roundFeedback) return;
 
     const interval = 50;
     const duration = 10000; // 10초
@@ -1358,7 +1498,7 @@ export const ArcadeTab: React.FC = () => {
     }, interval);
 
     return () => clearInterval(timer);
-  }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, selectedQuizChoice]);
+  }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, roundFeedback]);
 
   // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
   useEffect(() => {
@@ -1417,7 +1557,6 @@ export const ArcadeTab: React.FC = () => {
     submitInFlightRef.current = false;
     setSubmitRetry(null);
     setGameResult(null);
-    setSelectedQuizChoice(null);
     setFlippedIndices([]);
     setIsGameOver(false);
     setGameTimeLeft(MATCH_TIME_LIMIT_SECONDS);
@@ -1430,7 +1569,6 @@ export const ArcadeTab: React.FC = () => {
     setRoundCorrectCount(0);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
     setRoundChecking(false);
-    quizDeadlineRef.current = null;
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
     roundDeadlineRef.current = null;
@@ -1475,13 +1613,15 @@ export const ArcadeTab: React.FC = () => {
 
       // 게임별 초기 세팅값 설정
       if (type === 'quiz') {
-        const quizRemaining = remainingSeconds ?? QUIZ_TIME_LIMIT_SECONDS;
-        const elapsedPlayMs = Math.max(0, (data.timing?.time_limit_ms ?? QUIZ_TIME_LIMIT_SECONDS * 1000) - quizRemaining * 1000);
-        setQuizStartTime(Date.now() - elapsedPlayMs);
-        setQuizIntensity(Math.max(0, 100 - (elapsedPlayMs / 10_000) * 100));
-        setSelectedQuizChoice(null);
-        setQuizTimeLeft(quizRemaining);
-        quizDeadlineRef.current = isResumed ? Date.now() + quizRemaining * 1000 : null;
+        setRoundIndex(0);
+        setRoundAnswers([]);
+        setRoundFeedback(null);
+        setRoundCorrectCount(0);
+        setRoundChecking(false);
+        setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
+        roundDeadlineRef.current = isResumed ? Date.now() + QUIZ_TIME_LIMIT_SECONDS * 1000 : null;
+        setQuizStartTime(Date.now());
+        setQuizIntensity(100);
 
         // 4가지 블러 종류 중 랜덤 선택 (연습 모드에서 override.blur로 강제 지정 가능)
         const blurTypes: ('gaussian' | 'mosaic' | 'motion' | 'radial')[] = ['gaussian', 'mosaic', 'motion', 'radial'];
@@ -1557,17 +1697,6 @@ export const ArcadeTab: React.FC = () => {
     router.replace('/arcade'); // 파라미터 정리 (새로고침 시 재실행 방지)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, searchParams]);
-
-  // ==========================================
-  // 1. 인물 퀴즈 버튼 핸들러
-  // ==========================================
-  const handleQuizAnswer = (choiceId: string) => {
-    if (gameBusy || selectedQuizChoice || (countdownLeft !== null && countdownLeft > 0)) return;
-    setSelectedQuizChoice(choiceId);
-    submitResult({
-      answer_channel_id: choiceId
-    });
-  };
 
   // ==========================================
   // 2. 카드 퍼즐 회전 제어 (3x4 그리드)
@@ -1814,7 +1943,13 @@ export const ArcadeTab: React.FC = () => {
     setRoundIndex(nextIndex);
     setRoundFeedback(null);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-    roundDeadlineRef.current = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
+    const nextDeadline = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
+    roundDeadlineRef.current = nextDeadline;
+    if (activeGame === 'quiz') {
+      setQuizStartTime(Date.now());
+      setQuizIntensity(100);
+      setQuizBlurAngle(Math.floor(Math.random() * 360));
+    }
   };
 
   // 로그인 체크
@@ -1845,17 +1980,9 @@ export const ArcadeTab: React.FC = () => {
 
   const dailyGameDetails = DAILY_GAME_DETAILS[todayGame];
   const DailyGameIcon = dailyGameDetails.Icon;
-  const showAnswerReveal = Boolean(
-    gameResult && gameData && (activeGame === 'quiz' || activeGame === 'puzzle')
-  );
+  const showAnswerReveal = Boolean(gameResult && gameData && activeGame === 'puzzle');
   const revealedImageUrl = gameResult?.answer?.image_url || gameData?.image_url || '';
-  const revealedName = gameResult?.answer?.name
-    || (
-      activeGame === 'quiz' && gameResult?.correct
-        ? gameData?.choices?.find(choice => choice.channel_id === selectedQuizChoice)?.name
-        : undefined
-    )
-    || '정답 정보를 불러오지 못했습니다.';
+  const revealedName = gameResult?.answer?.name || '정답 정보를 불러오지 못했습니다.';
   const answerReportCard: ReportTargetCard | null = gameResult?.answer
     ? {
         star: gameResult.answer.star || 0,
@@ -2329,90 +2456,68 @@ export const ArcadeTab: React.FC = () => {
           {/* ======================================================== */}
           {/* 게임 1: 인물 퀴즈 */}
           {/* ======================================================== */}
-          {activeGame === 'quiz' && (
+          {activeGame === 'quiz' && gameData.rounds && (() => {
+            const currentRound = gameData.rounds[roundIndex];
+            if (!isQuizRound(currentRound)) return null;
+            const selectedId = roundFeedback?.selected_channel_id || null;
+            const correctIds = roundFeedback?.correct_channel_ids || [];
+            const imageBlindEnabled = Boolean(roundFeedback);
+
+            return (
               <div className="flex flex-1 flex-col items-center justify-center space-y-5 sm:space-y-6">
+                <GameTimeLimit
+                  timeLeft={roundTimeLeft}
+                  totalSeconds={QUIZ_TIME_LIMIT_SECONDS}
+                  dangerSeconds={3}
+                  bonusLabel="5문제 만점 보너스"
+                  pausedLabel={roundFeedback ? '결과 확인' : undefined}
+                />
 
-                {/* 퀴즈 15초 타이머 & 프로그레스 바 */}
-                <div className="flex w-full max-w-2xl flex-col gap-2 px-1">
-                  <div className="flex items-center justify-between">
-                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm transition-all duration-300 sm:px-4 sm:py-2 sm:text-sm ${quizTimeLeft <= 5
-                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-bounce'
-                      : 'bg-secondary/80 text-foreground border-border/70'
-                      }`}>
-                      {quizTimeLeft <= 5 ? (
-                        <span className="animate-pulse">🔥</span>
-                      ) : (
-                        <Timer className={`h-3 w-3 ${quizTimeLeft <= 8 ? 'animate-spin' : ''} text-primary`} />
-                      )}
-                      <span>남은 시간: <strong className="cute-number-font text-xs sm:text-base">{quizTimeLeft}</strong>초</span>
-                    </div>
-
-                    <span className="rounded-full border border-border/70 bg-secondary/80 px-2 py-0.5 text-[9px] font-black text-muted-foreground sm:px-3 sm:py-1.5 sm:text-xs">
-                      3초 스피드 보너스 (+200 P)
-                    </span>
-                  </div>
-
-                  {/* 프로그레스 바 게이지 */}
-                  <div className="relative h-1.5 w-full overflow-hidden rounded-full border border-border/20 bg-secondary/60 shadow-inner sm:h-2.5">
-                    <div
-                      className={`h-full rounded-full transition-all duration-1000 ease-linear ${quizTimeLeft <= 5
-                        ? 'bg-gradient-to-r from-rose-500 to-red-600 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
-                        : 'bg-gradient-to-r from-emerald-400 to-primary shadow-[0_0_8px_rgba(16,185,129,0.4)]'
-                        }`}
-                      style={{ width: `${(quizTimeLeft / 15) * 100}%` }}
-                    />
-                  </div>
+                <div className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-[10px] font-black text-emerald-800 dark:text-emerald-200 sm:text-xs">
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
+                  <span>2지선다 · 각 문제 <span className="cute-number-font">{QUIZ_TIME_LIMIT_SECONDS}</span>초</span>
                 </div>
 
-                {/* 카드 이미지 컨테이너 */}
                 <div
                   className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-[1.75rem] border border-border/80 bg-sky-950 shadow-[0_18px_44px_rgba(7,89,133,0.26)]"
                   onContextMenu={(event) => {
-                    event.preventDefault();
-                    const imageUrl = gameData.image_url || '';
-                    if (!imageUrl) return;
-                    if (isImageBlinded(imageUrl)) unblindImage(imageUrl);
-                    else blindImage(imageUrl);
+                    openImageBlindMenu(event, currentRound.image_url || '', imageBlindEnabled);
                   }}
                   title="우클릭으로 같은 이미지를 블라인드/해제"
                 >
-
-                  {/* 가우시안 블러 모드 */}
                   {quizBlurType === 'gaussian' && (
                     <BlindableCardImage
-                      src={gameData.image_url}
+                      src={currentRound.image_url}
                       alt="Quiz card"
                       style={{
                         filter: `blur(${(quizIntensity / 100) * QUIZ_GAUSSIAN_MAX_BLUR_PX}px) contrast(1.1)`,
                       }}
                       className="h-full w-full object-cover select-none pointer-events-none transition-all duration-75"
+                      imageBlindMenuEnabled={imageBlindEnabled}
                     />
                   )}
 
-                  {/* 모자이크 블러 모드 */}
                   {quizBlurType === 'mosaic' && (
-                    <MosaicQuizImage src={gameData.image_url || ''} intensity={quizIntensity} />
+                    <MosaicQuizImage src={currentRound.image_url || ''} intensity={quizIntensity} />
                   )}
 
-                  {/* 모션 블러 모드 */}
                   {quizBlurType === 'motion' && (
                     <MotionBlurQuizImage
-                      src={gameData.image_url || ''}
+                      src={currentRound.image_url || ''}
                       intensity={quizIntensity}
                       angle={quizBlurAngle}
                     />
                   )}
 
-                  {/* 방사형 회전 잔상 블러 모드 */}
                   {quizBlurType === 'radial' && (
                     <RadialBlurQuizImage
-                      src={gameData.image_url || ''}
+                      src={currentRound.image_url || ''}
                       intensity={quizIntensity}
                       angle={quizBlurAngle}
                     />
                   )}
 
-                  {/* 디테일 데코: 치지직 송출 에러 인터페이스 오버레이 */}
                   {quizIntensity > 0 && (
                     <div className="pointer-events-none absolute left-2.5 top-2.5 flex select-none items-center gap-1 rounded-full border border-white/20 bg-sky-950/72 px-1.5 py-0.5 text-[8px] font-black tracking-wider text-rose-300 animate-pulse sm:left-3.5 sm:top-3.5 sm:px-2 sm:py-1 sm:text-[10px]">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-600 animate-ping sm:h-2 sm:w-2" />
@@ -2432,30 +2537,68 @@ export const ArcadeTab: React.FC = () => {
                     </span>
                   </p>
                   <p className="max-w-lg text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-                    10초 동안 점점 선명해집니다. 누구의 카드인지 보기를 골라주세요!
+                    10초 동안 점점 선명해집니다. 둘 중 누구의 카드인지 골라주세요!
                   </p>
                 </div>
 
                 <div className="grid w-full max-w-3xl grid-cols-2 gap-2.5 sm:gap-4">
-                  {(gameData.choices ?? []).map((choice) => {
-                    const isSelected = selectedQuizChoice === choice.channel_id;
+                  {currentRound.choices.map((choice) => {
+                    const selected = selectedId === choice.channel_id;
+                    const correct = correctIds.includes(choice.channel_id);
+                    const wrong = selected && roundFeedback?.correct === false;
                     return (
                       <button
                         key={choice.channel_id}
-                        onClick={() => handleQuizAnswer(choice.channel_id)}
-                        disabled={selectedQuizChoice !== null}
-                        className={`cute-card-pop rounded-2xl border p-3.5 text-center text-xs font-extrabold sm:p-5 sm:text-base ${isSelected
-                          ? 'border-primary bg-primary/10 text-primary shadow-sm'
-                          : 'border-border bg-secondary/35 text-foreground hover:-translate-y-0.5 hover:bg-secondary/70'
-                          }`}
+                        onClick={() => handleRoundChoice(choice.channel_id)}
+                        disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || roundTimeLeft <= 0 || (countdownLeft !== null && countdownLeft > 0)}
+                        className={`cute-card-pop rounded-2xl border p-3.5 text-center text-xs font-extrabold transition sm:p-5 sm:text-base ${
+                          correct
+                            ? 'border-emerald-400 bg-emerald-500/12 text-emerald-700 ring-2 ring-emerald-400/50 dark:text-emerald-300'
+                            : wrong
+                              ? 'border-rose-400 bg-rose-500/12 text-rose-700 ring-2 ring-rose-400/50 dark:text-rose-300'
+                              : selected
+                                ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                                : 'border-border bg-secondary/35 text-foreground hover:-translate-y-0.5 hover:bg-secondary/70'
+                        }`}
                       >
                         {choice.name}
                       </button>
                     );
                   })}
                 </div>
+
+                <div className="min-h-16 w-full max-w-3xl">
+                  {roundChecking && (
+                    <div className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-secondary/45 px-4 py-3 text-xs font-black text-muted-foreground">
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                      라운드 결과 확인 중
+                    </div>
+                  )}
+                  {roundFeedback && (
+                    <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+                      roundFeedback.correct
+                        ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                    }`}>
+                      <div>
+                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                          {roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRoundContinue}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                      >
+                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-          )}
+            );
+          })()}
 
           {/* ======================================================== */}
           {/* 게임 2: 카드 퍼즐 (가로 3칸 세로 4칸 정사각형 조각 3:4 크롭) */}
@@ -2513,11 +2656,7 @@ export const ArcadeTab: React.FC = () => {
                 <div
                   className="arcade-puzzle-board grid aspect-[3/4] grid-cols-3 grid-rows-4 overflow-hidden rounded-2xl touch-none select-none"
                   onContextMenu={(event) => {
-                    event.preventDefault();
-                    const imageUrl = gameData.image_url || '';
-                    if (!imageUrl) return;
-                    if (isImageBlinded(imageUrl)) unblindImage(imageUrl);
-                    else blindImage(imageUrl);
+                    openImageBlindMenu(event, gameData.image_url || '', Boolean(isGameOver || gameResult));
                   }}
                   title="우클릭으로 같은 이미지를 블라인드/해제"
                 >
@@ -2602,6 +2741,7 @@ export const ArcadeTab: React.FC = () => {
                     card={currentRound.left}
                     showStarLabel={false}
                     disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                    imageBlindEnabled={Boolean(roundFeedback)}
                     onClick={() => handleRoundChoice(currentRound.left.channel_id)}
                     {...leftState}
                   />
@@ -2609,6 +2749,7 @@ export const ArcadeTab: React.FC = () => {
                     card={currentRound.right}
                     showStarLabel={false}
                     disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                    imageBlindEnabled={Boolean(roundFeedback)}
                     onClick={() => handleRoundChoice(currentRound.right.channel_id)}
                     {...rightState}
                   />
@@ -2672,7 +2813,10 @@ export const ArcadeTab: React.FC = () => {
                   <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
 
-                <CropPreview round={currentRound} />
+                <CropPreview
+                  key={`${currentRound.round}-${currentRound.source_image_url}-${currentRound.crop.x}-${currentRound.crop.y}-${currentRound.crop.rotation || 0}`}
+                  round={currentRound}
+                />
 
                 <div className="grid w-full max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-4">
                   {currentRound.choices.map((choice) => {
@@ -2687,6 +2831,7 @@ export const ArcadeTab: React.FC = () => {
                         correct={correct}
                         wrong={wrong}
                         disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
+                        imageBlindEnabled={Boolean(roundFeedback)}
                         onClick={() => handleRoundChoice(choice.channel_id)}
                       />
                     );
@@ -2822,6 +2967,27 @@ export const ArcadeTab: React.FC = () => {
           )}
 
         </div>
+      )}
+
+      {imageBlindMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed z-[130] w-52 overflow-hidden rounded-2xl border border-border bg-card/95 p-1.5 text-xs shadow-2xl backdrop-blur-md animate-in fade-in duration-100"
+          style={{ left: imageBlindMenu.x, top: imageBlindMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={async () => {
+              if (isImageBlinded(imageBlindMenu.imageUrl)) await unblindImage(imageBlindMenu.imageUrl);
+              else await blindImage(imageBlindMenu.imageUrl);
+              setImageBlindMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-black text-foreground transition hover:bg-secondary/80"
+          >
+            {isImageBlinded(imageBlindMenu.imageUrl) ? '👁️ 이미지 블라인드 해제' : '🚫 같은 이미지 블라인드'}
+          </button>
+        </div>,
+        document.body
       )}
 
       {/* 뒤집기 원복용/원형 원근 CSS 주입 */}
