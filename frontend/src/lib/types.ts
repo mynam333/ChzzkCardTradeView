@@ -217,20 +217,49 @@ export interface AssetEventListResponse {
   next_before_id: number | null;
 }
 
+export type AssetEventSuspicionSeverity = 'critical' | 'high' | 'medium' | 'low';
+
+export interface AssetEventSuspicionCategory {
+  id: string;
+  label: string;
+  score: number;
+  severity: AssetEventSuspicionSeverity;
+  reasons: string[];
+  metrics: Record<string, number | string | null>;
+}
+
+export interface AssetEventSuspicionCounterparty {
+  user_id: string;
+  username: string | null;
+  events: number;
+  point_in: number;
+  point_out: number;
+  card_in: number;
+  card_out: number;
+  score: number;
+  last_event_at: string | null;
+}
+
 export interface AssetEventSuspect {
   user_id: string;
   username: string | null;
   user_deleted_at: string | null;
-  severity: 'high' | 'medium' | 'low';
+  severity: AssetEventSuspicionSeverity;
+  risk_score: number;
   reasons: string[];
+  categories: AssetEventSuspicionCategory[];
+  counterparties: AssetEventSuspicionCounterparty[];
   total_events: number;
+  relation_events: number;
   point_income: number;
   point_expense: number;
+  point_net: number;
   card_moves: number;
   card_adds: number;
   card_deletes: number;
   cosmetic_events: number;
   negative_balance_events: number;
+  manual_adjustment_events: number;
   last_event_at: string | null;
 }
 

@@ -309,6 +309,7 @@ export const AdminTab: React.FC = () => {
   const [assetEventType, setAssetEventType] = useState<AssetEventAssetType | 'ALL'>('ALL');
   const [assetEventSource, setAssetEventSource] = useState('ALL');
   const [assetSuspects, setAssetSuspects] = useState<AssetEventSuspect[]>([]);
+  const [assetSuspectSearch, setAssetSuspectSearch] = useState('');
   const [assetSuspectsLoading, setAssetSuspectsLoading] = useState(false);
 
   // 스트리머 이미지 관리
@@ -408,6 +409,14 @@ export const AdminTab: React.FC = () => {
     }, 300);
     return () => clearTimeout(t);
   }, [assetEventSearch, assetEventType, assetEventSource, subTab, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || subTab !== 'asset-events') return;
+    const t = setTimeout(() => {
+      fetchAssetSuspects(assetSuspectSearch);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [assetSuspectSearch, subTab, isAdmin]);
 
   // 제재 유저 검색/정렬 변경 시 재조회 (디바운스 포함)
   useEffect(() => {
@@ -633,10 +642,13 @@ export const AdminTab: React.FC = () => {
     }
   };
 
-  const fetchAssetSuspects = async () => {
+  const fetchAssetSuspects = async (searchOverride = assetSuspectSearch) => {
     try {
       setAssetSuspectsLoading(true);
-      const res = await apiFetch('/admin/asset-events/suspects?days=7&limit=50');
+      const params = new URLSearchParams({ days: '7', limit: '50' });
+      const keyword = searchOverride.trim();
+      if (keyword) params.set('search', keyword);
+      const res = await apiFetch(`/admin/asset-events/suspects?${params.toString()}`);
       if (!res.ok) return;
       const data = await res.json() as AssetEventSuspectResponse;
       setAssetSuspects(data.items || []);
@@ -1610,6 +1622,20 @@ export const AdminTab: React.FC = () => {
       return `상대: ${event.counterparty_username || event.counterparty_user_id}`;
     }
     return null;
+  };
+
+  const assetSuspicionSeverityLabel: Record<string, string> = {
+    critical: '매우 높음',
+    high: '높음',
+    medium: '중간',
+    low: '낮음'
+  };
+
+  const assetSuspicionSeverityClass = (severity: string) => {
+    if (severity === 'critical') return 'bg-red-600/15 text-red-500 border-red-500/25';
+    if (severity === 'high') return 'bg-red-500/10 text-red-500 border-red-500/20';
+    if (severity === 'medium') return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
+    return 'bg-secondary text-muted-foreground border-border';
   };
 
   const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
@@ -3035,41 +3061,91 @@ export const AdminTab: React.FC = () => {
               <aside className="space-y-3">
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-black text-amber-700 dark:text-amber-200">의심 계정 요약</h4>
-                    <span className="text-[10px] text-muted-foreground">최근 7일</span>
+                    <div>
+                      <h4 className="text-xs font-black text-amber-700 dark:text-amber-200">정교 의심도 분석</h4>
+                      <p className="mt-1 text-[10px] text-muted-foreground">최근 7일 · 관계 흐름 우선</p>
+                    </div>
+                    <span className="rounded-full border border-amber-500/20 bg-card px-2 py-0.5 text-[10px] font-black text-amber-600 dark:text-amber-200">
+                      {assetSuspectSearch.trim() ? '검색 상세' : '상위 후보'}
+                    </span>
                   </div>
+
+                  <input
+                    type="text"
+                    placeholder="계정 ID 또는 닉네임으로 의심도 검색"
+                    value={assetSuspectSearch}
+                    onChange={(e) => setAssetSuspectSearch(e.target.value)}
+                    className="mt-3 w-full rounded-lg border border-amber-500/20 bg-card/80 px-3 py-2 text-xs outline-none focus:border-amber-500/50"
+                  />
+
                   <div className="mt-3 space-y-2">
                     {assetSuspectsLoading ? (
-                      <p className="text-[11px] text-muted-foreground">요약 계산 중입니다.</p>
+                      <p className="text-[11px] text-muted-foreground">의심도 계산 중입니다.</p>
                     ) : assetSuspects.length === 0 ? (
                       <p className="text-[11px] text-muted-foreground">현재 기준으로 표시할 후보가 없습니다.</p>
                     ) : (
-                      assetSuspects.slice(0, 8).map((suspect) => (
-                        <div key={suspect.user_id} className="rounded-lg bg-card/80 p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-black">{suspect.username || '미확인 유저'}</p>
-                              <p className="truncate text-[10px] text-muted-foreground">{suspect.user_id}</p>
+                      assetSuspects.slice(0, 10).map((suspect) => {
+                        const topCounterparty = suspect.counterparties?.[0];
+                        const categories = suspect.categories || [];
+                        return (
+                          <div key={suspect.user_id} className="rounded-xl border border-border/70 bg-card/85 p-3 shadow-sm">
+                            <div className="flex items-start justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setAssetEventSearch(suspect.user_id)}
+                                className="min-w-0 text-left"
+                                title="이 계정의 자산 기록 필터링"
+                              >
+                                <p className="truncate text-xs font-black text-foreground">{suspect.username || '미확인 유저'}</p>
+                                <p className="truncate text-[10px] text-muted-foreground">{suspect.user_id}</p>
+                              </button>
+                              <div className="shrink-0 text-right">
+                                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${assetSuspicionSeverityClass(suspect.severity)}`}>
+                                  {assetSuspicionSeverityLabel[suspect.severity] || suspect.severity}
+                                </span>
+                                <p className="mt-1 text-[10px] font-black text-foreground">{Math.round(suspect.risk_score || 0)}점</p>
+                              </div>
                             </div>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                              suspect.severity === 'high'
-                                ? 'bg-red-500/10 text-red-500'
-                                : suspect.severity === 'medium'
-                                  ? 'bg-amber-500/10 text-amber-600'
-                                  : 'bg-secondary text-muted-foreground'
-                            }`}>
-                              {suspect.severity === 'high' ? '높음' : suspect.severity === 'medium' ? '중간' : '낮음'}
-                            </span>
+
+                            {categories.length > 0 ? (
+                              <div className="mt-3 space-y-1.5">
+                                {categories.slice(0, 3).map((category) => (
+                                  <div key={category.id} className="rounded-lg bg-secondary/45 p-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[10px] font-black text-foreground">{category.label}</span>
+                                      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-black ${assetSuspicionSeverityClass(category.severity)}`}>
+                                        {category.score}점
+                                      </span>
+                                    </div>
+                                    {category.reasons?.[0] && <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{category.reasons[0]}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-[11px] text-muted-foreground">검색된 계정의 최근 기록은 있으나 높은 의심 신호는 없습니다.</p>
+                            )}
+
+                            {topCounterparty && (
+                              <div className="mt-3 rounded-lg border border-border/70 bg-secondary/20 p-2 text-[10px] text-muted-foreground">
+                                <p className="font-black text-foreground">집중 상대: {topCounterparty.username || topCounterparty.user_id}</p>
+                                <div className="mt-1 grid grid-cols-2 gap-1">
+                                  <span>관계 이벤트 {topCounterparty.events.toLocaleString()}건</span>
+                                  <span>카드 {topCounterparty.card_in.toLocaleString()}↓ / {topCounterparty.card_out.toLocaleString()}↑</span>
+                                  <span>포인트 유입 {topCounterparty.point_in.toLocaleString()}P</span>
+                                  <span>포인트 유출 {topCounterparty.point_out.toLocaleString()}P</span>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="mt-3 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+                              <span>전체 이벤트 {suspect.total_events.toLocaleString()}건</span>
+                              <span>관계 이벤트 {suspect.relation_events.toLocaleString()}건</span>
+                              <span>순포인트 {suspect.point_net.toLocaleString()}P</span>
+                              <span>카드 이동 {suspect.card_moves.toLocaleString()}건</span>
+                            </div>
                           </div>
-                          <p className="mt-2 text-[11px] text-muted-foreground">{suspect.reasons.join(' · ')}</p>
-                          <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
-                            <span>이벤트 {suspect.total_events.toLocaleString()}건</span>
-                            <span>카드 이동 {suspect.card_moves.toLocaleString()}건</span>
-                            <span>포인트 유입 {suspect.point_income.toLocaleString()}P</span>
-                            <span>코스메틱 {suspect.cosmetic_events.toLocaleString()}건</span>
-                          </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

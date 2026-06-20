@@ -82,20 +82,49 @@ export type AssetEventListOptions = {
   search?: string | null;
 };
 
+export type AssetEventSuspicionSeverity = 'critical' | 'high' | 'medium' | 'low';
+
+export type AssetEventSuspicionCategory = {
+  id: string;
+  label: string;
+  score: number;
+  severity: AssetEventSuspicionSeverity;
+  reasons: string[];
+  metrics: Record<string, number | string | null>;
+};
+
+export type AssetEventSuspicionCounterparty = {
+  user_id: string;
+  username: string | null;
+  events: number;
+  point_in: number;
+  point_out: number;
+  card_in: number;
+  card_out: number;
+  score: number;
+  last_event_at: string | null;
+};
+
 export type AssetEventSuspect = {
   user_id: string;
   username: string | null;
   user_deleted_at: string | null;
-  severity: 'high' | 'medium' | 'low';
+  severity: AssetEventSuspicionSeverity;
+  risk_score: number;
   reasons: string[];
+  categories: AssetEventSuspicionCategory[];
+  counterparties: AssetEventSuspicionCounterparty[];
   total_events: number;
+  relation_events: number;
   point_income: number;
   point_expense: number;
+  point_net: number;
   card_moves: number;
   card_adds: number;
   card_deletes: number;
   cosmetic_events: number;
   negative_balance_events: number;
+  manual_adjustment_events: number;
   last_event_at: string | null;
 };
 
@@ -546,53 +575,450 @@ const sinceSqlDate = (days: number) => {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 };
 
-const buildSuspect = (row: any): AssetEventSuspect => {
-  const totalEvents = Number(row.total_events || 0);
-  const pointIncome = Number(row.point_income || 0);
-  const pointExpense = Math.abs(Number(row.point_expense || 0));
-  const cardMoves = Number(row.card_moves || 0);
-  const cardAdds = Number(row.card_adds || 0);
-  const cardDeletes = Number(row.card_deletes || 0);
-  const cosmeticEvents = Number(row.cosmetic_events || 0);
-  const negativeBalanceEvents = Number(row.negative_balance_events || 0);
-  const reasons: string[] = [];
+type AssetEventSuspectCounterpartyStats = {
+  user_id: string;
+  username: string | null;
+  events: number;
+  point_in: number;
+  point_out: number;
+  card_in: number;
+  card_out: number;
+  card_weight_in: number;
+  card_weight_out: number;
+  source_types: Set<string>;
+  source_ids: Set<string>;
+  last_event_at: string | null;
+};
 
-  if (negativeBalanceEvents > 0) reasons.push('포인트 잔액 음수 기록');
-  if (pointIncome >= 1_000_000) reasons.push('단기간 대량 포인트 유입');
-  if (cardMoves >= 20) reasons.push('카드 이동 과다');
-  if (cardAdds >= 80) reasons.push('카드 획득 이벤트 과다');
-  if (cardDeletes >= 40) reasons.push('카드 삭제 이벤트 과다');
-  if (cosmeticEvents >= 50) reasons.push('코스메틱 장착/이동 과다');
-  if (totalEvents >= 120) reasons.push('전체 자산 이벤트 급증');
+type AssetEventSuspectStats = {
+  user_id: string;
+  username: string | null;
+  user_deleted_at: string | null;
+  total_events: number;
+  relation_events: number;
+  point_income: number;
+  point_expense: number;
+  relation_point_income: number;
+  relation_point_expense: number;
+  card_moves: number;
+  card_adds: number;
+  card_deletes: number;
+  cosmetic_events: number;
+  negative_balance_events: number;
+  manual_adjustment_events: number;
+  manual_adjustment_amount: number;
+  last_event_at: string | null;
+  counterparties: Map<string, AssetEventSuspectCounterpartyStats>;
+};
 
-  const severity: AssetEventSuspect['severity'] = negativeBalanceEvents > 0 || pointIncome >= 5_000_000
-    ? 'high'
-    : (pointIncome >= 1_000_000 || cardMoves >= 40 || totalEvents >= 200 ? 'medium' : 'low');
+const relationSourceTypes = new Set(['trade', 'market_purchase', 'market_sale']);
+const noisyFlowSourceTypes = new Set(['market_bid', 'market_bid_refund', 'market_listing', 'market_watch']);
+
+const suspicionSeverityFromScore = (score: number): AssetEventSuspicionSeverity => {
+  if (score >= 85) return 'critical';
+  if (score >= 65) return 'high';
+  if (score >= 40) return 'medium';
+  return 'low';
+};
+
+const addSuspicionCategory = (
+  categories: AssetEventSuspicionCategory[],
+  id: string,
+  label: string,
+  score: number,
+  reasons: string[],
+  metrics: Record<string, number | string | null>
+) => {
+  const normalizedScore = Math.max(0, Math.min(100, Math.round(score)));
+  if (normalizedScore <= 0) return;
+  categories.push({
+    id,
+    label,
+    score: normalizedScore,
+    severity: suspicionSeverityFromScore(normalizedScore),
+    reasons,
+    metrics
+  });
+};
+
+const cardSuspicionWeight = (row: any) => {
+  const star = Math.max(0, Math.min(5, Number(row.star || 0)));
+  return Math.max(1, Number(row.quantity || 1)) * (star + 1) * (star + 1);
+};
+
+const getRowUserName = (row: any, userId: string): string | null => {
+  if (row.user_id === userId) return row.user_username ?? null;
+  if (row.from_user_id === userId) return row.from_username ?? null;
+  if (row.to_user_id === userId) return row.to_username ?? null;
+  if (row.counterparty_user_id === userId) return row.counterparty_username ?? null;
+  return null;
+};
+
+const getRowDeletedAt = (row: any, userId: string): string | null => {
+  if (row.user_id === userId) return normalizeDate(row.user_deleted_at) || null;
+  if (row.from_user_id === userId) return normalizeDate(row.from_deleted_at) || null;
+  if (row.to_user_id === userId) return normalizeDate(row.to_deleted_at) || null;
+  if (row.counterparty_user_id === userId) return normalizeDate(row.counterparty_deleted_at) || null;
+  return null;
+};
+
+const getOtherAssetEventUser = (row: any, userId: string): { id: string; username: string | null } | null => {
+  if (row.from_user_id === userId && row.to_user_id && row.to_user_id !== userId) {
+    return { id: row.to_user_id, username: row.to_username ?? null };
+  }
+  if (row.to_user_id === userId && row.from_user_id && row.from_user_id !== userId) {
+    return { id: row.from_user_id, username: row.from_username ?? null };
+  }
+  if (row.counterparty_user_id && row.counterparty_user_id !== userId) {
+    return { id: row.counterparty_user_id, username: row.counterparty_username ?? null };
+  }
+  if (row.user_id && row.user_id !== userId) {
+    return { id: row.user_id, username: row.user_username ?? null };
+  }
+  return null;
+};
+
+const getOrCreateSuspectStats = (grouped: Map<string, AssetEventSuspectStats>, userId: string, row: any): AssetEventSuspectStats => {
+  const current = grouped.get(userId);
+  if (current) {
+    current.username = current.username || getRowUserName(row, userId);
+    current.user_deleted_at = current.user_deleted_at || getRowDeletedAt(row, userId);
+    return current;
+  }
+  const created: AssetEventSuspectStats = {
+    user_id: userId,
+    username: getRowUserName(row, userId),
+    user_deleted_at: getRowDeletedAt(row, userId),
+    total_events: 0,
+    relation_events: 0,
+    point_income: 0,
+    point_expense: 0,
+    relation_point_income: 0,
+    relation_point_expense: 0,
+    card_moves: 0,
+    card_adds: 0,
+    card_deletes: 0,
+    cosmetic_events: 0,
+    negative_balance_events: 0,
+    manual_adjustment_events: 0,
+    manual_adjustment_amount: 0,
+    last_event_at: null,
+    counterparties: new Map()
+  };
+  grouped.set(userId, created);
+  return created;
+};
+
+const getOrCreateCounterpartyStats = (
+  stats: AssetEventSuspectStats,
+  other: { id: string; username: string | null }
+): AssetEventSuspectCounterpartyStats => {
+  const current = stats.counterparties.get(other.id);
+  if (current) {
+    current.username = current.username || other.username;
+    return current;
+  }
+  const created: AssetEventSuspectCounterpartyStats = {
+    user_id: other.id,
+    username: other.username,
+    events: 0,
+    point_in: 0,
+    point_out: 0,
+    card_in: 0,
+    card_out: 0,
+    card_weight_in: 0,
+    card_weight_out: 0,
+    source_types: new Set(),
+    source_ids: new Set(),
+    last_event_at: null
+  };
+  stats.counterparties.set(other.id, created);
+  return created;
+};
+
+const collectAssetEventSuspectStats = (rows: any[]) => {
+  const grouped = new Map<string, AssetEventSuspectStats>();
+
+  for (const row of rows) {
+    const involved = new Set<string>();
+    if (row.user_id) involved.add(String(row.user_id));
+    if (row.from_user_id) involved.add(String(row.from_user_id));
+    if (row.to_user_id) involved.add(String(row.to_user_id));
+
+    for (const userId of involved) {
+      const stats = getOrCreateSuspectStats(grouped, userId, row);
+      stats.total_events += 1;
+      const createdAt = normalizeDate(row.created_at) || null;
+      if (createdAt && (!stats.last_event_at || createdAt > stats.last_event_at)) stats.last_event_at = createdAt;
+
+      const amount = Number(row.amount || 0);
+      if (row.asset_type === 'point' && row.user_id === userId) {
+        if (amount > 0) stats.point_income += amount;
+        if (amount < 0) stats.point_expense += Math.abs(amount);
+        if (Number(row.balance_after || 0) < 0) stats.negative_balance_events += 1;
+      }
+      if (row.asset_type === 'card') {
+        if (row.action === 'move' && (row.from_user_id === userId || row.to_user_id === userId || row.user_id === userId)) stats.card_moves += 1;
+        if (row.action === 'add' && row.user_id === userId) stats.card_adds += 1;
+        if (row.action === 'delete' && row.user_id === userId) stats.card_deletes += 1;
+      }
+      if (row.asset_type === 'cosmetic' && row.user_id === userId) stats.cosmetic_events += 1;
+      if ((row.source_type === 'manual_adjustment' || row.source_type === 'admin_reset') && row.user_id === userId) {
+        stats.manual_adjustment_events += 1;
+        stats.manual_adjustment_amount += Math.abs(amount);
+      }
+
+      const other = getOtherAssetEventUser(row, userId);
+      if (!other || noisyFlowSourceTypes.has(String(row.source_type || ''))) continue;
+
+      const isRelationSource = relationSourceTypes.has(String(row.source_type || '')) || row.from_user_id || row.to_user_id;
+      if (!isRelationSource) continue;
+
+      const counterparty = getOrCreateCounterpartyStats(stats, other);
+      counterparty.events += 1;
+      counterparty.source_types.add(String(row.source_type || 'unknown'));
+      if (row.source_id != null) counterparty.source_ids.add(String(row.source_id));
+      if (createdAt && (!counterparty.last_event_at || createdAt > counterparty.last_event_at)) counterparty.last_event_at = createdAt;
+      stats.relation_events += 1;
+
+      if (row.asset_type === 'point' && row.user_id === userId) {
+        if (amount > 0) {
+          counterparty.point_in += amount;
+          stats.relation_point_income += amount;
+        }
+        if (amount < 0) {
+          counterparty.point_out += Math.abs(amount);
+          stats.relation_point_expense += Math.abs(amount);
+        }
+      }
+      if (row.asset_type === 'card' && row.action === 'move') {
+        const weight = cardSuspicionWeight(row);
+        if (row.to_user_id === userId) {
+          counterparty.card_in += 1;
+          counterparty.card_weight_in += weight;
+        }
+        if (row.from_user_id === userId || row.user_id === userId) {
+          counterparty.card_out += 1;
+          counterparty.card_weight_out += weight;
+        }
+      }
+    }
+  }
+
+  return grouped;
+};
+
+const buildEnhancedSuspect = (stats: AssetEventSuspectStats): AssetEventSuspect => {
+  const counterparties = [...stats.counterparties.values()].map((counterparty) => {
+    const pointMoved = counterparty.point_in + counterparty.point_out;
+    const cardMoved = counterparty.card_in + counterparty.card_out;
+    const pointNetRatio = pointMoved > 0 ? Math.abs(counterparty.point_in - counterparty.point_out) / pointMoved : 0;
+    const cardNetRatio = cardMoved > 0 ? Math.abs(counterparty.card_in - counterparty.card_out) / cardMoved : 0;
+    const score = Math.round(
+      counterparty.events * 3
+      + Math.min(35, pointMoved / 50000)
+      + Math.min(25, cardMoved * 4)
+      + Math.max(pointNetRatio, cardNetRatio) * 20
+    );
+    return {
+      user_id: counterparty.user_id,
+      username: counterparty.username,
+      events: counterparty.events,
+      point_in: Math.round(counterparty.point_in),
+      point_out: Math.round(counterparty.point_out),
+      card_in: counterparty.card_in,
+      card_out: counterparty.card_out,
+      score,
+      last_event_at: counterparty.last_event_at
+    };
+  }).sort((a, b) => b.score - a.score).slice(0, 5);
+
+  const categories: AssetEventSuspicionCategory[] = [];
+  const topCounterparty = counterparties[0] || null;
+  const relationEvents = Math.max(0, stats.relation_events);
+  const topEventShare = topCounterparty && relationEvents > 0 ? topCounterparty.events / relationEvents : 0;
+  const pointThroughput = stats.relation_point_income + stats.relation_point_expense;
+  const pointNet = stats.relation_point_income - stats.relation_point_expense;
+  const pointNetRatio = pointThroughput > 0 ? Math.abs(pointNet) / pointThroughput : 0;
+
+  if (topCounterparty && relationEvents >= 4 && topEventShare >= 0.45) {
+    const score = Math.min(80, 20 + topEventShare * 45 + Math.min(15, topCounterparty.events * 2));
+    addSuspicionCategory(categories, 'counterparty_concentration', '특정 상대 집중', score, [
+      `${topCounterparty.username || topCounterparty.user_id} 계정과의 자산 이동이 전체 관계 이벤트의 ${Math.round(topEventShare * 100)}%입니다.`
+    ], {
+      top_counterparty: topCounterparty.username || topCounterparty.user_id,
+      relation_events: relationEvents,
+      top_counterparty_events: topCounterparty.events,
+      share_percent: Math.round(topEventShare * 100)
+    });
+  }
+
+  if (topCounterparty) {
+    const topPointMoved = topCounterparty.point_in + topCounterparty.point_out;
+    const topPointRatio = topPointMoved > 0 ? Math.abs(topCounterparty.point_in - topCounterparty.point_out) / topPointMoved : 0;
+    const topCardMoved = topCounterparty.card_in + topCounterparty.card_out;
+    const topCardRatio = topCardMoved > 0 ? Math.abs(topCounterparty.card_in - topCounterparty.card_out) / topCardMoved : 0;
+    const oneWayPointScore = topCounterparty.events >= 3 && topPointMoved >= 100000 && topPointRatio >= 0.8
+      ? 35 + Math.min(25, topPointMoved / 80000) + topPointRatio * 25
+      : 0;
+    const oneWayCardScore = topCounterparty.events >= 3 && topCardMoved >= 3 && topCardRatio >= 0.75
+      ? 32 + Math.min(22, topCardMoved * 4) + topCardRatio * 25
+      : 0;
+    const score = Math.min(100, Math.max(oneWayPointScore, oneWayCardScore));
+    if (score >= 30) {
+      const direction = topCounterparty.point_in > topCounterparty.point_out || topCounterparty.card_in > topCounterparty.card_out ? '유입' : '유출';
+      addSuspicionCategory(categories, 'one_way_counterparty_flow', '일방향 가치 이동', score, [
+        `${topCounterparty.username || topCounterparty.user_id} 계정과 ${direction} 방향으로 치우친 거래가 반복됩니다.`
+      ], {
+        counterparty: topCounterparty.username || topCounterparty.user_id,
+        point_in: topCounterparty.point_in,
+        point_out: topCounterparty.point_out,
+        card_in: topCounterparty.card_in,
+        card_out: topCounterparty.card_out,
+        point_one_way_percent: Math.round(topPointRatio * 100),
+        card_one_way_percent: Math.round(topCardRatio * 100)
+      });
+    }
+  }
+
+  if (relationEvents >= 5 && pointThroughput >= 200000 && pointNetRatio >= 0.75) {
+    const concentrationBoost = topEventShare >= 0.45 ? 18 : 0;
+    const score = Math.min(78, 24 + pointNetRatio * 32 + Math.min(18, pointThroughput / 100000) + concentrationBoost);
+    addSuspicionCategory(categories, 'trade_value_imbalance', '거래 가치 불균형', score, [
+      `관계 거래 포인트 흐름이 한쪽으로 ${Math.round(pointNetRatio * 100)}% 치우쳐 있습니다.`
+    ], {
+      point_income: Math.round(stats.relation_point_income),
+      point_expense: Math.round(stats.relation_point_expense),
+      point_net: pointNet,
+      relation_events: relationEvents,
+      net_ratio_percent: Math.round(pointNetRatio * 100)
+    });
+  }
+
+  if (stats.negative_balance_events > 0) {
+    addSuspicionCategory(categories, 'negative_balance', '잔액 무결성 이상', Math.min(100, 75 + stats.negative_balance_events * 8), [
+      `포인트 잔액이 음수로 기록된 이벤트가 ${stats.negative_balance_events}건 있습니다.`
+    ], {
+      negative_balance_events: stats.negative_balance_events
+    });
+  }
+
+  if (stats.manual_adjustment_events >= 2 || stats.manual_adjustment_amount >= 500000) {
+    addSuspicionCategory(categories, 'manual_adjustment', '관리자 조정 집중', Math.min(70, 20 + stats.manual_adjustment_events * 8 + stats.manual_adjustment_amount / 100000), [
+      '관리자 수동 조정 또는 초기화 이벤트가 짧은 기간에 집중되었습니다.'
+    ], {
+      manual_adjustment_events: stats.manual_adjustment_events,
+      manual_adjustment_amount: Math.round(stats.manual_adjustment_amount)
+    });
+  }
+
+  if (stats.total_events >= 180 || stats.card_moves >= 50 || stats.cosmetic_events >= 80) {
+    addSuspicionCategory(categories, 'activity_spike', '활동량 급증', Math.min(24, 8 + stats.total_events / 30 + stats.card_moves / 10), [
+      '단순 활동량 신호입니다. 이 항목만으로는 높은 의심도로 보지 않습니다.'
+    ], {
+      total_events: stats.total_events,
+      card_moves: stats.card_moves,
+      cosmetic_events: stats.cosmetic_events
+    });
+  }
+
+  if (stats.card_deletes >= 30) {
+    addSuspicionCategory(categories, 'asset_disposal', '카드 처분 집중', Math.min(35, 10 + stats.card_deletes / 2), [
+      '카드 삭제가 많습니다. 보상/정리 목적일 수 있으므로 다른 신호와 함께 확인해야 합니다.'
+    ], {
+      card_deletes: stats.card_deletes
+    });
+  }
+
+  categories.sort((a, b) => b.score - a.score);
+  const strongest = categories[0]?.score || 0;
+  const supporting = categories.slice(1).reduce((sum, item) => sum + Math.min(18, Math.round(item.score * 0.28)), 0);
+  const relationBonus = categories.some((item) => item.id === 'one_way_counterparty_flow') && categories.some((item) => item.id === 'counterparty_concentration') ? 10 : 0;
+  const riskScore = Math.min(100, strongest + supporting + relationBonus);
+  const reasons = categories.flatMap((category) => category.reasons).slice(0, 5);
 
   return {
-    user_id: row.user_id,
-    username: row.username ?? null,
-    user_deleted_at: row.user_deleted_at ?? null,
-    severity,
+    user_id: stats.user_id,
+    username: stats.username,
+    user_deleted_at: stats.user_deleted_at,
+    severity: suspicionSeverityFromScore(riskScore),
+    risk_score: riskScore,
     reasons,
-    total_events: totalEvents,
-    point_income: pointIncome,
-    point_expense: pointExpense,
-    card_moves: cardMoves,
-    card_adds: cardAdds,
-    card_deletes: cardDeletes,
-    cosmetic_events: cosmeticEvents,
-    negative_balance_events: negativeBalanceEvents,
-    last_event_at: normalizeDate(row.last_event_at) || null
+    categories,
+    counterparties,
+    total_events: stats.total_events,
+    relation_events: stats.relation_events,
+    point_income: Math.round(stats.point_income),
+    point_expense: Math.round(stats.point_expense),
+    point_net: Math.round(pointNet),
+    card_moves: stats.card_moves,
+    card_adds: stats.card_adds,
+    card_deletes: stats.card_deletes,
+    cosmetic_events: stats.cosmetic_events,
+    negative_balance_events: stats.negative_balance_events,
+    manual_adjustment_events: stats.manual_adjustment_events,
+    last_event_at: stats.last_event_at
   };
 };
 
+const assetSuspectMatchesSearch = (item: AssetEventSuspect, search: string) => {
+  const keyword = search.trim().toLowerCase();
+  if (!keyword) return true;
+  return String(item.user_id || '').toLowerCase().includes(keyword)
+    || String(item.username || '').toLowerCase().includes(keyword);
+};
+
+const selectAssetEventSuspectRowsSql = (searchSql: string) => `
+    SELECT a.id,
+           a.user_id,
+           COALESCE(u.username, du.username_snapshot) AS user_username,
+           du.deleted_at AS user_deleted_at,
+           a.counterparty_user_id,
+           COALESCE(cu.username, cdu.username_snapshot) AS counterparty_username,
+           cdu.deleted_at AS counterparty_deleted_at,
+           a.from_user_id,
+           COALESCE(fu.username, fdu.username_snapshot) AS from_username,
+           fdu.deleted_at AS from_deleted_at,
+           a.to_user_id,
+           COALESCE(tu.username, tdu.username_snapshot) AS to_username,
+           tdu.deleted_at AS to_deleted_at,
+           a.asset_type,
+           a.action,
+           a.amount,
+           a.quantity,
+           a.balance_after,
+           a.source_type,
+           a.source_id,
+           a.reason,
+           a.card_id,
+           a.channel_id,
+           a.serial_number,
+           a.star,
+           a.item_id,
+           a.created_at
+      FROM asset_event_logs a
+      LEFT JOIN users u ON u.id = a.user_id
+      LEFT JOIN deleted_user_accounts du ON du.user_id = a.user_id
+      LEFT JOIN users cu ON cu.id = a.counterparty_user_id
+      LEFT JOIN deleted_user_accounts cdu ON cdu.user_id = a.counterparty_user_id
+      LEFT JOIN users fu ON fu.id = a.from_user_id
+      LEFT JOIN deleted_user_accounts fdu ON fdu.user_id = a.from_user_id
+      LEFT JOIN users tu ON tu.id = a.to_user_id
+      LEFT JOIN deleted_user_accounts tdu ON tdu.user_id = a.to_user_id
+     WHERE a.created_at >= ?
+       ${searchSql}
+     ORDER BY a.created_at DESC, a.id DESC
+     LIMIT ?
+`;
+
 export const listAssetEventSuspects = async (
-  options: { days?: number; limit?: number } = {}
+  options: { days?: number; limit?: number; search?: string | null } = {}
 ): Promise<{ items: AssetEventSuspect[]; days: number }> => {
   const days = Math.max(1, Math.min(90, Math.floor(Number(options.days || 7))));
   const limit = clampLimit(options.limit, 50, 100);
   const since = sinceSqlDate(days);
+  const search = String(options.search || '').trim();
+  const scanLimit = search ? 8000 : Math.max(6000, Math.min(25000, limit * 500));
 
   if (getDbMode() === 'SUPABASE') {
     const { data, error } = await getSupabaseClient()
@@ -600,82 +1026,50 @@ export const listAssetEventSuspects = async (
       .select('*')
       .gte('created_at', since)
       .order('id', { ascending: false })
-      .limit(2000);
+      .limit(scanLimit);
     if (error) throw error;
-    const grouped = new Map<string, any>();
-    for (const event of data || []) {
-      const userId = event.user_id || event.to_user_id || event.from_user_id || event.counterparty_user_id;
-      if (!userId) continue;
-      const current = grouped.get(userId) || { user_id: userId };
-      current.total_events = Number(current.total_events || 0) + 1;
-      current.point_income = Number(current.point_income || 0) + (event.asset_type === 'point' && Number(event.amount || 0) > 0 ? Number(event.amount || 0) : 0);
-      current.point_expense = Number(current.point_expense || 0) + (event.asset_type === 'point' && Number(event.amount || 0) < 0 ? Number(event.amount || 0) : 0);
-      current.card_moves = Number(current.card_moves || 0) + (event.asset_type === 'card' && event.action === 'move' ? 1 : 0);
-      current.card_adds = Number(current.card_adds || 0) + (event.asset_type === 'card' && event.action === 'add' ? 1 : 0);
-      current.card_deletes = Number(current.card_deletes || 0) + (event.asset_type === 'card' && event.action === 'delete' ? 1 : 0);
-      current.cosmetic_events = Number(current.cosmetic_events || 0) + (event.asset_type === 'cosmetic' ? 1 : 0);
-      current.negative_balance_events = Number(current.negative_balance_events || 0) + (event.asset_type === 'point' && Number(event.balance_after || 0) < 0 ? 1 : 0);
-      current.last_event_at = current.last_event_at || event.created_at;
-      grouped.set(userId, current);
-    }
-    return {
-      days,
-      items: [...grouped.values()].map(buildSuspect).filter((item) => item.reasons.length > 0).slice(0, limit)
-    };
+    const rows = search
+      ? (data || []).filter((event: any) => [event.user_id, event.counterparty_user_id, event.from_user_id, event.to_user_id, event.source_id, event.reason, event.description].some((value) => String(value || '').toLowerCase().includes(search.toLowerCase())))
+      : (data || []);
+    const items = [...collectAssetEventSuspectStats(rows).values()]
+      .map(buildEnhancedSuspect)
+      .filter((item) => search ? (item.total_events > 0 && assetSuspectMatchesSearch(item, search)) : item.risk_score >= 30)
+      .sort((a, b) => b.risk_score - a.risk_score || b.relation_events - a.relation_events)
+      .slice(0, limit);
+    return { days, items };
   }
 
-  const sql = `
-    SELECT e.user_id,
-           COALESCE(u.username, du.username_snapshot) AS username,
-           du.deleted_at AS user_deleted_at,
-           e.total_events,
-           e.point_income,
-           e.point_expense,
-           e.card_moves,
-           e.card_adds,
-           e.card_deletes,
-           e.cosmetic_events,
-           e.negative_balance_events,
-           e.last_event_at
-      FROM (
-        SELECT COALESCE(user_id, to_user_id, from_user_id, counterparty_user_id) AS user_id,
-               COUNT(*) AS total_events,
-               SUM(CASE WHEN asset_type = 'point' AND amount > 0 THEN amount ELSE 0 END) AS point_income,
-               SUM(CASE WHEN asset_type = 'point' AND amount < 0 THEN amount ELSE 0 END) AS point_expense,
-               SUM(CASE WHEN asset_type = 'card' AND action = 'move' THEN 1 ELSE 0 END) AS card_moves,
-               SUM(CASE WHEN asset_type = 'card' AND action = 'add' THEN 1 ELSE 0 END) AS card_adds,
-               SUM(CASE WHEN asset_type = 'card' AND action = 'delete' THEN 1 ELSE 0 END) AS card_deletes,
-               SUM(CASE WHEN asset_type = 'cosmetic' THEN 1 ELSE 0 END) AS cosmetic_events,
-               SUM(CASE WHEN asset_type = 'point' AND balance_after < 0 THEN 1 ELSE 0 END) AS negative_balance_events,
-               MAX(created_at) AS last_event_at
-          FROM asset_event_logs
-         WHERE created_at >= ?
-         GROUP BY COALESCE(user_id, to_user_id, from_user_id, counterparty_user_id)
-      ) e
-      LEFT JOIN users u ON u.id = e.user_id
-      LEFT JOIN deleted_user_accounts du ON du.user_id = e.user_id
-     WHERE e.user_id IS NOT NULL
+  const params: any[] = [since];
+  let searchSql = '';
+  if (search) {
+    const like = `%${search}%`;
+    searchSql = `
        AND (
-         e.negative_balance_events > 0
-         OR e.point_income >= 1000000
-         OR e.card_moves >= 20
-         OR e.card_adds >= 80
-         OR e.card_deletes >= 40
-         OR e.cosmetic_events >= 50
-         OR e.total_events >= 120
-       )
-     ORDER BY e.negative_balance_events DESC, e.point_income DESC, e.total_events DESC
-     LIMIT ?
-  `;
+         a.user_id LIKE ? OR a.counterparty_user_id LIKE ? OR a.from_user_id LIKE ? OR a.to_user_id LIKE ?
+         OR COALESCE(u.username, du.username_snapshot, '') LIKE ?
+         OR COALESCE(cu.username, cdu.username_snapshot, '') LIKE ?
+         OR COALESCE(fu.username, fdu.username_snapshot, '') LIKE ?
+         OR COALESCE(tu.username, tdu.username_snapshot, '') LIKE ?
+       )`;
+    params.push(like, like, like, like, like, like, like, like);
+  }
+  params.push(scanLimit);
+
   let rows: any[];
   if (getDbMode() === 'MYSQL') {
     const db = getMysqlDb();
     await ensureMysqlAssetEventTable(db);
-    rows = await db.all(sql, since, limit);
+    rows = await db.all(selectAssetEventSuspectRowsSql(searchSql), ...params);
   } else {
     const db = getSqliteDb();
     ensureSqliteAssetEventTable(db);
-    rows = db.prepare(sql).all(since, limit) as any[];
+    rows = db.prepare(selectAssetEventSuspectRowsSql(searchSql)).all(...params) as any[];
   }
-  return { days, items: rows.map(buildSuspect) };
+
+  const items = [...collectAssetEventSuspectStats(rows).values()]
+    .map(buildEnhancedSuspect)
+    .filter((item) => search ? (item.total_events > 0 && assetSuspectMatchesSearch(item, search)) : item.risk_score >= 30)
+    .sort((a, b) => b.risk_score - a.risk_score || b.relation_events - a.relation_events || b.total_events - a.total_events)
+    .slice(0, limit);
+  return { days, items };
 };

@@ -89,7 +89,7 @@ export const getAdminAssetEventSuspects = async (req: Request, res: Response) =>
   try {
     const days = Math.max(1, Math.min(90, Math.floor(Number(req.query.days || 7))));
     const limit = parseLimit(req.query.limit, 50, 100);
-    const result = await listAssetEventSuspects({ days, limit });
+    const result = await listAssetEventSuspects({ days, limit, search: typeof req.query.search === 'string' ? req.query.search : '' });
     return res.status(200).json(result);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '의심 계정 요약 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
