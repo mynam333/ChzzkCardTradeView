@@ -74,6 +74,8 @@ interface FuseModalState {
 // 별 등급에 따른 가치 배율 (백엔드 starValueMultiplier와 동일)
 const starMult = (star: number) => 1 + (star || 0) * 0.8;
 const cardKey = (channelId: string, star: number) => `${channelId}#${star}`;
+const singleCardKey = (cardId: number) => `card:${cardId}`;
+const isSingleCardKey = (key: string) => key.startsWith('card:');
 const parseCardKey = (key: string) => {
   const separator = key.lastIndexOf('#');
   return {
@@ -215,6 +217,7 @@ export const GachaTab: React.FC = () => {
   const [sellModalOpen, setSellModalOpen] = useState(false);
   const [sellConfirmOpen, setSellConfirmOpen] = useState(false);
   const [sellQuantity, setSellQuantity] = useState(1);
+  const [sellingMaxCount, setSellingMaxCount] = useState(0);
   const [sellingStreamer, setSellingStreamer] = useState<Streamer | null>(null);
   const [sellingStar, setSellingStar] = useState(0);
 
@@ -376,6 +379,28 @@ export const GachaTab: React.FC = () => {
     return Math.max(0, total - locked - reserved - pendingMarket);
   };
 
+  const hasEquippedCosmetic = (card?: UserCard | null) =>
+    Boolean(card?.border || card?.name_effect);
+
+  const getInventoryGroupKey = (card: UserCard) =>
+    hasEquippedCosmetic(card) ? singleCardKey(card.id) : cardKey(card.channel_id, card.star ?? 0);
+
+  const getCardGroup = (card: UserCard) =>
+    hasEquippedCosmetic(card)
+      ? inventory.filter(c => c.id === card.id)
+      : inventory.filter(c =>
+          !hasEquippedCosmetic(c)
+          && c.channel_id === card.channel_id
+          && (c.star ?? 0) === (card.star ?? 0)
+        );
+
+  const getAvailableGroupCards = (card: UserCard) => {
+    const reserved = hasEquippedCosmetic(card)
+      ? 0
+      : reservations.cardsByStar[cardKey(card.channel_id, card.star ?? 0)] || 0;
+    const candidates = getCardGroup(card).filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
+    return candidates.slice(reserved);
+  };
   const getFuseMaterialMax = (channelId: string, baseStar: number, materialStar: number) => {
     const targetReserve = materialStar === baseStar ? 1 : 0;
     return Math.max(0, getAvailableCount(channelId, materialStar) - targetReserve);
@@ -967,6 +992,7 @@ export const GachaTab: React.FC = () => {
         setSellModalOpen(false);
         setSellingStreamer(null);
         setSellingStar(0);
+        setSellingMaxCount(0);
         fetchInventory();
         refreshUserData();
       } else {
@@ -986,6 +1012,7 @@ export const GachaTab: React.FC = () => {
   // 일괄 카드 판매 실행
   const executeBulkSell = async () => {
     const items = Object.entries(bulkSellQuantities)
+      .filter(([key]) => !isSingleCardKey(key))
       .map(([key, count]) => ({ ...parseCardKey(key), count }))
       .filter(item => item.count > 0);
 
@@ -1033,8 +1060,6 @@ export const GachaTab: React.FC = () => {
     return getAvailableCount(channelId, star);
   };
 
-  const getCardGroup = (card: UserCard) =>
-    inventory.filter(c => c.channel_id === card.channel_id && (c.star ?? 0) === (card.star ?? 0));
 
   const isCardGroupHidden = (card: UserCard) => {
     const group = getCardGroup(card);
@@ -1089,8 +1114,14 @@ export const GachaTab: React.FC = () => {
   };
 
   const getCardByKey = (key: string) => {
+    if (isSingleCardKey(key)) {
+      const cardId = Number(key.slice('card:'.length));
+      return inventory.find(c => c.id === cardId) || null;
+    }
     const { channelId, star } = parseCardKey(key);
-    return inventory.find(c => c.channel_id === channelId && (c.star || 0) === star) || null;
+    return inventory.find(c => !hasEquippedCosmetic(c) && c.channel_id === channelId && (c.star || 0) === star)
+      || inventory.find(c => c.channel_id === channelId && (c.star || 0) === star)
+      || null;
   };
 
   // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
@@ -1761,7 +1792,7 @@ export const GachaTab: React.FC = () => {
             count: number;
             star: number;
           }
-          const groupKey = (card: UserCard) => `${card.channel_id}__${card.star || 0}`;
+          const groupKey = getInventoryGroupKey;
           const groupedMap: { [key: string]: GroupedCard } = {};
 
           filteredInventory.forEach(card => {
@@ -1805,9 +1836,14 @@ export const GachaTab: React.FC = () => {
                         // 선택된 카드 정보 기반으로 일괄 판매 초기화
                         const quantities: { [key: string]: number } = {};
                         selectedCardKeys.forEach(key => {
+                          if (isSingleCardKey(key)) return;
                           const { channelId, star } = parseCardKey(key);
                           quantities[key] = getCardCountInInventory(channelId, star);
                         });
+                        if (Object.keys(quantities).length === 0) {
+                          toast('일괄 판매할 수 있는 카드가 선택되지 않았습니다.');
+                          return;
+                        }
                         setBulkSellQuantities(quantities);
                         setBulkSellModalOpen(true);
                       }}
@@ -1833,17 +1869,16 @@ export const GachaTab: React.FC = () => {
                   const streamer = card.streamer;
                   if (!streamer) return null;
 
-                  const key = cardKey(streamer.channel_id, star);
+                  const key = getInventoryGroupKey(card);
                   const isSelected = selectedCardKeys.includes(key);
                   const cardValue = Math.round((streamer.base_value || 0) * starMult(star));
-                  const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
-                  const avail = getAvailableCount(streamer.channel_id, star);
+                  const owned = getCardGroup(card);
+                  const actionCards = getAvailableGroupCards(card);
+                  const avail = actionCards.length;
                   const pendingMarketCount = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
                   const lockedCount = owned.filter(c => c.is_locked).length;
                   const hiddenCount = owned.filter(c => c.is_hidden).length;
-                  const actionReserved = reservations.cardsByStar[key] || 0;
-                  const actionCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
-                  const actionCard = actionCards.length > actionReserved ? actionCards[actionReserved] : null;
+                  const actionCard = actionCards[0] || null;
 
                   // 우클릭 이벤트 핸들러
                   const handleContextMenu = (e: React.MouseEvent) => {
@@ -1852,19 +1887,21 @@ export const GachaTab: React.FC = () => {
                       // 다중 선택 상태일 때의 우클릭 액션: 일괄 판매 모달 바로 트리거
                       const quantities: { [key: string]: number } = {};
                       selectedCardKeys.forEach(selectedKey => {
+                        if (isSingleCardKey(selectedKey)) return;
                         const parsed = parseCardKey(selectedKey);
                         quantities[selectedKey] = getCardCountInInventory(parsed.channelId, parsed.star);
                       });
+                      if (Object.keys(quantities).length === 0) {
+                        toast('일괄 판매할 수 있는 카드가 선택되지 않았습니다.');
+                        return;
+                      }
                       setBulkSellQuantities(quantities);
                       setBulkSellModalOpen(true);
                       return;
                     }
-                    const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
+                    const owned = getCardGroup(card);
                     const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
-                    const key = `${streamer.channel_id}#${star}`;
-                    const reserved = reservations.cardsByStar[key] || 0;
-                    const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
-                    const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+                    const availableCard = getAvailableGroupCards(card)[0] || null;
 
                     const menuPosition = clampContextMenuPosition(e.clientX, e.clientY);
                     setContextMenu({
@@ -1881,6 +1918,10 @@ export const GachaTab: React.FC = () => {
                   const handleCardClick = (e: React.MouseEvent) => {
                     if (selectionMode) {
                       e.preventDefault();
+                      if (hasEquippedCosmetic(card)) {
+                        showAlert('선택 제외', '코스메틱 장착 카드는 한 장 단위 카드라 일괄 판매에서 제외됩니다.', 'warning');
+                        return;
+                      }
                       if (isSelected) {
                         setSelectedCardKeys(selectedCardKeys.filter(selectedKey => selectedKey !== key));
                       } else {
@@ -1927,12 +1968,9 @@ export const GachaTab: React.FC = () => {
                       longPressFired.current = true;
                       longPressTimer.current = null;
                       const menuPosition = clampContextMenuPosition(x, y);
-                      const owned = inventory.filter(c => c.channel_id === streamer.channel_id && (c.star ?? 0) === star);
+                      const owned = getCardGroup(card);
                       const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
-                      const key = `${streamer.channel_id}#${star}`;
-                      const reserved = reservations.cardsByStar[key] || 0;
-                      const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
-                      const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+                      const availableCard = getAvailableGroupCards(card)[0] || null;
                       setContextMenu({
                         x: menuPosition.x,
                         y: menuPosition.y,
@@ -2407,16 +2445,15 @@ export const GachaTab: React.FC = () => {
       {contextMenu.open && (() => {
         const channelId = contextMenu.channel_id;
         const star = contextMenu.star;
-        const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
+        const menuCard = contextMenu.card;
+        const owned = menuCard ? getCardGroup(menuCard) : inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
         const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
         const lockedCard = owned.find(c => c.is_locked);
         const allHidden = owned.length > 0 && owned.every(c => c.is_hidden);
         
         // 가용한 카드 찾기
-        const key = `${channelId}#${star}`;
-        const reserved = reservations.cardsByStar[key] || 0;
-        const availableCards = owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
-        const availableCard = availableCards.length > reserved ? availableCards[reserved] : null;
+        const availableCards = menuCard ? getAvailableGroupCards(menuCard) : owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
+        const availableCard = availableCards[0] || null;
 
         // 대표로 사용할 카드 객체
         const displayCard = availableCard || lockedCard || pendingCard || contextMenu.card;
@@ -2425,6 +2462,7 @@ export const GachaTab: React.FC = () => {
           ? inventoryCardImage(displayCard.streamer, displayCard.star || 0)
           : '';
         const displayImageBlinded = isImageBlinded(displayImageUrl);
+        const canSellSelectedCard = Boolean(availableCard && !hasEquippedCosmetic(availableCard));
 
         return (
           <div
@@ -2462,8 +2500,12 @@ export const GachaTab: React.FC = () => {
             <button
               onClick={() => {
                 if (displayCard.streamer) {
-                  setSelectionMode(true);
-                  setSelectedCardKeys([cardKey(displayCard.streamer.channel_id, displayCard.star || 0)]);
+                  if (hasEquippedCosmetic(displayCard)) {
+                    showAlert('선택 제외', '코스메틱 장착 카드는 한 장 단위 카드라 일괄 판매에서 제외됩니다.', 'warning');
+                  } else {
+                    setSelectionMode(true);
+                    setSelectedCardKeys([cardKey(displayCard.streamer.channel_id, displayCard.star || 0)]);
+                  }
                 }
                 setContextMenu(prev => ({ ...prev, open: false }));
               }}
@@ -2540,15 +2582,18 @@ export const GachaTab: React.FC = () => {
               onClick={() => {
                 if (!availableCard) {
                   showAlert('작업 불가', '가용한 카드가 없습니다. (잠금, 판매 중, 교환 예약됨)', 'warning');
+                } else if (hasEquippedCosmetic(availableCard)) {
+                  showAlert('작업 불가', '코스메틱 장착 카드는 코스메틱을 해제한 뒤 일반 판매할 수 있습니다.', 'warning');
                 } else {
                   setSellingStreamer(availableCard.streamer || null);
                   setSellingStar(availableCard.star || 0);
+                  setSellingMaxCount(Math.max(1, availableCards.length));
                   setSellQuantity(1);
                   setSellModalOpen(true);
                 }
                 setContextMenu(prev => ({ ...prev, open: false }));
               }}
-              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!availableCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
+              className={`w-full text-left px-4 py-2 text-xs font-bold flex items-center gap-2 ${!canSellSelectedCard ? 'text-zinc-500 cursor-not-allowed opacity-55' : 'text-foreground hover:bg-secondary/80'}`}
             >
               💰 카드 판매하기
             </button>
@@ -2743,7 +2788,7 @@ export const GachaTab: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-black text-foreground truncate">{sellingStreamer.name}</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {sellingStar}성 보유량: <span className="font-bold text-foreground">{getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}</span>장
+                  {sellingStar}성 보유량: <span className="font-bold text-foreground">{Math.max(1, sellingMaxCount || getCardCountInInventory(sellingStreamer.channel_id, sellingStar))}</span>장
                 </p>
                 <p className="text-[10px] text-emerald-500 font-bold mt-0.5">
                   개당 시세: {Math.round(sellingStreamer.base_value * starMult(sellingStar)).toLocaleString()} P
@@ -2764,23 +2809,23 @@ export const GachaTab: React.FC = () => {
                 <input
                   type="number"
                   min="1"
-                  max={getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}
+                  max={Math.max(1, sellingMaxCount || getCardCountInInventory(sellingStreamer.channel_id, sellingStar))}
                   value={sellQuantity}
                   onChange={(e) => {
-                    const val = Math.max(1, Math.min(getCardCountInInventory(sellingStreamer.channel_id, sellingStar), Number(e.target.value) || 1));
+                    const val = Math.max(1, Math.min(Math.max(1, sellingMaxCount || getCardCountInInventory(sellingStreamer.channel_id, sellingStar)), Number(e.target.value) || 1));
                     setSellQuantity(val);
                   }}
                   className="w-16 text-center rounded-lg border border-border bg-secondary/50 px-2 py-1 text-xs font-bold focus:outline-none"
                 />
                 <button
-                  disabled={sellQuantity >= getCardCountInInventory(sellingStreamer.channel_id, sellingStar)}
+                  disabled={sellQuantity >= Math.max(1, sellingMaxCount || getCardCountInInventory(sellingStreamer.channel_id, sellingStar))}
                   onClick={() => setSellQuantity(prev => prev + 1)}
                   className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-foreground disabled:opacity-40"
                 >
                   +
                 </button>
                 <button
-                  onClick={() => setSellQuantity(getCardCountInInventory(sellingStreamer.channel_id, sellingStar))}
+                  onClick={() => setSellQuantity(Math.max(1, sellingMaxCount || getCardCountInInventory(sellingStreamer.channel_id, sellingStar)))}
                   className="ml-auto rounded-lg bg-secondary border border-border px-2.5 py-1.5 text-[9.5px] font-bold text-foreground hover:bg-secondary/80"
                 >
                   최대
@@ -2801,6 +2846,7 @@ export const GachaTab: React.FC = () => {
                   setSellModalOpen(false);
                   setSellingStreamer(null);
                   setSellingStar(0);
+                  setSellingMaxCount(0);
                 }}
                 className="rounded-lg bg-secondary px-4 py-2 text-xs font-bold text-muted-foreground hover:bg-secondary/80"
               >

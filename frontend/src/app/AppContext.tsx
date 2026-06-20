@@ -992,9 +992,17 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       return false;
     }
 
-    setImageBlindItems((prev) => prev.filter((item) => item.image_key !== imageKey));
+    setImageBlindItems((prev) => prev.filter((item) => {
+      const storedKey = String(item.image_key || '').trim();
+      return storedKey !== imageKey
+        && normalizeImageBlindKey(storedKey) !== imageKey
+        && normalizeImageBlindKey(item.image_url) !== imageKey;
+    }));
     try {
-      const res = await apiFetch(`/users/me/image-blinds/${encodeURIComponent(imageKey)}`, { method: 'DELETE' });
+      const res = await apiFetch('/users/me/image-blinds', {
+        method: 'DELETE',
+        body: JSON.stringify({ image_key: imageKey, image_url: imageKeyOrUrl })
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         await refreshImageBlinds();

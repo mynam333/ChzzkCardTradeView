@@ -87,6 +87,20 @@ export const addUserImageBlind = async (userId: string, imageUrl: string): Promi
   return { image_key: imageKey, image_url: imageUrl };
 };
 
+const findEquivalentImageBlindKeys = async (userId: string, imageKey: string): Promise<string[]> => {
+  const items = await listUserImageBlinds(userId);
+  const keys = new Set<string>();
+  for (const item of items) {
+    const storedKey = String(item.image_key || '').trim();
+    const storedUrlKey = normalizeImageBlindKey(item.image_url);
+    const normalizedStoredKey = normalizeImageBlindKey(storedKey);
+    if (storedKey === imageKey || normalizedStoredKey === imageKey || storedUrlKey === imageKey) {
+      keys.add(storedKey || imageKey);
+    }
+  }
+  return Array.from(keys).filter(Boolean);
+};
+
 export const removeUserImageBlind = async (userId: string, imageKeyOrUrl: string): Promise<boolean> => {
   const imageKey = normalizeImageBlindKey(imageKeyOrUrl);
   if (!imageKey) return false;
@@ -94,13 +108,42 @@ export const removeUserImageBlind = async (userId: string, imageKeyOrUrl: string
   const mode = getDbMode();
   if (mode === 'MYSQL') {
     const result = await getMysqlDb().run('DELETE FROM user_image_blinds WHERE user_id = ? AND image_key = ?', userId, imageKey);
-    return result.changes > 0;
+    if (result.changes > 0) return true;
+    const equivalentKeys = await findEquivalentImageBlindKeys(userId, imageKey);
+    for (const key of equivalentKeys) {
+      const fallback = await getMysqlDb().run('DELETE FROM user_image_blinds WHERE user_id = ? AND image_key = ?', userId, key);
+      if (fallback.changes > 0) return true;
+    }
+    return false;
   }
   if (mode === 'SUPABASE') {
-    const { error } = await getSupabaseClient().from('user_image_blinds').delete().eq('user_id', userId).eq('image_key', imageKey);
+    const { data, error } = await getSupabaseClient()
+      .from('user_image_blinds')
+      .delete()
+      .eq('user_id', userId)
+      .eq('image_key', imageKey)
+      .select('image_key');
     if (error) throw error;
-    return true;
+    if ((data || []).length > 0) return true;
+    const equivalentKeys = await findEquivalentImageBlindKeys(userId, imageKey);
+    for (const key of equivalentKeys) {
+      const { data: fallbackData, error: fallbackError } = await getSupabaseClient()
+        .from('user_image_blinds')
+        .delete()
+        .eq('user_id', userId)
+        .eq('image_key', key)
+        .select('image_key');
+      if (fallbackError) throw fallbackError;
+      if ((fallbackData || []).length > 0) return true;
+    }
+    return false;
   }
   const result = getSqliteDb().prepare('DELETE FROM user_image_blinds WHERE user_id = ? AND image_key = ?').run(userId, imageKey);
-  return result.changes > 0;
+  if (result.changes > 0) return true;
+  const equivalentKeys = await findEquivalentImageBlindKeys(userId, imageKey);
+  for (const key of equivalentKeys) {
+    const fallback = getSqliteDb().prepare('DELETE FROM user_image_blinds WHERE user_id = ? AND image_key = ?').run(userId, key);
+    if (fallback.changes > 0) return true;
+  }
+  return false;
 };

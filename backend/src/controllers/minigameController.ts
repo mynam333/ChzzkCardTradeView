@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { UserMinigameTicket, MinigameSession, MinigameType } from '../repositories/interfaces';
 import { getPuzzleExcludedImageKeys, normalizePuzzleImageKey } from '../services/puzzleImageExclusionService';
+import { listUserImageBlinds } from '../services/userImageBlindService';
+import { normalizeImageBlindKey } from '../utils/imageBlindKey';
 import { recordAchievementEvent } from '../services/achievementService';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
@@ -465,11 +467,27 @@ const stripCardValue = (card: any) => ({
   star: Number(card.star) || 0
 });
 
-const getPlayableImageCards = (streamers: any[]) =>
+const isUserBlindedMinigameImage = (imageUrl: string | null | undefined, imageBlindKeys: Set<string>): boolean => {
+  if (!imageBlindKeys.size) return false;
+  const imageKey = normalizeImageBlindKey(imageUrl);
+  return Boolean(imageKey && imageBlindKeys.has(imageKey));
+};
+
+const loadUserImageBlindKeys = async (userId: string): Promise<Set<string>> => {
+  try {
+    const items = await listUserImageBlinds(userId);
+    return new Set(items.map((item) => item.image_key).filter(Boolean));
+  } catch (err: any) {
+    console.warn('[MinigameController] 개인 블라인드 이미지 목록 조회 실패, 필터 없이 진행합니다:', err?.message || err);
+    return new Set<string>();
+  }
+};
+
+const getPlayableImageCards = (streamers: any[], imageBlindKeys = new Set<string>()) =>
   streamers.flatMap((streamer) =>
     Array.from({ length: 6 }, (_, star) => {
       const imageUrl = getCardImageUrl(streamer, star);
-      if (!imageUrl) return null;
+      if (!imageUrl || isUserBlindedMinigameImage(imageUrl, imageBlindKeys)) return null;
       return {
         streamer,
         card: {
@@ -483,9 +501,9 @@ const getPlayableImageCards = (streamers: any[]) =>
     }).filter(Boolean) as Array<{ streamer: any; card: any }>
   );
 
-const getUniquePlayableImageCards = (streamers: any[]) => {
+const getUniquePlayableImageCards = (streamers: any[], imageBlindKeys = new Set<string>()) => {
   const byChannel = new Map<string, any[]>();
-  for (const item of getPlayableImageCards(streamers)) {
+  for (const item of getPlayableImageCards(streamers, imageBlindKeys)) {
     const channelId = item.card.channel_id;
     if (!channelId) continue;
     const cards = byChannel.get(channelId) || [];
@@ -760,6 +778,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     if (streamers.length < 4) {
       return res.status(400).json({ error: 'BadRequest', message: '등록된 스트리머가 부족하여 미니게임을 시작할 수 없습니다. (최소 4명 필요)' });
     }
+    const userImageBlindKeys = await loadUserImageBlindKeys(userId);
 
     // 연습 모드 강제 지정 스트리머 해석
     const forcedStreamer = forceChannelId ? streamers.find(s => s.channel_id === forceChannelId) : null;
@@ -772,24 +791,31 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     let targetData: any = {};
 
     if (game_type === 'quiz') {
+      const quizCandidates = getPlayableImageCards(streamers, userImageBlindKeys)
+        .filter((item) => forceStar === null || item.card.star === forceStar);
+      const forcedQuizCandidates = forcedStreamer
+        ? quizCandidates.filter((item) => item.card.channel_id === forcedStreamer.channel_id)
+        : [];
+      if (quizCandidates.length === 0 || (forcedStreamer && forcedQuizCandidates.length === 0)) {
+        return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 인물 퀴즈 이미지가 없습니다. 블라인드 해제 후 다시 시도해 주세요.' });
+      }
       const answerPool = forcedStreamer
-        ? [forcedStreamer, ...shuffle(streamers.filter(s => s.channel_id !== forcedStreamer.channel_id))]
-        : shuffle(streamers);
+        ? [...shuffle(forcedQuizCandidates), ...shuffle(quizCandidates.filter((item) => item.card.channel_id !== forcedStreamer.channel_id))]
+        : shuffle(quizCandidates);
       const rounds = Array.from({ length: QUIZ_ROUND_COUNT }, (_, roundIndex) => {
-        const correctStreamer = answerPool[roundIndex % answerPool.length];
-        const star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6);
-        const imageUrl = getCardImageUrl(correctStreamer, star);
+        const correctCard = answerPool[roundIndex % answerPool.length].card;
         const distractor = shuffle(streamers)
-          .find(s => s.channel_id !== correctStreamer.channel_id);
-        const choices = shuffle([correctStreamer, distractor])
-          .filter(Boolean)
-          .map(s => ({ channel_id: s.channel_id, name: s.name }));
+          .find(s => s.channel_id !== correctCard.channel_id);
+        const choices = shuffle([
+          { channel_id: correctCard.channel_id, name: correctCard.name },
+          ...(distractor ? [{ channel_id: distractor.channel_id, name: distractor.name }] : [])
+        ]);
         return {
           round: roundIndex,
-          answer_channel_id: correctStreamer.channel_id,
-          answer_name: correctStreamer.name,
-          image_url: imageUrl,
-          star,
+          answer_channel_id: correctCard.channel_id,
+          answer_name: correctCard.name,
+          image_url: correctCard.image_url,
+          star: correctCard.star,
           choices
         };
       });
@@ -810,23 +836,28 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       let star = forceStar !== null ? forceStar : Math.floor(Math.random() * 6);
       let imageUrl = forceImageUrl || getCardImageUrl(correctStreamer, star);
 
-      if (!practiceMode && !forcedStreamer) {
-        const excludedImageKeys = await getPuzzleExcludedImageKeys().catch((err) => {
-          console.warn('[MinigameController] 퍼즐 제외 이미지 목록 조회 실패, 필터 없이 진행합니다:', err?.message || err);
-          return new Set<string>();
-        });
-        const candidates = streamers.flatMap((streamer) =>
-          Array.from({ length: 6 }, (_, candidateStar) => {
-            const candidateImageUrl = getCardImageUrl(streamer, candidateStar);
-            if (!candidateImageUrl) return null;
-            const imageKey = normalizePuzzleImageKey(candidateImageUrl);
-            if (imageKey && excludedImageKeys.has(imageKey)) return null;
-            return { streamer, star: candidateStar, imageUrl: candidateImageUrl };
-          }).filter(Boolean) as Array<{ streamer: any; star: number; imageUrl: string }>
-        );
+      if (forceImageUrl && isUserBlindedMinigameImage(forceImageUrl, userImageBlindKeys)) {
+        return res.status(400).json({ error: 'BadRequest', message: '개인 블라인드한 이미지는 미니게임에 출제할 수 없습니다.' });
+      }
+
+      if (!forceImageUrl) {
+        const excludedImageKeys = !practiceMode
+          ? await getPuzzleExcludedImageKeys().catch((err) => {
+            console.warn('[MinigameController] 퍼즐 제외 이미지 목록 조회 실패, 필터 없이 진행합니다:', err?.message || err);
+            return new Set<string>();
+          })
+          : new Set<string>();
+        const candidates = getPlayableImageCards(streamers, userImageBlindKeys)
+          .filter((item) => {
+            if (forcedStreamer && item.card.channel_id !== forcedStreamer.channel_id) return false;
+            if (forceStar !== null && item.card.star !== forceStar) return false;
+            const imageKey = normalizePuzzleImageKey(item.card.image_url);
+            return !imageKey || !excludedImageKeys.has(imageKey);
+          })
+          .map((item) => ({ streamer: item.streamer, star: item.card.star, imageUrl: item.card.image_url }));
 
         if (candidates.length === 0) {
-          return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 3x4 퍼즐 이미지가 없습니다.' });
+          return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 3x4 퍼즐 이미지가 없습니다. 블라인드 해제 후 다시 시도해 주세요.' });
         }
 
         const chosen = candidates[Math.floor(Math.random() * candidates.length)];
@@ -848,7 +879,14 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
     } else if (game_type === 'match') {
       // 카드 뒤집기: 6명 선정 (12장). 강제 지정 스트리머가 있으면 반드시 포함.
-      const pool = [...streamers].sort(() => 0.5 - Math.random());
+      const matchStreamers = streamers.filter((streamer) => !isUserBlindedMinigameImage(streamer.logo_url, userImageBlindKeys));
+      if (forcedStreamer && isUserBlindedMinigameImage(forcedStreamer.logo_url, userImageBlindKeys)) {
+        return res.status(400).json({ error: 'BadRequest', message: '개인 블라인드한 이미지는 미니게임에 출제할 수 없습니다.' });
+      }
+      if (matchStreamers.length < 6) {
+        return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 짝맞추기 이미지가 부족합니다. 블라인드 해제 후 다시 시도해 주세요.' });
+      }
+      const pool = shuffle(matchStreamers);
       let chosen = pool.slice(0, 6);
       if (forcedStreamer && !chosen.some(s => s.channel_id === forcedStreamer.channel_id)) {
         chosen = [forcedStreamer, ...pool.filter(s => s.channel_id !== forcedStreamer.channel_id).slice(0, 5)];
@@ -871,7 +909,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
         }))
       };
     } else if (game_type === 'value_duel') {
-      const candidates = getUniquePlayableImageCards(streamers)
+      const candidates = getUniquePlayableImageCards(streamers, userImageBlindKeys)
         .filter((card) => Number.isFinite(Number(card.base_value)));
       if (candidates.length < 2) {
         return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 시세 듀얼 카드가 부족합니다. (최소 2명 필요)' });
@@ -897,7 +935,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
         }))
       };
     } else if (game_type === 'crop_detective') {
-      const candidates = getUniquePlayableImageCards(streamers);
+      const candidates = getUniquePlayableImageCards(streamers, userImageBlindKeys);
       if (candidates.length < CROP_DETECTIVE_CHOICES) {
         return res.status(400).json({ error: 'BadRequest', message: '출제 가능한 카드 확대 탐정 이미지가 부족합니다. (최소 4명 필요)' });
       }

@@ -34,10 +34,25 @@ export const addMyImageBlind = async (req: Request, res: Response) => {
   }
 };
 
+const readImageBlindDeleteTarget = (req: Request): string => {
+  const bodyTarget = typeof req.body?.image_key === 'string'
+    ? req.body.image_key
+    : typeof req.body?.image_url === 'string'
+      ? req.body.image_url
+      : '';
+  const queryTarget = typeof req.query?.image_key === 'string'
+    ? req.query.image_key
+    : typeof req.query?.image_url === 'string'
+      ? req.query.image_url
+      : '';
+  const paramTarget = typeof req.params.image_key === 'string' ? req.params.image_key : '';
+  return (bodyTarget || queryTarget || paramTarget || '').trim();
+};
+
 export const removeMyImageBlind = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
-  const imageKey = typeof req.params.image_key === 'string' ? decodeURIComponent(req.params.image_key) : '';
+  const imageKey = readImageBlindDeleteTarget(req);
   if (!imageKey) return res.status(400).json({ error: 'BadRequest', message: '해제할 이미지 정보가 올바르지 않습니다.' });
   try {
     await removeUserImageBlind(userId, imageKey);

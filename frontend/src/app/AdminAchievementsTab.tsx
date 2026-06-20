@@ -29,6 +29,7 @@ const metricOptions = [
   'minigame.success.match.count',
   'minigame.success.value_duel.count',
   'minigame.success.crop_detective.count',
+  'minigame.failure.count',
   'minigame.perfect.count',
   'minigame.speed_bonus.count',
   'shop.purchase.count',
@@ -64,6 +65,7 @@ const metricOptions = [
   'user.border_cosmetic_count',
   'user.name_effect_cosmetic_count',
   'user.point_balance',
+  'user.total_asset',
   'user.free_draw_ticket_balance',
   'user.bonus_free_draw_ticket_balance',
   'user.minigame_ticket_balance',
@@ -100,6 +102,7 @@ const metricLabels: Record<string, string> = {
   'minigame.success.match.count': '매치 성공 수',
   'minigame.success.value_duel.count': '가치 대결 성공 수',
   'minigame.success.crop_detective.count': '크롭 탐정 성공 수',
+  'minigame.failure.count': '미니게임 실패 수',
   'minigame.perfect.count': '미니게임 퍼펙트 수',
   'minigame.speed_bonus.count': '미니게임 속도 보너스 수',
   'shop.purchase.count': '상점 구매 수',
@@ -135,6 +138,7 @@ const metricLabels: Record<string, string> = {
   'user.border_cosmetic_count': '보유 테두리 코스메틱 수',
   'user.name_effect_cosmetic_count': '보유 이름 이펙트 수',
   'user.point_balance': '보유 포인트',
+  'user.total_asset': '총 자산',
   'user.free_draw_ticket_balance': '보유 무료 소환권 수',
   'user.bonus_free_draw_ticket_balance': '보유 추가 무료 소환권 수',
   'user.minigame_ticket_balance': '보유 미니게임 티켓 수',
@@ -158,6 +162,7 @@ const conditionPreview = (condition: ConditionForm) => {
   if (condition.metric === 'login.current_streak_days') return `연속 출석 ${target.toLocaleString()}일 유지`;
   if (condition.metric === 'login.max_streak_days') return `최대 연속 출석 ${target.toLocaleString()}일 이상`;
   if (condition.metric === 'user.point_balance') return `${target.toLocaleString()}P 이상 보유`;
+  if (condition.metric === 'user.total_asset') return `총 자산 ${target.toLocaleString()}P 이상`;
   if (condition.metric === 'user.account_age_days') return `가입 후 ${target.toLocaleString()}일 이상`;
   return `${label} ${target.toLocaleString()} 이상`;
 };

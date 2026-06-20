@@ -1531,13 +1531,16 @@ export const searchChzzkStreamer = async (req: Request, res: Response) => {
  * 직접 재조회한 권위 있는 값으로 검증 및 시세를 산정합니다.
  */
 export const registerStreamer = async (req: Request, res: Response) => {
-  const { channelId } = req.body;
+  const channelId = String(req.body?.channelId || '').trim();
 
   if (!channelId) {
     return res.status(400).json({ error: 'BadRequest', message: '스트리머 채널 ID가 필요합니다.' });
   }
 
   try {
+    const actorId = String((req as any).user?.id || '').trim();
+    const isSelfRegistration = actorId === channelId;
+
     // 중복 체크
     const exists = await streamerRepository.findById(channelId);
     if (exists) {
@@ -1545,7 +1548,7 @@ export const registerStreamer = async (req: Request, res: Response) => {
     }
 
     const registrationBlocked = await streamerRepository.isRegistrationBlocked(channelId);
-    if (registrationBlocked) {
+    if (registrationBlocked && !isSelfRegistration) {
       return res.status(403).json({
         error: 'RegistrationBlocked',
         message: '본인 카드 삭제 요청에 따라 재등록이 제한된 스트리머입니다.'
@@ -1614,16 +1617,16 @@ export const registerStreamer = async (req: Request, res: Response) => {
       is_active: profile.openLive,
       last_broadcast_at: profile.openLive ? new Date().toISOString() : (profile.lastLiveAt || null),
       serial_number: serialNumber,
-      registered_by: (req as any).user?.id || null // 등록한 유저 ID 기록 (Null 가능)
+      registered_by: actorId || null // 등록한 유저 ID 기록 (Null 가능)
     };
     await streamerRepository.save(newStreamer);
     clearDrawPoolCache();
     streamerRankingsCache.clear();
-    const actorId = (req as any).user?.id || newStreamer.registered_by;
-    if (actorId) {
+    const achievementActorId = actorId || newStreamer.registered_by;
+    if (achievementActorId) {
       recordAchievementEvent({
-        eventKey: `streamer:register:${actorId}:${newStreamer.channel_id}`,
-        userId: actorId,
+        eventKey: `streamer:register:${achievementActorId}:${newStreamer.channel_id}`,
+        userId: achievementActorId,
         eventType: 'streamer.registered',
         sourceType: 'streamer',
         sourceId: newStreamer.channel_id,

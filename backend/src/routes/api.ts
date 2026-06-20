@@ -331,6 +331,7 @@ router.post('/users/me/blocks', authMiddleware, banCheckMiddleware, blockUser);
 router.delete('/users/me/blocks/:user_id', authMiddleware, banCheckMiddleware, unblockUser);
 router.get('/users/me/image-blinds', authMiddleware, banCheckMiddleware, getMyImageBlinds);
 router.post('/users/me/image-blinds', authMiddleware, banCheckMiddleware, addMyImageBlind);
+router.delete('/users/me/image-blinds', authMiddleware, banCheckMiddleware, removeMyImageBlind);
 router.delete('/users/me/image-blinds/:image_key', authMiddleware, banCheckMiddleware, removeMyImageBlind);
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCard);
 router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCards);

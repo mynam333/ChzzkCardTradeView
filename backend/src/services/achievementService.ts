@@ -138,6 +138,7 @@ const allowedMetrics = new Set([
   'minigame.success.match.count',
   'minigame.success.value_duel.count',
   'minigame.success.crop_detective.count',
+  'minigame.failure.count',
   'minigame.perfect.count',
   'minigame.speed_bonus.count',
   'shop.purchase.count',
@@ -173,6 +174,7 @@ const allowedMetrics = new Set([
   'user.border_cosmetic_count',
   'user.name_effect_cosmetic_count',
   'user.point_balance',
+  'user.total_asset',
   'user.free_draw_ticket_balance',
   'user.bonus_free_draw_ticket_balance',
   'user.minigame_ticket_balance',
@@ -209,6 +211,7 @@ const metricConditionText: Record<string, (target: number) => string> = {
   'minigame.success.match.count': (target) => `매치 미니게임 ${target.toLocaleString()}회 성공`,
   'minigame.success.value_duel.count': (target) => `가치 대결 미니게임 ${target.toLocaleString()}회 성공`,
   'minigame.success.crop_detective.count': (target) => `크롭 탐정 미니게임 ${target.toLocaleString()}회 성공`,
+  'minigame.failure.count': (target) => `미니게임 ${target.toLocaleString()}회 실패`,
   'minigame.perfect.count': (target) => `미니게임 퍼펙트 ${target.toLocaleString()}회 달성`,
   'minigame.speed_bonus.count': (target) => `미니게임 속도 보너스 ${target.toLocaleString()}회 달성`,
   'shop.purchase.count': (target) => `상점에서 ${target.toLocaleString()}회 구매`,
@@ -244,6 +247,7 @@ const metricConditionText: Record<string, (target: number) => string> = {
   'user.border_cosmetic_count': (target) => `테두리 코스메틱 ${target.toLocaleString()}개 보유`,
   'user.name_effect_cosmetic_count': (target) => `이름 이펙트 ${target.toLocaleString()}개 보유`,
   'user.point_balance': (target) => `${target.toLocaleString()}P 보유`,
+  'user.total_asset': (target) => `총 자산 ${target.toLocaleString()}P 달성`,
   'user.free_draw_ticket_balance': (target) => `무료 소환권 ${target.toLocaleString()}장 보유`,
   'user.bonus_free_draw_ticket_balance': (target) => `추가 무료 소환권 ${target.toLocaleString()}장 보유`,
   'user.minigame_ticket_balance': (target) => `미니게임 티켓 ${target.toLocaleString()}장 보유`,
@@ -1331,6 +1335,27 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
     const couponStats = db.prepare('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?').get(userId) as any;
     const friendStats = db.prepare('SELECT COUNT(*) AS c FROM friendships WHERE user_a_id = ? OR user_b_id = ?').get(userId, userId) as any;
     const minigameTicketStats = db.prepare('SELECT COALESCE(current_tickets, 0) + COALESCE(bonus_tickets, 0) AS c FROM user_minigame_tickets WHERE user_id = ?').get(userId) as any;
+    const minigameFailureStats = db.prepare(`
+      SELECT COUNT(*) AS c
+        FROM minigame_sessions
+       WHERE user_id = ?
+         AND status = 'COMPLETED'
+         AND COALESCE(earned_points, 0) <= 0
+         AND COALESCE(ticket_spent_type, 'NONE') <> 'NONE'
+    `).get(userId) as any;
+    const assetStats = db.prepare(`
+      SELECT COALESCE(u.point, 0) + ROUND(COALESCE(SUM(
+               CASE WHEN COALESCE(uc.is_hidden, 0) = 0
+                    THEN COALESCE(s.base_value, 0) * (1 + COALESCE(uc.star, 0) * 0.8)
+                    ELSE 0
+                END
+             ), 0)) AS total_asset
+        FROM users u
+        LEFT JOIN user_cards uc ON uc.user_id = u.id
+        LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+       WHERE u.id = ?
+       GROUP BY u.id
+    `).get(userId) as any;
     const user = db.prepare(`
       SELECT point, free_draw_tickets, bonus_free_draw_tickets, representative_card_channel_id, status_message,
              CAST(MAX(0, julianday('now') - julianday(COALESCE(created_at, datetime('now')))) AS INTEGER) AS account_age_days
@@ -1366,10 +1391,12 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'user.border_cosmetic_count': Number(cosmeticStats?.border_count || 0),
       'user.name_effect_cosmetic_count': Number(cosmeticStats?.name_effect_count || 0),
       'user.point_balance': Number(user?.point || 0),
+      'user.total_asset': Math.round(Number(assetStats?.total_asset || user?.point || 0)),
       'user.free_draw_ticket_balance': Number(user?.free_draw_tickets || 0) + Number(user?.bonus_free_draw_tickets || 0),
       'user.bonus_free_draw_ticket_balance': Number(user?.bonus_free_draw_tickets || 0),
       'user.minigame_ticket_balance': Number(minigameTicketStats?.c || 0),
       'user.account_age_days': Number(user?.account_age_days || 0),
+      'minigame.failure.count': Number(minigameFailureStats?.c || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
       'profile.status_message.set': user?.status_message ? 1 : 0,
       'market.active_listing_count': Number(marketStats?.active_listing_count || 0),
@@ -1448,6 +1475,27 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
     const couponStats = await db.get('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?', userId);
     const friendStats = await db.get('SELECT COUNT(*) AS c FROM friendships WHERE user_a_id = ? OR user_b_id = ?', userId, userId);
     const minigameTicketStats = await db.get('SELECT COALESCE(current_tickets, 0) + COALESCE(bonus_tickets, 0) AS c FROM user_minigame_tickets WHERE user_id = ?', userId);
+    const minigameFailureStats = await db.get(`
+      SELECT COUNT(*) AS c
+        FROM minigame_sessions
+       WHERE user_id = ?
+         AND status = 'COMPLETED'
+         AND COALESCE(earned_points, 0) <= 0
+         AND COALESCE(ticket_spent_type, 'NONE') <> 'NONE'
+    `, userId);
+    const assetStats = await db.get(`
+      SELECT COALESCE(u.point, 0) + ROUND(COALESCE(SUM(
+               CASE WHEN COALESCE(uc.is_hidden, 0) = 0
+                    THEN COALESCE(s.base_value, 0) * (1 + COALESCE(uc.star, 0) * 0.8)
+                    ELSE 0
+                END
+             ), 0)) AS total_asset
+        FROM users u
+        LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci
+        LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
+       WHERE u.id = ?
+       GROUP BY u.id
+    `, userId);
     const user = await db.get(`
       SELECT point, free_draw_tickets, bonus_free_draw_tickets, representative_card_channel_id, status_message,
              GREATEST(0, TIMESTAMPDIFF(DAY, COALESCE(created_at, UTC_TIMESTAMP()), UTC_TIMESTAMP())) AS account_age_days
@@ -1483,10 +1531,12 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'user.border_cosmetic_count': Number(cosmeticStats?.border_count || 0),
       'user.name_effect_cosmetic_count': Number(cosmeticStats?.name_effect_count || 0),
       'user.point_balance': Number(user?.point || 0),
+      'user.total_asset': Math.round(Number(assetStats?.total_asset || user?.point || 0)),
       'user.free_draw_ticket_balance': Number(user?.free_draw_tickets || 0) + Number(user?.bonus_free_draw_tickets || 0),
       'user.bonus_free_draw_ticket_balance': Number(user?.bonus_free_draw_tickets || 0),
       'user.minigame_ticket_balance': Number(minigameTicketStats?.c || 0),
       'user.account_age_days': Number(user?.account_age_days || 0),
+      'minigame.failure.count': Number(minigameFailureStats?.c || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
       'profile.status_message.set': user?.status_message ? 1 : 0,
       'market.active_listing_count': Number(marketStats?.active_listing_count || 0),

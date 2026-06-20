@@ -2062,10 +2062,12 @@ export const ArcadeTab: React.FC = () => {
                     </div>
                     <div className="relative aspect-[3/4] max-h-[42dvh] w-full overflow-hidden rounded-2xl border border-border/80 bg-zinc-950 shadow-[0_16px_40px_rgba(2,6,23,0.28)] sm:max-h-[52dvh]">
                       {revealedImageUrl ? (
-                        <img
+                        <BlindableCardImage
                           src={revealedImageUrl}
                           alt={`${revealedName} 원본 이미지`}
                           className="h-full w-full object-contain"
+                          draggable={false}
+                          imageBlindMenuEnabled
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center px-6 text-center text-xs font-bold text-zinc-400">
