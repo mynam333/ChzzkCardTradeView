@@ -318,12 +318,18 @@ export const FriendTab: React.FC = () => {
       return;
     }
     if (payload.type === 'joined') {
+      const previousRoom = activeChatRoomRef.current;
+      const routeRoom = searchParams.get('room');
+      const routeUser = searchParams.get('user');
       activeChatRoomRef.current = payload.room;
       setJoinedRoomId(payload.room.id);
       setActiveChatRoom(payload.room);
       upsertChatRoom(payload.room);
       setChatMessages(payload.messages || []);
       setHasOlderMessages((payload.messages || []).length >= 50);
+      if (routeRoom !== String(payload.room.id) && (routeUser === payload.room.other_user.id || isDraftRoom(previousRoom))) {
+        pushFriendRoute({ room: payload.room.id, user: null }, true);
+      }
       return;
     }
     if (payload.type === 'messages') {
@@ -879,6 +885,17 @@ export const FriendTab: React.FC = () => {
 
     const userParam = searchParams.get('user');
     if (userParam) {
+      const existingRoom = chatRooms.find((room) => room.other_user.id === userParam);
+      if (existingRoom) {
+        const current = activeChatRoomRef.current;
+        if (!isDraftRoom(current) && current?.id === existingRoom.id) {
+          pushFriendRoute({ room: existingRoom.id, user: null }, true);
+          return;
+        }
+        openExistingRoom(existingRoom, false);
+        pushFriendRoute({ room: existingRoom.id, user: null }, true);
+        return;
+      }
       const nextFriend = friends.find((friend) => friend.id === userParam);
       if (!nextFriend) return;
       const current = activeChatRoomRef.current;

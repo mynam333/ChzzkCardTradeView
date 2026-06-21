@@ -345,8 +345,8 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
       .from('value_history')
       .insert([{ channel_id: channelId, value }]);
     if (error) throw error;
-    // 오래된 이력 정리 (8일 초과)
-    const cutoff = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    // 7일을 초과한 이력은 UI에서 쓰지 않으므로 채널별 기록 시에도 정리합니다.
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     await this.getClient().from('value_history').delete().eq('channel_id', channelId).lt('recorded_at', cutoff);
   }
 
@@ -410,7 +410,8 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
     const days = Math.max(1, Math.floor(olderThanDays));
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const client = this.getClient();
-    for (let i = 0; i < 20; i++) {
+    const maxChunks = Math.max(1, Math.min(200, Math.floor(Number(process.env.VALUE_HISTORY_PRUNE_MAX_CHUNKS || 50))));
+    for (let i = 0; i < maxChunks; i++) {
       const { data, error: selectError } = await client
         .from('value_history')
         .select('id')

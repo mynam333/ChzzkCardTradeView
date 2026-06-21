@@ -152,8 +152,8 @@ const OFFLINE_COMPUTE_EVERY_CYCLES = readPositiveIntegerEnv(
   'OFFLINE_COMPUTE_EVERY_CYCLES',
   OFFLINE_POLL_SHARDS
 ); // 폴링하지 않은 오프라인 스트리머의 DB 시세/이력 반영 주기
-const PRUNE_EVERY_CYCLES = 30;          // 약 1시간마다 시세 이력 정리
-const VALUE_HISTORY_RETENTION_DAYS = 7; // 7일 초과 시세 이력 삭제
+const PRUNE_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_PRUNE_EVERY_CYCLES', 30); // 기본 약 1시간마다 정리
+const VALUE_HISTORY_RETENTION_DAYS = readPositiveIntegerEnv('VALUE_HISTORY_RETENTION_DAYS', 7); // 기본 7일 초과 시세 이력 삭제
 const VALUE_HISTORY_RECORD_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_RECORD_EVERY_CYCLES', 3);
 const VALUE_HISTORY_MIN_ABS_DELTA = readPositiveIntegerEnv('VALUE_HISTORY_MIN_ABS_DELTA', 25);
 const VALUE_HISTORY_MIN_PCT_DELTA = Math.max(

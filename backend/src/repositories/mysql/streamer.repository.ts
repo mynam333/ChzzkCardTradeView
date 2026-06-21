@@ -339,7 +339,7 @@ export class MysqlStreamerRepository implements IStreamerRepository {
 
   async recordValueHistory(channelId: string, value: number): Promise<void> {
     await this.getDb().run('INSERT INTO value_history (channel_id, value) VALUES (?, ?)', channelId, value);
-    await this.getDb().run('DELETE FROM value_history WHERE channel_id = ? AND recorded_at < UTC_TIMESTAMP() - INTERVAL 8 DAY', channelId);
+    await this.getDb().run('DELETE FROM value_history WHERE channel_id = ? AND recorded_at < UTC_TIMESTAMP() - INTERVAL 7 DAY LIMIT ?', channelId, 500);
   }
 
   async bulkApplyScheduleResults(results: StreamerScheduleResult[]): Promise<void> {
@@ -372,7 +372,21 @@ export class MysqlStreamerRepository implements IStreamerRepository {
 
   async pruneValueHistory(olderThanDays: number): Promise<void> {
     const days = Math.max(1, Math.floor(olderThanDays));
-    await this.getDb().run('DELETE FROM value_history WHERE recorded_at < UTC_TIMESTAMP() - INTERVAL ? DAY', days);
+    const chunkSize = Math.max(100, Math.min(50000, Math.floor(Number(process.env.VALUE_HISTORY_PRUNE_CHUNK_SIZE || 10000))));
+    const maxChunks = Math.max(1, Math.min(200, Math.floor(Number(process.env.VALUE_HISTORY_PRUNE_MAX_CHUNKS || 50))));
+    let deletedTotal = 0;
+    for (let i = 0; i < maxChunks; i += 1) {
+      const result = await this.getDb().run(
+        'DELETE FROM value_history WHERE recorded_at < UTC_TIMESTAMP() - INTERVAL ? DAY ORDER BY recorded_at ASC LIMIT ?',
+        days,
+        chunkSize
+      );
+      deletedTotal += Number(result.affectedRows || result.changes || 0);
+      if (Number(result.affectedRows || result.changes || 0) < chunkSize) break;
+    }
+    if (deletedTotal >= chunkSize * maxChunks) {
+      console.warn(`[ValueHistory] 오래된 시세 이력이 많아 이번 주기에는 ${deletedTotal.toLocaleString()}건까지만 정리했습니다.`);
+    }
   }
 
   private async valueAgoMap(hours: number): Promise<Record<string, number>> {

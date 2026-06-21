@@ -304,9 +304,15 @@ export class SqliteStreamerRepository implements IStreamerRepository {
 
   async recordValueHistory(channelId: string, value: number): Promise<void> {
     this.getDb().prepare('INSERT INTO value_history (channel_id, value) VALUES (?, ?)').run(channelId, value);
-    // 8일(192시간)보다 오래된 이력은 정리하여 테이블 비대화 방지
+    // 7일을 초과한 이력은 UI에서 쓰지 않으므로 채널별 기록 시에도 가볍게 정리합니다.
     this.getDb().prepare(
-      `DELETE FROM value_history WHERE channel_id = ? AND datetime(recorded_at) < datetime('now', '-8 days')`
+      `DELETE FROM value_history
+        WHERE id IN (
+          SELECT id FROM value_history
+           WHERE channel_id = ? AND datetime(recorded_at) < datetime('now', '-7 days')
+           ORDER BY datetime(recorded_at) ASC
+           LIMIT 500
+        )`
     ).run(channelId);
   }
 
@@ -366,9 +372,27 @@ export class SqliteStreamerRepository implements IStreamerRepository {
 
   async pruneValueHistory(olderThanDays: number): Promise<void> {
     const days = Math.max(1, Math.floor(olderThanDays));
-    this.getDb().prepare(
-      `DELETE FROM value_history WHERE datetime(recorded_at) < datetime('now', '-' || ? || ' days')`
-    ).run(days);
+    const chunkSize = Math.max(100, Math.min(50000, Math.floor(Number(process.env.VALUE_HISTORY_PRUNE_CHUNK_SIZE || 10000))));
+    const maxChunks = Math.max(1, Math.min(200, Math.floor(Number(process.env.VALUE_HISTORY_PRUNE_MAX_CHUNKS || 50))));
+    const stmt = this.getDb().prepare(
+      `DELETE FROM value_history
+        WHERE id IN (
+          SELECT id FROM value_history
+           WHERE datetime(recorded_at) < datetime('now', '-' || ? || ' days')
+           ORDER BY datetime(recorded_at) ASC
+           LIMIT ?
+        )`
+    );
+    let deletedTotal = 0;
+    for (let i = 0; i < maxChunks; i += 1) {
+      const result = stmt.run(days, chunkSize);
+      const deleted = Number(result.changes || 0);
+      deletedTotal += deleted;
+      if (deleted < chunkSize) break;
+    }
+    if (deletedTotal >= chunkSize * maxChunks) {
+      console.warn(`[ValueHistory] 오래된 시세 이력이 많아 이번 주기에는 ${deletedTotal.toLocaleString()}건까지만 정리했습니다.`);
+    }
   }
 
   // 채널별로 지정한 시간 경계에 가장 근접한(경계 이전 중 가장 최근) 시세를 선택
