@@ -279,6 +279,9 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   console.error('[Global Error]', err.stack || err);
   
   const status = err.status || err.statusCode || 500;
+  if (!res.headersSent) {
+    res.setHeader('Cache-Control', 'no-store, private, max-age=0');
+  }
   const response: { error: string; message: string; details?: any } = {
     error: status === 400 ? 'BadRequest' : 'InternalServerError',
     message: status === 400 ? (err.message || '잘못된 요청입니다.') : '서버 내부 오류가 발생했습니다.'

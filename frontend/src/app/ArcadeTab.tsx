@@ -227,6 +227,8 @@ const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
 const ROUND_GAME_ROUND_SECONDS = 10;
 const QUIZ_TIME_LIMIT_SECONDS = 10;
+type QuizBlurType = 'gaussian' | 'mosaic' | 'motion' | 'radial';
+const QUIZ_BLUR_TYPES: QuizBlurType[] = ['gaussian', 'mosaic', 'motion', 'radial'];
 const QUIZ_DISTORTION_SCALE = 0.25;
 const QUIZ_GAUSSIAN_MAX_BLUR_PX = 100 * QUIZ_DISTORTION_SCALE;
 // 방향형(모션) 블러: 한 방향으로 강하게 밀린 듯한 선형 모션 스미어.
@@ -631,14 +633,155 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
   );
 };
 
+const PUZZLE_ANIMATED_IMAGE_PATTERN = /\.(?:gif|webp|apng)(?:[?#]|$)/i;
+type PuzzleStillFrameSource = HTMLImageElement | ImageBitmap;
+const puzzleStillFrameCache = new Map<string, Promise<PuzzleStillFrameSource>>();
+
+const isLikelyAnimatedPuzzleImage = (src: string) => PUZZLE_ANIMATED_IMAGE_PATTERN.test(src);
+
+const loadPuzzleStillFrameSource = (src: string): Promise<PuzzleStillFrameSource> => {
+  const cached = puzzleStillFrameCache.get(src);
+  if (cached) return cached;
+
+  const promise = (async (): Promise<PuzzleStillFrameSource> => {
+    if (typeof fetch === 'function' && typeof createImageBitmap === 'function') {
+      try {
+        const response = await fetch(src, { cache: 'force-cache', credentials: 'same-origin' });
+        if (response.ok) {
+          const blob = await response.blob();
+          return await createImageBitmap(blob, { imageOrientation: 'from-image' });
+        }
+      } catch {
+        // Cross-origin image fetches can fail even when <img> display is allowed. Fall back to HTMLImageElement.
+      }
+    }
+
+    return await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.decoding = 'async';
+      image.fetchPriority = 'high';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to load puzzle still frame image.'));
+      image.src = src;
+    });
+  })();
+
+  puzzleStillFrameCache.set(src, promise);
+  return promise;
+};
+
+const getPuzzleStillFrameSourceSize = (source: PuzzleStillFrameSource) => (
+  source instanceof HTMLImageElement
+    ? { width: source.naturalWidth, height: source.naturalHeight }
+    : { width: source.width, height: source.height }
+);
+
+const drawPuzzlePieceStillFrame = (canvas: HTMLCanvasElement, source: PuzzleStillFrameSource, pieceId: number) => {
+  const { width: sourceNaturalWidth, height: sourceNaturalHeight } = getPuzzleStillFrameSourceSize(source);
+  if (!sourceNaturalWidth || !sourceNaturalHeight) return;
+
+  const displaySize = Math.max(1, Math.round(canvas.clientWidth || 80));
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(displaySize * pixelRatio);
+  canvas.height = Math.round(displaySize * pixelRatio);
+
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, displaySize, displaySize);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+
+  const targetRatio = PUZZLE_COLUMNS / PUZZLE_ROWS;
+  const sourceRatio = sourceNaturalWidth / sourceNaturalHeight;
+  let cropWidth = sourceNaturalWidth;
+  let cropHeight = sourceNaturalHeight;
+  let cropX = 0;
+  let cropY = 0;
+
+  if (sourceRatio > targetRatio) {
+    cropWidth = sourceNaturalHeight * targetRatio;
+    cropX = (sourceNaturalWidth - cropWidth) / 2;
+  } else {
+    cropHeight = sourceNaturalWidth / targetRatio;
+    cropY = (sourceNaturalHeight - cropHeight) / 2;
+  }
+
+  const column = pieceId % PUZZLE_COLUMNS;
+  const row = Math.floor(pieceId / PUZZLE_COLUMNS);
+  const sourcePieceWidth = cropWidth / PUZZLE_COLUMNS;
+  const sourcePieceHeight = cropHeight / PUZZLE_ROWS;
+
+  context.drawImage(
+    source,
+    cropX + column * sourcePieceWidth,
+    cropY + row * sourcePieceHeight,
+    sourcePieceWidth,
+    sourcePieceHeight,
+    0,
+    0,
+    displaySize,
+    displaySize
+  );
+};
+
 const PuzzlePieceImage: React.FC<{ src: string; pieceId: number }> = ({ src, pieceId }) => {
   const { isImageBlinded } = useApp();
   const blinded = isImageBlinded(src);
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const stillSourceRef = React.useRef<PuzzleStillFrameSource | null>(null);
   const column = pieceId % PUZZLE_COLUMNS;
   const row = Math.floor(pieceId / PUZZLE_COLUMNS);
+  const freezeAnimation = isLikelyAnimatedPuzzleImage(src);
+
+  useEffect(() => {
+    if (!freezeAnimation || !src || blinded) return;
+    let cancelled = false;
+    stillSourceRef.current = null;
+
+    loadPuzzleStillFrameSource(src)
+      .then((source) => {
+        if (cancelled) return;
+        stillSourceRef.current = source;
+        const canvas = canvasRef.current;
+        if (canvas) drawPuzzlePieceStillFrame(canvas, source, pieceId);
+      })
+      .catch(() => {
+        stillSourceRef.current = null;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [blinded, freezeAnimation, pieceId, src]);
+
+  useEffect(() => {
+    if (!freezeAnimation || blinded) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const redraw = () => {
+      const source = stillSourceRef.current;
+      if (source) drawPuzzlePieceStillFrame(canvas, source, pieceId);
+    };
+    redraw();
+    const observer = new ResizeObserver(redraw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [blinded, freezeAnimation, pieceId]);
 
   if (blinded) {
     return <BlindableCardImage src={src} alt="퍼즐 카드" className="h-full w-full object-cover" allowUnblind={false} />;
+  }
+
+  if (freezeAnimation) {
+    return (
+      <canvas
+        ref={canvasRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 h-full w-full select-none"
+      />
+    );
   }
 
   return (
@@ -707,6 +850,13 @@ const GameTimeLimit: React.FC<{
 );
 
 const normalizeRotation = (rotation: number) => ((rotation % 360) + 360) % 360;
+
+const getRandomQuizBlurType = (previousType?: QuizBlurType | null): QuizBlurType => {
+  const candidates = previousType
+    ? QUIZ_BLUR_TYPES.filter((type) => type !== previousType)
+    : QUIZ_BLUR_TYPES;
+  return candidates[Math.floor(Math.random() * candidates.length)] || 'gaussian';
+};
 
 const isPuzzleSolved = (pieces: PuzzlePiece[]) =>
   pieces.length === PUZZLE_PIECE_COUNT &&
@@ -1052,7 +1202,7 @@ export const ArcadeTab: React.FC = () => {
 
   // 1. 인물 퀴즈 전용 상태 (블러 퀴즈로 고도화)
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
-  const [quizBlurType, setQuizBlurType] = useState<'gaussian' | 'mosaic' | 'motion' | 'radial'>('gaussian');
+  const [quizBlurType, setQuizBlurType] = useState<QuizBlurType>('gaussian');
   const [quizBlurAngle, setQuizBlurAngle] = useState<number>(0);
   const [quizIntensity, setQuizIntensity] = useState<number>(100);
 
@@ -1563,14 +1713,11 @@ export const ArcadeTab: React.FC = () => {
         roundDeadlineRef.current = isResumed ? Date.now() + QUIZ_TIME_LIMIT_SECONDS * 1000 : null;
         setQuizStartTime(Date.now());
         setQuizIntensity(100);
-
-        // 4가지 블러 종류 중 랜덤 선택 (연습 모드에서 override.blur로 강제 지정 가능)
-        const blurTypes: ('gaussian' | 'mosaic' | 'motion' | 'radial')[] = ['gaussian', 'mosaic', 'motion', 'radial'];
-        const forcedBlur = practiceMode && override?.blur && (blurTypes as string[]).includes(override.blur)
-          ? (override.blur as 'gaussian' | 'mosaic' | 'motion' | 'radial')
+        // 첫 문제는 랜덤 블러로 시작하되, 연습 URL에 blur가 있으면 첫 문제만 강제할 수 있습니다.
+        const forcedBlur = practiceMode && override?.blur && (QUIZ_BLUR_TYPES as string[]).includes(override.blur)
+          ? (override.blur as QuizBlurType)
           : null;
-        const chosenBlur = forcedBlur ?? blurTypes[Math.floor(Math.random() * blurTypes.length)];
-        setQuizBlurType(chosenBlur);
+        setQuizBlurType(forcedBlur ?? getRandomQuizBlurType());
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
         setPuzzlePieces(createInitialPuzzlePieces());
@@ -1889,6 +2036,7 @@ export const ArcadeTab: React.FC = () => {
     if (activeGame === 'quiz') {
       setQuizStartTime(Date.now());
       setQuizIntensity(100);
+      setQuizBlurType((previousType) => getRandomQuizBlurType(previousType));
       setQuizBlurAngle(Math.floor(Math.random() * 360));
     }
   };
