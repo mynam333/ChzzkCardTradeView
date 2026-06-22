@@ -665,9 +665,24 @@ export const excludeReportImageFromPuzzle = async (req: AuthenticatedRequest, re
       createdBy: req.user?.id || null
     });
 
+    const resolutionDetail = '신고 이미지가 3x4 퍼즐 일반 출제에서 제외되었습니다.';
+    if (report.status === 'pending') {
+      await reportRepository.updateStatus(reportId, 'resolved');
+      await notifyReportResult(report, 'resolved', {
+        actionLabel: '3x4 퍼즐 출제 제외',
+        detail: resolutionDetail
+      }).catch((notifyErr) => {
+        console.warn('[AdminController] 퍼즐 제외 신고 처리 알림 생성 실패:', notifyErr?.message || notifyErr);
+      });
+    }
+
     return res.status(200).json({
-      message: '해당 신고 이미지가 3x4 퍼즐 출제 제외 목록에 등록되었습니다.',
-      excluded_image: record
+      message: report.status === 'pending'
+        ? '해당 신고 이미지가 3x4 퍼즐 출제 제외 목록에 등록되었고 신고가 처리 완료되었습니다.'
+        : '해당 신고 이미지가 3x4 퍼즐 출제 제외 목록에 등록되었습니다.',
+      excluded_image: record,
+      report_id: reportId,
+      status: report.status === 'pending' ? 'resolved' : report.status
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '퍼즐 제외 이미지 등록 실패', details: IS_PRODUCTION ? undefined : err.message });

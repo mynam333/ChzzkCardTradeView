@@ -634,90 +634,31 @@ const MosaicQuizImage: React.FC<{ src: string; intensity: number }> = ({ src, in
 const PuzzlePieceImage: React.FC<{ src: string; pieceId: number }> = ({ src, pieceId }) => {
   const { isImageBlinded } = useApp();
   const blinded = isImageBlinded(src);
-  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !src || blinded) return;
-
-    let cancelled = false;
-    const image = new Image();
-    image.decoding = 'async';
-    image.fetchPriority = 'high';
-
-    const drawPiece = () => {
-      if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
-
-      const displaySize = Math.max(1, Math.round(canvas.clientWidth || 80));
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.round(displaySize * pixelRatio);
-      canvas.height = Math.round(displaySize * pixelRatio);
-
-      const context = canvas.getContext('2d');
-      if (!context) return;
-
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      context.clearRect(0, 0, displaySize, displaySize);
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = 'high';
-
-      // 원본의 중앙 3:4 영역을 먼저 계산하면 3x4로 나눈 각 영역은 정확한 정사각형이 됩니다.
-      const targetRatio = PUZZLE_COLUMNS / PUZZLE_ROWS;
-      const sourceRatio = image.naturalWidth / image.naturalHeight;
-      let cropWidth = image.naturalWidth;
-      let cropHeight = image.naturalHeight;
-      let cropX = 0;
-      let cropY = 0;
-
-      if (sourceRatio > targetRatio) {
-        cropWidth = image.naturalHeight * targetRatio;
-        cropX = (image.naturalWidth - cropWidth) / 2;
-      } else {
-        cropHeight = image.naturalWidth / targetRatio;
-        cropY = (image.naturalHeight - cropHeight) / 2;
-      }
-
-      const column = pieceId % PUZZLE_COLUMNS;
-      const row = Math.floor(pieceId / PUZZLE_COLUMNS);
-      const sourcePieceWidth = cropWidth / PUZZLE_COLUMNS;
-      const sourcePieceHeight = cropHeight / PUZZLE_ROWS;
-
-      context.drawImage(
-        image,
-        cropX + column * sourcePieceWidth,
-        cropY + row * sourcePieceHeight,
-        sourcePieceWidth,
-        sourcePieceHeight,
-        0,
-        0,
-        displaySize,
-        displaySize
-      );
-    };
-
-    image.onload = drawPiece;
-    image.src = src;
-    if (image.complete) drawPiece();
-
-    return () => {
-      cancelled = true;
-      image.onload = null;
-    };
-  }, [blinded, pieceId, src]);
+  const column = pieceId % PUZZLE_COLUMNS;
+  const row = Math.floor(pieceId / PUZZLE_COLUMNS);
 
   if (blinded) {
     return <BlindableCardImage src={src} alt="퍼즐 카드" className="h-full w-full object-cover" allowUnblind={false} />;
   }
 
   return (
-    <canvas
-      ref={canvasRef}
+    <img
+      src={src}
+      alt=""
+      draggable={false}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 h-full w-full select-none"
+      className="pointer-events-none absolute max-w-none select-none"
+      style={{
+        width: `${PUZZLE_COLUMNS * 100}%`,
+        height: `${PUZZLE_ROWS * 100}%`,
+        left: `${-column * 100}%`,
+        top: `${-row * 100}%`,
+        objectFit: 'cover',
+        objectPosition: 'center'
+      }}
     />
   );
 };
-
 const GameTimeLimit: React.FC<{
   timeLeft: number;
   totalSeconds: number;
