@@ -151,7 +151,7 @@ export const AchievementsTab: React.FC = () => {
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return (
-    <section className="space-y-5">
+    <section data-tour="achievements-overview" className="space-y-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -180,7 +180,7 @@ export const AchievementsTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <div data-tour="achievements-filters" className="rounded-2xl border border-border bg-card p-4 shadow-sm">
         <div className="grid gap-3 lg:grid-cols-[1.1fr_170px_170px_170px_170px_auto]">
           <label className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -222,7 +222,7 @@ export const AchievementsTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div data-tour="achievements-list" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {filteredItems.map((item) => {
           const masked = item.is_hidden && !item.code;
           const claimable = item.status === 'completed';
@@ -310,3 +310,4 @@ const Select: React.FC<{ value: string; onChange: (value: string) => void; child
     <ChevronDown className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
   </label>
 );
+

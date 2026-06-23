@@ -29,7 +29,7 @@ export const getMysqlPoolConfig = (): mysql.PoolOptions => {
   const ssl = getSslConfig();
   const common = {
     waitForConnections: true,
-    connectionLimit: Math.max(1, Number(process.env.MYSQL_CONNECTION_LIMIT || 10)),
+    connectionLimit: Math.max(1, Number(process.env.MYSQL_CONNECTION_LIMIT || 5)),
     queueLimit: Math.max(0, Number(process.env.MYSQL_QUEUE_LIMIT || 0)),
     charset: 'utf8mb4',
     dateStrings: true,

@@ -7,14 +7,41 @@ import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
 
 const AUTH_USER_CACHE_TTL_MS = Math.max(1000, Number(process.env.AUTH_USER_CACHE_TTL_MS || 15_000));
 const AUTH_USER_LOOKUP_TIMEOUT_MS = Math.max(500, Number(process.env.AUTH_USER_LOOKUP_TIMEOUT_MS || 3000));
+const AUTH_USER_CACHE_MAX_ENTRIES = Math.max(100, Number(process.env.AUTH_USER_CACHE_MAX_ENTRIES || 5000));
+const LAST_SEEN_TOUCH_INTERVAL_MS = Math.max(60_000, Number(process.env.LAST_SEEN_TOUCH_INTERVAL_MS || 600_000));
+const LAST_SEEN_TOUCH_MAX_ENTRIES = Math.max(100, Number(process.env.LAST_SEEN_TOUCH_MAX_ENTRIES || 10000));
+const LAST_SEEN_TOUCH_RETENTION_MS = Math.max(
+  LAST_SEEN_TOUCH_INTERVAL_MS,
+  Number(process.env.LAST_SEEN_TOUCH_RETENTION_MS || 24 * 60 * 60_000)
+);
 const AUTH_BEARER_ENABLED =
   process.env.AUTH_BEARER_ENABLED === 'true' ||
   (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
-const LAST_SEEN_TOUCH_INTERVAL_MS = Math.max(60_000, Number(process.env.LAST_SEEN_TOUCH_INTERVAL_MS || 600_000));
 
 const userCache = new Map<string, { user: any; expiresAt: number }>();
 const userLookups = new Map<string, Promise<any>>();
 const lastSeenTouches = new Map<string, number>();
+let lastCachePruneAt = 0;
+
+const deleteOldestEntry = <T>(map: Map<string, T>) => {
+  const oldestKey = map.keys().next().value;
+  if (oldestKey !== undefined) map.delete(oldestKey);
+};
+
+const pruneAuthCaches = (now = Date.now(), force = false) => {
+  if (!force && now - lastCachePruneAt < 60_000) return;
+  lastCachePruneAt = now;
+
+  for (const [userId, cached] of userCache) {
+    if (cached.expiresAt <= now) userCache.delete(userId);
+  }
+  while (userCache.size > AUTH_USER_CACHE_MAX_ENTRIES) deleteOldestEntry(userCache);
+
+  for (const [userId, touchedAt] of lastSeenTouches) {
+    if (now - touchedAt > LAST_SEEN_TOUCH_RETENTION_MS) lastSeenTouches.delete(userId);
+  }
+  while (lastSeenTouches.size > LAST_SEEN_TOUCH_MAX_ENTRIES) deleteOldestEntry(lastSeenTouches);
+};
 
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -42,6 +69,7 @@ const findUserCached = async (userId: string) => {
       .then((user) => {
         if (user) {
           userCache.set(userId, { user, expiresAt: Date.now() + AUTH_USER_CACHE_TTL_MS });
+          pruneAuthCaches(Date.now(), userCache.size > AUTH_USER_CACHE_MAX_ENTRIES);
         } else {
           userCache.delete(userId);
         }
@@ -65,7 +93,9 @@ const touchLastSeen = (userId: string) => {
   const now = Date.now();
   const lastTouchedAt = lastSeenTouches.get(userId) || 0;
   if (now - lastTouchedAt < LAST_SEEN_TOUCH_INTERVAL_MS) return;
+  lastSeenTouches.delete(userId);
   lastSeenTouches.set(userId, now);
+  pruneAuthCaches(now, lastSeenTouches.size > LAST_SEEN_TOUCH_MAX_ENTRIES);
   const seenAt = new Date(now).toISOString();
   userRepository.updateLastSeen(userId, seenAt)
     .then(() => {

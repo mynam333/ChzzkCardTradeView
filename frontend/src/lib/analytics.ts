@@ -129,6 +129,12 @@ export const initAnalytics = () => {
     capture_pageview: false,
     capture_pageleave: false,
     disable_session_recording: true,
+    disable_surveys: true,
+    disable_product_tours: true,
+    disable_external_dependency_loading: true,
+    advanced_disable_flags: true,
+    advanced_disable_feature_flags: true,
+    advanced_disable_feature_flags_on_first_load: true,
     respect_dnt: true,
     persistence: 'localStorage+cookie'
   } as any);

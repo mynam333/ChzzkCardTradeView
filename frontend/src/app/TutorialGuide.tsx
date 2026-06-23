@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Award,
   CheckCircle2,
   Gamepad2,
   Home,
@@ -29,6 +30,7 @@ type TutorialSection =
   | 'shop'
   | 'inventory'
   | 'arcade'
+  | 'achievements'
   | 'ranking'
   | 'friends'
   | 'my-info'
@@ -57,7 +59,7 @@ type HighlightRect = {
   height: number;
 };
 
-const TUTORIAL_VERSION = '2026-06-11-v3';
+const TUTORIAL_VERSION = '2026-06-24-v1';
 const MANUAL_START_EVENT = 'chikapo-start-tutorial';
 const UARU_CHANNEL_ID = '6d395c84c99777272f872171b4dfc122';
 
@@ -67,6 +69,7 @@ const sectionLabels: Record<TutorialSection, string> = {
   shop: '상점',
   inventory: '보관함',
   arcade: '미니게임',
+  achievements: '업적',
   ranking: '랭킹',
   friends: '친구',
   'my-info': '내 정보',
@@ -79,6 +82,7 @@ const sectionIcons: Record<TutorialSection, typeof Sparkles> = {
   shop: Store,
   inventory: Layers,
   arcade: Gamepad2,
+  achievements: Award,
   ranking: TrendingUp,
   friends: MessageCircle,
   'my-info': User,
@@ -90,12 +94,23 @@ const tutorialSteps: TutorialStep[] = [
     id: 'hello',
     section: 'welcome',
     tab: 'main',
-    title: '치카포, 딱 필요한 것만 볼게요',
+    title: '치카포를 빠르게 둘러볼게요',
     lines: [
-      '기능이 많아졌으니 이번 안내는 핵심만 짧게 지나갈게요.',
-      '제가 화면을 옮겨 드릴 테니, 어디서 무엇을 하면 되는지만 감 잡으면 됩니다.'
+      '치카포는 치지직 스트리머 카드를 모으고, 사고팔고, 친구와 교환하는 수집형 카드 서비스예요.',
+      '제가 화면을 옮겨 드릴 테니, "어디서 뭘 하면 되는지"만 편하게 감 잡으면 됩니다.'
     ],
-    tip: '이미 튜토리얼을 봤던 계정은 새 버전이어도 자동으로 다시 켜지지 않아요.'
+    tip: '중간에 스킵해도 괜찮고, 내 정보에서 언제든 다시 열 수 있어요.'
+  },
+  {
+    id: 'service-loop',
+    section: 'welcome',
+    tab: 'main',
+    title: '큰 흐름은 이렇게 굴러가요',
+    lines: [
+      '카드를 뽑고, 보관함에서 정리하고, 마켓이나 1:1 교환으로 원하는 카드를 맞춰 가는 구조예요.',
+      '스트리머의 팔로워나 활동 지표가 반영돼 카드 가치가 움직이니, 수집이랑 시세 보는 재미가 같이 있어요.'
+    ],
+    tip: '비공식 팬 서비스라서 치지직/네이버 공식 서비스는 아니에요.'
   },
   {
     id: 'main-overview',
@@ -103,22 +118,34 @@ const tutorialSteps: TutorialStep[] = [
     tab: 'main',
     title: '메인은 오늘의 현황판이에요',
     lines: [
-      '공지, 실시간 흐름, 서비스 통계를 먼저 확인하는 출발점입니다.',
-      '뭔가 달라졌나 싶을 때는 메인에서 분위기를 보고 움직이면 좋아요.'
+      '공지, 실시간 인기 스트리머, 서비스 통계를 먼저 보는 출발점입니다.',
+      '뭔가 달라졌나 싶을 때는 메인에서 분위기부터 보고 움직이면 좋아요.'
     ],
     actionLabel: '메인 확인',
     target: 'main-landing'
   },
   {
+    id: 'main-news',
+    section: 'main',
+    tab: 'main',
+    title: '공지와 이벤트는 여기서 챙겨요',
+    lines: [
+      '플랫폼 새소식에는 운영 공지, 이벤트, 업데이트가 짧게 모여 있어요.',
+      '제목을 누르면 자세한 내용을 볼 수 있고, 중요한 공지는 팝업으로도 뜰 수 있습니다.'
+    ],
+    tip: '처음 보는 기능이 생겼다면 공지부터 확인하면 헷갈릴 일이 줄어요.',
+    target: 'main-news'
+  },
+  {
     id: 'shop-gacha',
     section: 'shop',
     tab: 'shop',
-    title: '상점에서는 카드를 뽑고 거래해요',
+    title: '상점의 시작은 카드 소환이에요',
     lines: [
-      '상점은 카드 소환, 코스메틱 구매, 오픈마켓 거래가 모인 곳이에요.',
-      '처음이라면 무료 소환부터 눌러 보고, 사고팔기 전에는 가격과 수수료를 한 번 더 확인해 주세요.'
+      '상점에는 카드 소환, 코스메틱 구매, 오픈마켓 거래가 같이 모여 있어요.',
+      '처음이라면 무료 소환부터 눌러 보세요. 체험용 티켓을 받을 수 있으면 제가 한 장 준비해 둘게요.'
     ],
-    tip: '체험용 무료 소환 티켓을 받을 수 있으면 제가 한 장 준비해 둘게요.',
+    tip: '소환은 포인트나 무료 소환권을 쓰고, 카드 가치는 스트리머 지표에 따라 계속 움직입니다.',
     target: 'shop-gacha-button',
     grantGachaTicket: true,
     waitForEvent: 'chikapo:gacha-result',
@@ -126,16 +153,66 @@ const tutorialSteps: TutorialStep[] = [
     actionLabel: '소환 결과 기다리는 중'
   },
   {
+    id: 'shop-gacha-result',
+    section: 'shop',
+    tab: 'shop',
+    title: '소환 결과는 카드 정보까지 같이 봐요',
+    lines: [
+      '카드에는 스트리머, 별 등급, 현재 가치 같은 핵심 정보가 들어 있어요.',
+      '희귀한 카드는 잘 팔릴 수도 있지만, 최애 카드라면 보관함에서 꾸미거나 대표 카드로 써도 좋아요.'
+    ],
+    target: 'shop-gacha-result-card',
+    shopSubTab: 'gacha_shop',
+    actionLabel: '결과 확인'
+  },
+  {
+    id: 'shop-cosmetics',
+    section: 'shop',
+    tab: 'shop',
+    title: '코스메틱으로 카드를 꾸밀 수 있어요',
+    lines: [
+      '테두리와 이름 효과 같은 코스메틱은 카드의 분위기를 바꿔 주는 장식이에요.',
+      '구매한 코스메틱은 보관함에서 카드에 입혀서 내 컬렉션을 더 또렷하게 보여줄 수 있습니다.'
+    ],
+    tip: '한정 판매나 판매 기간이 있는 아이템은 수량과 남은 시간을 같이 확인해 주세요.',
+    target: 'shop-cosmetics',
+    shopSubTab: 'gacha_shop'
+  },
+  {
     id: 'shop-market',
     section: 'shop',
     tab: 'shop',
-    title: '오픈마켓은 상태를 보고 움직이면 돼요',
+    title: '오픈마켓에서는 다른 유저와 거래해요',
     lines: [
-      '전체 매물, 즉시 판매, 경매, 입찰중 같은 보기로 원하는 거래만 좁혀 볼 수 있어요.',
-      '관심 매물이나 입찰 변화는 알림으로 이어질 수 있으니, 중요한 거래는 알림 설정을 켜두면 편합니다.'
+      '즉시 판매 매물은 바로 구매할 수 있고, 경매 매물은 입찰로 경쟁할 수 있어요.',
+      '시스템 거래라 편하지만, 가격과 수수료는 꼭 확인하고 움직이면 좋습니다.'
     ],
     target: 'shop-market',
     shopSubTab: 'market'
+  },
+  {
+    id: 'shop-market-filters',
+    section: 'shop',
+    tab: 'shop',
+    title: '마켓은 필터로 좁혀 보면 편해요',
+    lines: [
+      '스트리머 이름, 등급, 판매 방식, 정렬을 조합해서 원하는 매물만 볼 수 있어요.',
+      '싸게 사고 싶으면 낮은 가격순, 경매를 노린다면 마감 임박이나 높은 입찰순도 같이 보면 됩니다.'
+    ],
+    target: 'shop-market-filters',
+    shopSubTab: 'market'
+  },
+  {
+    id: 'shop-my-listings',
+    section: 'shop',
+    tab: 'shop',
+    title: '내가 올린 매물은 따로 관리해요',
+    lines: [
+      '내 판매 목록에서는 등록한 매물 상태를 확인하고, 가능한 경우 판매를 취소할 수 있어요.',
+      '경매는 입찰자가 생기면 마음대로 취소할 수 없으니 등록 전에 조건을 신중하게 정해 주세요.'
+    ],
+    target: 'shop-my-listings',
+    shopSubTab: 'my_listings'
   },
   {
     id: 'inventory-core',
@@ -149,27 +226,117 @@ const tutorialSteps: TutorialStep[] = [
     target: 'inventory-list'
   },
   {
+    id: 'inventory-filters',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '카드가 많아지면 먼저 걸러 보세요',
+    lines: [
+      '보관함에서는 스트리머 이름, 등급, 정렬, 보유 상태를 기준으로 카드를 찾을 수 있어요.',
+      '방송 모드를 켜면 카드 이미지를 0성 이미지로 보여줘서 화면 공유할 때도 부담이 덜합니다.'
+    ],
+    target: 'inventory-filters'
+  },
+  {
+    id: 'inventory-menu',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '카드 메뉴에서 대부분의 작업을 시작해요',
+    lines: [
+      '카드를 누르면 판매, 마켓 등록, 1:1 교환, 대표 카드 설정, 신고 같은 메뉴가 열립니다.',
+      '거래 중이거나 잠긴 카드는 일부 작업이 막힐 수 있으니 상태 표시를 먼저 보는 습관이 좋아요.'
+    ],
+    tip: '코스메틱이 입혀진 카드는 교환이나 판매 때 장식 포함 여부를 따로 확인해 주세요.',
+    target: 'inventory-list',
+    demo: 'inventory-menu'
+  },
+  {
+    id: 'inventory-trade',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '1:1 교환은 서로 확인하고 끝나요',
+    lines: [
+      '교환은 카드와 포인트를 섞어서 제안할 수 있고, 상대가 동의한 뒤 최종 승인까지 거쳐야 완료돼요.',
+      '양쪽이 한 번 더 확인하는 구조라서, 조건이 맞는지 천천히 보고 누르면 됩니다.'
+    ],
+    target: 'inventory-trade-actions'
+  },
+  {
+    id: 'inventory-bulk',
+    section: 'inventory',
+    tab: 'inventory',
+    title: '중복 카드는 한 번에 정리할 수 있어요',
+    lines: [
+      '카드가 많이 쌓이면 일괄 선택과 일괄 판매로 중복 카드를 빠르게 정리할 수 있어요.',
+      '단, 즐겨찾기나 잠금 카드까지 같이 정리하지 않도록 선택 범위를 꼭 확인해 주세요.'
+    ],
+    target: 'inventory-bulk-actions'
+  },
+  {
+    id: 'achievements-overview',
+    section: 'achievements',
+    tab: 'achievements',
+    title: '업적은 다음 목표를 알려줘요',
+    lines: [
+      '업적 탭에서는 출석, 수집, 경제, 교환, 마켓, 미니게임 같은 활동 목표를 한눈에 볼 수 있어요.',
+      '뭘 해야 할지 애매할 때는 추천순이나 진행도순으로 보면 다음 행동이 꽤 잘 잡힙니다.'
+    ],
+    target: 'achievements-overview'
+  },
+  {
+    id: 'achievements-rewards',
+    section: 'achievements',
+    tab: 'achievements',
+    title: '완료한 업적은 보상을 꼭 받아요',
+    lines: [
+      '완료 상태가 된 업적은 포인트, 카드, 코스메틱, 무료 소환권, 칭호 같은 보상을 줄 수 있어요.',
+      '수령 버튼을 눌러야 내 자산에 들어오는 보상도 있으니, 보상 대기 숫자를 가끔 확인해 주세요.'
+    ],
+    target: 'achievements-list'
+  },
+  {
     id: 'friends-core',
     section: 'friends',
     tab: 'friends',
-    title: '친구 탭에서 1:1 톡을 써요',
+    title: '친구 탭에서는 사람을 찾고 이어져요',
     lines: [
       '닉네임으로 친구를 검색하고 신청하면, 수락된 친구끼리 1:1 톡을 열 수 있어요.',
-      '톡방을 보고 있을 때 새 메시지가 바로 읽히면 알림은 보내지 않고, 보고 있지 않을 때만 사이트 알림과 푸시 알림이 갑니다.'
+      '카드 교환을 자주 하는 사람이나 같이 게임하는 사람을 친구로 묶어 두면 이동이 훨씬 편해집니다.'
     ],
     tip: '원하지 않는 유저는 내 정보의 차단에서 친구 신청도 함께 막을 수 있어요.',
     target: 'friends-search'
   },
   {
+    id: 'friends-chat',
+    section: 'friends',
+    tab: 'friends',
+    title: '친구가 되면 1:1 톡을 쓸 수 있어요',
+    lines: [
+      '친구 목록에서 대화를 열면 텍스트, 첨부, 링크 미리보기 같은 대화 기능을 사용할 수 있어요.',
+      '톡방을 보고 있을 때 바로 읽힌 메시지는 알림을 줄이고, 보고 있지 않을 때만 사이트 알림이나 푸시로 알려줍니다.'
+    ],
+    target: 'friends-list'
+  },
+  {
     id: 'arcade-points',
     section: 'arcade',
     tab: 'arcade',
-    title: '미니게임은 포인트 보충용이에요',
+    title: '미니게임은 포인트를 보태는 길이에요',
     lines: [
       '하루에 도전할 수 있는 게임과 연습용 게임이 나뉘어 있어요.',
-      '카드를 사고 싶을 때 포인트를 조금씩 모으는 보조 루트라고 생각하면 됩니다.'
+      '카드를 사고 싶거나 소환을 더 하고 싶을 때 포인트를 조금씩 모으는 보조 루트라고 생각하면 됩니다.'
     ],
     target: 'arcade-daily-game'
+  },
+  {
+    id: 'arcade-tickets',
+    section: 'arcade',
+    tab: 'arcade',
+    title: '티켓과 일일 도전 횟수를 확인해요',
+    lines: [
+      '미니게임은 무제한으로 보상을 주는 구조가 아니라, 티켓이나 일일 제한을 확인하면서 즐기는 쪽에 가까워요.',
+      '연습 모드는 부담 없이 감을 익힐 때 좋고, 실제 보상은 안내된 조건을 보고 도전하면 됩니다.'
+    ],
+    target: 'arcade-tickets'
   },
   {
     id: 'ranking-read',
@@ -184,29 +351,86 @@ const tutorialSteps: TutorialStep[] = [
     rankingSubTab: 'value'
   },
   {
+    id: 'ranking-tabs',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '랭킹은 탭마다 보는 기준이 달라요',
+    lines: [
+      '가치 랭킹은 현재 카드 시세, 등락 랭킹은 최근 변화가 큰 카드를 보여줘요.',
+      '유저 랭킹은 포인트와 카드 가치를 합친 총자산, 카드 랭킹은 보유 카드 가치만 따로 봅니다.'
+    ],
+    target: 'ranking-tabs',
+    rankingSubTab: 'change'
+  },
+  {
+    id: 'ranking-card-filter',
+    section: 'ranking',
+    tab: 'ranking',
+    title: '특정 카드 보유자도 찾아볼 수 있어요',
+    lines: [
+      '유저/카드 랭킹에서는 특정 스트리머나 별 등급을 가진 사람만 필터링할 수 있어요.',
+      '거래 상대를 찾거나 희귀 카드가 어디에 있는지 가늠할 때 꽤 쓸만합니다.'
+    ],
+    tip: '등급을 비워두면 해당 스트리머 카드를 가진 사람을 등급과 관계없이 볼 수 있어요.',
+    target: 'ranking-card-filter',
+    rankingSubTab: 'cards'
+  },
+  {
     id: 'my-info-settings',
     section: 'my-info',
     tab: 'my-info',
-    title: '내 정보에는 안전장치가 모여 있어요',
+    title: '내 정보에서는 프로필을 정리해요',
     lines: [
-      '대표 카드, 상태 메시지, 쿠폰, 푸시 알림, 차단, 개인정보와 탈퇴 설정을 관리합니다.',
-      '특히 알림과 차단은 거래와 친구 기능을 편하게 쓰는 데 꽤 중요해요.'
+      '대표 카드, 상태 메시지, 칭호를 정하면 다른 사람이 보는 내 프로필이 더 또렷해져요.',
+      '구독이나 이벤트로 얻은 칭호가 있다면 여기서 장착하고 새로고침으로 상태를 다시 확인할 수 있습니다.'
     ],
-    target: 'my-info-push'
+    target: 'my-info-profile'
+  },
+  {
+    id: 'my-info-images',
+    section: 'my-info',
+    tab: 'my-info',
+    title: '스트리머라면 카드 이미지도 관리해요',
+    lines: [
+      '본인 채널로 확인되는 스트리머는 카드 배경 이미지를 직접 바꿀 수 있어요.',
+      '이미지는 저장할 때 최적화되어 올라가고, 부적절한 이미지는 신고나 운영 조치 대상이 될 수 있습니다.'
+    ],
+    target: 'my-info-images'
+  },
+  {
+    id: 'my-info-coupon-push',
+    section: 'my-info',
+    tab: 'my-info',
+    title: '쿠폰과 푸시 알림도 여기서 챙겨요',
+    lines: [
+      '이벤트 쿠폰은 내 정보의 쿠폰 입력칸에 넣으면 보상을 받을 수 있어요.',
+      '푸시 알림을 켜두면 친구 메시지, 마켓 변화, 운영 알림처럼 놓치기 쉬운 소식을 더 빨리 받을 수 있습니다.'
+    ],
+    target: 'my-info-coupon'
+  },
+  {
+    id: 'my-info-safety',
+    section: 'my-info',
+    tab: 'my-info',
+    title: '불편한 유저는 차단으로 정리해요',
+    lines: [
+      '차단한 유저는 친구 신청이나 대화 같은 커뮤니티 기능에서 더 멀리 둘 수 있어요.',
+      '개인정보와 탈퇴 같은 민감한 설정도 같은 화면 아래쪽에 있으니, 필요한 때만 신중하게 만지면 됩니다.'
+    ],
+    target: 'my-info-blocks'
   },
   {
     id: 'wrap-up-done',
     section: 'wrap-up',
     tab: 'main',
-    title: '이 정도만 알면 충분해요',
+    title: '이제 어디서 시작할지 보일 거예요',
     lines: [
-      '메인에서 흐름을 보고, 상점과 보관함에서 카드를 움직이고, 친구 탭에서 대화하면 됩니다.',
-      '더 궁금해지면 내 정보에서 이 튜토리얼을 다시 열어 천천히 둘러봐도 좋아요.'
+      '메인에서 흐름을 보고, 상점에서 뽑거나 사고, 보관함에서 정리하고, 랭킹과 친구 기능으로 더 깊게 즐기면 됩니다.',
+      '헷갈리면 내 정보의 "튜토리얼 다시 보기"로 언제든 돌아와도 좋아요.'
     ],
     actionLabel: '튜토리얼 완료'
   }
 ];
-
 const legacyTutorialSteps: TutorialStep[] = [
   {
     id: 'hello',
@@ -342,19 +566,6 @@ const legacyTutorialSteps: TutorialStep[] = [
     shopSubTab: 'gacha_shop'
   },
   {
-    id: 'shop-cosmetic-tools',
-    section: 'shop',
-    tab: 'shop',
-    title: '상품을 빠르게 찾기',
-    lines: [
-      '코스메틱이 많아지면 검색과 정렬을 같이 쓰면 편해요.',
-      '테두리와 이름 효과를 나누어 보고, 가격순이나 이름순으로 정리해서 원하는 상품을 찾을 수 있습니다.'
-    ],
-    tip: '페이지가 나뉘어 있어도 검색어나 정렬을 바꾸면 첫 페이지부터 다시 보여줘요.',
-    target: 'shop-cosmetic-tools',
-    shopSubTab: 'gacha_shop'
-  },
-  {
     id: 'shop-market',
     section: 'shop',
     tab: 'shop',
@@ -389,19 +600,6 @@ const legacyTutorialSteps: TutorialStep[] = [
     ],
     tip: '첫 입찰은 현재가 그대로 가능하고, 이후 입찰은 현재가보다 100P 이상 높게 넣어야 합니다.',
     target: 'shop-market',
-    shopSubTab: 'market'
-  },
-  {
-    id: 'shop-market-watch',
-    section: 'shop',
-    tab: 'shop',
-    title: '관심 매물 알림',
-    lines: [
-      '원하는 스트리머 카드가 장터에 올라왔을 때 알림을 받을 수 있어요.',
-      '등급과 최대 가격을 정해두면 조건에 맞는 매물이 등록될 때 사이트 알림과 푸시 알림으로 알려줍니다.'
-    ],
-    tip: '푸시 알림을 받으려면 내 정보에서 알림 구독을 먼저 허용해 주세요.',
-    target: 'shop-market-watch',
     shopSubTab: 'market'
   },
   {
@@ -1402,3 +1600,6 @@ export const startChikapoTutorial = () => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(MANUAL_START_EVENT));
 };
+
+
+

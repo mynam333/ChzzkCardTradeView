@@ -42,7 +42,7 @@ const IMAGE_PROXY_SLOW_REQUEST_LOG_MS = Math.max(
   Number(process.env.IMAGE_PROXY_SLOW_REQUEST_LOG_MS || 10_000)
 );
 const REQUEST_LOG_URL_MAX_LENGTH = Math.max(120, Number(process.env.REQUEST_LOG_URL_MAX_LENGTH || 300));
-const BODY_SIZE_LIMIT = process.env.API_BODY_SIZE_LIMIT || '50mb';
+const BODY_SIZE_LIMIT = process.env.API_BODY_SIZE_LIMIT || '2mb';
 
 const resolveProjectPath = (value: string): string =>
   path.isAbsolute(value) ? value : path.resolve(__dirname, '..', '..', value);

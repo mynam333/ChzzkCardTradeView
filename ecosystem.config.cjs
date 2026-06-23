@@ -4,12 +4,12 @@ module.exports = {
       name: 'chikapo-api',
       cwd: __dirname,
       script: 'backend/dist/server.js',
-      instances: process.env.API_INSTANCES || 4,
+      instances: process.env.API_INSTANCES || 2,
       exec_mode: 'cluster',
       wait_ready: true,
       listen_timeout: 15000,
       kill_timeout: 15000,
-      max_memory_restart: process.env.API_MAX_MEMORY_RESTART || '2G',
+      max_memory_restart: process.env.API_MAX_MEMORY_RESTART || '700M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'api'
@@ -21,7 +21,7 @@ module.exports = {
       script: 'backend/dist/workers/liveStatusWorker.js',
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: process.env.LIVE_WORKER_MAX_MEMORY_RESTART || '1G',
+      max_memory_restart: process.env.LIVE_WORKER_MAX_MEMORY_RESTART || '650M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'live-worker'
@@ -33,7 +33,7 @@ module.exports = {
       script: 'backend/dist/workers/schedulerWorker.js',
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: process.env.SCHEDULER_WORKER_MAX_MEMORY_RESTART || '1G',
+      max_memory_restart: process.env.SCHEDULER_WORKER_MAX_MEMORY_RESTART || '500M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'scheduler-worker'
@@ -45,7 +45,7 @@ module.exports = {
       script: 'backend/dist/workers/backupWorker.js',
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: process.env.BACKUP_WORKER_MAX_MEMORY_RESTART || '1G',
+      max_memory_restart: process.env.BACKUP_WORKER_MAX_MEMORY_RESTART || '450M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'backup-worker'
@@ -57,7 +57,7 @@ module.exports = {
       script: 'backend/dist/workers/imageProxyWorker.js',
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: process.env.IMAGE_WORKER_MAX_MEMORY_RESTART || '1G',
+      max_memory_restart: process.env.IMAGE_WORKER_MAX_MEMORY_RESTART || '450M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'image-worker'
@@ -72,7 +72,7 @@ module.exports = {
       wait_ready: true,
       listen_timeout: 15000,
       kill_timeout: 15000,
-      max_memory_restart: process.env.CHAT_WORKER_MAX_MEMORY_RESTART || '1G',
+      max_memory_restart: process.env.CHAT_WORKER_MAX_MEMORY_RESTART || '650M',
       env: {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'chat-worker'

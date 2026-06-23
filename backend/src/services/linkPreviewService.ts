@@ -22,7 +22,26 @@ const PREVIEW_TIMEOUT_MS = 2500;
 const MAX_HTML_BYTES = 512 * 1024;
 const SUCCESS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MEMORY_CACHE_MAX_ENTRIES = Math.max(50, Number(process.env.LINK_PREVIEW_MEMORY_CACHE_MAX_ENTRIES || 1000));
 const cache = new Map<string, { expiresAt: number; preview: ChatLinkPreview | null }>();
+
+const deleteOldestCacheEntry = () => {
+  const oldestKey = cache.keys().next().value;
+  if (oldestKey !== undefined) cache.delete(oldestKey);
+};
+
+const pruneMemoryCache = (now = Date.now()) => {
+  for (const [key, item] of cache) {
+    if (item.expiresAt <= now) cache.delete(key);
+  }
+  while (cache.size > MEMORY_CACHE_MAX_ENTRIES) deleteOldestCacheEntry();
+};
+
+const setMemoryCache = (normalizedUrl: string, item: { expiresAt: number; preview: ChatLinkPreview | null }) => {
+  cache.delete(normalizedUrl);
+  cache.set(normalizedUrl, item);
+  if (cache.size > MEMORY_CACHE_MAX_ENTRIES) pruneMemoryCache();
+};
 
 const trimText = (value?: string | null, max = 280) => {
   if (!value) return null;
@@ -301,11 +320,16 @@ export const getLinkPreviewForText = async (text: string): Promise<ChatLinkPrevi
   try {
     const normalized = await assertPublicHttpUrl(firstUrl);
     const cached = cache.get(normalized);
-    if (cached && cached.expiresAt > Date.now()) return cached.preview;
+    if (cached && cached.expiresAt > Date.now()) {
+      cache.delete(normalized);
+      cache.set(normalized, cached);
+      return cached.preview;
+    }
+    if (cached) cache.delete(normalized);
 
     const dbCached = await getCachedPreviewFromDb(normalized);
     if (dbCached.hit) {
-      cache.set(normalized, { preview: dbCached.preview, expiresAt: dbCached.expiresAt });
+      setMemoryCache(normalized, { preview: dbCached.preview, expiresAt: dbCached.expiresAt });
       return dbCached.preview;
     }
 
@@ -314,7 +338,7 @@ export const getLinkPreviewForText = async (text: string): Promise<ChatLinkPrevi
       ? await buildYoutubePreview(normalized, videoId)
       : await buildGenericPreview(normalized);
     const expiresAt = Date.now() + (preview ? SUCCESS_CACHE_TTL_MS : FAILURE_CACHE_TTL_MS);
-    cache.set(normalized, { preview, expiresAt });
+    setMemoryCache(normalized, { preview, expiresAt });
     await saveCachedPreviewToDb(normalized, preview);
     return preview;
   } catch {

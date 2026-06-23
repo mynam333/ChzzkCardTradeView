@@ -50,8 +50,9 @@ const IMAGE_PROXY_TIMEOUT_MS = readPositiveNumber('IMAGE_PROXY_TIMEOUT_MS', 4_00
 const IMAGE_PROXY_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_CACHE_TTL_MS', 24 * 60 * 60_000);
 const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS', 5 * 60_000);
 const IMAGE_PROXY_MAX_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_BYTES', 4 * 1024 * 1024);
-const IMAGE_PROXY_MAX_CACHE_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_BYTES', 64 * 1024 * 1024);
-const IMAGE_PROXY_MAX_CACHE_ENTRIES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_ENTRIES', 500);
+const IMAGE_PROXY_MAX_CACHE_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_BYTES', 16 * 1024 * 1024);
+const IMAGE_PROXY_MAX_CACHE_ENTRIES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_ENTRIES', 150);
+const IMAGE_PROXY_MAX_CACHE_ENTRY_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_ENTRY_BYTES', 512 * 1024);
 const IMAGE_PROXY_MAX_RESIZE_WIDTH = readPositiveNumber('IMAGE_PROXY_MAX_RESIZE_WIDTH', 768);
 const PSTATIC_RESIZE_TYPES = (process.env.IMAGE_PROXY_PSTATIC_TYPES || 'f60_60_na,f120_120_na,f240_240_na')
   .split(',')
@@ -170,7 +171,7 @@ const getCachedProxyImage = (key: string): ProxyCacheEntry | null => {
 };
 
 const setCachedProxyImage = (key: string, entry: ProxyCacheEntry) => {
-  if (entry.size > IMAGE_PROXY_MAX_BYTES) return;
+  if (entry.size > IMAGE_PROXY_MAX_CACHE_ENTRY_BYTES) return;
   const prev = proxyCache.get(key);
   if (prev) proxyCacheBytes -= prev.size;
   proxyCache.set(key, entry);

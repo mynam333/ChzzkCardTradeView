@@ -17,6 +17,7 @@ const DEFAULT_CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const ERROR_RETRY_MS = 30 * 60 * 1000;
 const SUBSCRIBER_PAGE_SIZE = 50;
 const RULES_CACHE_TTL_MS = Math.max(1_000, Number(process.env.SUBSCRIPTION_TITLE_RULES_CACHE_TTL_MS || 60_000));
+const SUBSCRIBER_LIST_CACHE_MAX_ENTRIES = Math.max(1, Number(process.env.CHZZK_SUBSCRIBER_LIST_CACHE_MAX_ENTRIES || 50));
 
 type SubscriberSetResult = { ok: true; subscribers: Set<string> } | { ok: false; reason: string };
 
@@ -24,6 +25,17 @@ const subscriberListCache = new Map<string, { expiresAt: number; fetchedAt: numb
 const subscriberListInFlight = new Map<string, Promise<SubscriberSetResult>>();
 let rulesCache: { data: SubscriptionTitleRule[]; expiresAt: number } | null = null;
 let rulesInFlight: Promise<SubscriptionTitleRule[]> | null = null;
+
+const pruneSubscriberListCache = (now = Date.now()) => {
+  for (const [key, item] of subscriberListCache) {
+    if (item.expiresAt <= now) subscriberListCache.delete(key);
+  }
+  while (subscriberListCache.size > SUBSCRIBER_LIST_CACHE_MAX_ENTRIES) {
+    const oldestKey = subscriberListCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    subscriberListCache.delete(oldestKey);
+  }
+};
 
 const clearSubscriptionTitleRulesCache = () => {
   rulesCache = null;
@@ -88,8 +100,11 @@ const fetchSubscriberSet = async (
   const cached = subscriberListCache.get(cacheKey);
   const now = Date.now();
   if (cached && (!forceRefresh || now - cached.fetchedAt < getSubscriberListForceMinMs()) && cached.expiresAt > now) {
+    subscriberListCache.delete(cacheKey);
+    subscriberListCache.set(cacheKey, cached);
     return { ok: true, subscribers: cached.subscribers };
   }
+  if (cached && cached.expiresAt <= now) subscriberListCache.delete(cacheKey);
 
   const inFlight = subscriberListInFlight.get(cacheKey);
   if (inFlight) return inFlight;
@@ -133,6 +148,7 @@ const fetchSubscriberSet = async (
       fetchedAt: Date.now(),
       subscribers
     });
+    pruneSubscriberListCache();
     return { ok: true as const, subscribers };
   })();
 
