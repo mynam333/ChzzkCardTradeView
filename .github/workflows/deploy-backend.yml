@@ -94,6 +94,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "
             set -euo pipefail
             cd '$DEPLOY_PATH'
+            trap 'rm -f '\''$RELEASE_NAME'\''' EXIT
             tar -xzf '$RELEASE_NAME' deploy.sh
             chmod +x deploy.sh
             ./deploy.sh '$DEPLOY_PATH/$RELEASE_NAME'

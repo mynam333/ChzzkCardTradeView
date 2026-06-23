@@ -95,8 +95,11 @@ const hasBackupForToday = (backupDir: string) => {
 };
 
 const pruneOldBackups = (backupDir: string) => {
-  const retentionDays = getNumberEnv('MYSQL_SQLITE_BACKUP_RETENTION_DAYS', 7, 1);
+  const retentionDays = getNumberEnv('MYSQL_SQLITE_BACKUP_RETENTION_DAYS', 1, 1);
+  const keepCount = Math.floor(getNumberEnv('MYSQL_SQLITE_BACKUP_KEEP_COUNT', 1, 0));
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const backupFiles = getBackupFiles(backupDir);
+  const keepFiles = new Set(backupFiles.slice(0, keepCount).map((file) => file.fullPath));
   let deleted = 0;
 
   if (!fs.existsSync(backupDir)) return deleted;
@@ -113,7 +116,10 @@ const pruneOldBackups = (backupDir: string) => {
 
     const isBackup = /^mysql-backup-\d{4}-\d{2}-\d{2}-\d{6}\.sqlite$/.test(entry);
     const isStaleTmp = /^\.mysql-backup-.*\.tmp$/.test(entry);
-    if ((isBackup && stat.mtimeMs < cutoff) || (isStaleTmp && stat.mtimeMs < Date.now() - 24 * 60 * 60 * 1000)) {
+    const exceedsKeepCount = isBackup && !keepFiles.has(fullPath);
+    const expired = isBackup && stat.mtimeMs < cutoff && !keepFiles.has(fullPath);
+    const staleTmp = isStaleTmp && stat.mtimeMs < Date.now() - 24 * 60 * 60 * 1000;
+    if (exceedsKeepCount || expired || staleTmp) {
       try {
         fs.unlinkSync(fullPath);
         deleted++;
@@ -333,7 +339,7 @@ export const startMysqlSqliteBackupScheduler = () => {
     }
   });
 
-  console.log(`[MySQLBackup] MySQL -> SQLite 일일 백업 스케줄러가 가동되었습니다. (${expression}, 보관 ${getNumberEnv('MYSQL_SQLITE_BACKUP_RETENTION_DAYS', 7, 1)}일)`);
+  console.log(`[MySQLBackup] MySQL -> SQLite 일일 백업 스케줄러가 가동되었습니다. (${expression}, 최신 ${getNumberEnv('MYSQL_SQLITE_BACKUP_KEEP_COUNT', 1, 0)}개 보관)`);
 };
 
 export const stopMysqlSqliteBackupScheduler = () => {

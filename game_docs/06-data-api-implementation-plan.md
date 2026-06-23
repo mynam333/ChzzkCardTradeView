@@ -55,7 +55,7 @@
 - `description`
 - `tags_json`
 - `effect_json`
-- `exclusive_group`
+- `effect_axis`
 - `risk_level`: low/medium/high
 - `passive_type`: combat/support/explore/variable
 - `is_active`
@@ -91,9 +91,9 @@
 
 - 스탯 총합 20
 - 스탯별 최대치 준수
-- 패시브 2개 중복 금지
+- 같은 패시브 2회 선택은 허용하지 않되, 서로 다른 패시브 조합은 금지하지 않음
 - 클래스 허용 태그와 패시브 태그 매칭
-- exclusive group 충돌 금지
+- 같은 효과 축 중첩 시 점감/상한 규칙 적용
 
 ### 3.5 `frontier_expeditions`
 
@@ -126,7 +126,7 @@
 - `name`
 - `description`
 - `difficulty`
-- `recommended_role_groups_json`
+- `score_axis_weights_json`
 - `event_pool_json`
 - `reward_table_json`
 - `is_active`
@@ -177,7 +177,6 @@
       "channel_id": "channel-id",
       "streamer_name": "스트리머",
       "star": 3,
-      "base_value_bucket": "mid",
       "class": {
         "id": 1,
         "code": "iron_host",
@@ -205,10 +204,9 @@
           "effect": {}
         }
       ],
-      "party_cost": 12
+      "effect_axes": ["protect", "survival"]
     }
   ],
-  "total_cost": 46,
   "role_groups": ["vanguard", "support", "strike", "explore"],
   "created_at": "2026-06-24T00:00:00.000Z"
 }
@@ -286,7 +284,7 @@
 2. 중복 카드 확인
 3. 카드별 스트리머 빌드 조회
 4. 미설정 스트리머는 기본 빌드 적용
-5. 파티 코스트 확인
+5. 효과 축 중첩과 점감 규칙 계산
 6. 스냅샷 생성
 7. 원정 row 생성
 
@@ -375,9 +373,9 @@
 - 패시브 목록 관리
 - 클래스 활성/비활성
 - 패시브 활성/비활성
-- 금지 조합 관리
+- 점감/상한 규칙 관리
 - 시즌 보너스 설정
-- 지역별 추천 역할군 설정
+- 지역별 판정 축 비중 설정
 - 보상 테이블 설정
 - 클래스/패시브 선택률 통계
 - 원정 보상 지급량 통계
@@ -426,7 +424,7 @@
 - 선택률 통계
 - 보상 지급량 통계
 - 시즌 보너스 조정
-- 금지 조합 관리
+- 점감/상한 규칙 관리
 
 ### 10.5 5단계: 확장 콘텐츠
 
@@ -439,10 +437,10 @@
 
 - 스탯 총합이 20이 아니면 저장 실패
 - 허용 태그가 맞지 않는 패시브 선택 실패
-- exclusive group 충돌 실패
+- 같은 효과 축 중첩 시 점감/상한 규칙이 적용된다
 - 스트리머가 아닌 유저는 빌드 저장 실패
 - 원정 시작 시 보유하지 않은 카드 사용 실패
-- 같은 카드 중복 편성 실패
+- 같은 카드 인스턴스 중복 편성 실패
 - 완료 전 claim 실패
 - 같은 원정 claim 동시 요청 시 보상 1회만 지급
 - 같은 seed와 snapshot은 같은 결과 반환

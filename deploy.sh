@@ -9,9 +9,25 @@ RELEASE_DIR="${RELEASE_ROOT}/${TIMESTAMP}"
 LOCK_FILE="${PROJECT_DIR}/deploy.lock"
 API_APP_NAME="${API_APP_NAME:-chikapo-api}"
 WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker}"
-KEEP_RELEASES="${KEEP_RELEASES:-5}"
+KEEP_RELEASES="${KEEP_RELEASES:-0}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
 CLEANUP_RELEASE_ARTIFACTS="${CLEANUP_RELEASE_ARTIFACTS:-true}"
+
+cleanup_release_artifacts() {
+  if [ "${CLEANUP_RELEASE_ARTIFACTS}" != "true" ]; then
+    return 0
+  fi
+  if [ -n "${RELEASE_ROOT:-}" ] && [ -d "${RELEASE_ROOT}" ]; then
+    find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  fi
+  if [ -n "${RELEASE_ARCHIVE:-}" ]; then
+    rm -f "${RELEASE_ARCHIVE}"
+  fi
+  if [ -n "${PROJECT_DIR:-}" ] && [ -d "${PROJECT_DIR}" ]; then
+    find "${PROJECT_DIR}" -maxdepth 1 -type f -name 'backend-release-*.tar.gz' -delete
+  fi
+}
+trap cleanup_release_artifacts EXIT
 
 resolve_command() {
   local command_name="$1"
@@ -307,6 +323,26 @@ run_mysql_backup() {
   return 1
 }
 
+prune_mysql_deploy_backups() {
+  local keep_count="${DB_BACKUP_KEEP_COUNT:-1}"
+  local backup_dir="backups"
+
+  if ! [[ "${keep_count}" =~ ^[0-9]+$ ]]; then
+    keep_count=1
+  fi
+  [ "${keep_count}" -ge 0 ] || keep_count=1
+  [ -d "${backup_dir}" ] || return 0
+
+  find "${backup_dir}" -maxdepth 1 -type f \( \
+      -name 'mysql-before-update-*.sql' -o \
+      -name 'mysql-before-update-*.sql.tmp' -o \
+      -name 'mysql-before-update-*.sql.err' \
+    \) -printf '%T@ %p\n' \
+    | sort -rn \
+    | tail -n +$((keep_count + 1)) \
+    | cut -d' ' -f2- \
+    | xargs -r rm -f
+}
 run_mysql_schema() {
   local attempt=1
   local err_file="backups/mysql-schema-${TIMESTAMP}.err"
@@ -362,15 +398,19 @@ if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2
       echo "[deploy] check DB VM/service, private IP route, firewall/security-list, MYSQL_HOST/MYSQL_PORT, and DB credentials."
       if [ "${SKIP_DB_BACKUP_ON_FAILURE:-false}" = "true" ]; then
         echo "[deploy] continue because SKIP_DB_BACKUP_ON_FAILURE=true"
+        prune_mysql_deploy_backups
       else
         echo "[deploy] aborting before app replacement to avoid deploying without a fresh DB backup."
         exit 2
       fi
+    else
+      prune_mysql_deploy_backups
     fi
   else
     echo "[deploy] mysql backup skipped: MYSQL_* or DB_* env is incomplete"
   fi
 fi
+prune_mysql_deploy_backups
 
 NEED_INSTALL=false
 if [ ! -d "node_modules" ] || [ ! -d "backend/node_modules" ]; then
@@ -486,8 +526,7 @@ done
 
 if [ "${CLEANUP_RELEASE_ARTIFACTS}" = "true" ]; then
   echo "[deploy] cleanup release artifacts"
-  rm -rf "${RELEASE_DIR}"
-  rm -f "${RELEASE_ARCHIVE}"
+  cleanup_release_artifacts
 else
   echo "[deploy] prune old releases"
   find "${RELEASE_ROOT}" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n +"$((KEEP_RELEASES + 1))" | xargs -r rm -rf
