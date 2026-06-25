@@ -143,10 +143,10 @@ const loadOwnedArenaChannelIds = async (userId: string): Promise<Set<string>> =>
 };
 
 const normalizeCardsInput = (body: any): ArenaDeckCardRef[] => {
-  const source = Array.isArray(body?.cards)
-    ? body.cards
-    : Array.isArray(body?.card_ids)
-      ? body.card_ids
+  const source = Array.isArray(body?.card_ids)
+    ? body.card_ids
+    : Array.isArray(body?.cards)
+      ? body.cards
       : [];
 
   return source
@@ -536,7 +536,7 @@ export const updateArenaDeck = async (userId: string, deckId: string, body: any)
   const cardListChanged = Array.isArray(body?.cards) || Array.isArray(body?.card_ids);
   const validation = await validateArenaDeckInput({
     ...body,
-    cards: body?.cards ?? existing.cards,
+    cards: Array.isArray(body?.card_ids) ? body.card_ids : body?.cards ?? existing.cards,
     round_plans: cardListChanged ? [] : body?.round_plans ?? existing.round_plans,
     strategy_chip_id: body?.strategy_chip_id ?? existing.strategy_chip_id
   }, userId);

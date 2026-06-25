@@ -1774,21 +1774,8 @@ html.easter-egg-mode .card-container {
   .arena-metric-tile::after,
   .arena-panel-soft::after,
   .arena-empty-state::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.38) 48%, transparent 66%);
-    opacity: 0;
-    transform: translateX(-36%);
-    transition: opacity 180ms ease, transform 520ms ease;
-  }
-
-  .arena-metric-tile:hover::after,
-  .arena-panel-soft:hover::after,
-  .arena-empty-state:hover::after {
-    opacity: 0.72;
-    transform: translateX(36%);
+    content: none;
+    display: none;
   }
 
   .arena-card-preview {

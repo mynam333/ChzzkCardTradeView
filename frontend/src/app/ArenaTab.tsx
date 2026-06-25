@@ -478,6 +478,16 @@ const cupStageLabels: Record<string, string> = {
 
 const ARENA_ROUND_NOS = [1, 2, 3, 4, 5] as const;
 const ARENA_DECK_CARD_LIMIT = 10;
+const ARENA_PLAY_CARD_PREVIEW_LIMIT = 12;
+
+const pickRandomArenaCards = (items: ArenaCard[], limit = ARENA_PLAY_CARD_PREVIEW_LIMIT) => {
+  if (items.length <= limit) return items;
+  return items
+    .map((item) => ({ item, sort: Math.random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .slice(0, limit)
+    .map(({ item }) => item);
+};
 
 const createArenaEventSource = (path: string) => {
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') return null;
@@ -1518,6 +1528,36 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
   );
 };
 
+const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
+  const primarySkill = card.skills[0];
+  const statTotal = getCardStatTotal(card);
+  const initial = card.name.trim().slice(0, 1) || 'A';
+  return (
+    <article className="arena-card-preview cute-card-pop group rounded-3xl border border-white/70 bg-white/82 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/72">
+      <div className="flex items-center gap-3">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-primary/10 text-primary shadow-sm">
+          {card.image_url ? (
+            <img src={card.image_url} alt={card.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-lg font-black">{initial}</div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <h3 className="min-w-0 truncate text-sm font-black text-foreground">{card.name}</h3>
+            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">합 {statTotal}</span>
+          </div>
+          <p className="mt-1 truncate text-[11px] font-bold text-muted-foreground">
+            {card.class.name} · {roleLabels[card.class.role] || card.class.role}
+          </p>
+          {primarySkill ? (
+            <p className="mt-1 truncate text-[10px] font-black text-primary">{primarySkill.name}</p>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+};
 const arenaCosmeticTypeLabels: Record<ArenaShopItem['type'], string> = {
   border: '프로필 프레임',
   name_effect: '이름 연출',
@@ -2863,8 +2903,14 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     : selectedReplayMatch?.result === 'win' ? '승리' : selectedReplayMatch?.result === 'loss' ? '패배' : '무승부';
   const roundRevealResultLabel = roundReveal?.roundWinner === 'player' ? '라운드 승리' : roundReveal?.roundWinner === 'bot' ? '라운드 패배' : '라운드 무승부';
   const isArenaAdmin = user?.role === 'ADMIN';
-  const displayedCards = user ? ownedCards : cards;
+  const playPreviewCards = React.useMemo(() => (
+    user ? pickRandomArenaCards(ownedCards) : pickRandomArenaCards(cards)
+  ), [cards, ownedCards, user]);
+  const displayedCards = playPreviewCards;
   const hasArenaCards = displayedCards.length > 0;
+  const playCardPoolLoading = user ? ownedCardsLoading && ownedCards.length === 0 : loading && cards.length === 0;
+  const playCardPoolError = user ? ownedCardsError : previewError;
+  const reloadPlayCardPool = user ? loadMyOwnedArenaCards : loadArenaPreview;
   const primaryCtaLabel = user
     ? hasArenaCards ? '내 덱 준비하기' : '카드 풀 보기'
     : '로그인하기';
@@ -3900,16 +3946,16 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-black text-foreground">아레나 카드 풀</h2>
-                {!hasArenaCards && !loading ? (
+                {!hasArenaCards && !playCardPoolLoading ? (
                   <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-black text-muted-foreground">
                     비어 있음
                   </span>
                 ) : null}
               </div>
               <p className="mt-1 text-xs font-bold text-muted-foreground">
-                {!hasArenaCards && !loading
+                {!hasArenaCards && !playCardPoolLoading
                   ? '아직 확인할 수 있는 아레나 카드가 없습니다.'
-                : '카드별 클래스, 스탯, 스킬, 태그를 확인하고 덱 후보를 고르세요.'}
+                : '소유 중인 아레나 카드 중 최대 12장을 무작위로 보여줍니다. 전체 목록과 덱 편집은 보관함과 덱 편집 영역에서 확인하세요.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -3932,29 +3978,29 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
             </div>
           </div>
 
-          {loading && cards.length === 0 ? (
+          {playCardPoolLoading ? (
             <ArenaCardSkeletonGrid />
-          ) : previewError ? (
+          ) : playCardPoolError ? (
             <ArenaStateNotice
               variant="error"
               title="카드 풀을 불러오지 못했습니다"
-              description={previewError}
+              description={playCardPoolError}
               actionLabel="다시 불러오기"
-              onAction={loadArenaPreview}
-              disabled={loading}
+              onAction={reloadPlayCardPool}
+              disabled={playCardPoolLoading}
             />
           ) : displayedCards.length === 0 ? (
             <ArenaStateNotice
               title="아직 보여줄 카드가 없습니다"
               description="아레나 카드가 등록되면 클래스, 스탯, 스킬을 이곳에서 확인할 수 있습니다."
               actionLabel="다시 불러오기"
-              onAction={loadArenaPreview}
-              disabled={loading}
+              onAction={reloadPlayCardPool}
+              disabled={playCardPoolLoading}
             />
           ) : (
             <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {displayedCards.map((card) => (
-                <ArenaCardPreview key={card.card_id} card={card} />
+                <ArenaCompactCardPreview key={card.card_id} card={card} />
               ))}
             </div>
           )}
