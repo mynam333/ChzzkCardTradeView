@@ -303,6 +303,8 @@ type ArenaShopItem = {
 export type ArenaSiteTab = 'play' | 'inventory' | 'ranking' | 'style' | 'admin';
 type ArenaStyleFilter = 'all' | 'border' | 'name_effect' | 'emote';
 
+const arenaMatchHref = (matchId: string) => `/arena/matches?match_id=${encodeURIComponent(matchId)}`;
+
 type ArenaRoundReveal = {
   roundNo: number;
   stage: 'battle' | 'result';
@@ -431,6 +433,45 @@ const ArenaSkillTooltip: React.FC<{ skill: ArenaCard['skills'][number]; children
     {children}
   </ArenaInfoTooltip>
 );
+
+const ArenaSkillList: React.FC<{
+  skills?: ArenaCard['skills'];
+  compact?: boolean;
+  max?: number;
+}> = ({ skills = [], compact = false, max = 3 }) => {
+  const visibleSkills = skills.slice(0, max);
+  if (visibleSkills.length === 0) return null;
+  return (
+    <div className={compact ? 'mt-1 flex min-w-0 flex-wrap gap-1' : 'mt-3 space-y-1.5'}>
+      {visibleSkills.map((skill) => (
+        compact ? (
+          <ArenaSkillTooltip key={skill.id} skill={skill}>
+            <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/65 px-2 py-0.5 text-[9px] font-black text-primary dark:bg-white/10">
+              <span className="shrink-0 text-muted-foreground">{arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type}</span>
+              <span className="truncate">{skill.name}</span>
+            </span>
+          </ArenaSkillTooltip>
+        ) : (
+          <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-[11px] font-black text-foreground">
+                <ArenaSkillTooltip skill={skill}>
+                  <span>{skill.name}</span>
+                </ArenaSkillTooltip>
+              </p>
+              <ArenaSkillTooltip skill={skill}>
+                <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[8px] font-black text-muted-foreground dark:bg-white/10">
+                  {arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type}
+                </span>
+              </ArenaSkillTooltip>
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-[10px] font-bold text-muted-foreground">{skill.description}</p>
+          </div>
+        )
+      ))}
+    </div>
+  );
+};
 
 const arenaTagMeta: Record<string, ArenaTagMeta> = {
   guardian: { label: '수호', description: '보호막과 아군 보호 효율을 높이는 방어 태그입니다.' },
@@ -1542,10 +1583,9 @@ const ArenaReplayPanel: React.FC<{
   );
 };
 const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
-  const primarySkill = card.skills[0];
   const tone = roleToneClass[card.class.role] || roleToneClass.tempo;
   const initial = card.name.trim().slice(0, 1) || 'A';
-  const visibleTags = primarySkill?.tags?.slice(0, 3) || [];
+  const visibleTags = Array.from(new Set(card.skills.flatMap((skill) => skill.tags || []))).slice(0, 4);
   return (
     <article className="arena-card-preview cute-card-pop group overflow-hidden rounded-3xl border border-white/70 bg-white/86 shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/78">
       <div className={`arena-card-media relative aspect-[4/3] overflow-hidden bg-gradient-to-br ${tone}`}>
@@ -1592,17 +1632,9 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
             </ArenaStatTooltip>
           ))}
         </div>
-        {primarySkill ? (
+        {card.skills.length > 0 ? (
           <div className="arena-skill-panel rounded-2xl border border-primary/15 px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <ArenaSkillTooltip skill={primarySkill} className="min-w-0">
-                <span className="min-w-0 truncate text-[10px] font-black text-primary">{primarySkill.name}</span>
-              </ArenaSkillTooltip>
-              <ArenaSkillTooltip skill={primarySkill}>
-                <span className="shrink-0 rounded-full bg-white/68 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10">{arenaSkillSlotLabels[primarySkill.type as ArenaSkillSlotType] || primarySkill.type}</span>
-              </ArenaSkillTooltip>
-            </div>
-            <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-relaxed text-muted-foreground">{primarySkill.description}</p>
+            <ArenaSkillList skills={card.skills} />
             {visibleTags.length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1">
                 {visibleTags.map((tag) => <ArenaTagBadge key={tag} tag={tag} />)}
@@ -1616,7 +1648,6 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
 };
 
 const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
-  const primarySkill = card.skills[0];
   const initial = card.name.trim().slice(0, 1) || 'A';
   return (
     <article className="arena-card-preview cute-card-pop group rounded-3xl border border-white/70 bg-white/82 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/72">
@@ -1641,13 +1672,7 @@ const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
               <span>{roleLabels[card.class.role] || card.class.role}</span>
             </ArenaRoleTooltip>
           </p>
-          {primarySkill ? (
-            <p className="mt-1 truncate text-[10px] font-black text-primary">
-              <ArenaSkillTooltip skill={primarySkill}>
-                <span>{primarySkill.name}</span>
-              </ArenaSkillTooltip>
-            </p>
-          ) : null}
+          <ArenaSkillList skills={card.skills} compact />
         </div>
       </div>
     </article>
@@ -2344,7 +2369,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     setRoundCommitTactic(nextPlan?.tactic_style || 'balanced');
     setRoundCommitFocus(nextPlan?.focus_rule || 'frontline_first');
     setRoundCommitChipId(match?.summary?.player_deck?.strategy_chip_id || 'none');
-    if (match?.id) router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
+    if (match?.id) router.push(arenaMatchHref(match.id));
   }, [router]);
 
   const notifyArenaQueueMatched = React.useCallback((kind: 'quick' | 'cup', id: string | null | undefined) => {
@@ -2358,7 +2383,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       body: kind === 'quick'
         ? '상대가 잡혔습니다. 라운드 전술을 선택하세요.'
         : '8인 컵 결과가 도착했습니다. 결과와 리플레이를 확인하세요.',
-      url: kind === 'quick' ? `/arena/matches/${encodeURIComponent(id)}` : '/arena/play'
+      url: kind === 'quick' ? arenaMatchHref(id) : '/arena/play'
     });
   }, []);
   const loadQuickMatchStatus = React.useCallback(async (showToast = false) => {
@@ -2528,7 +2553,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       setRoundCommitFocus(nextPlan?.focus_rule || 'frontline_first');
       setRoundCommitChipId(match?.summary?.player_deck?.strategy_chip_id || 'none');
       toast('봇 연습전이 준비되었습니다. 1라운드 전술을 선택해 시작하세요.', 'success');
-      if (match?.id) router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
+      if (match?.id) router.push(arenaMatchHref(match.id));
     } catch (err: any) {
       toast(err?.message || '봇 연습전 생성에 실패했습니다.', 'error');
     } finally {
@@ -2676,7 +2701,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   const loadRecentMatchReplay = async (match: ArenaRecentMatch) => {
     try {
       if (isArenaMatchInProgress(match)) {
-        router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
+        router.push(arenaMatchHref(match.id));
         setSelectedReplayMatch(match);
         setRoundWait(match.summary?.pending_round_input?.deadline_at ? {
           roundNo: match.summary.pending_round_input.round_no,
@@ -2704,7 +2729,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       setSelectedReplayMatch(match);
       setSelectedReplay(data.data || null);
       toast('최근 경기 리플레이를 불러왔습니다.', 'success');
-      router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
+      router.push(arenaMatchHref(match.id));
     } catch (err: any) {
       toast(err?.message || '최근 경기 리플레이를 불러오지 못했습니다.', 'error');
     }
@@ -3618,18 +3643,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             </ArenaStatTooltip>
                           ))}
                         </div>
-                        <div className="mt-3 space-y-1.5">
-                          {card.skills.slice(0, 2).map((skill) => (
-                            <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2">
-                              <p className="truncate text-[11px] font-black text-foreground">
-                                <ArenaSkillTooltip skill={skill}>
-                                  <span>{skill.name}</span>
-                                </ArenaSkillTooltip>
-                              </p>
-                              <p className="mt-0.5 line-clamp-2 text-[10px] font-bold text-muted-foreground">{skill.description}</p>
-                            </div>
-                          ))}
-                        </div>
+                        <ArenaSkillList skills={card.skills} />
                       </div>
                     </article>
                   ))}
@@ -4677,7 +4691,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                                   <ArenaClassTooltip cardClass={card.class}>
                                     <span>{card.class.name}</span>
                                   </ArenaClassTooltip>
-                                  {card.skills.slice(0, 2).map((skill) => (
+                                  {card.skills.slice(0, 3).map((skill) => (
                                     <React.Fragment key={skill.id}>
                                       <span> · </span>
                                       <ArenaSkillTooltip skill={skill}>
