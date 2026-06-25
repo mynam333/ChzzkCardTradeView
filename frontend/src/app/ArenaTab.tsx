@@ -2660,7 +2660,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || '관전 공유 링크를 만들지 못했습니다.');
       const token = data.data?.token;
-      const url = token ? `${window.location.origin}/arena?share=${encodeURIComponent(token)}` : '';
+      const url = token ? `${window.location.origin}/arena/spectate?share=${encodeURIComponent(token)}` : '';
       if (url && navigator.clipboard) await navigator.clipboard.writeText(url);
       toast(url ? '관전 공유 링크를 복사했습니다.' : '관전 공유 링크를 만들었습니다.', 'success');
     } catch (err: any) {
@@ -2674,29 +2674,8 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     if (typeof window === 'undefined') return;
     const token = new URLSearchParams(window.location.search).get('share');
     if (!token) return;
-    let cancelled = false;
-    setSpectatorLoading(true);
-    setSpectatorError(null);
-    apiFetch(`/arena/spectator/share/${encodeURIComponent(token)}`)
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.message || '관전 공유 리플레이를 찾을 수 없습니다.');
-        if (!cancelled) {
-          setSpectatorReplay(data.data || null);
-          setSpectatorShareToken(token);
-        }
-      })
-      .catch((err: any) => {
-        if (!cancelled) {
-          setSpectatorReplay(null);
-          setSpectatorError(err?.message || '관전 공유 리플레이를 불러오지 못했습니다.');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSpectatorLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
+    router.replace(`/arena/spectate?share=${encodeURIComponent(token)}`);
+  }, [router]);
 
   const loadRecentMatchReplay = async (match: ArenaRecentMatch) => {
     try {

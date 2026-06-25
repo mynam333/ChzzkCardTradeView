@@ -209,19 +209,19 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 0.75rem;
   padding: 1rem;
 }
 
 .arena-battle-row.is-player-row {
-  grid-template-columns: 9.5rem minmax(0, 1fr);
   padding-top: 0;
 }
 
 .arena-combat-portrait {
   display: flex;
+  width: min(100%, 18rem);
   min-width: 0;
   align-items: center;
   gap: 0.65rem;
@@ -231,6 +231,14 @@
   padding: 0.55rem;
   box-shadow: 0 12px 28px rgba(244, 63, 94, 0.12);
   backdrop-filter: blur(12px);
+}
+
+.arena-battle-row.is-opponent-row .arena-combat-portrait {
+  justify-self: center;
+}
+
+.arena-battle-row.is-player-row .arena-combat-portrait {
+  justify-self: center;
 }
 
 .dark .arena-combat-portrait {
@@ -260,7 +268,7 @@
 
 .arena-combat-lane-labels {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
   padding: 0 0.25rem 0.3rem;
   text-align: center;
@@ -269,7 +277,7 @@
   color: var(--muted-foreground);
 }
 
-.arena-combat-lane-labels span:nth-child(2) {
+.arena-combat-lane-labels .is-frontline {
   color: var(--primary);
 }
 
@@ -286,6 +294,9 @@
 
 .arena-combat-card {
   position: relative;
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  align-items: stretch;
   min-height: 6.2rem;
   overflow: hidden;
   border-radius: 1.2rem;
@@ -310,18 +321,22 @@
 }
 
 .arena-combat-card-media {
-  height: 3.3rem;
+  min-height: 6.2rem;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.7);
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.9), transparent 62%),
+    rgba(255, 255, 255, 0.7);
+  padding: 0.25rem;
 }
 
 .arena-combat-card-body {
-  padding: 0.45rem 0.5rem 1rem;
+  min-width: 0;
+  padding: 0.6rem 0.55rem 1.15rem 0.5rem;
 }
 
 .arena-combat-hp {
   position: absolute;
-  left: 0.5rem;
+  left: 4.75rem;
   right: 0.5rem;
   bottom: 0.45rem;
   height: 0.34rem;
@@ -413,6 +428,33 @@
   position: absolute;
   inset: 0;
   background: repeating-linear-gradient(-35deg, rgba(15, 23, 42, 0.14) 0 0.35rem, rgba(255, 255, 255, 0.08) 0.35rem 0.7rem);
+}
+
+.arena-combat-card.is-hidden-card {
+  display: flex;
+  min-height: 6.2rem;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-style: dashed;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.78), transparent 44%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 228, 230, 0.48));
+}
+
+.arena-hidden-card-mark {
+  display: flex;
+  height: 2.15rem;
+  width: 2.15rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--primary);
+  font-size: 1rem;
+  font-weight: 900;
+  box-shadow: 0 10px 18px rgba(244, 63, 94, 0.12);
 }
 
 .arena-combat-card.vfx-attack .arena-combat-vfx,
@@ -559,8 +601,16 @@
     min-height: 5.7rem;
   }
 
+  .arena-combat-card {
+    grid-template-columns: 3.75rem minmax(0, 1fr);
+  }
+
   .arena-combat-card-media {
-    height: 2.9rem;
+    min-height: 5.7rem;
+  }
+
+  .arena-combat-hp {
+    left: 4.25rem;
   }
 
   .arena-battle-centerline {

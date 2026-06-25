@@ -38,7 +38,7 @@ type RoundWaitState = {
   deadlineAt: string;
 };
 
-type RoundRevealState = {
+export type RoundRevealState = {
   roundNo: number;
   stage: 'battle' | 'result';
   winner: 'player' | 'bot' | 'draw';
@@ -72,19 +72,19 @@ const focusOptions = [
   ['highest_attack', '고화력']
 ] as const;
 
-const resultLabel = (result?: ArenaMatchViewDto['result']) => (
+export const resultLabel = (result?: ArenaMatchViewDto['result']) => (
   result === 'win' ? '승리' : result === 'loss' ? '패배' : result === 'draw' ? '무승부' : '진행 중'
 );
 
 const normalizeArenaProgressStatus = (status?: unknown) => String(status || '').trim().toLowerCase();
-const isArenaMatchCompleted = (match?: Pick<ArenaMatchViewDto, 'summary' | 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'> | null) => {
+export const isArenaMatchCompleted = (match?: Pick<ArenaMatchViewDto, 'summary' | 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'> | null) => {
   const status = normalizeArenaProgressStatus(match?.summary?.progress_status);
   if (status === 'completed') return true;
   if (status === 'in_progress') return false;
   return Number(match?.player_a_round_wins || 0) >= 3 || Number(match?.player_b_round_wins || 0) >= 3 || Number(match?.round_count || 0) >= 5;
 };
 
-const winnerLabel = (winner?: string) => (
+export const winnerLabel = (winner?: string) => (
   winner === 'player' ? '내 라운드 승리' : winner === 'bot' ? '상대 라운드 승리' : '라운드 무승부'
 );
 
@@ -94,20 +94,20 @@ const arenaSkillSlotLabels: Record<string, string> = {
   ultimate: '궁극기'
 };
 
-type SelectedRoundSlot = {
+export type SelectedRoundSlot = {
   card_id: string;
   row: 0 | 1;
   col: 0 | 1 | 2;
 };
 
-type ArenaRuleSkill = {
+export type ArenaRuleSkill = {
   id: string;
   name?: string;
   type?: string;
   description?: string;
 };
 
-type ArenaRuleClass = {
+export type ArenaRuleClass = {
   id?: string;
   class_id?: string;
   name?: string;
@@ -125,7 +125,7 @@ type ArenaShopItem = {
   font_family?: string | null;
 };
 
-type ArenaCosmeticLoadout = {
+export type ArenaCosmeticLoadout = {
   user_id: string;
   border_item_id: number | null;
   name_effect_item_id: number | null;
@@ -193,7 +193,7 @@ const getClassDescription = (card: ArenaSnapshotCardDto, classLookup: Map<string
   return '카드의 전투 역할과 기본 스탯 성향을 결정하는 클래스입니다.';
 };
 
-const formatDateTime = (value?: string | null) => {
+export const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
@@ -208,7 +208,7 @@ const formatDateTime = (value?: string | null) => {
 const getRoundPlan = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number): ArenaRoundPlanDto | undefined =>
   deck?.round_plans?.find((plan) => plan.round_no === roundNo) || deck?.round_plans?.[0];
 
-const getRoundCards = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number): ArenaSnapshotCardDto[] => {
+export const getRoundCards = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number): ArenaSnapshotCardDto[] => {
   if (!deck?.cards?.length) return [];
   const plan = getRoundPlan(deck, roundNo);
   if (!plan?.slots?.length) return deck.cards.slice(0, 6);
@@ -219,7 +219,7 @@ const getRoundCards = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number):
   return planned.length > 0 ? planned : deck.cards.slice(0, 6);
 };
 
-const getRoundSlots = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number): SelectedRoundSlot[] => {
+export const getRoundSlots = (deck: ArenaDeckSnapshotDto | undefined, roundNo: number): SelectedRoundSlot[] => {
   if (!deck?.cards?.length) return [];
   const cardIds = new Set(deck.cards.map((card) => card.card_id));
   const plan = getRoundPlan(deck, roundNo);
@@ -342,22 +342,21 @@ const FormationSlotBoard: React.FC<{
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <p className="text-[10px] font-black text-primary">출전 배치</p>
-          <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">가운데 열이 전열, 양쪽 열이 후열입니다.</p>
+          <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">상단이 전열, 하단이 후열입니다.</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${slots.length === ARENA_ACTIVE_SLOT_COUNT ? 'bg-primary/10 text-primary' : 'bg-amber-100 text-amber-700 dark:bg-amber-300/10 dark:text-amber-100'}`}>
           {slots.length}/{ARENA_ACTIVE_SLOT_COUNT}
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-1.5 pb-1 text-center text-[9px] font-black text-muted-foreground">
-        <span>후열</span>
-        <span className="text-primary">전열</span>
-        <span>후열</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {[0, 1].map((row) => (
-          <React.Fragment key={row}>
+      <div className="space-y-2">
+        {[
+          { label: '전열', row: 1 as const },
+          { label: '후열', row: 0 as const }
+        ].map(({ label, row }, displayRowIndex) => (
+          <div key={row} className="grid grid-cols-[2.5rem_repeat(3,minmax(0,1fr))] gap-2">
+            <div className={`flex items-center justify-center rounded-2xl text-[9px] font-black ${row === 1 ? 'bg-primary/10 text-primary' : 'bg-secondary/52 text-muted-foreground'}`}>{label}</div>
             {[0, 1, 2].map((col) => {
-              const slotIndex = row * 3 + col;
+              const slotIndex = displayRowIndex * 3 + col;
               const slot = ordered.find((item) => item.row === row && item.col === col);
               const card = slot ? byId.get(slot.card_id) : null;
               const isDragging = draggingCardId && slot?.card_id === draggingCardId;
@@ -381,7 +380,7 @@ const FormationSlotBoard: React.FC<{
                       ? 'border-primary/25 bg-gradient-to-br from-white to-rose-50 shadow-sm dark:from-white/10 dark:to-rose-300/10'
                       : 'border-dashed border-rose-200 bg-rose-50/45 dark:border-rose-300/20 dark:bg-rose-300/8'
                   } ${isDragging ? 'opacity-45' : ''} ${disabled ? 'cursor-default' : 'hover:-translate-y-0.5 hover:border-primary/45'}`}
-                  aria-label={card ? `${card.name} 슬롯 제거` : `${col === 1 ? '전열' : '후열'} ${row + 1} 슬롯`}
+                  aria-label={card ? `${card.name} 슬롯 제거` : `${label} ${col + 1} 슬롯`}
                 >
                   {card ? (
                     <span className="flex min-w-0 items-center gap-2">
@@ -408,7 +407,7 @@ const FormationSlotBoard: React.FC<{
                 </button>
               );
             })}
-          </React.Fragment>
+          </div>
         ))}
       </div>
     </div>
@@ -544,11 +543,11 @@ const ArenaCombatCard: React.FC<{
   const statusLabel = retired ? 'RETIRE' : hit ? `-${currentValue || 'HIT'}` : controlEvent ? '상태 이상' : skillEvent ? 'SKILL' : acting ? (vfxKind === 'ultimate' ? 'ULTIMATE' : 'ATTACK') : '';
   return (
     <article
-      className={`arena-combat-card is-${side} ${slot.col === 1 ? 'is-frontline' : 'is-backline'} ${acting ? 'is-acting' : ''} ${hit ? 'is-hit' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
+      className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${acting ? 'is-acting' : ''} ${hit ? 'is-hit' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
       style={{ ['--combat-delay' as any]: `${visualIndex * 90}ms` }}
     >
       <div className="arena-combat-card-media">
-        {card.image_url ? <img src={card.image_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
+        {card.image_url ? <img src={card.image_url} alt="" className="h-full w-full object-contain" loading="lazy" /> : null}
       </div>
       <div className="arena-combat-card-body">
         <p className="truncate text-[10px] font-black text-foreground">{card.name}</p>
@@ -577,6 +576,7 @@ const ArenaCombatFormation: React.FC<{
   side: 'player' | 'opponent';
   cards: ArenaSnapshotCardDto[];
   slots: SelectedRoundSlot[];
+  revealed?: boolean;
   activeEvent?: ArenaReplayPayloadDto['rounds'][number]['events'][number];
   battleEvents: ArenaReplayPayloadDto['rounds'][number]['events'];
   battleEventIndex: number;
@@ -584,22 +584,28 @@ const ArenaCombatFormation: React.FC<{
   remainingUnits?: number;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
-}> = ({ side, cards, slots, activeEvent, battleEvents, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
+}> = ({ side, cards, slots, revealed = true, activeEvent, battleEvents, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
   const positioned = getCardBySlots(cards, slots);
   const retiredStart = typeof remainingUnits === 'number' ? Math.max(0, positioned.length - Math.max(0, remainingUnits)) : 0;
+  const displayRows = side === 'opponent'
+    ? [{ label: '후열', row: 0 as const }, { label: '전열', row: 1 as const }]
+    : [{ label: '전열', row: 1 as const }, { label: '후열', row: 0 as const }];
   return (
     <div className={`arena-combat-formation is-${side}`} aria-label={side === 'player' ? '내 전투 진영' : '상대 전투 진영'}>
       <div className="arena-combat-lane-labels" aria-hidden="true">
-        <span>후열</span>
-        <span>전열</span>
-        <span>후열</span>
+        {displayRows.map((row) => <span key={row.row} className={row.row === 1 ? 'is-frontline' : ''}>{row.label}</span>)}
       </div>
       <div className="arena-combat-grid">
-        {[0, 1].map((row) => [0, 1, 2].map((col) => {
+        {displayRows.map(({ row }) => [0, 1, 2].map((col) => {
           const item = positioned.find((entry) => entry.slot.row === row && entry.slot.col === col);
           return (
-            <div key={`${row}-${col}`} className={`arena-combat-cell ${col === 1 ? 'is-frontline' : 'is-backline'}`}>
-              {item ? (
+            <div key={`${row}-${col}`} className={`arena-combat-cell ${row === 1 ? 'is-frontline' : 'is-backline'}`}>
+              {!revealed && side === 'opponent' ? (
+                <div className="arena-combat-card is-hidden-card">
+                  <div className="arena-hidden-card-mark">?</div>
+                  <p className="text-[10px] font-black text-muted-foreground">비공개</p>
+                </div>
+              ) : item ? (
                 <ArenaCombatCard
                   card={item.card}
                   side={side}
@@ -622,7 +628,7 @@ const ArenaCombatFormation: React.FC<{
   );
 };
 
-const ArenaBattleStage: React.FC<{
+export const ArenaBattleStage: React.FC<{
   match: ArenaMatchViewDto;
   playerCards: ArenaSnapshotCardDto[];
   opponentCards: ArenaSnapshotCardDto[];
@@ -631,13 +637,14 @@ const ArenaBattleStage: React.FC<{
   activeEvent?: ArenaReplayPayloadDto['rounds'][number]['events'][number];
   battleEvents: ArenaReplayPayloadDto['rounds'][number]['events'];
   battleEventIndex: number;
+  revealOpponent: boolean;
   roundReveal: RoundRevealState | null;
   roundResult?: ArenaRoundResultDto;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
   user: any;
   loadout: ArenaCosmeticLoadout | null;
-}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeEvent, battleEvents, battleEventIndex, roundReveal, roundResult, skillLookup, classLookup, user, loadout }) => {
+}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeEvent, battleEvents, battleEventIndex, revealOpponent, roundReveal, roundResult, skillLookup, classLookup, user, loadout }) => {
   const opponentAvatar = opponentCards[0]?.image_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(match.player_b_id || `arena-bot-${match.id}`)}`;
   const playerLabel = user?.username || '나';
   const opponentLabel = match.match_type === 'RANKED' ? '상대 플레이어' : 'AI 연습 상대';
@@ -645,10 +652,12 @@ const ArenaBattleStage: React.FC<{
     <div className={`arena-battle-stage ${roundReveal?.stage === 'battle' ? 'is-playing' : ''} ${roundReveal?.stage === 'result' ? 'is-result' : ''}`}>
       <div className="arena-battle-stage-bg" />
       <div className="arena-battle-row is-opponent-row">
+        <ArenaCombatPortrait label={opponentLabel} caption={`${match.player_b_round_wins || 0} 라운드 승`} avatarUrl={revealOpponent ? opponentAvatar : null} side="opponent" />
         <ArenaCombatFormation
           side="opponent"
           cards={opponentCards}
           slots={opponentSlots}
+          revealed={revealOpponent}
           activeEvent={activeEvent}
           battleEvents={battleEvents}
           battleEventIndex={battleEventIndex}
@@ -657,7 +666,6 @@ const ArenaBattleStage: React.FC<{
           skillLookup={skillLookup}
           classLookup={classLookup}
         />
-        <ArenaCombatPortrait label={opponentLabel} caption={`${match.player_b_round_wins || 0} 라운드 승`} avatarUrl={opponentAvatar} side="opponent" />
       </div>
       <div className="arena-battle-centerline">
         <span className="arena-battle-pulse" />
@@ -668,7 +676,6 @@ const ArenaBattleStage: React.FC<{
         <span className="arena-battle-pulse" />
       </div>
       <div className="arena-battle-row is-player-row">
-        <ArenaCombatPortrait label={playerLabel} caption={`${match.player_a_round_wins || 0} 라운드 승`} avatarUrl={user?.avatarUrl} loadout={loadout} side="player" />
         <ArenaCombatFormation
           side="player"
           cards={playerCards}
@@ -681,6 +688,7 @@ const ArenaBattleStage: React.FC<{
           skillLookup={skillLookup}
           classLookup={classLookup}
         />
+        <ArenaCombatPortrait label={playerLabel} caption={`${match.player_a_round_wins || 0} 라운드 승`} avatarUrl={user?.avatarUrl} loadout={loadout} side="player" />
       </div>
     </div>
   );
@@ -864,9 +872,9 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
     .map((slot) => playerCardById.get(slot.card_id))
     .filter((card): card is ArenaSnapshotCardDto => Boolean(card));
   const playerCards = selectedPlayerCards.length > 0 ? selectedPlayerCards : getRoundCards(playerDeck, nextRoundNo);
-  const opponentCards = getRoundCards(opponentDeck, nextRoundNo);
   const roundResults = match?.summary?.round_results || [];
   const selectedReplayRound = replay?.rounds?.[replay.rounds.length - 1];
+  const battleRoundNo = roundReveal?.roundNo || (selectedReplayRound?.round_no ?? nextRoundNo);
   const visibleEvents = (selectedReplayRound?.events || []).slice(-18).reverse();
   const activeBattleEvents = selectedReplayRound?.events || [];
   const activeBattleEvent = activeBattleEvents.length > 0 ? activeBattleEvents[Math.min(battleEventIndex, activeBattleEvents.length - 1)] : undefined;
@@ -878,7 +886,10 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const scoreLabel = `${match?.player_a_round_wins || 0}:${match?.player_b_round_wins || 0}`;
   const selectionLocked = completed || roundLoading || Boolean(roundWait) || roundReveal?.stage === 'battle';
   const canCommitWithSelection = selectedSlots.length === ARENA_ACTIVE_SLOT_COUNT || canForceRound;
-  const opponentSlots = getRoundSlots(opponentDeck, nextRoundNo);
+  const revealOpponentFormation = completed || Boolean(roundReveal) || roundResults.some((round) => Number(round.round_no) === Number(battleRoundNo));
+  const playerBattleCards = revealOpponentFormation ? getRoundCards(playerDeck, battleRoundNo) : playerCards;
+  const opponentCards = revealOpponentFormation ? getRoundCards(opponentDeck, battleRoundNo) : [];
+  const opponentSlots = revealOpponentFormation ? getRoundSlots(opponentDeck, battleRoundNo) : [];
   const latestRoundResult = [...roundResults].sort((a, b) => Number(b.round_no || 0) - Number(a.round_no || 0))[0];
 
   React.useEffect(() => {
@@ -899,11 +910,23 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const placeCardInSlot = React.useCallback((slotIndex: number, cardId: string) => {
     setSelectedSlots((prev) => {
       const nextPosition = {
-        row: (Math.floor(slotIndex / 3) === 0 ? 0 : 1) as 0 | 1,
+        row: (slotIndex < 3 ? 1 : 0) as 0 | 1,
         col: (slotIndex % 3) as 0 | 1 | 2
       };
-      const withoutCard = prev.filter((slot) => slot.card_id !== cardId);
-      const withoutTarget = withoutCard.filter((slot) => !(slot.row === nextPosition.row && slot.col === nextPosition.col));
+      const movingSlot = prev.find((slot) => slot.card_id === cardId);
+      const targetSlot = prev.find((slot) => slot.row === nextPosition.row && slot.col === nextPosition.col);
+      if (movingSlot && movingSlot.row === nextPosition.row && movingSlot.col === nextPosition.col) return prev;
+      if (movingSlot && targetSlot) {
+        return orderRoundSlots(prev.map((slot) => {
+          if (slot.card_id === cardId) return { ...slot, ...nextPosition };
+          if (slot.card_id === targetSlot.card_id) return { ...slot, row: movingSlot.row, col: movingSlot.col };
+          return slot;
+        }));
+      }
+      if (movingSlot) {
+        return orderRoundSlots(prev.map((slot) => slot.card_id === cardId ? { ...slot, ...nextPosition } : slot));
+      }
+      const withoutTarget = prev.filter((slot) => !(slot.row === nextPosition.row && slot.col === nextPosition.col));
       return orderRoundSlots([...withoutTarget, { card_id: cardId, ...nextPosition }]).slice(0, ARENA_ACTIVE_SLOT_COUNT);
     });
   }, []);
@@ -1001,7 +1024,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || '관전 공유 링크 생성에 실패했습니다.');
       const token = data.data?.token;
-      const url = token ? `${window.location.origin}/arena?share=${encodeURIComponent(token)}` : '';
+      const url = token ? `${window.location.origin}/arena/spectate?share=${encodeURIComponent(token)}` : '';
       if (url && navigator.clipboard) await navigator.clipboard.writeText(url);
       toast(url ? '관전 링크를 복사했습니다.' : '관전 링크를 생성했습니다.', 'success');
     } catch (err: any) {
@@ -1121,13 +1144,14 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                 <div className="mt-4">
                   <ArenaBattleStage
                     match={match}
-                    playerCards={playerCards}
+                    playerCards={playerBattleCards}
                     opponentCards={opponentCards}
-                    playerSlots={selectedSlots.length > 0 ? selectedSlots : getRoundSlots(playerDeck, nextRoundNo)}
+                    playerSlots={revealOpponentFormation ? getRoundSlots(playerDeck, battleRoundNo) : (selectedSlots.length > 0 ? selectedSlots : getRoundSlots(playerDeck, nextRoundNo))}
                     opponentSlots={opponentSlots}
                     activeEvent={activeBattleEvent}
                     battleEvents={activeBattleEvents}
                     battleEventIndex={battleEventIndex}
+                    revealOpponent={revealOpponentFormation}
                     roundReveal={roundReveal}
                     roundResult={latestRoundResult}
                     skillLookup={skillLookup}

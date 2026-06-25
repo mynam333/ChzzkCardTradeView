@@ -9,12 +9,15 @@ import { NotificationBell } from './NotificationBell';
 import { UserTitleList } from './UserTitleBadge';
 import type { ArenaSiteTab } from './ArenaTab';
 import { apiFetch } from '@/lib/api';
+import { MobileLoopDock, type MobileLoopDockItem } from './MobileLoopDock';
 
 type ArenaNavItem = {
   id: ArenaSiteTab;
   label: string;
   icon: typeof Swords;
 };
+
+type ArenaMobileDockId = ArenaSiteTab | 'chikapo';
 
 export const ArenaLayout: React.FC<{
   activeTab: ArenaSiteTab;
@@ -29,6 +32,14 @@ export const ArenaLayout: React.FC<{
     { id: 'ranking', label: 'MMR 랭킹', icon: Trophy },
     { id: 'style', label: '스타일 상점', icon: Store },
     ...(user?.role === 'ADMIN' ? [{ id: 'admin' as const, label: '관리자', icon: ShieldCheck }] : [])
+  ];
+  const mobileDockItems: MobileLoopDockItem<ArenaMobileDockId>[] = [
+    { id: 'inventory', label: '보관함', icon: Layers },
+    { id: 'style', label: '스타일', icon: Store },
+    { id: 'play', label: '플레이', icon: Swords },
+    { id: 'ranking', label: '랭킹', icon: Trophy },
+    ...(user?.role === 'ADMIN' ? [{ id: 'admin' as const, label: '관리자', icon: ShieldCheck }] : []),
+    { id: 'chikapo', label: '치카포', icon: Home }
   ];
 
   const goChikapo = () => router.push('/');
@@ -162,34 +173,19 @@ export const ArenaLayout: React.FC<{
         {children}
       </main>
 
-      <nav className="fixed bottom-2 left-0 right-0 z-50 px-3 md:hidden" aria-label="아레나 모바일 메뉴">
-        <div
-          className="cute-surface mx-auto grid max-w-md gap-1 rounded-[2.1rem] border border-white/70 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_18px_46px_rgba(159,18,57,0.18)] dark:border-white/10"
-          style={{ gridTemplateColumns: `repeat(${navItems.length + 1}, minmax(0, 1fr))` }}
-        >
-          <button type="button" onClick={goChikapo} className="flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black text-muted-foreground">
-            <Home className="h-5 w-5" />
-            치카포
-          </button>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onTabChange(item.id)}
-                className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-black transition ${
-                  isActive ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' : 'text-muted-foreground'
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                {item.id === 'play' ? '플레이' : item.id === 'inventory' ? '보관함' : item.id === 'ranking' ? '랭킹' : item.id === 'style' ? '스타일' : '관리자'}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      <MobileLoopDock
+        items={mobileDockItems}
+        activeId={activeTab}
+        ariaLabel="아레나 모바일 메뉴"
+        surfaceShadowClassName="shadow-[0_18px_46px_rgba(159,18,57,0.18)] dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+        onSelect={(id) => {
+          if (id === 'chikapo') {
+            goChikapo();
+            return;
+          }
+          onTabChange(id);
+        }}
+      />
     </div>
   );
 };

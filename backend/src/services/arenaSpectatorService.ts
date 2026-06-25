@@ -41,7 +41,15 @@ const compactDeck = (deck: any) => ({
         name: String(card?.name || ''),
         image_url: card?.image_url || null,
         class_id: String(card?.class_id || ''),
-        class_name: String(card?.class_name || '')
+        class_name: String(card?.class_name || ''),
+        stats: card?.stats && typeof card.stats === 'object' ? card.stats : undefined,
+        skills: Array.isArray(card?.skills)
+          ? card.skills.slice(0, 3).map((skill: any) => ({
+              id: String(skill?.id || ''),
+              name: String(skill?.name || ''),
+              type: String(skill?.type || '')
+            }))
+          : []
       }))
     : [],
   round_plans: Array.isArray(deck?.round_plans) ? deck.round_plans.slice(0, 5) : []
@@ -84,7 +92,8 @@ export const getArenaSpectatorReplay = async (matchId: string) => {
       draw_rounds: Number(row.draw_rounds || 0),
       created_at: row.created_at,
       player_deck: compactDeck(summary.player_deck),
-      opponent_deck: compactDeck(summary.opponent_deck || summary.bot_deck)
+      opponent_deck: compactDeck(summary.opponent_deck || summary.bot_deck),
+      round_results: Array.isArray(summary.round_results) ? summary.round_results.slice(0, 5) : []
     },
     replay: {
       ...replay,
