@@ -79,12 +79,12 @@ type RawDeckRow = {
   user_id: string;
   season_id: string;
   name: string;
-  cards_json: string;
-  round_plans_json: string;
+  cards_json: unknown;
+  round_plans_json: unknown;
   strategy_chip_id?: string | null;
   deck_hash: string;
   validation_status: string;
-  validation_result_json: string | null;
+  validation_result_json: unknown;
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
@@ -102,10 +102,14 @@ const getCardIdChannel = (cardId: unknown): string => {
 
 const toCardId = (channelId: string) => `arena_streamer_${channelId}`;
 
-const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
-  if (!raw) return fallback;
+const parseJson = <T>(raw: unknown, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  if (typeof raw === 'object') return raw as T;
+
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  if (!text) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(text) as T;
   } catch {
     return fallback;
   }

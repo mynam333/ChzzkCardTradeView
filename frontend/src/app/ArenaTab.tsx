@@ -1981,7 +1981,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   const loadMyArenaDecks = React.useCallback(async () => {
     if (!user) {
       setDecks([]);
-      return;
+      return [] as ArenaDeck[];
     }
     setDeckLoading(true);
     setDeckError(null);
@@ -1989,10 +1989,13 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       const res = await apiFetch('/arena/decks');
       if (!res.ok) throw new Error('Arena decks response was not ok');
       const data = await res.json();
-      setDecks(Array.isArray(data.data?.items) ? data.data.items : []);
+      const items = Array.isArray(data.data?.items) ? data.data.items as ArenaDeck[] : [];
+      setDecks(items);
+      return items;
     } catch (err) {
       console.warn('[ArenaTab] 내 아레나 덱 로드 실패:', err);
       setDeckError('저장된 덱을 불러오지 못했습니다.');
+      return [] as ArenaDeck[];
     } finally {
       setDeckLoading(false);
     }
@@ -2149,11 +2152,12 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
         const detail = Array.isArray(data.validation?.errors) ? data.validation.errors[0] : data.message;
         throw new Error(detail || 'Arena deck save failed');
       }
-      const savedDeck = (data.data?.deck || data.data) as ArenaDeck | undefined;
-      if (!savedDeck?.id || !Array.isArray(savedDeck.cards) || savedDeck.cards.length !== cardIds.length) {
-        throw new Error('저장된 덱 카드 수를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
+      const responseDeck = (data.data?.deck || data.data) as ArenaDeck | undefined;
+      const refreshedDecks = await loadMyArenaDecks();
+      const savedDeck = refreshedDecks.find((deck) => responseDeck?.id && deck.id === responseDeck.id) || responseDeck;
+      if (!savedDeck?.id || !Array.isArray(savedDeck.cards) || savedDeck.cards.length < 6) {
+        throw new Error('아레나 덱 저장 결과를 다시 불러오지 못했습니다. 덱 새로고침 후 확인해주세요.');
       }
-      await loadMyArenaDecks();
       openDeckEditor(savedDeck);
       toast(deckEditorId ? '아레나 덱을 수정했습니다.' : '아레나 덱을 저장했습니다.', 'success');
     } catch (err: any) {
