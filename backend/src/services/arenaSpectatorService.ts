@@ -10,18 +10,22 @@ type RawSpectatorMatchRow = {
   player_a_round_wins: number;
   player_b_round_wins: number;
   draw_rounds: number;
-  summary_json: string;
-  replay_json: string | null;
+  summary_json: unknown;
+  replay_json: unknown;
   created_at: string;
 };
 
 const SPECTATOR_REPLAY_CACHE_TTL_MS = Math.max(5_000, Math.min(120_000, Number(process.env.ARENA_SPECTATOR_REPLAY_CACHE_TTL_MS || 30_000)));
 const spectatorReplayCache = new Map<string, { expiresAt: number; data: any }>();
 
-const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
-  if (!raw) return fallback;
+const parseJson = <T>(raw: unknown, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  if (typeof raw === 'object') return raw as T;
+
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  if (!text) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(text) as T;
   } catch {
     return fallback;
   }

@@ -25,7 +25,7 @@ export interface ArenaMatchSummary {
   player_a_round_wins: number;
   player_b_round_wins: number;
   draw_rounds: number;
-  result: 'win' | 'loss' | 'draw';
+  result: 'win' | 'loss' | 'draw' | null;
   difficulty: ArenaMatchDifficulty;
   summary: ArenaCompactMatchSummary;
   created_at: string;
@@ -268,7 +268,7 @@ const saveArenaMatchReplay = async (matchId: string, replay: ArenaReplayPayload 
   return replayJson;
 };
 
-export const loadArenaMatchReplayJson = async (matchId: string, legacyReplayJson?: string | null): Promise<string | null> => {
+export const loadArenaMatchReplayJson = async (matchId: string, legacyReplayJson?: unknown): Promise<unknown | null> => {
   await ensureArenaReplayTable();
   const query = `SELECT replay_json
     FROM arena_match_replays
@@ -281,10 +281,14 @@ export const loadArenaMatchReplayJson = async (matchId: string, legacyReplayJson
   return row?.replay_json || legacyReplayJson || null;
 };
 
-const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
-  if (!raw) return fallback;
+const parseJson = <T>(raw: unknown, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  if (typeof raw === 'object') return raw as T;
+
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  if (!text) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(text) as T;
   } catch {
     return fallback;
   }
@@ -531,8 +535,11 @@ const sanitizeRoundCommitInput = (input: ArenaRoundCommitInput): ArenaRoundCommi
   auto_commit: input.auto_commit === true
 });
 
-const getSummaryProgressStatus = (summary: ArenaCompactMatchSummary, row?: Pick<RawMatchRow, 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'>) => {
-  if (summary.progress_status === 'in_progress' || summary.progress_status === 'completed') return summary.progress_status;
+const getSummaryProgressStatus = (summary: ArenaCompactMatchSummary, row?: Pick<RawMatchRow, 'round_count' | 'player_a_round_wins' | 'player_b_round_wins' | 'progress_status'>) => {
+  const normalizedRowStatus = String(row?.progress_status || '').trim().toLowerCase();
+  if (normalizedRowStatus === 'in_progress' || normalizedRowStatus === 'completed') return normalizedRowStatus;
+  const normalizedStatus = String(summary.progress_status || '').trim().toLowerCase();
+  if (normalizedStatus === 'in_progress' || normalizedStatus === 'completed') return normalizedStatus;
   const playerWins = Number(row?.player_a_round_wins || 0);
   const opponentWins = Number(row?.player_b_round_wins || 0);
   const roundCount = Number(row?.round_count ?? summary.round_results?.length ?? 0);
@@ -914,7 +921,7 @@ const mapMatchRow = (row: RawMatchRow, viewerUserId?: string): ArenaMatchSummary
   summary.rounds_to_win = summary.rounds_to_win || ARENA_ROUNDS_TO_WIN;
   summary.max_rounds = summary.max_rounds || ARENA_MAX_ROUNDS_PER_MATCH;
   const result = progressStatus === 'in_progress'
-    ? 'draw'
+    ? null
     : viewerWins > opponentWins ? 'win' : opponentWins > viewerWins ? 'loss' : 'draw';
 
   return {
@@ -1448,7 +1455,7 @@ const mapPublicRecentArenaMatch = (match: ArenaMatchSummary) => ({
   difficulty: match.difficulty,
   created_at: match.created_at,
   summary: {
-    progress_status: match.summary?.progress_status === 'completed' ? 'completed' as const : undefined,
+    progress_status: String(match.summary?.progress_status || '').toLowerCase() === 'completed' ? 'completed' as const : undefined,
     battlefield_rule: match.summary?.battlefield_rule
       ? {
           id: match.summary.battlefield_rule.id,
@@ -1475,7 +1482,7 @@ export const getArenaUserProfile = async (userId: string): Promise<ArenaUserProf
   return {
     ...profile,
     recent_matches: recentMatches
-      .filter((match) => match.match_type === 'RANKED' && match.summary?.progress_status === 'completed')
+      .filter((match) => match.match_type === 'RANKED' && String(match.summary?.progress_status || '').toLowerCase() === 'completed')
       .slice(0, 5)
       .map(mapPublicRecentArenaMatch) as any,
     win_rate: decided > 0 ? Math.round((profile.wins / decided) * 1000) / 10 : 0

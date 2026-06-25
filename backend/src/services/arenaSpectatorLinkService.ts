@@ -80,17 +80,18 @@ export const createArenaSpectatorShareLink = async (userId: string, matchId: str
   await ensureArenaSpectatorLinkTable();
   const match = await loadCompletedMatchForOwner(userId, matchId);
   if (!match) throw new Error('ArenaSpectatorShareMatchNotFound');
+  const replay = await getArenaSpectatorReplay(matchId);
+  if (!replay) throw new Error('ArenaSpectatorReplayNotFound');
   const token = crypto.randomBytes(18).toString('base64url');
   const tokenHash = hashToken(token);
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
       `INSERT INTO arena_spectator_links
         (token_hash, match_id, owner_user_id, visibility, expires_at)
-       VALUES (?, ?, ?, 'LINK_ONLY', DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY))`,
+       VALUES (?, ?, ?, 'LINK_ONLY', DATE_ADD(UTC_TIMESTAMP(), INTERVAL ${LINK_TTL_DAYS} DAY))`,
       tokenHash,
       matchId,
-      userId,
-      LINK_TTL_DAYS
+      userId
     );
   } else {
     getSqliteDb()

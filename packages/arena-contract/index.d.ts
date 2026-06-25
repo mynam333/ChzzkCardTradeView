@@ -108,7 +108,7 @@ export interface ArenaCompactMatchSummaryDto {
 
 export interface ArenaMatchViewDto {
   id: string;
-  result: ArenaMatchResultDto;
+  result: ArenaMatchResultDto | null;
   match_type?: ArenaMatchTypeDto;
   round_count: number;
   player_a_round_wins: number;
@@ -146,7 +146,7 @@ export interface ArenaReplayPayloadDto {
 
 export interface ArenaRecentMatchDto {
   id: string;
-  result: ArenaMatchResultDto;
+  result: ArenaMatchResultDto | null;
   match_type?: ArenaMatchTypeDto;
   round_count: number;
   player_a_round_wins: number;

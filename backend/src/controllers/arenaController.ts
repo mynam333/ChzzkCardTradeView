@@ -705,6 +705,18 @@ const handleArenaMatchError = (res: Response, err: any, fallbackMessage: string)
   if (err?.message === 'ArenaMatchStorageUnsupported') {
     return res.status(503).json({ error: 'ArenaMatchStorageUnsupported', message: '현재 DB 모드에서는 아레나 매치 저장소를 사용할 수 없습니다.' });
   }
+  if (err?.message === 'ArenaSpectatorLinkStorageUnsupported') {
+    return res.status(503).json({ error: 'ArenaSpectatorLinkStorageUnsupported', message: '현재 DB 모드에서는 아레나 관전 링크 저장소를 사용할 수 없습니다.' });
+  }
+  if (err?.message === 'ArenaSpectatorShareMatchNotFound') {
+    return res.status(409).json({ error: 'ArenaSpectatorShareMatchNotFound', message: '완료된 본인 아레나 경기만 관전 링크로 공유할 수 있습니다.' });
+  }
+  if (err?.message === 'ArenaSpectatorReplayNotFound') {
+    return res.status(409).json({ error: 'ArenaSpectatorReplayNotFound', message: '이 경기의 관전 리플레이가 아직 준비되지 않았거나 보관 기간이 만료되었습니다.' });
+  }
+  if (err?.message === 'ArenaSpectatorDisabled') {
+    return res.status(503).json({ error: 'ArenaSpectatorDisabled', message: '아레나 관전 공유 기능이 현재 비활성화되어 있습니다.' });
+  }
   if (err?.message === 'ArenaAdminStatsRebuildAlreadyRunning' || err?.message === 'ArenaRankingRebuildAlreadyRunning' || err?.message === 'ArenaAdminJobAlreadyRunning') {
     return res.status(409).json({ error: err.message, message: '이미 같은 관리자 재생성 작업이 실행 중입니다. 잠시 후 다시 시도해 주세요.' });
   }

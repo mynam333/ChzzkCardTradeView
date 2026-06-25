@@ -32,10 +32,10 @@ import {
   Zap
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
-import { ensureCosmeticCss, parseStyle } from '@/lib/cosmetics';
+import { borderClass, borderStyle, ensureCosmeticCss, parseStyle } from '@/lib/cosmetics';
 import { useApp } from './AppContext';
 import { ArenaAdminPanel } from './ArenaAdminPanel';
-import { CardPreview } from './CardPreview';
+import { CosmeticFrame } from './CosmeticFrame';
 import { CosmeticName } from './CosmeticName';
 import { StreamerTooltip } from './StreamerTooltip';
 import type {
@@ -387,6 +387,51 @@ const getSkillTooltip = (skill: ArenaCard['skills'][number]) => `${skill.name} (
 
 type ArenaTagMeta = { label: string; description: string };
 
+const ArenaInfoTooltip: React.FC<{
+  label: string;
+  description: string;
+  children: React.ReactNode;
+  className?: string;
+}> = ({ label, description, children, className }) => (
+  <StreamerTooltip
+    as="span"
+    className={`inline-flex min-w-0 ${className || ''}`.trim()}
+    edgeGuard={{ right: 300, bottom: 160 }}
+    content={(
+      <span className="block max-w-[17rem] text-left">
+        <span className="block text-[10px] font-black text-primary">{label}</span>
+        <span className="mt-1 block text-[11px] font-bold leading-relaxed text-foreground/85">{description}</span>
+      </span>
+    )}
+  >
+    {children}
+  </StreamerTooltip>
+);
+
+const ArenaClassTooltip: React.FC<{ cardClass: ArenaCard['class']; children: React.ReactNode; className?: string }> = ({ cardClass, children, className }) => (
+  <ArenaInfoTooltip label={cardClass.name} description={cardClass.description || getRoleTooltip(cardClass.role)} className={className}>
+    {children}
+  </ArenaInfoTooltip>
+);
+
+const ArenaRoleTooltip: React.FC<{ role: string; children: React.ReactNode; className?: string }> = ({ role, children, className }) => (
+  <ArenaInfoTooltip label={roleLabels[role] || role} description={roleDescriptions[role] || '카드의 전투 포지션과 라운드 운영 성향을 나타냅니다.'} className={className}>
+    {children}
+  </ArenaInfoTooltip>
+);
+
+const ArenaStatTooltip: React.FC<{ statKey: keyof ArenaCard['stats']; label: string; value?: number; children: React.ReactNode; className?: string }> = ({ statKey, label, value, children, className }) => (
+  <ArenaInfoTooltip label={`${label}${typeof value === 'number' ? ` ${value}` : ''}`} description={statDescriptions[statKey]} className={className}>
+    {children}
+  </ArenaInfoTooltip>
+);
+
+const ArenaSkillTooltip: React.FC<{ skill: ArenaCard['skills'][number]; children: React.ReactNode; className?: string }> = ({ skill, children, className }) => (
+  <ArenaInfoTooltip label={`${skill.name} (${arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type})`} description={skill.description} className={className}>
+    {children}
+  </ArenaInfoTooltip>
+);
+
 const arenaTagMeta: Record<string, ArenaTagMeta> = {
   guardian: { label: '수호', description: '보호막과 아군 보호 효율을 높이는 방어 태그입니다.' },
   frontline: { label: '전열', description: '앞줄 생존력과 집중 공격을 버티는 힘을 보강합니다.' },
@@ -480,11 +525,11 @@ const ArenaTagBadge: React.FC<{ tag: string; selected?: boolean; asButton?: bool
   return (
     <StreamerTooltip content={tooltip} className="inline-flex" edgeGuard={{ right: 280, bottom: 120 }}>
       {asButton ? (
-        <button type="button" onClick={onClick} className={className} aria-pressed={selected} aria-label={`${meta.label}: ${meta.description}`} title={`${meta.label}: ${meta.description}`}>
+        <button type="button" onClick={onClick} className={className} aria-pressed={selected} aria-label={`${meta.label}: ${meta.description}`}>
           #{meta.label}
         </button>
       ) : (
-        <span className={className} title={`${meta.label}: ${meta.description}`}>
+        <span className={className}>
           #{meta.label}
         </span>
       )}
@@ -514,6 +559,20 @@ const pickRandomArenaCards = (items: ArenaCard[], limit = ARENA_PLAY_CARD_PREVIE
 const createArenaEventSource = (path: string) => {
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') return null;
   return new EventSource(`${API_BASE_URL}${path}`, { withCredentials: true });
+};
+
+const normalizeArenaProgressStatus = (status?: unknown) => String(status || '').trim().toLowerCase();
+const isArenaMatchCompleted = (match?: Pick<ArenaMatchView, 'summary' | 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'> | null) => {
+  const status = normalizeArenaProgressStatus(match?.summary?.progress_status);
+  if (status === 'completed') return true;
+  if (status === 'in_progress') return false;
+  return Number(match?.player_a_round_wins || 0) >= 3 || Number(match?.player_b_round_wins || 0) >= 3 || Number(match?.round_count || 0) >= 5;
+};
+const isArenaMatchInProgress = (match?: Pick<ArenaMatchView, 'summary' | 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'> | null) =>
+  Boolean(match) && !isArenaMatchCompleted(match);
+const getArenaMatchResultLabel = (match?: Pick<ArenaMatchView, 'result' | 'summary' | 'round_count' | 'player_a_round_wins' | 'player_b_round_wins'> | null) => {
+  if (!match || isArenaMatchInProgress(match)) return '진행 중';
+  return match.result === 'win' ? '승리' : match.result === 'loss' ? '패배' : match.result === 'draw' ? '무승부' : '결과 없음';
 };
 
 const ARENA_ROUND_SELECTION_TIMEOUT_MS = 60_000;
@@ -1038,7 +1097,7 @@ const DeckDiagnosticPanel: React.FC<{ deck: ArenaDeck; cardById: Map<string, Are
 const ArenaMatchHighlightsPanel: React.FC<{ match: ArenaMatchView; replay: ArenaReplay | null }> = ({ match, replay }) => {
   const highlights = React.useMemo(() => getArenaMatchHighlights(match, replay), [match, replay]);
   if (!highlights) return null;
-  const resultLabel = match.result === 'win' ? '승리' : match.result === 'loss' ? '패배' : '무승부';
+  const resultLabel = getArenaMatchResultLabel(match);
   return (
     <div className="arena-highlight-panel rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-white/10 dark:bg-white/8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1147,7 +1206,7 @@ const ArenaProfileCardModal: React.FC<{
                   <div key={match.id} className="flex items-center justify-between gap-3 rounded-2xl bg-secondary/52 px-3 py-2">
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-black text-foreground">
-                        {match.result === 'win' ? '승리' : match.result === 'loss' ? '패배' : '무승부'} · {match.player_a_round_wins}:{match.player_b_round_wins}
+                        {getArenaMatchResultLabel(match)} · {match.player_a_round_wins}:{match.player_b_round_wins}
                       </p>
                       <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">{formatDateTime(match.created_at)} · {match.summary?.battlefield_rule?.name || '기본 전장'}</p>
                     </div>
@@ -1412,7 +1471,7 @@ const ArenaReplayPanel: React.FC<{
                 className={`arena-emote-pie-button is-${slot.direction}`}
                 onClick={() => entry && sendArenaEmote({ item: entry.item, slot: entry.slot })}
                 disabled={!entry}
-                title={entry?.item.name || `${slot.label} 방향 비어 있음`}
+                aria-label={entry?.item.name || `${slot.label} 방향 비어 있음`}
               >
                 {entry ? <ArenaEmoteBadge item={entry.item} size="sm" /> : <span>{slot.label}</span>}
               </button>
@@ -1502,33 +1561,46 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
             <Sparkles className="absolute right-5 top-5 h-6 w-6 text-primary/70" />
           </div>
         )}
-        <div className="absolute left-3 top-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88" title={getClassTooltip(card.class)}>
-          {card.class.name}
-        </div>
-        <div className="absolute bottom-3 right-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-primary shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88" title={getRoleTooltip(card.class.role)}>
-          {roleLabels[card.class.role] || card.class.role}
-        </div>
+        <ArenaClassTooltip cardClass={card.class} className="absolute left-3 top-3">
+          <span className="rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88">
+            {card.class.name}
+          </span>
+        </ArenaClassTooltip>
+        <ArenaRoleTooltip role={card.class.role} className="absolute bottom-3 right-3">
+          <span className="rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-primary shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88">
+            {roleLabels[card.class.role] || card.class.role}
+          </span>
+        </ArenaRoleTooltip>
       </div>
       <div className="space-y-3 p-4">
         <div>
           <h3 className="truncate text-sm font-black text-foreground">{card.name}</h3>
-          <p className="mt-0.5 text-[11px] font-bold text-muted-foreground" title={getRoleTooltip(card.class.role)}>
-            {roleLabels[card.class.role] || card.class.role} · 동일 스트리머 고정 능력
+          <p className="mt-0.5 text-[11px] font-bold text-muted-foreground">
+            <ArenaRoleTooltip role={card.class.role}>
+              <span>{roleLabels[card.class.role] || card.class.role}</span>
+            </ArenaRoleTooltip>
+            <span> · 동일 스트리머 고정 능력</span>
           </p>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
           {statLabels.map(([key, label]) => (
-            <div key={key} className="arena-stat-cell rounded-2xl px-1.5 py-2 text-center" title={getStatTooltip(key, label, card.stats[key])}>
-              <p className="text-[9px] font-black text-muted-foreground">{label}</p>
-              <p className="mt-0.5 text-xs font-black text-foreground">{card.stats[key]}</p>
-            </div>
+            <ArenaStatTooltip key={key} statKey={key} label={label} value={card.stats[key]} className="block">
+              <span className="arena-stat-cell block rounded-2xl px-1.5 py-2 text-center">
+                <span className="block text-[9px] font-black text-muted-foreground">{label}</span>
+                <span className="mt-0.5 block text-xs font-black text-foreground">{card.stats[key]}</span>
+              </span>
+            </ArenaStatTooltip>
           ))}
         </div>
         {primarySkill ? (
-          <div className="arena-skill-panel rounded-2xl border border-primary/15 px-3 py-2" title={getSkillTooltip(primarySkill)}>
+          <div className="arena-skill-panel rounded-2xl border border-primary/15 px-3 py-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="min-w-0 truncate text-[10px] font-black text-primary">{primarySkill.name}</p>
-              <span className="shrink-0 rounded-full bg-white/68 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10" title={getSkillTooltip(primarySkill)}>{arenaSkillSlotLabels[primarySkill.type as ArenaSkillSlotType] || primarySkill.type}</span>
+              <ArenaSkillTooltip skill={primarySkill} className="min-w-0">
+                <span className="min-w-0 truncate text-[10px] font-black text-primary">{primarySkill.name}</span>
+              </ArenaSkillTooltip>
+              <ArenaSkillTooltip skill={primarySkill}>
+                <span className="shrink-0 rounded-full bg-white/68 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10">{arenaSkillSlotLabels[primarySkill.type as ArenaSkillSlotType] || primarySkill.type}</span>
+              </ArenaSkillTooltip>
             </div>
             <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-relaxed text-muted-foreground">{primarySkill.description}</p>
             {visibleTags.length > 0 ? (
@@ -1560,11 +1632,21 @@ const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
           <div className="flex items-center gap-1.5">
             <h3 className="min-w-0 truncate text-sm font-black text-foreground">{card.name}</h3>
           </div>
-          <p className="mt-1 truncate text-[11px] font-bold text-muted-foreground" title={`${getClassTooltip(card.class)} / ${getRoleTooltip(card.class.role)}`}>
-            {card.class.name} · {roleLabels[card.class.role] || card.class.role}
+          <p className="mt-1 truncate text-[11px] font-bold text-muted-foreground">
+            <ArenaClassTooltip cardClass={card.class}>
+              <span>{card.class.name}</span>
+            </ArenaClassTooltip>
+            <span> · </span>
+            <ArenaRoleTooltip role={card.class.role}>
+              <span>{roleLabels[card.class.role] || card.class.role}</span>
+            </ArenaRoleTooltip>
           </p>
           {primarySkill ? (
-            <p className="mt-1 truncate text-[10px] font-black text-primary" title={getSkillTooltip(primarySkill)}>{primarySkill.name}</p>
+            <p className="mt-1 truncate text-[10px] font-black text-primary">
+              <ArenaSkillTooltip skill={primarySkill}>
+                <span>{primarySkill.name}</span>
+              </ArenaSkillTooltip>
+            </p>
           ) : null}
         </div>
       </div>
@@ -1575,6 +1657,72 @@ const arenaCosmeticTypeLabels: Record<ArenaShopItem['type'], string> = {
   border: '프로필 프레임',
   name_effect: '이름 연출',
   emote: '배틀 이모트'
+};
+
+const ArenaMiniCardSurface: React.FC<{
+  border?: Pick<ArenaShopItem, 'style_json'> | null;
+  nameEffect?: Pick<ArenaShopItem, 'style_json' | 'font_url' | 'font_family'> | null;
+  name?: string;
+  className?: string;
+}> = ({ border, nameEffect, name = 'ARENA', className }) => {
+  React.useEffect(() => {
+    ensureCosmeticCss(border || null);
+  }, [border?.style_json]);
+  const inlineBorderStyle = border && !borderClass(border) ? borderStyle(border) : {};
+  return (
+    <div
+      className={`relative flex h-[5.2rem] w-14 shrink-0 flex-col justify-between overflow-hidden rounded-xl border border-white/70 bg-gradient-to-br from-rose-100 via-white to-pink-100 p-1.5 text-left shadow-xl shadow-rose-900/10 dark:border-white/10 dark:from-rose-300/20 dark:via-white/8 dark:to-pink-300/14 ${className || ''}`}
+      style={{ containerType: 'inline-size', ...inlineBorderStyle }}
+    >
+      <CosmeticFrame border={border || null} />
+      <div className="relative z-10 flex items-center justify-between">
+        <span className="rounded bg-white/74 px-1 py-0.5 text-[6px] font-black text-rose-700 dark:bg-white/10 dark:text-rose-100">A</span>
+        <span className="rounded bg-rose-900/12 px-1 py-0.5 text-[6px] font-black text-rose-700 dark:bg-white/10 dark:text-rose-100">5</span>
+      </div>
+      <div className="relative z-10 min-w-0">
+        <CosmeticName effect={nameEffect || null} className="block truncate text-[9px] font-black leading-tight text-foreground">
+          {name}
+        </CosmeticName>
+        <p className="mt-0.5 text-[6px] font-black text-muted-foreground">STYLE PREVIEW</p>
+      </div>
+    </div>
+  );
+};
+
+const ArenaCosmeticItemPreview: React.FC<{ item: ArenaShopItem }> = ({ item }) => {
+  if (item.type === 'emote') {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <ArenaEmoteBadge item={item} size="lg" />
+      </div>
+    );
+  }
+
+  if (item.type === 'border') {
+    return (
+      <div className="flex h-full w-full items-center justify-center gap-3 px-3">
+        <ArenaMiniCardSurface border={item} name="ARENA" />
+        <div className="min-w-0 text-left">
+          <p className="text-[10px] font-black text-primary">프레임 적용</p>
+          <p className="mt-1 line-clamp-2 text-[10px] font-bold leading-relaxed text-muted-foreground">
+            카드 표면의 테두리와 오버레이가 실제 렌더링됩니다.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full items-center justify-center gap-3 px-3">
+      <ArenaMiniCardSurface nameEffect={item} name="치카포 아레나" />
+      <div className="min-w-0 text-left">
+        <p className="text-[10px] font-black text-primary">이름 연출 적용</p>
+        <CosmeticName effect={item} className="mt-1 block max-w-[9rem] truncate text-sm font-black text-foreground">
+          치카포 아레나
+        </CosmeticName>
+      </div>
+    </div>
+  );
 };
 
 const ArenaStylePreview: React.FC<{
@@ -1590,13 +1738,11 @@ const ArenaStylePreview: React.FC<{
       <Palette className="h-5 w-5 text-primary" />
     </div>
     <div className="mt-4 flex items-center gap-3 rounded-3xl bg-secondary/45 p-3">
-      <div className={`arena-style-avatar ${loadout?.border_item ? 'is-equipped' : ''} flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.35rem] text-lg font-black text-primary`}>
-        {userName.slice(0, 1).toUpperCase()}
-      </div>
+      <ArenaMiniCardSurface border={loadout?.border_item || null} nameEffect={loadout?.name_effect_item || null} name={userName} className="h-20 w-14" />
       <div className="min-w-0 flex-1">
-        <p className={`arena-style-name truncate text-lg font-black ${loadout?.name_effect_item ? 'is-equipped' : ''}`}>
+        <CosmeticName effect={loadout?.name_effect_item || null} className="arena-style-name block truncate text-lg font-black">
           {userName}
-        </p>
+        </CosmeticName>
         <p className="mt-1 text-[11px] font-bold text-muted-foreground">
           {loadout?.border_item?.name || '기본 프레임'} · {loadout?.name_effect_item?.name || '기본 이름'}
         </p>
@@ -1653,15 +1799,7 @@ const ArenaCosmeticCard: React.FC<{
   return (
     <article className="shop-cosmetic-card arena-cosmetic-card cute-card-pop grid min-h-[18rem] grid-rows-[5.75rem_auto_1fr_auto] rounded-[1.35rem] border border-border bg-card/76 p-3 text-center shadow-sm">
       <div className="cosmetic-list-preview arena-cosmetic-preview relative mx-auto flex h-[5.4rem] w-full items-center justify-center overflow-hidden rounded-3xl bg-secondary/50">
-        {item.type === 'border' ? (
-          <div className="arena-style-avatar is-equipped flex h-14 w-14 items-center justify-center rounded-[1.2rem] text-base font-black text-primary">
-            A
-          </div>
-        ) : item.type === 'emote' ? (
-          <ArenaEmoteBadge item={item} />
-        ) : (
-          <p className="arena-style-name is-equipped max-w-full truncate px-3 text-lg font-black">{item.name}</p>
-        )}
+        <ArenaCosmeticItemPreview item={item} />
         <span className="absolute left-2 top-2 rounded-full bg-white/80 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10">
           {arenaCosmeticTypeLabels[item.type]}
         </span>
@@ -1906,16 +2044,6 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     setMyStreamerCardDraft((current) => ({ ...current, ...patch }));
   };
 
-  const toggleMyStreamerSkill = (skillId: string) => {
-    const maxSkills = myStreamerCard?.config_options?.limits?.skill_ids || 3;
-    setMyStreamerCardDraft((current) => {
-      const currentIds = Array.isArray(current.skill_ids) ? current.skill_ids : [];
-      if (currentIds.includes(skillId)) {
-        return { ...current, skill_ids: currentIds.filter((id) => id !== skillId) };
-      }
-      return { ...current, skill_ids: [...currentIds, skillId].slice(0, maxSkills) };
-    });
-  };
   const updateMyStreamerSkillSlot = (slotType: ArenaSkillSlotType, skillId: string) => {
     setMyStreamerCardDraft((current) => {
       const currentIds = Array.isArray(current.skill_ids) ? current.skill_ids : [];
@@ -2199,7 +2327,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     const res = await apiFetch(`/arena/matches/${encodeURIComponent(matchId)}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.message || '아레나 매치를 불러오지 못했습니다.');
-    const match = data.data || null;
+    const match = data.data?.match || data.data || null;
     setSelectedReplayMatch(match);
     setRoundWait(null);
     setRoundReveal(null);
@@ -2216,7 +2344,8 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     setRoundCommitTactic(nextPlan?.tactic_style || 'balanced');
     setRoundCommitFocus(nextPlan?.focus_rule || 'frontline_first');
     setRoundCommitChipId(match?.summary?.player_deck?.strategy_chip_id || 'none');
-  }, []);
+    if (match?.id) router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
+  }, [router]);
 
   const notifyArenaQueueMatched = React.useCallback((kind: 'quick' | 'cup', id: string | null | undefined) => {
     if (!id || typeof document === 'undefined' || document.visibilityState === 'visible') return;
@@ -2229,7 +2358,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       body: kind === 'quick'
         ? '상대가 잡혔습니다. 라운드 전술을 선택하세요.'
         : '8인 컵 결과가 도착했습니다. 결과와 리플레이를 확인하세요.',
-      url: '/arena/play'
+      url: kind === 'quick' ? `/arena/matches/${encodeURIComponent(id)}` : '/arena/play'
     });
   }, []);
   const loadQuickMatchStatus = React.useCallback(async (showToast = false) => {
@@ -2399,6 +2528,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       setRoundCommitFocus(nextPlan?.focus_rule || 'frontline_first');
       setRoundCommitChipId(match?.summary?.player_deck?.strategy_chip_id || 'none');
       toast('봇 연습전이 준비되었습니다. 1라운드 전술을 선택해 시작하세요.', 'success');
+      if (match?.id) router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
     } catch (err: any) {
       toast(err?.message || '봇 연습전 생성에 실패했습니다.', 'error');
     } finally {
@@ -2454,8 +2584,8 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
         roundNo: nextRoundNo,
         stage: 'battle',
         roundWinner,
-        completed: match?.summary?.progress_status === 'completed',
-        matchResult: match?.result || 'draw'
+        completed: isArenaMatchCompleted(match),
+        matchResult: isArenaMatchCompleted(match) ? (match?.result || 'draw') : null
       };
       setRoundReveal(reveal);
       roundRevealTimerRef.current = window.setTimeout(() => {
@@ -2545,9 +2675,10 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
 
   const loadRecentMatchReplay = async (match: ArenaRecentMatch) => {
     try {
-      if (match.summary?.progress_status === 'in_progress') {
+      if (isArenaMatchInProgress(match)) {
+        router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
         setSelectedReplayMatch(match);
-        setRoundWait(match.summary.pending_round_input?.deadline_at ? {
+        setRoundWait(match.summary?.pending_round_input?.deadline_at ? {
           roundNo: match.summary.pending_round_input.round_no,
           deadlineAt: match.summary.pending_round_input.deadline_at
         } : null);
@@ -2559,11 +2690,11 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
           replay_storage: 'tick_events',
           rounds: []
         } as ArenaReplay);
-        const nextRoundNo = match.summary.current_round_no || match.round_count + 1;
-        const nextPlan = match.summary.player_deck?.round_plans?.find((plan) => plan.round_no === nextRoundNo) || match.summary.player_deck?.round_plans?.[0];
+        const nextRoundNo = match.summary?.current_round_no || match.round_count + 1;
+        const nextPlan = match.summary?.player_deck?.round_plans?.find((plan) => plan.round_no === nextRoundNo) || match.summary?.player_deck?.round_plans?.[0];
         setRoundCommitTactic(nextPlan?.tactic_style || 'balanced');
         setRoundCommitFocus(nextPlan?.focus_rule || 'frontline_first');
-        setRoundCommitChipId(match.summary.player_deck?.strategy_chip_id || 'none');
+        setRoundCommitChipId(match.summary?.player_deck?.strategy_chip_id || 'none');
         toast('진행 중인 매치를 불러왔습니다.', 'success');
         return;
       }
@@ -2573,6 +2704,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       setSelectedReplayMatch(match);
       setSelectedReplay(data.data || null);
       toast('최근 경기 리플레이를 불러왔습니다.', 'success');
+      router.push(`/arena/matches/${encodeURIComponent(match.id)}`);
     } catch (err: any) {
       toast(err?.message || '최근 경기 리플레이를 불러오지 못했습니다.', 'error');
     }
@@ -2919,7 +3051,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
 
   React.useEffect(() => {
     if (!roundWait || !selectedReplayMatch?.id) return;
-    if (selectedReplayMatch.summary?.progress_status === 'completed') return;
+    if (isArenaMatchCompleted(selectedReplayMatch)) return;
     const key = `${selectedReplayMatch.id}:${roundWait.roundNo}:${roundWait.deadlineAt}`;
     const delay = Math.max(250, new Date(roundWait.deadlineAt).getTime() - Date.now() + 250);
     const timer = window.setTimeout(() => {
@@ -2937,9 +3069,9 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     selectedReplayMatch?.summary?.progress_status
   ]);
 
-  const selectedMatchResultLabel = selectedReplayMatch?.summary?.progress_status === 'in_progress'
-    ? `${selectedReplayMatch.summary.current_round_no || selectedReplayMatch.round_count + 1}라운드 선택 대기`
-    : selectedReplayMatch?.result === 'win' ? '승리' : selectedReplayMatch?.result === 'loss' ? '패배' : '무승부';
+  const selectedMatchResultLabel = isArenaMatchInProgress(selectedReplayMatch)
+    ? `${selectedReplayMatch?.summary?.current_round_no || (selectedReplayMatch?.round_count || 0) + 1}라운드 선택 대기`
+    : getArenaMatchResultLabel(selectedReplayMatch);
   const roundRevealResultLabel = roundReveal?.roundWinner === 'player' ? '라운드 승리' : roundReveal?.roundWinner === 'bot' ? '라운드 패배' : '라운드 무승부';
   const isArenaAdmin = user?.role === 'ADMIN';
   const playPreviewCards = React.useMemo(() => (
@@ -3452,7 +3584,15 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                           </div>
                           <div className="min-w-0">
                             <p className="truncate text-sm font-black text-foreground">{card.name}</p>
-                            <p className="mt-0.5 text-[10px] font-bold text-muted-foreground" title={`${getClassTooltip(card.class)} / ${getRoleTooltip(card.class.role)}`}>{card.class.name} · {roleLabels[card.class.role] || card.class.role}</p>
+                            <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
+                              <ArenaClassTooltip cardClass={card.class}>
+                                <span>{card.class.name}</span>
+                              </ArenaClassTooltip>
+                              <span> · </span>
+                              <ArenaRoleTooltip role={card.class.role}>
+                                <span>{roleLabels[card.class.role] || card.class.role}</span>
+                              </ArenaRoleTooltip>
+                            </p>
                             <div className="mt-2 flex flex-wrap gap-1">
                               <span className="rounded-full bg-white/74 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10">보유 {card.owned_count || 1}</span>
                               <span className="rounded-full bg-white/74 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10">최고 {card.max_star || 0}성</span>
@@ -3470,16 +3610,22 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             ['SPD', card.stats.speed, 'speed'],
                             ['FOC', card.stats.focus, 'focus']
                           ].map(([label, value, statKey]) => (
-                            <div key={label} className="rounded-2xl bg-secondary/52 px-2 py-1.5 text-center" title={getStatTooltip(statKey as keyof ArenaCard['stats'], String(label), Number(value))}>
-                              <p className="text-[8px] font-black text-muted-foreground">{label}</p>
-                              <p className="mt-0.5 text-[11px] font-black text-foreground">{value}</p>
-                            </div>
+                            <ArenaStatTooltip key={String(label)} statKey={statKey as keyof ArenaCard['stats']} label={String(label)} value={Number(value)} className="block">
+                              <span className="block rounded-2xl bg-secondary/52 px-2 py-1.5 text-center">
+                                <span className="block text-[8px] font-black text-muted-foreground">{label}</span>
+                                <span className="mt-0.5 block text-[11px] font-black text-foreground">{value}</span>
+                              </span>
+                            </ArenaStatTooltip>
                           ))}
                         </div>
                         <div className="mt-3 space-y-1.5">
                           {card.skills.slice(0, 2).map((skill) => (
-                            <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2" title={getSkillTooltip(skill)}>
-                              <p className="truncate text-[11px] font-black text-foreground">{skill.name}</p>
+                            <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2">
+                              <p className="truncate text-[11px] font-black text-foreground">
+                                <ArenaSkillTooltip skill={skill}>
+                                  <span>{skill.name}</span>
+                                </ArenaSkillTooltip>
+                              </p>
                               <p className="mt-0.5 line-clamp-2 text-[10px] font-bold text-muted-foreground">{skill.description}</p>
                             </div>
                           ))}
@@ -4179,24 +4325,32 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
 
                           <div>
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-[10px] font-black text-muted-foreground">스킬 {streamerSelectedSkillIds.length}/{streamerConfigOptions.limits.skill_ids}</p>
-                              <p className="text-[10px] font-bold text-muted-foreground">같은 클래스 안에서만 선택됩니다.</p>
+                              <p className="text-[10px] font-black text-muted-foreground">스킬 슬롯</p>
+                              <p className="text-[10px] font-bold text-muted-foreground">액티브, 패시브, 궁극기를 각각 1개씩 사용합니다.</p>
                             </div>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              {streamerSkillOptions.map((skill) => {
-                                const selected = streamerSelectedSkillIds.includes(skill.id);
+                            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                              {streamerSkillSlots.map((slot) => {
+                                const selectedSkill = slot.options.find((skill) => skill.id === slot.selectedId) || slot.options[0];
                                 return (
-                                  <button
-                                    key={skill.id}
-                                    type="button"
-                                    onClick={() => toggleMyStreamerSkill(skill.id)}
-                                    className={`arena-tactic-card rounded-2xl border px-3 py-2 text-left ${selected ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-card/80 text-muted-foreground'}`}
-                                    aria-pressed={selected}
-                                    title={getSkillTooltip(skill)}
-                                  >
-                                    <span className="block text-xs font-black">{skill.name}</span>
-                                    <span className="mt-0.5 block line-clamp-2 text-[10px] font-bold opacity-80">{skill.description}</span>
-                                  </button>
+                                  <label key={slot.type} className="arena-tactic-card rounded-2xl border border-transparent bg-card/80 px-3 py-2 text-left text-muted-foreground">
+                                    <span className="block text-[10px] font-black text-primary">{slot.label}</span>
+                                    <select
+                                      value={selectedSkill?.id || ''}
+                                      onChange={(event) => updateMyStreamerSkillSlot(slot.type, event.target.value)}
+                                      className="mt-1 w-full rounded-2xl border border-border bg-background px-2.5 py-2 text-xs font-black text-foreground outline-none focus:border-primary"
+                                    >
+                                      {slot.options.map((skill) => (
+                                        <option key={skill.id} value={skill.id}>{skill.name}</option>
+                                      ))}
+                                    </select>
+                                    {selectedSkill ? (
+                                      <ArenaSkillTooltip skill={selectedSkill}>
+                                        <span className="mt-1.5 block line-clamp-2 cursor-help text-[10px] font-bold opacity-80">{selectedSkill.description}</span>
+                                      </ArenaSkillTooltip>
+                                    ) : (
+                                      <span className="mt-1.5 block text-[10px] font-bold opacity-80">사용 가능한 스킬이 없습니다.</span>
+                                    )}
+                                  </label>
                                 );
                               })}
                             </div>
@@ -4263,7 +4417,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                       onClick={startNewDeckEditor}
                       disabled={deckActionLoading || ownedCards.length < 6}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm disabled:opacity-50"
-                      title="새 덱 편집"
+                      aria-label="새 덱 편집"
                     >
                       <PlusCircle className="h-4 w-4" />
                     </button>
@@ -4298,7 +4452,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => openDeckEditor(deck)}
                             disabled={deckActionLoading}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-border bg-card text-foreground disabled:opacity-50"
-                            title="덱 수정"
+                            aria-label="덱 수정"
                           >
                             <Layers3 className="h-3.5 w-3.5" />
                           </button>
@@ -4307,7 +4461,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => startQuickMatch(deck.id)}
                             disabled={!season?.quick_match_enabled || Boolean(quickMatchLoadingDeckId) || deck.validation_status !== 'VALID'}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:opacity-50 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100"
-                            title="빠른대전"
+                            aria-label="빠른대전"
                           >
                             <Swords className={`h-3.5 w-3.5 ${quickMatchLoadingDeckId === deck.id ? 'animate-pulse' : ''}`} />
                           </button>
@@ -4316,7 +4470,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => startCup(deck.id)}
                             disabled={!season?.cup_enabled || Boolean(cupLoadingDeckId) || deck.validation_status !== 'VALID'}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 disabled:opacity-50 dark:border-red-300/20 dark:bg-red-300/10 dark:text-red-100"
-                            title="8인 컵"
+                            aria-label="8인 컵"
                           >
                             <Trophy className={`h-3.5 w-3.5 ${cupLoadingDeckId === deck.id ? 'animate-pulse' : ''}`} />
                           </button>
@@ -4325,7 +4479,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => startBotPractice(deck.id)}
                             disabled={Boolean(botMatchLoadingDeckId) || deck.validation_status !== 'VALID'}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
-                            title="봇 연습전"
+                            aria-label="봇 연습전"
                           >
                             <Bot className={`h-3.5 w-3.5 ${botMatchLoadingDeckId === deck.id ? 'animate-pulse' : ''}`} />
                           </button>
@@ -4334,7 +4488,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => deleteDeck(deck.id)}
                             disabled={deckActionLoading}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 disabled:opacity-50 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100"
-                            title="덱 삭제"
+                            aria-label="덱 삭제"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -4468,7 +4622,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                                 type="button"
                                 onClick={() => toggleDeckEditorCard(cardId)}
                                 className="arena-card-token min-w-0 rounded-2xl border border-primary/20 bg-primary/10 px-2.5 py-2 text-left text-foreground"
-                                title="덱에서 제거"
+                                aria-label="덱에서 제거"
                               >
                                 <span className="flex items-center gap-2">
                                   <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/80 text-[10px] font-black text-primary dark:bg-white/10">
@@ -4511,7 +4665,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => toggleDeckEditorCard(card.card_id)}
                             className={`arena-tactic-card min-w-0 rounded-2xl border px-3 py-2 text-left ${selected ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
                             aria-pressed={selected}
-                            title={`${selected ? '덱에서 제거' : '덱에 추가'}: ${getClassTooltip(card.class)} / ${card.skills.slice(0, 3).map(getSkillTooltip).join(' / ')}`}
+                            aria-label={`${selected ? '덱에서 제거' : '덱에 추가'}: ${card.name}`}
                           >
                             <span className="flex items-center gap-2">
                               <span className="h-9 w-9 shrink-0 overflow-hidden rounded-2xl bg-white/80 dark:bg-white/10">
@@ -4519,7 +4673,19 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-xs font-black">{card.name}</span>
-                                <span className="mt-0.5 block truncate text-[10px] font-bold opacity-80" title={`${getClassTooltip(card.class)} / ${card.skills.slice(0, 3).map(getSkillTooltip).join(' / ')}`}>{card.class.name} · {card.skills.slice(0, 2).map((skill) => skill.name).join(', ')}</span>
+                                <span className="mt-0.5 block truncate text-[10px] font-bold opacity-80">
+                                  <ArenaClassTooltip cardClass={card.class}>
+                                    <span>{card.class.name}</span>
+                                  </ArenaClassTooltip>
+                                  {card.skills.slice(0, 2).map((skill) => (
+                                    <React.Fragment key={skill.id}>
+                                      <span> · </span>
+                                      <ArenaSkillTooltip skill={skill}>
+                                        <span>{skill.name}</span>
+                                      </ArenaSkillTooltip>
+                                    </React.Fragment>
+                                  ))}
+                                </span>
                               </span>
                               <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10 dark:text-primary-foreground">
                                 {selected ? '선택' : '+'}
@@ -4568,7 +4734,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                     <p className="mt-2 text-[11px] font-bold text-muted-foreground">
                       매치 ID {selectedReplayMatch.id} · 라운드가 끝날 때마다 다음 선택으로 전투 흐름을 바꿉니다.
                     </p>
-                    {selectedReplayMatch.summary?.progress_status === 'completed' ? (
+                    {isArenaMatchCompleted(selectedReplayMatch) ? (
                       <button
                         type="button"
                         onClick={() => createArenaShareLink(selectedReplayMatch.id)}
@@ -4630,7 +4796,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                         </p>
                       </div>
                     ) : null}
-                    {selectedReplayMatch.summary?.progress_status === 'in_progress' ? (
+                    {isArenaMatchInProgress(selectedReplayMatch) ? (
                       <div className="mt-3 rounded-3xl border border-primary/20 bg-primary/8 p-3">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -4640,7 +4806,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             </p>
                           </div>
                           <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10">
-                            R{selectedReplayMatch.summary.current_round_no || selectedReplayMatch.round_count + 1}
+                            R{selectedReplayMatch.summary?.current_round_no || selectedReplayMatch.round_count + 1}
                           </span>
                         </div>
                         <div className="mt-3 grid gap-2">
@@ -4749,8 +4915,8 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
             ) : (
               <div className="mt-4 space-y-2">
                 {recentMatches.map((match) => {
-                  const inProgress = match.summary?.progress_status === 'in_progress';
-                  const resultLabel = inProgress ? '진행 중' : match.result === 'win' ? '승리' : match.result === 'loss' ? '패배' : '무승부';
+                  const inProgress = isArenaMatchInProgress(match);
+                  const resultLabel = inProgress ? '진행 중' : getArenaMatchResultLabel(match);
                   return (
                     <div key={match.id} className="arena-status-row flex items-center justify-between gap-3 rounded-3xl border border-border bg-card/70 p-3">
                       <div className="min-w-0">

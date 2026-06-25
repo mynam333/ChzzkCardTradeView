@@ -45,6 +45,8 @@ export interface ArenaSkillDefinition {
   description: string;
 }
 
+type ArenaSkillSlotType = ArenaSkillDefinition['type'];
+
 export interface ArenaGeneratedCard {
   card_id: string;
   channel_id: string;
@@ -316,6 +318,46 @@ const pickDeterministicSubset = <T>(items: T[], seed: string, count: number): T[
     .sort((a, b) => hashInt(seed, JSON.stringify(a)) - hashInt(seed, JSON.stringify(b)))
     .slice(0, count);
 
+const ARENA_REQUIRED_SKILL_SLOTS: ArenaSkillSlotType[] = ['active', 'passive', 'ultimate'];
+
+const normalizeSkillIdsBySlot = (skillIds: string[]): string[] => {
+  const byType = new Map<ArenaSkillSlotType, string>();
+  for (const id of skillIds) {
+    const skill = skillById.get(id);
+    if (!skill || byType.has(skill.type)) continue;
+    byType.set(skill.type, id);
+  }
+  return ARENA_REQUIRED_SKILL_SLOTS
+    .map((type) => byType.get(type))
+    .filter((id): id is string => Boolean(id));
+};
+
+const buildSkillSlots = (
+  skillPool: ArenaSkillDefinition[],
+  configuredSkills: ArenaSkillDefinition[],
+  seed: string,
+  fallbackSkillPool: ArenaSkillDefinition[] = skillPool
+): ArenaSkillDefinition[] => {
+  const selected: ArenaSkillDefinition[] = [];
+  const selectedIds = new Set<string>();
+
+  for (const slotType of ARENA_REQUIRED_SKILL_SLOTS) {
+    const configured = configuredSkills.find((skill) => skill.type === slotType && !selectedIds.has(skill.id));
+    const typedPool = skillPool.filter((skill) => skill.type === slotType && !selectedIds.has(skill.id));
+    const fallbackTypedPool = fallbackSkillPool.filter((skill) => skill.type === slotType && !selectedIds.has(skill.id));
+    const fallbackPool = skillPool.filter((skill) => !selectedIds.has(skill.id));
+    const picked = configured
+      || pickDeterministicSubset(typedPool, `${seed}:skill-slot:${slotType}`, 1)[0]
+      || pickDeterministicSubset(fallbackTypedPool, `${seed}:skill-slot:global:${slotType}`, 1)[0]
+      || pickDeterministicSubset(fallbackPool, `${seed}:skill-slot:fallback:${slotType}`, 1)[0];
+    if (!picked) continue;
+    selected.push(picked);
+    selectedIds.add(picked.id);
+  }
+
+  return selected;
+};
+
 const buildStats = (seed: string, classId: ArenaClassId): Record<ArenaCardStatKey, number> => {
   const keys: ArenaCardStatKey[] = ['hp', 'attack', 'defense', 'speed', 'focus'];
   const raw = keys.map((key, index) => 42 + (hashInt(seed, `stat:${key}:${index}`) % 29));
@@ -366,6 +408,7 @@ export const normalizeArenaCardConfig = (raw: unknown, classFallback?: ArenaClas
   const skillIds = incomingSkillIds
     .filter((id) => allowedSkillSet.has(id))
     .slice(0, CONFIG_LIMITS.skill_ids);
+  const slottedSkillIds = normalizeSkillIdsBySlot(skillIds);
   const tagIds = normalizeIdList(source.tag_ids || source.tags, CONFIG_LIMITS.tag_ids)
     .map((tag) => tag.toLowerCase().replace(/[^a-z0-9_-]/g, ''))
     .filter((tag) => CUSTOM_TAG_SET.has(tag))
@@ -378,7 +421,7 @@ export const normalizeArenaCardConfig = (raw: unknown, classFallback?: ArenaClas
   if (resolvedClassId && classIdSet.has(resolvedClassId)) config.class_id = resolvedClassId;
   if (statFocus && statFocusSet.has(statFocus as ArenaCardStatKey)) config.stat_focus = statFocus as ArenaCardStatKey;
   if (combatStyle && combatStyleSet.has(combatStyle as ArenaCombatStyleId)) config.combat_style = combatStyle as ArenaCombatStyleId;
-  if (skillIds.length > 0) config.skill_ids = skillIds;
+  if (slottedSkillIds.length > 0) config.skill_ids = slottedSkillIds;
   if (tagIds.length > 0) config.tag_ids = tagIds;
   if (flavorText) config.flavor_text = flavorText;
 
@@ -504,16 +547,13 @@ export const generateArenaCardFromStreamer = (
     .map((id) => skillById.get(id))
     .filter((skill): skill is ArenaSkillDefinition => Boolean(skill))
     .filter((skill) => !disabledSkills.has(skill.id));
+  const globalSkillPool = ARENA_SKILLS.filter((skill) => !disabledSkills.has(skill.id));
   const configuredSkillIds = normalizedConfig?.skill_ids || [];
   const configuredSkills = configuredSkillIds
     .map((id) => skillById.get(id))
     .filter((skill): skill is ArenaSkillDefinition => Boolean(skill))
     .filter((skill) => !disabledSkills.has(skill.id));
-  const remainingSkills = skillPool.filter((skill) => !configuredSkillIds.includes(skill.id));
-  const skills = [
-    ...configuredSkills,
-    ...pickDeterministicSubset(remainingSkills, `${seed}:skills:${normalizedConfig?.combat_style || 'auto'}`, Math.max(0, 3 - configuredSkills.length))
-  ].slice(0, 3);
+  const skills = buildSkillSlots(skillPool, configuredSkills, `${seed}:skills:${normalizedConfig?.combat_style || 'auto'}`, globalSkillPool);
   const tags = Array.from(new Set([
     arenaClass.role,
     arenaClass.id,

@@ -11,6 +11,8 @@ interface Props {
   children: React.ReactNode;
   /** 래퍼 div 클래스 (호버 영역 = children 영역) */
   className?: string;
+  /** 텍스트 내부에 넣을 때는 span 래퍼를 사용 */
+  as?: 'div' | 'span';
   /** 툴팁 자체에 추가할 클래스 */
   tooltipClassName?: string;
   /** 긴 툴팁이 화면 밖으로 나가지 않도록 보정할 기준값 */
@@ -22,7 +24,7 @@ interface Props {
  * 보유 카드 썸네일 위에 올리면 스트리머 닉네임을 커서 옆에 표시합니다.
  * 시각 스타일은 globals.css의 .streamer-tooltip (라이트/다크 테마 변수 기반).
  */
-export const StreamerTooltip: React.FC<Props> = ({ name, content, children, className, tooltipClassName, edgeGuard }) => {
+export const StreamerTooltip: React.FC<Props> = ({ name, content, children, className, tooltipClassName, edgeGuard, as = 'div' }) => {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   const update = (e: React.MouseEvent) => setPos({ x: e.clientX, y: e.clientY });
@@ -38,10 +40,11 @@ export const StreamerTooltip: React.FC<Props> = ({ name, content, children, clas
     transform = `translate(${tx}, ${ty})`;
   }
 
+  const Wrapper = as;
   const tooltipContent = content ?? name;
 
   return (
-    <div className={className} onMouseEnter={update} onMouseMove={update} onMouseLeave={hide}>
+    <Wrapper className={className} onMouseEnter={update} onMouseMove={update} onMouseLeave={hide}>
       {children}
       {tooltipContent && pos && typeof document !== 'undefined' && createPortal(
         <div className={`streamer-tooltip ${tooltipClassName ?? ''}`.trim()} style={{ left: pos.x, top: pos.y, transform }} role="tooltip">
@@ -49,6 +52,6 @@ export const StreamerTooltip: React.FC<Props> = ({ name, content, children, clas
         </div>,
         document.body
       )}
-    </div>
+    </Wrapper>
   );
 };
