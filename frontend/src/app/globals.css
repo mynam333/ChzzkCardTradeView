@@ -169,6 +169,423 @@
   animation: arena-battle-progress 2200ms ease-out both;
 }
 
+.arena-battle-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2rem;
+  border: 1px solid rgba(251, 113, 133, 0.22);
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.94), transparent 24%),
+    radial-gradient(circle at 22% 20%, rgba(254, 202, 202, 0.42), transparent 30%),
+    radial-gradient(circle at 78% 78%, rgba(253, 164, 175, 0.34), transparent 34%),
+    linear-gradient(180deg, rgba(255, 241, 242, 0.9), rgba(255, 255, 255, 0.76) 50%, rgba(255, 228, 230, 0.82));
+  box-shadow: 0 18px 44px rgba(244, 63, 94, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.dark .arena-battle-stage {
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.11), transparent 24%),
+    radial-gradient(circle at 22% 20%, rgba(251, 113, 133, 0.22), transparent 30%),
+    radial-gradient(circle at 78% 78%, rgba(244, 63, 94, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(76, 24, 42, 0.9), rgba(39, 18, 32, 0.82) 50%, rgba(68, 20, 38, 0.88));
+}
+
+.arena-battle-stage-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(251, 113, 133, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(251, 113, 133, 0.08) 1px, transparent 1px);
+  background-size: 3rem 3rem;
+  mask-image: radial-gradient(circle at 50% 50%, #000 0 58%, transparent 82%);
+}
+
+.arena-battle-stage.is-playing .arena-battle-stage-bg {
+  animation: arena-combat-field-pulse 1400ms ease-in-out infinite alternate;
+}
+
+.arena-battle-row {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.arena-battle-row.is-player-row {
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  padding-top: 0;
+}
+
+.arena-combat-portrait {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 1.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.68);
+  padding: 0.55rem;
+  box-shadow: 0 12px 28px rgba(244, 63, 94, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+.dark .arena-combat-portrait {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.arena-combat-portrait-frame {
+  --cosmetic-frame-unit: 1px;
+  position: relative;
+  display: flex;
+  height: 3.35rem;
+  width: 3.35rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  border-radius: 1.2rem;
+  border: 2px solid rgba(251, 113, 133, 0.32);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 22px rgba(244, 63, 94, 0.14);
+}
+
+.arena-combat-formation {
+  min-width: 0;
+}
+
+.arena-combat-lane-labels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0 0.25rem 0.3rem;
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 900;
+  color: var(--muted-foreground);
+}
+
+.arena-combat-lane-labels span:nth-child(2) {
+  color: var(--primary);
+}
+
+.arena-combat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.arena-combat-cell {
+  min-width: 0;
+  min-height: 6.2rem;
+}
+
+.arena-combat-card {
+  position: relative;
+  min-height: 6.2rem;
+  overflow: hidden;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(251, 113, 133, 0.24);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(255, 241, 242, 0.78)),
+    var(--card);
+  box-shadow: 0 12px 26px rgba(244, 63, 94, 0.1);
+  transform-origin: center;
+  animation: arena-combat-card-enter 420ms cubic-bezier(.2, .9, .2, 1) both;
+  animation-delay: var(--combat-delay);
+}
+
+.dark .arena-combat-card {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(251, 113, 133, 0.1));
+}
+
+.arena-combat-card.is-frontline {
+  box-shadow: 0 16px 30px rgba(244, 63, 94, 0.16);
+  transform: translateY(-0.25rem);
+}
+
+.arena-combat-card-media {
+  height: 3.3rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.arena-combat-card-body {
+  padding: 0.45rem 0.5rem 1rem;
+}
+
+.arena-combat-hp {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.45rem;
+  height: 0.34rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(127, 29, 29, 0.14);
+}
+
+.arena-combat-hp span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #fb7185, #fda4af 54%, #fecdd3);
+  transition: width 260ms ease;
+}
+
+.arena-combat-hp-text {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 0.05rem 0.32rem;
+  font-size: 0.48rem;
+  font-weight: 900;
+  color: var(--muted-foreground);
+}
+
+.dark .arena-combat-hp-text {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.arena-combat-vfx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.arena-combat-float {
+  position: absolute;
+  left: 50%;
+  top: 0.55rem;
+  z-index: 4;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  animation: arena-combat-float 720ms ease both;
+}
+
+.arena-combat-float.is-damage {
+  background: linear-gradient(135deg, #e11d48, #fb7185);
+  box-shadow: 0 10px 18px rgba(225, 29, 72, 0.28);
+}
+
+.arena-combat-float.is-action {
+  background: linear-gradient(135deg, #f97316, #fb7185);
+}
+
+.arena-combat-float.is-control {
+  background: linear-gradient(135deg, #7c3aed, #fb7185);
+}
+
+.arena-combat-float.is-retire {
+  background: linear-gradient(135deg, #334155, #991b1b);
+}
+
+.arena-combat-card.is-acting {
+  z-index: 3;
+  animation: arena-combat-strike 520ms ease both;
+}
+
+.arena-combat-card.is-hit {
+  animation: arena-combat-hit 420ms ease both;
+}
+
+.arena-combat-card.is-retired {
+  filter: grayscale(0.8) brightness(0.72);
+  opacity: 0.62;
+}
+
+.arena-combat-card.is-retired::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(-35deg, rgba(15, 23, 42, 0.14) 0 0.35rem, rgba(255, 255, 255, 0.08) 0.35rem 0.7rem);
+}
+
+.arena-combat-card.vfx-attack .arena-combat-vfx,
+.arena-combat-card.vfx-skill .arena-combat-vfx,
+.arena-combat-card.vfx-ultimate .arena-combat-vfx,
+.arena-combat-card.vfx-heal .arena-combat-vfx,
+.arena-combat-card.vfx-guard .arena-combat-vfx,
+.arena-combat-card.vfx-burn .arena-combat-vfx,
+.arena-combat-card.vfx-poison .arena-combat-vfx,
+.arena-combat-card.vfx-control .arena-combat-vfx,
+.arena-combat-card.vfx-tempo .arena-combat-vfx {
+  opacity: 1;
+  animation: arena-combat-vfx-pop 640ms ease both;
+}
+
+.arena-combat-card.vfx-attack .arena-combat-vfx {
+  background: linear-gradient(115deg, transparent 24%, rgba(255, 255, 255, 0.92) 46%, transparent 62%);
+}
+
+.arena-combat-card.vfx-skill .arena-combat-vfx {
+  background: radial-gradient(circle at 50% 35%, rgba(251, 113, 133, 0.55), transparent 34%), conic-gradient(from 90deg, transparent, rgba(251, 113, 133, 0.45), transparent);
+}
+
+.arena-combat-card.vfx-ultimate .arena-combat-vfx {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.86), rgba(251, 113, 133, 0.62) 28%, transparent 62%);
+  animation-duration: 880ms;
+}
+
+.arena-combat-card.vfx-heal .arena-combat-vfx {
+  background: radial-gradient(circle at 50% 35%, rgba(74, 222, 128, 0.46), transparent 42%);
+}
+
+.arena-combat-card.vfx-guard .arena-combat-vfx {
+  box-shadow: inset 0 0 0 3px rgba(96, 165, 250, 0.58), inset 0 0 26px rgba(96, 165, 250, 0.34);
+}
+
+.arena-combat-card.vfx-burn .arena-combat-vfx {
+  background: radial-gradient(circle at 40% 70%, rgba(251, 146, 60, 0.66), transparent 30%), radial-gradient(circle at 70% 30%, rgba(239, 68, 68, 0.46), transparent 34%);
+}
+
+.arena-combat-card.vfx-poison .arena-combat-vfx {
+  background: radial-gradient(circle at 45% 45%, rgba(163, 230, 53, 0.5), transparent 38%), linear-gradient(135deg, transparent, rgba(34, 197, 94, 0.24), transparent);
+}
+
+.arena-combat-card.vfx-control .arena-combat-vfx {
+  background: repeating-linear-gradient(90deg, rgba(124, 58, 237, 0.28) 0 0.25rem, transparent 0.25rem 0.5rem);
+}
+
+.arena-combat-card.vfx-tempo .arena-combat-vfx {
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.44), transparent);
+}
+
+.arena-battle-centerline {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 22rem) 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 1rem 0.9rem;
+}
+
+.arena-battle-pulse {
+  height: 0.16rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(251, 113, 133, 0.18);
+}
+
+.arena-battle-stage.is-playing .arena-battle-pulse::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 36%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.8), transparent);
+  animation: arena-combat-line 920ms ease-in-out infinite;
+}
+
+@keyframes arena-combat-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes arena-combat-strike {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-8px) scale(1.04); filter: brightness(1.08); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes arena-combat-hit {
+  0% { transform: translateX(0); filter: brightness(1); }
+  24% { transform: translateX(-4px); filter: brightness(1.22) saturate(1.12); }
+  52% { transform: translateX(4px); }
+  100% { transform: translateX(0); filter: brightness(1); }
+}
+
+@keyframes arena-combat-float {
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(0.8); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -22px) scale(0.96); }
+}
+
+@keyframes arena-combat-vfx-pop {
+  0% { opacity: 0; transform: scale(0.78) rotate(0deg); }
+  35% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.18) rotate(18deg); }
+}
+
+@keyframes arena-combat-line {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(280%); }
+}
+
+@keyframes arena-combat-field-pulse {
+  from { opacity: 0.44; transform: scale(1); }
+  to { opacity: 0.72; transform: scale(1.02); }
+}
+
+@media (max-width: 720px) {
+  .arena-battle-row,
+  .arena-battle-row.is-player-row {
+    grid-template-columns: 1fr;
+    padding: 0.8rem;
+  }
+
+  .arena-battle-row.is-opponent-row .arena-combat-portrait {
+    order: -1;
+  }
+
+  .arena-combat-portrait {
+    width: 100%;
+  }
+
+  .arena-combat-cell,
+  .arena-combat-card {
+    min-height: 5.7rem;
+  }
+
+  .arena-combat-card-media {
+    height: 2.9rem;
+  }
+
+  .arena-battle-centerline {
+    grid-template-columns: 1fr;
+    padding-inline: 0.8rem;
+  }
+
+  .arena-battle-pulse {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arena-battle-stage.is-playing .arena-battle-stage-bg,
+  .arena-battle-stage.is-playing .arena-battle-pulse::after,
+  .arena-combat-card,
+  .arena-combat-card.is-acting,
+  .arena-combat-card.is-hit,
+  .arena-combat-card .arena-combat-vfx,
+  .arena-combat-float {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 .arena-emote-editor-wheel {
   position: relative;
   margin: 0 auto;

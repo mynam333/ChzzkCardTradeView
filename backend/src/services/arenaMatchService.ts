@@ -8,7 +8,7 @@ import { ArenaBattleEvent, pickArenaBattlefieldRule, simulateArenaRound } from '
 import { ARENA_MAX_ROUNDS_PER_MATCH, ARENA_MATCH_FORMAT, ARENA_ROUNDS_TO_WIN, ARENA_TACTIC_CHIPS } from './arenaRules';
 import { getArenaOpsConfigSync } from './arenaOpsConfig';
 import { streamerRepository } from '../repositories';
-import type { ArenaCompactMatchSummaryDto, ArenaDeckSnapshotDto } from '@chikapo/arena-contract';
+import type { ArenaCompactMatchSummaryDto, ArenaDeckSnapshotDto, ArenaRoundPlanSlotDto } from '@chikapo/arena-contract';
 
 export type ArenaMatchDifficulty = 'easy' | 'normal' | 'hard';
 
@@ -93,6 +93,7 @@ export interface ArenaRoundCommitInput {
   focus_rule?: unknown;
   strategy_chip_id?: unknown;
   auto_commit?: unknown;
+  slots?: unknown;
 }
 
 export interface ArenaDeckSnapshot extends Omit<ArenaDeckSnapshotDto, 'cards' | 'round_plans'> {
@@ -527,12 +528,35 @@ const normalizeStrategyChipId = (value: unknown, fallback = 'none') => {
   return ARENA_TACTIC_CHIPS.some((chip) => chip.id === normalized) ? normalized : fallback;
 };
 
+const sanitizeRoundPlanSlots = (value: unknown): ArenaRoundPlanSlotDto[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const slots: ArenaRoundPlanSlotDto[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const cardId = String((raw as any).card_id || '').trim();
+    if (!cardId || seen.has(cardId)) continue;
+    seen.add(cardId);
+    const rowValue = Number((raw as any).row);
+    const colValue = Number((raw as any).col);
+    slots.push({
+      card_id: cardId,
+      channel_id: typeof (raw as any).channel_id === 'string' ? String((raw as any).channel_id).trim() : undefined,
+      row: (Number.isInteger(rowValue) && rowValue >= 0 && rowValue <= 1 ? rowValue : slots.length < 3 ? 1 : 0) as 0 | 1,
+      col: (Number.isInteger(colValue) && colValue >= 0 && colValue <= 2 ? colValue : slots.length % 3) as 0 | 1 | 2
+    });
+    if (slots.length >= 6) break;
+  }
+  return slots.length > 0 ? slots : undefined;
+};
+
 const sanitizeRoundCommitInput = (input: ArenaRoundCommitInput): ArenaRoundCommitInput => ({
   round_no: input.round_no,
   tactic_style: normalizeTacticStyle(input.tactic_style),
   focus_rule: normalizeFocusRule(input.focus_rule),
   strategy_chip_id: normalizeStrategyChipId(input.strategy_chip_id),
-  auto_commit: input.auto_commit === true
+  auto_commit: input.auto_commit === true,
+  slots: sanitizeRoundPlanSlots(input.slots)
 });
 
 const getSummaryProgressStatus = (summary: ArenaCompactMatchSummary, row?: Pick<RawMatchRow, 'round_count' | 'player_a_round_wins' | 'player_b_round_wins' | 'progress_status'>) => {
@@ -572,12 +596,25 @@ const withCommittedRoundPlan = (
           row: (index < 3 ? 1 : 0) as 0 | 1,
           col: (index % 3) as 0 | 1 | 2 | 3
         }));
+  const deckCardsById = new Map(deck.cards.map((card) => [card.card_id, card]));
+  const committedSlots = sanitizeRoundPlanSlots(input.slots)
+    ?.filter((slot) => deckCardsById.has(slot.card_id))
+    .slice(0, 6)
+    .map((slot, index) => {
+      const card = deckCardsById.get(slot.card_id)!;
+      return {
+        card_id: card.card_id,
+        channel_id: card.channel_id,
+        row: (Number.isInteger(slot.row) && slot.row >= 0 && slot.row <= 1 ? slot.row : index < 3 ? 1 : 0) as 0 | 1,
+        col: (Number.isInteger(slot.col) && slot.col >= 0 && slot.col <= 2 ? slot.col : index % 3) as 0 | 1 | 2
+      };
+    });
   const roundPlan = {
     round_no: Math.min(ARENA_MAX_ROUNDS_PER_MATCH, Math.max(1, roundNo)) as any,
     formation_id: fallbackPlan?.formation_id || 'round-commit-2x4',
     tactic_style: tacticStyle,
     focus_rule: focusRule,
-    slots: baseSlots
+    slots: committedSlots && committedSlots.length >= 6 ? committedSlots : baseSlots
   };
   const otherPlans = (deck.round_plans || []).filter((plan) => plan.round_no !== roundNo);
   return {
