@@ -3,7 +3,7 @@
  * 백엔드 응답 스키마와 1:1 대응합니다. (any 남용 제거용)
  */
 
-export type CosmeticType = 'border' | 'name_effect';
+export type CosmeticType = 'border' | 'name_effect' | 'emote';
 
 export interface UserTitle {
   id: number;

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { useApp, TabId } from './AppContext';
 import {
   Home,
@@ -14,7 +15,8 @@ import {
   Shield,
   Store,
   Gamepad2,
-  Award
+  Award,
+  Swords
 } from 'lucide-react';
 import Image from 'next/image';
 import { apiFetch } from '@/lib/api';
@@ -32,6 +34,7 @@ const LOGO_EASTER_EGG_MAX_GAP_MS = 520;
 
 export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activeTab, setActiveTab, theme, toggleTheme, user, authLoading, toast } = useApp();
+  const router = useRouter();
   const dockTouchStartX = React.useRef<number | null>(null);
   const dockTouchStartY = React.useRef<number | null>(null);
   const dockClickSuppressed = React.useRef(false);
@@ -78,10 +81,11 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       ? [{ id: 'admin' as TabId, label: '관리자', icon: Shield }]
       : []),
   ];
+  const arenaNavItem: NavItem = { id: 'arena', label: '아레나', icon: Swords };
 
-  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'achievements', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
+  const mobileNavOrder: TabId[] = ['inventory', 'shop', 'main', 'arena', 'achievements', 'ranking', 'friends', 'arcade', 'my-info', 'admin'];
   const mobileNavItems = mobileNavOrder
-    .map((id) => navItems.find((item) => item.id === id))
+    .map((id) => id === 'arena' ? arenaNavItem : navItems.find((item) => item.id === id))
     .filter((item): item is NavItem => Boolean(item));
   const visualTab = dockVisualTab?.from === activeTab ? dockVisualTab.tab : activeTab;
   const activeNavIndex = Math.max(0, mobileNavItems.findIndex((item) => item.id === visualTab));
@@ -302,6 +306,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             </button>
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => router.push('/arena')}
+          className="cute-wiggle-hover mb-4 flex w-full items-center gap-3 rounded-2xl border border-primary/20 bg-white/70 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 hover:bg-secondary/70 dark:bg-white/10"
+        >
+          <Swords className="h-4.5 w-4.5 text-primary" />
+          <span className="min-w-0">
+            <span className="block truncate">아레나로 이동</span>
+            <span className="block truncate text-[10px] font-bold text-muted-foreground">치카포 기반 듀얼 게임</span>
+          </span>
+        </button>
 
         <nav className="shrink-0 space-y-1">
           {navItems.map((item) => {

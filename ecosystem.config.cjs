@@ -77,6 +77,18 @@ module.exports = {
         NODE_ENV: 'production',
         PROCESS_ROLE: 'chat-worker'
       }
+    },
+    {
+      name: 'chikapo-arena-worker',
+      cwd: __dirname,
+      script: 'backend/dist/workers/arenaWorker.js',
+      instances: 1,
+      exec_mode: 'fork',
+      max_memory_restart: process.env.ARENA_WORKER_MAX_MEMORY_RESTART || '350M',
+      env: {
+        NODE_ENV: 'production',
+        PROCESS_ROLE: 'arena-worker'
+      }
     }
   ]
 };

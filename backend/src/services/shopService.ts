@@ -1,6 +1,7 @@
 /**
  * shopService.ts - 상점(코스메틱) 데이터 액세스. SQLite/Supabase 양 모드를 인라인 처리합니다.
- * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트). 카드당 각 1개 장착, 해제 시 보유로 반환.
+ * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트) | 'emote'(아레나 이모트).
+ * 카드 장착은 border/name_effect만 허용하며 emote는 아레나 전용 로드아웃에서만 사용합니다.
  */
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
@@ -8,7 +9,7 @@ import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 
 export interface ShopItem {
   id: number;
-  type: 'border' | 'name_effect';
+  type: 'border' | 'name_effect' | 'emote';
   name: string;
   description: string | null;
   price: number;
@@ -539,6 +540,11 @@ const slotColumn = (type: 'border' | 'name_effect') => (type === 'border' ? 'bor
 
 // ---- 장착 ----
 export const equipCosmetic = async (userId: string, cardId: number, itemId: number): Promise<{ ok: boolean; reason: string }> => {
+  const item = await getItem(itemId);
+  if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
+  if (item.type !== 'border' && item.type !== 'name_effect') return { ok: false, reason: 'ITEM_TYPE_MISMATCH' };
+  const equipType: 'border' | 'name_effect' = item.type;
+
   if (getDbMode() === 'SUPABASE') {
     const { data: card, error: cardError } = await getSupabaseClient()
       .from('user_cards')
@@ -564,9 +570,7 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
 
   if (getDbMode() === 'MYSQL') {
     return getMysqlDb().transaction(async (tx) => {
-      const item = await tx.get('SELECT * FROM shop_items WHERE id = ?', itemId) as any;
-      if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
-      const col = slotColumn(item.type);
+      const col = slotColumn(equipType);
       const card = await tx.get(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
       if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
       if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
@@ -613,9 +617,7 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
 
   const db = getSqliteDb();
   return db.transaction(() => {
-    const item = db.prepare('SELECT * FROM shop_items WHERE id = ?').get(itemId) as any;
-    if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
-    const col = slotColumn(item.type);
+    const col = slotColumn(equipType);
     const card = db.prepare(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ?`)
       .get(cardId, userId) as any;
     if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };

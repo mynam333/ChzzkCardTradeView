@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "backend"
+    "backend",
+    "packages/*"
   ],
   "scripts": {
     "dev:frontend": "npm run dev --workspace=frontend",
@@ -18,8 +19,11 @@
     "start:worker:backup": "npm run start:worker:backup --workspace=backend",
     "start:worker:image": "npm run start:worker:image --workspace=backend",
     "start:worker:chat": "npm run start:worker:chat --workspace=backend",
+    "start:worker:arena": "npm run start:worker:arena --workspace=backend",
     "deploy:backend": "npm run build:backend && npm run start:backend",
     "migrate:backend": "npm run migrate --workspace=backend",
-    "migrate:sqlite-to-mysql": "node scripts/sqlite-to-mysql.js"
+    "migrate:sqlite-to-mysql": "node scripts/sqlite-to-mysql.js",
+    "arena:readiness": "node scripts/arena-service-readiness.mjs",
+    "arena:balance": "npm run arena:balance --workspace=backend"
   }
 }

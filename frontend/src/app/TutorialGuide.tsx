@@ -49,6 +49,7 @@ type TutorialStep = {
   grantGachaTicket?: boolean;
   shopSubTab?: 'gacha_shop' | 'market' | 'my_listings' | 'history';
   rankingSubTab?: 'value' | 'change' | 'user' | 'cards';
+  openFriendsPanel?: boolean;
   demo?: 'inventory-menu' | 'minigame-result';
 };
 
@@ -303,7 +304,8 @@ const tutorialSteps: TutorialStep[] = [
       '카드 교환을 자주 하는 사람이나 같이 게임하는 사람을 친구로 묶어 두면 이동이 훨씬 편해집니다.'
     ],
     tip: '원하지 않는 유저는 내 정보의 차단에서 친구 신청도 함께 막을 수 있어요.',
-    target: 'friends-search'
+    target: 'friends-search',
+    openFriendsPanel: true
   },
   {
     id: 'friends-chat',
@@ -314,7 +316,8 @@ const tutorialSteps: TutorialStep[] = [
       '친구 목록에서 대화를 열면 텍스트, 첨부, 링크 미리보기 같은 대화 기능을 사용할 수 있어요.',
       '톡방을 보고 있을 때 바로 읽힌 메시지는 알림을 줄이고, 보고 있지 않을 때만 사이트 알림이나 푸시로 알려줍니다.'
     ],
-    target: 'friends-list'
+    target: 'friends-list',
+    openFriendsPanel: true
   },
   {
     id: 'arcade-points',
@@ -1208,6 +1211,22 @@ export const TutorialGuide: React.FC = () => {
   }, [collapsed, open, step.id, step.rankingSubTab]);
 
   useEffect(() => {
+    if (!open || collapsed || !step.openFriendsPanel) return;
+    const dispatchOpenPanel = () => {
+      window.dispatchEvent(new CustomEvent('chikapo:tutorial-friends-panel', {
+        detail: { open: true }
+      }));
+    };
+    dispatchOpenPanel();
+    const firstTimer = window.setTimeout(dispatchOpenPanel, 120);
+    const secondTimer = window.setTimeout(dispatchOpenPanel, 360);
+    return () => {
+      window.clearTimeout(firstTimer);
+      window.clearTimeout(secondTimer);
+    };
+  }, [collapsed, open, step.id, step.openFriendsPanel]);
+
+  useEffect(() => {
     setWaitingSatisfied(false);
     setActionStatus('');
   }, [step.id]);
@@ -1600,6 +1619,4 @@ export const startChikapoTutorial = () => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(MANUAL_START_EVENT));
 };
-
-
 

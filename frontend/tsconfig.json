@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@chikapo/arena-contract": ["../packages/arena-contract/index.d.ts"]
     }
   },
   "include": [

@@ -21,11 +21,30 @@ import { EasterEggProvider } from './EasterEggProvider';
 import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 
-export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'achievements' | 'friends' | 'my-info' | 'admin' | 'arcade';
+export type TabId = 'main' | 'shop' | 'inventory' | 'ranking' | 'achievements' | 'friends' | 'my-info' | 'admin' | 'arcade' | 'arena';
 type ShopSubTabId = 'gacha_shop' | 'market' | 'my_listings' | 'history';
 
-const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'achievements', 'friends', 'my-info', 'admin', 'arcade'];
+const VALID_TABS: TabId[] = ['main', 'shop', 'inventory', 'ranking', 'achievements', 'friends', 'my-info', 'admin', 'arcade', 'arena'];
 const SHOP_SUB_TABS: ShopSubTabId[] = ['gacha_shop', 'market', 'my_listings', 'history'];
+const APP_INIT_API_TIMEOUT_MS = 6_000;
+
+const apiFetchWithTimeout = async (
+  path: string,
+  options: RequestInit = {},
+  timeoutMs = APP_INIT_API_TIMEOUT_MS
+): Promise<Response> => {
+  if (typeof AbortController === 'undefined' || options.signal) {
+    return apiFetch(path, options);
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await apiFetch(path, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+};
 
 const parseNotificationLink = (link: string | null): { tab: TabId; shopSubTab?: ShopSubTabId } | null => {
   const raw = (link || '').trim();
@@ -559,8 +578,10 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     if (pathname.startsWith('/my-info')) return 'my-info';
     if (pathname.startsWith('/admin')) return 'admin';
     if (pathname.startsWith('/arcade')) return 'arcade';
+    if (pathname.startsWith('/arena')) return 'arena';
     return 'main';
   })();
+  const isArenaRoute = pathname.startsWith('/arena');
   const realtimeTopics = React.useMemo(() => {
     const topics = new Set(['maintenance']);
     if (pathname === '/' || pathname.startsWith('/ranking')) topics.add('ranking');
@@ -599,7 +620,15 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const readLocation = () => setAnalyticsLocationKey(`${window.location.pathname}${window.location.search}`);
+    let locationTimer: number | null = null;
+    const readLocation = () => {
+      const nextLocationKey = `${window.location.pathname}${window.location.search}`;
+      if (locationTimer !== null) window.clearTimeout(locationTimer);
+      locationTimer = window.setTimeout(() => {
+        setAnalyticsLocationKey(nextLocationKey);
+        locationTimer = null;
+      }, 0);
+    };
     readLocation();
 
     const originalPushState = window.history.pushState;
@@ -622,6 +651,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       window.history.replaceState = originalReplaceState;
       window.removeEventListener('popstate', readLocation);
       window.removeEventListener('chikapo:location-change', readLocation);
+      if (locationTimer !== null) window.clearTimeout(locationTimer);
     };
   }, []);
 
@@ -700,7 +730,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
 
   const checkMaintenanceStatus = async () => {
     try {
-      const res = await apiFetch('/maintenance/status');
+      const res = await apiFetchWithTimeout('/maintenance/status');
       if (res.ok) {
         const data = await res.json();
         setMaintenanceActive(!!data.active);
@@ -712,7 +742,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
         }
       }
     } catch (err) {
-      console.error('[AppContext] 점검 상태 조회 실패:', err);
+      console.warn('[AppContext] 점검 상태 조회 실패:', err);
       if (maintenanceActive === null) {
         setMaintenanceActive(false);
       }
@@ -876,7 +906,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       setAuthLoading(true);
     }
     try {
-      const response = await apiFetch('/users/me');
+      const response = await apiFetchWithTimeout('/users/me');
       if (response.ok) {
         const data = await response.json();
         setAuthFlag();
@@ -906,7 +936,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
         setUser(null);
       }
     } catch (e) {
-      console.error('[AppContext] 유저 세션 갱신 실패:', e);
+      console.warn('[AppContext] 유저 세션 갱신 실패:', e);
     } finally {
       setAuthLoading(false);
     }
@@ -1065,23 +1095,23 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
         <EasterEggProvider toast={toast}>
           {isInitializing ? (
             <div className="fixed inset-0 z-50 flex select-none flex-col items-center justify-center overflow-hidden bg-background text-foreground">
-              <div className="absolute -left-16 -top-16 h-64 w-64 rounded-full bg-white/70 blur-2xl pointer-events-none dark:bg-primary/10"></div>
-              <div className="absolute right-[-4rem] top-16 h-80 w-80 rounded-full bg-primary/18 blur-[80px] pointer-events-none"></div>
-              <div className="absolute bottom-[-5rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-accent/45 blur-[90px] pointer-events-none"></div>
+              <div className={`absolute -left-16 -top-16 h-64 w-64 rounded-full blur-2xl pointer-events-none ${isArenaRoute ? 'bg-rose-100/80 dark:bg-rose-400/10' : 'bg-white/70 dark:bg-primary/10'}`}></div>
+              <div className={`absolute right-[-4rem] top-16 h-80 w-80 rounded-full blur-[80px] pointer-events-none ${isArenaRoute ? 'bg-rose-300/26 dark:bg-rose-400/14' : 'bg-primary/18'}`}></div>
+              <div className={`absolute bottom-[-5rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full blur-[90px] pointer-events-none ${isArenaRoute ? 'bg-red-200/45 dark:bg-red-400/12' : 'bg-accent/45'}`}></div>
               <div className="flex flex-col items-center space-y-6 relative z-10">
                 <div className="relative flex h-24 w-24 items-center justify-center">
-                  <div className="absolute h-full w-full animate-ping rounded-[2rem] bg-primary/10 opacity-75 duration-[1800ms]"></div>
-                  <div className="absolute h-18 w-18 animate-spin rounded-[1.75rem] border-[3px] border-primary/12 border-t-primary"></div>
-                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-white/90 p-2 shadow-xl shadow-primary/20 dark:bg-card/90">
-                    <img src="/favicon.ico" alt="치카포" className="h-8 w-8 object-contain" />
+                  <div className={`absolute h-full w-full animate-ping rounded-[2rem] opacity-75 duration-[1800ms] ${isArenaRoute ? 'bg-rose-300/18' : 'bg-primary/10'}`}></div>
+                  <div className={`absolute h-18 w-18 animate-spin rounded-[1.75rem] border-[3px] ${isArenaRoute ? 'border-rose-200/60 border-t-rose-500 dark:border-rose-300/14 dark:border-t-rose-300' : 'border-primary/12 border-t-primary'}`}></div>
+                  <div className={`relative flex h-14 w-14 items-center justify-center rounded-2xl border bg-white/90 p-2 shadow-xl dark:bg-card/90 ${isArenaRoute ? 'border-rose-200/80 shadow-rose-300/25 dark:border-rose-300/18 dark:shadow-rose-500/12' : 'border-primary/20 shadow-primary/20'}`}>
+                    <img src={isArenaRoute ? '/arena-icon.png' : '/favicon.ico'} alt={isArenaRoute ? '치카포 아레나' : '치카포'} className={`${isArenaRoute ? 'h-10 w-10' : 'h-8 w-8'} object-contain`} />
                   </div>
                 </div>
                 <div className="text-center space-y-2">
-                  <h1 className="cute-loading-logo text-4xl font-black animate-pulse">
-                    치카포
+                  <h1 className={`cute-loading-logo text-4xl font-black animate-pulse ${isArenaRoute ? 'arena-loading-logo' : ''}`}>
+                    {isArenaRoute ? '아레나' : '치카포'}
                   </h1>
-                  <p className="rounded-full border border-primary/15 bg-card/70 px-4 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground shadow-sm backdrop-blur">
-                    치지직 카드 포럼을 불러오는 중입니다...
+                  <p className={`rounded-full border bg-card/70 px-4 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground shadow-sm backdrop-blur ${isArenaRoute ? 'border-rose-300/30 bg-rose-50/70 text-rose-900/70 dark:bg-rose-300/10 dark:text-rose-100/75' : 'border-primary/15'}`}>
+                    {isArenaRoute ? '치카포 아레나를 불러오는 중입니다...' : '치지직 카드 포럼을 불러오는 중입니다...'}
                   </p>
                 </div>
               </div>

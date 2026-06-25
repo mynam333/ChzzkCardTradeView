@@ -208,6 +208,13 @@ export const GachaTab: React.FC = () => {
     card: UserCard | null;
   }>({ x: 0, y: 0, open: false, channel_id: '', star: 0, card: null });
   const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const [bulkContextMenu, setBulkContextMenu] = useState<{
+    x: number;
+    y: number;
+    open: boolean;
+    keys: string[];
+  }>({ x: 0, y: 0, open: false, keys: [] });
+  const bulkContextMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   // 카드 선택 모드 및 선택된 채널+별 키 목록
   const [selectionMode, setSelectionMode] = useState(false);
@@ -276,6 +283,7 @@ export const GachaTab: React.FC = () => {
         return;
       }
       setContextMenu(prev => prev.open ? { ...prev, open: false } : prev);
+      setBulkContextMenu(prev => prev.open ? { ...prev, open: false } : prev);
     };
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
@@ -308,6 +316,32 @@ export const GachaTab: React.FC = () => {
     };
   }, [contextMenu.open, contextMenu.x, contextMenu.y]);
 
+  useEffect(() => {
+    if (!bulkContextMenu.open) return;
+
+    const repositionBulkContextMenu = () => {
+      const menu = bulkContextMenuRef.current;
+      if (!menu) return;
+
+      const rect = menu.getBoundingClientRect();
+      const next = clampContextMenuPosition(bulkContextMenu.x, bulkContextMenu.y, rect.width, rect.height);
+      if (next.x !== bulkContextMenu.x || next.y !== bulkContextMenu.y) {
+        setBulkContextMenu(prev => prev.open ? { ...prev, x: next.x, y: next.y } : prev);
+      }
+    };
+
+    const frame = window.requestAnimationFrame(repositionBulkContextMenu);
+    window.addEventListener('resize', repositionBulkContextMenu);
+    window.visualViewport?.addEventListener('resize', repositionBulkContextMenu);
+    window.visualViewport?.addEventListener('scroll', repositionBulkContextMenu);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', repositionBulkContextMenu);
+      window.visualViewport?.removeEventListener('resize', repositionBulkContextMenu);
+      window.visualViewport?.removeEventListener('scroll', repositionBulkContextMenu);
+    };
+  }, [bulkContextMenu.open, bulkContextMenu.x, bulkContextMenu.y]);
   useEffect(() => {
     const streamerId = searchParams.get('streamer');
     setDetailStreamer(streamerId ? { channel_id: streamerId } : null);
@@ -1124,6 +1158,81 @@ export const GachaTab: React.FC = () => {
       || null;
   };
 
+
+  const getCardsBySelectionKeys = (keys: string[]) => {
+    const selected = new Map<number, UserCard>();
+    keys.forEach((key) => {
+      if (isSingleCardKey(key)) {
+        const card = getCardByKey(key);
+        if (card) selected.set(card.id, card);
+        return;
+      }
+      const { channelId, star } = parseCardKey(key);
+      inventory
+        .filter(c => !hasEquippedCosmetic(c) && c.channel_id === channelId && (c.star || 0) === star)
+        .forEach(card => selected.set(card.id, card));
+    });
+    return Array.from(selected.values());
+  };
+
+  const buildBulkSellQuantitiesFromKeys = (keys: string[]) => {
+    const quantities: { [key: string]: number } = {};
+    keys.forEach(key => {
+      if (isSingleCardKey(key)) return;
+      const { channelId, star } = parseCardKey(key);
+      const count = getCardCountInInventory(channelId, star);
+      if (count > 0) quantities[key] = count;
+    });
+    return quantities;
+  };
+
+  const openBulkSelectionMenu = (event: React.MouseEvent | { clientX: number; clientY: number }, keys = selectedCardKeys) => {
+    if (!selectionMode) return;
+    const effectiveKeys = Array.from(new Set(keys));
+    if (effectiveKeys.length === 0) {
+      toast('선택된 카드가 없습니다.');
+      return;
+    }
+    const menuPosition = clampContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu(prev => prev.open ? { ...prev, open: false } : prev);
+    setBulkContextMenu({ x: menuPosition.x, y: menuPosition.y, open: true, keys: effectiveKeys });
+  };
+
+  const runSelectedCardUpdates = async (
+    cards: UserCard[],
+    makeRequest: (card: UserCard) => Promise<Response>,
+    failureMessage: string,
+    options: { refreshMarket?: boolean } = {}
+  ) => {
+    if (cards.length === 0) {
+      toast('선택된 카드가 없습니다.');
+      return;
+    }
+
+    let success = 0;
+    let failed = 0;
+    for (let index = 0; index < cards.length; index += 8) {
+      const batch = cards.slice(index, index + 8);
+      const results = await Promise.all(batch.map(async (card) => {
+        try {
+          const res = await makeRequest(card);
+          return res.ok;
+        } catch {
+          return false;
+        }
+      }));
+      success += results.filter(Boolean).length;
+      failed += results.filter(ok => !ok).length;
+    }
+
+    if (success > 0) {
+      showAlert('설정 완료', `${success}장의 카드에 적용했습니다.${failed > 0 ? ` ${failed}장은 처리하지 못했습니다.` : ''}`, failed > 0 ? 'warning' : 'success');
+      await fetchInventory();
+      if (options.refreshMarket) await fetchMarketPending();
+    } else {
+      showAlert('설정 실패', failureMessage, 'error');
+    }
+  };
   // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
   const getProcessedInventory = () => {
     // 1. 검색어 및 라이브 상태 필터링
@@ -1884,19 +1993,9 @@ export const GachaTab: React.FC = () => {
                   const handleContextMenu = (e: React.MouseEvent) => {
                     e.preventDefault();
                     if (selectionMode) {
-                      // 다중 선택 상태일 때의 우클릭 액션: 일괄 판매 모달 바로 트리거
-                      const quantities: { [key: string]: number } = {};
-                      selectedCardKeys.forEach(selectedKey => {
-                        if (isSingleCardKey(selectedKey)) return;
-                        const parsed = parseCardKey(selectedKey);
-                        quantities[selectedKey] = getCardCountInInventory(parsed.channelId, parsed.star);
-                      });
-                      if (Object.keys(quantities).length === 0) {
-                        toast('일괄 판매할 수 있는 카드가 선택되지 않았습니다.');
-                        return;
-                      }
-                      setBulkSellQuantities(quantities);
-                      setBulkSellModalOpen(true);
+                      const nextKeys = isSelected ? selectedCardKeys : [...selectedCardKeys, key];
+                      if (!isSelected) setSelectedCardKeys(nextKeys);
+                      openBulkSelectionMenu(e, nextKeys);
                       return;
                     }
                     const owned = getCardGroup(card);
@@ -1918,10 +2017,6 @@ export const GachaTab: React.FC = () => {
                   const handleCardClick = (e: React.MouseEvent) => {
                     if (selectionMode) {
                       e.preventDefault();
-                      if (hasEquippedCosmetic(card)) {
-                        showAlert('선택 제외', '코스메틱 장착 카드는 한 장 단위 카드라 일괄 판매에서 제외됩니다.', 'warning');
-                        return;
-                      }
                       if (isSelected) {
                         setSelectedCardKeys(selectedCardKeys.filter(selectedKey => selectedKey !== key));
                       } else {
@@ -1962,7 +2057,12 @@ export const GachaTab: React.FC = () => {
                         return;
                       }
                       if (selectionMode) {
-                        cancelLongPress();
+                        const nextKeys = selectedCardKeys.includes(key) ? selectedCardKeys : [...selectedCardKeys, key];
+                        if (!selectedCardKeys.includes(key)) setSelectedCardKeys(nextKeys);
+                        longPressFired.current = true;
+                        longPressTimer.current = null;
+                        openBulkSelectionMenu({ clientX: x, clientY: y }, nextKeys);
+                        if (navigator.vibrate) navigator.vibrate(40);
                         return;
                       }
                       longPressFired.current = true;
@@ -2441,6 +2541,124 @@ export const GachaTab: React.FC = () => {
         );
       })()}
 
+      {/* 다중선택 우클릭 컨텍스트 메뉴 오버레이 */}
+      {selectionMode && bulkContextMenu.open && (() => {
+        const selectedCards = getCardsBySelectionKeys(bulkContextMenu.keys);
+        const sellQuantities = buildBulkSellQuantitiesFromKeys(bulkContextMenu.keys);
+        const canBulkSell = Object.keys(sellQuantities).length > 0;
+        const imageUrls = Array.from(new Set(selectedCards
+          .map(card => card.streamer ? inventoryCardImage(card.streamer, card.star || 0) : '')
+          .filter(Boolean)));
+        if (selectedCards.length === 0) return null;
+
+        const closeBulkMenu = () => setBulkContextMenu(prev => ({ ...prev, open: false }));
+
+        return (
+          <div
+            ref={bulkContextMenuRef}
+            className="fixed z-50 max-h-[calc(100dvh-1rem)] w-60 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-2xl border border-border bg-card/95 py-1.5 shadow-2xl backdrop-blur-md animate-in fade-in duration-100"
+            style={{ left: `${bulkContextMenu.x}px`, top: `${bulkContextMenu.y}px` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-border/60 px-4 py-2.5">
+              <p className="text-xs font-black text-foreground">선택 카드 작업</p>
+              <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">{selectedCards.length.toLocaleString()}장 대상 · 섞인 상태는 각각 반대로 토글됩니다.</p>
+            </div>
+            <button
+              onClick={() => {
+                if (!canBulkSell) {
+                  toast('일괄 판매할 수 있는 선택 카드가 없습니다.');
+                  return;
+                }
+                setBulkSellQuantities(sellQuantities);
+                setBulkSellModalOpen(true);
+                closeBulkMenu();
+              }}
+              className={`flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold ${canBulkSell ? 'text-foreground hover:bg-secondary/80' : 'cursor-not-allowed text-muted-foreground/55'}`}
+            >
+              💰 선택 카드 일괄 판매
+            </button>
+            <button
+              onClick={async () => {
+                closeBulkMenu();
+                await runSelectedCardUpdates(
+                  selectedCards,
+                  (card) => apiFetch(`/cards/${card.id}/favorite`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ favorite: card.favorite_order == null })
+                  }),
+                  '즐겨찾기 설정 중 오류가 발생했습니다.'
+                );
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-foreground hover:bg-secondary/80"
+            >
+              ⭐ 즐겨찾기 고정/해제
+            </button>
+            <button
+              onClick={async () => {
+                closeBulkMenu();
+                await runSelectedCardUpdates(
+                  selectedCards,
+                  (card) => apiFetch(`/cards/${card.id}/visibility`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ hidden: !card.is_hidden })
+                  }),
+                  '외부 공개 설정 중 오류가 발생했습니다.'
+                );
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-foreground hover:bg-secondary/80"
+            >
+              🙈 외부 공개 숨기기/표시하기
+            </button>
+            {imageUrls.length > 0 && (
+              <button
+                onClick={async () => {
+                  closeBulkMenu();
+                  let success = 0;
+                  for (const imageUrl of imageUrls) {
+                    const ok = isImageBlinded(imageUrl)
+                      ? await unblindImage(imageUrl)
+                      : await blindImage(imageUrl);
+                    if (ok) success += 1;
+                  }
+                  showAlert(success > 0 ? '설정 완료' : '설정 실패', success > 0 ? `${success}개 이미지의 블라인드 상태를 변경했습니다.` : '이미지 블라인드 설정 중 오류가 발생했습니다.', success > 0 ? 'success' : 'error');
+                }}
+                className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-foreground hover:bg-secondary/80"
+              >
+                🚫 이미지 블라인드/해제
+              </button>
+            )}
+            <button
+              onClick={async () => {
+                closeBulkMenu();
+                await runSelectedCardUpdates(
+                  selectedCards,
+                  (card) => apiFetch(`/cards/${card.id}/lock`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ locked: !card.is_locked })
+                  }),
+                  '카드 잠금 설정 중 오류가 발생했습니다.',
+                  { refreshMarket: true }
+                );
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-foreground hover:bg-secondary/80"
+            >
+              🔒 카드 전부 잠금/해제
+            </button>
+            <div className="my-1 border-t border-border/60" />
+            <button
+              onClick={() => {
+                setSelectedCardKeys([]);
+                setSelectionMode(false);
+                closeBulkMenu();
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-muted-foreground hover:bg-secondary/80"
+            >
+              ✕ 선택 해제
+            </button>
+          </div>
+        );
+      })()}
       {/* 우클릭 컨텍스트 메뉴 오버레이 */}
       {contextMenu.open && (() => {
         const channelId = contextMenu.channel_id;

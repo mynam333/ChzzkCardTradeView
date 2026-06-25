@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { ensureParentDirectory, getSqliteDbPath } from './storagePaths';
 import { createMysqlDb, MysqlDb } from './mysqlDb';
+import { ensureArenaMysqlSchema, ensureArenaSqliteSchema } from './arenaSchemaMigration';
 
 let sqliteDb: Database.Database | null = null;
 let supabaseClient: SupabaseClient | null = null;
@@ -110,6 +111,7 @@ const fetchWithRetry: typeof fetch = async (input, init) => {
 };
 
 const createSqliteIdBackfillTrigger = (db: Database.Database, table: string) => {
+  if (!sqliteColumnExists(db, table, 'id')) return;
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS trg_${table}_id_after_insert
     AFTER INSERT ON ${table}
@@ -121,10 +123,17 @@ const createSqliteIdBackfillTrigger = (db: Database.Database, table: string) => 
 };
 
 const backfillNullIdFromRowId = (db: Database.Database, table: string) => {
+  if (!sqliteColumnExists(db, table, 'id')) return;
   db.exec(`UPDATE ${table} SET id = rowid WHERE id IS NULL;`);
 };
 
 const ensureUniqueIndex = (db: Database.Database, table: string, columns: string[], indexName: string) => {
+  if (!sqliteTableExists(db, table)) return;
+  const missingColumns = columns.filter((column) => !sqliteColumnExists(db, table, column));
+  if (missingColumns.length > 0) {
+    console.warn(`[DB Migration] SQLite ${table}.${indexName} 인덱스 생성을 건너뜁니다. 누락 컬럼: ${missingColumns.join(', ')}`);
+    return;
+  }
   const quotedColumns = columns.map((column) => `"${column}"`).join(', ');
   const partition = columns.map((column) => `"${column}"`).join(', ');
   db.exec(`
@@ -142,6 +151,56 @@ const ensureUniqueIndex = (db: Database.Database, table: string, columns: string
        AND ${columns.map((column) => `"${column}" IS NOT NULL`).join(' AND ')};
     CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${quotedColumns});
   `);
+};
+
+const sqliteTableExists = (db: Database.Database, table: string): boolean => {
+  const row = db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(table);
+  return Boolean(row);
+};
+
+const sqliteColumnExists = (db: Database.Database, table: string, column: string): boolean => {
+  if (!sqliteTableExists(db, table)) return false;
+  const columns = db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as Array<{ name: string }>;
+  return columns.some((entry) => entry.name === column);
+};
+
+const ensureSqliteColumn = (db: Database.Database, table: string, column: string, ddl: string): void => {
+  if (!sqliteTableExists(db, table) || sqliteColumnExists(db, table, column)) return;
+  console.log(`[DB Migration] SQLite ${table}.${column} 컬럼이 없어 추가합니다.`);
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl};`);
+};
+
+const ensureSqlitePreSchemaCompatibility = (db: Database.Database): void => {
+  // init-db.sql은 CREATE TABLE IF NOT EXISTS 뒤 곧바로 최신 인덱스를 생성합니다.
+  // 이미 존재하는 구형 SQLite 테이블은 CREATE TABLE로 컬럼이 갱신되지 않으므로,
+  // 인덱스가 참조하는 신규 컬럼을 먼저 보강해야 초기 스키마 재실행이 멱등성을 가집니다.
+  const indexedColumnBackfills: Array<[string, string, string]> = [
+    ['user_titles', 'is_equipped', 'is_equipped INTEGER NOT NULL DEFAULT 0'],
+    ['user_titles', 'grant_source', "grant_source TEXT NOT NULL DEFAULT 'manual'"],
+    ['subscription_title_states', 'checked_until', 'checked_until TEXT'],
+    ['user_cards', 'star', 'star INTEGER DEFAULT 0'],
+    ['user_cards', 'is_hidden', 'is_hidden INTEGER NOT NULL DEFAULT 0'],
+    ['user_cards', 'favorite_order', 'favorite_order INTEGER'],
+    ['user_cards', 'favorite_at', 'favorite_at TEXT'],
+    ['user_cards', 'is_locked', 'is_locked INTEGER NOT NULL DEFAULT 0'],
+    ['notifications', 'deleted_at', 'deleted_at TEXT'],
+    ['notifications', 'group_key', 'group_key TEXT'],
+    ['shop_items', 'listed_at', 'listed_at TEXT'],
+    ['shop_items', 'sale_start_at', 'sale_start_at TEXT'],
+    ['shop_items', 'sale_end_at', 'sale_end_at TEXT'],
+    ['shop_items', 'limited_total_quantity', 'limited_total_quantity INTEGER NOT NULL DEFAULT 0'],
+    ['shop_items', 'sold_quantity', 'sold_quantity INTEGER NOT NULL DEFAULT 0'],
+    ['chat_messages', 'message_type', "message_type TEXT NOT NULL DEFAULT 'text'"],
+    ['chat_messages', 'attachment_expires_at', 'attachment_expires_at TEXT'],
+    ['chat_messages', 'attachment_deleted_at', 'attachment_deleted_at TEXT'],
+    ['market_listings', 'listing_type', "listing_type TEXT NOT NULL DEFAULT 'fixed'"],
+    ['market_listings', 'current_bidder_id', 'current_bidder_id TEXT'],
+    ['market_listings', 'bid_reserved', 'bid_reserved INTEGER DEFAULT 0'],
+    ['market_transaction_audit_logs', 'current_bidder_id', 'current_bidder_id TEXT']
+  ];
+  for (const [table, column, ddl] of indexedColumnBackfills) {
+    ensureSqliteColumn(db, table, column, ddl);
+  }
 };
 
 const ensureSqliteCompatibilityConstraints = (db: Database.Database) => {
@@ -697,6 +756,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       INDEX idx_market_audit_bidder (current_bidder_id, recorded_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await ensureArenaMysqlSchema(db);
 };
 
 /**
@@ -768,6 +828,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
     const sqlPath = path.join(__dirname, '../../../init-db.sql');
     if (fs.existsSync(sqlPath)) {
       const sqlSchema = fs.readFileSync(sqlPath, 'utf8');
+      ensureSqlitePreSchemaCompatibility(sqliteDb);
       sqliteDb.exec(sqlSchema);
       console.log(`[DB] 로컬 SQLite3 데이터베이스 연결 및 초기 스키마 적재가 완료되었습니다. (LOCAL MODE: ${dbPath})`);
       
@@ -1562,6 +1623,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();
+      ensureArenaSqliteSchema(sqliteDb);
 
       try {
         ensureSqliteCompatibilityConstraints(sqliteDb);

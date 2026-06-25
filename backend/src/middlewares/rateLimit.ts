@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 
 /**
  * 의존성 없는 경량 인메모리 레이트 리미터.
- * IP + 라우트 키별로 고정 윈도우(windowMs) 동안 max 회까지 허용합니다.
+ * IP 또는 인증 사용자 + 라우트 키별로 고정 윈도우(windowMs) 동안 max 회까지 허용합니다.
  * (단일 인스턴스 기준. 다중 인스턴스 배포 시 Redis 등 공유 저장소 권장)
  */
 interface Bucket {
@@ -32,8 +32,8 @@ const getClientIp = (req: Request): string => {
  * @param options.max 윈도우당 최대 요청 수
  * @param options.key 버킷 구분용 라우트 식별자
  */
-export const rateLimit = (options: { windowMs: number; max: number; key: string }) => {
-  const { windowMs, max, key } = options;
+export const rateLimit = (options: { windowMs: number; max: number; key: string; keyByUser?: boolean }) => {
+  const { windowMs, max, key, keyByUser = false } = options;
 
   return (req: Request, res: Response, next: NextFunction) => {
     if (max <= 0) {
@@ -41,7 +41,8 @@ export const rateLimit = (options: { windowMs: number; max: number; key: string 
     }
 
     const ip = getClientIp(req);
-    const bucketKey = `${key}:${ip}`;
+    const userId = keyByUser ? String((req as any).user?.id || '').trim() : '';
+    const bucketKey = `${key}:${userId ? `user:${userId}` : `ip:${ip}`}`;
     const now = Date.now();
 
     let bucket = store.get(bucketKey);
@@ -68,3 +69,4 @@ export const rateLimit = (options: { windowMs: number; max: number; key: string 
     next();
   };
 };
+

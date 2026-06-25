@@ -10,18 +10,17 @@ import { AdminTab } from '../AdminTab';
  * 치카포 관리자 탭 컨텐츠 컴포넌트
  */
 function AdminPageContent() {
-  const { user, authLoading, toast } = useApp();
+  const { user, authLoading } = useApp();
   const router = useRouter();
 
   useEffect(() => {
     // 세션 로딩이 완료된 후, 유저 정보가 없거나 역할이 ADMIN이 아닌 경우
     if (!authLoading) {
       if (!user || user.role !== 'ADMIN') {
-        toast('관리자 권한이 필요합니다.', 'error');
         router.replace('/');
       }
     }
-  }, [user, authLoading, router, toast]);
+  }, [user, authLoading, router]);
 
   // 로딩 중이거나 권한이 없는 경우 화면을 렌더링하지 않음
   if (authLoading || !user || user.role !== 'ADMIN') {

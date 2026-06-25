@@ -197,7 +197,8 @@ const rewardTypeLabels: Record<AchievementRewardType, string> = {
 
 const cosmeticTypeLabels: Record<ShopItem['type'], string> = {
   border: '테두리',
-  name_effect: '이름 이펙트'
+  name_effect: '이름 이펙트',
+  emote: '아레나 이모트'
 };
 
 const emptyReward = (): AchievementReward => ({ type: 'point', points: 1000 });

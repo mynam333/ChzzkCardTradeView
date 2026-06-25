@@ -5,7 +5,8 @@ export type ProcessRole =
   | 'live-worker'
   | 'backup-worker'
   | 'image-worker'
-  | 'chat-worker';
+  | 'chat-worker'
+  | 'arena-worker';
 
 const normalizeRole = (value: string | undefined): ProcessRole => {
   const role = String(value || 'api').trim().toLowerCase();
@@ -16,7 +17,8 @@ const normalizeRole = (value: string | undefined): ProcessRole => {
     role === 'live-worker' ||
     role === 'backup-worker' ||
     role === 'image-worker' ||
-    role === 'chat-worker'
+    role === 'chat-worker' ||
+    role === 'arena-worker'
   ) {
     return role;
   }
@@ -33,6 +35,7 @@ export const isLiveWorkerProcess = () => PROCESS_ROLE === 'live-worker' || PROCE
 export const isBackupWorkerProcess = () => PROCESS_ROLE === 'backup-worker' || PROCESS_ROLE === 'all';
 export const isImageWorkerProcess = () => PROCESS_ROLE === 'image-worker';
 export const isChatWorkerProcess = () => PROCESS_ROLE === 'chat-worker';
+export const isArenaWorkerProcess = () => PROCESS_ROLE === 'arena-worker' || PROCESS_ROLE === 'all';
 
 export const shouldRunPushScheduler = () =>
   process.env.RUN_PUSH_SCHEDULER === 'true' || isSchedulerWorkerProcess();

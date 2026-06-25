@@ -54,11 +54,19 @@ const DEFAULT_CORS_ALLOWED_ORIGINS = [
  * CORS_ALLOWED_ORIGINS="https://a.com,https://b.com" 형태로 콤마 구분.
  * 미설정 시 운영 기본 도메인과 로컬 개발 도메인을 허용합니다.
  */
-export const CORS_ALLOWED_ORIGINS: string[] = (
+const configuredCorsAllowedOrigins = (
   process.env.CORS_ALLOWED_ORIGINS ||
   DEFAULT_CORS_ALLOWED_ORIGINS.join(',')
-)
-  .split(',')
+).split(',');
+const shouldIncludeLocalCorsOrigins =
+  !IS_PRODUCTION ||
+  ['sqlite', 'local_sql', 'local-sql', 'local', 'file'].includes((process.env.DB_MODE || '').trim().toLowerCase()) ||
+  process.env.ALLOW_LOCAL_CORS_ORIGINS === 'true';
+
+export const CORS_ALLOWED_ORIGINS: string[] = [
+  ...configuredCorsAllowedOrigins,
+  ...(shouldIncludeLocalCorsOrigins ? DEFAULT_CORS_ALLOWED_ORIGINS : [])
+]
   .map((o) => normalizeOrigin(o.trim()))
   .filter((origin): origin is string => Boolean(origin))
   .filter((origin, index, origins) => origins.indexOf(origin) === index);

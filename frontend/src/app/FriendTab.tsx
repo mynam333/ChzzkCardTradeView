@@ -915,6 +915,15 @@ export const FriendTab: React.FC = () => {
   }, [activeChatRoom]);
 
   useEffect(() => {
+    const handleTutorialFriendsPanel = (event: Event) => {
+      const shouldOpen = (event as CustomEvent<{ open?: boolean }>).detail?.open !== false;
+      setPanelOpen(shouldOpen);
+    };
+    window.addEventListener('chikapo:tutorial-friends-panel', handleTutorialFriendsPanel);
+    return () => window.removeEventListener('chikapo:tutorial-friends-panel', handleTutorialFriendsPanel);
+  }, []);
+
+  useEffect(() => {
     if (!user || typeof WebSocket === 'undefined') {
       setChatSocketStatus('unsupported');
       return;
@@ -1703,3 +1712,4 @@ export const FriendTab: React.FC = () => {
     </div>
   );
 };
+

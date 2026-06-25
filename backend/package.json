@@ -13,8 +13,10 @@
     "start:worker:backup": "PROCESS_ROLE=backup-worker ts-node src/workers/backupWorker.ts",
     "start:worker:image": "PROCESS_ROLE=image-worker ts-node src/workers/imageProxyWorker.ts",
     "start:worker:chat": "ts-node src/workers/chatWorker.ts",
+    "start:worker:arena": "PROCESS_ROLE=arena-worker ts-node src/workers/arenaWorker.ts",
     "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
     "migrate": "ts-node scripts/migrate.ts",
+    "arena:balance": "ts-node src/scripts/arenaBalanceSimulation.ts",
     "test": "vitest run"
   },
   "dependencies": {

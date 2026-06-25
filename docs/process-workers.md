@@ -9,6 +9,7 @@
 - `scheduler-worker`: 예약 푸시와 만료 경매 정산을 처리한다.
 - `backup-worker`: MySQL 데이터를 SQLite로 백업한다.
 - `image-worker`: `/api/image-proxy` 이미지 fetch/resize/cache만 처리한다.
+- `arena-worker`: 아레나 관리자 작업, 큐 만료/복구, 스냅샷 재생성처럼 API 응답 경로에서 분리해야 하는 저빈도 작업만 처리한다.
 - `all`: 기존처럼 한 프로세스에서 모든 작업을 실행한다. 운영에서는 권장하지 않는다.
 
 ## dotenv 로딩 규칙
@@ -25,6 +26,7 @@ backend/.env.live-worker
 backend/.env.scheduler-worker
 backend/.env.backup-worker
 backend/.env.image-worker
+backend/.env.arena-worker
 ```
 
 저장소에는 같은 형식의 예시 파일이 포함되어 있다.
@@ -36,6 +38,7 @@ backend/.env.live-worker.example
 backend/.env.scheduler-worker.example
 backend/.env.backup-worker.example
 backend/.env.image-worker.example
+backend/.env.arena-worker.example
 ```
 
 운영 서버에서는 필요한 예시 파일을 복사해 `.example`을 제거하고 비밀값을 채운다.
@@ -132,6 +135,19 @@ IMAGE_PROXY_TIMEOUT_MS=3000
 IMAGE_PROXY_MAX_CACHE_BYTES=134217728
 ```
 
+`backend/.env.arena-worker`
+
+```env
+MYSQL_CONNECTION_LIMIT=1
+ARENA_WORKER_JOB_POLL_INTERVAL_MS=10000
+ARENA_WORKER_AUTO_QUEUE_RECOVERY=true
+ARENA_WORKER_QUEUE_RECOVERY_INTERVAL_MS=60000
+ARENA_WORKER_STALE_JOB_RESET_INTERVAL_MS=300000
+ARENA_WORKER_STALE_JOB_MINUTES=30
+```
+
+아레나는 별도 API 서버로 분리하지 않는다. 일반 요청, 빠른대전 참가, 봇 연습 생성은 기존 API에서 처리하고, 오래 걸릴 수 있는 관리자 스냅샷 재생성, 랭킹 스냅샷 재생성, 리플레이 정리, 중단된 큐 복구만 `arena-worker`가 순차 처리한다. 이렇게 해야 6GB RAM 서버에서 프로세스 수 증가로 인한 메모리/DB 커넥션 비용을 최소화하면서도 API 응답 지연을 줄일 수 있다.
+
 ## PM2 실행
 
 ```bash
@@ -147,6 +163,7 @@ pm2 status
 pm2 logs chikapo-api
 pm2 logs chikapo-live-worker
 pm2 logs chikapo-backup-worker
+pm2 logs chikapo-arena-worker
 ```
 
 ## 파일 로그
@@ -161,6 +178,7 @@ backend-live-worker-2026-06-10.log
 backend-scheduler-worker-2026-06-10.log
 backend-backup-worker-2026-06-10.log
 backend-image-worker-2026-06-10.log
+backend-arena-worker-2026-06-10.log
 ```
 
 `LOG_RETENTION_DAYS`보다 오래된 `backend-*.log` 파일은 프로세스 시작 시와 `LOG_PRUNE_INTERVAL_MS` 간격마다 자동 삭제된다.
@@ -171,6 +189,7 @@ backend-image-worker-2026-06-10.log
 tail -f backend/logs/backend-api-$(date +%F).log
 tail -f backend/logs/backend-live-worker-$(date +%F).log
 tail -f backend/logs/backend-image-worker-$(date +%F).log
+tail -f backend/logs/backend-arena-worker-$(date +%F).log
 ```
 
 PM2 자체 로그는 `~/.pm2/logs`에도 남을 수 있다. PM2 로그까지 장기 보관할 필요가 있으면 `pm2-logrotate`를 같이 설정한다.

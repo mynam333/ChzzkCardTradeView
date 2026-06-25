@@ -37,6 +37,7 @@ backend/.env.live-worker
 backend/.env.scheduler-worker
 backend/.env.backup-worker
 backend/.env.image-worker
+backend/.env.arena-worker
 ```
 
 GitHub Actions 아티팩트에는 `.env`가 포함되지 않습니다.
