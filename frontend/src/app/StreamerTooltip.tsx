@@ -31,8 +31,8 @@ export const StreamerTooltip: React.FC<Props> = ({ name, content, children, clas
   // 화면 가장자리에서 잘리지 않도록 커서 기준 위치 보정
   let transform = 'translate(14px, 16px)';
   if (pos && typeof window !== 'undefined') {
-    const nearRight = pos.x > window.innerWidth - (edgeGuard?.right ?? 180);
-    const nearBottom = pos.y > window.innerHeight - (edgeGuard?.bottom ?? 48);
+    const nearRight = pos.x > window.innerWidth - (edgeGuard?.right ?? 440);
+    const nearBottom = pos.y > window.innerHeight - (edgeGuard?.bottom ?? 180);
     const tx = nearRight ? 'calc(-100% - 14px)' : '14px';
     const ty = nearBottom ? 'calc(-100% - 14px)' : '16px';
     transform = `translate(${tx}, ${ty})`;

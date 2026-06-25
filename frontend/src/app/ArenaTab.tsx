@@ -18,6 +18,7 @@ import {
   Palette,
   PlusCircle,
   RefreshCw,
+  Search,
   Share2,
   ShieldCheck,
   SmilePlus,
@@ -355,6 +356,14 @@ const statLabels: Array<[keyof ArenaCard['stats'], string]> = [
   ['focus', '집중']
 ];
 
+const statDescriptions: Record<keyof ArenaCard['stats'], string> = {
+  hp: '라운드에서 버틸 수 있는 기본 생존력입니다.',
+  attack: '기본 공격과 물리형 피해의 중심 수치입니다.',
+  defense: '받는 피해를 줄이고 전열 유지력을 높입니다.',
+  speed: '행동 순서와 공격 템포에 영향을 줍니다.',
+  focus: '스킬 발동 흐름과 스킬형 효과 안정성에 영향을 줍니다.'
+};
+
 const roleLabels: Record<string, string> = {
   frontline: '전열',
   damage: '공격',
@@ -362,6 +371,19 @@ const roleLabels: Record<string, string> = {
   support: '지원',
   tempo: '템포'
 };
+
+const roleDescriptions: Record<string, string> = {
+  frontline: '앞줄에서 피해를 받아내고 팀의 전투 시간을 벌어주는 역할입니다.',
+  damage: '상대 카드를 빠르게 쓰러뜨리는 주 피해 역할입니다.',
+  control: '상태 이상과 행동 지연으로 상대의 전투 흐름을 흔드는 역할입니다.',
+  support: '회복, 보호, 강화로 아군 카드의 안정성을 높이는 역할입니다.',
+  tempo: '행동 순서와 스킬 흐름을 조절해 라운드 주도권을 잡는 역할입니다.'
+};
+
+const getStatTooltip = (key: keyof ArenaCard['stats'], label: string, value?: number) => `${label}${typeof value === 'number' ? ` ${value}` : ''}: ${statDescriptions[key]}`;
+const getRoleTooltip = (role: string) => `${roleLabels[role] || role}: ${roleDescriptions[role] || '카드의 전투 포지션과 라운드 운영 성향을 나타냅니다.'}`;
+const getClassTooltip = (cardClass: ArenaCard['class']) => `${cardClass.name}: ${cardClass.description || getRoleTooltip(cardClass.role)}`;
+const getSkillTooltip = (skill: ArenaCard['skills'][number]) => `${skill.name} (${arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type}): ${skill.description}`;
 
 type ArenaTagMeta = { label: string; description: string };
 
@@ -603,9 +625,6 @@ const showArenaInactiveNotification = async (payload: { tag: string; title: stri
     console.warn('[ArenaTab] inactive match notification failed:', err);
   }
 };
-
-const getCardStatTotal = (card: ArenaCard) =>
-  card.stats.hp + card.stats.attack + card.stats.defense + card.stats.speed + card.stats.focus;
 
 const arenaSkillSlotTypes = ['active', 'passive', 'ultimate'] as const;
 type ArenaSkillSlotType = typeof arenaSkillSlotTypes[number];
@@ -1467,7 +1486,6 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
   const primarySkill = card.skills[0];
   const tone = roleToneClass[card.class.role] || roleToneClass.tempo;
   const initial = card.name.trim().slice(0, 1) || 'A';
-  const statTotal = getCardStatTotal(card);
   const visibleTags = primarySkill?.tags?.slice(0, 3) || [];
   return (
     <article className="arena-card-preview cute-card-pop group overflow-hidden rounded-3xl border border-white/70 bg-white/86 shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/78">
@@ -1484,36 +1502,33 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
             <Sparkles className="absolute right-5 top-5 h-6 w-6 text-primary/70" />
           </div>
         )}
-        <div className="absolute left-3 top-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88">
+        <div className="absolute left-3 top-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88" title={getClassTooltip(card.class)}>
           {card.class.name}
         </div>
-        <div className="absolute right-3 top-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88">
-          합 {statTotal}
-        </div>
-        <div className="absolute bottom-3 right-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-primary shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88">
+        <div className="absolute bottom-3 right-3 rounded-full border border-white/70 bg-white/88 px-2.5 py-1 text-[10px] font-black text-primary shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/88" title={getRoleTooltip(card.class.role)}>
           {roleLabels[card.class.role] || card.class.role}
         </div>
       </div>
       <div className="space-y-3 p-4">
         <div>
           <h3 className="truncate text-sm font-black text-foreground">{card.name}</h3>
-          <p className="mt-0.5 text-[11px] font-bold text-muted-foreground">
+          <p className="mt-0.5 text-[11px] font-bold text-muted-foreground" title={getRoleTooltip(card.class.role)}>
             {roleLabels[card.class.role] || card.class.role} · 동일 스트리머 고정 능력
           </p>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
           {statLabels.map(([key, label]) => (
-            <div key={key} className="arena-stat-cell rounded-2xl px-1.5 py-2 text-center">
+            <div key={key} className="arena-stat-cell rounded-2xl px-1.5 py-2 text-center" title={getStatTooltip(key, label, card.stats[key])}>
               <p className="text-[9px] font-black text-muted-foreground">{label}</p>
               <p className="mt-0.5 text-xs font-black text-foreground">{card.stats[key]}</p>
             </div>
           ))}
         </div>
         {primarySkill ? (
-          <div className="arena-skill-panel rounded-2xl border border-primary/15 px-3 py-2">
+          <div className="arena-skill-panel rounded-2xl border border-primary/15 px-3 py-2" title={getSkillTooltip(primarySkill)}>
             <div className="flex items-center justify-between gap-2">
               <p className="min-w-0 truncate text-[10px] font-black text-primary">{primarySkill.name}</p>
-              <span className="shrink-0 rounded-full bg-white/68 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10">{primarySkill.type}</span>
+              <span className="shrink-0 rounded-full bg-white/68 px-2 py-0.5 text-[9px] font-black text-muted-foreground dark:bg-white/10" title={getSkillTooltip(primarySkill)}>{arenaSkillSlotLabels[primarySkill.type as ArenaSkillSlotType] || primarySkill.type}</span>
             </div>
             <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-relaxed text-muted-foreground">{primarySkill.description}</p>
             {visibleTags.length > 0 ? (
@@ -1530,7 +1545,6 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
 
 const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
   const primarySkill = card.skills[0];
-  const statTotal = getCardStatTotal(card);
   const initial = card.name.trim().slice(0, 1) || 'A';
   return (
     <article className="arena-card-preview cute-card-pop group rounded-3xl border border-white/70 bg-white/82 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-card/72">
@@ -1545,13 +1559,12 @@ const ArenaCompactCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <h3 className="min-w-0 truncate text-sm font-black text-foreground">{card.name}</h3>
-            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-black text-primary">합 {statTotal}</span>
           </div>
-          <p className="mt-1 truncate text-[11px] font-bold text-muted-foreground">
+          <p className="mt-1 truncate text-[11px] font-bold text-muted-foreground" title={`${getClassTooltip(card.class)} / ${getRoleTooltip(card.class.role)}`}>
             {card.class.name} · {roleLabels[card.class.role] || card.class.role}
           </p>
           {primarySkill ? (
-            <p className="mt-1 truncate text-[10px] font-black text-primary">{primarySkill.name}</p>
+            <p className="mt-1 truncate text-[10px] font-black text-primary" title={getSkillTooltip(primarySkill)}>{primarySkill.name}</p>
           ) : null}
         </div>
       </div>
@@ -1757,6 +1770,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   const [deckEditorId, setDeckEditorId] = React.useState<string | null>(null);
   const [deckEditorName, setDeckEditorName] = React.useState('아레나 덱');
   const [deckEditorCardIds, setDeckEditorCardIds] = React.useState<string[]>([]);
+  const [deckEditorSearch, setDeckEditorSearch] = React.useState('');
   const [deckEditorSaving, setDeckEditorSaving] = React.useState(false);
   const [botMatchLoadingDeckId, setBotMatchLoadingDeckId] = React.useState<string | null>(null);
   const [selectedReplayMatch, setSelectedReplayMatch] = React.useState<ArenaMatchView | null>(null);
@@ -2086,6 +2100,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     setDeckEditorId(null);
     setDeckEditorName('아레나 덱');
     setDeckEditorCardIds([]);
+    setDeckEditorSearch('');
   }, []);
 
   const startNewDeckEditor = React.useCallback(() => {
@@ -2134,10 +2149,13 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
         const detail = Array.isArray(data.validation?.errors) ? data.validation.errors[0] : data.message;
         throw new Error(detail || 'Arena deck save failed');
       }
-      const savedDeck = data.data as ArenaDeck | undefined;
-      toast(deckEditorId ? '아레나 덱을 수정했습니다.' : '아레나 덱을 저장했습니다.', 'success');
+      const savedDeck = (data.data?.deck || data.data) as ArenaDeck | undefined;
+      if (!savedDeck?.id || !Array.isArray(savedDeck.cards) || savedDeck.cards.length !== cardIds.length) {
+        throw new Error('저장된 덱 카드 수를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
+      }
       await loadMyArenaDecks();
-      if (savedDeck?.id) openDeckEditor(savedDeck);
+      openDeckEditor(savedDeck);
+      toast(deckEditorId ? '아레나 덱을 수정했습니다.' : '아레나 덱을 저장했습니다.', 'success');
     } catch (err: any) {
       toast(err?.message || '아레나 덱 저장에 실패했습니다.', 'error');
     } finally {
@@ -2856,6 +2874,23 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     ownedCards.forEach((card) => map.set(card.card_id, card));
     return map;
   }, [ownedCards]);
+  const deckEditorSearchTerm = deckEditorSearch.trim().toLowerCase();
+  const filteredDeckEditorCards = React.useMemo(() => {
+    if (!deckEditorSearchTerm) return ownedCards;
+    return ownedCards.filter((card) => {
+      const haystack = [
+        card.name,
+        card.card_id,
+        card.channel_id,
+        card.class.name,
+        card.class.role,
+        roleLabels[card.class.role] || '',
+        card.class.description,
+        ...card.skills.flatMap((skill) => [skill.name, skill.type, skill.description, ...skill.tags])
+      ].join(' ').toLowerCase();
+      return haystack.includes(deckEditorSearchTerm);
+    });
+  }, [deckEditorSearchTerm, ownedCards]);
   const deckEditorMissingCount = Math.max(0, 6 - deckEditorCardIds.length);
   const tacticChipOptions = rulesCatalog?.tactic_chips || [];
   const battlefieldRules = rulesCatalog?.battlefield_rules || [];
@@ -3413,7 +3448,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                           </div>
                           <div className="min-w-0">
                             <p className="truncate text-sm font-black text-foreground">{card.name}</p>
-                            <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">{card.class.name} · {card.class.role}</p>
+                            <p className="mt-0.5 text-[10px] font-bold text-muted-foreground" title={`${getClassTooltip(card.class)} / ${getRoleTooltip(card.class.role)}`}>{card.class.name} · {roleLabels[card.class.role] || card.class.role}</p>
                             <div className="mt-2 flex flex-wrap gap-1">
                               <span className="rounded-full bg-white/74 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10">보유 {card.owned_count || 1}</span>
                               <span className="rounded-full bg-white/74 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10">최고 {card.max_star || 0}성</span>
@@ -3425,13 +3460,13 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                       <div className="p-3">
                         <div className="grid grid-cols-5 gap-1.5">
                           {[
-                            ['HP', card.stats.hp],
-                            ['ATK', card.stats.attack],
-                            ['DEF', card.stats.defense],
-                            ['SPD', card.stats.speed],
-                            ['FOC', card.stats.focus]
-                          ].map(([label, value]) => (
-                            <div key={label} className="rounded-2xl bg-secondary/52 px-2 py-1.5 text-center">
+                            ['HP', card.stats.hp, 'hp'],
+                            ['ATK', card.stats.attack, 'attack'],
+                            ['DEF', card.stats.defense, 'defense'],
+                            ['SPD', card.stats.speed, 'speed'],
+                            ['FOC', card.stats.focus, 'focus']
+                          ].map(([label, value, statKey]) => (
+                            <div key={label} className="rounded-2xl bg-secondary/52 px-2 py-1.5 text-center" title={getStatTooltip(statKey as keyof ArenaCard['stats'], String(label), Number(value))}>
                               <p className="text-[8px] font-black text-muted-foreground">{label}</p>
                               <p className="mt-0.5 text-[11px] font-black text-foreground">{value}</p>
                             </div>
@@ -3439,7 +3474,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                         </div>
                         <div className="mt-3 space-y-1.5">
                           {card.skills.slice(0, 2).map((skill) => (
-                            <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2">
+                            <div key={skill.id} className="rounded-2xl bg-secondary/40 px-3 py-2" title={getSkillTooltip(skill)}>
                               <p className="truncate text-[11px] font-black text-foreground">{skill.name}</p>
                               <p className="mt-0.5 line-clamp-2 text-[10px] font-bold text-muted-foreground">{skill.description}</p>
                             </div>
@@ -4153,7 +4188,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                                     onClick={() => toggleMyStreamerSkill(skill.id)}
                                     className={`arena-tactic-card rounded-2xl border px-3 py-2 text-left ${selected ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-card/80 text-muted-foreground'}`}
                                     aria-pressed={selected}
-                                    title={skill.description}
+                                    title={getSkillTooltip(skill)}
                                   >
                                     <span className="block text-xs font-black">{skill.name}</span>
                                     <span className="mt-0.5 block line-clamp-2 text-[10px] font-bold opacity-80">{skill.description}</span>
@@ -4446,10 +4481,24 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                         </div>
                       )}
                     </div>
+                    <label className="mt-3 block">
+                      <span className="text-[10px] font-black text-muted-foreground">카드 검색</span>
+                      <span className="mt-1 flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 focus-within:border-primary">
+                        <Search className="h-4 w-4 shrink-0 text-primary" />
+                        <input
+                          value={deckEditorSearch}
+                          onChange={(event) => setDeckEditorSearch(event.target.value)}
+                          className="min-w-0 flex-1 bg-transparent text-xs font-black text-foreground outline-none placeholder:text-muted-foreground"
+                          placeholder="이름, 클래스, 역할, 스킬, 태그 검색"
+                        />
+                      </span>
+                    </label>
                     <div className="mt-3 grid max-h-[22rem] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                       {ownedCards.length === 0 ? (
                         <ArenaStateNotice title="덱에 넣을 보유 카드가 없습니다" description="아레나에 사용할 수 있는 보유 카드가 생기면 이곳에서 덱을 구성할 수 있습니다." />
-                      ) : ownedCards.map((card) => {
+                      ) : filteredDeckEditorCards.length === 0 ? (
+                        <ArenaStateNotice title="검색 결과가 없습니다" description="다른 이름, 클래스, 역할, 스킬명으로 다시 찾아보세요." />
+                      ) : filteredDeckEditorCards.map((card) => {
                         const selected = deckEditorCardIds.includes(card.card_id);
                         return (
                           <button
@@ -4458,7 +4507,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             onClick={() => toggleDeckEditorCard(card.card_id)}
                             className={`arena-tactic-card min-w-0 rounded-2xl border px-3 py-2 text-left ${selected ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
                             aria-pressed={selected}
-                            title={selected ? '덱에서 제거' : '덱에 추가'}
+                            title={`${selected ? '덱에서 제거' : '덱에 추가'}: ${getClassTooltip(card.class)} / ${card.skills.slice(0, 3).map(getSkillTooltip).join(' / ')}`}
                           >
                             <span className="flex items-center gap-2">
                               <span className="h-9 w-9 shrink-0 overflow-hidden rounded-2xl bg-white/80 dark:bg-white/10">
@@ -4466,7 +4515,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-xs font-black">{card.name}</span>
-                                <span className="mt-0.5 block truncate text-[10px] font-bold opacity-80">{card.class.name} · {card.skills.slice(0, 2).map((skill) => skill.name).join(', ')}</span>
+                                <span className="mt-0.5 block truncate text-[10px] font-bold opacity-80" title={`${getClassTooltip(card.class)} / ${card.skills.slice(0, 3).map(getSkillTooltip).join(' / ')}`}>{card.class.name} · {card.skills.slice(0, 2).map((skill) => skill.name).join(', ')}</span>
                               </span>
                               <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10 dark:text-primary-foreground">
                                 {selected ? '선택' : '+'}
