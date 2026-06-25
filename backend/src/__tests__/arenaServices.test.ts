@@ -160,7 +160,7 @@ describe('arena streamer card configuration', () => {
 
     expect(first).toEqual(second);
     expect(first.config_source).toBe('streamer_config');
-    expect(first.class.id).toBe('guardian');
+    expect(first.class.id).toBe('shield_knight');
     expect(first.skills.map((skill) => skill.id)).toEqual(['aegis-pop', 'soft-taunt', 'last-cookie']);
     expect(first.tags).toContain('shield');
     expect(first.tags).toContain('frontline');
@@ -176,7 +176,7 @@ describe('arena streamer card configuration', () => {
 
     const card = generateArenaCardFromStreamer(streamer, { config });
 
-    expect(card.class.id).toBe('supporter');
+    expect(card.class.id).toBe('healer');
     expect(card.skills.map((skill) => skill.id)).toContain('bubble-tea');
     expect(card.skills.map((skill) => skill.id)).not.toContain('neon-sting');
   });

@@ -294,9 +294,10 @@ export const ensureArenaWorkerHeartbeatTable = async () => {
 
 export const recordArenaWorkerHeartbeat = async (payload: Record<string, unknown> = {}) => {
   await ensureArenaWorkerHeartbeatTable();
-  const workerId = String(process.env.ARENA_WORKER_ID || `${process.env.PROCESS_ROLE || 'arena-worker'}:${process.pid}`);
   const processRole = String(process.env.PROCESS_ROLE || 'arena-worker');
-  const payloadJson = JSON.stringify({ ...payload, pid: process.pid });
+  const workerSlot = String(process.env.NODE_APP_INSTANCE || process.env.pm_id || '0');
+  const workerId = String(process.env.ARENA_WORKER_ID || `${processRole}:${workerSlot}`);
+  const payloadJson = JSON.stringify({ ...payload, pid: process.pid, worker_slot: workerSlot });
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
       `INSERT INTO arena_worker_heartbeats (worker_id, process_role, status, payload_json, heartbeat_at)

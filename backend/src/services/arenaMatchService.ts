@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
-import { ARENA_CURRENT_SEASON_ID, ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { getArenaCurrentSeasonId } from './arenaSeasonService';
 import { ArenaGeneratedCard, generateArenaCardFromStreamer } from './arenaCatalog';
 import { listArenaStreamerCardStates } from './arenaStreamerCardState';
 import { ArenaBattleEvent, pickArenaBattlefieldRule, simulateArenaRound } from './arenaBattleSimulator';
@@ -104,6 +105,7 @@ export interface ArenaDeckSnapshot extends Omit<ArenaDeckSnapshotDto, 'cards' | 
     image_url: string | null;
     class_id: string;
     class_name: string;
+    class_role?: string;
     stats: ArenaGeneratedCard['stats'];
     skills: Array<{ id: string; name: string; type: string }>;
   }>;
@@ -167,7 +169,7 @@ const REPLAY_PRUNE_LIMIT = Math.max(10, Math.min(1000, Number(process.env.ARENA_
 const REPLAY_MAX_EVENTS_PER_ROUND = Math.max(20, Math.min(300, Number(process.env.ARENA_REPLAY_MAX_EVENTS_PER_ROUND || 120)));
 const REPLAY_MAX_BYTES = Math.max(8_192, Math.min(512_000, Number(process.env.ARENA_REPLAY_MAX_BYTES || 96_000)));
 const RANKING_CACHE_TTL_MS = Math.max(5_000, Number(process.env.ARENA_RANKING_CACHE_TTL_MS || 30_000));
-const ROUND_SELECTION_TIMEOUT_MS = Math.max(5_000, Math.min(60_000, Number(process.env.ARENA_ROUND_SELECTION_TIMEOUT_MS || 20_000)));
+const ROUND_SELECTION_TIMEOUT_MS = Math.max(5_000, Math.min(60_000, Number(process.env.ARENA_ROUND_SELECTION_TIMEOUT_MS || 60_000)));
 const ROUND_SELECTION_TIMEOUT_SECONDS = Math.ceil(ROUND_SELECTION_TIMEOUT_MS / 1000);
 const RANKED_ELO_K = Math.max(8, Math.min(48, Number(process.env.ARENA_QUICK_ELO_K || 24)));
 const EXPIRED_ROUND_SCAN_LIMIT = Math.max(5, Math.min(100, Number(process.env.ARENA_EXPIRED_ROUND_SCAN_LIMIT || 25)));
@@ -608,6 +610,7 @@ const toDeckSnapshotCard = (card: ArenaGeneratedCard): ArenaDeckSnapshot['cards'
   image_url: card.image_url,
   class_id: String(card.class.id),
   class_name: card.class.name,
+  class_role: card.class.role,
   stats: card.stats,
   skills: card.skills.map((skill) => ({ id: skill.id, name: skill.name, type: skill.type }))
 });
@@ -688,8 +691,8 @@ const loadArenaRatingRow = async (userId: string) => {
     WHERE season_id = ? AND user_id = ?
     LIMIT 1`;
   const row = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().get<any>(query, ARENA_CURRENT_SEASON_ID, userId)
-    : getSqliteDb().prepare(query).get(ARENA_CURRENT_SEASON_ID, userId) as any;
+    ? await getMysqlDb().get<any>(query, getArenaCurrentSeasonId(), userId)
+    : getSqliteDb().prepare(query).get(getArenaCurrentSeasonId(), userId) as any;
   return row ? { ...fallback, ...row } : fallback;
 };
 
@@ -709,7 +712,7 @@ const upsertArenaRatingMysql = async (
        losses = losses + VALUES(losses),
        draws = draws + VALUES(draws),
        last_played_at = UTC_TIMESTAMP()`,
-    ARENA_CURRENT_SEASON_ID,
+    getArenaCurrentSeasonId(),
     userId,
     patch.mmr,
     patch.rating_points,
@@ -735,7 +738,7 @@ const upsertArenaRatingSqlite = (userId: string, patch: ReturnType<typeof rating
          updated_at = CURRENT_TIMESTAMP`
     )
     .run(
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       userId,
       patch.mmr,
       patch.rating_points,
@@ -844,7 +847,7 @@ export const createPendingRankedArenaMatch = async (input: {
          player_a_deck_id, winner_user_id, player_a_round_wins, player_b_round_wins, draw_rounds,
          difficulty, summary_json, progress_status, pending_round_deadline_at, replay_json)
        VALUES (?, 'RANKED', ?, ?, 0, ?, ?, ?, NULL, 0, 0, 0, 'normal', ?, 'IN_PROGRESS', ${dbNowPlusRoundSelectionSql()}, ?)`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       ARENA_MATCH_FORMAT,
       ARENA_ROUNDS_TO_WIN,
       input.playerAId,
@@ -866,7 +869,7 @@ export const createPendingRankedArenaMatch = async (input: {
        VALUES (?, 'RANKED', ?, ?, 0, ?, ?, ?, NULL, 0, 0, 0, 'normal', ?, 'IN_PROGRESS', ${dbNowPlusRoundSelectionSql()}, ?)`
     )
     .run(
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       ARENA_MATCH_FORMAT,
       ARENA_ROUNDS_TO_WIN,
       input.playerAId,
@@ -943,7 +946,7 @@ export const createArenaBotMatch = async (
   const difficulty = normalizeDifficulty(difficultyInput);
   const storedDeck = await getArenaDeck(userId, deckId);
   if (!storedDeck) throw new Error('ArenaDeckNotFound');
-  const validation = await validateArenaDeckInput(storedDeck);
+  const validation = await validateArenaDeckInput(storedDeck, storedDeck.user_id);
   if (!validation.valid) {
     const err = new Error('ArenaDeckValidationFailed') as Error & { validation?: unknown };
     err.validation = validation;
@@ -961,7 +964,7 @@ export const createArenaBotMatch = async (
   if (botDeck.cards.length < 6) throw new Error('ArenaBotPoolInsufficient');
   const difficultyMultiplier = difficulty === 'easy' ? 0.94 : difficulty === 'hard' ? 1.08 : 1;
   const matchSeed = createHash('sha256')
-    .update(`${ARENA_CURRENT_SEASON_ID}:${userId}:${deck.id}:${botDeck.deck_id}:${difficulty}:${Date.now()}`)
+    .update(`${getArenaCurrentSeasonId()}:${userId}:${deck.id}:${botDeck.deck_id}:${difficulty}:${Date.now()}`)
     .digest('hex');
   const battlefieldRule = pickArenaBattlefieldRule(matchSeed);
   const summary: ArenaCompactMatchSummary = {
@@ -987,7 +990,7 @@ export const createArenaBotMatch = async (
          player_a_deck_id, winner_user_id, player_a_round_wins, player_b_round_wins, draw_rounds,
          difficulty, summary_json, progress_status, pending_round_deadline_at, replay_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', NULL, ?)`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       'BOT_PRACTICE',
       ARENA_MATCH_FORMAT,
       ARENA_ROUNDS_TO_WIN,
@@ -1017,7 +1020,7 @@ export const createArenaBotMatch = async (
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', NULL, ?)`
     )
     .run(
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       'BOT_PRACTICE',
       ARENA_MATCH_FORMAT,
       ARENA_ROUNDS_TO_WIN,
@@ -1362,8 +1365,8 @@ export const recoverExpiredArenaRoundCommits = async (limitInput?: unknown) => {
     ORDER BY pending_round_deadline_at ASC, id ASC
     LIMIT ?`;
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<RawMatchRow>(query, ARENA_CURRENT_SEASON_ID, ARENA_MAX_ROUNDS_PER_MATCH, limit)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, ARENA_MAX_ROUNDS_PER_MATCH, limit) as RawMatchRow[];
+    ? await getMysqlDb().all<RawMatchRow>(query, getArenaCurrentSeasonId(), ARENA_MAX_ROUNDS_PER_MATCH, limit)
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), ARENA_MAX_ROUNDS_PER_MATCH, limit) as RawMatchRow[];
 
   let committed = 0;
   let pending = 0;
@@ -1419,7 +1422,7 @@ export const getArenaProfile = async (userId: string) => {
          FROM arena_player_ratings
         WHERE season_id = ? AND user_id = ?
         LIMIT 1`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       userId
     );
     return buildArenaProfileFromRating(userId, rating || null);
@@ -1430,7 +1433,7 @@ export const getArenaProfile = async (userId: string) => {
       FROM arena_player_ratings
       WHERE season_id = ? AND user_id = ?
       LIMIT 1`)
-    .get(ARENA_CURRENT_SEASON_ID, userId) as any;
+    .get(getArenaCurrentSeasonId(), userId) as any;
   return buildArenaProfileFromRating(userId, rating || null);
 };
 
@@ -1500,7 +1503,7 @@ const getArenaRankFromSnapshot = async (userId: string): Promise<number | null> 
       `SELECT rank_no FROM arena_rank_snapshots
         WHERE season_id = ? AND rank_type = 'MMR' AND user_id = ?
         LIMIT 1`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       userId
     );
     return row ? Number(row.rank_no || 0) || null : null;
@@ -1512,14 +1515,14 @@ const getArenaRankFromSnapshot = async (userId: string): Promise<number | null> 
         WHERE season_id = ? AND rank_type = 'MMR' AND user_id = ?
         LIMIT 1`
     )
-    .get(ARENA_CURRENT_SEASON_ID, userId) as any;
+    .get(getArenaCurrentSeasonId(), userId) as any;
   return row ? Number(row.rank_no || 0) || null : null;
 };
 
 const buildArenaProfileFromRating = async (userId: string, rating: any | null) => {
   const rank = await getArenaRankFromSnapshot(userId);
   const fallback = {
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     user_id: userId,
     rating: 1000,
     tier: 'BRONZE',
@@ -1544,7 +1547,7 @@ const buildArenaProfileFromRating = async (userId: string, rating: any | null) =
 
 export const listArenaRankings = async (limitInput: unknown): Promise<ArenaRankingResponse> => {
   const limit = clampRankingLimit(limitInput);
-  const cacheKey = `${ARENA_CURRENT_SEASON_ID}:snapshot:${limit}`;
+  const cacheKey = `${getArenaCurrentSeasonId()}:snapshot:${limit}`;
   const cached = rankingCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
 
@@ -1556,8 +1559,8 @@ export const listArenaRankings = async (limitInput: unknown): Promise<ArenaRanki
     LIMIT ?`;
 
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(query, ARENA_CURRENT_SEASON_ID, limit)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, limit) as any[];
+    ? await getMysqlDb().all<any>(query, getArenaCurrentSeasonId(), limit)
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), limit) as any[];
 
   const sourceRows = rows.map((row) => ({ source: 'rank_snapshot', row }));
 
@@ -1599,18 +1602,18 @@ const rebuildArenaRankingSnapshotInternal = async (limitInput?: unknown) => {
     ORDER BY rating_points DESC, mmr DESC, wins DESC
     LIMIT ?`;
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(sourceQuery, ARENA_CURRENT_SEASON_ID, limit)
-    : getSqliteDb().prepare(sourceQuery).all(ARENA_CURRENT_SEASON_ID, limit) as any[];
+    ? await getMysqlDb().all<any>(sourceQuery, getArenaCurrentSeasonId(), limit)
+    : getSqliteDb().prepare(sourceQuery).all(getArenaCurrentSeasonId(), limit) as any[];
 
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().transaction(async (tx) => {
-      await tx.run(`DELETE FROM arena_rank_snapshots WHERE season_id = ? AND rank_type = 'MMR'`, ARENA_CURRENT_SEASON_ID);
+      await tx.run(`DELETE FROM arena_rank_snapshots WHERE season_id = ? AND rank_type = 'MMR'`, getArenaCurrentSeasonId());
       for (const [index, row] of rows.entries()) {
         await tx.run(
           `INSERT INTO arena_rank_snapshots
             (season_id, rank_type, rank_no, user_id, score, payload_json, snapshot_at)
            VALUES (?, 'MMR', ?, ?, ?, ?, UTC_TIMESTAMP())`,
-          ARENA_CURRENT_SEASON_ID,
+          getArenaCurrentSeasonId(),
           index + 1,
           row.user_id,
           Number(row.rating_points || 0),
@@ -1621,21 +1624,21 @@ const rebuildArenaRankingSnapshotInternal = async (limitInput?: unknown) => {
   } else {
     const db = getSqliteDb();
     db.transaction(() => {
-      db.prepare(`DELETE FROM arena_rank_snapshots WHERE season_id = ? AND rank_type = 'MMR'`).run(ARENA_CURRENT_SEASON_ID);
+      db.prepare(`DELETE FROM arena_rank_snapshots WHERE season_id = ? AND rank_type = 'MMR'`).run(getArenaCurrentSeasonId());
       const stmt = db.prepare(
         `INSERT INTO arena_rank_snapshots
           (season_id, rank_type, rank_no, user_id, score, payload_json, snapshot_at)
          VALUES (?, 'MMR', ?, ?, ?, ?, CURRENT_TIMESTAMP)`
       );
       rows.forEach((row, index) => {
-        stmt.run(ARENA_CURRENT_SEASON_ID, index + 1, row.user_id, Number(row.rating_points || 0), JSON.stringify(row));
+        stmt.run(getArenaCurrentSeasonId(), index + 1, row.user_id, Number(row.rating_points || 0), JSON.stringify(row));
       });
     })();
   }
 
   rankingCache.clear();
   return {
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     rank_type: 'MMR',
     rebuilt: rows.length,
     limit,
@@ -1717,4 +1720,6 @@ export const pruneArenaReplayLogs = async (daysInput?: unknown, limitInput?: unk
     limit
   };
 };
+
+
 

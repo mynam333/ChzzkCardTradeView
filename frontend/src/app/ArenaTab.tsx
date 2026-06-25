@@ -34,6 +34,9 @@ import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { ensureCosmeticCss, parseStyle } from '@/lib/cosmetics';
 import { useApp } from './AppContext';
 import { ArenaAdminPanel } from './ArenaAdminPanel';
+import { CardPreview } from './CardPreview';
+import { CosmeticName } from './CosmeticName';
+import { StreamerTooltip } from './StreamerTooltip';
 import type {
   ArenaBattlefieldRuleDto,
   ArenaDeckSnapshotDto,
@@ -360,6 +363,113 @@ const roleLabels: Record<string, string> = {
   tempo: '템포'
 };
 
+type ArenaTagMeta = { label: string; description: string };
+
+const arenaTagMeta: Record<string, ArenaTagMeta> = {
+  guardian: { label: '수호', description: '보호막과 아군 보호 효율을 높이는 방어 태그입니다.' },
+  frontline: { label: '전열', description: '앞줄 생존력과 집중 공격을 버티는 힘을 보강합니다.' },
+  order: { label: '질서', description: '전열 안정성과 상태 저항 중심의 정돈된 운영 태그입니다.' },
+  command: { label: '지휘', description: '같은 대상을 함께 압박하는 집중 공격 운영에 어울립니다.' },
+  duel: { label: '결투', description: '단일 대상 교전과 지속 압박에 강한 태그입니다.' },
+  focus: { label: '집중', description: '스킬 흐름, 표식 대상 피해, 명중 안정성을 보강합니다.' },
+  blade: { label: '검술', description: '기본 공격과 근접 교전 성능을 높이는 공격 태그입니다.' },
+  rage: { label: '격노', description: '체력이 낮아질수록 공격적으로 반격하는 성향입니다.' },
+  hunt: { label: '사냥', description: '약해진 적을 추적하고 마무리하는 데 유리합니다.' },
+  precision: { label: '정밀', description: '치명타와 정확한 단일 타격 성능을 높입니다.' },
+  backline: { label: '후열', description: '뒤쪽 배치에서 안정적으로 피해를 누적하는 태그입니다.' },
+  speed: { label: '속도', description: '행동 순서와 공격 템포를 앞당깁니다.' },
+  arcane: { label: '비전', description: '에너지와 마법형 스킬 운용을 안정화합니다.' },
+  flame: { label: '화염', description: '지속 피해와 광역 압박에 어울리는 공격 태그입니다.' },
+  frost: { label: '서리', description: '둔화와 제한적 행동 방해로 상대 템포를 늦춥니다.' },
+  storm: { label: '폭풍', description: '무작위 피해와 연쇄 타격으로 변수를 만듭니다.' },
+  curse: { label: '저주', description: '취약, 약화, 지속 압박으로 상대 강점을 깎습니다.' },
+  poison: { label: '독', description: '지속 피해와 회복 견제를 담당합니다.' },
+  control: { label: '제어', description: '상태 이상과 행동 흐름 방해에 특화된 태그입니다.' },
+  healing: { label: '치유', description: '회복량과 생존 보조 효율을 높입니다.' },
+  light: { label: '빛', description: '보호, 정화, 상태 저항을 돕는 안정형 태그입니다.' },
+  cleanse: { label: '정화', description: '디버프 완화와 상태 이상 대응에 유리합니다.' },
+  support_link: { label: '연결', description: '인접 아군 보호와 팀 보조 효과에 어울립니다.' },
+  song: { label: '노래', description: '버프와 에너지 흐름을 부드럽게 보조합니다.' },
+  machine: { label: '기계', description: '주기적 강화와 보호막 파쇄에 어울리는 태그입니다.' },
+  trap: { label: '함정', description: '시간차 피해와 전장 방해로 상대 진형을 흔듭니다.' },
+  shadow: { label: '그림자', description: '첫 공격, 회피, 후열 압박에 어울리는 태그입니다.' },
+  trick: { label: '속임수', description: '회피와 교란으로 예측하기 어려운 흐름을 만듭니다.' },
+  space: { label: '공간', description: '위치 이동과 배치 변수를 활용하는 태그입니다.' },
+  stone: { label: '석갑', description: '방어와 장기전 안정성을 보강합니다.' },
+  shield: { label: '보호막', description: '피해를 흡수하는 보호막 효과와 관련된 태그입니다.' },
+  guard: { label: '수비', description: '받는 피해를 줄이고 전열을 안정화합니다.' },
+  redirect: { label: '유도', description: '공격 대상을 전열이나 자신 쪽으로 끌어오는 효과입니다.' },
+  survive: { label: '생존', description: '위기 상황에서 버티거나 회복하는 효과입니다.' },
+  heal: { label: '회복', description: '체력을 회복해 라운드 지속력을 높입니다.' },
+  late: { label: '후반', description: '라운드가 길어질수록 효율이 좋아지는 성향입니다.' },
+  burst: { label: '폭발', description: '짧은 시간에 높은 피해를 몰아치는 태그입니다.' },
+  single: { label: '단일', description: '한 대상에게 피해나 효과를 집중합니다.' },
+  execute: { label: '처형', description: '체력이 낮은 적을 마무리하는 효과입니다.' },
+  tempo: { label: '템포', description: '행동 순서와 전투 흐름을 유리하게 조정합니다.' },
+  chain: { label: '연계', description: '처치나 발동 이후 다음 행동으로 이어지는 효과입니다.' },
+  magic: { label: '마법', description: '집중 기반 스킬 피해와 제어 효과에 관련됩니다.' },
+  area: { label: '광역', description: '여러 대상에게 피해나 효과를 나누어 적용합니다.' },
+  scale: { label: '성장', description: '조건을 만족할수록 성능이 점진적으로 좋아집니다.' },
+  delay: { label: '지연', description: '짧은 준비 시간 뒤 강한 효과가 발동됩니다.' },
+  resource: { label: '자원', description: '집중, 에너지, 쿨다운 흐름을 보정합니다.' },
+  ranged: { label: '원거리', description: '후열에서 안정적으로 공격하는 성향입니다.' },
+  mark: { label: '표식', description: '특정 대상을 지정해 후속 피해나 집중 공격을 돕습니다.' },
+  multi: { label: '다중', description: '여러 대상이나 여러 타격으로 효과를 나눕니다.' },
+  crit: { label: '치명', description: '치명타 확률이나 결정력을 높입니다.' },
+  evade: { label: '회피', description: '피해를 줄이거나 피하면서 반격 기회를 만듭니다.' },
+  decoy: { label: '미끼', description: '첫 피격이나 타겟팅을 흔드는 방어적 교란 효과입니다.' },
+  disrupt: { label: '교란', description: '상대 행동 순서와 스킬 타이밍을 방해합니다.' },
+  support: { label: '지원', description: '아군 회복, 보호, 버프와 관련된 태그입니다.' },
+  buff: { label: '강화', description: '아군 능력치를 잠시 끌어올립니다.' },
+  team: { label: '팀', description: '아군 여러 명에게 영향을 주는 효과입니다.' },
+  aura: { label: '오라', description: '주변 또는 후열 아군에게 지속 보조를 제공합니다.' },
+  break: { label: '파쇄', description: '보호막과 방어 태세를 깨는 데 강합니다.' },
+  armor: { label: '방어구', description: '방어력 높은 대상이나 보호 효과와 상호작용합니다.' },
+  counter: { label: '역습', description: '상대 공격을 받아낸 뒤 반격하는 성향입니다.' },
+  stun: { label: '기절', description: '짧게 행동을 늦추거나 멈추는 제어 효과입니다.' },
+  debuff: { label: '약화', description: '상대 능력치나 방어 효율을 낮춥니다.' },
+  cooldown: { label: '쿨다운', description: '스킬 재사용 흐름과 행동 주기를 조정합니다.' },
+  adapt: { label: '적응', description: '라운드 흐름에 맞춰 보정이 바뀌는 태그입니다.' },
+  anchor: { label: '고정', description: '팀의 중심을 잡고 라운드 플랜을 안정화합니다.' },
+  carry: { label: '캐리', description: '주요 피해원으로 팀 전투를 이끄는 성향입니다.' },
+  combo: { label: '콤보', description: '다른 카드나 효과와 맞물릴 때 가치가 커집니다.' },
+  cute: { label: '큐트', description: '아레나 카드 콘셉트를 꾸미는 감성 태그입니다.' },
+  defense: { label: '방어', description: '피해 감소와 생존력 중심의 태그입니다.' },
+  finisher: { label: '마무리', description: '후반 결정력과 처치 관여에 어울립니다.' }
+};
+
+const getArenaTagMeta = (tag: string): ArenaTagMeta => arenaTagMeta[tag] || {
+  label: tag.replace(/_/g, ' '),
+  description: '이 태그는 카드의 전투 성향과 조합 콘셉트를 구분하는 데 사용됩니다.'
+};
+
+const ArenaTagBadge: React.FC<{ tag: string; selected?: boolean; asButton?: boolean; onClick?: () => void }> = ({ tag, selected = false, asButton = false, onClick }) => {
+  const meta = getArenaTagMeta(tag);
+  const tooltip = (
+    <div className="max-w-[16rem] text-left">
+      <p className="text-[10px] font-black text-primary">#{meta.label}</p>
+      <p className="mt-1 text-[11px] font-bold leading-relaxed text-foreground/85">{meta.description}</p>
+    </div>
+  );
+  const className = asButton
+    ? `rounded-full px-2.5 py-1 text-[10px] font-black transition ${selected ? 'bg-rose-100 text-rose-700 ring-2 ring-rose-300 dark:bg-rose-300/15 dark:text-rose-100' : 'bg-card text-muted-foreground hover:bg-secondary'}`
+    : 'rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-black text-primary dark:bg-white/10';
+
+  return (
+    <StreamerTooltip content={tooltip} className="inline-flex" edgeGuard={{ right: 280, bottom: 120 }}>
+      {asButton ? (
+        <button type="button" onClick={onClick} className={className} aria-pressed={selected} aria-label={`${meta.label}: ${meta.description}`} title={`${meta.label}: ${meta.description}`}>
+          #{meta.label}
+        </button>
+      ) : (
+        <span className={className} title={`${meta.label}: ${meta.description}`}>
+          #{meta.label}
+        </span>
+      )}
+    </StreamerTooltip>
+  );
+};
+
 const cupStageLabels: Record<string, string> = {
   quarterfinal: '8강',
   semifinal: '4강',
@@ -374,7 +484,7 @@ const createArenaEventSource = (path: string) => {
   return new EventSource(`${API_BASE_URL}${path}`, { withCredentials: true });
 };
 
-const ARENA_ROUND_SELECTION_TIMEOUT_MS = 20_000;
+const ARENA_ROUND_SELECTION_TIMEOUT_MS = 60_000;
 const tacticOptions = [
   ['balanced', '균형'],
   ['aggressive', '공격'],
@@ -486,6 +596,19 @@ const showArenaInactiveNotification = async (payload: { tag: string; title: stri
 
 const getCardStatTotal = (card: ArenaCard) =>
   card.stats.hp + card.stats.attack + card.stats.defense + card.stats.speed + card.stats.focus;
+
+const arenaSkillSlotTypes = ['active', 'passive', 'ultimate'] as const;
+type ArenaSkillSlotType = typeof arenaSkillSlotTypes[number];
+
+const arenaSkillSlotLabels: Record<ArenaSkillSlotType, string> = {
+  active: '액티브',
+  passive: '패시브',
+  ultimate: '궁극기'
+};
+
+const pickDefaultSkillIds = (skills: ArenaCard['skills'] = []) => arenaSkillSlotTypes
+  .map((type) => skills.find((skill) => skill.type === type)?.id)
+  .filter((id): id is string => Boolean(id));
 
 const formatArenaTier = (tier?: string | null) => {
   const normalized = String(tier || 'BRONZE').toUpperCase();
@@ -1385,11 +1508,7 @@ const ArenaCardPreview: React.FC<{ card: ArenaCard }> = ({ card }) => {
             <p className="mt-1 line-clamp-2 text-[11px] font-bold leading-relaxed text-muted-foreground">{primarySkill.description}</p>
             {visibleTags.length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1">
-                {visibleTags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-black text-primary dark:bg-white/10">
-                    #{tag}
-                  </span>
-                ))}
+                {visibleTags.map((tag) => <ArenaTagBadge key={tag} tag={tag} />)}
               </div>
             ) : null}
           </div>
@@ -1595,6 +1714,10 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   const [deckLoading, setDeckLoading] = React.useState(false);
   const [deckError, setDeckError] = React.useState<string | null>(null);
   const [deckActionLoading, setDeckActionLoading] = React.useState(false);
+  const [deckEditorId, setDeckEditorId] = React.useState<string | null>(null);
+  const [deckEditorName, setDeckEditorName] = React.useState('아레나 덱');
+  const [deckEditorCardIds, setDeckEditorCardIds] = React.useState<string[]>([]);
+  const [deckEditorSaving, setDeckEditorSaving] = React.useState(false);
   const [botMatchLoadingDeckId, setBotMatchLoadingDeckId] = React.useState<string | null>(null);
   const [selectedReplayMatch, setSelectedReplayMatch] = React.useState<ArenaMatchView | null>(null);
   const [selectedReplay, setSelectedReplay] = React.useState<ArenaReplay | null>(null);
@@ -1605,12 +1728,6 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   const [roundReveal, setRoundReveal] = React.useState<ArenaRoundReveal | null>(null);
   const [roundWait, setRoundWait] = React.useState<ArenaRoundWaitState | null>(null);
   const [roundWaitNow, setRoundWaitNow] = React.useState(() => Date.now());
-  const [plannerDeckId, setPlannerDeckId] = React.useState<string | null>(null);
-  const [plannerRoundNo, setPlannerRoundNo] = React.useState(1);
-  const [plannerPlans, setPlannerPlans] = React.useState<ArenaDeck['round_plans']>([]);
-  const [plannerStrategyChipId, setPlannerStrategyChipId] = React.useState('none');
-  const [selectedPlannerCardId, setSelectedPlannerCardId] = React.useState<string | null>(null);
-  const [plannerSaving, setPlannerSaving] = React.useState(false);
   const [quickMatchLoadingDeckId, setQuickMatchLoadingDeckId] = React.useState<string | null>(null);
   const [quickMatch, setQuickMatch] = React.useState<ArenaQuickMatch | null>(null);
   const [cupLoadingDeckId, setCupLoadingDeckId] = React.useState<string | null>(null);
@@ -1702,7 +1819,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
           class_id: savedConfig.class_id || payload.card?.class?.id || payload.config_options?.classes?.[0]?.id,
           stat_focus: savedConfig.stat_focus || 'hp',
           combat_style: savedConfig.combat_style || 'balanced',
-          skill_ids: Array.isArray(savedConfig.skill_ids) ? savedConfig.skill_ids : payload.card?.skills?.slice(0, 3).map((skill: ArenaCard['skills'][number]) => skill.id) || [],
+          skill_ids: Array.isArray(savedConfig.skill_ids) ? savedConfig.skill_ids : pickDefaultSkillIds(payload.card?.skills || []),
           tag_ids: Array.isArray(savedConfig.tag_ids) ? savedConfig.tag_ids : [],
           flavor_text: savedConfig.flavor_text || ''
         });
@@ -1745,6 +1862,24 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       return { ...current, skill_ids: [...currentIds, skillId].slice(0, maxSkills) };
     });
   };
+  const updateMyStreamerSkillSlot = (slotType: ArenaSkillSlotType, skillId: string) => {
+    setMyStreamerCardDraft((current) => {
+      const currentIds = Array.isArray(current.skill_ids) ? current.skill_ids : [];
+      const currentByType = new Map<ArenaSkillSlotType, string>();
+      arenaSkillSlotTypes.forEach((type) => {
+        const selected = streamerSkillOptions.find((skill) => skill.type === type && currentIds.includes(skill.id));
+        if (selected) currentByType.set(type, selected.id);
+      });
+      if (skillId) currentByType.set(slotType, skillId);
+      else currentByType.delete(slotType);
+      return {
+        ...current,
+        skill_ids: arenaSkillSlotTypes
+          .map((type) => currentByType.get(type))
+          .filter((id): id is string => Boolean(id))
+      };
+    });
+  };
 
   const toggleMyStreamerTag = (tagId: string) => {
     const maxTags = myStreamerCard?.config_options?.limits?.tag_ids || 4;
@@ -1775,7 +1910,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
           class_id: savedConfig.class_id || data.data?.card?.class?.id,
           stat_focus: savedConfig.stat_focus || 'hp',
           combat_style: savedConfig.combat_style || 'balanced',
-          skill_ids: Array.isArray(savedConfig.skill_ids) ? savedConfig.skill_ids : data.data?.card?.skills?.slice(0, 3).map((skill: ArenaCard['skills'][number]) => skill.id) || [],
+          skill_ids: Array.isArray(savedConfig.skill_ids) ? savedConfig.skill_ids : pickDefaultSkillIds(data.data?.card?.skills || []),
           tag_ids: Array.isArray(savedConfig.tag_ids) ? savedConfig.tag_ids : [],
           flavor_text: savedConfig.flavor_text || ''
         });
@@ -1817,7 +1952,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     setOwnedCardsLoading(true);
     setOwnedCardsError(null);
     try {
-      const res = await apiFetch('/arena/cards/owned?limit=12');
+      const res = await apiFetch('/arena/cards/owned?limit=5000');
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Owned arena cards response was not ok');
       setOwnedCards(Array.isArray(data.data?.items) ? data.data.items : []);
@@ -1907,34 +2042,79 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     }
   }, [toast]);
 
-  const createStarterDeck = async () => {
-    if (!user || deckActionLoading) return;
-    if (cards.length < 6) {
-      toast('기본 덱을 만들 카드가 아직 충분하지 않습니다.', 'warning');
+  const resetDeckEditor = React.useCallback(() => {
+    setDeckEditorId(null);
+    setDeckEditorName('아레나 덱');
+    setDeckEditorCardIds([]);
+  }, []);
+
+  const startNewDeckEditor = React.useCallback(() => {
+    setDeckEditorId(null);
+    setDeckEditorName(decks.length > 0 ? `아레나 덱 ${decks.length + 1}` : '프리시즌 기본 덱');
+    setDeckEditorCardIds(ownedCards.slice(0, ARENA_DECK_CARD_LIMIT).map((card) => card.card_id));
+  }, [decks.length, ownedCards]);
+
+  const openDeckEditor = React.useCallback((deck: ArenaDeck) => {
+    setDeckEditorId(deck.id);
+    setDeckEditorName(deck.name || '아레나 덱');
+    setDeckEditorCardIds(deck.cards.slice(0, ARENA_DECK_CARD_LIMIT).map((card) => card.card_id));
+  }, []);
+
+  const toggleDeckEditorCard = React.useCallback((cardId: string) => {
+    setDeckEditorCardIds((current) => {
+      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
+      if (current.length >= ARENA_DECK_CARD_LIMIT) {
+        toast(`덱은 최대 ${ARENA_DECK_CARD_LIMIT}장까지 구성할 수 있습니다.`, 'warning');
+        return current;
+      }
+      return [...current, cardId];
+    });
+  }, [toast]);
+
+  const saveDeckEditor = async () => {
+    if (!user || deckEditorSaving) return;
+    const cardIds = Array.from(new Set(deckEditorCardIds));
+    if (cardIds.length < 6 || cardIds.length > ARENA_DECK_CARD_LIMIT) {
+      toast(`덱은 6~${ARENA_DECK_CARD_LIMIT}장의 보유 카드로 구성해야 합니다.`, 'warning');
       return;
     }
-    setDeckActionLoading(true);
+    setDeckEditorSaving(true);
     try {
-      const res = await apiFetch('/arena/decks', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: '프리시즌 기본 덱',
-          card_ids: cards.slice(0, ARENA_DECK_CARD_LIMIT).map((card) => card.card_id),
-          strategy_chip_id: 'none'
-        })
+      const body = JSON.stringify({
+        name: (deckEditorName.trim() || '아레나 덱').slice(0, 80),
+        card_ids: cardIds,
+        strategy_chip_id: 'none'
+      });
+      const res = await apiFetch(deckEditorId ? `/arena/decks/${deckEditorId}` : '/arena/decks', {
+        method: deckEditorId ? 'PATCH' : 'POST',
+        body
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = Array.isArray(data.validation?.errors) ? data.validation.errors[0] : data.message;
-        throw new Error(detail || 'Arena deck create failed');
+        throw new Error(detail || 'Arena deck save failed');
       }
-      toast('기본 아레나 덱을 저장했습니다.', 'success');
+      const savedDeck = data.data as ArenaDeck | undefined;
+      toast(deckEditorId ? '아레나 덱을 수정했습니다.' : '아레나 덱을 저장했습니다.', 'success');
       await loadMyArenaDecks();
+      if (savedDeck?.id) openDeckEditor(savedDeck);
     } catch (err: any) {
       toast(err?.message || '아레나 덱 저장에 실패했습니다.', 'error');
     } finally {
-      setDeckActionLoading(false);
+      setDeckEditorSaving(false);
     }
+  };
+
+  const createStarterDeck = async () => {
+    if (!user || deckActionLoading) return;
+    if (ownedCards.length < 6) {
+      toast('덱을 만들 보유 아레나 카드가 아직 충분하지 않습니다.', 'warning');
+      return;
+    }
+    setDeckEditorId(null);
+    setDeckEditorName(decks.length > 0 ? `아레나 덱 ${decks.length + 1}` : '프리시즌 기본 덱');
+    setDeckEditorCardIds(ownedCards.slice(0, ARENA_DECK_CARD_LIMIT).map((card) => card.card_id));
+    toast('보유 카드로 덱 초안을 만들었습니다. 저장하면 대전에 사용할 수 있습니다.', 'success');
   };
 
   const deleteDeck = async (deckId: string) => {
@@ -1945,6 +2125,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Arena deck delete failed');
       toast('아레나 덱을 삭제했습니다.', 'success');
+      if (deckEditorId === deckId) resetDeckEditor();
       await loadMyArenaDecks();
     } catch (err: any) {
       toast(err?.message || '아레나 덱 삭제에 실패했습니다.', 'error');
@@ -1952,60 +2133,6 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       setDeckActionLoading(false);
     }
   };
-
-  const openDeckPlanner = (deck: ArenaDeck) => {
-    setPlannerDeckId(deck.id);
-    setPlannerRoundNo(1);
-    setPlannerPlans(buildEditableRoundPlans(deck));
-    setPlannerStrategyChipId(deck.strategy_chip_id || 'none');
-    setSelectedPlannerCardId(deck.cards[0]?.card_id || null);
-  };
-
-  const updatePlannerSlot = (row: number, col: number) => {
-    if (!selectedPlannerCardId) return;
-    setPlannerPlans((prev) => prev.map((plan) => {
-      if (plan.round_no !== plannerRoundNo) return plan;
-      const current = plan.slots || [];
-      const assigned = current.find((slot) => slot.row === row && slot.col === col);
-      if (assigned?.card_id === selectedPlannerCardId) {
-        return { ...plan, slots: current.filter((slot) => !(slot.row === row && slot.col === col)) };
-      }
-      const slots = current
-        .filter((slot) => slot.card_id !== selectedPlannerCardId && !(slot.row === row && slot.col === col))
-        .concat({ card_id: selectedPlannerCardId, row, col })
-        .slice(0, 6);
-      return { ...plan, slots };
-    }));
-  };
-
-  const updatePlannerPlanMeta = (key: 'tactic_style' | 'focus_rule', value: string) => {
-    setPlannerPlans((prev) => prev.map((plan) => (
-      plan.round_no === plannerRoundNo ? { ...plan, [key]: value } : plan
-    )));
-  };
-
-  const savePlannerPlans = async () => {
-    if (!plannerDeckId || plannerSaving) return;
-    setPlannerSaving(true);
-    try {
-      const res = await apiFetch(`/arena/decks/${plannerDeckId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ round_plans: plannerPlans, strategy_chip_id: plannerStrategyChipId })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = Array.isArray(data.validation?.errors) ? data.validation.errors[0] : data.message;
-        throw new Error(detail || 'Arena deck plan save failed');
-      }
-      toast('라운드 전술 플랜을 저장했습니다.', 'success');
-      await loadMyArenaDecks();
-    } catch (err: any) {
-      toast(err?.message || '라운드 전술 플랜 저장에 실패했습니다.', 'error');
-    } finally {
-      setPlannerSaving(false);
-    }
-  };
-
   const openArenaMatchForRoundPlay = React.useCallback(async (matchId: string) => {
     const res = await apiFetch(`/arena/matches/${encodeURIComponent(matchId)}`);
     const data = await res.json().catch(() => ({}));
@@ -2566,18 +2693,6 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     }
   }, []);
 
-  React.useEffect(() => {
-    if (!decks.length) {
-      setPlannerDeckId(null);
-      setPlannerPlans([]);
-      setPlannerStrategyChipId('none');
-      setSelectedPlannerCardId(null);
-      return;
-    }
-    if (!plannerDeckId || !decks.some((deck) => deck.id === plannerDeckId)) {
-      openDeckPlanner(decks[0]);
-    }
-  }, [decks, plannerDeckId]);
 
   React.useEffect(() => {
     if (!user || !season?.quick_match_enabled) return;
@@ -2696,24 +2811,28 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
   }, [cupStatus?.poll_after_sec, cupStatus?.status, loadCupDetail, loadCupStatus, notifyArenaQueueMatched, season?.cup_enabled, toast, user]);
 
   const targetPlayTime = formatSecondsRange(status?.match_format?.target_client_play_time_seconds);
-  const plannerDeck = decks.find((deck) => deck.id === plannerDeckId) || null;
-  const plannerPlan = plannerPlans.find((plan) => plan.round_no === plannerRoundNo) || null;
-  const plannerCardName = (cardId: string) => cards.find((card) => card.card_id === cardId)?.name || ownedCards.find((card) => card.card_id === cardId)?.name || plannerDeck?.cards.find((card) => card.card_id === cardId)?.channel_id || cardId.replace('arena_streamer_', '');
-  const plannerCardById = React.useMemo(() => {
+  const deckEditorCardById = React.useMemo(() => {
     const map = new Map<string, ArenaCard>();
-    [...cards, ...ownedCards].forEach((card) => map.set(card.card_id, card));
+    ownedCards.forEach((card) => map.set(card.card_id, card));
     return map;
-  }, [cards, ownedCards]);
+  }, [ownedCards]);
+  const deckEditorMissingCount = Math.max(0, 6 - deckEditorCardIds.length);
   const tacticChipOptions = rulesCatalog?.tactic_chips || [];
   const battlefieldRules = rulesCatalog?.battlefield_rules || [];
   const streamerConfigOptions = myStreamerCard?.config_options;
   const streamerSelectedClassId = myStreamerCardDraft.class_id || myStreamerCard?.card?.class?.id || streamerConfigOptions?.classes?.[0]?.id || '';
   const streamerSkillOptions = streamerSelectedClassId ? streamerConfigOptions?.skills_by_class?.[streamerSelectedClassId] || [] : [];
   const streamerSelectedSkillIds = Array.isArray(myStreamerCardDraft.skill_ids) ? myStreamerCardDraft.skill_ids : [];
+  const streamerSkillSlots = arenaSkillSlotTypes.map((type) => {
+    const options = streamerSkillOptions.filter((skill) => skill.type === type);
+    return {
+      type,
+      label: arenaSkillSlotLabels[type],
+      options,
+      selectedId: options.find((skill) => streamerSelectedSkillIds.includes(skill.id))?.id || options[0]?.id || ''
+    };
+  });
   const streamerSelectedTagIds = Array.isArray(myStreamerCardDraft.tag_ids) ? myStreamerCardDraft.tag_ids : [];
-  const currentStrategyChip = tacticChipOptions.find((chip) => chip.id === plannerStrategyChipId);
-  const currentTacticLabel = tacticOptions.find(([id]) => id === plannerPlan?.tactic_style)?.[1] || '균형';
-  const currentFocusLabel = focusOptions.find(([id]) => id === plannerPlan?.focus_rule)?.[1] || '전열 우선';
   const isRoundBattleRevealing = roundReveal?.stage === 'battle';
   const roundWaitRemainingMs = roundWait ? Math.max(0, new Date(roundWait.deadlineAt).getTime() - roundWaitNow) : 0;
   const roundWaitRemainingSec = Math.ceil(roundWaitRemainingMs / 1000);
@@ -2744,7 +2863,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
     : selectedReplayMatch?.result === 'win' ? '승리' : selectedReplayMatch?.result === 'loss' ? '패배' : '무승부';
   const roundRevealResultLabel = roundReveal?.roundWinner === 'player' ? '라운드 승리' : roundReveal?.roundWinner === 'bot' ? '라운드 패배' : '라운드 무승부';
   const isArenaAdmin = user?.role === 'ADMIN';
-  const displayedCards = cards;
+  const displayedCards = user ? ownedCards : cards;
   const hasArenaCards = displayedCards.length > 0;
   const primaryCtaLabel = user
     ? hasArenaCards ? '내 덱 준비하기' : '카드 풀 보기'
@@ -2848,7 +2967,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       title: 'AI 봇 연습전',
       badge: '즉시 시작',
       description: '상대를 기다리지 않고 라운드 전술과 덱 흐름을 확인합니다.',
-      queueLabel: 'DB 큐 없음',
+      queueLabel: '대기열 없음',
       estimate: '대기 없이 바로 매치를 생성합니다.',
       enabled: Boolean(season?.bot_practice_enabled),
       disabledLabel: '봇전 비활성화',
@@ -2862,7 +2981,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       title: '빠른대전',
       badge: '1:1 MMR',
       description: '비슷한 MMR의 상대를 찾아 5판 3선승으로 진행합니다.',
-      queueLabel: 'arena_match_queue',
+      queueLabel: '빠른대전 대기열',
       estimate: quickQueueActive ? getQuickQueueEstimate(quickMatch?.elapsed_sec) : '대기 중에는 MMR 범위를 단계적으로 넓힙니다.',
       enabled: Boolean(season?.quick_match_enabled),
       disabledLabel: '빠른대전 비활성화',
@@ -2876,7 +2995,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
       title: '8인 컵',
       badge: '별도 컵 큐',
       description: '8명이 모이면 브래킷을 만들고 등수별 결과를 정리합니다.',
-      queueLabel: 'arena_cup_queue',
+      queueLabel: '8인 컵 대기열',
       estimate: cupQueueActive ? getCupQueueEstimate(cupStatus?.queued_count, cupStatus?.required_count) : '8명이 모여야 시작하므로 빠른대전보다 오래 걸릴 수 있습니다.',
       enabled: Boolean(season?.cup_enabled),
       disabledLabel: '8인 컵 비활성화',
@@ -2953,7 +3072,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
           {[
             { icon: Swords, label: '매치 방식', value: '5판 3선승' },
             { icon: Clock3, label: '예상 플레이 시간', value: targetPlayTime },
-            { icon: ShieldCheck, label: '주요 전략 요소', value: '덱 조합/배치' }
+            { icon: ShieldCheck, label: '주요 전략 요소', value: '덱 조합/라운드 선택' }
           ].map((item) => {
             const Icon = item.icon;
             return (
@@ -2981,7 +3100,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                 : !hasArenaCards
                   ? '아레나에 어울리는 첫 조합을 기다려보세요'
                   : decks.length === 0
-                    ? '첫 덱을 만들고 라운드별 전술을 조정하세요'
+                    ? '첫 덱을 만들고 대전에서 라운드 선택을 시작하세요'
                     : recentMatches.length === 0
                       ? '봇 연습전으로 첫 전투 흐름을 확인하세요'
                       : '최근 경기 하이라이트를 보고 다음 전술을 다듬으세요'}
@@ -2990,7 +3109,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
               {!user
                 ? '아레나는 보유 카드와 저장 덱을 기준으로 진행됩니다.'
                 : decks.length === 0
-                  ? '역할, 스탯, 배치를 살펴보며 내 덱의 색깔을 정해보세요.'
+                  ? '보유 카드의 역할과 스킬을 살펴보며 내 덱의 색깔을 정해보세요.'
                   : '지난 경기를 다시 보며 카드별 활약과 라운드 흐름을 확인할 수 있습니다.'}
             </p>
           </div>
@@ -3001,7 +3120,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                 로그인하기
               </button>
             ) : decks.length === 0 ? (
-              <button type="button" onClick={createStarterDeck} disabled={deckActionLoading || cards.length < 6} className="arena-primary-cta cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs font-black text-primary-foreground disabled:opacity-50">
+              <button type="button" onClick={createStarterDeck} disabled={deckActionLoading || ownedCards.length < 6} className="arena-primary-cta cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs font-black text-primary-foreground disabled:opacity-50">
                 <PlusCircle className="h-4 w-4" />
                 첫 덱 만들기
               </button>
@@ -3074,7 +3193,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                   ) : deckLoading ? (
                     <div className="h-10 animate-pulse rounded-2xl bg-secondary/70" />
                   ) : decks.length === 0 ? (
-                    <button type="button" onClick={createStarterDeck} disabled={deckActionLoading || cards.length < 6} className="arena-primary-cta cute-wiggle-hover flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground disabled:opacity-50">
+                    <button type="button" onClick={createStarterDeck} disabled={deckActionLoading || ownedCards.length < 6} className="arena-primary-cta cute-wiggle-hover flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground disabled:opacity-50">
                       <PlusCircle className="h-4 w-4" />
                       첫 덱 만들기
                     </button>
@@ -3165,7 +3284,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                   <button
                     type="button"
                     onClick={createStarterDeck}
-                    disabled={deckActionLoading || cards.length < 6}
+                    disabled={deckActionLoading || ownedCards.length < 6}
                     className="arena-primary-cta cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs font-black text-primary-foreground shadow-lg shadow-primary/20 disabled:opacity-50"
                   >
                     <PlusCircle className="h-4 w-4" />
@@ -3937,7 +4056,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                                 value={streamerSelectedClassId}
                                 onChange={(event) => {
                                   const nextClassId = event.target.value;
-                                  const nextSkills = streamerConfigOptions.skills_by_class?.[nextClassId]?.slice(0, streamerConfigOptions.limits.skill_ids).map((skill) => skill.id) || [];
+                                  const nextSkills = pickDefaultSkillIds(streamerConfigOptions.skills_by_class?.[nextClassId] || []);
                                   updateMyStreamerCardDraft({ class_id: nextClassId, skill_ids: nextSkills });
                                 }}
                                 className="mt-1 w-full rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-foreground outline-none focus:border-primary"
@@ -4003,17 +4122,7 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {streamerConfigOptions.tag_options.map((tag) => {
                                 const selected = streamerSelectedTagIds.includes(tag);
-                                return (
-                                  <button
-                                    key={tag}
-                                    type="button"
-                                    onClick={() => toggleMyStreamerTag(tag)}
-                                    className={`rounded-full px-2.5 py-1 text-[10px] font-black transition ${selected ? 'bg-rose-100 text-rose-700 ring-2 ring-rose-300 dark:bg-rose-300/15 dark:text-rose-100' : 'bg-card text-muted-foreground hover:bg-secondary'}`}
-                                    aria-pressed={selected}
-                                  >
-                                    {tag}
-                                  </button>
-                                );
+                                return <ArenaTagBadge key={tag} tag={tag} selected={selected} asButton onClick={() => toggleMyStreamerTag(tag)} />;
                               })}
                             </div>
                           </div>
@@ -4066,10 +4175,10 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                     </div>
                     <button
                       type="button"
-                      onClick={createStarterDeck}
-                      disabled={deckActionLoading || cards.length < 6}
+                      onClick={startNewDeckEditor}
+                      disabled={deckActionLoading || ownedCards.length < 6}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm disabled:opacity-50"
-                      title="기본 덱 생성"
+                      title="새 덱 편집"
                     >
                       <PlusCircle className="h-4 w-4" />
                     </button>
@@ -4088,17 +4197,26 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                       />
                     ) : decks.length === 0 ? (
                       <p className="text-[11px] font-bold leading-relaxed text-muted-foreground">
-                        카드 풀이 열리면 마음에 드는 10장을 골라 첫 덱을 만들 수 있습니다.
+                        보유 카드에서 6~10장을 골라 첫 덱을 만들 수 있습니다.
                       </p>
                     ) : decks.map((deck) => (
                       <div key={deck.id} className="arena-deck-row flex items-center justify-between gap-2 rounded-2xl bg-secondary/52 px-3 py-2">
                         <div className="min-w-0">
                           <p className="truncate text-xs font-black text-foreground">{deck.name}</p>
                           <p className="text-[10px] font-bold text-muted-foreground">
-                            {deck.cards.length}장 · {deck.round_plans.length}플랜 · {deck.validation_status === 'VALID' ? '검증 완료' : '수정 필요'}
+                            {deck.cards.length}장 · {deck.validation_status === 'VALID' ? '검증 완료' : '수정 필요'}
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openDeckEditor(deck)}
+                            disabled={deckActionLoading}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-border bg-card text-foreground disabled:opacity-50"
+                            title="덱 수정"
+                          >
+                            <Layers3 className="h-3.5 w-3.5" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => startQuickMatch(deck.id)}
@@ -4224,164 +4342,115 @@ export const ArenaTab: React.FC<ArenaTabProps> = ({ activeSiteTab, onSiteTabChan
                   </div>
                 ) : null}
 
-                {plannerDeck ? (
+                {user ? (
                   <div className="arena-planner-card rounded-3xl border border-border bg-card/70 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[10px] font-black text-muted-foreground">라운드 플랜 편집</p>
-                        <p className="mt-1 truncate text-sm font-black text-foreground">{plannerDeck.name}</p>
+                        <p className="text-[10px] font-black text-muted-foreground">덱 편집</p>
+                        <p className="mt-1 text-sm font-black text-foreground">보유 카드에서 6~10장을 선택하세요</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={savePlannerPlans}
-                        disabled={plannerSaving}
-                        className="inline-flex items-center gap-1.5 rounded-2xl bg-primary px-3 py-2 text-[11px] font-black text-primary-foreground disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        {plannerSaving ? '저장 중' : '저장'}
-                      </button>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${deckEditorMissingCount > 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-300/10 dark:text-amber-100' : 'bg-primary/10 text-primary'}`}>
+                        {deckEditorCardIds.length}/{ARENA_DECK_CARD_LIMIT}장
+                      </span>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {decks.map((deck) => (
-                        <button
-                          key={deck.id}
-                          type="button"
-                          onClick={() => openDeckPlanner(deck)}
-                          className={`rounded-xl px-2.5 py-1.5 text-[10px] font-black ${plannerDeckId === deck.id ? 'bg-primary text-primary-foreground' : 'bg-secondary/60 text-muted-foreground'}`}
-                        >
-                          {deck.name}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3">
-                      <DeckDiagnosticPanel deck={plannerDeck} cardById={plannerCardById} />
-                    </div>
-                    {tacticChipOptions.length > 0 ? (
-                      <div className="mt-3 rounded-3xl border border-border bg-secondary/30 p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-[10px] font-black text-muted-foreground">전술 칩</p>
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-black text-primary">{currentStrategyChip?.name || '기본'}</span>
-                        </div>
+                    <label className="mt-3 block text-[10px] font-black text-muted-foreground">
+                      덱 이름
+                      <input
+                        value={deckEditorName}
+                        onChange={(event) => setDeckEditorName(event.target.value.slice(0, 80))}
+                        className="mt-1 w-full rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-foreground outline-none focus:border-primary"
+                        placeholder="아레나 덱"
+                      />
+                    </label>
+                    <div className="mt-3 rounded-3xl border border-border bg-secondary/28 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black text-muted-foreground">선택한 카드</p>
+                        {deckEditorMissingCount > 0 ? (
+                          <span className="text-[10px] font-black text-amber-700 dark:text-amber-100">{deckEditorMissingCount}장 더 필요</span>
+                        ) : (
+                          <span className="text-[10px] font-black text-primary">저장 가능</span>
+                        )}
+                      </div>
+                      {deckEditorCardIds.length === 0 ? (
+                        <p className="mt-2 text-[11px] font-bold leading-relaxed text-muted-foreground">아래 보유 카드 목록에서 덱에 넣을 카드를 선택하세요.</p>
+                      ) : (
                         <div className="mt-2 grid grid-cols-2 gap-1.5">
-                          {tacticChipOptions.map((chip) => (
-                            <button
-                              key={chip.id}
-                              type="button"
-                              onClick={() => setPlannerStrategyChipId(chip.id)}
-                              className={`arena-tactic-card min-w-0 rounded-2xl border px-2.5 py-2 text-left ${plannerStrategyChipId === chip.id ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-card/70 text-muted-foreground'}`}
-                              title={chip.description}
-                              aria-pressed={plannerStrategyChipId === chip.id}
-                            >
-                              <span className="block truncate">{chip.name}</span>
-                              <span className="mt-0.5 block line-clamp-2 text-[9px] font-bold opacity-80">{chip.description}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex gap-1.5 rounded-2xl bg-secondary/60 p-1">
-                      {ARENA_ROUND_NOS.map((roundNo) => (
-                        <button
-                          key={roundNo}
-                          type="button"
-                          onClick={() => setPlannerRoundNo(roundNo)}
-                          className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black ${plannerRoundNo === roundNo ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground'}`}
-                        >
-                          {roundNo}R
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3 grid gap-2">
-                      <div>
-                        <p className="mb-1.5 text-[10px] font-black text-muted-foreground">전술 성향</p>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {tacticOptions.map(([id, label]) => (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => updatePlannerPlanMeta('tactic_style', id)}
-                              className={`arena-tactic-card rounded-2xl border px-2 py-2 text-left ${plannerPlan?.tactic_style === id ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
-                              aria-pressed={plannerPlan?.tactic_style === id}
-                            >
-                              <span className="block text-[10px] font-black">{label}</span>
-                              <span className="mt-0.5 block line-clamp-2 text-[9px] font-bold opacity-80">{tacticDescriptions[id]}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="mb-1.5 text-[10px] font-black text-muted-foreground">타겟 우선순위</p>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {focusOptions.map(([id, label]) => (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => updatePlannerPlanMeta('focus_rule', id)}
-                              className={`arena-tactic-card rounded-2xl border px-2 py-2 text-left ${plannerPlan?.focus_rule === id ? 'is-selected border-rose-300 bg-rose-100 text-rose-700 ring-2 ring-rose-300 dark:border-rose-300/30 dark:bg-rose-300/15 dark:text-rose-100' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
-                              aria-pressed={plannerPlan?.focus_rule === id}
-                            >
-                              <span className="block text-[10px] font-black">{label}</span>
-                              <span className="mt-0.5 block line-clamp-2 text-[9px] font-bold opacity-80">{focusDescriptions[id]}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 grid gap-2 rounded-3xl border border-rose-200/70 bg-rose-50/60 p-3 dark:border-rose-300/20 dark:bg-rose-300/10">
-                      <div className="flex items-center gap-2">
-                        <Target className="h-4 w-4 text-rose-700 dark:text-rose-100" />
-                        <p className="text-[10px] font-black text-rose-700 dark:text-rose-100">이번 라운드 선택</p>
-                      </div>
-                      <p className="text-[11px] font-bold leading-relaxed text-muted-foreground">
-                        {plannerRoundNo}라운드는 <span className="font-black text-foreground">{currentTacticLabel}</span> 성향으로 움직이고, <span className="font-black text-foreground">{currentFocusLabel}</span> 대상을 먼저 노립니다.
-                      </p>
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-1.5">
-                      {plannerDeck.cards.slice(0, ARENA_DECK_CARD_LIMIT).map((card) => (
-                        <button
-                          key={card.card_id}
-                          type="button"
-                          onClick={() => setSelectedPlannerCardId(card.card_id)}
-                          className={`arena-card-token min-w-0 rounded-2xl border px-2 py-2 text-left ${selectedPlannerCardId === card.card_id ? 'is-selected border-rose-300 bg-rose-100 text-rose-700 ring-2 ring-rose-300 dark:border-rose-300/30 dark:bg-rose-300/15 dark:text-rose-100' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
-                          aria-pressed={selectedPlannerCardId === card.card_id}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <span className="h-5 w-5 shrink-0 overflow-hidden rounded-lg bg-white/70 text-center text-[9px] leading-5 dark:bg-white/10">
-                              {plannerCardById.get(card.card_id)?.image_url ? (
-                                <img src={plannerCardById.get(card.card_id)?.image_url || ''} alt="" className="h-full w-full object-cover" loading="lazy" />
-                              ) : plannerCardName(card.card_id).slice(0, 1)}
-                            </span>
-                            <span className="block min-w-0 truncate text-[10px] font-black">{plannerCardName(card.card_id)}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="arena-board-grid mt-3 rounded-3xl border border-border bg-secondary/28 p-2">
-                      {[0, 1].map((row) => (
-                        <div key={row} className="grid grid-cols-4 gap-1.5 py-1">
-                          {[0, 1, 2, 3].map((col) => {
-                            const assigned = plannerPlan?.slots?.find((slot) => slot.row === row && slot.col === col);
-                            const assignedCard = assigned ? plannerCardById.get(assigned.card_id) : null;
+                          {deckEditorCardIds.map((cardId, index) => {
+                            const card = deckEditorCardById.get(cardId);
                             return (
                               <button
-                                key={`${row}-${col}`}
+                                key={cardId}
                                 type="button"
-                                onClick={() => updatePlannerSlot(row, col)}
-                                className={`arena-board-slot aspect-[1.15] min-w-0 rounded-2xl border px-1.5 py-2 text-[10px] font-black ${assigned ? 'is-filled border-primary/30 bg-primary/10 text-foreground' : 'border-dashed border-border bg-card/60 text-muted-foreground'}`}
-                                title={assigned ? plannerCardName(assigned.card_id) : '빈 칸'}
+                                onClick={() => toggleDeckEditorCard(cardId)}
+                                className="arena-card-token min-w-0 rounded-2xl border border-primary/20 bg-primary/10 px-2.5 py-2 text-left text-foreground"
+                                title="덱에서 제거"
                               >
-                                {assignedCard?.image_url ? (
-                                  <img src={assignedCard.image_url} alt="" className="mx-auto mb-1 h-8 w-8 rounded-xl object-cover" loading="lazy" />
-                                ) : null}
-                                <span className="block truncate">{assigned ? plannerCardName(assigned.card_id) : row === 0 ? '후열' : '전열'}</span>
+                                <span className="flex items-center gap-2">
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/80 text-[10px] font-black text-primary dark:bg-white/10">
+                                    {card?.image_url ? <img src={card.image_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : index + 1}
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-[10px] font-black">{card?.name || cardId.replace('arena_streamer_', '')}</span>
+                                    <span className="block truncate text-[9px] font-bold text-muted-foreground">클릭하면 제거</span>
+                                  </span>
+                                </span>
                               </button>
                             );
                           })}
                         </div>
-                      ))}
+                      )}
+                    </div>
+                    <div className="mt-3 grid max-h-[22rem] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {ownedCards.length === 0 ? (
+                        <ArenaStateNotice title="덱에 넣을 보유 카드가 없습니다" description="아레나에 사용할 수 있는 보유 카드가 생기면 이곳에서 덱을 구성할 수 있습니다." />
+                      ) : ownedCards.map((card) => {
+                        const selected = deckEditorCardIds.includes(card.card_id);
+                        return (
+                          <button
+                            key={card.card_id}
+                            type="button"
+                            onClick={() => toggleDeckEditorCard(card.card_id)}
+                            className={`arena-tactic-card min-w-0 rounded-2xl border px-3 py-2 text-left ${selected ? 'is-selected border-primary/35 bg-primary text-primary-foreground shadow-sm' : 'border-transparent bg-secondary/52 text-muted-foreground'}`}
+                            aria-pressed={selected}
+                            title={selected ? '덱에서 제거' : '덱에 추가'}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-2xl bg-white/80 dark:bg-white/10">
+                                {card.image_url ? <img src={card.image_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : null}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-xs font-black">{card.name}</span>
+                                <span className="mt-0.5 block truncate text-[10px] font-bold opacity-80">{card.class.name} · {card.skills.slice(0, 2).map((skill) => skill.name).join(', ')}</span>
+                              </span>
+                              <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black text-primary dark:bg-white/10 dark:text-primary-foreground">
+                                {selected ? '선택' : '+'}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={saveDeckEditor}
+                        disabled={deckEditorSaving || deckEditorCardIds.length < 6 || deckEditorCardIds.length > ARENA_DECK_CARD_LIMIT}
+                        className="arena-primary-cta inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground shadow-lg shadow-primary/20 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        {deckEditorSaving ? '저장 중...' : deckEditorId ? '덱 수정 저장' : '새 덱 저장'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetDeckEditor}
+                        disabled={deckEditorSaving}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 text-xs font-black text-muted-foreground disabled:opacity-50"
+                      >
+                        선택 비우기
+                      </button>
                     </div>
                     <p className="mt-2 text-[10px] font-bold leading-relaxed text-muted-foreground">
-                      라운드마다 전술 성향, 타겟 우선순위, 보드 배치를 저장합니다. 같은 카드를 같은 라운드에 중복 배치할 수 없습니다.
+                      라운드별 전술과 출전 배치는 게임이 잡힌 뒤 각 라운드마다 직접 선택합니다.
                     </p>
                   </div>
                 ) : null}
@@ -4845,3 +4914,11 @@ const ArenaBattleShowcase: React.FC<{ cards: ArenaCard[] }> = ({ cards }) => {
     </div>
   );
 };
+
+
+
+
+
+
+
+

@@ -1,7 +1,8 @@
 import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
-import { ARENA_CURRENT_SEASON_ID, ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { getArenaCurrentSeasonId, isArenaSeasonOpen } from './arenaSeasonService';
 import {
   ArenaDeckSnapshot,
   createPendingRankedArenaMatch,
@@ -32,7 +33,7 @@ quickMatchEvents.setMaxListeners(Math.max(100, Number(process.env.ARENA_QUICK_SS
 const QUEUE_COLUMNS = `id, user_id, season_id, deck_id, deck_hash, round_plan_hash, mmr, mmr_bucket,
   status, queued_at, expires_at, matched_match_id`;
 
-export const isArenaQuickMatchEnabled = () => getArenaOpsConfigSync().quick_match_enabled;
+export const isArenaQuickMatchEnabled = () => isArenaSeasonOpen() && getArenaOpsConfigSync().quick_match_enabled;
 
 export type ArenaQuickMatchStatus = 'queued' | 'matched' | 'cancelled' | 'expired' | 'none';
 
@@ -225,7 +226,7 @@ const loadLatestQueueForUser = async (userId: string): Promise<QueueRow | null> 
         ORDER BY id DESC
         LIMIT 1`,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
     return row || null;
   }
@@ -237,7 +238,7 @@ const loadLatestQueueForUser = async (userId: string): Promise<QueueRow | null> 
         ORDER BY id DESC
         LIMIT 1`
     )
-    .get(userId, ARENA_CURRENT_SEASON_ID) as QueueRow | undefined;
+    .get(userId, getArenaCurrentSeasonId()) as QueueRow | undefined;
   return row || null;
 };
 
@@ -251,7 +252,7 @@ const loadActiveQueueForUser = async (userId: string): Promise<QueueRow | null> 
         ORDER BY id DESC
         LIMIT 1`,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
     return row || null;
   }
@@ -265,7 +266,7 @@ const loadActiveQueueForUser = async (userId: string): Promise<QueueRow | null> 
         ORDER BY id DESC
         LIMIT 1`
     )
-    .get(userId, ARENA_CURRENT_SEASON_ID) as QueueRow | undefined;
+    .get(userId, getArenaCurrentSeasonId()) as QueueRow | undefined;
   return row || null;
 };
 
@@ -277,8 +278,8 @@ const loadWaitingQueuesForRecovery = async (limit: number): Promise<QueueRow[]> 
     ORDER BY queued_at ASC, id ASC
     LIMIT ?`;
   return getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<QueueRow>(query, ARENA_CURRENT_SEASON_ID, limit)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, limit) as QueueRow[];
+    ? await getMysqlDb().all<QueueRow>(query, getArenaCurrentSeasonId(), limit)
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), limit) as QueueRow[];
 };
 
 const loadRating = async (userId: string): Promise<RatingRow> => {
@@ -298,7 +299,7 @@ const loadRating = async (userId: string): Promise<RatingRow> => {
          FROM arena_player_ratings
         WHERE season_id = ? AND user_id = ?
         LIMIT 1`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       userId
     );
     return row ? { ...fallback, ...row, mmr: Number(row.mmr || 1000), rating_points: Number(row.rating_points || 0), wins: Number(row.wins || 0), losses: Number(row.losses || 0), draws: Number(row.draws || 0) } : fallback;
@@ -311,7 +312,7 @@ const loadRating = async (userId: string): Promise<RatingRow> => {
         WHERE season_id = ? AND user_id = ?
         LIMIT 1`
     )
-    .get(ARENA_CURRENT_SEASON_ID, userId) as any;
+    .get(getArenaCurrentSeasonId(), userId) as any;
   return row ? { ...fallback, ...row, mmr: Number(row.mmr || 1000), rating_points: Number(row.rating_points || 0), wins: Number(row.wins || 0), losses: Number(row.losses || 0), draws: Number(row.draws || 0) } : fallback;
 };
 
@@ -323,7 +324,7 @@ const insertQueue = async (userId: string, deck: ArenaDeck, rating: RatingRow): 
         (user_id, season_id, deck_id, deck_hash, round_plan_hash, mmr, mmr_bucket, status, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND))`,
       userId,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       deck.id,
       deck.deck_hash,
       deck.deck_hash,
@@ -343,7 +344,7 @@ const insertQueue = async (userId: string, deck: ArenaDeck, rating: RatingRow): 
         (user_id, season_id, deck_id, deck_hash, round_plan_hash, mmr, mmr_bucket, status, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', datetime('now', '+' || ? || ' seconds'))`
     )
-    .run(userId, ARENA_CURRENT_SEASON_ID, deck.id, deck.deck_hash, deck.deck_hash, rating.mmr, bucket, QUEUE_TTL_SECONDS);
+    .run(userId, getArenaCurrentSeasonId(), deck.id, deck.deck_hash, deck.deck_hash, rating.mmr, bucket, QUEUE_TTL_SECONDS);
   const row = await loadLatestQueueForUser(userId);
   if (!row || String(row.id) !== String(result.lastInsertRowid)) throw new Error('ArenaQueueCreateReadbackFailed');
   emitArenaQuickMatchEvent(userId, toResponse(row));
@@ -365,8 +366,8 @@ const loadBlockedRecentOpponents = async (userId: string): Promise<Set<string>> 
     ORDER BY id DESC
     LIMIT ?`;
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(query, ARENA_CURRENT_SEASON_ID, userId, userId, windowMinutes, SAME_OPPONENT_SCAN_LIMIT)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, userId, userId, windowMinutes, SAME_OPPONENT_SCAN_LIMIT) as any[];
+    ? await getMysqlDb().all<any>(query, getArenaCurrentSeasonId(), userId, userId, windowMinutes, SAME_OPPONENT_SCAN_LIMIT)
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), userId, userId, windowMinutes, SAME_OPPONENT_SCAN_LIMIT) as any[];
 
   const now = Date.now();
   const opponentCounts = new Map<string, number>();
@@ -402,7 +403,7 @@ const findCandidateQueue = async (myQueue: QueueRow): Promise<QueueRow | null> =
           AND expires_at > UTC_TIMESTAMP()
         ORDER BY mmr_bucket ASC, queued_at ASC
         LIMIT ?`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       myQueue.user_id,
       minBucket,
       maxBucket,
@@ -427,7 +428,7 @@ const findCandidateQueue = async (myQueue: QueueRow): Promise<QueueRow | null> =
         ORDER BY mmr_bucket ASC, queued_at ASC
         LIMIT ?`
     )
-    .all(ARENA_CURRENT_SEASON_ID, myQueue.user_id, minBucket, maxBucket, MAX_QUEUE_CANDIDATES) as QueueRow[];
+    .all(getArenaCurrentSeasonId(), myQueue.user_id, minBucket, maxBucket, MAX_QUEUE_CANDIDATES) as QueueRow[];
   for (const row of rows) {
     if (String(row.id) === String(myQueue.id)) continue;
     if (blockedOpponents.has(row.user_id)) continue;
@@ -498,7 +499,7 @@ const releaseCandidatePair = async (mine: QueueRow, opponent: QueueRow) => {
 const prepareValidDeck = async (userId: string, deckId: string): Promise<ArenaDeck> => {
   const storedDeck = await getArenaDeck(userId, deckId);
   if (!storedDeck) throw new Error('ArenaDeckNotFound');
-  const validation = await validateArenaDeckInput(storedDeck);
+  const validation = await validateArenaDeckInput(storedDeck, storedDeck.user_id);
   if (!validation.valid) {
     const err = new Error('ArenaDeckValidationFailed') as Error & { validation?: unknown };
     err.validation = validation;
@@ -537,7 +538,7 @@ const tryFinalizeMatch = async (myQueue: QueueRow): Promise<ArenaQuickMatchRespo
   }
 
   const matchSeed = createHash('sha256')
-    .update(`${ARENA_CURRENT_SEASON_ID}:${mine.id}:${opponent.id}:${myDeck.deck_hash}:${opponentDeck.deck_hash}`)
+    .update(`${getArenaCurrentSeasonId()}:${mine.id}:${opponent.id}:${myDeck.deck_hash}:${opponentDeck.deck_hash}`)
     .digest('hex');
   const battlefieldRule = pickArenaBattlefieldRule(matchSeed);
 
@@ -660,7 +661,7 @@ export const recoverArenaQuickMatchQueue = async () => {
           AND expires_at > UTC_TIMESTAMP()
           AND queued_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)
         LIMIT ?`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       limit
     );
     lastQueueCleanupAt = Date.now();
@@ -704,7 +705,7 @@ export const recoverArenaQuickMatchQueue = async () => {
           LIMIT ?
         )`
     )
-    .run(ARENA_CURRENT_SEASON_ID, limit);
+    .run(getArenaCurrentSeasonId(), limit);
   lastQueueCleanupAt = Date.now();
   const finalized = await finalizeWaitingArenaQuickMatches(Math.min(limit, QUEUE_RECOVERY_MATCH_LIMIT));
   return {
@@ -726,15 +727,15 @@ export const getArenaQuickMatchAdminOverview = async () => {
     WHERE season_id = ?
     GROUP BY status`;
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(query, ARENA_CURRENT_SEASON_ID)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID) as any[];
+    ? await getMysqlDb().all<any>(query, getArenaCurrentSeasonId())
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId()) as any[];
   const byStatus = rows.reduce<Record<string, number>>((acc, row) => {
     acc[String(row.status || 'UNKNOWN').toLowerCase()] = Number(row.count || 0);
     return acc;
   }, {});
   return {
     enabled: isArenaQuickMatchEnabled(),
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     queue: {
       waiting: byStatus.waiting || 0,
       matching: byStatus.matching || 0,
@@ -837,6 +838,8 @@ export const cancelArenaQuickMatch = async (userId: string): Promise<ArenaQuickM
   emitArenaQuickMatchEvent(userId, cancelled);
   return cancelled;
 };
+
+
 
 
 

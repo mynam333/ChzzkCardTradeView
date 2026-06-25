@@ -1,5 +1,5 @@
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
-import { ARENA_CURRENT_SEASON_ID } from './arenaDeckService';
+import { getArenaCurrentSeasonId } from './arenaSeasonService';
 import { ensureArenaMatchTables } from './arenaMatchService';
 
 type RawArenaAuditMatchRow = {
@@ -96,9 +96,9 @@ const loadRecentRankedMatches = async (limit: number): Promise<RawArenaAuditMatc
     ORDER BY id DESC
     LIMIT ?`;
   if (getDbMode() === 'MYSQL') {
-    return getMysqlDb().all<RawArenaAuditMatchRow>(query, ARENA_CURRENT_SEASON_ID, limit);
+    return getMysqlDb().all<RawArenaAuditMatchRow>(query, getArenaCurrentSeasonId(), limit);
   }
-  return getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, limit) as RawArenaAuditMatchRow[];
+  return getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), limit) as RawArenaAuditMatchRow[];
 };
 
 const pushEvidence = (items: AuditMatch[], match: AuditMatch) => {
@@ -231,7 +231,7 @@ const serializePair = (pair: PairAudit) => {
 
 export const getArenaAbuseAudit = async (limitInput?: unknown) => {
   const limit = normalizeLimit(limitInput);
-  const cacheKey = `${ARENA_CURRENT_SEASON_ID}:${limit}`;
+  const cacheKey = `${getArenaCurrentSeasonId()}:${limit}`;
   const now = Date.now();
   if (auditCache && auditCache.key === cacheKey && auditCache.expiresAt > now) return auditCache.data;
   if (auditInFlight) return auditInFlight;
@@ -314,7 +314,7 @@ export const getArenaAbuseAudit = async (limitInput?: unknown) => {
       .slice(0, 60);
 
     const data = {
-      season_id: ARENA_CURRENT_SEASON_ID,
+      season_id: getArenaCurrentSeasonId(),
       source: 'arena_matches_recent_ranked_limited',
       generated_at: new Date().toISOString(),
       scanned_matches: rows.length,
@@ -348,3 +348,4 @@ export const getArenaAbuseAudit = async (limitInput?: unknown) => {
 
   return auditInFlight;
 };
+

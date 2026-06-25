@@ -307,18 +307,6 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => router.push('/arena')}
-          className="cute-wiggle-hover mb-4 flex w-full items-center gap-3 rounded-2xl border border-primary/20 bg-white/70 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 hover:bg-secondary/70 dark:bg-white/10"
-        >
-          <Swords className="h-4.5 w-4.5 text-primary" />
-          <span className="min-w-0">
-            <span className="block truncate">아레나로 이동</span>
-            <span className="block truncate text-[10px] font-bold text-muted-foreground">치카포 기반 듀얼 게임</span>
-          </span>
-        </button>
-
         <nav className="shrink-0 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -341,7 +329,18 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
         </nav>
 
         {/* 테마 스위치 */}
-        <div className="mt-auto shrink-0 pt-4 border-t border-border">
+        <div className="mt-auto shrink-0 space-y-3 pt-4 border-t border-border">
+          <button
+            type="button"
+            onClick={() => router.push('/arena')}
+            className="cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl border border-primary/20 bg-white/70 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 hover:bg-secondary/70 dark:bg-white/10"
+          >
+            <Swords className="h-4.5 w-4.5 text-primary" />
+            <span className="min-w-0">
+              <span className="block truncate">아레나로 이동</span>
+              <span className="block truncate text-[10px] font-bold text-muted-foreground">치카포 기반 듀얼 게임</span>
+            </span>
+          </button>
           <div className="flex items-center justify-between px-2">
             <span className="text-xs font-bold text-muted-foreground">화면 테마</span>
             <button
@@ -526,3 +525,4 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     </div>
   );
 };
+

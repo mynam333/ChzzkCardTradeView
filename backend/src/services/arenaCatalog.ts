@@ -3,14 +3,30 @@ import { Streamer } from '../repositories/interfaces';
 import { getArenaAdminControlConfigSync } from './arenaAdminControlService';
 
 export type ArenaClassId =
-  | 'guardian'
+  | 'shield_knight'
+  | 'iron_wall'
+  | 'vanguard'
+  | 'ward_keeper'
   | 'duelist'
-  | 'arcanist'
-  | 'ranger'
-  | 'trickster'
-  | 'supporter'
+  | 'berserker'
+  | 'pursuer'
   | 'breaker'
-  | 'tempoist';
+  | 'sniper'
+  | 'assassin'
+  | 'rapid_gunner'
+  | 'executioner'
+  | 'fire_mage'
+  | 'frost_mage'
+  | 'storm_caller'
+  | 'curse_weaver'
+  | 'healer'
+  | 'bard'
+  | 'tactician'
+  | 'purifier'
+  | 'trapper'
+  | 'illusionist'
+  | 'disruptor'
+  | 'switcher';
 
 export type ArenaCardStatKey = 'hp' | 'attack' | 'defense' | 'speed' | 'focus';
 
@@ -94,14 +110,30 @@ export interface ArenaCardConfigOptions {
 }
 
 export const ARENA_CLASSES: ArenaClassDefinition[] = [
-  { id: 'guardian', name: '가디언', role: 'frontline', description: '전열에서 피해를 나누어 받고 라운드 후반까지 버티는 방어형 클래스' },
-  { id: 'duelist', name: '듀얼리스트', role: 'damage', description: '단일 대상을 빠르게 압박해 5판 3선승 흐름을 흔드는 공격형 클래스' },
-  { id: 'arcanist', name: '아르카니스트', role: 'control', description: '상태 이상과 집중 자원으로 전투 템포를 제어하는 기술형 클래스' },
-  { id: 'ranger', name: '레인저', role: 'damage', description: '후열에서 안정적인 누적 피해를 만들고 표식을 활용하는 원거리 클래스' },
-  { id: 'trickster', name: '트릭스터', role: 'tempo', description: '회피, 복제, 교란 효과로 예측을 어렵게 만드는 변수 창출 클래스' },
-  { id: 'supporter', name: '서포터', role: 'support', description: '보호막, 회복, 버프를 통해 덱의 컨셉을 완성하는 지원 클래스' },
-  { id: 'breaker', name: '브레이커', role: 'control', description: '보호막과 방어 태세를 깨고 전열 돌파를 담당하는 클래스' },
-  { id: 'tempoist', name: '템포이스트', role: 'tempo', description: '행동 순서와 쿨다운을 조작해 짧은 전투의 주도권을 잡는 클래스' }
+  { id: 'shield_knight', name: '방패기사', role: 'frontline', description: '도발과 보호막으로 전열을 고정하는 정석 수비 클래스' },
+  { id: 'iron_wall', name: '철벽수호자', role: 'frontline', description: '높은 방어와 피해 감소로 장기 교전을 버티는 방어 클래스' },
+  { id: 'vanguard', name: '선봉대장', role: 'frontline', description: '전투 시작 주도권과 아군 보호를 함께 노리는 전열 클래스' },
+  { id: 'ward_keeper', name: '결계지기', role: 'support', description: '광역 보호막과 피해 분산으로 팀 생존을 보조하는 보호 클래스' },
+  { id: 'duelist', name: '결투가', role: 'damage', description: '같은 대상을 오래 압박해 단일 교전 우위를 만드는 브루저 클래스' },
+  { id: 'berserker', name: '폭주전사', role: 'damage', description: '체력이 낮아질수록 공격적으로 몰아붙이는 고위험 클래스' },
+  { id: 'pursuer', name: '추격자', role: 'damage', description: '약해진 적을 추적하고 마무리 타이밍을 만드는 클래스' },
+  { id: 'breaker', name: '파쇄자', role: 'control', description: '보호막과 방어 태세를 깨고 전열 돌파를 담당하는 클래스' },
+  { id: 'sniper', name: '저격수', role: 'damage', description: '후열에서 표식과 치명타로 단일 화력을 누적하는 원거리 클래스' },
+  { id: 'assassin', name: '암살자', role: 'damage', description: '약한 후열을 빠르게 압박하는 속도형 공격 클래스' },
+  { id: 'rapid_gunner', name: '속사수', role: 'damage', description: '빠른 기본 공격과 표식 연계로 지속 피해를 만드는 클래스' },
+  { id: 'executioner', name: '처형자', role: 'damage', description: '낮은 체력 대상을 확실히 마무리하는 결정력 클래스' },
+  { id: 'fire_mage', name: '화염술사', role: 'control', description: '광역 피해와 지속 압박으로 전장을 흔드는 캐스터 클래스' },
+  { id: 'frost_mage', name: '서리술사', role: 'control', description: '둔화와 제한적 행동 방해로 상대 템포를 늦추는 캐스터 클래스' },
+  { id: 'storm_caller', name: '폭풍소환사', role: 'control', description: '무작위 연쇄 피해와 집중 흔들기로 변수를 만드는 캐스터 클래스' },
+  { id: 'curse_weaver', name: '저주술사', role: 'control', description: '약화와 취약 효과로 상대의 강점을 깎는 디버프 클래스' },
+  { id: 'healer', name: '치유사', role: 'support', description: '회복과 생존 보조로 세트 안정성을 높이는 지원 클래스' },
+  { id: 'bard', name: '음유지원가', role: 'support', description: '버프와 에너지 흐름을 보조해 팀 템포를 끌어올리는 클래스' },
+  { id: 'tactician', name: '전술가', role: 'tempo', description: '집중 공격과 배치 운영으로 라운드 플랜을 강화하는 클래스' },
+  { id: 'purifier', name: '정화자', role: 'support', description: '디버프 완화와 상태 저항으로 안정적인 전투를 돕는 클래스' },
+  { id: 'trapper', name: '함정공', role: 'tempo', description: '시간차 함정과 방해 효과로 상대 진형을 흔드는 클래스' },
+  { id: 'illusionist', name: '환영술사', role: 'tempo', description: '회피와 환영성 교란으로 예측을 어렵게 만드는 클래스' },
+  { id: 'disruptor', name: '교란자', role: 'control', description: '침묵과 에너지 감소로 핵심 스킬 타이밍을 방해하는 클래스' },
+  { id: 'switcher', name: '위치술사', role: 'tempo', description: '위치 교환과 이동 변수로 전열과 후열 구도를 바꾸는 클래스' }
 ];
 
 export const ARENA_STAT_FOCUSES: ArenaConfigOptionDefinition<ArenaCardStatKey>[] = [
@@ -165,52 +197,107 @@ export const ARENA_SKILLS: ArenaSkillDefinition[] = [
 ];
 
 const CLASS_STAT_BIAS: Record<ArenaClassId, Partial<Record<ArenaCardStatKey, number>>> = {
-  guardian: { hp: 12, defense: 12, speed: -8, attack: -4 },
-  duelist: { attack: 14, speed: 8, defense: -8 },
-  arcanist: { focus: 16, attack: 4, hp: -8 },
-  ranger: { attack: 8, speed: 8, defense: -4 },
-  trickster: { speed: 14, focus: 6, hp: -6 },
-  supporter: { focus: 10, defense: 6, attack: -8 },
+  shield_knight: { hp: 10, defense: 14, speed: -8, attack: -4 },
+  iron_wall: { hp: 8, defense: 16, speed: -10, focus: -2 },
+  vanguard: { hp: 8, defense: 8, speed: 4, attack: -4 },
+  ward_keeper: { hp: 8, defense: 8, focus: 8, attack: -8 },
+  duelist: { attack: 12, speed: 8, defense: -7 },
+  berserker: { attack: 16, hp: 4, defense: -10, focus: -3 },
+  pursuer: { attack: 10, speed: 10, hp: -5, defense: -3 },
   breaker: { attack: 10, hp: 4, focus: -4 },
-  tempoist: { speed: 12, focus: 10, defense: -6 }
+  sniper: { attack: 13, focus: 7, hp: -8, defense: -4 },
+  assassin: { attack: 12, speed: 12, hp: -10, defense: -4 },
+  rapid_gunner: { speed: 14, attack: 7, defense: -6, focus: -3 },
+  executioner: { attack: 15, focus: 5, speed: -2, defense: -7 },
+  fire_mage: { focus: 14, attack: 6, hp: -8, defense: -3 },
+  frost_mage: { focus: 13, defense: 3, speed: -3, hp: -5 },
+  storm_caller: { focus: 12, speed: 5, attack: 4, hp: -8 },
+  curse_weaver: { focus: 15, defense: -4, hp: -6, speed: 3 },
+  healer: { focus: 12, defense: 6, attack: -10, speed: -2 },
+  bard: { focus: 10, speed: 6, attack: -8, defense: 2 },
+  tactician: { focus: 8, speed: 8, defense: 2, attack: -6 },
+  purifier: { focus: 10, defense: 8, attack: -9 },
+  trapper: { speed: 9, focus: 8, attack: -4, hp: -4 },
+  illusionist: { speed: 13, focus: 7, hp: -6, defense: -4 },
+  disruptor: { focus: 12, speed: 7, attack: -5, defense: -3 },
+  switcher: { speed: 12, focus: 6, defense: -2, attack: -5 }
 };
 
 export const SKILLS_BY_CLASS: Record<ArenaClassId, string[]> = {
-  guardian: ['aegis-pop', 'soft-taunt', 'last-cookie', 'ribbon-wall', 'sturdy-promise'],
+  shield_knight: ['aegis-pop', 'soft-taunt', 'last-cookie', 'ribbon-wall', 'sturdy-promise'],
+  iron_wall: ['soft-taunt', 'sturdy-promise', 'aegis-pop', 'last-cookie', 'ribbon-wall'],
+  vanguard: ['aegis-pop', 'ribbon-wall', 'fast-count', 'team-chant', 'sturdy-promise'],
+  ward_keeper: ['ribbon-wall', 'cozy-finale', 'aegis-pop', 'warm-light', 'team-chant'],
   duelist: ['neon-sting', 'rivalry', 'clutch-cut', 'pink-rush', 'one-more-hit'],
-  arcanist: ['star-orbit', 'focus-lens', 'quiet-comet', 'puzzle-spark', 'mana-ribbon'],
-  ranger: ['mint-arrow', 'steady-breath', 'rain-shot', 'sky-snipe', 'calm-aim'],
-  trickster: ['mirror-step', 'confetti-fake', 'shuffle-stage', 'wink-escape', 'tiny-trap'],
-  supporter: ['bubble-tea', 'team-chant', 'cozy-finale', 'snack-break', 'warm-light'],
+  berserker: ['pink-rush', 'one-more-hit', 'clutch-cut', 'neon-sting', 'rivalry'],
+  pursuer: ['neon-sting', 'clutch-cut', 'sky-snipe', 'pink-rush', 'one-more-hit'],
   breaker: ['crack-pop', 'guard-pierce', 'candy-hammer', 'armor-melt', 'front-cracker'],
-  tempoist: ['clock-hop', 'tempo-pocket', 'rewind-cue', 'fast-count', 'beat-shift']
+  sniper: ['mint-arrow', 'steady-breath', 'rain-shot', 'sky-snipe', 'calm-aim'],
+  assassin: ['mirror-step', 'neon-sting', 'clutch-cut', 'wink-escape', 'one-more-hit'],
+  rapid_gunner: ['mint-arrow', 'steady-breath', 'rain-shot', 'pink-rush', 'calm-aim'],
+  executioner: ['clutch-cut', 'sky-snipe', 'neon-sting', 'rivalry', 'calm-aim'],
+  fire_mage: ['star-orbit', 'quiet-comet', 'puzzle-spark', 'focus-lens', 'mana-ribbon'],
+  frost_mage: ['puzzle-spark', 'focus-lens', 'quiet-comet', 'star-orbit', 'mana-ribbon'],
+  storm_caller: ['star-orbit', 'puzzle-spark', 'rewind-cue', 'focus-lens', 'beat-shift'],
+  curse_weaver: ['puzzle-spark', 'quiet-comet', 'armor-melt', 'mana-ribbon', 'focus-lens'],
+  healer: ['bubble-tea', 'team-chant', 'cozy-finale', 'snack-break', 'warm-light'],
+  bard: ['team-chant', 'clock-hop', 'rewind-cue', 'warm-light', 'tempo-pocket'],
+  tactician: ['clock-hop', 'team-chant', 'fast-count', 'beat-shift', 'focus-lens'],
+  purifier: ['warm-light', 'snack-break', 'cozy-finale', 'team-chant', 'sturdy-promise'],
+  trapper: ['tiny-trap', 'shuffle-stage', 'mirror-step', 'puzzle-spark', 'confetti-fake'],
+  illusionist: ['mirror-step', 'confetti-fake', 'shuffle-stage', 'wink-escape', 'tiny-trap'],
+  disruptor: ['tiny-trap', 'puzzle-spark', 'armor-melt', 'shuffle-stage', 'beat-shift'],
+  switcher: ['shuffle-stage', 'clock-hop', 'wink-escape', 'tiny-trap', 'fast-count']
 };
 
 const skillById = new Map(ARENA_SKILLS.map((skill) => [skill.id, skill]));
 const classIdSet = new Set(ARENA_CLASSES.map((arenaClass) => arenaClass.id));
+const LEGACY_CLASS_ALIASES: Record<string, ArenaClassId> = {
+  guardian: 'shield_knight',
+  arcanist: 'fire_mage',
+  ranger: 'sniper',
+  trickster: 'illusionist',
+  supporter: 'healer',
+  tempoist: 'bard'
+};
+const resolveArenaClassId = (value: unknown, fallback?: ArenaClassId): ArenaClassId | undefined => {
+  const id = normalizeId(value);
+  const canonical = id ? LEGACY_CLASS_ALIASES[id] || id : fallback;
+  return canonical && classIdSet.has(canonical as ArenaClassId) ? canonical as ArenaClassId : fallback;
+};
 const statFocusSet = new Set(ARENA_STAT_FOCUSES.map((focus) => focus.id));
 const combatStyleSet = new Set(ARENA_COMBAT_STYLES.map((style) => style.id));
 const ALLOWED_CUSTOM_TAGS = [
-  'anchor',
-  'burst',
-  'carry',
-  'combo',
-  'control',
-  'counter',
-  'cute',
-  'defense',
-  'finisher',
+  'guardian',
   'frontline',
-  'heal',
-  'magic',
-  'mark',
-  'ranged',
-  'resource',
-  'shield',
+  'order',
+  'command',
+  'duel',
+  'focus',
+  'blade',
+  'rage',
+  'hunt',
+  'precision',
+  'backline',
   'speed',
-  'support',
-  'tempo',
-  'trick'
+  'arcane',
+  'flame',
+  'frost',
+  'storm',
+  'curse',
+  'poison',
+  'control',
+  'healing',
+  'light',
+  'cleanse',
+  'support_link',
+  'song',
+  'machine',
+  'trap',
+  'shadow',
+  'trick',
+  'space',
+  'stone'
 ];
 const CUSTOM_TAG_SET = new Set(ALLOWED_CUSTOM_TAGS);
 const CONFIG_LIMITS = {
@@ -266,10 +353,7 @@ const normalizeIdList = (value: unknown, maxCount: number): string[] => {
 export const normalizeArenaCardConfig = (raw: unknown, classFallback?: ArenaClassId): ArenaCardConfig | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
-  const classId = normalizeId(source.class_id);
-  const resolvedClassId = classId && classIdSet.has(classId as ArenaClassId)
-    ? classId as ArenaClassId
-    : classFallback;
+  const resolvedClassId = resolveArenaClassId(source.class_id, classFallback);
   const statFocus = normalizeId(source.stat_focus || source.stat_profile_id);
   const combatStyle = normalizeId(source.combat_style);
   const activeSkillId = normalizeId(source.active_skill_id);
@@ -401,8 +485,9 @@ export const generateArenaCardFromStreamer = (
   options: ArenaCardGenerationOptions = {}
 ): ArenaGeneratedCard => {
   const seed = hashHex(`arena:v1:${streamer.channel_id}`);
-  const configuredClass = options.config?.class_id
-    ? ARENA_CLASSES.find((arenaClassOption) => arenaClassOption.id === options.config?.class_id)
+  const configuredClassId = resolveArenaClassId(options.config?.class_id);
+  const configuredClass = configuredClassId
+    ? ARENA_CLASSES.find((arenaClassOption) => arenaClassOption.id === configuredClassId)
     : null;
   const arenaClass = configuredClass || pick(ARENA_CLASSES, seed, 'class');
   const normalizedConfig = normalizeArenaCardConfig(options.config, arenaClass.id);

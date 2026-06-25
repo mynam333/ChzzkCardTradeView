@@ -252,7 +252,18 @@ export const ArenaAdminPanel: React.FC = () => {
   const [reviewFilter, setReviewFilter] = React.useState<ArenaStatFilterReview>('all');
   const [minSampleFilter, setMinSampleFilter] = React.useState(0);
   const [statSearch, setStatSearch] = React.useState('');
+  const [seasonKind, setSeasonKind] = React.useState<'preseason' | 'season'>('preseason');
+  const [seasonNo, setSeasonNo] = React.useState(0);
+  const [seasonName, setSeasonName] = React.useState('');
+  const [seasonSaving, setSeasonSaving] = React.useState(false);
 
+  React.useEffect(() => {
+    const season = arenaOps?.season;
+    if (!season) return;
+    setSeasonKind(season.kind === 'season' ? 'season' : 'preseason');
+    setSeasonNo(Number(season.season_no || 0));
+    setSeasonName(String(season.name || ''));
+  }, [arenaOps?.season?.id, arenaOps?.season?.name, arenaOps?.season?.phase]);
   const isAdmin = user?.role === 'ADMIN';
   const statItems = React.useMemo(() => (Array.isArray(arenaStats?.items) ? arenaStats.items : []), [arenaStats]);
   const activeStatFilters = React.useMemo(() => ({
@@ -392,6 +403,31 @@ export const ArenaAdminPanel: React.FC = () => {
       toast(err?.message || '아레나 관리자 작업에 실패했습니다.', 'error');
     } finally {
       setActionLoading('');
+    }
+  };
+
+  const updateArenaSeason = async (phase: 'setup' | 'active' | 'closed') => {
+    setSeasonSaving(true);
+    try {
+      const res = await apiFetch('/admin/arena/season', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: seasonKind,
+          season_no: seasonNo,
+          name: seasonName,
+          phase,
+          reason: 'arena admin season control'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Arena season update failed');
+      toast(phase === 'active' ? '아레나 시즌을 열었습니다.' : phase === 'closed' ? '아레나 시즌을 닫았습니다.' : '아레나 시즌을 준비 상태로 저장했습니다.', 'success');
+      await fetchArenaAdminData('ops');
+    } catch (err: any) {
+      toast(err?.message || '아레나 시즌 설정 변경에 실패했습니다.', 'error');
+    } finally {
+      setSeasonSaving(false);
     }
   };
 
@@ -902,9 +938,47 @@ export const ArenaAdminPanel: React.FC = () => {
         <div className="mt-4 rounded-[1.75rem] border border-border bg-card/70 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
+              <h3 className="text-sm font-black text-foreground">시즌 관리</h3>
+              <p className="mt-1 text-[11px] font-bold text-muted-foreground">
+                현재 시즌 ID는 덱, 큐, 매치, 랭킹의 season_id로 사용됩니다. 시즌을 닫으면 플레이 진입이 비활성화됩니다.
+              </p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${arenaOps?.season?.phase === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-300/10 dark:text-emerald-100' : arenaOps?.season?.phase === 'closed' ? 'bg-rose-50 text-rose-700 dark:bg-rose-300/10 dark:text-rose-100' : 'bg-secondary text-muted-foreground'}`}>
+              {arenaOps?.season?.phase === 'active' ? 'OPEN' : arenaOps?.season?.phase === 'closed' ? 'CLOSED' : 'SETUP'}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-[0.85fr_0.7fr_1.45fr_auto]">
+            <label className="text-[10px] font-black text-muted-foreground">
+              시즌 유형
+              <select value={seasonKind} onChange={(event) => setSeasonKind(event.target.value === 'season' ? 'season' : 'preseason')} className="mt-1 w-full rounded-2xl border border-border bg-background px-3 py-2 text-xs font-black text-foreground outline-none focus:border-primary">
+                <option value="preseason">프리시즌</option>
+                <option value="season">정규 시즌</option>
+              </select>
+            </label>
+            <label className="text-[10px] font-black text-muted-foreground">
+              번호
+              <input type="number" min={0} max={9999} value={seasonNo} onChange={(event) => setSeasonNo(Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0))} className="mt-1 w-full rounded-2xl border border-border bg-background px-3 py-2 text-xs font-black text-foreground outline-none focus:border-primary" />
+            </label>
+            <label className="text-[10px] font-black text-muted-foreground">
+              표시 이름
+              <input value={seasonName} onChange={(event) => setSeasonName(event.target.value.slice(0, 80))} placeholder={seasonKind === 'season' ? `시즌 ${seasonNo}` : `프리시즌 ${seasonNo}`} className="mt-1 w-full rounded-2xl border border-border bg-background px-3 py-2 text-xs font-black text-foreground outline-none focus:border-primary" />
+            </label>
+            <div className="grid grid-cols-3 gap-1.5 self-end">
+              <button type="button" onClick={() => updateArenaSeason('setup')} disabled={seasonSaving} className="rounded-2xl border border-border bg-secondary/70 px-3 py-2 text-[10px] font-black text-foreground disabled:opacity-50">준비</button>
+              <button type="button" onClick={() => updateArenaSeason('active')} disabled={seasonSaving} className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-700 disabled:opacity-50 dark:border-emerald-300/20 dark:bg-emerald-300/10 dark:text-emerald-100">열기</button>
+              <button type="button" onClick={() => updateArenaSeason('closed')} disabled={seasonSaving} className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-black text-rose-700 disabled:opacity-50 dark:border-rose-300/20 dark:bg-rose-300/10 dark:text-rose-100">닫기</button>
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] font-bold text-muted-foreground">
+            현재 ID: {arenaOps?.season?.id || '-'} · 저장 출처: {arenaOps?.season?.source || 'env_default'}
+          </p>
+        </div>
+        <div className="mt-4 rounded-[1.75rem] border border-border bg-card/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
               <h3 className="text-sm font-black text-foreground">Worker 상태</h3>
               <p className="mt-1 text-[11px] font-bold text-muted-foreground">
-                관리자 작업, 큐 복구, 라운드 자동 진행을 담당하는 아레나 worker heartbeat입니다.
+                PM2 업타임이 아니라 DB에 마지막으로 기록된 heartbeat입니다. 값이 주기적으로 0초대로 돌아가는 것은 정상 갱신입니다.
               </p>
             </div>
             <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${arenaOps?.worker_health?.ok ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-300/10 dark:text-emerald-100' : 'bg-rose-50 text-rose-700 dark:bg-rose-300/10 dark:text-rose-100'}`}>
@@ -917,7 +991,10 @@ export const ArenaAdminPanel: React.FC = () => {
                 <div key={worker.worker_id} className="rounded-2xl bg-secondary/55 px-3 py-2">
                   <p className="truncate text-xs font-black text-foreground">{worker.worker_id}</p>
                   <p className="mt-1 text-[10px] font-bold text-muted-foreground">
-                    {worker.process_role} · {worker.seconds_since_heartbeat == null ? 'heartbeat 없음' : `${worker.seconds_since_heartbeat}초 전`}
+                    {worker.process_role} · heartbeat {worker.seconds_since_heartbeat == null ? '없음' : `${worker.seconds_since_heartbeat}초 전`}
+                  </p>
+                  <p className="mt-1 text-[10px] font-bold text-muted-foreground">
+                    pid {worker.payload?.pid || '-'} · uptime {worker.payload?.uptime_sec == null ? '-' : `${worker.payload.uptime_sec}초`}
                   </p>
                 </div>
               ))}
@@ -1300,3 +1377,6 @@ export const ArenaAdminPanel: React.FC = () => {
     </section>
   );
 };
+
+
+

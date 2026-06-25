@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
 import { ensureArenaMatchTables } from './arenaMatchService';
-import { ARENA_CURRENT_SEASON_ID } from './arenaDeckService';
+import { getArenaCurrentSeasonId } from './arenaSeasonService';
 import { ARENA_ROUNDS_TO_WIN } from './arenaRules';
 import { getArenaSpectatorReplay } from './arenaSpectatorService';
 
@@ -67,8 +67,8 @@ const loadCompletedMatchForOwner = async (userId: string, matchId: string) => {
       AND (player_a_id = ? OR player_b_id = ?)
     LIMIT 1`;
   const row = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().get<any>(query, matchId, ARENA_CURRENT_SEASON_ID, userId, userId)
-    : getSqliteDb().prepare(query).get(matchId, ARENA_CURRENT_SEASON_ID, userId, userId) as any;
+    ? await getMysqlDb().get<any>(query, matchId, getArenaCurrentSeasonId(), userId, userId)
+    : getSqliteDb().prepare(query).get(matchId, getArenaCurrentSeasonId(), userId, userId) as any;
   if (!row) return null;
   const completed = Number(row.player_a_round_wins || 0) >= ARENA_ROUNDS_TO_WIN
     || Number(row.player_b_round_wins || 0) >= ARENA_ROUNDS_TO_WIN

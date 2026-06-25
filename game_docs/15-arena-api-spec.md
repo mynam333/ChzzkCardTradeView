@@ -346,55 +346,37 @@ limit
 
 ### POST `/api/arena/decks`
 
-덱을 생성한다.
+덱을 생성한다. 클라이언트는 보유 카드 중 덱에 넣을 카드 ID만 전송한다. 라운드별 출전, 배치, 전술 선택은 매치 생성 후 인게임 라운드 선택 API에서 처리한다.
 
 요청:
 
 ```json
 {
   "name": "랭킹 덱",
-  "cards": [
-    {
-      "slot": 1,
-      "card_id": "arena_card_..."
-    }
+  "card_ids": [
+    "arena_streamer_channel_a",
+    "arena_streamer_channel_b",
+    "arena_streamer_channel_c",
+    "arena_streamer_channel_d",
+    "arena_streamer_channel_e",
+    "arena_streamer_channel_f"
   ],
-  "round_plans": [
-    {
-      "round_no": 1,
-      "formation_id": "frontline_default",
-      "focus_rule": "lowest_hp",
-      "target_priority": "damage_dealer",
-      "skill_timing_rule": "early_pressure"
-    },
-    {
-      "round_no": 2,
-      "formation_id": "anti_burst",
-      "focus_rule": "highest_attack",
-      "target_priority": "support",
-      "skill_timing_rule": "counter"
-    },
-    {
-      "round_no": 3,
-      "formation_id": "standard",
-      "focus_rule": "lowest_hp",
-      "target_priority": "frontline",
-      "skill_timing_rule": "balanced"
-    }
-  ]
+  "strategy_chip_id": "none"
 }
 ```
 
 서버 검증:
 
-- 덱 카드 수
+- 요청 유저의 보유 카드 여부
+- 덱 카드 수 6~10장
 - 중복 카드 제한
 - 비활성화 카드 포함 여부
 - 카드 버전 유효성
-- 라운드별 전술 계획 1~5라운드 존재 여부
 - 전술 칩 1개 제한
 - 시즌 로테이션 카드 풀 참조 금지
 - 금지 조합 여부
+
+서버는 `round_plans`가 없으면 내부 fallback용 기본 플랜을 생성한다. 이 플랜은 인게임 라운드 선택 타이머 만료와 재접속 보호를 위한 값이며, 사전 라운드 플랜 편집 UI로 노출하지 않는다.
 
 ### PATCH `/api/arena/decks/{deck_id}`
 

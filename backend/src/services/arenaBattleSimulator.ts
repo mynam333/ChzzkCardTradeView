@@ -14,6 +14,7 @@ export interface ArenaSimulatorCardSnapshot {
   image_url: string | null;
   class_id: string;
   class_name: string;
+  class_role?: string;
   stats: ArenaGeneratedCard['stats'];
   skills: Array<{ id: string; name: string; type: string }>;
 }
@@ -107,6 +108,31 @@ type CombatUnit = {
   alive: boolean;
   tacticStyle: string;
   focusRule: string;
+};
+
+const HEALING_CLASS_IDS = new Set(['healer', 'bard', 'purifier', 'supporter']);
+const SHIELDING_CLASS_IDS = new Set(['shield_knight', 'iron_wall', 'vanguard', 'ward_keeper', 'guardian']);
+const BREAKER_CLASS_IDS = new Set(['breaker']);
+const BRUISER_DAMAGE_CLASS_IDS = new Set(['duelist', 'berserker', 'pursuer']);
+const FINISHER_DAMAGE_CLASS_IDS = new Set(['sniper', 'assassin', 'rapid_gunner', 'executioner', 'ranger']);
+const CASTER_CONTROL_CLASS_IDS = new Set(['fire_mage', 'frost_mage', 'storm_caller', 'curse_weaver', 'disruptor', 'arcanist']);
+
+const getCardClassRole = (card: ArenaSimulatorCardSnapshot) => {
+  if (card.class_role) return card.class_role;
+  if (HEALING_CLASS_IDS.has(card.class_id)) return 'support';
+  if (SHIELDING_CLASS_IDS.has(card.class_id)) return 'frontline';
+  if (CASTER_CONTROL_CLASS_IDS.has(card.class_id) || BREAKER_CLASS_IDS.has(card.class_id)) return 'control';
+  if (BRUISER_DAMAGE_CLASS_IDS.has(card.class_id) || FINISHER_DAMAGE_CLASS_IDS.has(card.class_id)) return 'damage';
+  return 'tempo';
+};
+
+const getSkillDamageMultiplier = (card: ArenaSimulatorCardSnapshot) => {
+  if (BREAKER_CLASS_IDS.has(card.class_id)) return 1.68;
+  if (CASTER_CONTROL_CLASS_IDS.has(card.class_id) || getCardClassRole(card) === 'control') return 1.62;
+  if (BRUISER_DAMAGE_CLASS_IDS.has(card.class_id)) return 1.58;
+  if (FINISHER_DAMAGE_CLASS_IDS.has(card.class_id) || getCardClassRole(card) === 'damage') return 1.56;
+  if (getCardClassRole(card) === 'tempo') return 1.5;
+  return 1.36;
 };
 
 const TICK_MS = 250;
@@ -291,7 +317,7 @@ const castSkill = (
   actor.energy = Math.max(0, actor.energy - actor.skillCost);
   pushEvent(events, { t, type: 'SKILL_CAST', actor: actor.id, message: skill ? skill.name : '스킬' });
 
-  if (actor.card.class_id === 'supporter') {
+  if (HEALING_CLASS_IDS.has(actor.card.class_id) || getCardClassRole(actor.card) === 'support') {
     const target = living(allies).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
     if (target) {
       const heal = Math.round(actor.attack * 1.1 + actor.card.stats.focus * 1.7);
@@ -303,7 +329,7 @@ const castSkill = (
     return;
   }
 
-  if (actor.card.class_id === 'guardian') {
+  if (SHIELDING_CLASS_IDS.has(actor.card.class_id)) {
     const target = living(allies).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
     if (target) {
       const shield = Math.round(actor.maxHp * 0.095 + actor.card.stats.defense * 1.6);
@@ -315,13 +341,7 @@ const castSkill = (
 
   const target = chooseTarget(actor, enemies, `${seed}:skill`);
   if (!target) return;
-  const multiplier = actor.card.class_id === 'breaker'
-    ? 1.68
-    : actor.card.class_id === 'duelist'
-      ? 1.58
-      : actor.card.class_id === 'arcanist'
-        ? 1.66
-        : 1.45;
+  const multiplier = getSkillDamageMultiplier(actor.card);
   const focusSkillMod = clamp(1 + (actor.card.stats.focus - 55) * 0.0025, 0.94, 1.08);
   applyDamage(actor, target, actor.attack * multiplier * focusSkillMod, t, `${seed}:skill`, events);
 };

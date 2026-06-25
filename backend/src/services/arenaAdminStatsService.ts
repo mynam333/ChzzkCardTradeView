@@ -1,5 +1,5 @@
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
-import { ARENA_CURRENT_SEASON_ID } from './arenaDeckService';
+import { getArenaCurrentSeasonId } from './arenaSeasonService';
 import { ensureArenaMatchTables } from './arenaMatchService';
 
 type RawArenaMatchStatRow = {
@@ -207,9 +207,9 @@ const loadRecentMatches = async (limit: number): Promise<RawArenaMatchStatRow[]>
     ORDER BY id DESC
     LIMIT ?`;
   if (getDbMode() === 'MYSQL') {
-    return getMysqlDb().all<RawArenaMatchStatRow>(query, ARENA_CURRENT_SEASON_ID, limit);
+    return getMysqlDb().all<RawArenaMatchStatRow>(query, getArenaCurrentSeasonId(), limit);
   }
-  return getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, limit) as RawArenaMatchStatRow[];
+  return getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), limit) as RawArenaMatchStatRow[];
 };
 
 const toSnapshotPayload = (metric: ArenaAdminMetric) => ({
@@ -237,13 +237,13 @@ const rebuildArenaAdminStatsSnapshotInternal = async (limitInput?: unknown) => {
 
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().transaction(async (tx) => {
-      await tx.run(`DELETE FROM arena_admin_stat_snapshots WHERE season_id = ?`, ARENA_CURRENT_SEASON_ID);
+      await tx.run(`DELETE FROM arena_admin_stat_snapshots WHERE season_id = ?`, getArenaCurrentSeasonId());
       for (const metric of snapshotRows) {
         await tx.run(
           `INSERT INTO arena_admin_stat_snapshots
             (season_id, snapshot_type, metric_key, sample_count, wins, losses, draws, payload_json, snapshot_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
-          ARENA_CURRENT_SEASON_ID,
+          getArenaCurrentSeasonId(),
           metric.snapshot_type,
           metric.metric_key,
           metric.sample_count,
@@ -257,7 +257,7 @@ const rebuildArenaAdminStatsSnapshotInternal = async (limitInput?: unknown) => {
   } else {
     const db = getSqliteDb();
     db.transaction(() => {
-      db.prepare(`DELETE FROM arena_admin_stat_snapshots WHERE season_id = ?`).run(ARENA_CURRENT_SEASON_ID);
+      db.prepare(`DELETE FROM arena_admin_stat_snapshots WHERE season_id = ?`).run(getArenaCurrentSeasonId());
       const stmt = db.prepare(
         `INSERT INTO arena_admin_stat_snapshots
           (season_id, snapshot_type, metric_key, sample_count, wins, losses, draws, payload_json, snapshot_at)
@@ -265,7 +265,7 @@ const rebuildArenaAdminStatsSnapshotInternal = async (limitInput?: unknown) => {
       );
       for (const metric of snapshotRows) {
         stmt.run(
-          ARENA_CURRENT_SEASON_ID,
+          getArenaCurrentSeasonId(),
           metric.snapshot_type,
           metric.metric_key,
           metric.sample_count,
@@ -279,7 +279,7 @@ const rebuildArenaAdminStatsSnapshotInternal = async (limitInput?: unknown) => {
   }
 
   return {
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     source: 'arena_matches_recent_limited',
     scanned_matches: rows.length,
     written_metrics: snapshotRows.length,
@@ -303,7 +303,7 @@ export const rebuildArenaAdminStatsSnapshot = async (limitInput?: unknown) => {
 export const listArenaAdminStatsSnapshot = async (limitInput?: unknown) => {
   await ensureArenaAdminStatsTable();
   const limit = normalizeLimit(limitInput, SNAPSHOT_READ_LIMIT, SNAPSHOT_READ_LIMIT);
-  const cacheKey = `${ARENA_CURRENT_SEASON_ID}:${limit}`;
+  const cacheKey = `${getArenaCurrentSeasonId()}:${limit}`;
   if (statsSnapshotReadCache && statsSnapshotReadCache.key === cacheKey && statsSnapshotReadCache.expiresAt > Date.now()) {
     return statsSnapshotReadCache.data;
   }
@@ -313,11 +313,11 @@ export const listArenaAdminStatsSnapshot = async (limitInput?: unknown) => {
     ORDER BY snapshot_type ASC, sample_count DESC
     LIMIT ?`;
   const rows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<RawSnapshotRow>(query, ARENA_CURRENT_SEASON_ID, limit)
-    : getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, limit) as RawSnapshotRow[];
+    ? await getMysqlDb().all<RawSnapshotRow>(query, getArenaCurrentSeasonId(), limit)
+    : getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), limit) as RawSnapshotRow[];
 
   const payload = {
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     source: rows.length > 0 ? 'admin_stat_snapshot' : 'admin_stat_snapshot_empty',
     snapshot_at: rows[0]?.snapshot_at ? new Date(rows[0].snapshot_at).toISOString() : null,
     items: rows.map((row) => {
@@ -337,5 +337,6 @@ export const listArenaAdminStatsSnapshot = async (limitInput?: unknown) => {
   statsSnapshotReadCache = { key: cacheKey, data: payload, expiresAt: Date.now() + SNAPSHOT_READ_CACHE_TTL_MS };
   return payload;
 };
+
 
 

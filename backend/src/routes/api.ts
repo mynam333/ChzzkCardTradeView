@@ -211,6 +211,7 @@ import {
   adminRebuildArenaStats,
   adminUpdateArenaOpsFlag,
   adminUpdateArenaRestriction,
+  adminUpdateArenaSeason,
   buyMyArenaCosmeticItem,
   cancelMyArenaQuickMatch,
   cancelMyArenaCup,
@@ -496,6 +497,7 @@ router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInte
 router.get('/arena/system-status', arenaReadLimiter, getArenaSystemStatus);
 router.get('/admin/arena/system', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaOpsStatus);
 router.patch('/admin/arena/system/flags/:flag', authMiddleware, adminMiddleware, arenaAdminLimiter, adminUpdateArenaOpsFlag);
+router.patch('/admin/arena/season', authMiddleware, adminMiddleware, arenaAdminLimiter, adminUpdateArenaSeason);
 router.patch('/admin/arena/restrictions/:type/:id', authMiddleware, adminMiddleware, arenaAdminLimiter, adminUpdateArenaRestriction);
 router.get('/admin/arena/audit-logs', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaAuditLogs);
 router.get('/admin/arena/jobs', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaJobs);
@@ -821,3 +823,4 @@ router.get('/maintenance/status', getMaintenanceStatus);
 router.post('/admin/maintenance/status', authMiddleware, adminMiddleware, setMaintenanceStatus);
 
 export default router;
+

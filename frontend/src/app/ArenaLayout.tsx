@@ -95,18 +95,6 @@ export const ArenaLayout: React.FC<{
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={goChikapo}
-          className="cute-wiggle-hover mb-4 flex w-full items-center gap-3 rounded-2xl border border-border bg-white/64 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 dark:bg-white/10"
-        >
-          <ArrowLeftRight className="h-4.5 w-4.5 text-primary" />
-          <span className="min-w-0">
-            <span className="block truncate">치카포로 이동</span>
-            <span className="block truncate text-[10px] font-bold text-muted-foreground">치지직 카드 포럼</span>
-          </span>
-        </button>
-
         <nav className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -129,7 +117,18 @@ export const ArenaLayout: React.FC<{
           })}
         </nav>
 
-        <div className="mt-auto border-t border-border pt-4">
+        <div className="mt-auto space-y-3 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={goChikapo}
+            className="cute-wiggle-hover flex w-full items-center gap-3 rounded-2xl border border-border bg-white/64 px-3 py-2.5 text-sm font-black text-foreground shadow-sm hover:-translate-y-0.5 dark:bg-white/10"
+          >
+            <ArrowLeftRight className="h-4.5 w-4.5 text-primary" />
+            <span className="min-w-0">
+              <span className="block truncate">치카포로 이동</span>
+              <span className="block truncate text-[10px] font-bold text-muted-foreground">치지직 카드 포럼</span>
+            </span>
+          </button>
           <div className="flex items-center justify-between px-2">
             <span className="text-xs font-bold text-muted-foreground">화면 테마</span>
             <button onClick={toggleTheme} className="rounded-2xl border border-border bg-secondary/70 p-2 text-muted-foreground hover:-translate-y-0.5 hover:text-foreground">
@@ -194,3 +193,4 @@ export const ArenaLayout: React.FC<{
     </div>
   );
 };
+

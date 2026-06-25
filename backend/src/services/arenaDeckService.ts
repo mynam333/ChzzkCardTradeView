@@ -12,7 +12,8 @@ import {
   ArenaRoundNo
 } from './arenaRules';
 import { listDisabledArenaStreamerIds } from './arenaStreamerCardState';
-import { streamerRepository } from '../repositories';
+import { streamerRepository, userCardRepository } from '../repositories';
+import { getArenaCurrentSeasonId } from './arenaSeasonService';
 
 export const ARENA_CURRENT_SEASON_ID = 'arena-preseason-0';
 const MAX_DECKS_PER_USER = Math.max(1, Number(process.env.ARENA_MAX_DECKS_PER_USER || 12));
@@ -132,6 +133,14 @@ const loadKnownStreamerIds = async (): Promise<Set<string>> => {
 
   return knownStreamerIdsInFlight;
 };
+const loadOwnedArenaChannelIds = async (userId: string): Promise<Set<string>> => {
+  const ownedCards = await userCardRepository.findByUserId(userId);
+  return new Set(
+    ownedCards
+      .map((card: any) => String(card?.channel_id || '').trim())
+      .filter(Boolean)
+  );
+};
 
 const normalizeCardsInput = (body: any): ArenaDeckCardRef[] => {
   const source = Array.isArray(body?.cards)
@@ -216,7 +225,7 @@ const validationRule = (): ArenaDeckValidationResult['deck_rule'] => ({
   match_format: ARENA_MATCH_FORMAT
 });
 
-export const validateArenaDeckInput = async (body: any): Promise<ArenaDeckValidationResult> => {
+export const validateArenaDeckInput = async (body: any, userId?: string): Promise<ArenaDeckValidationResult> => {
   const normalizedCards = normalizeCardsInput(body);
   const normalizedRoundPlans = normalizeRoundPlansInput(body, normalizedCards);
   const normalizedStrategyChipId = normalizeStrategyChipId(body?.strategy_chip_id);
@@ -257,6 +266,16 @@ export const validateArenaDeckInput = async (body: any): Promise<ArenaDeckValida
   const missingCardIds = confirmedMissing.filter((channelId): channelId is string => Boolean(channelId)).map((channelId) => toCardId(channelId));
   if (missingCardIds.length > 0) {
     errors.push(`등록되지 않은 아레나 카드가 포함되어 있습니다: ${missingCardIds.slice(0, 3).join(', ')}`);
+  }
+
+  if (userId) {
+    const ownedChannelIds = await loadOwnedArenaChannelIds(userId);
+    const unownedCardIds = normalizedCards
+      .filter((card) => !ownedChannelIds.has(card.channel_id))
+      .map((card) => card.card_id);
+    if (unownedCardIds.length > 0) {
+      errors.push(`보유하지 않은 아레나 카드는 덱에 편성할 수 없습니다: ${unownedCardIds.slice(0, 3).join(', ')}`);
+    }
   }
 
   const seenRoundNos = new Set<number>();
@@ -414,7 +433,7 @@ export const listArenaDecks = async (userId: string): Promise<ArenaDeck[]> => {
     const rows = await getMysqlDb().all<RawDeckRow>(
       `SELECT * FROM arena_decks WHERE user_id = ? AND season_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`,
       userId,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       MAX_DECKS_PER_USER
     );
     return rows.map(mapDeckRow);
@@ -422,7 +441,7 @@ export const listArenaDecks = async (userId: string): Promise<ArenaDeck[]> => {
 
   const rows = getSqliteDb()
     .prepare(`SELECT * FROM arena_decks WHERE user_id = ? AND season_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`)
-    .all(userId, ARENA_CURRENT_SEASON_ID, MAX_DECKS_PER_USER) as RawDeckRow[];
+    .all(userId, getArenaCurrentSeasonId(), MAX_DECKS_PER_USER) as RawDeckRow[];
   return rows.map(mapDeckRow);
 };
 
@@ -433,14 +452,14 @@ export const getArenaDeck = async (userId: string, deckId: string): Promise<Aren
       `SELECT * FROM arena_decks WHERE id = ? AND user_id = ? AND season_id = ? LIMIT 1`,
       deckId,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
     return row ? mapDeckRow(row) : null;
   }
 
   const row = getSqliteDb()
     .prepare(`SELECT * FROM arena_decks WHERE id = ? AND user_id = ? AND season_id = ? LIMIT 1`)
-    .get(deckId, userId, ARENA_CURRENT_SEASON_ID) as RawDeckRow | undefined;
+    .get(deckId, userId, getArenaCurrentSeasonId()) as RawDeckRow | undefined;
   return row ? mapDeckRow(row) : null;
 };
 
@@ -456,7 +475,7 @@ export const createArenaDeck = async (userId: string, body: any): Promise<ArenaD
     throw new Error('ArenaDeckLimitExceeded');
   }
 
-  const validation = await validateArenaDeckInput(body);
+  const validation = await validateArenaDeckInput(body, userId);
   if (!validation.valid) {
     const err = new Error('ArenaDeckValidationFailed') as Error & { validation?: ArenaDeckValidationResult };
     err.validation = validation;
@@ -473,7 +492,7 @@ export const createArenaDeck = async (userId: string, body: any): Promise<ArenaD
         (user_id, season_id, name, cards_json, round_plans_json, strategy_chip_id, deck_hash, validation_status, validation_result_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       userId,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       name,
       JSON.stringify(validation.normalized_cards),
       JSON.stringify(validation.normalized_round_plans),
@@ -495,7 +514,7 @@ export const createArenaDeck = async (userId: string, body: any): Promise<ArenaD
     )
     .run(
       userId,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       name,
       JSON.stringify(validation.normalized_cards),
       JSON.stringify(validation.normalized_round_plans),
@@ -514,12 +533,13 @@ export const updateArenaDeck = async (userId: string, deckId: string, body: any)
   const existing = await getArenaDeck(userId, deckId);
   if (!existing) return null;
 
+  const cardListChanged = Array.isArray(body?.cards) || Array.isArray(body?.card_ids);
   const validation = await validateArenaDeckInput({
     ...body,
     cards: body?.cards ?? existing.cards,
-    round_plans: body?.round_plans ?? existing.round_plans,
+    round_plans: cardListChanged ? [] : body?.round_plans ?? existing.round_plans,
     strategy_chip_id: body?.strategy_chip_id ?? existing.strategy_chip_id
-  });
+  }, userId);
   if (!validation.valid) {
     const err = new Error('ArenaDeckValidationFailed') as Error & { validation?: ArenaDeckValidationResult };
     err.validation = validation;
@@ -545,7 +565,7 @@ export const updateArenaDeck = async (userId: string, deckId: string, body: any)
       validationJson,
       deckId,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
   } else {
     getSqliteDb()
@@ -565,7 +585,7 @@ export const updateArenaDeck = async (userId: string, deckId: string, body: any)
         validationJson,
         deckId,
         userId,
-        ARENA_CURRENT_SEASON_ID
+        getArenaCurrentSeasonId()
       );
   }
 
@@ -579,14 +599,14 @@ export const deleteArenaDeck = async (userId: string, deckId: string): Promise<b
       `DELETE FROM arena_decks WHERE id = ? AND user_id = ? AND season_id = ?`,
       deckId,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
     return result.changes > 0;
   }
 
   const result = getSqliteDb()
     .prepare(`DELETE FROM arena_decks WHERE id = ? AND user_id = ? AND season_id = ?`)
-    .run(deckId, userId, ARENA_CURRENT_SEASON_ID);
+    .run(deckId, userId, getArenaCurrentSeasonId());
   return result.changes > 0;
 };
 
@@ -594,7 +614,7 @@ export const revalidateArenaDeck = async (userId: string, deckId: string): Promi
   const existing = await getArenaDeck(userId, deckId);
   if (!existing) return null;
 
-  const validation = await validateArenaDeckInput(existing);
+  const validation = await validateArenaDeckInput(existing, userId);
   const validationStatus = validation.valid ? 'VALID' : 'INVALID';
   const validationJson = JSON.stringify(validation);
 
@@ -607,7 +627,7 @@ export const revalidateArenaDeck = async (userId: string, deckId: string): Promi
       validationJson,
       deckId,
       userId,
-      ARENA_CURRENT_SEASON_ID
+      getArenaCurrentSeasonId()
     );
   } else {
     getSqliteDb()
@@ -616,10 +636,11 @@ export const revalidateArenaDeck = async (userId: string, deckId: string): Promi
             SET validation_status = ?, validation_result_json = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND user_id = ? AND season_id = ?`
       )
-      .run(validationStatus, validationJson, deckId, userId, ARENA_CURRENT_SEASON_ID);
+      .run(validationStatus, validationJson, deckId, userId, getArenaCurrentSeasonId());
   }
 
   return getArenaDeck(userId, deckId);
 };
+
 
 

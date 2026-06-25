@@ -15,6 +15,7 @@ const STALE_JOB_RESET_INTERVAL_MS = parseInterval(process.env.ARENA_WORKER_STALE
 const HEARTBEAT_INTERVAL_MS = parseInterval(process.env.ARENA_WORKER_HEARTBEAT_INTERVAL_MS, 30_000, 15_000, 300_000);
 const AUTO_QUEUE_RECOVERY = process.env.ARENA_WORKER_AUTO_QUEUE_RECOVERY !== 'false';
 const AUTO_ROUND_RECOVERY = process.env.ARENA_WORKER_AUTO_ROUND_RECOVERY !== 'false';
+const WORKER_STARTED_AT = new Date().toISOString();
 
 let jobTimer: NodeJS.Timeout | null = null;
 let queueTimer: NodeJS.Timeout | null = null;
@@ -146,7 +147,9 @@ const start = async () => {
         queue_recovery_interval_ms: QUEUE_RECOVERY_INTERVAL_MS,
         round_recovery_interval_ms: ROUND_RECOVERY_INTERVAL_MS,
         auto_queue_recovery: AUTO_QUEUE_RECOVERY,
-        auto_round_recovery: AUTO_ROUND_RECOVERY
+        auto_round_recovery: AUTO_ROUND_RECOVERY,
+        started_at: WORKER_STARTED_AT,
+        uptime_sec: Math.max(0, Math.floor(process.uptime()))
       });
     } catch (err) {
       console.error('[ArenaWorker] heartbeat 기록 실패:', (err as any)?.message || err);
@@ -203,3 +206,4 @@ start().catch((err: any) => {
   console.error('[ArenaWorker] 시작 실패:', err?.message || err);
   process.exit(1);
 });
+

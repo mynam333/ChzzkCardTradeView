@@ -80,6 +80,7 @@ import {
   updateArenaCosmeticLoadout
 } from '../services/arenaCosmeticService';
 import { ArenaOpsFlag, loadArenaOpsConfig, setArenaOpsFlag } from '../services/arenaOpsConfig';
+import { ArenaSeasonKind, ArenaSeasonPhase, loadArenaSeasonConfig, setArenaSeasonConfig } from '../services/arenaSeasonService';
 import {
   ArenaAdminRestrictionType,
   listArenaAdminAuditLogs,
@@ -160,10 +161,11 @@ const requireArenaStreamerOwner = async (req: AuthenticatedRequest, res: Respons
 };
 
 export const getArenaSystemStatus = async (_req: Request, res: Response) => {
+  const seasonConfig = await loadArenaSeasonConfig();
   await loadArenaOpsConfig();
   setPublicCache(res, 60);
   return res.status(200).json({
-    status: 'preseason_setup',
+    status: seasonConfig.phase === 'active' ? 'season_open' : seasonConfig.phase === 'closed' ? 'season_closed' : 'preseason_setup',
     quick_match_enabled: isArenaQuickMatchEnabled(),
     service_name: '치카포 아레나',
     match_format: {
@@ -213,6 +215,7 @@ export const getArenaSystemStatus = async (_req: Request, res: Response) => {
 
 
 export const getArenaCupStatus = async (_req: Request, res: Response) => {
+  await loadArenaSeasonConfig();
   await loadArenaOpsConfig();
   setPublicCache(res, 60);
   return res.status(200).json({
@@ -235,19 +238,25 @@ export const getArenaCupStatus = async (_req: Request, res: Response) => {
   });
 };
 export const getArenaCurrentSeason = async (_req: Request, res: Response) => {
+  const seasonConfig = await loadArenaSeasonConfig();
   await loadArenaOpsConfig();
+  const seasonOpen = seasonConfig.phase === 'active';
   setPublicCache(res, 120);
   return res.status(200).json({
     season: {
-      id: 'arena-preseason-0',
-      name: '프리시즌 준비',
-      phase: 'setup',
-      ranked_enabled: isArenaQuickMatchEnabled(),
-      quick_match_enabled: isArenaQuickMatchEnabled(),
-      bot_practice_enabled: true,
-      mmr_enabled: true,
+      id: seasonConfig.id,
+      name: seasonConfig.name,
+      kind: seasonConfig.kind,
+      season_no: seasonConfig.season_no,
+      phase: seasonConfig.phase,
+      opened_at: seasonConfig.opened_at,
+      closed_at: seasonConfig.closed_at,
+      ranked_enabled: seasonOpen && isArenaQuickMatchEnabled(),
+      quick_match_enabled: seasonOpen && isArenaQuickMatchEnabled(),
+      bot_practice_enabled: seasonOpen,
+      mmr_enabled: seasonOpen,
       ranking_enabled: true,
-      cup_enabled: isArenaCupEnabled()
+      cup_enabled: seasonOpen && isArenaCupEnabled()
     }
   });
 };
@@ -488,7 +497,8 @@ export const getMyArenaOwnedCards = async (req: AuthenticatedRequest, res: Respo
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
-    const limit = Math.min(80, Math.max(1, Number.parseInt(String(req.query.limit || '40'), 10) || 40));
+    const requestedLimit = Number.parseInt(String(req.query.limit || '0'), 10);
+    const limit = requestedLimit > 0 ? Math.min(5000, requestedLimit) : 5000;
     const ownedCards = await userCardRepository.findByUserId(req.user.id);
     const streamerCardStates = await listArenaStreamerCardStates();
     const byChannel = new Map<string, { streamer: any; owned_count: number; max_star: number }>();
@@ -547,7 +557,7 @@ export const validateArenaDeck = async (req: Request, res: Response) => {
       return res.status(200).json({ ok: true, data: { deck, validation: deck.validation_result } });
     }
 
-    const validation = await validateArenaDeckInput(req.body || {});
+    const validation = await validateArenaDeckInput(req.body || {}, user.id);
     res.set('Cache-Control', 'private, no-store');
     return res.status(200).json({ ok: true, data: { validation }, ...validation });
   } catch (err: any) {
@@ -713,6 +723,8 @@ const handleArenaMatchError = (res: Response, err: any, fallbackMessage: string)
 
 export const joinArenaQuickMatchQueue = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    await loadArenaSeasonConfig();
+    await loadArenaOpsConfig();
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
@@ -796,6 +808,8 @@ export const streamMyArenaQuickMatchStatus = async (req: AuthenticatedRequest, r
 
 export const getMyArenaQuickMatchStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    await loadArenaSeasonConfig();
+    await loadArenaOpsConfig();
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
@@ -853,6 +867,11 @@ export const cancelMyArenaQuickMatch = async (req: AuthenticatedRequest, res: Re
 };
 export const createArenaBotPracticeMatch = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const seasonConfig = await loadArenaSeasonConfig();
+    await loadArenaOpsConfig();
+    if (seasonConfig.phase !== 'active') {
+      return res.status(403).json({ error: 'ArenaSeasonClosed', message: '아레나 시즌이 열려있지 않습니다.' });
+    }
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
@@ -900,6 +919,8 @@ export const commitMyArenaMatchRound = async (req: AuthenticatedRequest, res: Re
 
 export const joinArenaCup = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    await loadArenaSeasonConfig();
+    await loadArenaOpsConfig();
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
@@ -973,6 +994,8 @@ export const streamMyArenaCupStatus = async (req: AuthenticatedRequest, res: Res
 
 export const getMyArenaCupStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    await loadArenaSeasonConfig();
+    await loadArenaOpsConfig();
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
     }
@@ -1131,6 +1154,7 @@ export const getArenaRankings = async (req: Request, res: Response) => {
 };
 
 export const adminGetArenaOpsStatus = async (_req: AuthenticatedRequest, res: Response) => {
+  const seasonConfig = await loadArenaSeasonConfig();
   const opsConfig = await loadArenaOpsConfig();
   const adminControl = await loadArenaAdminControlConfig();
   res.set('Cache-Control', 'private, no-store');
@@ -1138,6 +1162,7 @@ export const adminGetArenaOpsStatus = async (_req: AuthenticatedRequest, res: Re
     ok: true,
     data: {
       quick_match_enabled: isArenaQuickMatchEnabled(),
+      season: seasonConfig,
       transport_policy: {
         battle_transport: 'http_result_with_client_replay',
         queue_status_transport: 'sse_while_queued_with_http_fallback',
@@ -1181,6 +1206,37 @@ export const adminGetArenaOpsStatus = async (_req: AuthenticatedRequest, res: Re
       }
     }
   });
+};
+
+export const adminUpdateArenaSeason = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+    }
+    const kind: ArenaSeasonKind = req.body?.kind === 'season' ? 'season' : 'preseason';
+    const seasonNo = Number.parseInt(String(req.body?.season_no ?? 0), 10);
+    const phaseInput = String(req.body?.phase || 'setup');
+    if (!['setup', 'active', 'closed'].includes(phaseInput)) {
+      return res.status(400).json({ error: 'ArenaSeasonPhaseInvalid', message: '시즌 상태가 올바르지 않습니다.' });
+    }
+    const config = await setArenaSeasonConfig({
+      kind,
+      season_no: Number.isFinite(seasonNo) ? seasonNo : 0,
+      name: typeof req.body?.name === 'string' ? req.body.name : undefined,
+      phase: phaseInput as ArenaSeasonPhase
+    });
+    await recordArenaAdminAuditLog({
+      adminUserId: req.user.id,
+      actionType: 'season_update',
+      targetType: 'season',
+      targetId: config.id,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null,
+      payload: { config }
+    });
+    return res.status(200).json({ ok: true, data: { season: config } });
+  } catch (err: any) {
+    return handleArenaMatchError(res, err, '아레나 시즌 설정을 변경하지 못했습니다.');
+  }
 };
 
 export const adminUpdateArenaOpsFlag = async (req: AuthenticatedRequest, res: Response) => {
@@ -1496,6 +1552,10 @@ export const enableMyArenaStreamerCard = async (req: AuthenticatedRequest, res: 
     return res.status(500).json({ error: 'InternalServerError', message: '아레나 카드 재활성화에 실패했습니다.' });
   }
 };
+
+
+
+
 
 
 

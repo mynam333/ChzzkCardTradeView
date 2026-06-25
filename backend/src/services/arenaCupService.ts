@@ -1,13 +1,14 @@
 import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
-import { ARENA_CURRENT_SEASON_ID, ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
+import { getArenaCurrentSeasonId, isArenaSeasonOpen } from './arenaSeasonService';
 import { ArenaDeckSnapshot, buildArenaReplayJsonForStorage, ensureArenaMatchTables, loadArenaDeckSnapshot } from './arenaMatchService';
 import { pickArenaBattlefieldRule, simulateArenaSet } from './arenaBattleSimulator';
 import { ARENA_MATCH_FORMAT, ARENA_ROUNDS_TO_WIN } from './arenaRules';
 import { getArenaOpsConfigSync } from './arenaOpsConfig';
 
-export const isArenaCupEnabled = () => getArenaOpsConfigSync().cup_enabled;
+export const isArenaCupEnabled = () => isArenaSeasonOpen() && getArenaOpsConfigSync().cup_enabled;
 
 type CupQueueStatus = 'queued' | 'matched' | 'cancelled' | 'expired' | 'none';
 type RawCupQueueRow = {
@@ -408,9 +409,9 @@ const loadLatestCupQueueForUser = async (userId: string): Promise<RawCupQueueRow
     ORDER BY id DESC
     LIMIT 1`;
   if (getDbMode() === 'MYSQL') {
-    return (await getMysqlDb().get<RawCupQueueRow>(query, userId, ARENA_CURRENT_SEASON_ID)) || null;
+    return (await getMysqlDb().get<RawCupQueueRow>(query, userId, getArenaCurrentSeasonId())) || null;
   }
-  return (getSqliteDb().prepare(query).get(userId, ARENA_CURRENT_SEASON_ID) as RawCupQueueRow | undefined) || null;
+  return (getSqliteDb().prepare(query).get(userId, getArenaCurrentSeasonId()) as RawCupQueueRow | undefined) || null;
 };
 
 const loadActiveCupQueueForUser = async (userId: string): Promise<RawCupQueueRow | null> => {
@@ -421,24 +422,24 @@ const loadActiveCupQueueForUser = async (userId: string): Promise<RawCupQueueRow
     ORDER BY id DESC
     LIMIT 1`;
   if (getDbMode() === 'MYSQL') {
-    return (await getMysqlDb().get<RawCupQueueRow>(query, userId, ARENA_CURRENT_SEASON_ID)) || null;
+    return (await getMysqlDb().get<RawCupQueueRow>(query, userId, getArenaCurrentSeasonId())) || null;
   }
-  return (getSqliteDb().prepare(query).get(userId, ARENA_CURRENT_SEASON_ID) as RawCupQueueRow | undefined) || null;
+  return (getSqliteDb().prepare(query).get(userId, getArenaCurrentSeasonId()) as RawCupQueueRow | undefined) || null;
 };
 
 const countWaitingCupQueue = async () => {
   const query = `SELECT COUNT(*) AS count FROM arena_cup_queue
     WHERE season_id = ? AND status = 'WAITING'`;
   const row = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().get<any>(query, ARENA_CURRENT_SEASON_ID)
-    : getSqliteDb().prepare(query).get(ARENA_CURRENT_SEASON_ID) as any;
+    ? await getMysqlDb().get<any>(query, getArenaCurrentSeasonId())
+    : getSqliteDb().prepare(query).get(getArenaCurrentSeasonId()) as any;
   return Number(row?.count || 0);
 };
 
 const prepareValidDeck = async (userId: string, deckId: string): Promise<ArenaDeck> => {
   const storedDeck = await getArenaDeck(userId, deckId);
   if (!storedDeck) throw new Error('ArenaDeckNotFound');
-  const validation = await validateArenaDeckInput(storedDeck);
+  const validation = await validateArenaDeckInput(storedDeck, storedDeck.user_id);
   if (!validation.valid) {
     const err = new Error('ArenaDeckValidationFailed') as Error & { validation?: unknown };
     err.validation = validation;
@@ -454,7 +455,7 @@ const insertCupQueue = async (userId: string, deck: ArenaDeck): Promise<RawCupQu
         (user_id, season_id, deck_id, deck_hash, status, expires_at)
        VALUES (?, ?, ?, ?, 'WAITING', DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND))`,
       userId,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       deck.id,
       deck.deck_hash,
       CUP_QUEUE_TTL_SECONDS
@@ -471,7 +472,7 @@ const insertCupQueue = async (userId: string, deck: ArenaDeck): Promise<RawCupQu
         (user_id, season_id, deck_id, deck_hash, status, expires_at)
        VALUES (?, ?, ?, ?, 'WAITING', datetime('now', '+' || ? || ' seconds'))`
     )
-    .run(userId, ARENA_CURRENT_SEASON_ID, deck.id, deck.deck_hash, CUP_QUEUE_TTL_SECONDS);
+    .run(userId, getArenaCurrentSeasonId(), deck.id, deck.deck_hash, CUP_QUEUE_TTL_SECONDS);
   const row = await loadLatestCupQueueForUser(userId);
   if (!row || String(row.id) !== String(result.lastInsertRowid)) throw new Error('ArenaCupQueueCreateReadbackFailed');
   emitArenaCupQueueEvent(userId, toQueueResponse(row));
@@ -486,9 +487,9 @@ const loadCupCandidates = async (): Promise<RawCupQueueRow[]> => {
     ORDER BY queued_at ASC, id ASC
     LIMIT ?`;
   if (getDbMode() === 'MYSQL') {
-    return getMysqlDb().all<RawCupQueueRow>(query, ARENA_CURRENT_SEASON_ID, CUP_SIZE);
+    return getMysqlDb().all<RawCupQueueRow>(query, getArenaCurrentSeasonId(), CUP_SIZE);
   }
-  return getSqliteDb().prepare(query).all(ARENA_CURRENT_SEASON_ID, CUP_SIZE) as RawCupQueueRow[];
+  return getSqliteDb().prepare(query).all(getArenaCurrentSeasonId(), CUP_SIZE) as RawCupQueueRow[];
 };
 
 const reserveCupCandidates = async (rows: RawCupQueueRow[]): Promise<boolean> => {
@@ -679,7 +680,7 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
       deck: snapshot
     } satisfies CupParticipant;
   }));
-  const seed = hashHex(`${ARENA_CURRENT_SEASON_ID}:${rows.map((row) => `${row.id}:${row.user_id}:${row.deck_hash}`).join('|')}`);
+  const seed = hashHex(`${getArenaCurrentSeasonId()}:${rows.map((row) => `${row.id}:${row.user_id}:${row.deck_hash}`).join('|')}`);
   const simulated = __test_simulateCupBracket(deckEntries, seed);
   const bracketJson = JSON.stringify(simulated.bracket);
   const replayJson = buildArenaReplayJsonForStorage(simulated.replay);
@@ -692,7 +693,7 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
         `INSERT INTO arena_cups
           (season_id, status, participant_count, champion_user_id, bracket_json, replay_json, completed_at)
          VALUES (?, 'COMPLETED', ?, ?, ?, NULL, UTC_TIMESTAMP())`,
-        ARENA_CURRENT_SEASON_ID,
+        getArenaCurrentSeasonId(),
         CUP_SIZE,
         simulated.bracket.champion_user_id,
         bracketJson
@@ -720,7 +721,7 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
           (season_id, status, participant_count, champion_user_id, bracket_json, replay_json, completed_at)
          VALUES (?, 'COMPLETED', ?, ?, ?, NULL, CURRENT_TIMESTAMP)`
       )
-      .run(ARENA_CURRENT_SEASON_ID, CUP_SIZE, simulated.bracket.champion_user_id, bracketJson);
+      .run(getArenaCurrentSeasonId(), CUP_SIZE, simulated.bracket.champion_user_id, bracketJson);
     db.prepare(
       `UPDATE arena_cup_queue
           SET status = 'MATCHED', cup_id = ?
@@ -869,7 +870,7 @@ export const recoverArenaCupQueue = async () => {
           AND expires_at > UTC_TIMESTAMP()
           AND queued_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)
         LIMIT ?`,
-      ARENA_CURRENT_SEASON_ID,
+      getArenaCurrentSeasonId(),
       limit
     );
     lastCupCleanupAt = Date.now();
@@ -913,7 +914,7 @@ export const recoverArenaCupQueue = async () => {
           LIMIT ?
         )`
     )
-    .run(ARENA_CURRENT_SEASON_ID, limit);
+    .run(getArenaCurrentSeasonId(), limit);
   lastCupCleanupAt = Date.now();
   const finalized = await finalizeWaitingArenaCups(Math.min(CUP_RECOVERY_FINALIZE_LIMIT, Math.max(1, Math.floor(limit / CUP_SIZE))));
   return {
@@ -979,14 +980,14 @@ export const getArenaCupAdminOverview = async () => {
     LIMIT 10`;
 
   const queueRows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(queueQuery, ARENA_CURRENT_SEASON_ID)
-    : getSqliteDb().prepare(queueQuery).all(ARENA_CURRENT_SEASON_ID) as any[];
+    ? await getMysqlDb().all<any>(queueQuery, getArenaCurrentSeasonId())
+    : getSqliteDb().prepare(queueQuery).all(getArenaCurrentSeasonId()) as any[];
   const cupCountRow = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().get<any>(cupQuery, ARENA_CURRENT_SEASON_ID)
-    : getSqliteDb().prepare(cupQuery).get(ARENA_CURRENT_SEASON_ID) as any;
+    ? await getMysqlDb().get<any>(cupQuery, getArenaCurrentSeasonId())
+    : getSqliteDb().prepare(cupQuery).get(getArenaCurrentSeasonId()) as any;
   const latestRows = getDbMode() === 'MYSQL'
-    ? await getMysqlDb().all<any>(latestQuery, ARENA_CURRENT_SEASON_ID)
-    : getSqliteDb().prepare(latestQuery).all(ARENA_CURRENT_SEASON_ID) as any[];
+    ? await getMysqlDb().all<any>(latestQuery, getArenaCurrentSeasonId())
+    : getSqliteDb().prepare(latestQuery).all(getArenaCurrentSeasonId()) as any[];
 
   const queueByStatus = queueRows.reduce<Record<string, number>>((acc, row) => {
     acc[String(row.status || 'UNKNOWN').toLowerCase()] = Number(row.count || 0);
@@ -995,7 +996,7 @@ export const getArenaCupAdminOverview = async () => {
 
   return {
     enabled: isArenaCupEnabled(),
-    season_id: ARENA_CURRENT_SEASON_ID,
+    season_id: getArenaCurrentSeasonId(),
     queue: {
       waiting: queueByStatus.waiting || 0,
       matching: queueByStatus.matching || 0,
@@ -1019,5 +1020,7 @@ export const getArenaCupAdminOverview = async () => {
     }
   };
 };
+
+
 
 
