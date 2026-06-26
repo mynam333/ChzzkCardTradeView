@@ -126,13 +126,37 @@ export interface ArenaReplayEventDto {
   actor?: string;
   targets?: string[];
   value?: number;
+  hp_before?: number;
+  hp_after?: number;
+  shield_before?: number;
+  shield_after?: number;
+  alive_after?: boolean;
   message?: string;
+}
+
+export interface ArenaReplayUnitStateDto {
+  id: string;
+  side: 'player' | 'bot';
+  card_id: string;
+  channel_id?: string;
+  max_hp: number;
+  start_hp?: number;
+  final_hp: number;
+  alive: boolean;
 }
 
 export interface ArenaReplayRoundDto {
   round_no: number;
   duration_ms: number;
   winner_side: ArenaRoundWinnerDto;
+  replay_truncated?: boolean;
+  original_event_count?: number;
+  timeline_summary?: {
+    first_event_t?: number;
+    last_event_t?: number;
+    omitted_event_count: number;
+  };
+  unit_states?: ArenaReplayUnitStateDto[];
   events: ArenaReplayEventDto[];
 }
 
@@ -140,6 +164,7 @@ export interface ArenaReplayPayloadDto {
   match_id: string;
   match_format?: string;
   rounds_to_win?: number;
+  replay_version?: number;
   replay_storage: 'compact_summary' | 'tick_events' | string;
   rounds: ArenaReplayRoundDto[];
 }

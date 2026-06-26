@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import { motion } from 'motion/react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -23,6 +24,7 @@ import { useApp } from '../../AppContext';
 import { StreamerTooltip } from '../../StreamerTooltip';
 import { apiFetch } from '@/lib/api';
 import { borderClass, borderStyle, ensureCosmeticCss, ensureFont, nameEffectClass, nameEffectStyle, proxiedImage } from '@/lib/cosmetics';
+import { ArenaPixiBattleRenderer } from './ArenaPixiBattleRenderer';
 import type {
   ArenaDeckSnapshotDto,
   ArenaMatchViewDto,
@@ -136,6 +138,14 @@ export type ArenaCosmeticLoadout = {
 
 const ARENA_ACTIVE_SLOT_COUNT = 6;
 const ARENA_VFX_PARTICLES = Array.from({ length: 16 }, (_, index) => index);
+const ARENA_CARD_HIT_SPARKS = [
+  { x: -36, y: -18, rotate: -28, delay: 0 },
+  { x: 34, y: -22, rotate: 22, delay: 0.025 },
+  { x: -24, y: 24, rotate: 18, delay: 0.045 },
+  { x: 30, y: 20, rotate: -18, delay: 0.065 },
+  { x: -8, y: -34, rotate: 8, delay: 0.08 },
+  { x: 10, y: 32, rotate: -8, delay: 0.095 }
+];
 export const ARENA_BATTLE_TURN_MS = 820;
 const ARENA_BATTLE_RESULT_SETTLE_MS = 420;
 const ARENA_BATTLE_MIN_REVEAL_MS = 1200;
@@ -442,6 +452,7 @@ const getCardBySlots = (
 };
 
 type ArenaReplayEvent = ArenaReplayPayloadDto['rounds'][number]['events'][number];
+type ArenaReplayUnitState = NonNullable<ArenaReplayPayloadDto['rounds'][number]['unit_states']>[number];
 
 export type ArenaBattleTurn = {
   id: string;
@@ -574,6 +585,30 @@ const eventActorMentionsCard = (
   return eventMatchesCard(event?.actor, card);
 };
 
+const eventTargetsCard = (
+  event: ArenaReplayEvent | undefined,
+  card: ArenaSnapshotCardDto
+) => {
+  if (!event) return false;
+  return (event.targets || []).some((target) => eventMatchesCard(target, card));
+};
+
+const eventKillsCard = (
+  event: ArenaReplayEvent | undefined,
+  card: ArenaSnapshotCardDto
+) => {
+  if (!event || String(event.type || '').toUpperCase() !== 'DEATH') return false;
+  return eventMatchesCard(event.actor, card) || eventTargetsCard(event, card) || eventMatchesCard(event.message, card);
+};
+
+const unitStateMatchesCard = (state: ArenaReplayUnitState | undefined, side: 'player' | 'opponent', card: ArenaSnapshotCardDto) => {
+  if (!state || state.side !== (side === 'player' ? 'player' : 'bot')) return false;
+  return [state.card_id, state.channel_id, state.id].some((value) => eventMatchesCard(value, card));
+};
+
+const findUnitState = (unitStates: ArenaReplayUnitState[] | undefined, side: 'player' | 'opponent', card: ArenaSnapshotCardDto) =>
+  (unitStates || []).find((state) => unitStateMatchesCard(state, side, card));
+
 const turnTargetsCard = (turn: ArenaBattleTurn | undefined, card: ArenaSnapshotCardDto) => {
   if (!turn) return false;
   return turn.targetIds.some((target) => eventMatchesCard(target, card))
@@ -598,26 +633,49 @@ const getEventVfxKind = (event?: ArenaReplayEvent, turn?: ArenaBattleTurn) => {
   return 'attack';
 };
 
+const getCardMaxHealth = (card: ArenaSnapshotCardDto) =>
+  Math.max(1, Math.round(700 + Number(card.stats?.hp || 1) * 12));
+
 const estimateCardHealth = (
   card: ArenaSnapshotCardDto,
+  side: 'player' | 'opponent',
   events: ArenaReplayEvent[],
   eventIndex: number,
-  retired: boolean
+  retired: boolean,
+  unitStates?: ArenaReplayUnitState[]
 ) => {
-  if (retired) return { max: Math.max(1, Number(card.stats?.hp || 1) * 10), remaining: 0, percent: 0 };
-  const max = Math.max(1, Number(card.stats?.hp || 1) * 10);
-  const damage = events.slice(0, Math.max(0, eventIndex + 1)).reduce((total, event) => {
-    if (!eventMentionsCard(event, card) || eventActorMentionsCard(event, card)) return total;
-    return total + Math.max(0, Number(event.value || 0));
-  }, 0);
-  const remaining = Math.max(0, max - damage);
-  return { max, remaining, percent: Math.max(0, Math.min(100, Math.round((remaining / max) * 100))) };
+  const unitState = findUnitState(unitStates, side, card);
+  const max = Math.max(1, Number(unitState?.max_hp || getCardMaxHealth(card)));
+  if (retired || unitState?.alive === false && eventIndex >= events.length - 1) {
+    const finalRemaining = Math.max(0, Number(unitState?.final_hp || 0));
+    return { max, remaining: finalRemaining, percent: Math.max(0, Math.min(100, Math.round((finalRemaining / max) * 100))) };
+  }
+  const visibleEvents = events.slice(0, Math.max(0, eventIndex + 1));
+  const dead = visibleEvents.some((event) => eventKillsCard(event, card));
+  const remaining = visibleEvents.reduce((hp, event) => {
+    const type = String(event.type || '').toUpperCase();
+    if (eventKillsCard(event, card)) return 0;
+    const eventHpAfter = Number(event.hp_after);
+    if (['DAMAGE', 'HEAL', 'SHIELD_GAIN'].includes(type) && eventTargetsCard(event, card) && Number.isFinite(eventHpAfter)) {
+      return Math.max(0, Math.min(max, Math.round(eventHpAfter)));
+    }
+    if (type === 'DAMAGE' && eventTargetsCard(event, card)) {
+      return Math.max(0, hp - Math.max(0, Number(event.value || 0)));
+    }
+    if (type === 'HEAL' && eventTargetsCard(event, card)) {
+      return Math.min(max, hp + Math.max(0, Number(event.value || 0)));
+    }
+    return hp;
+  }, Math.max(0, Math.min(max, Number(unitState?.start_hp || max))));
+  const displayRemaining = !dead && remaining <= 0 ? 1 : remaining;
+  return { max, remaining: displayRemaining, percent: Math.max(0, Math.min(100, Math.round((displayRemaining / max) * 100))) };
 };
 
 const getTurnValueForCard = (turn: ArenaBattleTurn | undefined, card: ArenaSnapshotCardDto) => {
   if (!turn) return 0;
   return turn.events.reduce((total, event) => {
-    if (!eventMentionsCard(event, card) || eventActorMentionsCard(event, card)) return total;
+    const type = String(event.type || '').toUpperCase();
+    if (!['DAMAGE', 'HEAL', 'SHIELD_GAIN'].includes(type) || !eventTargetsCard(event, card)) return total;
     return total + Math.max(0, Number(event.value || 0));
   }, 0);
 };
@@ -732,16 +790,24 @@ const ArenaCombatCard: React.FC<{
   activeTurn?: ArenaBattleTurn;
   activeEvent?: ArenaReplayEvent;
   battleEvents: ArenaReplayEvent[];
+  unitStates?: ArenaReplayUnitState[];
   battleEventIndex: number;
   roundReveal: RoundRevealState | null;
   retired: boolean;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
-}> = ({ card, side, slot, visualIndex, activeTurn, activeEvent, battleEvents, battleEventIndex, roundReveal, retired, skillLookup, classLookup }) => {
+}> = ({ card, side, slot, visualIndex, activeTurn, activeEvent, battleEvents, unitStates, battleEventIndex, roundReveal, retired, skillLookup, classLookup }) => {
   const cardRef = React.useRef<HTMLElement | null>(null);
   const isBattle = roundReveal?.stage === 'battle';
-  const acting = Boolean(isBattle && activeTurn && activeTurn.actor && eventMatchesCard(activeTurn.actor, card));
-  const targeted = Boolean(isBattle && activeTurn && turnTargetsCard(activeTurn, card));
+  const rawActing = Boolean(isBattle && activeTurn && activeTurn.actor && eventMatchesCard(activeTurn.actor, card));
+  const rawTargeted = Boolean(isBattle && activeTurn && turnTargetsCard(activeTurn, card));
+  const activeTurnEventIndices = activeTurn?.events.map((event) => battleEvents.indexOf(event)).filter((index) => index >= 0) || [];
+  const activeTurnStartCursor = activeTurnEventIndices.length > 0 ? Math.min(...activeTurnEventIndices) : battleEventIndex;
+  const activeEventCursor = activeTurnEventIndices.length > 0 ? Math.max(...activeTurnEventIndices) : battleEventIndex;
+  const healthBeforeTurn = estimateCardHealth(card, side, battleEvents, activeTurnStartCursor - 1, retired, unitStates);
+  const eliminatedBeforeTurn = isBattle && healthBeforeTurn.remaining <= 0;
+  const acting = rawActing && !eliminatedBeforeTurn;
+  const targeted = rawTargeted && !eliminatedBeforeTurn;
   const activeTurnText = activeTurn?.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ').toLowerCase() || '';
   const turnHasHeal = activeTurnText.includes('heal') || activeTurnText.includes('회복');
   const turnHasGuard = activeTurnText.includes('shield') || activeTurnText.includes('guard') || activeTurnText.includes('보호') || activeTurnText.includes('방어');
@@ -752,12 +818,10 @@ const ArenaCombatCard: React.FC<{
   const skillEvent = acting && activeTurn?.actionType === 'skill';
   const controlEvent = targeted && (activeTurn?.actionType === 'control' || activeTurn?.events.some(isControlEvent));
   const vfxKind = acting || targeted || controlEvent ? getEventVfxKind(activeEvent, activeTurn) : 'idle';
-  const activeEventCursor = activeTurn
-    ? Math.max(...activeTurn.events.map((event) => battleEvents.indexOf(event)).filter((index) => index >= 0), 0)
-    : battleEventIndex;
-  const health = estimateCardHealth(card, battleEvents, activeEventCursor, retired);
+  const health = estimateCardHealth(card, side, battleEvents, activeEventCursor, retired, unitStates);
+  const displayRetired = retired || (isBattle && health.remaining <= 0);
   const currentValue = getTurnValueForCard(activeTurn, card);
-  const waitingTurn = Boolean(isBattle && activeTurn && !acting && !targeted);
+  const waitingTurn = Boolean(isBattle && activeTurn && !acting && !targeted && !eliminatedBeforeTurn);
   const turnParity = battleEventIndex % 2 === 0 ? 'is-turn-even' : 'is-turn-odd';
   const actionClass = activeTurn?.actionType ? `is-action-${activeTurn.actionType}` : 'is-action-idle';
   const heavyImpact = Boolean(activeTurn && ['skill', 'control', 'retire'].includes(activeTurn.actionType)) || vfxKind === 'ultimate';
@@ -829,7 +893,8 @@ const ArenaCombatCard: React.FC<{
       data-card-id={card.card_id}
       data-channel-id={card.channel_id}
       data-card-name={card.name}
-      className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${turnParity} ${actionClass} ${acting ? 'is-acting' : ''} ${targeted ? 'is-targeted' : ''} ${waitingTurn ? 'is-waiting-turn' : ''} ${hit ? 'is-hit' : ''} ${healed ? 'is-healed' : ''} ${guarded ? 'is-guarded' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} ${heavyImpact ? 'is-heavy-impact' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
+      data-retired={displayRetired ? 'true' : undefined}
+      className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${turnParity} ${actionClass} ${acting ? 'is-acting' : ''} ${targeted ? 'is-targeted' : ''} ${waitingTurn ? 'is-waiting-turn' : ''} ${hit ? 'is-hit' : ''} ${healed ? 'is-healed' : ''} ${guarded ? 'is-guarded' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} ${heavyImpact ? 'is-heavy-impact' : ''} vfx-${vfxKind} ${displayRetired ? 'is-retired' : ''}`.trim()}
       style={{ ['--combat-delay' as any]: `${visualIndex * 90}ms` }}
     >
       <div className="arena-combat-card-media">
@@ -852,6 +917,7 @@ const ArenaCombatCard: React.FC<{
         <span style={{ width: `${health.percent}%` }} />
       </div>
       <div className="arena-combat-hp-text">{health.remaining}/{health.max}</div>
+      <div className="arena-combat-turn-timer" aria-hidden="true" />
       {statusLabel ? (
         <div
           key={`${card.card_id}-${battleEventIndex}-${statusLabel}`}
@@ -865,11 +931,15 @@ const ArenaCombatCard: React.FC<{
       <div className="arena-combat-strike-edge" aria-hidden="true" />
       <div className="arena-combat-energy-ring" aria-hidden="true" />
       <div className="arena-combat-speed-lines" aria-hidden="true" />
-      <div className="arena-combat-hit-sparks" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <span />
+      <div key={`${card.card_id}-${activeTurn?.id || battleEventIndex}-sparks`} className="arena-combat-hit-sparks is-motion-sparks" aria-hidden="true">
+        {hit ? ARENA_CARD_HIT_SPARKS.map((spark, index) => (
+          <motion.span
+            key={index}
+            initial={{ opacity: 0, x: '-50%', y: '-50%', scale: 0.28, rotate: 0 }}
+            animate={{ opacity: [0, 1, 0], x: `calc(-50% + ${spark.x}px)`, y: `calc(-50% + ${spark.y}px)`, scale: [0.45, 1.18, 0.1], rotate: spark.rotate }}
+            transition={{ duration: vfxKind === 'ultimate' ? 0.42 : 0.34, delay: 0.2 + spark.delay, ease: [0.12, 0.86, 0.18, 1] }}
+          />
+        )) : null}
       </div>
     </article>
   );
@@ -883,14 +953,14 @@ const ArenaCombatFormation: React.FC<{
   activeTurn?: ArenaBattleTurn;
   activeEvent?: ArenaReplayEvent;
   battleEvents: ArenaReplayEvent[];
+  unitStates?: ArenaReplayUnitState[];
   battleEventIndex: number;
   roundReveal: RoundRevealState | null;
   remainingUnits?: number;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
-}> = ({ side, cards, slots, revealed = true, activeTurn, activeEvent, battleEvents, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
+}> = ({ side, cards, slots, revealed = true, activeTurn, activeEvent, battleEvents, unitStates, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
   const positioned = getCardBySlots(cards, slots);
-  const retiredStart = typeof remainingUnits === 'number' ? Math.max(0, positioned.length - Math.max(0, remainingUnits)) : 0;
   const displayRows = side === 'opponent'
     ? [{ label: '후열', row: 0 as const }, { label: '전열', row: 1 as const }]
     : [{ label: '전열', row: 1 as const }, { label: '후열', row: 0 as const }];
@@ -918,9 +988,10 @@ const ArenaCombatFormation: React.FC<{
                   activeTurn={activeTurn}
                   activeEvent={activeEvent}
                   battleEvents={battleEvents}
+                  unitStates={unitStates}
                   battleEventIndex={battleEventIndex}
                   roundReveal={roundReveal}
-                  retired={roundReveal?.stage === 'result' && item.visualIndex >= Math.max(0, positioned.length - retiredStart)}
+                  retired={roundReveal?.stage === 'result' && (findUnitState(unitStates, side, item.card)?.alive === false || (!findUnitState(unitStates, side, item.card) && battleEvents.some((event) => eventKillsCard(event, item.card))))}
                   skillLookup={skillLookup}
                   classLookup={classLookup}
                 />
@@ -942,6 +1013,7 @@ export const ArenaBattleStage: React.FC<{
   activeTurn?: ArenaBattleTurn;
   activeEvent?: ArenaReplayEvent;
   battleEvents: ArenaReplayEvent[];
+  unitStates?: ArenaReplayUnitState[];
   battleEventIndex: number;
   revealOpponent: boolean;
   roundReveal: RoundRevealState | null;
@@ -950,107 +1022,32 @@ export const ArenaBattleStage: React.FC<{
   classLookup: Map<string, ArenaRuleClass>;
   user: any;
   loadout: ArenaCosmeticLoadout | null;
-}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeTurn, activeEvent, battleEvents, battleEventIndex, revealOpponent, roundReveal, roundResult, skillLookup, classLookup, user, loadout }) => {
-  const opponentAvatar = opponentCards[0]?.image_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(match.player_b_id || `arena-bot-${match.id}`)}`;
-  const playerLabel = user?.username || '나';
-  const opponentLabel = match.match_type === 'RANKED' ? '상대 플레이어' : 'AI 연습 상대';
-  const resolveCombatName = React.useMemo(
-    () => buildCombatNameResolver([...playerCards, ...opponentCards]),
-    [playerCards, opponentCards]
-  );
-  const actionLabel = roundReveal?.stage === 'battle'
-    ? getTurnActionLabel(activeTurn)
-    : roundReveal?.stage === 'result'
-      ? winnerLabel(roundReveal.winner)
-      : '전술 준비';
-  const actionCaption = roundReveal?.stage === 'battle'
-    ? getTurnCaption(activeTurn, resolveCombatName)
-    : '카드 배치와 전술 선택이 전투 흐름을 만듭니다.';
-  const vfxKind = getTurnVfxKind(activeTurn);
-  const actorSide = findCombatCardSide(activeTurn?.actor, playerCards, opponentCards);
-  const targetSide = activeTurn?.targetIds
-    .map((target) => findCombatCardSide(target, playerCards, opponentCards))
-    .find(Boolean) || null;
-  const vfxDirection = actorSide === 'player' && targetSide === 'opponent'
-    ? 'from-player'
-    : actorSide === 'opponent' && targetSide === 'player'
-      ? 'from-opponent'
-      : actorSide === 'player'
-        ? 'ally-player'
-        : actorSide === 'opponent'
-          ? 'ally-opponent'
-          : 'from-center';
+  displayPlayerRoundWins?: number;
+  displayOpponentRoundWins?: number;
+}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeTurn, activeEvent, battleEvents, unitStates, battleEventIndex, revealOpponent, roundReveal, roundResult, skillLookup, classLookup, user, loadout, displayPlayerRoundWins, displayOpponentRoundWins }) => {
   return (
     <div className={`arena-battle-stage ${roundReveal?.stage === 'battle' ? 'is-playing' : ''} ${roundReveal?.stage === 'result' ? 'is-result' : ''}`}>
       <div className="arena-battle-stage-bg" />
-      {roundReveal?.stage === 'battle' && activeTurn ? (
-        <div key={activeTurn.id} className={`arena-battle-cinematic-vfx vfx-${vfxKind} ${vfxDirection}`} aria-hidden="true">
-          <span className="arena-vfx-screen-flash" />
-          <span className="arena-vfx-lane" />
-          <span className="arena-vfx-afterimage" />
-          <span className="arena-vfx-comet" />
-          <span className="arena-vfx-slash" />
-          <span className="arena-vfx-slash is-secondary" />
-          <span className="arena-vfx-impact" />
-          <span className="arena-vfx-ring" />
-          <span className="arena-vfx-rune" />
-          <span className="arena-vfx-shockwave" />
-          <span className="arena-vfx-ground" />
-          {ARENA_VFX_PARTICLES.map((particle) => (
-            <span
-              key={particle}
-              className="arena-vfx-particle"
-              style={{
-                ['--particle-index' as any]: particle,
-                ['--particle-x' as any]: `${Math.round(Math.cos((particle / ARENA_VFX_PARTICLES.length) * Math.PI * 2) * (18 + (particle % 4) * 7))}px`,
-                ['--particle-y' as any]: `${Math.round(Math.sin((particle / ARENA_VFX_PARTICLES.length) * Math.PI * 2) * (10 + (particle % 5) * 5))}px`
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
-      <div className="arena-battle-row is-opponent-row">
-        <ArenaCombatPortrait label={opponentLabel} caption={`${match.player_b_round_wins || 0} 라운드 승`} avatarUrl={revealOpponent ? opponentAvatar : null} side="opponent" />
-        <ArenaCombatFormation
-          side="opponent"
-          cards={opponentCards}
-          slots={opponentSlots}
-          revealed={revealOpponent}
-          activeTurn={activeTurn}
-          activeEvent={activeEvent}
-          battleEvents={battleEvents}
-          battleEventIndex={battleEventIndex}
-          roundReveal={roundReveal}
-          remainingUnits={roundResult?.bot_remaining_units}
-          skillLookup={skillLookup}
-          classLookup={classLookup}
-        />
-      </div>
-      <div className="arena-battle-centerline">
-        <span className="arena-battle-pulse" />
-        <div key={activeTurn?.id || roundReveal?.stage || 'ready'} className="arena-battle-turn-callout min-w-0 text-center">
-          <p className="arena-battle-turn-kicker">{roundReveal?.stage === 'battle' ? '행동' : roundReveal?.stage === 'result' ? '라운드 결과' : '전술 준비'}</p>
-          <p className="arena-battle-turn-title">{actionLabel}</p>
-          <p className="arena-battle-turn-caption">{actionCaption}</p>
-        </div>
-        <span className="arena-battle-pulse" />
-      </div>
-      <div className="arena-battle-row is-player-row">
-        <ArenaCombatFormation
-          side="player"
-          cards={playerCards}
-          slots={playerSlots}
-          activeTurn={activeTurn}
-          activeEvent={activeEvent}
-          battleEvents={battleEvents}
-          battleEventIndex={battleEventIndex}
-          roundReveal={roundReveal}
-          remainingUnits={roundResult?.player_remaining_units}
-          skillLookup={skillLookup}
-          classLookup={classLookup}
-        />
-        <ArenaCombatPortrait label={playerLabel} caption={`${match.player_a_round_wins || 0} 라운드 승`} avatarUrl={user?.avatarUrl} loadout={loadout} side="player" />
-      </div>
+      <ArenaPixiBattleRenderer
+        match={match}
+        playerCards={playerCards}
+        opponentCards={opponentCards}
+        playerSlots={playerSlots}
+        opponentSlots={opponentSlots}
+        activeTurn={activeTurn}
+        battleEvents={battleEvents}
+        unitStates={unitStates}
+        battleEventIndex={battleEventIndex}
+        revealOpponent={revealOpponent}
+        roundReveal={roundReveal}
+        roundResult={roundResult}
+        skillLookup={skillLookup}
+        classLookup={classLookup}
+        user={user}
+        loadout={loadout}
+        displayPlayerRoundWins={displayPlayerRoundWins}
+        displayOpponentRoundWins={displayOpponentRoundWins}
+      />
     </div>
   );
 };
@@ -1238,6 +1235,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const battleRoundNo = roundReveal?.roundNo || (selectedReplayRound?.round_no ?? nextRoundNo);
   const visibleEvents = (selectedReplayRound?.events || []).slice(-18).reverse();
   const activeBattleEvents = selectedReplayRound?.events || [];
+  const activeUnitStates = selectedReplayRound?.unit_states || [];
   const activeBattleTurns = React.useMemo(() => buildArenaBattleTurns(activeBattleEvents), [activeBattleEvents]);
   const activeBattleTurn = activeBattleTurns.length > 0 ? activeBattleTurns[Math.min(battleEventIndex, activeBattleTurns.length - 1)] : undefined;
   const activeBattleEvent = activeBattleTurn?.primary;
@@ -1247,7 +1245,6 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const canForceRound = Boolean(roundWait && waitMs <= 0);
   const battlefield = match?.summary?.battlefield_rule;
   const tacticChips = rules?.tactic_chips || [];
-  const scoreLabel = `${match?.player_a_round_wins || 0}:${match?.player_b_round_wins || 0}`;
   const selectionLocked = completed || roundLoading || Boolean(roundWait) || roundReveal?.stage === 'battle';
   const canCommitWithSelection = selectedSlots.length === ARENA_ACTIVE_SLOT_COUNT || canForceRound;
   const revealOpponentFormation = completed || Boolean(roundReveal) || roundResults.some((round) => Number(round.round_no) === Number(battleRoundNo));
@@ -1255,6 +1252,20 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const opponentCards = revealOpponentFormation ? getRoundCards(opponentDeck, battleRoundNo) : [];
   const opponentSlots = revealOpponentFormation ? getRoundSlots(opponentDeck, battleRoundNo) : [];
   const latestRoundResult = [...roundResults].sort((a, b) => Number(b.round_no || 0) - Number(a.round_no || 0))[0];
+  const battleInProgress = roundReveal?.stage === 'battle';
+  const visibleRoundResults = battleInProgress && roundReveal?.roundNo
+    ? roundResults.filter((round) => Number(round.round_no) < Number(roundReveal.roundNo))
+    : roundResults;
+  const visibleScore = battleInProgress
+    ? visibleRoundResults.reduce((score, round) => {
+      if (round.winner_side === 'player') return { ...score, player: score.player + 1 };
+      if (round.winner_side === 'bot') return { ...score, opponent: score.opponent + 1 };
+      return score;
+    }, { player: 0, opponent: 0 })
+    : { player: Number(match?.player_a_round_wins || 0), opponent: Number(match?.player_b_round_wins || 0) };
+  const scoreLabel = `${visibleScore.player}:${visibleScore.opponent}`;
+  const visibleReplayEvents = battleInProgress ? [] : visibleEvents;
+  const displayCompleted = completed && !battleInProgress;
 
   React.useEffect(() => {
     if (roundReveal?.stage !== 'battle' || activeBattleTurns.length === 0) {
@@ -1412,7 +1423,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                 아레나 게임
               </span>
               <h1 className="mt-3 text-3xl font-black tracking-tight text-foreground md:text-5xl">
-                {loading ? '매치를 불러오는 중' : completed ? `세트 ${resultLabel(match?.result)}` : `${nextRoundNo}라운드 전술 준비`}
+                {loading ? '매치를 불러오는 중' : displayCompleted ? `세트 ${resultLabel(match?.result)}` : `${nextRoundNo}라운드 전술 준비`}
               </h1>
               <p className="mt-2 max-w-2xl text-sm font-bold leading-relaxed text-muted-foreground">
                 {match?.id ? `매치 ID ${match.id} · ${match.match_type === 'RANKED' ? '빠른대전' : '봇 연습전'} · ${formatDateTime(match.created_at)}` : '라운드마다 선택을 바꾸고 전투 결과를 확인합니다.'}
@@ -1429,7 +1440,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
               </div>
               <div className="rounded-2xl bg-secondary/60 px-4 py-3 text-center">
                 <p className="text-[10px] font-black text-muted-foreground">상태</p>
-                <p className="mt-1 text-sm font-black text-primary">{completed ? '완료' : roundWait ? '대기' : '준비'}</p>
+                <p className="mt-1 text-sm font-black text-primary">{battleInProgress ? '전투 중' : displayCompleted ? '완료' : roundWait ? '대기' : '준비'}</p>
               </div>
             </div>
           </div>
@@ -1458,7 +1469,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     <h2 className="mt-1 text-xl font-black text-foreground">{battlefield?.name || '기본 전장'}</h2>
                     <p className="mt-1 text-xs font-bold text-muted-foreground">{battlefield?.description || '이번 라운드의 전장 규칙이 적용됩니다.'}</p>
                   </div>
-                  {completed ? (
+                  {displayCompleted ? (
                     <button
                       type="button"
                       onClick={createShareLink}
@@ -1518,6 +1529,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     activeTurn={activeBattleTurn}
                     activeEvent={activeBattleEvent}
                     battleEvents={activeBattleEvents}
+                    unitStates={activeUnitStates}
                     battleEventIndex={battleEventIndex}
                     revealOpponent={revealOpponentFormation}
                     roundReveal={roundReveal}
@@ -1526,10 +1538,12 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     classLookup={classLookup}
                     user={user}
                     loadout={cosmeticLoadout}
+                    displayPlayerRoundWins={visibleScore.player}
+                    displayOpponentRoundWins={visibleScore.opponent}
                   />
                 </div>
 
-                {!completed ? (
+                {!displayCompleted ? (
                   <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
                     <FormationSlotBoard
                       deck={playerDeck}
@@ -1593,10 +1607,10 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-black text-primary">라운드 선택</p>
-                      <h2 className="mt-1 text-lg font-black text-foreground">{completed ? '경기 종료' : `R${nextRoundNo} 준비`}</h2>
+                      <h2 className="mt-1 text-lg font-black text-foreground">{battleInProgress ? '전투 진행 중' : displayCompleted ? '경기 종료' : `R${nextRoundNo} 준비`}</h2>
                     </div>
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                      {completed ? <Trophy className="h-5 w-5" /> : <Target className="h-5 w-5" />}
+                      {displayCompleted ? <Trophy className="h-5 w-5" /> : <Target className="h-5 w-5" />}
                     </div>
                   </div>
 
@@ -1618,7 +1632,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     </div>
                   ) : null}
 
-                  {!completed ? (
+                  {!displayCompleted ? (
                     <div className="mt-4 space-y-3">
                       <div className="grid grid-cols-3 gap-1.5">
                         {tacticOptions.map(([id, label]) => (
@@ -1689,11 +1703,11 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     <FileClock className="h-4 w-4 text-primary" />
                     <h2 className="text-sm font-black text-foreground">라운드 기록</h2>
                   </div>
-                  {roundResults.length === 0 ? (
+                  {visibleRoundResults.length === 0 ? (
                     <p className="text-xs font-bold leading-relaxed text-muted-foreground">아직 완료된 라운드가 없습니다.</p>
                   ) : (
                     <div className="space-y-2">
-                      {roundResults.map((round) => (
+                      {visibleRoundResults.map((round) => (
                         <div key={round.round_no} className="flex items-center justify-between gap-2 rounded-2xl bg-secondary/55 px-3 py-2">
                           <span className="text-xs font-black text-foreground">R{round.round_no}</span>
                           <span className="text-[10px] font-black text-primary">{winnerLabel(round.winner_side)}</span>
@@ -1715,11 +1729,13 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                   {replay?.rounds?.length || 0}라운드 저장
                 </span>
               </div>
-              {visibleEvents.length === 0 ? (
+              {battleInProgress ? (
+                <StateNotice title="전투가 진행 중입니다" description="라운드 결과와 전체 로그는 전투 연출이 끝난 뒤 표시됩니다." />
+              ) : visibleReplayEvents.length === 0 ? (
                 <StateNotice title="아직 재생할 전투 로그가 없습니다" description="라운드를 시작하면 공격, 스킬, 피해 흐름이 이곳에 쌓입니다." />
               ) : (
                 <div className="mt-4 grid gap-2">
-                  {visibleEvents.map((event, index) => (
+                  {visibleReplayEvents.map((event, index) => (
                     <div key={`${event.t}-${event.type}-${index}`} className="arena-status-row flex items-center justify-between gap-3 rounded-2xl border border-border bg-card/70 px-3 py-2">
                       <div className="min-w-0">
                         <p className="truncate text-xs font-black text-foreground">{event.message || event.type}</p>

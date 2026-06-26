@@ -422,5 +422,7 @@ disk free 부족
 - 리플레이 저장은 `ARENA_REPLAY_MAX_EVENTS_PER_ROUND`, `ARENA_REPLAY_MAX_BYTES` 상한을 넘지 않는다.
 - 신규 일반 매치 리플레이는 `arena_match_replays`, 8인 컵 리플레이는 `arena_cup_replays`에 분리 저장하고, 본문 테이블의 `replay_json`은 레거시 fallback으로만 사용한다. `replay_prune`은 두 리플레이 테이블과 레거시 inline 값을 함께 제한 개수로 정리한다. 큐 상태는 상태 변화 이벤트를 SSE로 즉시 전달하고, fallback 조회는 30~90초 수준으로 늦춘다.
 - `ARENA_DISABLE_REPLAY_WRITES=true`일 때 신규 리플레이 저장을 중지한다.
+- 리플레이 v2는 이벤트별 `hp_after`와 라운드별 `unit_states`를 저장해 프론트 추정 재계산을 줄인다. 이벤트 상한으로 잘린 경우에는 `replay_truncated`와 생략 수 메타데이터만 남긴다.
+- `/arena/settings`의 전투 품질, 관전 속도, 디버그 export는 localStorage와 사용자 클릭 기반 조회만 사용한다. 상시 수집, 자동 업로드, 주기적 폴링은 금지한다.
 - `ARENA_DISABLE_RANKED_RATING_WRITES=true`일 때 랭크 매치 결과는 저장하되 MMR 갱신은 중지한다.
 - 관리자 화면은 빠른대전 큐, 8인 컵 큐, 최근 관리자 job 상태를 스냅샷으로 표시한다.

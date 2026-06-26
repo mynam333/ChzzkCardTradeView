@@ -35,6 +35,7 @@ export interface ArenaReplayPayload {
   match_id: string;
   match_format: typeof ARENA_MATCH_FORMAT;
   rounds_to_win: typeof ARENA_ROUNDS_TO_WIN;
+  replay_version?: number;
   replay_storage: 'compact_summary' | 'tick_events';
   rounds: ArenaRoundReplay[];
 }
@@ -71,6 +72,23 @@ interface ArenaRoundReplay {
   round_no: number;
   duration_ms: number;
   winner_side: 'player' | 'bot' | 'draw';
+  replay_truncated?: boolean;
+  original_event_count?: number;
+  timeline_summary?: {
+    first_event_t?: number;
+    last_event_t?: number;
+    omitted_event_count: number;
+  };
+  unit_states?: Array<{
+    id: string;
+    side: 'player' | 'bot';
+    card_id: string;
+    channel_id?: string;
+    max_hp: number;
+    start_hp?: number;
+    final_hp: number;
+    alive: boolean;
+  }>;
   events: ArenaBattleEvent[];
 }
 
@@ -196,20 +214,40 @@ export const getArenaReplayStoragePolicy = () => ({
   prune_batch_limit: REPLAY_PRUNE_LIMIT
 });
 
-const boundReplayRounds = (rounds: any[]) => rounds.map((round: any) => ({
-  ...round,
-  events: Array.isArray(round?.events) ? round.events.slice(0, REPLAY_MAX_EVENTS_PER_ROUND) : []
-}));
+const boundReplayRounds = (rounds: any[]) => rounds.map((round: any) => {
+  const events = Array.isArray(round?.events) ? round.events : [];
+  const boundedEvents = events.slice(0, REPLAY_MAX_EVENTS_PER_ROUND);
+  const omittedEventCount = Math.max(0, events.length - boundedEvents.length);
+  const firstEvent = events[0];
+  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+  return {
+    ...round,
+    replay_truncated: omittedEventCount > 0 || Boolean(round?.replay_truncated),
+    original_event_count: Number.isFinite(Number(round?.original_event_count))
+      ? Number(round.original_event_count)
+      : events.length,
+    timeline_summary: omittedEventCount > 0
+      ? {
+          first_event_t: Number.isFinite(Number(firstEvent?.t)) ? Number(firstEvent.t) : undefined,
+          last_event_t: Number.isFinite(Number(lastEvent?.t)) ? Number(lastEvent.t) : undefined,
+          omitted_event_count: omittedEventCount
+        }
+      : round?.timeline_summary,
+    events: boundedEvents
+  };
+});
 
 export const buildArenaReplayJsonForStorage = (replay: ArenaReplayPayload | any): string | null => {
   if (!isArenaReplayWriteEnabled()) return null;
   const bounded = {
     ...replay,
+    replay_version: Number.isFinite(Number(replay?.replay_version)) ? Number(replay.replay_version) : 2,
     replay_storage: replay?.replay_storage || 'tick_events',
     rounds: Array.isArray(replay?.rounds) ? boundReplayRounds(replay.rounds) : replay?.rounds,
     matches: Array.isArray(replay?.matches)
       ? replay.matches.map((match: any) => ({
           ...match,
+          replay_version: Number.isFinite(Number(match?.replay_version)) ? Number(match.replay_version) : 2,
           rounds: Array.isArray(match?.rounds) ? boundReplayRounds(match.rounds) : []
         }))
       : replay?.matches
@@ -1262,6 +1300,7 @@ export const commitArenaMatchRound = async (
     match_id: String(row.id),
     match_format: ARENA_MATCH_FORMAT,
     rounds_to_win: ARENA_ROUNDS_TO_WIN,
+    replay_version: 2,
     replay_storage: 'tick_events',
     rounds: [...(previousReplay?.rounds || []), simulatedRound.replay]
   };

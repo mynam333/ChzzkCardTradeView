@@ -634,12 +634,43 @@ UX 기준:
   "ok": true,
   "data": {
     "match_id": "match_...",
-    "match_format": "best_of_3",
+    "match_format": "best_of_five",
+    "rounds_to_win": 3,
+    "replay_version": 2,
+    "replay_storage": "tick_events",
     "rounds": [
       {
         "round_no": 1,
         "duration_ms": 52400,
-        "events": []
+        "winner_side": "player",
+        "replay_truncated": false,
+        "original_event_count": 84,
+        "unit_states": [
+          {
+            "id": "player:card_1",
+            "side": "player",
+            "card_id": "card_1",
+            "channel_id": "channel_1",
+            "max_hp": 1520,
+            "start_hp": 1520,
+            "final_hp": 640,
+            "alive": true
+          }
+        ],
+        "events": [
+          {
+            "t": 1280,
+            "type": "DAMAGE",
+            "actor": "player:card_1",
+            "targets": ["bot:card_2"],
+            "value": 218,
+            "hp_before": 1400,
+            "hp_after": 1182,
+            "shield_before": 0,
+            "shield_after": 0,
+            "alive_after": true
+          }
+        ]
       }
     ]
   }
@@ -650,6 +681,8 @@ UX 기준:
 
 - 응답 크기 상한을 둔다.
 - 오래된 상세 로그는 삭제될 수 있다.
+- `replay_version: 2`는 이벤트별 체력/실드 상태와 라운드별 최종 유닛 상태를 포함한다.
+- 이벤트 수 상한으로 일부 이벤트가 생략되면 `replay_truncated`, `original_event_count`, `timeline_summary.omitted_event_count`를 함께 내려준다.
 - 리플레이 조회 실패와 경기 결과 반영 실패를 구분한다.
 
 ### GET `/api/arena/matches/recent`

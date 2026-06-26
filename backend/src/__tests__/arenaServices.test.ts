@@ -124,6 +124,7 @@ describe('arena replay storage policy', () => {
           round_no: 1,
           duration_ms: 1000,
           winner_side: 'player',
+          unit_states: [{ id: 'u1', side: 'player', card_id: 'c1', max_hp: 100, start_hp: 100, final_hp: 80, alive: true }],
           events: Array.from({ length: 200 }, (_, index) => ({ t: index, type: 'hit', value: 1 }))
         }
       ]
@@ -131,7 +132,38 @@ describe('arena replay storage policy', () => {
 
     expect(replayJson).toBeTruthy();
     const parsed = JSON.parse(replayJson || '{}');
+    expect(parsed.replay_version).toBe(2);
     expect(parsed.rounds[0].events).toHaveLength(120);
+    expect(parsed.rounds[0].unit_states).toHaveLength(1);
+    expect(parsed.rounds[0].replay_truncated).toBe(true);
+    expect(parsed.rounds[0].original_event_count).toBe(200);
+    expect(parsed.rounds[0].timeline_summary.omitted_event_count).toBe(80);
+  });
+
+  it('emits replay event health state and final unit states for deterministic playback', () => {
+    const result = simulateArenaSet({
+      playerDeck: makeDeck('replay-player', 'high'),
+      opponentDeck: makeDeck('replay-opponent', 'low'),
+      matchSeed: 'arena-test-replay-health-state'
+    });
+    const round = result.replayRounds[0];
+    const stateById = new Map((round.unit_states || []).map((state: any) => [state.id, state]));
+    const healthEvents = round.events.filter((event: any) => ['DAMAGE', 'HEAL', 'SHIELD_GAIN'].includes(String(event.type || '').toUpperCase()));
+
+    expect(round.unit_states?.length).toBeGreaterThan(0);
+    expect(healthEvents.length).toBeGreaterThan(0);
+    for (const event of healthEvents) {
+      expect(typeof event.hp_before).toBe('number');
+      expect(typeof event.hp_after).toBe('number');
+      expect(typeof event.shield_before).toBe('number');
+      expect(typeof event.shield_after).toBe('number');
+      expect(typeof event.alive_after).toBe('boolean');
+    }
+    for (const state of stateById.values()) {
+      if ((state as any).alive === false) expect((state as any).final_hp).toBe(0);
+      expect((state as any).final_hp).toBeGreaterThanOrEqual(0);
+      expect((state as any).final_hp).toBeLessThanOrEqual((state as any).max_hp);
+    }
   });
 });
 

@@ -589,6 +589,7 @@ const simulateCupMatch = (a: CupParticipant, b: CupParticipant, stage: string, i
       match_key: `${stage}-${index}`,
       match_format: ARENA_MATCH_FORMAT,
       rounds_to_win: ARENA_ROUNDS_TO_WIN,
+      replay_version: 2,
       replay_storage: 'tick_events' as const,
       battlefield_rule: battlefieldRule,
       rounds: simulated.replayRounds
@@ -660,6 +661,7 @@ export const __test_simulateCupBracket = (participants: CupParticipant[], seed: 
       champion_user_id: final.winner.user_id
     },
     replay: {
+      replay_version: 2,
       replay_storage: 'cup_tick_events',
       matches: allMatches.map((item) => item.replay)
     }

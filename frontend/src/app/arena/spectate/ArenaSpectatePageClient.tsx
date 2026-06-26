@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Eye, Pause, Play, RefreshCw, RotateCcw, Trophy } from 'lucide-react';
+import { Eye, Pause, Play, RefreshCw, RotateCcw, SkipBack, SkipForward, Trophy } from 'lucide-react';
 import { ArenaLayout } from '../../ArenaLayout';
 import type { ArenaSiteTab } from '../../ArenaTab';
 import { apiFetch } from '@/lib/api';
@@ -64,6 +64,14 @@ const getTokenFromInput = (value: string) => {
   }
 };
 
+const SPECTATE_SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 2];
+
+const readSpectateSpeed = () => {
+  if (typeof window === 'undefined') return 1;
+  const value = Number(window.localStorage.getItem('arena:replay-speed') || '1');
+  return SPECTATE_SPEED_OPTIONS.includes(value) ? value : 1;
+};
+
 export const ArenaSpectatePageClient: React.FC = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -76,6 +84,7 @@ export const ArenaSpectatePageClient: React.FC = () => {
   const [selectedRoundNo, setSelectedRoundNo] = React.useState(1);
   const [eventIndex, setEventIndex] = React.useState(0);
   const [playing, setPlaying] = React.useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
   const initialLoadRef = React.useRef(false);
 
   const moveArenaTab = React.useCallback((tab: ArenaSiteTab) => {
@@ -161,18 +170,30 @@ export const ArenaSpectatePageClient: React.FC = () => {
   }, [initialShare, loadSpectatorReplay]);
 
   React.useEffect(() => {
+    setPlaybackSpeed(readSpectateSpeed());
+  }, []);
+
+  React.useEffect(() => {
     if (!playing || !selectedRound || battleTurns.length === 0) return;
     if (eventIndex >= battleTurns.length - 1) {
       setPlaying(false);
       return;
     }
-    const timer = window.setTimeout(() => setEventIndex((prev) => Math.min(battleTurns.length - 1, prev + 1)), ARENA_BATTLE_TURN_MS);
+    const timer = window.setTimeout(
+      () => setEventIndex((prev) => Math.min(battleTurns.length - 1, prev + 1)),
+      Math.max(180, Math.round(ARENA_BATTLE_TURN_MS / playbackSpeed))
+    );
     return () => window.clearTimeout(timer);
-  }, [battleTurns.length, eventIndex, playing, selectedRound]);
+  }, [battleTurns.length, eventIndex, playbackSpeed, playing, selectedRound]);
 
   const restartRound = () => {
     setEventIndex(0);
     setPlaying(true);
+  };
+
+  const setSpeed = (speed: number) => {
+    setPlaybackSpeed(speed);
+    window.localStorage.setItem('arena:replay-speed', String(speed));
   };
 
   return (
@@ -272,6 +293,7 @@ export const ArenaSpectatePageClient: React.FC = () => {
                   activeTurn={activeTurn}
                   activeEvent={activeEvent}
                   battleEvents={events}
+                  unitStates={selectedRound.unit_states || []}
                   battleEventIndex={eventIndex}
                   revealOpponent
                   roundReveal={roundReveal}
@@ -291,7 +313,45 @@ export const ArenaSpectatePageClient: React.FC = () => {
                       {battleTurns.length > 0 ? `${Math.min(eventIndex + 1, battleTurns.length)} / ${battleTurns.length} 턴` : '턴 없음'}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex rounded-2xl border border-border bg-card p-1">
+                      {SPECTATE_SPEED_OPTIONS.map((speed) => (
+                        <button
+                          key={speed}
+                          type="button"
+                          onClick={() => setSpeed(speed)}
+                          className={`rounded-xl px-2.5 py-1.5 text-[10px] font-black transition ${
+                            playbackSpeed === speed ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {speed}x
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlaying(false);
+                        setEventIndex((prev) => Math.max(0, prev - 1));
+                      }}
+                      disabled={battleTurns.length === 0 || eventIndex <= 0}
+                      className="cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-foreground disabled:opacity-50"
+                    >
+                      <SkipBack className="h-3.5 w-3.5" />
+                      이전
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlaying(false);
+                        setEventIndex((prev) => Math.min(battleTurns.length - 1, prev + 1));
+                      }}
+                      disabled={battleTurns.length === 0 || eventIndex >= battleTurns.length - 1}
+                      className="cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-foreground disabled:opacity-50"
+                    >
+                      <SkipForward className="h-3.5 w-3.5" />
+                      다음
+                    </button>
                     <button
                       type="button"
                       onClick={restartRound}

@@ -41,7 +41,23 @@ export interface ArenaBattleEvent {
   actor?: string;
   targets?: string[];
   value?: number;
+  hp_before?: number;
+  hp_after?: number;
+  shield_before?: number;
+  shield_after?: number;
+  alive_after?: boolean;
   message?: string;
+}
+
+export interface ArenaReplayUnitState {
+  id: string;
+  side: ArenaSide;
+  card_id: string;
+  channel_id: string;
+  max_hp: number;
+  start_hp: number;
+  final_hp: number;
+  alive: boolean;
 }
 
 export interface ArenaRoundResult {
@@ -61,6 +77,7 @@ export interface ArenaRoundReplay {
   round_no: number;
   duration_ms: number;
   winner_side: ArenaRoundWinner;
+  unit_states: ArenaReplayUnitState[];
   events: ArenaBattleEvent[];
 }
 
@@ -249,6 +266,18 @@ const unitPower = (unit: CombatUnit) =>
 
 const living = (units: CombatUnit[]) => units.filter((unit) => unit.alive && unit.hp > 0);
 
+const buildReplayUnitStates = (units: CombatUnit[]): ArenaReplayUnitState[] =>
+  units.map((unit) => ({
+    id: unit.id,
+    side: unit.side,
+    card_id: unit.card.card_id,
+    channel_id: unit.card.channel_id,
+    max_hp: unit.maxHp,
+    start_hp: unit.maxHp,
+    final_hp: Math.max(0, Math.round(unit.hp)),
+    alive: unit.alive && unit.hp > 0
+  }));
+
 const chooseTarget = (actor: CombatUnit, enemies: CombatUnit[], seed: string) => {
   const aliveEnemies = living(enemies);
   const front = aliveEnemies.filter((unit) => unit.row === 1);
@@ -288,6 +317,8 @@ const applyDamage = (
   const crit = seededRatio(`${seed}:crit:${actor.id}:${target.id}:${t}`) < actor.critChance;
   const damageAfterDefense = rawDamage * (100 / (100 + target.defense));
   let damage = Math.max(1, Math.round(damageAfterDefense * (crit ? actor.critDamage * target.critTakenMod : 1)));
+  const hpBefore = target.hp;
+  const shieldBefore = target.shield;
   if (target.shield > 0) {
     const shieldUsed = Math.min(target.shield, damage);
     target.shield -= shieldUsed;
@@ -297,11 +328,32 @@ const applyDamage = (
     target.hp = Math.max(0, target.hp - damage);
     actor.damageDealt += damage;
     target.damageTaken += damage;
-    pushEvent(events, { t, type: 'DAMAGE', actor: actor.id, targets: [target.id], value: damage });
+    pushEvent(events, {
+      t,
+      type: 'DAMAGE',
+      actor: actor.id,
+      targets: [target.id],
+      value: damage,
+      hp_before: Math.max(0, Math.round(hpBefore)),
+      hp_after: Math.max(0, Math.round(target.hp)),
+      shield_before: Math.max(0, Math.round(shieldBefore)),
+      shield_after: Math.max(0, Math.round(target.shield)),
+      alive_after: target.hp > 0
+    });
   }
   if (target.hp <= 0 && target.alive) {
     target.alive = false;
-    pushEvent(events, { t, type: 'DEATH', actor: target.id, message: `${target.card.name} 전투 불능` });
+    pushEvent(events, {
+      t,
+      type: 'DEATH',
+      actor: target.id,
+      hp_before: Math.max(0, Math.round(target.hp)),
+      hp_after: 0,
+      shield_before: Math.max(0, Math.round(target.shield)),
+      shield_after: Math.max(0, Math.round(target.shield)),
+      alive_after: false,
+      message: `${target.card.name} 전투 불능`
+    });
   }
 };
 
@@ -321,10 +373,22 @@ const castSkill = (
     const target = living(allies).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
     if (target) {
       const heal = Math.round(actor.attack * 1.1 + actor.card.stats.focus * 1.7);
+      const hpBefore = target.hp;
       const applied = Math.max(0, Math.min(heal, target.maxHp - target.hp));
       target.hp += applied;
       actor.healingDone += applied;
-      pushEvent(events, { t, type: 'HEAL', actor: actor.id, targets: [target.id], value: applied });
+      pushEvent(events, {
+        t,
+        type: 'HEAL',
+        actor: actor.id,
+        targets: [target.id],
+        value: applied,
+        hp_before: Math.max(0, Math.round(hpBefore)),
+        hp_after: Math.max(0, Math.round(target.hp)),
+        shield_before: Math.max(0, Math.round(target.shield)),
+        shield_after: Math.max(0, Math.round(target.shield)),
+        alive_after: target.alive && target.hp > 0
+      });
     }
     return;
   }
@@ -333,8 +397,20 @@ const castSkill = (
     const target = living(allies).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
     if (target) {
       const shield = Math.round(actor.maxHp * 0.095 + actor.card.stats.defense * 1.6);
+      const shieldBefore = target.shield;
       target.shield = clamp(target.shield + shield, 0, Math.round(target.maxHp * 0.5));
-      pushEvent(events, { t, type: 'SHIELD_GAIN', actor: actor.id, targets: [target.id], value: shield });
+      pushEvent(events, {
+        t,
+        type: 'SHIELD_GAIN',
+        actor: actor.id,
+        targets: [target.id],
+        value: Math.max(0, target.shield - shieldBefore),
+        hp_before: Math.max(0, Math.round(target.hp)),
+        hp_after: Math.max(0, Math.round(target.hp)),
+        shield_before: Math.max(0, Math.round(shieldBefore)),
+        shield_after: Math.max(0, Math.round(target.shield)),
+        alive_after: target.alive && target.hp > 0
+      });
     }
     return;
   }
@@ -447,6 +523,7 @@ const simulateRound = (
       round_no: roundNo,
       duration_ms: durationMs,
       winner_side: winner,
+      unit_states: buildReplayUnitStates([...playerUnits, ...botUnits]),
       events
     }
   };
