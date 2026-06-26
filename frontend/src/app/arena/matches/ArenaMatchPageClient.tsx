@@ -547,6 +547,16 @@ const eventMatchesCard = (value: string | undefined, card: ArenaSnapshotCardDto)
   });
 };
 
+const combatElementMatchesToken = (element: Element, value: string | undefined) => {
+  const token = normalizeCombatToken(value);
+  if (!token) return false;
+  const target = element as HTMLElement;
+  return [target.dataset.cardId, target.dataset.channelId, target.dataset.cardName].some((candidate) => {
+    const normalized = normalizeCombatToken(candidate);
+    return normalized && (token === normalized || token.includes(normalized) || normalized.includes(token));
+  });
+};
+
 const eventMentionsCard = (
   event: ArenaReplayEvent | undefined,
   card: ArenaSnapshotCardDto
@@ -728,6 +738,7 @@ const ArenaCombatCard: React.FC<{
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
 }> = ({ card, side, slot, visualIndex, activeTurn, activeEvent, battleEvents, battleEventIndex, roundReveal, retired, skillLookup, classLookup }) => {
+  const cardRef = React.useRef<HTMLElement | null>(null);
   const isBattle = roundReveal?.stage === 'battle';
   const acting = Boolean(isBattle && activeTurn && activeTurn.actor && eventMatchesCard(activeTurn.actor, card));
   const targeted = Boolean(isBattle && activeTurn && turnTargetsCard(activeTurn, card));
@@ -765,8 +776,59 @@ const ArenaCombatCard: React.FC<{
               : acting
                 ? '공격'
                 : '';
+  React.useLayoutEffect(() => {
+    const element = cardRef.current;
+    if (!element) return;
+    const strikeProperties = ['--strike-windup-x', '--strike-windup-y', '--strike-near-x', '--strike-near-y', '--strike-hit-x', '--strike-hit-y', '--strike-smash-x', '--strike-smash-y', '--strike-exit-x', '--strike-exit-y', '--strike-recoil-x', '--strike-recoil-y', '--strike-angle'];
+    if (!acting || activeTurn?.actionType !== 'attack') {
+      strikeProperties.forEach((property) => element.style.removeProperty(property));
+      return;
+    }
+    strikeProperties.forEach((property) => element.style.removeProperty(property));
+    const targetElement = Array.from(document.querySelectorAll('[data-arena-combat-card="true"]'))
+      .find((candidate) => candidate !== element && activeTurn.targetIds.some((target) => combatElementMatchesToken(candidate, target))) as HTMLElement | undefined;
+    if (!targetElement) return;
+    const actorRect = element.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    const actorCenterX = actorRect.left + actorRect.width / 2;
+    const actorCenterY = actorRect.top + actorRect.height / 2;
+    const targetCenterX = targetRect.left + targetRect.width / 2;
+    const targetCenterY = targetRect.top + targetRect.height / 2;
+    const centerDx = targetCenterX - actorCenterX;
+    const centerDy = targetCenterY - actorCenterY;
+    const distance = Math.max(1, Math.hypot(centerDx, centerDy));
+    const unitX = centerDx / distance;
+    const unitY = centerDy / distance;
+    const actorHalfOnPath = Math.abs(unitX) * actorRect.width / 2 + Math.abs(unitY) * actorRect.height / 2;
+    const targetHalfOnPath = Math.abs(unitX) * targetRect.width / 2 + Math.abs(unitY) * targetRect.height / 2;
+    const contactDistance = Math.max(0, distance - actorHalfOnPath * 0.82 - targetHalfOnPath * 0.72);
+    const smashDistance = Math.min(distance, contactDistance + Math.min(18, Math.max(8, targetHalfOnPath * 0.22)));
+    const hitX = unitX * contactDistance;
+    const hitY = unitY * contactDistance;
+    const smashX = unitX * smashDistance;
+    const smashY = unitY * smashDistance;
+    const strikeAngle = Math.round(Math.atan2(unitY, unitX) * 180 / Math.PI);
+    element.style.setProperty('--strike-windup-x', `${Math.round(unitX * -10)}px`);
+    element.style.setProperty('--strike-windup-y', `${Math.round(unitY * -10)}px`);
+    element.style.setProperty('--strike-near-x', `${Math.round(hitX * 0.78)}px`);
+    element.style.setProperty('--strike-near-y', `${Math.round(hitY * 0.78)}px`);
+    element.style.setProperty('--strike-hit-x', `${Math.round(hitX)}px`);
+    element.style.setProperty('--strike-hit-y', `${Math.round(hitY)}px`);
+    element.style.setProperty('--strike-smash-x', `${Math.round(smashX)}px`);
+    element.style.setProperty('--strike-smash-y', `${Math.round(smashY)}px`);
+    element.style.setProperty('--strike-angle', `${strikeAngle}deg`);
+    element.style.setProperty('--strike-exit-x', `${Math.round(hitX * 0.56)}px`);
+    element.style.setProperty('--strike-exit-y', `${Math.round(hitY * 0.56)}px`);
+    element.style.setProperty('--strike-recoil-x', `${Math.round(unitX * -8)}px`);
+    element.style.setProperty('--strike-recoil-y', `${Math.round(unitY * -8)}px`);
+  }, [acting, activeTurn?.id, activeTurn?.actionType, activeTurn?.targetIds, battleEventIndex]);
   return (
     <article
+      ref={cardRef}
+      data-arena-combat-card="true"
+      data-card-id={card.card_id}
+      data-channel-id={card.channel_id}
+      data-card-name={card.name}
       className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${turnParity} ${actionClass} ${acting ? 'is-acting' : ''} ${targeted ? 'is-targeted' : ''} ${waitingTurn ? 'is-waiting-turn' : ''} ${hit ? 'is-hit' : ''} ${healed ? 'is-healed' : ''} ${guarded ? 'is-guarded' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} ${heavyImpact ? 'is-heavy-impact' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
       style={{ ['--combat-delay' as any]: `${visualIndex * 90}ms` }}
     >
@@ -800,6 +862,7 @@ const ArenaCombatCard: React.FC<{
       ) : null}
       <div className="arena-combat-contact-flash" aria-hidden="true" />
       <div className="arena-combat-vfx" />
+      <div className="arena-combat-strike-edge" aria-hidden="true" />
       <div className="arena-combat-energy-ring" aria-hidden="true" />
       <div className="arena-combat-speed-lines" aria-hidden="true" />
       <div className="arena-combat-hit-sparks" aria-hidden="true">

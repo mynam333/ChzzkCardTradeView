@@ -523,6 +523,7 @@
 
 .arena-combat-formation {
   min-width: 0;
+  overflow: visible;
 }
 
 .arena-combat-lane-labels {
@@ -544,20 +545,38 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
+  overflow: visible;
 }
 
 .arena-combat-cell {
+  position: relative;
   min-width: 0;
   min-height: 6.2rem;
+  overflow: visible;
 }
 
 .arena-combat-card {
+  --strike-y: clamp(6.8rem, 13vw, 10.5rem);
+  --strike-x: clamp(1rem, 3.6vw, 2.7rem);
+  --strike-windup-x: -0.5rem;
+  --strike-windup-y: 0.9rem;
+  --strike-near-x: 2rem;
+  --strike-near-y: -8rem;
+  --strike-hit-x: var(--strike-x);
+  --strike-hit-y: -10rem;
+  --strike-smash-x: 3rem;
+  --strike-smash-y: -10.5rem;
+  --strike-exit-x: 1.4rem;
+  --strike-exit-y: -6rem;
+  --strike-recoil-x: -0.4rem;
+  --strike-recoil-y: -0.55rem;
+  --strike-angle: -90deg;
   position: relative;
   display: grid;
   grid-template-columns: 4.25rem minmax(0, 1fr);
   align-items: stretch;
   min-height: 6.2rem;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 1.2rem;
   border: 1px solid rgba(251, 113, 133, 0.24);
   background:
@@ -580,6 +599,7 @@
 }
 
 .arena-combat-card-media {
+  border-radius: 1.15rem 0 0 1.15rem;
   min-height: 6.2rem;
   overflow: hidden;
   background:
@@ -638,6 +658,7 @@
 .arena-combat-energy-ring,
 .arena-combat-speed-lines,
 .arena-combat-contact-flash,
+.arena-combat-strike-edge,
 .arena-combat-hit-sparks {
   position: absolute;
   inset: 0;
@@ -665,6 +686,18 @@
     linear-gradient(115deg, transparent 0 34%, rgba(255, 255, 255, 0.7) 44%, transparent 58%);
   mix-blend-mode: screen;
   transform: scale(0.82);
+}
+
+.arena-combat-strike-edge {
+  z-index: 5;
+  inset: -0.28rem;
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(calc(var(--strike-angle) + 90deg), transparent 0 28%, rgba(255, 255, 255, 0.95) 43%, rgba(251, 113, 133, 0.54) 51%, transparent 68%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.22), transparent 58%);
+  box-shadow: 0 0 24px rgba(244, 63, 94, 0.34), inset 0 0 18px rgba(255, 255, 255, 0.42);
+  mix-blend-mode: screen;
+  transform: scale(0.92) rotate(var(--strike-angle));
 }
 
 .arena-combat-hit-sparks {
@@ -707,8 +740,8 @@
 .arena-combat-float {
   position: absolute;
   left: 50%;
-  top: 0.55rem;
-  z-index: 4;
+  top: -0.3rem;
+  z-index: 16;
   transform: translateX(-50%);
   border-radius: 999px;
   padding: 0.18rem 0.5rem;
@@ -804,7 +837,10 @@
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 2;
+  border-radius: inherit;
   background: repeating-linear-gradient(-35deg, rgba(15, 23, 42, 0.14) 0 0.35rem, rgba(255, 255, 255, 0.08) 0.35rem 0.7rem);
+  pointer-events: none;
 }
 
 .arena-combat-card.is-hidden-card {
@@ -1068,20 +1104,20 @@
 
 @keyframes arena-combat-hit {
   0% { transform: translateX(0) translateY(0) scale(1); filter: brightness(1) saturate(1); }
-  10% { transform: translateX(0) translateY(0) scale(1.01); filter: brightness(1.18) saturate(1.12); }
-  18% { transform: translateX(-9px) translateY(3px) scale(0.962) rotate(-0.8deg); filter: brightness(1.36) saturate(1.25); }
-  30% { transform: translateX(8px) translateY(-2px) scale(1.02) rotate(0.58deg); }
-  45% { transform: translateX(-4px) translateY(1px) scale(0.992) rotate(-0.28deg); }
+  8% { transform: translateX(0) translateY(0) scale(1.018); filter: brightness(1.24) saturate(1.16); }
+  16% { transform: translateX(-13px) translateY(5px) scaleX(0.94) scaleY(1.035) rotate(-1.1deg); filter: brightness(1.42) saturate(1.3); }
+  28% { transform: translateX(9px) translateY(-3px) scaleX(1.025) scaleY(0.98) rotate(0.72deg); }
+  43% { transform: translateX(-5px) translateY(1px) scale(0.99) rotate(-0.36deg); }
   62% { transform: translateX(2px) translateY(0) scale(1.004) rotate(0.12deg); }
   100% { transform: translateX(0) translateY(0) scale(1); filter: brightness(1) saturate(1); }
 }
 
 @keyframes arena-combat-hit-alt {
   0% { transform: translateX(0) translateY(0) scale(1); filter: brightness(1) saturate(1); }
-  10% { transform: translateX(0) translateY(0) scale(1.01); filter: brightness(1.18) saturate(1.12); }
-  18% { transform: translateX(9px) translateY(3px) scale(0.962) rotate(0.8deg); filter: brightness(1.36) saturate(1.25); }
-  30% { transform: translateX(-8px) translateY(-2px) scale(1.02) rotate(-0.58deg); }
-  45% { transform: translateX(4px) translateY(1px) scale(0.992) rotate(0.28deg); }
+  8% { transform: translateX(0) translateY(0) scale(1.018); filter: brightness(1.24) saturate(1.16); }
+  16% { transform: translateX(13px) translateY(5px) scaleX(0.94) scaleY(1.035) rotate(1.1deg); filter: brightness(1.42) saturate(1.3); }
+  28% { transform: translateX(-9px) translateY(-3px) scaleX(1.025) scaleY(0.98) rotate(-0.72deg); }
+  43% { transform: translateX(5px) translateY(1px) scale(0.99) rotate(0.36deg); }
   62% { transform: translateX(-2px) translateY(0) scale(1.004) rotate(-0.12deg); }
   100% { transform: translateX(0) translateY(0) scale(1); filter: brightness(1) saturate(1); }
 }
@@ -1160,6 +1196,14 @@
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
   14% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
   100% { opacity: 0; transform: translate(calc(-50% + var(--spark-x)), calc(-50% + var(--spark-y))) scale(0.12); }
+}
+
+@keyframes arena-combat-strike-edge {
+  0% { opacity: 0; transform: scale(0.78) rotate(var(--strike-angle)); filter: blur(1px); }
+  32% { opacity: 0; }
+  48% { opacity: 1; transform: scaleX(1.08) scaleY(0.86) rotate(var(--strike-angle)); filter: blur(0); }
+  62% { opacity: 0.72; transform: scaleX(0.88) scaleY(1.18) rotate(var(--strike-angle)); }
+  100% { opacity: 0; transform: scale(1.28) rotate(var(--strike-angle)); filter: blur(1.4px); }
 }
 
 @keyframes arena-vfx-screen-flash {
@@ -1508,6 +1552,16 @@
   animation-duration: 520ms;
 }
 
+.arena-combat-card.is-action-attack.is-acting {
+  z-index: 12;
+  filter: drop-shadow(0 20px 26px rgba(127, 29, 29, 0.2));
+}
+
+.arena-combat-card.is-action-attack.is-acting .arena-combat-strike-edge {
+  opacity: 1;
+  animation: arena-combat-strike-edge 470ms cubic-bezier(.12, .9, .18, 1) 170ms both;
+}
+
 .arena-combat-card.is-action-skill.is-acting .arena-combat-speed-lines,
 .arena-combat-card.is-action-control.is-acting .arena-combat-speed-lines {
   background:
@@ -1527,47 +1581,81 @@
 
 .arena-combat-card.is-hit .arena-combat-contact-flash,
 .arena-combat-card.is-heavy-impact.is-targeted .arena-combat-contact-flash {
-  animation-duration: 360ms;
+  animation-delay: 205ms;
+  animation-duration: 320ms;
 }
 
 .arena-combat-card.is-hit .arena-combat-hit-sparks span,
 .arena-combat-card.is-heavy-impact.is-targeted .arena-combat-hit-sparks span {
-  animation-duration: 360ms;
+  animation-delay: 205ms;
+  animation-duration: 320ms;
+}
+
+.arena-combat-card.is-hit {
+  animation-delay: 205ms;
+}
+
+.arena-combat-float.is-damage,
+.arena-combat-float.is-retire {
+  animation-delay: 215ms;
+}
+
+.arena-combat-card.is-hit .arena-combat-hit-sparks span:nth-child(2),
+.arena-combat-card.is-heavy-impact.is-targeted .arena-combat-hit-sparks span:nth-child(2) {
+  animation-delay: 235ms;
+}
+
+.arena-combat-card.is-hit .arena-combat-hit-sparks span:nth-child(3),
+.arena-combat-card.is-heavy-impact.is-targeted .arena-combat-hit-sparks span:nth-child(3) {
+  animation-delay: 260ms;
+}
+
+.arena-combat-card.is-hit .arena-combat-hit-sparks span:nth-child(4),
+.arena-combat-card.is-heavy-impact.is-targeted .arena-combat-hit-sparks span:nth-child(4) {
+  animation-delay: 285ms;
 }
 
 @keyframes arena-combat-dash-strike-up {
   0% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
-  14% { transform: translateY(8px) translateX(-2px) scale(0.96) rotate(-0.25deg); filter: brightness(0.9); }
-  34% { transform: translateY(-42px) translateX(10px) scale(1.16) rotate(1.4deg); filter: brightness(1.34) saturate(1.24); }
-  44% { transform: translateY(-50px) translateX(16px) scale(1.1) rotate(-0.7deg); filter: brightness(1.44) saturate(1.3); }
-  62% { transform: translateY(-10px) translateX(-4px) scale(0.985) rotate(0.3deg); }
+  10% { transform: translateY(var(--strike-windup-y)) translateX(var(--strike-windup-x)) scale(0.93) rotate(-0.4deg); filter: brightness(0.84); }
+  28% { transform: translateY(var(--strike-near-y)) translateX(var(--strike-near-x)) scale(1.18) rotate(2.2deg); filter: brightness(1.42) saturate(1.26); }
+  34% { transform: translateY(var(--strike-hit-y)) translateX(var(--strike-hit-x)) scaleX(1.16) scaleY(0.94) rotate(-1deg); filter: brightness(1.62) saturate(1.36); }
+  40% { transform: translateY(var(--strike-smash-y)) translateX(var(--strike-smash-x)) scaleX(0.9) scaleY(1.12) rotate(-2.4deg); filter: brightness(1.82) saturate(1.45); }
+  50% { transform: translateY(var(--strike-exit-y)) translateX(var(--strike-exit-x)) scaleX(1.06) scaleY(0.97) rotate(0.8deg); }
+  70% { transform: translateY(var(--strike-recoil-y)) translateX(var(--strike-recoil-x)) scale(0.96) rotate(-0.24deg); }
   100% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
 }
 
 @keyframes arena-combat-dash-strike-up-alt {
   0% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
-  14% { transform: translateY(8px) translateX(2px) scale(0.96) rotate(0.25deg); filter: brightness(0.9); }
-  34% { transform: translateY(-42px) translateX(-10px) scale(1.16) rotate(-1.4deg); filter: brightness(1.34) saturate(1.24); }
-  44% { transform: translateY(-50px) translateX(-16px) scale(1.1) rotate(0.7deg); filter: brightness(1.44) saturate(1.3); }
-  62% { transform: translateY(-10px) translateX(4px) scale(0.985) rotate(-0.3deg); }
+  10% { transform: translateY(var(--strike-windup-y)) translateX(var(--strike-windup-x)) scale(0.93) rotate(0.4deg); filter: brightness(0.84); }
+  28% { transform: translateY(var(--strike-near-y)) translateX(var(--strike-near-x)) scale(1.18) rotate(-2.2deg); filter: brightness(1.42) saturate(1.26); }
+  34% { transform: translateY(var(--strike-hit-y)) translateX(var(--strike-hit-x)) scaleX(1.16) scaleY(0.94) rotate(1deg); filter: brightness(1.62) saturate(1.36); }
+  40% { transform: translateY(var(--strike-smash-y)) translateX(var(--strike-smash-x)) scaleX(0.9) scaleY(1.12) rotate(2.4deg); filter: brightness(1.82) saturate(1.45); }
+  50% { transform: translateY(var(--strike-exit-y)) translateX(var(--strike-exit-x)) scaleX(1.06) scaleY(0.97) rotate(-0.8deg); }
+  70% { transform: translateY(var(--strike-recoil-y)) translateX(var(--strike-recoil-x)) scale(0.96) rotate(0.24deg); }
   100% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
 }
 
 @keyframes arena-combat-dash-strike-down {
   0% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
-  14% { transform: translateY(-8px) translateX(2px) scale(0.96) rotate(0.25deg); filter: brightness(0.9); }
-  34% { transform: translateY(42px) translateX(-10px) scale(1.16) rotate(-1.4deg); filter: brightness(1.34) saturate(1.24); }
-  44% { transform: translateY(50px) translateX(-16px) scale(1.1) rotate(0.7deg); filter: brightness(1.44) saturate(1.3); }
-  62% { transform: translateY(10px) translateX(4px) scale(0.985) rotate(-0.3deg); }
+  10% { transform: translateY(var(--strike-windup-y)) translateX(var(--strike-windup-x)) scale(0.93) rotate(0.4deg); filter: brightness(0.84); }
+  28% { transform: translateY(var(--strike-near-y)) translateX(var(--strike-near-x)) scale(1.18) rotate(-2.2deg); filter: brightness(1.42) saturate(1.26); }
+  34% { transform: translateY(var(--strike-hit-y)) translateX(var(--strike-hit-x)) scaleX(1.16) scaleY(0.94) rotate(1deg); filter: brightness(1.62) saturate(1.36); }
+  40% { transform: translateY(var(--strike-smash-y)) translateX(var(--strike-smash-x)) scaleX(0.9) scaleY(1.12) rotate(2.4deg); filter: brightness(1.82) saturate(1.45); }
+  50% { transform: translateY(var(--strike-exit-y)) translateX(var(--strike-exit-x)) scaleX(1.06) scaleY(0.97) rotate(-0.8deg); }
+  70% { transform: translateY(var(--strike-recoil-y)) translateX(var(--strike-recoil-x)) scale(0.96) rotate(0.24deg); }
   100% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
 }
 
 @keyframes arena-combat-dash-strike-down-alt {
   0% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
-  14% { transform: translateY(-8px) translateX(-2px) scale(0.96) rotate(-0.25deg); filter: brightness(0.9); }
-  34% { transform: translateY(42px) translateX(10px) scale(1.16) rotate(1.4deg); filter: brightness(1.34) saturate(1.24); }
-  44% { transform: translateY(50px) translateX(16px) scale(1.1) rotate(-0.7deg); filter: brightness(1.44) saturate(1.3); }
-  62% { transform: translateY(10px) translateX(-4px) scale(0.985) rotate(0.3deg); }
+  10% { transform: translateY(var(--strike-windup-y)) translateX(var(--strike-windup-x)) scale(0.93) rotate(-0.4deg); filter: brightness(0.84); }
+  28% { transform: translateY(var(--strike-near-y)) translateX(var(--strike-near-x)) scale(1.18) rotate(2.2deg); filter: brightness(1.42) saturate(1.26); }
+  34% { transform: translateY(var(--strike-hit-y)) translateX(var(--strike-hit-x)) scaleX(1.16) scaleY(0.94) rotate(-1deg); filter: brightness(1.62) saturate(1.36); }
+  40% { transform: translateY(var(--strike-smash-y)) translateX(var(--strike-smash-x)) scaleX(0.9) scaleY(1.12) rotate(-2.4deg); filter: brightness(1.82) saturate(1.45); }
+  50% { transform: translateY(var(--strike-exit-y)) translateX(var(--strike-exit-x)) scaleX(1.06) scaleY(0.97) rotate(0.8deg); }
+  70% { transform: translateY(var(--strike-recoil-y)) translateX(var(--strike-recoil-x)) scale(0.96) rotate(-0.24deg); }
   100% { transform: translateY(0) translateX(0) scale(1) rotate(0deg); filter: brightness(1); }
 }
 
@@ -1633,6 +1721,8 @@
   }
 
   .arena-combat-card {
+    --strike-y: clamp(4.4rem, 19vw, 7rem);
+    --strike-x: clamp(0.6rem, 5vw, 1.5rem);
     grid-template-columns: 3.75rem minmax(0, 1fr);
   }
 
