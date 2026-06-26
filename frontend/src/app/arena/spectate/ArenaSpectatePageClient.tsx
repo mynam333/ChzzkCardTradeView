@@ -15,6 +15,8 @@ import type {
 } from '@chikapo/arena-contract';
 import {
   ArenaBattleStage,
+  ARENA_BATTLE_TURN_MS,
+  buildArenaBattleTurns,
   formatDateTime,
   getRoundCards,
   getRoundSlots,
@@ -116,8 +118,10 @@ export const ArenaSpectatePageClient: React.FC = () => {
   const rounds = payload?.replay.rounds || [];
   const selectedRound = rounds.find((round) => round.round_no === selectedRoundNo) || rounds[0];
   const events = selectedRound?.events || [];
-  const activeEvent = events.length > 0 ? events[Math.min(eventIndex, events.length - 1)] : undefined;
-  const roundFinished = events.length === 0 || eventIndex >= events.length - 1;
+  const battleTurns = React.useMemo(() => buildArenaBattleTurns(events), [events]);
+  const activeTurn = battleTurns.length > 0 ? battleTurns[Math.min(eventIndex, battleTurns.length - 1)] : undefined;
+  const activeEvent = activeTurn?.primary;
+  const roundFinished = battleTurns.length === 0 || eventIndex >= battleTurns.length - 1;
   const roundResult = payload?.match.round_results?.find((round) => Number(round.round_no) === Number(selectedRound?.round_no));
   const match = payload ? ({
     id: payload.match.match_id,
@@ -157,14 +161,14 @@ export const ArenaSpectatePageClient: React.FC = () => {
   }, [initialShare, loadSpectatorReplay]);
 
   React.useEffect(() => {
-    if (!playing || !selectedRound || events.length === 0) return;
-    if (eventIndex >= events.length - 1) {
+    if (!playing || !selectedRound || battleTurns.length === 0) return;
+    if (eventIndex >= battleTurns.length - 1) {
       setPlaying(false);
       return;
     }
-    const timer = window.setTimeout(() => setEventIndex((prev) => Math.min(events.length - 1, prev + 1)), 360);
+    const timer = window.setTimeout(() => setEventIndex((prev) => Math.min(battleTurns.length - 1, prev + 1)), ARENA_BATTLE_TURN_MS);
     return () => window.clearTimeout(timer);
-  }, [eventIndex, events.length, playing, selectedRound]);
+  }, [battleTurns.length, eventIndex, playing, selectedRound]);
 
   const restartRound = () => {
     setEventIndex(0);
@@ -265,6 +269,7 @@ export const ArenaSpectatePageClient: React.FC = () => {
                   opponentCards={getRoundCards(payload.match.opponent_deck, selectedRound.round_no)}
                   playerSlots={getRoundSlots(payload.match.player_deck, selectedRound.round_no)}
                   opponentSlots={getRoundSlots(payload.match.opponent_deck, selectedRound.round_no)}
+                  activeTurn={activeTurn}
                   activeEvent={activeEvent}
                   battleEvents={events}
                   battleEventIndex={eventIndex}
@@ -283,14 +288,14 @@ export const ArenaSpectatePageClient: React.FC = () => {
                     <p className="text-[10px] font-black text-primary">R{selectedRound.round_no} {winnerLabel(selectedRound.winner_side)}</p>
                     <p className="mt-1 truncate text-sm font-black text-foreground">{activeEvent?.message || '라운드를 재생하면 전투 흐름이 표시됩니다.'}</p>
                     <p className="mt-1 text-[10px] font-bold text-muted-foreground">
-                      {events.length > 0 ? `${Math.min(eventIndex + 1, events.length)} / ${events.length} 이벤트` : '이벤트 없음'}
+                      {battleTurns.length > 0 ? `${Math.min(eventIndex + 1, battleTurns.length)} / ${battleTurns.length} 턴` : '턴 없음'}
                     </p>
                   </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={restartRound}
-                      disabled={events.length === 0}
+                      disabled={battleTurns.length === 0}
                       className="cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-2 text-xs font-black text-foreground disabled:opacity-50"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
@@ -299,7 +304,7 @@ export const ArenaSpectatePageClient: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setPlaying((prev) => !prev)}
-                      disabled={events.length === 0 || roundFinished}
+                      disabled={battleTurns.length === 0 || roundFinished}
                       className="arena-primary-cta cute-wiggle-hover inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground shadow-lg shadow-primary/20 disabled:opacity-50"
                     >
                       {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
@@ -310,7 +315,7 @@ export const ArenaSpectatePageClient: React.FC = () => {
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-white/10">
                   <div
                     className="h-full rounded-full bg-primary transition-all duration-300"
-                    style={{ width: `${events.length > 0 ? Math.max(4, Math.round(((eventIndex + 1) / events.length) * 100)) : 0}%` }}
+                    style={{ width: `${battleTurns.length > 0 ? Math.max(4, Math.round(((eventIndex + 1) / battleTurns.length) * 100)) : 0}%` }}
                   />
                 </div>
               </div>

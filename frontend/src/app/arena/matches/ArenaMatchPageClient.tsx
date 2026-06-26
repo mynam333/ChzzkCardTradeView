@@ -135,6 +135,10 @@ export type ArenaCosmeticLoadout = {
 };
 
 const ARENA_ACTIVE_SLOT_COUNT = 6;
+const ARENA_VFX_PARTICLES = Array.from({ length: 16 }, (_, index) => index);
+export const ARENA_BATTLE_TURN_MS = 1450;
+const ARENA_BATTLE_RESULT_SETTLE_MS = 900;
+const ARENA_BATTLE_MIN_REVEAL_MS = 2200;
 
 const statLabels: Array<[keyof NonNullable<ArenaSnapshotCardDto['stats']>, string, string]> = [
   ['hp', 'HP', '체력'],
@@ -437,31 +441,142 @@ const getCardBySlots = (
   }));
 };
 
+type ArenaReplayEvent = ArenaReplayPayloadDto['rounds'][number]['events'][number];
+
+export type ArenaBattleTurn = {
+  id: string;
+  primary: ArenaReplayEvent;
+  events: ArenaReplayEvent[];
+  actor?: string;
+  targetIds: string[];
+  actionType: 'start' | 'attack' | 'skill' | 'heal' | 'guard' | 'control' | 'retire' | 'effect';
+  skillName?: string;
+  value: number;
+};
+
+const normalizeCombatToken = (value?: string | null) => String(value || '').trim().toLowerCase();
+
+const getEventTargets = (event: ArenaReplayEvent): string[] => {
+  const targets = Array.isArray(event.targets) ? event.targets.filter(Boolean).map(String) : [];
+  if (String(event.type || '').toUpperCase() === 'DEATH' && event.actor) return [...targets, String(event.actor)];
+  return targets;
+};
+
+const mergeUniqueTargets = (events: ArenaReplayEvent[]) => {
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  events.forEach((event) => {
+    getEventTargets(event).forEach((target) => {
+      if (!seen.has(target)) {
+        seen.add(target);
+        targets.push(target);
+      }
+    });
+  });
+  return targets;
+};
+
+const getTurnActionType = (events: ArenaReplayEvent[]): ArenaBattleTurn['actionType'] => {
+  const text = events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ').toLowerCase();
+  if (text.includes('round_start')) return 'start';
+  if (text.includes('skill_cast') || text.includes('skill') || text.includes('스킬')) return 'skill';
+  if (text.includes('heal') || text.includes('회복')) return 'heal';
+  if (text.includes('shield') || text.includes('guard') || text.includes('보호') || text.includes('방어')) return 'guard';
+  if (text.includes('stun') || text.includes('slow') || text.includes('control') || text.includes('delay') || text.includes('기절') || text.includes('지연')) return 'control';
+  if (text.includes('death') || text.includes('전투 불능')) return 'retire';
+  if (text.includes('basic_attack') || text.includes('damage')) return 'attack';
+  return 'effect';
+};
+
+export const buildArenaBattleTurns = (events: ArenaReplayEvent[]): ArenaBattleTurn[] => {
+  const turns: ArenaBattleTurn[] = [];
+  let current: ArenaReplayEvent[] = [];
+
+  const flush = () => {
+    if (current.length === 0) return;
+    const primary = current[0];
+    const skillCast = current.find((event) => String(event.type || '').toUpperCase() === 'SKILL_CAST');
+    const value = current.reduce((total, event) => total + Math.max(0, Number(event.value || 0)), 0);
+    turns.push({
+      id: `${primary.t}-${primary.type}-${turns.length}`,
+      primary,
+      events: current,
+      actor: primary.actor,
+      targetIds: mergeUniqueTargets(current),
+      actionType: getTurnActionType(current),
+      skillName: skillCast?.message,
+      value
+    });
+    current = [];
+  };
+
+  events.forEach((event) => {
+    const type = String(event.type || '').toUpperCase();
+    const startsAction = type === 'ROUND_START' || type === 'BASIC_ATTACK' || type === 'SKILL_CAST';
+    const currentPrimary = current[0];
+    const currentTargets = new Set(mergeUniqueTargets(current).map(normalizeCombatToken));
+    const eventTargets = getEventTargets(event).map(normalizeCombatToken);
+    const canAttachToCurrent = current.length > 0
+      && event.t === currentPrimary.t
+      && (
+        normalizeCombatToken(event.actor) === normalizeCombatToken(currentPrimary.actor)
+        || eventTargets.some((target) => currentTargets.has(target))
+        || (type === 'DEATH' && currentTargets.has(normalizeCombatToken(event.actor)))
+      );
+
+    if (current.length === 0 || startsAction || !canAttachToCurrent) {
+      flush();
+      current = [event];
+      return;
+    }
+    current.push(event);
+  });
+  flush();
+  return turns;
+};
+
+export const getArenaBattleRevealDurationMs = (turnCount: number) =>
+  Math.max(ARENA_BATTLE_MIN_REVEAL_MS, Math.max(1, turnCount) * ARENA_BATTLE_TURN_MS + ARENA_BATTLE_RESULT_SETTLE_MS);
+
+const eventMatchesCard = (value: string | undefined, card: ArenaSnapshotCardDto) => {
+  const token = normalizeCombatToken(value);
+  if (!token) return false;
+  return [card.name, card.card_id, card.channel_id].some((candidate) => {
+    const normalized = normalizeCombatToken(candidate);
+    return normalized && (token === normalized || token.includes(normalized) || normalized.includes(token));
+  });
+};
+
 const eventMentionsCard = (
-  event: ArenaReplayPayloadDto['rounds'][number]['events'][number] | undefined,
+  event: ArenaReplayEvent | undefined,
   card: ArenaSnapshotCardDto
 ) => {
   if (!event) return false;
-  const text = `${event.actor || ''} ${(event.targets || []).join(' ')} ${event.message || ''}`.toLowerCase();
-  return text.includes(card.name.toLowerCase()) || text.includes(card.card_id.toLowerCase()) || text.includes(card.channel_id.toLowerCase());
+  return eventMatchesCard(event.actor, card)
+    || (event.targets || []).some((target) => eventMatchesCard(target, card))
+    || eventMatchesCard(event.message, card);
 };
 
 const eventActorMentionsCard = (
-  event: ArenaReplayPayloadDto['rounds'][number]['events'][number] | undefined,
+  event: ArenaReplayEvent | undefined,
   card: ArenaSnapshotCardDto
 ) => {
-  if (!event?.actor) return false;
-  const actor = event.actor.toLowerCase();
-  return actor.includes(card.name.toLowerCase()) || actor.includes(card.card_id.toLowerCase()) || actor.includes(card.channel_id.toLowerCase());
+  return eventMatchesCard(event?.actor, card);
 };
 
-const isControlEvent = (event?: ArenaReplayPayloadDto['rounds'][number]['events'][number]) => {
+const turnTargetsCard = (turn: ArenaBattleTurn | undefined, card: ArenaSnapshotCardDto) => {
+  if (!turn) return false;
+  return turn.targetIds.some((target) => eventMatchesCard(target, card))
+    || turn.events.some((event) => eventMentionsCard(event, card) && !eventActorMentionsCard(event, card));
+};
+
+const isControlEvent = (event?: ArenaReplayEvent) => {
   const text = `${event?.type || ''} ${event?.message || ''}`.toLowerCase();
   return ['stun', 'slow', 'control', 'delay', 'debuff', '침묵', '기절', '지연', '약화'].some((token) => text.includes(token));
 };
 
-const getEventVfxKind = (event?: ArenaReplayPayloadDto['rounds'][number]['events'][number]) => {
-  const text = `${event?.type || ''} ${event?.actor || ''} ${event?.message || ''}`.toLowerCase();
+const getEventVfxKind = (event?: ArenaReplayEvent, turn?: ArenaBattleTurn) => {
+  const text = `${turn?.actionType || ''} ${event?.type || ''} ${event?.actor || ''} ${event?.message || ''}`.toLowerCase();
   if (['ultimate', 'ult', '궁극'].some((token) => text.includes(token))) return 'ultimate';
   if (['heal', 'recover', 'regen', '회복', '재생'].some((token) => text.includes(token))) return 'heal';
   if (['shield', 'guard', 'barrier', 'protect', '방어', '보호', '장벽'].some((token) => text.includes(token))) return 'guard';
@@ -475,7 +590,7 @@ const getEventVfxKind = (event?: ArenaReplayPayloadDto['rounds'][number]['events
 
 const estimateCardHealth = (
   card: ArenaSnapshotCardDto,
-  events: ArenaReplayPayloadDto['rounds'][number]['events'],
+  events: ArenaReplayEvent[],
   eventIndex: number,
   retired: boolean
 ) => {
@@ -487,6 +602,86 @@ const estimateCardHealth = (
   }, 0);
   const remaining = Math.max(0, max - damage);
   return { max, remaining, percent: Math.max(0, Math.min(100, Math.round((remaining / max) * 100))) };
+};
+
+const getTurnValueForCard = (turn: ArenaBattleTurn | undefined, card: ArenaSnapshotCardDto) => {
+  if (!turn) return 0;
+  return turn.events.reduce((total, event) => {
+    if (!eventMentionsCard(event, card) || eventActorMentionsCard(event, card)) return total;
+    return total + Math.max(0, Number(event.value || 0));
+  }, 0);
+};
+
+const buildCombatNameResolver = (cards: ArenaSnapshotCardDto[]) => {
+  const entries = cards.flatMap((card) => [
+    [normalizeCombatToken(card.card_id), card.name] as const,
+    [normalizeCombatToken(card.channel_id), card.name] as const,
+    [normalizeCombatToken(card.name), card.name] as const
+  ]);
+  const lookup = new Map(entries.filter(([key]) => Boolean(key)));
+  return (value?: string) => {
+    const normalized = normalizeCombatToken(value);
+    if (!normalized) return '';
+    return lookup.get(normalized) || value || '';
+  };
+};
+
+const getTurnActionLabel = (turn?: ArenaBattleTurn) => {
+  if (!turn) return '전투 대기';
+  if (turn.actionType === 'start') return '라운드 시작';
+  if (turn.actionType === 'skill') return turn.skillName || '스킬 사용';
+  if (turn.actionType === 'heal') return '회복';
+  if (turn.actionType === 'guard') return '보호';
+  if (turn.actionType === 'control') return '제어 효과';
+  if (turn.actionType === 'retire') return '전투 불능';
+  if (turn.actionType === 'attack') return '기본 공격';
+  return '전투 효과';
+};
+
+const getTurnCaption = (turn: ArenaBattleTurn | undefined, resolveName: (value?: string) => string) => {
+  if (!turn) return '카드 배치와 전술 선택이 전투 흐름을 만듭니다.';
+  if (turn.actionType === 'start') return turn.primary.message || '라운드가 시작되었습니다.';
+  const actorName = resolveName(turn.actor) || turn.primary.actor || '전투 카드';
+  const targetNames = turn.targetIds.map(resolveName).filter(Boolean);
+  const targetLabel = targetNames.length > 0 ? targetNames.slice(0, 2).join(', ') : '대상';
+  const turnText = turn.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ').toLowerCase();
+  const positiveEffect = turn.actionType === 'heal'
+    || turn.actionType === 'guard'
+    || turnText.includes('heal')
+    || turnText.includes('shield')
+    || turnText.includes('guard')
+    || turnText.includes('회복')
+    || turnText.includes('보호');
+  const suffix = turn.value > 0
+    ? positiveEffect
+      ? ` +${turn.value}`
+      : ` ${turn.value}`
+    : '';
+  return `${actorName} → ${targetLabel}${suffix}`;
+};
+
+const findCombatCardSide = (
+  value: string | undefined,
+  playerCards: ArenaSnapshotCardDto[],
+  opponentCards: ArenaSnapshotCardDto[]
+) => {
+  if (!value) return null;
+  if (playerCards.some((card) => eventMatchesCard(value, card))) return 'player';
+  if (opponentCards.some((card) => eventMatchesCard(value, card))) return 'opponent';
+  return null;
+};
+
+const getTurnVfxKind = (turn?: ArenaBattleTurn) => {
+  if (!turn) return 'idle';
+  const text = turn.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ').toLowerCase();
+  if (turn.actionType === 'heal' || text.includes('heal') || text.includes('회복')) return 'heal';
+  if (turn.actionType === 'guard' || text.includes('shield') || text.includes('guard') || text.includes('보호')) return 'guard';
+  if (turn.actionType === 'control' || text.includes('stun') || text.includes('slow') || text.includes('기절') || text.includes('지연')) return 'control';
+  if (text.includes('ultimate') || text.includes('ult') || text.includes('궁극')) return 'ultimate';
+  if (turn.actionType === 'skill' || text.includes('skill_cast')) return 'skill';
+  if (turn.actionType === 'retire' || text.includes('death')) return 'retire';
+  if (turn.actionType === 'attack') return 'attack';
+  return 'effect';
 };
 
 const ArenaCombatPortrait: React.FC<{
@@ -524,26 +719,55 @@ const ArenaCombatCard: React.FC<{
   side: 'player' | 'opponent';
   slot: SelectedRoundSlot;
   visualIndex: number;
-  activeEvent?: ArenaReplayPayloadDto['rounds'][number]['events'][number];
-  battleEvents: ArenaReplayPayloadDto['rounds'][number]['events'];
+  activeTurn?: ArenaBattleTurn;
+  activeEvent?: ArenaReplayEvent;
+  battleEvents: ArenaReplayEvent[];
   battleEventIndex: number;
   roundReveal: RoundRevealState | null;
   retired: boolean;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
-}> = ({ card, side, slot, visualIndex, activeEvent, battleEvents, battleEventIndex, roundReveal, retired, skillLookup, classLookup }) => {
-  const acting = roundReveal?.stage === 'battle' && eventActorMentionsCard(activeEvent, card);
-  const mentioned = roundReveal?.stage === 'battle' && eventMentionsCard(activeEvent, card);
-  const hit = mentioned && !acting;
-  const skillEvent = acting && String(activeEvent?.type || activeEvent?.message || '').toLowerCase().includes('skill');
-  const controlEvent = mentioned && isControlEvent(activeEvent);
-  const vfxKind = acting || hit || controlEvent ? getEventVfxKind(activeEvent) : 'idle';
-  const health = estimateCardHealth(card, battleEvents, battleEventIndex, retired);
-  const currentValue = typeof activeEvent?.value === 'number' && (hit || acting) ? Math.max(0, Number(activeEvent.value || 0)) : 0;
-  const statusLabel = retired ? 'RETIRE' : hit ? `-${currentValue || 'HIT'}` : controlEvent ? '상태 이상' : skillEvent ? 'SKILL' : acting ? (vfxKind === 'ultimate' ? 'ULTIMATE' : 'ATTACK') : '';
+}> = ({ card, side, slot, visualIndex, activeTurn, activeEvent, battleEvents, battleEventIndex, roundReveal, retired, skillLookup, classLookup }) => {
+  const isBattle = roundReveal?.stage === 'battle';
+  const acting = Boolean(isBattle && activeTurn && activeTurn.actor && eventMatchesCard(activeTurn.actor, card));
+  const targeted = Boolean(isBattle && activeTurn && turnTargetsCard(activeTurn, card));
+  const activeTurnText = activeTurn?.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ').toLowerCase() || '';
+  const turnHasHeal = activeTurnText.includes('heal') || activeTurnText.includes('회복');
+  const turnHasGuard = activeTurnText.includes('shield') || activeTurnText.includes('guard') || activeTurnText.includes('보호') || activeTurnText.includes('방어');
+  const turnHasDamage = activeTurnText.includes('damage') || activeTurnText.includes('basic_attack') || activeTurnText.includes('death');
+  const healed = targeted && turnHasHeal;
+  const guarded = targeted && !healed && turnHasGuard;
+  const hit = targeted && !acting && !healed && !guarded && (turnHasDamage || ['attack', 'skill', 'control', 'retire', 'effect'].includes(activeTurn?.actionType || ''));
+  const skillEvent = acting && activeTurn?.actionType === 'skill';
+  const controlEvent = targeted && (activeTurn?.actionType === 'control' || activeTurn?.events.some(isControlEvent));
+  const vfxKind = acting || targeted || controlEvent ? getEventVfxKind(activeEvent, activeTurn) : 'idle';
+  const activeEventCursor = activeTurn
+    ? Math.max(...activeTurn.events.map((event) => battleEvents.indexOf(event)).filter((index) => index >= 0), 0)
+    : battleEventIndex;
+  const health = estimateCardHealth(card, battleEvents, activeEventCursor, retired);
+  const currentValue = getTurnValueForCard(activeTurn, card);
+  const waitingTurn = Boolean(isBattle && activeTurn && !acting && !targeted);
+  const turnParity = battleEventIndex % 2 === 0 ? 'is-turn-even' : 'is-turn-odd';
+  const actionClass = activeTurn?.actionType ? `is-action-${activeTurn.actionType}` : 'is-action-idle';
+  const heavyImpact = Boolean(activeTurn && ['skill', 'control', 'retire'].includes(activeTurn.actionType)) || vfxKind === 'ultimate';
+  const statusLabel = retired
+    ? 'RETIRE'
+    : healed
+      ? `+${currentValue || 'HEAL'}`
+      : guarded
+        ? `+${currentValue || 'GUARD'}`
+        : hit
+          ? `-${currentValue || 'HIT'}`
+          : controlEvent
+            ? '상태 이상'
+            : skillEvent
+              ? (activeTurn?.skillName || 'SKILL')
+              : acting
+                ? '공격'
+                : '';
   return (
     <article
-      className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${acting ? 'is-acting' : ''} ${hit ? 'is-hit' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
+      className={`arena-combat-card is-${side} ${slot.row === 1 ? 'is-frontline' : 'is-backline'} ${turnParity} ${actionClass} ${acting ? 'is-acting' : ''} ${targeted ? 'is-targeted' : ''} ${waitingTurn ? 'is-waiting-turn' : ''} ${hit ? 'is-hit' : ''} ${healed ? 'is-healed' : ''} ${guarded ? 'is-guarded' : ''} ${skillEvent ? 'is-skill' : ''} ${controlEvent ? 'is-control' : ''} ${heavyImpact ? 'is-heavy-impact' : ''} vfx-${vfxKind} ${retired ? 'is-retired' : ''}`.trim()}
       style={{ ['--combat-delay' as any]: `${visualIndex * 90}ms` }}
     >
       <div className="arena-combat-card-media">
@@ -566,8 +790,24 @@ const ArenaCombatCard: React.FC<{
         <span style={{ width: `${health.percent}%` }} />
       </div>
       <div className="arena-combat-hp-text">{health.remaining}/{health.max}</div>
-      {statusLabel ? <div className={`arena-combat-float ${hit ? 'is-damage' : retired ? 'is-retire' : controlEvent ? 'is-control' : 'is-action'}`}>{statusLabel}</div> : null}
+      {statusLabel ? (
+        <div
+          key={`${card.card_id}-${battleEventIndex}-${statusLabel}`}
+          className={`arena-combat-float ${hit ? 'is-damage' : healed ? 'is-heal' : guarded ? 'is-guard' : retired ? 'is-retire' : controlEvent ? 'is-control' : 'is-action'}`}
+        >
+          {statusLabel}
+        </div>
+      ) : null}
+      <div className="arena-combat-contact-flash" aria-hidden="true" />
       <div className="arena-combat-vfx" />
+      <div className="arena-combat-energy-ring" aria-hidden="true" />
+      <div className="arena-combat-speed-lines" aria-hidden="true" />
+      <div className="arena-combat-hit-sparks" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
     </article>
   );
 };
@@ -577,14 +817,15 @@ const ArenaCombatFormation: React.FC<{
   cards: ArenaSnapshotCardDto[];
   slots: SelectedRoundSlot[];
   revealed?: boolean;
-  activeEvent?: ArenaReplayPayloadDto['rounds'][number]['events'][number];
-  battleEvents: ArenaReplayPayloadDto['rounds'][number]['events'];
+  activeTurn?: ArenaBattleTurn;
+  activeEvent?: ArenaReplayEvent;
+  battleEvents: ArenaReplayEvent[];
   battleEventIndex: number;
   roundReveal: RoundRevealState | null;
   remainingUnits?: number;
   skillLookup: Map<string, ArenaRuleSkill>;
   classLookup: Map<string, ArenaRuleClass>;
-}> = ({ side, cards, slots, revealed = true, activeEvent, battleEvents, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
+}> = ({ side, cards, slots, revealed = true, activeTurn, activeEvent, battleEvents, battleEventIndex, roundReveal, remainingUnits, skillLookup, classLookup }) => {
   const positioned = getCardBySlots(cards, slots);
   const retiredStart = typeof remainingUnits === 'number' ? Math.max(0, positioned.length - Math.max(0, remainingUnits)) : 0;
   const displayRows = side === 'opponent'
@@ -611,6 +852,7 @@ const ArenaCombatFormation: React.FC<{
                   side={side}
                   slot={item.slot}
                   visualIndex={item.visualIndex}
+                  activeTurn={activeTurn}
                   activeEvent={activeEvent}
                   battleEvents={battleEvents}
                   battleEventIndex={battleEventIndex}
@@ -634,8 +876,9 @@ export const ArenaBattleStage: React.FC<{
   opponentCards: ArenaSnapshotCardDto[];
   playerSlots: SelectedRoundSlot[];
   opponentSlots: SelectedRoundSlot[];
-  activeEvent?: ArenaReplayPayloadDto['rounds'][number]['events'][number];
-  battleEvents: ArenaReplayPayloadDto['rounds'][number]['events'];
+  activeTurn?: ArenaBattleTurn;
+  activeEvent?: ArenaReplayEvent;
+  battleEvents: ArenaReplayEvent[];
   battleEventIndex: number;
   revealOpponent: boolean;
   roundReveal: RoundRevealState | null;
@@ -644,13 +887,65 @@ export const ArenaBattleStage: React.FC<{
   classLookup: Map<string, ArenaRuleClass>;
   user: any;
   loadout: ArenaCosmeticLoadout | null;
-}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeEvent, battleEvents, battleEventIndex, revealOpponent, roundReveal, roundResult, skillLookup, classLookup, user, loadout }) => {
+}> = ({ match, playerCards, opponentCards, playerSlots, opponentSlots, activeTurn, activeEvent, battleEvents, battleEventIndex, revealOpponent, roundReveal, roundResult, skillLookup, classLookup, user, loadout }) => {
   const opponentAvatar = opponentCards[0]?.image_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(match.player_b_id || `arena-bot-${match.id}`)}`;
   const playerLabel = user?.username || '나';
   const opponentLabel = match.match_type === 'RANKED' ? '상대 플레이어' : 'AI 연습 상대';
+  const resolveCombatName = React.useMemo(
+    () => buildCombatNameResolver([...playerCards, ...opponentCards]),
+    [playerCards, opponentCards]
+  );
+  const actionLabel = roundReveal?.stage === 'battle'
+    ? getTurnActionLabel(activeTurn)
+    : roundReveal?.stage === 'result'
+      ? winnerLabel(roundReveal.winner)
+      : '전술 준비';
+  const actionCaption = roundReveal?.stage === 'battle'
+    ? getTurnCaption(activeTurn, resolveCombatName)
+    : '카드 배치와 전술 선택이 전투 흐름을 만듭니다.';
+  const vfxKind = getTurnVfxKind(activeTurn);
+  const actorSide = findCombatCardSide(activeTurn?.actor, playerCards, opponentCards);
+  const targetSide = activeTurn?.targetIds
+    .map((target) => findCombatCardSide(target, playerCards, opponentCards))
+    .find(Boolean) || null;
+  const vfxDirection = actorSide === 'player' && targetSide === 'opponent'
+    ? 'from-player'
+    : actorSide === 'opponent' && targetSide === 'player'
+      ? 'from-opponent'
+      : actorSide === 'player'
+        ? 'ally-player'
+        : actorSide === 'opponent'
+          ? 'ally-opponent'
+          : 'from-center';
   return (
     <div className={`arena-battle-stage ${roundReveal?.stage === 'battle' ? 'is-playing' : ''} ${roundReveal?.stage === 'result' ? 'is-result' : ''}`}>
       <div className="arena-battle-stage-bg" />
+      {roundReveal?.stage === 'battle' && activeTurn ? (
+        <div key={activeTurn.id} className={`arena-battle-cinematic-vfx vfx-${vfxKind} ${vfxDirection}`} aria-hidden="true">
+          <span className="arena-vfx-screen-flash" />
+          <span className="arena-vfx-lane" />
+          <span className="arena-vfx-afterimage" />
+          <span className="arena-vfx-comet" />
+          <span className="arena-vfx-slash" />
+          <span className="arena-vfx-slash is-secondary" />
+          <span className="arena-vfx-impact" />
+          <span className="arena-vfx-ring" />
+          <span className="arena-vfx-rune" />
+          <span className="arena-vfx-shockwave" />
+          <span className="arena-vfx-ground" />
+          {ARENA_VFX_PARTICLES.map((particle) => (
+            <span
+              key={particle}
+              className="arena-vfx-particle"
+              style={{
+                ['--particle-index' as any]: particle,
+                ['--particle-x' as any]: `${Math.round(Math.cos((particle / ARENA_VFX_PARTICLES.length) * Math.PI * 2) * (18 + (particle % 4) * 7))}px`,
+                ['--particle-y' as any]: `${Math.round(Math.sin((particle / ARENA_VFX_PARTICLES.length) * Math.PI * 2) * (10 + (particle % 5) * 5))}px`
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
       <div className="arena-battle-row is-opponent-row">
         <ArenaCombatPortrait label={opponentLabel} caption={`${match.player_b_round_wins || 0} 라운드 승`} avatarUrl={revealOpponent ? opponentAvatar : null} side="opponent" />
         <ArenaCombatFormation
@@ -658,6 +953,7 @@ export const ArenaBattleStage: React.FC<{
           cards={opponentCards}
           slots={opponentSlots}
           revealed={revealOpponent}
+          activeTurn={activeTurn}
           activeEvent={activeEvent}
           battleEvents={battleEvents}
           battleEventIndex={battleEventIndex}
@@ -669,9 +965,10 @@ export const ArenaBattleStage: React.FC<{
       </div>
       <div className="arena-battle-centerline">
         <span className="arena-battle-pulse" />
-        <div className="min-w-0 text-center">
-          <p className="truncate text-[10px] font-black text-primary">{roundReveal?.stage === 'battle' ? 'ACTION' : roundReveal?.stage === 'result' ? winnerLabel(roundReveal.winner) : 'TACTIC READY'}</p>
-          <p className="mt-0.5 truncate text-xs font-black text-foreground">{activeEvent?.message || '카드 배치와 전술 선택이 전투 흐름을 만듭니다.'}</p>
+        <div key={activeTurn?.id || roundReveal?.stage || 'ready'} className="arena-battle-turn-callout min-w-0 text-center">
+          <p className="arena-battle-turn-kicker">{roundReveal?.stage === 'battle' ? '행동' : roundReveal?.stage === 'result' ? '라운드 결과' : '전술 준비'}</p>
+          <p className="arena-battle-turn-title">{actionLabel}</p>
+          <p className="arena-battle-turn-caption">{actionCaption}</p>
         </div>
         <span className="arena-battle-pulse" />
       </div>
@@ -680,6 +977,7 @@ export const ArenaBattleStage: React.FC<{
           side="player"
           cards={playerCards}
           slots={playerSlots}
+          activeTurn={activeTurn}
           activeEvent={activeEvent}
           battleEvents={battleEvents}
           battleEventIndex={battleEventIndex}
@@ -877,7 +1175,10 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const battleRoundNo = roundReveal?.roundNo || (selectedReplayRound?.round_no ?? nextRoundNo);
   const visibleEvents = (selectedReplayRound?.events || []).slice(-18).reverse();
   const activeBattleEvents = selectedReplayRound?.events || [];
-  const activeBattleEvent = activeBattleEvents.length > 0 ? activeBattleEvents[Math.min(battleEventIndex, activeBattleEvents.length - 1)] : undefined;
+  const activeBattleTurns = React.useMemo(() => buildArenaBattleTurns(activeBattleEvents), [activeBattleEvents]);
+  const activeBattleTurn = activeBattleTurns.length > 0 ? activeBattleTurns[Math.min(battleEventIndex, activeBattleTurns.length - 1)] : undefined;
+  const activeBattleEvent = activeBattleTurn?.primary;
+  const battleRevealDurationMs = getArenaBattleRevealDurationMs(activeBattleTurns.length);
   const waitMs = roundWait ? Math.max(0, new Date(roundWait.deadlineAt).getTime() - roundWaitNow) : 0;
   const waitSec = Math.ceil(waitMs / 1000);
   const canForceRound = Boolean(roundWait && waitMs <= 0);
@@ -893,19 +1194,19 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
   const latestRoundResult = [...roundResults].sort((a, b) => Number(b.round_no || 0) - Number(a.round_no || 0))[0];
 
   React.useEffect(() => {
-    if (roundReveal?.stage !== 'battle' || activeBattleEvents.length === 0) {
+    if (roundReveal?.stage !== 'battle' || activeBattleTurns.length === 0) {
       setBattleEventIndex(0);
       return;
     }
     setBattleEventIndex(0);
     const timer = window.setInterval(() => {
       setBattleEventIndex((prev) => {
-        if (prev >= activeBattleEvents.length - 1) return prev;
+        if (prev >= activeBattleTurns.length - 1) return prev;
         return prev + 1;
       });
-    }, 320);
+    }, ARENA_BATTLE_TURN_MS);
     return () => window.clearInterval(timer);
-  }, [roundReveal?.roundNo, roundReveal?.stage, activeBattleEvents.length]);
+  }, [roundReveal?.roundNo, roundReveal?.stage, activeBattleTurns.length]);
 
   const placeCardInSlot = React.useCallback((slotIndex: number, cardId: string) => {
     setSelectedSlots((prev) => {
@@ -1004,11 +1305,14 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
       };
       setRoundReveal(reveal);
       applyMatchDefaults(nextMatch);
+      const committedRoundEvents = nextReplay?.rounds?.[nextReplay.rounds.length - 1]?.events || [];
+      const committedTurnCount = buildArenaBattleTurns(committedRoundEvents).length;
+      const revealDurationMs = getArenaBattleRevealDurationMs(committedTurnCount);
       revealTimerRef.current = window.setTimeout(() => {
         setRoundReveal({ ...reveal, stage: 'result' });
         toast(reveal.completed ? `세트 ${resultLabel(reveal.result)}로 경기가 종료되었습니다.` : `${reveal.roundNo}라운드가 종료되었습니다.`, 'success');
         revealTimerRef.current = null;
-      }, 2200);
+      }, revealDurationMs);
     } catch (err: any) {
       toast(err?.message || '라운드 확정에 실패했습니다.', 'error');
     } finally {
@@ -1136,7 +1440,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                       </div>
                     </div>
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-white/10">
-                      <div className={`h-full rounded-full ${roundReveal.stage === 'battle' ? 'arena-battle-progress bg-rose-500' : 'bg-primary'}`} />
+                      <div className={`h-full rounded-full ${roundReveal.stage === 'battle' ? 'arena-battle-progress bg-rose-500' : 'bg-primary'}`} style={roundReveal.stage === 'battle' ? { animationDuration: `${battleRevealDurationMs}ms` } : undefined} />
                     </div>
                   </div>
                 ) : null}
@@ -1148,6 +1452,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
                     opponentCards={opponentCards}
                     playerSlots={revealOpponentFormation ? getRoundSlots(playerDeck, battleRoundNo) : (selectedSlots.length > 0 ? selectedSlots : getRoundSlots(playerDeck, nextRoundNo))}
                     opponentSlots={opponentSlots}
+                    activeTurn={activeBattleTurn}
                     activeEvent={activeBattleEvent}
                     battleEvents={activeBattleEvents}
                     battleEventIndex={battleEventIndex}
