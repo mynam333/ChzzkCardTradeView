@@ -193,6 +193,7 @@
 .arena-battle-stage-bg {
   position: absolute;
   inset: 0;
+  z-index: 0;
   pointer-events: none;
   background-image:
     linear-gradient(rgba(251, 113, 133, 0.09) 1px, transparent 1px),
@@ -207,7 +208,7 @@
 
 .arena-pixi-battle-renderer {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   height: clamp(37rem, 72vw, 52rem);
   min-height: 37rem;
   overflow: hidden;
@@ -223,8 +224,8 @@
 
 @media (max-width: 640px) {
   .arena-pixi-battle-renderer {
-    height: clamp(34rem, 132vw, 42rem);
-    min-height: 34rem;
+    height: clamp(38rem, 150vw, 46rem);
+    min-height: 38rem;
   }
 }
 
@@ -1552,7 +1553,7 @@
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 1;
   pointer-events: none;
   background:
     radial-gradient(circle at 50% 50%, transparent 0 48%, rgba(127, 29, 29, 0.08) 78%, rgba(127, 29, 29, 0.12) 100%),

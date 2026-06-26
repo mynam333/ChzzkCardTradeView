@@ -116,6 +116,43 @@ const PASTEL = {
   slate: 0x334155
 };
 
+const CARD_STYLE = {
+  player: {
+    fillTop: 0xffffff,
+    fillBottom: 0xffedf0,
+    rim: 0xfb7185,
+    glow: 0xff9aa9
+  },
+  opponent: {
+    fillTop: 0xffffff,
+    fillBottom: 0xffe4ec,
+    rim: 0xf472b6,
+    glow: 0xf9a8d4
+  }
+};
+
+const roleAccent: Record<string, number> = {
+  frontline: 0xfb7185,
+  damage: 0xf43f5e,
+  control: 0xa78bfa,
+  support: 0x4ade80,
+  tempo: 0x60a5fa
+};
+
+const roleLabels: Record<string, string> = {
+  frontline: '전열',
+  damage: '딜러',
+  control: '제어',
+  support: '지원',
+  tempo: '템포'
+};
+
+const skillGlyphs: Record<string, string> = {
+  active: 'A',
+  passive: 'P',
+  ultimate: 'U'
+};
+
 const arenaSkillSlotLabels: Record<string, string> = {
   active: '액티브',
   passive: '패시브',
@@ -128,6 +165,20 @@ const statDescriptions: Record<string, string> = {
   defense: '받는 피해를 줄이고 전열 유지력을 높입니다.',
   speed: '행동 순서와 공격 템포에 영향을 줍니다.',
   focus: '스킬 발동 흐름과 스킬형 효과 안정성에 영향을 줍니다.'
+};
+
+const roleDescriptions: Record<string, string> = {
+  frontline: '전열에서 피해를 받아내고 상대의 공격 흐름을 붙잡는 역할입니다.',
+  damage: '핵심 대상에게 피해를 누적해 라운드 승리 조건을 앞당기는 역할입니다.',
+  control: '둔화, 약화, 방해 효과로 상대 전술의 템포를 흔드는 역할입니다.',
+  support: '회복, 보호막, 버프를 통해 팀 전체의 안정성을 높이는 역할입니다.',
+  tempo: '행동 순서와 배치 변수를 활용해 라운드 흐름을 바꾸는 역할입니다.'
+};
+
+const skillTypeDescriptions: Record<string, string> = {
+  active: '라운드 중 조건을 만족하면 직접 발동해 피해, 회복, 보호, 방해 같은 즉시 효과를 만듭니다.',
+  passive: '전투 내내 조건부로 적용되어 카드의 역할과 스탯 운용을 보조합니다.',
+  ultimate: '에너지가 충분할 때 전세를 크게 바꾸는 강한 한 번의 효과입니다.'
 };
 
 const textureCache = new Map<string, Promise<PixiTexture>>();
@@ -166,6 +217,18 @@ const loadTextureCached = (PIXI: PixiModule, url: string) => {
   const promise = PIXI.Assets.load(url) as Promise<PixiTexture>;
   textureCache.set(url, promise);
   return promise;
+};
+
+const renderPixiFrame = (app: PixiApp) => {
+  try {
+    app.render();
+  } catch {
+    try {
+      app.renderer.render({ container: app.stage });
+    } catch {
+      // Rendering is best-effort here; the next ticker frame can still recover.
+    }
+  }
 };
 
 const clearContainer = (container: PixiContainer) => {
@@ -288,15 +351,39 @@ const getCardBySlots = (
 };
 
 const getClassDescription = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
-  const catalogClass = classLookup.get(card.class_id);
+  const catalogClass = classLookup.get(card.class_id) || [...classLookup.values()].find((item) => item.name === card.class_name);
   if (catalogClass?.description) return catalogClass.description;
-  if (catalogClass?.role) return `${catalogClass.role} 성향의 전투 역할입니다.`;
-  return '카드의 전투 역할과 기본 스탯 성향을 결정하는 클래스입니다.';
+  const role = String(catalogClass?.role || (card as any).class_role || '').trim();
+  if (role && roleDescriptions[role]) return roleDescriptions[role];
+  const stats = card.stats || {};
+  const topStat = (Object.entries(stats).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))[0]?.[0] || '') as keyof typeof statDescriptions;
+  const statHint = statDescriptions[topStat] || '카드의 전투 역할과 기본 스탯 성향을 결정합니다.';
+  return `${card.class_name || '클래스'}는 ${statHint}`;
 };
 
 const getSkillDescription = (skill: NonNullable<ArenaSnapshotCardDto['skills']>[number], skillLookup: Map<string, ArenaRuleSkill>) => {
-  const catalogSkill = skillLookup.get(skill.id);
-  return catalogSkill?.description || `${arenaSkillSlotLabels[skill.type] || skill.type} 슬롯의 전투 스킬입니다.`;
+  const catalogSkill = skillLookup.get(skill.id) || [...skillLookup.values()].find((item) => item.name === skill.name);
+  if (catalogSkill?.description) return catalogSkill.description;
+  const slotLabel = arenaSkillSlotLabels[skill.type] || skill.type || '스킬';
+  const typeHint = skillTypeDescriptions[skill.type] || '라운드 계산 중 카드의 역할과 스탯에 맞춰 적용됩니다.';
+  return `${skill.name}은 ${slotLabel} 슬롯 스킬입니다. ${typeHint}`;
+};
+
+const getCardRole = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
+  const catalogClass = classLookup.get(card.class_id) || [...classLookup.values()].find((item) => item.name === card.class_name);
+  const role = String(catalogClass?.role || (card as any).class_role || '').trim();
+  if (role) return role;
+  const classText = `${card.class_id} ${card.class_name}`.toLowerCase();
+  if (['guardian', 'shield', 'knight', 'wall', '방패', '수호', '전열'].some((token) => classText.includes(token))) return 'frontline';
+  if (['heal', 'bard', 'support', '치유', '지원'].some((token) => classText.includes(token))) return 'support';
+  if (['mage', 'curse', 'control', '교란', '서리', '저주'].some((token) => classText.includes(token))) return 'control';
+  if (['tempo', 'switch', 'trapper', '환영', '템포'].some((token) => classText.includes(token))) return 'tempo';
+  return 'damage';
+};
+
+const shortenName = (value: string, max = 12) => {
+  const text = String(value || '').trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 };
 
 const resolveName = (cards: ArenaSnapshotCardDto[], value?: string) => {
@@ -460,8 +547,8 @@ const computeBattleLayout = (width: number, height: number): BattleResponsiveLay
   const maxCardHeightByCanvas = Math.floor((height - topReserved - bottomReserved - rowGap * 2 - desiredMiddleGap) / 4);
   const maxCardHeightByWidth = Math.floor(cardWidth * (compact ? 0.84 : 0.76));
   const cardHeight = Math.max(
-    compact ? 68 : 76,
-    Math.min(maxCardHeightByCanvas, maxCardHeightByWidth, compact ? 104 : 124)
+    compact ? 118 : 104,
+    Math.min(maxCardHeightByCanvas, maxCardHeightByWidth, compact ? 132 : 124)
   );
   const opponentBackTop = topReserved;
   const opponentFrontTop = opponentBackTop + cardHeight + rowGap;
@@ -555,7 +642,7 @@ const drawTimer = (PIXI: PixiModule, parent: PixiContainer, x: number, y: number
   parent.addChild(ring);
 };
 
-const drawCard = async (
+const drawCard = (
   PIXI: PixiModule,
   zoneLayer: PixiContainer,
   card: PositionedCard,
@@ -565,8 +652,9 @@ const drawCard = async (
   quality: RendererQuality,
   skillLookup: Map<string, ArenaRuleSkill>,
   classLookup: Map<string, ArenaRuleClass>,
-  hoverZones: HoverZone[]
-): Promise<CardVisual> => {
+  hoverZones: HoverZone[],
+  requestRender?: () => void
+): CardVisual => {
   const root = new PIXI.Container();
   root.position.set(card.x + card.width / 2, card.y + card.height / 2);
   root.pivot.set(card.width / 2, card.height / 2);
@@ -578,34 +666,67 @@ const drawCard = async (
   const actionColor = colorForAction(activeTurn);
   const isFrontline = card.slot.row === 1;
   const alpha = card.retired || card.health.remaining <= 0 ? 0.5 : card.hidden ? 0.86 : 1;
-  const bodyFill = card.side === 'player' ? 0xfff1f2 : 0xffe4e6;
-  const borderColor = acting ? actionColor : targeted ? PASTEL.rose : isFrontline ? PASTEL.roseSoft : 0xfecdd3;
+  const role = getCardRole(card.card, classLookup);
+  const roleColor = roleAccent[role] || PASTEL.rose;
+  const palette = card.side === 'player' ? CARD_STYLE.player : CARD_STYLE.opponent;
+  const borderColor = acting ? actionColor : targeted ? PASTEL.rose : roleColor;
+  const cornerRadius = clamp(card.width * 0.12, 18, 26);
+  const narrowCard = card.width < 155;
 
-  drawSoftShadow(PIXI, root, 3, 3, card.width - 6, card.height - 6, 22, targeted ? actionColor : PASTEL.rose, targeted ? 0.18 : 0.1);
-  drawRoundRect(PIXI, root, 0, 0, card.width, card.height, 22, bodyFill, 0.88, { color: borderColor, alpha: acting || targeted ? 0.96 : 0.55, width: acting || targeted ? 3 : 1.5 });
-  if (isFrontline) {
-    const ribbon = new PIXI.Graphics();
-    ribbon.roundRect(8, 7, 42, 14, 999).fill({ color: PASTEL.rose, alpha: 0.82 });
-    root.addChild(ribbon);
-    addText(PIXI, root, '전열', 18, 9, {
-      fill: PASTEL.white,
-      fontSize: 8,
-      fontWeight: '900',
-      fontFamily: 'Arial, sans-serif'
-    });
-  }
+  drawSoftShadow(PIXI, root, 4, 6, card.width - 8, card.height - 8, cornerRadius, targeted ? actionColor : palette.glow, targeted ? 0.22 : 0.13);
+  drawRoundRect(PIXI, root, 0, 0, card.width, card.height, cornerRadius, palette.fillBottom, 0.96, { color: borderColor, alpha: acting || targeted ? 0.98 : 0.58, width: acting || targeted ? 3 : 1.4 });
+  const surface = new PIXI.Graphics();
+  surface.roundRect(3, 3, card.width - 6, card.height - 6, cornerRadius - 4)
+    .fill({ color: palette.fillTop, alpha: 0.62 });
+  surface.roundRect(5, card.height * 0.52, card.width - 10, card.height * 0.42, cornerRadius - 8)
+    .fill({ color: 0xffdbe3, alpha: 0.16 });
+  surface.circle(card.width - 20, 18, 32).fill({ color: roleColor, alpha: 0.1 });
+  surface.circle(18, card.height - 18, 28).fill({ color: PASTEL.white, alpha: 0.24 });
+  root.addChild(surface);
+
+  const topBar = new PIXI.Graphics();
+  topBar.roundRect(6, 6, card.width - 12, 20, 999)
+    .fill({ color: roleColor, alpha: card.hidden ? 0.36 : 0.88 });
+  topBar.roundRect(8, 7, card.width - 16, 8, 999).fill({ color: PASTEL.white, alpha: 0.22 });
+  root.addChild(topBar);
+  addText(PIXI, root, isFrontline ? '전열' : '후열', 15, 10, {
+    fill: PASTEL.white,
+    fontSize: 8,
+    fontWeight: '900',
+    fontFamily: 'Arial, sans-serif'
+  });
+  addText(PIXI, root, roleLabels[role] || '전투', card.width - 38, 10, {
+    fill: PASTEL.white,
+    fontSize: 8,
+    fontWeight: '900',
+    fontFamily: 'Arial, sans-serif'
+  });
+
   const shine = new PIXI.Graphics();
-  shine.roundRect(1.5, 1.5, card.width - 3, card.height - 3, 20)
-    .fill({ color: PASTEL.white, alpha: 0.15 });
-  shine.moveTo(0, card.height * 0.16).lineTo(card.width * 0.72, 0).lineTo(card.width, 0).lineTo(0, card.height * 0.42).fill({ color: PASTEL.white, alpha: 0.18 });
+  shine.roundRect(2, 2, card.width - 4, card.height - 4, cornerRadius - 2)
+    .stroke({ color: PASTEL.white, alpha: 0.45, width: 1 });
+  shine.moveTo(8, card.height * 0.24).lineTo(card.width * 0.44, 8).lineTo(card.width * 0.7, 8).lineTo(8, card.height * 0.45).fill({ color: PASTEL.white, alpha: 0.16 });
   root.addChild(shine);
 
-  const mediaSize = Math.min(card.height - 20, card.width * 0.38);
-  const mediaX = 10;
-  const mediaY = (card.height - mediaSize) / 2;
-  drawRoundRect(PIXI, root, mediaX, mediaY, mediaSize, mediaSize, 18, PASTEL.white, 0.72, { color: PASTEL.roseSoft, alpha: 0.32, width: 1 });
+  const mediaSize = narrowCard
+    ? Math.min(card.width - 24, card.height * 0.44)
+    : Math.min(card.height - 34, card.width * 0.36);
+  const mediaX = narrowCard ? (card.width - mediaSize) / 2 : 10;
+  const mediaY = 30;
+  drawSoftShadow(PIXI, root, mediaX + 1, mediaY + 3, mediaSize, mediaSize, 18, roleColor, 0.11);
+  drawRoundRect(PIXI, root, mediaX, mediaY, mediaSize, mediaSize, 18, PASTEL.white, 0.9, { color: roleColor, alpha: 0.34, width: 1.8 });
+  const mediaLayer = new PIXI.Container();
+  const mediaMask = new PIXI.Graphics();
+  mediaMask.roundRect(mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8, 14).fill({ color: PASTEL.white, alpha: 1 });
+  mediaMask.renderable = false;
+  mediaLayer.mask = mediaMask;
+  root.addChild(mediaMask, mediaLayer);
 
   if (card.hidden) {
+    const hiddenMark = new PIXI.Graphics();
+    hiddenMark.circle(mediaX + mediaSize / 2, mediaY + mediaSize / 2, mediaSize * 0.34).fill({ color: PASTEL.white, alpha: 0.68 })
+      .stroke({ color: roleColor, alpha: 0.42, width: 2 });
+    root.addChild(hiddenMark);
     addText(PIXI, root, '?', mediaX + mediaSize / 2 - 8, mediaY + mediaSize / 2 - 18, {
       fill: PASTEL.rose,
       fontSize: 36,
@@ -613,98 +734,132 @@ const drawCard = async (
       fontFamily: 'Arial, sans-serif'
     });
   } else if (card.card.image_url) {
-    try {
-      const texture = await loadTextureCached(PIXI, proxiedImage(card.card.image_url, { width: 160, quality: quality === 'high' ? 78 : 62 }));
-      const sprite = new PIXI.Sprite(texture);
-      sprite.alpha = alpha;
-      fitSprite(sprite, mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8);
-      root.addChild(sprite);
-    } catch {
-      addText(PIXI, root, card.card.name.slice(0, 1), mediaX + mediaSize / 2 - 8, mediaY + mediaSize / 2 - 11, {
-        fill: PASTEL.rose,
-        fontSize: 22,
-        fontWeight: '900',
-        fontFamily: 'Arial, sans-serif'
+    const fallbackInitial = addText(PIXI, root, card.card.name.slice(0, 1), mediaX + mediaSize / 2 - 8, mediaY + mediaSize / 2 - 11, {
+      fill: PASTEL.rose,
+      fontSize: 22,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+    loadTextureCached(PIXI, proxiedImage(card.card.image_url, { width: 160, quality: quality === 'high' ? 78 : 62 }))
+      .then((texture) => {
+        if ((root as any).destroyed) return;
+        fallbackInitial.destroy();
+        const sprite = new PIXI.Sprite(texture);
+        sprite.alpha = alpha;
+        fitSprite(sprite, mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8);
+        mediaLayer.addChild(sprite);
+        requestRender?.();
+      })
+      .catch(() => {
+        // The fallback initial remains visible when remote image loading fails.
       });
-    }
   }
 
-  const infoX = mediaX + mediaSize + 10;
-  const infoW = card.width - infoX - 10;
+  const infoX = narrowCard ? 10 : mediaX + mediaSize + 10;
+  const infoW = narrowCard ? card.width - 20 : card.width - infoX - 10;
   const title = card.hidden ? '상대 카드' : card.card.name;
-  addText(PIXI, root, title, infoX, 13, {
+  const titleY = narrowCard ? mediaY + mediaSize + 6 : 31;
+  addText(PIXI, root, shortenName(title, narrowCard ? 7 : card.width < 270 ? 10 : 14), infoX, titleY, {
     fill: PASTEL.text,
-    fontSize: clamp(card.width * 0.06, 11, 14),
+    fontSize: narrowCard ? 9 : clamp(card.width * 0.057, 11, 14),
     fontWeight: '900',
     fontFamily: 'Arial, sans-serif',
     wordWrap: true,
     wordWrapWidth: infoW
   });
-  const classY = 34;
-  addText(PIXI, root, card.hidden ? '비공개' : card.card.class_name, infoX, classY, {
-    fill: PASTEL.rose,
-    fontSize: 10,
-    fontWeight: '900',
-    fontFamily: 'Arial, sans-serif'
-  });
+  const classY = narrowCard ? titleY + 14 : 51;
+  if (!narrowCard) {
+    drawRoundRect(PIXI, root, infoX, classY - 2, Math.min(infoW, 92), 16, 999, roleColor, 0.1, { color: roleColor, alpha: 0.24, width: 1 });
+    addText(PIXI, root, card.hidden ? '비공개' : shortenName(card.card.class_name, 9), infoX + 8, classY + 1, {
+      fill: roleColor,
+      fontSize: 9,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+  }
   if (!card.hidden) {
     hoverZones.push({
       x: card.x + infoX,
-      y: card.y + classY,
+      y: card.y + (narrowCard ? 8 : classY),
       width: infoW,
-      height: 16,
+      height: narrowCard ? 18 : 16,
       label: card.card.class_name,
       description: getClassDescription(card.card, classLookup)
     });
   }
 
-  const skillY = card.height - 50;
+  const skillY = narrowCard ? mediaY + mediaSize - 9 : classY - 1;
   if (!card.hidden) {
     (card.card.skills || []).slice(0, 3).forEach((skill, index) => {
-      const dotX = infoX + index * 22;
-      const dot = new PIXI.Graphics();
+      const dotSize = narrowCard || card.height < 104 ? 15 : 18;
+      const skillStartX = narrowCard
+        ? (card.width - (dotSize * 3 + 8)) / 2
+        : infoX + Math.max(48, Math.min(infoW - 58, 96));
+      const dotX = skillStartX + index * (dotSize + 4);
       const skillColor = skill.type === 'ultimate' ? PASTEL.amber : skill.type === 'passive' ? PASTEL.blue : PASTEL.rose;
-      dot.circle(dotX + 6, skillY + 6, 6).fill({ color: skillColor, alpha: 0.92 })
-        .stroke({ color: PASTEL.white, alpha: 0.9, width: 1.5 });
+      const dot = new PIXI.Graphics();
+      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2).fill({ color: PASTEL.white, alpha: 0.86 })
+        .stroke({ color: skillColor, alpha: 0.9, width: 2 });
+      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2 - 4).fill({ color: skillColor, alpha: 0.9 });
       root.addChild(dot);
+      addText(PIXI, root, skillGlyphs[skill.type] || 'S', dotX + dotSize / 2 - 3.5, skillY + dotSize / 2 - 4.8, {
+        fill: PASTEL.white,
+        fontSize: dotSize < 18 ? 7 : 8,
+        fontWeight: '900',
+        fontFamily: 'Arial, sans-serif'
+      });
       hoverZones.push({
-        x: card.x + dotX - 4,
-        y: card.y + skillY - 4,
-        width: 20,
-        height: 20,
+        x: card.x + dotX - 3,
+        y: card.y + skillY - 3,
+        width: dotSize + 6,
+        height: dotSize + 6,
         label: `${skill.name} (${arenaSkillSlotLabels[skill.type] || skill.type})`,
         description: getSkillDescription(skill, skillLookup)
       });
     });
   }
 
-  const hpY = card.height - 18;
-  drawRoundRect(PIXI, root, infoX, hpY, infoW, 7, 999, 0x7f1d1d, 0.15);
-  drawRoundRect(PIXI, root, infoX, hpY, Math.max(0, infoW * card.health.percent / 100), 7, 999, card.health.percent < 30 ? 0xef4444 : PASTEL.rose, 0.95);
-  addText(PIXI, root, `${card.health.remaining}/${card.health.max}`, infoX + infoW - 46, hpY - 15, {
+  const hpY = card.height - 17;
+  addText(PIXI, root, 'HP', infoX, hpY - 14, {
     fill: PASTEL.muted,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '900',
     fontFamily: 'Arial, sans-serif'
   });
+  addText(PIXI, root, `${card.health.remaining}/${card.health.max}`, infoX + Math.max(0, infoW - 58), hpY - 14, {
+    fill: PASTEL.text,
+    fontSize: 8,
+    fontWeight: '900',
+    fontFamily: 'Arial, sans-serif'
+  });
+  drawRoundRect(PIXI, root, infoX, hpY, infoW, 8, 999, 0x7f1d1d, 0.12, { color: PASTEL.white, alpha: 0.5, width: 1 });
+  drawRoundRect(PIXI, root, infoX + 1.5, hpY + 1.5, Math.max(0, (infoW - 3) * card.health.percent / 100), 5, 999, card.health.percent < 30 ? 0xef4444 : roleColor, 0.96);
 
-  if (!card.hidden && card.card.stats) {
+  if (!narrowCard && !card.hidden && card.card.stats && card.height >= 104 && infoW >= 104) {
     const statKeys = ['attack', 'defense', 'speed', 'focus'] as const;
     statKeys.forEach((key, index) => {
-      const x = infoX + index * Math.min(34, infoW / 4);
-      const y = skillY + 19;
+      const chipW = Math.min(33, Math.max(25, (infoW - 6) / 4));
+      const x = infoX + index * (chipW + 2);
+      const y = card.height - 36;
       const label = key === 'attack' ? 'ATK' : key === 'defense' ? 'DEF' : key === 'speed' ? 'SPD' : 'FOC';
-      addText(PIXI, root, `${label} ${card.card.stats?.[key] ?? 0}`, x, y, {
+      drawRoundRect(PIXI, root, x, y - 2, chipW, 14, 999, PASTEL.white, 0.48, { color: roleColor, alpha: 0.12, width: 1 });
+      addText(PIXI, root, `${label}`, x + 4, y + 1, {
         fill: PASTEL.muted,
-        fontSize: 8,
+        fontSize: 6.5,
+        fontWeight: '900',
+        fontFamily: 'Arial, sans-serif'
+      });
+      addText(PIXI, root, String(card.card.stats?.[key] ?? 0), x + chipW - 13, y + 1, {
+        fill: PASTEL.text,
+        fontSize: 7,
         fontWeight: '900',
         fontFamily: 'Arial, sans-serif'
       });
       hoverZones.push({
         x: card.x + x,
-        y: card.y + y,
-        width: 32,
-        height: 12,
+        y: card.y + y - 2,
+        width: chipW,
+        height: 15,
         label: `${label} ${card.card.stats?.[key] ?? 0}`,
         description: statDescriptions[key]
       });
@@ -744,7 +899,7 @@ const drawCard = async (
   return { root, card };
 };
 
-const drawPortrait = async (
+const drawPortrait = (
   PIXI: PixiModule,
   parent: PixiContainer,
   x: number,
@@ -754,7 +909,8 @@ const drawPortrait = async (
   imageUrl?: string | null,
   side: CombatSide = 'player',
   loadout?: ArenaCosmeticLoadout | null,
-  size?: { width: number; height: number }
+  size?: { width: number; height: number },
+  requestRender?: () => void
 ) => {
   const width = size?.width || 220;
   const height = size?.height || 48;
@@ -769,14 +925,17 @@ const drawPortrait = async (
   const frameColor = loadout?.border_item ? PASTEL.amber : side === 'player' ? PASTEL.rose : PASTEL.roseSoft;
   drawRoundRect(PIXI, root, avatarX, avatarY, avatarSize, avatarSize, Math.min(14, avatarSize / 2.2), 0xfff1f2, 0.95, { color: frameColor, alpha: 0.82, width: 2 });
   if (imageUrl) {
-    try {
-      const texture = await loadTextureCached(PIXI, proxiedImage(imageUrl, { width: 96, quality: 72 }));
+    loadTextureCached(PIXI, proxiedImage(imageUrl, { width: 96, quality: 72 }))
+      .then((texture) => {
+        if ((root as any).destroyed) return;
       const sprite = new PIXI.Sprite(texture);
       fitSprite(sprite, avatarX + 2, avatarY + 2, avatarSize - 4, avatarSize - 4);
       root.addChild(sprite);
-    } catch {
-      // Text fallback below is enough when remote image loading fails.
-    }
+        requestRender?.();
+      })
+      .catch(() => {
+        // Text fallback below is enough when remote image loading fails.
+      });
   }
   addText(PIXI, root, label, textX, clamp(height * 0.18, 7, 10), {
     fill: PASTEL.text,
@@ -872,6 +1031,7 @@ const animate = (
     if (progress >= 1) {
       app.ticker.remove(ticker);
       done?.();
+      renderPixiFrame(app);
       if (app.ticker.count === 0) app.ticker.stop();
     }
   };
@@ -1142,11 +1302,9 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
     drawTeamMat(PIXI, scene, cards.filter((card) => card.side === 'opponent'), 'opponent');
     drawTeamMat(PIXI, scene, cards.filter((card) => card.side === 'player'), 'player');
 
-    await Promise.all([
-      drawPortrait(PIXI, scene, layout.opponentPortraitX, layout.opponentPortraitY, opponentLabel, `${displayOpponentRoundWins ?? match.player_b_round_wins ?? 0} 라운드 승`, revealOpponent ? opponentAvatar : null, 'opponent', null, { width: layout.portraitWidth, height: layout.portraitHeight }),
-      drawPortrait(PIXI, scene, layout.playerPortraitX, layout.playerPortraitY, playerLabel, `${displayPlayerRoundWins ?? match.player_a_round_wins ?? 0} 라운드 승`, user?.avatarUrl, 'player', loadout, { width: layout.portraitWidth, height: layout.portraitHeight })
-    ]);
-    if (renderId !== latestRenderIdRef.current) return;
+    const requestFrame = () => renderPixiFrame(app);
+    drawPortrait(PIXI, scene, layout.opponentPortraitX, layout.opponentPortraitY, opponentLabel, `${displayOpponentRoundWins ?? match.player_b_round_wins ?? 0} 라운드 승`, revealOpponent ? opponentAvatar : null, 'opponent', null, { width: layout.portraitWidth, height: layout.portraitHeight }, requestFrame);
+    drawPortrait(PIXI, scene, layout.playerPortraitX, layout.playerPortraitY, playerLabel, `${displayPlayerRoundWins ?? match.player_a_round_wins ?? 0} 라운드 승`, user?.avatarUrl, 'player', loadout, { width: layout.portraitWidth, height: layout.portraitHeight }, requestFrame);
 
     drawCenterHud(PIXI, scene, layout, stage, activeTurn, roundReveal, allCards);
     if (stage === 'battle' && activeTurn) {
@@ -1166,8 +1324,9 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
     const turnProgress = stage === 'battle' ? Math.min(1, ((Date.now() % PIXI_BATTLE_TURN_MS) / PIXI_BATTLE_TURN_MS)) : 0;
     const zoneLayer = new PIXI.Container();
     scene.addChild(zoneLayer);
-    const visuals = await Promise.all(cards.map((card) => drawCard(PIXI, zoneLayer, card, activeTurn, stage, turnProgress, qualityRef.current, skillLookup, classLookup, hoverZonesRef.current)));
+    const visuals = cards.map((card) => drawCard(PIXI, zoneLayer, card, activeTurn, stage, turnProgress, qualityRef.current, skillLookup, classLookup, hoverZonesRef.current, requestFrame));
     if (renderId !== latestRenderIdRef.current) return;
+    renderPixiFrame(app);
     if (stage === 'battle' && activeTurn && activeTurn.id !== lastTurnIdRef.current && qualityRef.current !== 'off') {
       lastTurnIdRef.current = activeTurn.id;
       playAction(PIXI, app, actionLayer, visuals, activeTurn, qualityRef.current);

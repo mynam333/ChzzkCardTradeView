@@ -174,6 +174,12 @@ const classRoleDescriptions: Record<string, string> = {
   tempo: '행동 순서와 스킬 흐름을 조절해 라운드 주도권을 잡는 역할입니다.'
 };
 
+const skillTypeDescriptions: Record<string, string> = {
+  active: '조건을 만족하면 직접 발동해 피해, 회복, 보호, 방해 같은 즉시 효과를 만듭니다.',
+  passive: '전투 내내 조건부로 적용되어 카드의 역할과 스탯 운용을 보조합니다.',
+  ultimate: '에너지가 충분할 때 전세를 크게 바꾸는 강한 한 번의 효과입니다.'
+};
+
 const ArenaInfoTooltip: React.FC<{
   label: string;
   description: string;
@@ -196,15 +202,21 @@ const ArenaInfoTooltip: React.FC<{
 );
 
 const getSkillDescription = (skill: NonNullable<ArenaSnapshotCardDto['skills']>[number], skillLookup: Map<string, ArenaRuleSkill>) => {
-  const catalogSkill = skillLookup.get(skill.id);
-  return catalogSkill?.description || `${arenaSkillSlotLabels[skill.type] || skill.type} 슬롯의 전투 스킬입니다. 라운드 계산에서 카드의 역할과 스탯에 맞춰 적용됩니다.`;
+  const catalogSkill = skillLookup.get(skill.id) || [...skillLookup.values()].find((item) => item.name === skill.name);
+  if (catalogSkill?.description) return catalogSkill.description;
+  const slotLabel = arenaSkillSlotLabels[skill.type] || skill.type || '스킬';
+  const typeHint = skillTypeDescriptions[skill.type] || '라운드 계산에서 카드의 역할과 스탯에 맞춰 적용됩니다.';
+  return `${skill.name}은 ${slotLabel} 슬롯 스킬입니다. ${typeHint}`;
 };
 
 const getClassDescription = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
-  const catalogClass = classLookup.get(card.class_id);
+  const catalogClass = classLookup.get(card.class_id) || [...classLookup.values()].find((item) => item.name === card.class_name);
   if (catalogClass?.description) return catalogClass.description;
   if (catalogClass?.role && classRoleDescriptions[catalogClass.role]) return classRoleDescriptions[catalogClass.role];
-  return '카드의 전투 역할과 기본 스탯 성향을 결정하는 클래스입니다.';
+  const stats = card.stats || {};
+  const topStat = (Object.entries(stats).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))[0]?.[0] || '') as keyof typeof statDescriptions;
+  const statHint = statDescriptions[topStat] || '카드의 전투 역할과 기본 스탯 성향을 결정합니다.';
+  return `${card.class_name || '클래스'}는 ${statHint}`;
 };
 
 export const formatDateTime = (value?: string | null) => {
