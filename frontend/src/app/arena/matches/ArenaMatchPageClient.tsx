@@ -136,9 +136,9 @@ export type ArenaCosmeticLoadout = {
 
 const ARENA_ACTIVE_SLOT_COUNT = 6;
 const ARENA_VFX_PARTICLES = Array.from({ length: 16 }, (_, index) => index);
-export const ARENA_BATTLE_TURN_MS = 1450;
-const ARENA_BATTLE_RESULT_SETTLE_MS = 900;
-const ARENA_BATTLE_MIN_REVEAL_MS = 2200;
+export const ARENA_BATTLE_TURN_MS = 820;
+const ARENA_BATTLE_RESULT_SETTLE_MS = 420;
+const ARENA_BATTLE_MIN_REVEAL_MS = 1200;
 
 const statLabels: Array<[keyof NonNullable<ArenaSnapshotCardDto['stats']>, string, string]> = [
   ['hp', 'HP', '체력'],
