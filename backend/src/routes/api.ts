@@ -199,6 +199,7 @@ import {
   adminGetArenaAbuseAudit,
   adminGetArenaAuditLogs,
   adminGetArenaJobs,
+  adminGetArenaMatchReplayDiagnostic,
   adminGetArenaOpsStatus,
   adminGetArenaQuickMatch,
   adminGetArenaStats,
@@ -214,6 +215,7 @@ import {
   adminUpdateArenaSeason,
   buyMyArenaCosmeticItem,
   cancelMyArenaQuickMatch,
+  collectArenaPerformanceSample,
   cancelMyArenaCup,
   commitMyArenaMatchRound,
   createArenaBotPracticeMatch,
@@ -505,6 +507,7 @@ router.get('/admin/arena/stats', authMiddleware, adminMiddleware, arenaAdminLimi
 router.get('/admin/arena/stats/overview', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaStats);
 router.get('/admin/arena/stats/balance', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaStats);
 router.get('/admin/arena/abuse-audit', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaAbuseAudit);
+router.get('/admin/arena/matches/:match_id/replay-diagnostic', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaMatchReplayDiagnostic);
 router.post('/admin/arena/cosmetics/emote-assets', authMiddleware, adminMiddleware, arenaAdminLimiter, uploadSingleImage, adminUploadArenaEmoteAsset);
 router.get('/admin/arena/quick-match', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaQuickMatch);
 router.post('/admin/arena/quick-match/recover-queue', authMiddleware, adminMiddleware, arenaAdminLimiter, adminRecoverArenaQuickMatchQueue);
@@ -513,6 +516,7 @@ router.post('/admin/arena/cups/recover-queue', authMiddleware, adminMiddleware, 
 router.post('/admin/arena/stats/rebuild', authMiddleware, adminMiddleware, arenaAdminLimiter, adminRebuildArenaStats);
 router.post('/admin/arena/rankings/rebuild', authMiddleware, adminMiddleware, arenaAdminLimiter, adminRebuildArenaRankings);
 router.post('/admin/arena/matches/prune-logs', authMiddleware, adminMiddleware, arenaAdminLimiter, adminPruneArenaReplays);
+router.post('/arena/telemetry/performance', authMiddleware, banCheckMiddleware, arenaReadLimiter, collectArenaPerformanceSample);
 router.get('/arena/seasons/current', arenaReadLimiter, getArenaCurrentSeason);
 router.get('/arena/rules/catalog', arenaReadLimiter, getArenaRulesCatalog);
 router.get('/arena/cosmetics/shop-items', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaCosmeticShopItems);

@@ -29,11 +29,14 @@ type ArenaRealtimeMessage =
   | { type: 'join'; match_id: string }
   | { type: 'leave'; match_id?: string }
   | { type: 'emote'; match_id?: string; item_id: number; slot?: number }
+  | { type: 'skip_round_reveal'; match_id?: string; round_no: number }
   | { type: 'ping' };
 
 const clientsByMatch = new Map<string, Set<ArenaSocket>>();
 const equippedEmoteCache = new Map<string, { item: any | null; expiresAt: number }>();
 const matchAccessCache = new Map<string, { allowed: boolean; expiresAt: number }>();
+const matchParticipantCache = new Map<string, { userIds: string[]; expiresAt: number }>();
+const roundRevealSkipState = new Map<string, { userIds: Set<string>; expiresAt: number }>();
 
 const EMOTE_COOLDOWN_MS = Math.max(750, Number(process.env.ARENA_EMOTE_COOLDOWN_MS || 1500));
 const EQUIPPED_EMOTE_CACHE_TTL_MS = Math.max(1000, Number(process.env.ARENA_EMOTE_EQUIP_CACHE_TTL_MS || 10_000));
@@ -46,6 +49,19 @@ const JOIN_COOLDOWN_MS = Math.max(500, Math.min(10_000, Number(process.env.ARENA
 const MAX_CLIENTS_PER_MATCH = Math.max(2, Math.min(32, Number(process.env.ARENA_REALTIME_WS_MAX_CLIENTS_PER_MATCH || 8)));
 const MAX_TOTAL_CLIENTS = Math.max(10, Math.min(2000, Number(process.env.ARENA_REALTIME_WS_MAX_TOTAL_CLIENTS || 500)));
 const MAX_ACCESS_CACHE_SIZE = Math.max(100, Math.min(5000, Number(process.env.ARENA_REALTIME_MATCH_ACCESS_CACHE_MAX || 1000)));
+const SKIP_REVEAL_TTL_MS = Math.max(30_000, Math.min(10 * 60_000, Number(process.env.ARENA_REALTIME_SKIP_REVEAL_TTL_MS || 3 * 60_000)));
+
+const pruneExpiringMap = <T>(cache: Map<string, { expiresAt: number } & T>, maxSize: number, now = Date.now()) => {
+  if (cache.size <= maxSize) return;
+  for (const [key, value] of cache) {
+    if (value.expiresAt <= now) cache.delete(key);
+  }
+  while (cache.size > maxSize) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+};
 
 const parseCookies = (cookieHeader = '') => {
   const cookies = new Map<string, string>();
@@ -120,16 +136,26 @@ const canJoinRealtimeMatch = async (user: ArenaSocketUser, matchId: string): Pro
     : getSqliteDb().prepare(query).get(matchId, user.id, user.id) as any;
   const allowed = Boolean(row);
   matchAccessCache.set(cacheKey, { allowed, expiresAt: Date.now() + MATCH_ACCESS_CACHE_TTL_MS });
-  if (matchAccessCache.size > MAX_ACCESS_CACHE_SIZE) {
-    for (const [key, value] of matchAccessCache) {
-      if (value.expiresAt <= Date.now()) matchAccessCache.delete(key);
-    }
-    if (matchAccessCache.size > MAX_ACCESS_CACHE_SIZE) {
-      const firstKey = matchAccessCache.keys().next().value;
-      if (firstKey) matchAccessCache.delete(firstKey);
-    }
-  }
+  pruneExpiringMap(matchAccessCache, MAX_ACCESS_CACHE_SIZE);
   return allowed;
+};
+
+const getMatchParticipantUserIds = async (matchId: string): Promise<string[]> => {
+  const cached = matchParticipantCache.get(matchId);
+  if (cached && cached.expiresAt > Date.now()) return cached.userIds;
+
+  await ensureArenaMatchTables();
+  const query = `SELECT player_a_id, player_b_id
+    FROM arena_matches
+    WHERE id = ?
+    LIMIT 1`;
+  const row = getDbMode() === 'MYSQL'
+    ? await getMysqlDb().get<any>(query, matchId)
+    : getSqliteDb().prepare(query).get(matchId) as any;
+  const userIds = [row?.player_a_id, row?.player_b_id].filter(Boolean).map(String);
+  matchParticipantCache.set(matchId, { userIds, expiresAt: Date.now() + MATCH_ACCESS_CACHE_TTL_MS });
+  pruneExpiringMap(matchParticipantCache, MAX_ACCESS_CACHE_SIZE);
+  return userIds;
 };
 
 const joinMatch = async (socket: ArenaSocket, rawMatchId: unknown) => {
@@ -157,10 +183,7 @@ const getEquippedEmoteCached = async (userId: string, itemId: number) => {
   if (cached && cached.expiresAt > now) return cached.item;
   const item = await getEquippedArenaEmoteItem(userId, itemId);
   equippedEmoteCache.set(key, { item, expiresAt: now + EQUIPPED_EMOTE_CACHE_TTL_MS });
-  if (equippedEmoteCache.size > 5000) {
-    const firstKey = equippedEmoteCache.keys().next().value;
-    if (firstKey) equippedEmoteCache.delete(firstKey);
-  }
+  pruneExpiringMap(equippedEmoteCache, 5000, now);
   return item;
 };
 
@@ -195,6 +218,42 @@ const handleEmote = async (socket: ArenaSocket, message: Extract<ArenaRealtimeMe
     slot: Number.isInteger(Number(message.slot)) ? Number(message.slot) : null,
     sent_at: new Date(now).toISOString()
   });
+};
+
+const handleSkipRoundReveal = async (socket: ArenaSocket, message: Extract<ArenaRealtimeMessage, { type: 'skip_round_reveal' }>) => {
+  if (!socket.user) throw new Error('Unauthorized');
+  const matchId = sanitizeMatchId(message.match_id || socket.currentMatchId);
+  if (!matchId || socket.currentMatchId !== matchId) throw new Error('MatchNotJoined');
+  const roundNo = Number(message.round_no);
+  if (!Number.isInteger(roundNo) || roundNo < 1 || roundNo > 5) throw new Error('InvalidRoundNo');
+
+  const participantIds = await getMatchParticipantUserIds(matchId);
+  if (!participantIds.includes(socket.user.id)) throw new Error('MatchRealtimeForbidden');
+  const requiredUserIds = participantIds.slice(0, 2);
+  const requiredCount = Math.max(1, requiredUserIds.length);
+  const key = `${matchId}:${roundNo}`;
+  const now = Date.now();
+  const state = roundRevealSkipState.get(key) || { userIds: new Set<string>(), expiresAt: now + SKIP_REVEAL_TTL_MS };
+  state.userIds.add(socket.user.id);
+  state.expiresAt = now + SKIP_REVEAL_TTL_MS;
+  roundRevealSkipState.set(key, state);
+
+  for (const [stateKey, value] of roundRevealSkipState) {
+    if (value.expiresAt <= now) roundRevealSkipState.delete(stateKey);
+  }
+
+  const skippedCount = requiredUserIds.filter((userId) => state.userIds.has(userId)).length;
+  const ready = skippedCount >= requiredCount;
+  broadcastMatch(matchId, {
+    type: 'arena_round_skip_status',
+    match_id: matchId,
+    round_no: roundNo,
+    skipped_count: skippedCount,
+    required_count: requiredCount,
+    ready,
+    sent_at: new Date(now).toISOString()
+  });
+  if (ready) roundRevealSkipState.delete(key);
 };
 
 const guardClientMessage = (socket: ArenaSocket, raw: WebSocket.RawData) => {
@@ -234,6 +293,10 @@ const handleClientMessage = async (socket: ArenaSocket, raw: WebSocket.RawData) 
   }
   if (message.type === 'emote') {
     await handleEmote(socket, message);
+    return;
+  }
+  if (message.type === 'skip_round_reveal') {
+    await handleSkipRoundReveal(socket, message);
     return;
   }
 

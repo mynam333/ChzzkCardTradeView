@@ -668,7 +668,12 @@ UX 기준:
             "hp_after": 1182,
             "shield_before": 0,
             "shield_after": 0,
-            "alive_after": true
+            "alive_after": true,
+            "vfx_kind": "skill",
+            "damage_type": "magic",
+            "skill_id": "active_focus_burst",
+            "skill_type": "active",
+            "effect_tags": ["skill", "damage"]
           }
         ]
       }
@@ -682,6 +687,8 @@ UX 기준:
 - 응답 크기 상한을 둔다.
 - 오래된 상세 로그는 삭제될 수 있다.
 - `replay_version: 2`는 이벤트별 체력/실드 상태와 라운드별 최종 유닛 상태를 포함한다.
+- `vfx_kind`, `damage_type`, `skill_id`, `skill_type`, `effect_tags`는 클라이언트 전투 렌더러용 선택 메타데이터다.
+- 클라이언트는 `vfx_kind`를 우선 사용하되, 필드가 없는 과거 리플레이는 `type`과 `message` 기반 fallback으로 재생한다.
 - 이벤트 수 상한으로 일부 이벤트가 생략되면 `replay_truncated`, `original_event_count`, `timeline_summary.omitted_event_count`를 함께 내려준다.
 - 리플레이 조회 실패와 경기 결과 반영 실패를 구분한다.
 

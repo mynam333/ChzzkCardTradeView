@@ -131,6 +131,11 @@ export interface ArenaReplayEventDto {
   shield_before?: number;
   shield_after?: number;
   alive_after?: boolean;
+  vfx_kind?: 'attack' | 'skill' | 'ultimate' | 'heal' | 'guard' | 'control' | 'burn' | 'poison' | 'tempo' | 'retire' | 'result' | string;
+  damage_type?: 'physical' | 'magic' | 'true' | 'heal' | 'shield' | 'control' | string;
+  skill_id?: string;
+  skill_type?: string;
+  effect_tags?: string[];
   message?: string;
 }
 
@@ -165,7 +170,24 @@ export interface ArenaReplayPayloadDto {
   match_format?: string;
   rounds_to_win?: number;
   replay_version?: number;
+  replay_schema_version?: 2;
   replay_storage: 'compact_summary' | 'tick_events' | string;
+  storage_policy?: {
+    enabled?: boolean;
+    mode?: 'event_log_with_snapshots' | string;
+    write_path?: string;
+    legacy_inline_replay_json?: string;
+    max_events_per_round?: number;
+    max_bytes?: number;
+    prune_retention_days?: number;
+    prune_batch_limit?: number;
+  };
+  diagnostic_summary?: {
+    schema: 'arena-replay-diagnostic-v1' | string;
+    issue_count: number;
+    warning_count: number;
+    error_count: number;
+  };
   rounds: ArenaReplayRoundDto[];
 }
 

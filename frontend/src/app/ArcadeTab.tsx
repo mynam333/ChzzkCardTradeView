@@ -915,11 +915,13 @@ const getRotatedCropSafeMargin = (size: number, rotation: number) => {
   return Math.min(0.48, rotatedHalfExtent + 0.025);
 };
 
-const CROP_ALPHA_CANVAS_SIZE = 96;
-const CROP_ALPHA_GRID_SIZE = 9;
+const CROP_ALPHA_CANVAS_SIZE = 128;
+const CROP_ALPHA_GRID_SIZE = 11;
 const CROP_ALPHA_THRESHOLD = 32;
 const CROP_MIN_OPAQUE_RATIO = 0.68;
-const CROP_ALPHA_CANDIDATE_COUNT = 24;
+const CROP_MIN_DETAIL_SCORE = 0.18;
+const CROP_GOOD_CONTENT_SCORE = 0.58;
+const CROP_ALPHA_CANDIDATE_COUNT = 40;
 
 const hashStringToSeed = (value: string) => {
   let hash = 2166136261;
@@ -973,18 +975,27 @@ const buildCropCandidates = (
   return candidates;
 };
 
-const getCropOpaqueRatio = (
+type CropContentScore = {
+  opaqueRatio: number;
+  detailScore: number;
+  score: number;
+};
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const getCropContentScore = (
   imageData: ImageData,
   candidate: { x: number; y: number },
   size: number,
   rotation: number
-) => {
+): CropContentScore => {
   const { data, width, height } = imageData;
   const radians = (-rotation * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   let opaque = 0;
   let total = 0;
+  const samples: Array<{ opaque: boolean; r: number; g: number; b: number; luma: number }> = [];
 
   for (let row = 0; row < CROP_ALPHA_GRID_SIZE; row += 1) {
     for (let col = 0; col < CROP_ALPHA_GRID_SIZE; col += 1) {
@@ -992,17 +1003,89 @@ const getCropOpaqueRatio = (
       const dy = ((row + 0.5) / CROP_ALPHA_GRID_SIZE - 0.5) * size;
       const sourceX = candidate.x + dx * cos - dy * sin;
       const sourceY = candidate.y + dx * sin + dy * cos;
-      if (sourceX < 0 || sourceX > 1 || sourceY < 0 || sourceY > 1) continue;
+      if (sourceX < 0 || sourceX > 1 || sourceY < 0 || sourceY > 1) {
+        samples.push({ opaque: false, r: 0, g: 0, b: 0, luma: 0 });
+        total += 1;
+        continue;
+      }
       const pixelX = Math.min(width - 1, Math.max(0, Math.floor(sourceX * width)));
       const pixelY = Math.min(height - 1, Math.max(0, Math.floor(sourceY * height)));
-      const alpha = data[(pixelY * width + pixelX) * 4 + 3];
-      if (alpha >= CROP_ALPHA_THRESHOLD) opaque += 1;
+      const offset = (pixelY * width + pixelX) * 4;
+      const alpha = data[offset + 3];
+      const isOpaque = alpha >= CROP_ALPHA_THRESHOLD;
+      const r = data[offset];
+      const g = data[offset + 1];
+      const b = data[offset + 2];
+      const luma = r * 0.299 + g * 0.587 + b * 0.114;
+      if (isOpaque) opaque += 1;
+      samples.push({ opaque: isOpaque, r, g, b, luma });
       total += 1;
     }
   }
 
-  return total > 0 ? opaque / total : 0;
+  const opaqueRatio = total > 0 ? opaque / total : 0;
+  if (opaque < 3) return { opaqueRatio, detailScore: 0, score: opaqueRatio * 0.2 };
+
+  let rTotal = 0;
+  let gTotal = 0;
+  let bTotal = 0;
+  let lumaTotal = 0;
+  for (const sample of samples) {
+    if (!sample.opaque) continue;
+    rTotal += sample.r;
+    gTotal += sample.g;
+    bTotal += sample.b;
+    lumaTotal += sample.luma;
+  }
+
+  const rMean = rTotal / opaque;
+  const gMean = gTotal / opaque;
+  const bMean = bTotal / opaque;
+  const lumaMean = lumaTotal / opaque;
+  let lumaVariance = 0;
+  let chromaVariance = 0;
+  for (const sample of samples) {
+    if (!sample.opaque) continue;
+    lumaVariance += (sample.luma - lumaMean) ** 2;
+    chromaVariance += ((sample.r - rMean) ** 2 + (sample.g - gMean) ** 2 + (sample.b - bMean) ** 2) / 3;
+  }
+
+  const lumaStdDev = Math.sqrt(lumaVariance / opaque);
+  const chromaStdDev = Math.sqrt(chromaVariance / opaque);
+  let edgeTotal = 0;
+  let edgeCount = 0;
+  for (let row = 0; row < CROP_ALPHA_GRID_SIZE; row += 1) {
+    for (let col = 0; col < CROP_ALPHA_GRID_SIZE; col += 1) {
+      const index = row * CROP_ALPHA_GRID_SIZE + col;
+      const sample = samples[index];
+      if (!sample?.opaque) continue;
+      const right = col + 1 < CROP_ALPHA_GRID_SIZE ? samples[index + 1] : null;
+      const bottom = row + 1 < CROP_ALPHA_GRID_SIZE ? samples[index + CROP_ALPHA_GRID_SIZE] : null;
+      if (right?.opaque) {
+        edgeTotal += Math.abs(sample.luma - right.luma);
+        edgeCount += 1;
+      }
+      if (bottom?.opaque) {
+        edgeTotal += Math.abs(sample.luma - bottom.luma);
+        edgeCount += 1;
+      }
+    }
+  }
+
+  const edgeMean = edgeCount > 0 ? edgeTotal / edgeCount : 0;
+  const detailScore = clamp01(
+    clamp01((lumaStdDev - 5) / 42) * 0.44 +
+    clamp01(edgeMean / 36) * 0.42 +
+    clamp01((chromaStdDev - 6) / 54) * 0.14
+  );
+  const score = opaqueRatio * 0.35 + detailScore * 0.65;
+  return { opaqueRatio, detailScore, score };
 };
+
+const isCropContentGoodEnough = (contentScore: CropContentScore) =>
+  contentScore.opaqueRatio >= CROP_MIN_OPAQUE_RATIO &&
+  contentScore.detailScore >= CROP_MIN_DETAIL_SCORE &&
+  contentScore.score >= CROP_GOOD_CONTENT_SCORE;
 
 const CardImageTile: React.FC<{
   card: ArcadeCardOption;
@@ -1011,9 +1094,10 @@ const CardImageTile: React.FC<{
   wrong?: boolean;
   disabled?: boolean;
   imageBlindEnabled?: boolean;
+  darkImageBackground?: boolean;
   showStarLabel?: boolean;
   onClick?: () => void;
-}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, imageBlindEnabled = false, showStarLabel = true, onClick }) => {
+}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, imageBlindEnabled = false, darkImageBackground = false, showStarLabel = true, onClick }) => {
   const imageUrl = card.image_url || '/icon.png';
   const nativeDisabled = disabled && !imageBlindEnabled;
 
@@ -1042,7 +1126,7 @@ const CardImageTile: React.FC<{
       }`}
       title="우클릭으로 같은 이미지를 블라인드/해제"
     >
-      <div className="aspect-[4/5] w-full overflow-hidden bg-secondary/50">
+      <div className={`aspect-[4/5] w-full overflow-hidden ${darkImageBackground ? 'bg-zinc-950' : 'bg-secondary/50'}`}>
         <BlindableCardImage
           src={imageUrl}
           alt={card.name}
@@ -1102,17 +1186,17 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
         );
 
         let bestCrop = baseCrop;
-        let bestScore = getCropOpaqueRatio(imageData, baseCrop, size, rotation);
+        let bestScore = getCropContentScore(imageData, baseCrop, size, rotation);
         for (const candidate of candidates.slice(1)) {
-          const score = getCropOpaqueRatio(imageData, candidate, size, rotation);
-          if (score > bestScore) {
+          const score = getCropContentScore(imageData, candidate, size, rotation);
+          if (score.score > bestScore.score) {
             bestScore = score;
             bestCrop = candidate;
           }
-          if (score >= CROP_MIN_OPAQUE_RATIO) break;
+          if (isCropContentGoodEnough(score)) break;
         }
 
-        if (!cancelled && bestScore > 0) {
+        if (!cancelled && bestScore.opaqueRatio > 0) {
           setVisibleCrop(bestCrop);
         }
       } catch {
@@ -2923,6 +3007,7 @@ export const ArcadeTab: React.FC = () => {
                         wrong={wrong}
                         disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
                         imageBlindEnabled={Boolean(roundFeedback)}
+                        darkImageBackground
                         onClick={() => handleRoundChoice(choice.channel_id)}
                       />
                     );

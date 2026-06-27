@@ -6,6 +6,8 @@ import { getArenaAdminControlConfigSync } from './arenaAdminControlService';
 
 export type ArenaSide = 'player' | 'bot';
 export type ArenaRoundWinner = ArenaSide | 'draw';
+export type ArenaBattleVfxKind = 'attack' | 'skill' | 'ultimate' | 'heal' | 'guard' | 'control' | 'burn' | 'poison' | 'tempo' | 'retire' | 'result';
+export type ArenaBattleDamageType = 'physical' | 'magic' | 'true' | 'heal' | 'shield' | 'control';
 
 export interface ArenaSimulatorCardSnapshot {
   card_id: string;
@@ -46,6 +48,11 @@ export interface ArenaBattleEvent {
   shield_before?: number;
   shield_after?: number;
   alive_after?: boolean;
+  vfx_kind?: ArenaBattleVfxKind;
+  damage_type?: ArenaBattleDamageType;
+  skill_id?: string;
+  skill_type?: string;
+  effect_tags?: string[];
   message?: string;
 }
 
@@ -133,6 +140,37 @@ const BREAKER_CLASS_IDS = new Set(['breaker']);
 const BRUISER_DAMAGE_CLASS_IDS = new Set(['duelist', 'berserker', 'pursuer']);
 const FINISHER_DAMAGE_CLASS_IDS = new Set(['sniper', 'assassin', 'rapid_gunner', 'executioner', 'ranger']);
 const CASTER_CONTROL_CLASS_IDS = new Set(['fire_mage', 'frost_mage', 'storm_caller', 'curse_weaver', 'disruptor', 'arcanist']);
+
+const getSkillVfxKind = (card: ArenaSimulatorCardSnapshot): ArenaBattleVfxKind => {
+  const skillText = card.skills.map((skill) => `${skill.id} ${skill.name} ${skill.type}`).join(' ').toLowerCase();
+  if (card.skills.some((skill) => skill.type === 'ultimate') || ['ultimate', 'ult', '궁극'].some((token) => skillText.includes(token))) return 'ultimate';
+  if (card.class_id === 'fire_mage' || ['burn', 'fire', 'ignite', '화상', '불꽃'].some((token) => skillText.includes(token))) return 'burn';
+  if (card.class_id === 'curse_weaver' || ['poison', 'venom', 'toxin', '독', '중독', '저주'].some((token) => skillText.includes(token))) return 'poison';
+  if (HEALING_CLASS_IDS.has(card.class_id) || getCardClassRole(card) === 'support') return 'heal';
+  if (SHIELDING_CLASS_IDS.has(card.class_id)) return 'guard';
+  if (CASTER_CONTROL_CLASS_IDS.has(card.class_id) || BREAKER_CLASS_IDS.has(card.class_id) || getCardClassRole(card) === 'control') return 'control';
+  if (getCardClassRole(card) === 'tempo') return 'tempo';
+  return 'skill';
+};
+
+const getDamageTypeForVfx = (vfxKind: ArenaBattleVfxKind): ArenaBattleDamageType => {
+  if (vfxKind === 'heal') return 'heal';
+  if (vfxKind === 'guard') return 'shield';
+  if (vfxKind === 'control') return 'control';
+  if (['skill', 'ultimate', 'burn', 'poison', 'tempo'].includes(vfxKind)) return 'magic';
+  return 'physical';
+};
+
+const getEffectTagsForVfx = (vfxKind: ArenaBattleVfxKind, card?: ArenaSimulatorCardSnapshot) => {
+  const tags = new Set<string>([vfxKind]);
+  const role = card ? getCardClassRole(card) : '';
+  if (role) tags.add(role);
+  if (vfxKind === 'burn') tags.add('damage_over_time');
+  if (vfxKind === 'poison') tags.add('debuff');
+  if (vfxKind === 'control') tags.add('disrupt');
+  if (vfxKind === 'ultimate') tags.add('high_impact');
+  return Array.from(tags).slice(0, 5);
+};
 
 const getCardClassRole = (card: ArenaSimulatorCardSnapshot) => {
   if (card.class_role) return card.class_role;
@@ -312,7 +350,14 @@ const applyDamage = (
   rawDamage: number,
   t: number,
   seed: string,
-  events: ArenaBattleEvent[]
+  events: ArenaBattleEvent[],
+  meta?: {
+    vfx_kind?: ArenaBattleVfxKind;
+    damage_type?: ArenaBattleDamageType;
+    skill_id?: string;
+    skill_type?: string;
+    effect_tags?: string[];
+  }
 ) => {
   const crit = seededRatio(`${seed}:crit:${actor.id}:${target.id}:${t}`) < actor.critChance;
   const damageAfterDefense = rawDamage * (100 / (100 + target.defense));
@@ -338,7 +383,12 @@ const applyDamage = (
       hp_after: Math.max(0, Math.round(target.hp)),
       shield_before: Math.max(0, Math.round(shieldBefore)),
       shield_after: Math.max(0, Math.round(target.shield)),
-      alive_after: target.hp > 0
+      alive_after: target.hp > 0,
+      vfx_kind: meta?.vfx_kind || 'attack',
+      damage_type: meta?.damage_type || 'physical',
+      skill_id: meta?.skill_id,
+      skill_type: meta?.skill_type,
+      effect_tags: meta?.effect_tags || ['attack']
     });
   }
   if (target.hp <= 0 && target.alive) {
@@ -352,6 +402,11 @@ const applyDamage = (
       shield_before: Math.max(0, Math.round(target.shield)),
       shield_after: Math.max(0, Math.round(target.shield)),
       alive_after: false,
+      vfx_kind: 'retire',
+      damage_type: meta?.damage_type || 'physical',
+      skill_id: meta?.skill_id,
+      skill_type: meta?.skill_type,
+      effect_tags: ['retire', ...(meta?.effect_tags || []).slice(0, 3)],
       message: `${target.card.name} 전투 불능`
     });
   }
@@ -366,8 +421,21 @@ const castSkill = (
   events: ArenaBattleEvent[]
 ) => {
   const skill = actor.card.skills.find((item) => item.type === 'active') || actor.card.skills[0];
+  const vfxKind = getSkillVfxKind(actor.card);
+  const damageType = getDamageTypeForVfx(vfxKind);
+  const effectTags = getEffectTagsForVfx(vfxKind, actor.card);
   actor.energy = Math.max(0, actor.energy - actor.skillCost);
-  pushEvent(events, { t, type: 'SKILL_CAST', actor: actor.id, message: skill ? skill.name : '스킬' });
+  pushEvent(events, {
+    t,
+    type: 'SKILL_CAST',
+    actor: actor.id,
+    vfx_kind: vfxKind,
+    damage_type: damageType,
+    skill_id: skill?.id,
+    skill_type: skill?.type,
+    effect_tags: effectTags,
+    message: skill ? skill.name : '스킬'
+  });
 
   if (HEALING_CLASS_IDS.has(actor.card.class_id) || getCardClassRole(actor.card) === 'support') {
     const target = living(allies).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
@@ -387,7 +455,12 @@ const castSkill = (
         hp_after: Math.max(0, Math.round(target.hp)),
         shield_before: Math.max(0, Math.round(target.shield)),
         shield_after: Math.max(0, Math.round(target.shield)),
-        alive_after: target.alive && target.hp > 0
+        alive_after: target.alive && target.hp > 0,
+        vfx_kind: 'heal',
+        damage_type: 'heal',
+        skill_id: skill?.id,
+        skill_type: skill?.type,
+        effect_tags: getEffectTagsForVfx('heal', actor.card)
       });
     }
     return;
@@ -409,7 +482,12 @@ const castSkill = (
         hp_after: Math.max(0, Math.round(target.hp)),
         shield_before: Math.max(0, Math.round(shieldBefore)),
         shield_after: Math.max(0, Math.round(target.shield)),
-        alive_after: target.alive && target.hp > 0
+        alive_after: target.alive && target.hp > 0,
+        vfx_kind: 'guard',
+        damage_type: 'shield',
+        skill_id: skill?.id,
+        skill_type: skill?.type,
+        effect_tags: getEffectTagsForVfx('guard', actor.card)
       });
     }
     return;
@@ -419,7 +497,13 @@ const castSkill = (
   if (!target) return;
   const multiplier = getSkillDamageMultiplier(actor.card);
   const focusSkillMod = clamp(1 + (actor.card.stats.focus - 55) * 0.0025, 0.94, 1.08);
-  applyDamage(actor, target, actor.attack * multiplier * focusSkillMod, t, `${seed}:skill`, events);
+  applyDamage(actor, target, actor.attack * multiplier * focusSkillMod, t, `${seed}:skill`, events, {
+    vfx_kind: vfxKind,
+    damage_type: damageType,
+    skill_id: skill?.id,
+    skill_type: skill?.type,
+    effect_tags: effectTags
+  });
 };
 
 const simulateRound = (
@@ -434,7 +518,13 @@ const simulateRound = (
   const botUnits = buildUnits(botDeck, 'bot', roundNo, botPowerMultiplier, battlefieldRuleId);
   const events: ArenaBattleEvent[] = [];
   const battlefield = ARENA_BATTLEFIELD_RULES.find((item) => item.id === battlefieldRuleId);
-  pushEvent(events, { t: 0, type: 'ROUND_START', message: battlefield ? `${roundNo}라운드 시작 · ${battlefield.name}` : `${roundNo}라운드 시작` });
+  pushEvent(events, {
+    t: 0,
+    type: 'ROUND_START',
+    vfx_kind: 'result',
+    effect_tags: ['round_start'],
+    message: battlefield ? `${roundNo}라운드 시작 · ${battlefield.name}` : `${roundNo}라운드 시작`
+  });
 
   let durationMs = ARENA_MAX_ROUND_TICKS * TICK_MS;
   for (let tick = 0; tick < ARENA_MAX_ROUND_TICKS; tick += 1) {
@@ -463,8 +553,20 @@ const simulateRound = (
       } else {
         const target = chooseTarget(actor, enemies, seed);
         if (target) {
-          pushEvent(events, { t, type: 'BASIC_ATTACK', actor: actor.id, targets: [target.id] });
-          applyDamage(actor, target, actor.attack, t, seed, events);
+          pushEvent(events, {
+            t,
+            type: 'BASIC_ATTACK',
+            actor: actor.id,
+            targets: [target.id],
+            vfx_kind: 'attack',
+            damage_type: 'physical',
+            effect_tags: ['attack', getCardClassRole(actor.card)]
+          });
+          applyDamage(actor, target, actor.attack, t, seed, events, {
+            vfx_kind: 'attack',
+            damage_type: 'physical',
+            effect_tags: ['attack', getCardClassRole(actor.card)]
+          });
           actor.energy = Math.min(200, actor.energy + 12);
         }
       }
@@ -501,6 +603,8 @@ const simulateRound = (
   pushEvent(events, {
     t: durationMs,
     type: 'ROUND_RESULT',
+    vfx_kind: 'result',
+    effect_tags: ['round_result', winner],
     message: winner === 'draw' ? '라운드 무승부' : winner === 'player' ? '플레이어 라운드 승리' : '봇 라운드 승리'
   });
 

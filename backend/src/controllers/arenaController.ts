@@ -33,6 +33,7 @@ import {
   commitArenaMatchRound,
   createArenaBotMatch,
   getArenaMatchForUser,
+  getArenaMatchReplayDiagnosticForAdmin,
   listRecentArenaMatchesForUser,
   getArenaProfile,
   getArenaUserProfile,
@@ -89,6 +90,7 @@ import {
   setArenaAdminRestriction
 } from '../services/arenaAdminControlService';
 import { ensureDirectory, getUploadsDir } from '../services/storagePaths';
+import { getArenaPerformanceTelemetry, recordArenaPerformanceSample } from '../services/arenaTelemetryService';
 
 const CARD_LIST_CACHE_TTL_MS = Math.max(60_000, Number(process.env.ARENA_CARD_LIST_CACHE_TTL_MS || 300_000));
 const CARD_LIST_MAX_LIMIT = Math.max(12, Number(process.env.ARENA_CARD_LIST_MAX_LIMIT || 96));
@@ -1100,6 +1102,19 @@ export const getArenaMatchReplay = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
+export const collectArenaPerformanceSample = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    recordArenaPerformanceSample({
+      ...(typeof req.body === 'object' && req.body ? req.body : {}),
+      user_id: req.user?.id || null
+    });
+    res.set('Cache-Control', 'private, no-store');
+    return res.status(202).json({ ok: true });
+  } catch (err: any) {
+    return handleArenaMatchError(res, err, '아레나 성능 샘플을 기록하지 못했습니다.');
+  }
+};
+
 
 export const getMyArenaProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1194,6 +1209,7 @@ export const adminGetArenaOpsStatus = async (_req: AuthenticatedRequest, res: Re
         prune_targets: ['arena_match_replays', 'arena_cup_replays', 'arena_spectator_links', 'legacy_inline_replay_json'],
         ...getArenaReplayStoragePolicy()
       },
+      performance_telemetry: getArenaPerformanceTelemetry(),
       worker_health: await getArenaWorkerHeartbeatStatus(),
       load_policy: {
         queue_poll_after_sec: 3,
@@ -1218,6 +1234,23 @@ export const adminGetArenaOpsStatus = async (_req: AuthenticatedRequest, res: Re
       }
     }
   });
+};
+
+export const adminGetArenaMatchReplayDiagnostic = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const matchId = String(req.params.match_id || req.query.match_id || '').trim();
+    if (!matchId) {
+      return res.status(400).json({ error: 'ArenaMatchIdRequired', message: '매치 ID가 필요합니다.' });
+    }
+    const result = await getArenaMatchReplayDiagnosticForAdmin(matchId);
+    if (!result) {
+      return res.status(404).json({ error: 'ArenaMatchNotFound', message: '아레나 매치를 찾을 수 없습니다.' });
+    }
+    res.set('Cache-Control', 'private, no-store');
+    return res.status(200).json({ ok: true, data: result });
+  } catch (err: any) {
+    return handleArenaMatchError(res, err, '아레나 리플레이 진단을 불러오지 못했습니다.');
+  }
 };
 
 export const adminUpdateArenaSeason = async (req: AuthenticatedRequest, res: Response) => {

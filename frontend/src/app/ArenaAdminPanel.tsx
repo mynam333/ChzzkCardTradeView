@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   BarChart3,
   Download,
+  FileSearch,
   Gamepad2,
   Gauge,
   RefreshCw,
@@ -17,7 +18,7 @@ import { formatLocalDateTime } from '@/lib/time';
 import { useApp } from './AppContext';
 
 type ArenaAdminAction = 'stats' | 'rankings' | 'prune' | 'recoverCup' | 'recoverQuick';
-type ArenaAdminSubTab = 'ops' | 'controls' | 'abuse';
+type ArenaAdminSubTab = 'ops' | 'controls' | 'abuse' | 'diagnostics';
 type ArenaRestrictionType = 'skill' | 'tag' | 'battlefield' | 'card';
 type ArenaStatFilterReview = 'all' | 'watch' | 'over' | 'under' | 'low_sample' | 'normal';
 
@@ -256,6 +257,9 @@ export const ArenaAdminPanel: React.FC = () => {
   const [seasonNo, setSeasonNo] = React.useState(0);
   const [seasonName, setSeasonName] = React.useState('');
   const [seasonSaving, setSeasonSaving] = React.useState(false);
+  const [diagnosticMatchId, setDiagnosticMatchId] = React.useState('');
+  const [matchDiagnostic, setMatchDiagnostic] = React.useState<any | null>(null);
+  const [matchDiagnosticLoading, setMatchDiagnosticLoading] = React.useState(false);
 
   React.useEffect(() => {
     const season = arenaOps?.season;
@@ -314,6 +318,10 @@ export const ArenaAdminPanel: React.FC = () => {
           const auditData = await auditRes.json();
           setArenaAudit(auditData.data || auditData);
         }
+        return;
+      }
+
+      if (scope === 'diagnostics') {
         return;
       }
 
@@ -472,6 +480,29 @@ export const ArenaAdminPanel: React.FC = () => {
     }
   };
 
+  const fetchMatchDiagnostic = async () => {
+    const cleanId = diagnosticMatchId.trim();
+    if (!cleanId || matchDiagnosticLoading) return;
+    setMatchDiagnosticLoading(true);
+    try {
+      const res = await apiFetch(`/admin/arena/matches/${encodeURIComponent(cleanId)}/replay-diagnostic`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Arena match diagnostic failed');
+      setMatchDiagnostic(data.data || data);
+      toast('전투 리플레이 진단을 불러왔습니다.', 'success');
+    } catch (err: any) {
+      toast(err?.message || '전투 리플레이 진단을 불러오지 못했습니다.', 'error');
+    } finally {
+      setMatchDiagnosticLoading(false);
+    }
+  };
+
+  const exportMatchDiagnosticJson = () => {
+    if (!matchDiagnostic) return;
+    const filename = `chikapo-arena-match-diagnostic-${diagnosticMatchId.trim() || 'unknown'}-${formatExportTimestamp()}.json`;
+    downloadTextFile(filename, JSON.stringify(matchDiagnostic, null, 2), 'application/json;charset=utf-8');
+  };
+
   const exportArenaStatsCsv = () => {
     if (filteredStatItems.length === 0) {
       toast('현재 필터 조건에 맞는 아레나 통계가 없습니다.', 'warning');
@@ -599,11 +630,12 @@ export const ArenaAdminPanel: React.FC = () => {
   return (
     <section className="space-y-5">
       <div className="cute-surface rounded-[2rem] p-3">
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {[
             ['ops', '운영/통계', '큐, 스냅샷, 밸런스 통계 관리'],
             ['controls', '인게임 제어', '문제 카드와 규칙 즉시 제한'],
-            ['abuse', '어뷰징 감사', '반복 상대와 비정상 승패 흐름 확인']
+            ['abuse', '어뷰징 감사', '반복 상대와 비정상 승패 흐름 확인'],
+            ['diagnostics', '전투 진단', '매치 리플레이 스키마와 프론트 재생 근거 확인']
           ].map(([id, label, description]) => (
             <button
               key={id}
@@ -897,6 +929,142 @@ export const ArenaAdminPanel: React.FC = () => {
             </div>
           </div>
         </div>
+      ) : adminSubTab === 'diagnostics' ? (
+        <div className="cute-surface rounded-[2rem] p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-black text-foreground">
+                <FileSearch className="h-5 w-5 text-primary" />
+                전투 리플레이 진단
+              </h2>
+              <p className="mt-1 max-w-3xl text-xs font-bold leading-relaxed text-muted-foreground">
+                매치 ID를 직접 입력해 서버 리플레이 원본이 프론트 전투 중계 규칙과 맞는지 확인합니다. 입력한 매치만 조회하므로 상시 DB 부하가 없습니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={exportMatchDiagnosticJson}
+              disabled={!matchDiagnostic}
+              className="cute-wiggle-hover inline-flex items-center gap-1.5 rounded-2xl bg-primary px-3 py-2 text-[10px] font-black text-primary-foreground shadow-sm disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              JSON
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-2 md:grid-cols-[minmax(0,1fr)_10rem]">
+            <input
+              value={diagnosticMatchId}
+              onChange={(event) => setDiagnosticMatchId(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void fetchMatchDiagnostic();
+              }}
+              placeholder="진단할 매치 ID"
+              className="rounded-2xl border border-border bg-background px-4 py-3 text-sm font-black text-foreground outline-none focus:border-primary"
+            />
+            <button
+              type="button"
+              onClick={fetchMatchDiagnostic}
+              disabled={!diagnosticMatchId.trim() || matchDiagnosticLoading}
+              className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-3 text-sm font-black text-primary-foreground disabled:opacity-50"
+            >
+              {matchDiagnosticLoading ? '진단 중' : '진단 조회'}
+            </button>
+          </div>
+
+          {matchDiagnostic ? (
+            <div className="mt-5 space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                {[
+                  ['리플레이', matchDiagnostic.replay_available ? '있음' : '없음'],
+                  ['라운드', matchDiagnostic.diagnostic?.round_count ?? 0],
+                  ['이벤트', matchDiagnostic.diagnostic?.event_count ?? 0],
+                  ['오류/경고', `${matchDiagnostic.diagnostic?.error_count || 0}/${matchDiagnostic.diagnostic?.warning_count || 0}`]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-3xl border border-white/70 bg-white/72 p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/10">
+                    <p className="text-[10px] font-black text-muted-foreground">{String(label)}</p>
+                    <p className="mt-1 text-xl font-black text-foreground">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-3xl border border-border bg-card/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-foreground">저장 정책</h3>
+                    <p className="mt-1 text-[11px] font-bold text-muted-foreground">
+                      리플레이는 이벤트 로그와 라운드 스냅샷만 저장하고, 오래된 항목은 관리자 작업으로 정리합니다.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-black text-muted-foreground">
+                    {matchDiagnostic.replay_policy?.write_path || 'arena_match_replays'}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-4">
+                  {[
+                    ['이벤트/라운드', matchDiagnostic.replay_policy?.max_events_per_round],
+                    ['최대 바이트', matchDiagnostic.replay_policy?.max_bytes],
+                    ['보관일', matchDiagnostic.replay_policy?.prune_retention_days],
+                    ['레거시', matchDiagnostic.replay_policy?.legacy_inline_replay_json]
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-2xl bg-secondary/45 px-3 py-2">
+                      <p className="text-[9px] font-black text-muted-foreground">{String(label)}</p>
+                      <p className="mt-0.5 break-all text-[11px] font-black text-foreground">{String(value ?? '-')}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="rounded-3xl border border-white/70 bg-white/64 p-4 dark:border-white/10 dark:bg-white/10">
+                  <h3 className="text-sm font-black text-foreground">라운드별 진단</h3>
+                  <div className="mt-3 space-y-2">
+                    {(matchDiagnostic.diagnostic?.rounds || []).length === 0 ? (
+                      <p className="rounded-2xl bg-secondary/45 px-3 py-4 text-center text-[11px] font-bold text-muted-foreground">진단할 라운드가 없습니다.</p>
+                    ) : matchDiagnostic.diagnostic.rounds.map((round: any) => (
+                      <div key={`diag-round-${round.round_no}`} className="rounded-2xl bg-card/80 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-black text-foreground">R{round.round_no}</p>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${round.error_count > 0 ? 'bg-red-500/10 text-red-700 dark:text-red-100' : round.warning_count > 0 ? 'bg-amber-500/10 text-amber-700 dark:text-amber-100' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-100'}`}>
+                            {round.error_count > 0 ? '오류' : round.warning_count > 0 ? '주의' : '정상'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[10px] font-bold text-muted-foreground">
+                          이벤트 {Number(round.event_count || 0).toLocaleString()} · 이슈 {Number(round.issue_count || 0).toLocaleString()}
+                          {round.truncated ? ` · 생략 ${Number(round.omitted_event_count || 0).toLocaleString()}` : ''}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/70 bg-white/64 p-4 dark:border-white/10 dark:bg-white/10">
+                  <h3 className="text-sm font-black text-foreground">스키마 이슈</h3>
+                  <div className="mt-3 space-y-2">
+                    {(matchDiagnostic.diagnostic?.issues || []).length === 0 ? (
+                      <p className="rounded-2xl bg-secondary/45 px-3 py-4 text-center text-[11px] font-bold text-muted-foreground">리플레이 스키마 이슈가 없습니다.</p>
+                    ) : matchDiagnostic.diagnostic.issues.slice(0, 30).map((issue: any, index: number) => (
+                      <div key={`${issue.code}-${issue.round_no}-${issue.event_index}-${index}`} className="rounded-2xl bg-card/80 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[9px] font-black ${issue.severity === 'error' ? 'bg-red-500/10 text-red-700 dark:text-red-100' : issue.severity === 'warning' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-100' : 'bg-secondary text-muted-foreground'}`}>
+                            {issue.severity}
+                          </span>
+                          <p className="text-[10px] font-black text-foreground">{issue.code}</p>
+                          <p className="text-[10px] font-bold text-muted-foreground">R{issue.round_no} / E{issue.event_index}</p>
+                        </div>
+                        <p className="mt-1 text-[11px] font-bold leading-relaxed text-muted-foreground">{issue.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-5 rounded-[1.75rem] border border-dashed border-primary/25 bg-white/55 px-4 py-8 text-center text-xs font-bold text-muted-foreground dark:bg-white/8">
+              매치 ID를 입력하면 리플레이 스키마, 저장 정책, 라운드별 재생 가능성을 확인합니다.
+            </p>
+          )}
+        </div>
       ) : (
         <>
       <div className="cute-surface rounded-[2rem] p-5">
@@ -933,6 +1101,33 @@ export const ArenaAdminPanel: React.FC = () => {
               <p className="mt-1 break-all text-sm font-black text-foreground">{item.value}</p>
             </div>
           ))}
+        </div>
+
+        <div className="mt-4 rounded-[1.75rem] border border-border bg-card/70 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-foreground">전투 화면 성능 샘플</h3>
+              <p className="mt-1 text-[11px] font-bold text-muted-foreground">
+                실제 매치 화면에서 낮은 빈도로 전송된 인메모리 샘플입니다. DB에 저장하지 않습니다.
+              </p>
+            </div>
+            <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-black text-muted-foreground">
+              {arenaOps?.performance_telemetry?.sample_count || 0} samples
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            {[
+              ['초기화', `${arenaOps?.performance_telemetry?.averages?.init_ms ?? 0}ms`],
+              ['리플레이', `${arenaOps?.performance_telemetry?.averages?.replay_ms ?? 0}ms`],
+              ['이벤트', arenaOps?.performance_telemetry?.averages?.event_count ?? 0],
+              ['드롭 추정', arenaOps?.performance_telemetry?.averages?.dropped_frames ?? 0]
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded-2xl bg-secondary/45 px-3 py-2 text-center">
+                <p className="text-[9px] font-black text-muted-foreground">{String(label)}</p>
+                <p className="mt-0.5 text-sm font-black text-foreground">{String(value)}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="mt-4 rounded-[1.75rem] border border-border bg-card/70 p-4">

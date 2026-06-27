@@ -9,6 +9,7 @@ import type {
 } from '@chikapo/arena-contract';
 import type { TextStyleOptions } from 'pixi.js';
 import { proxiedImage } from '@/lib/cosmetics';
+import { resolveArenaVfxPreset, type ArenaVfxPresetKind } from '@/lib/arenaVfxPresets';
 import type { ArenaBattleTurn, ArenaCosmeticLoadout, ArenaRuleClass, ArenaRuleSkill, RoundRevealState, SelectedRoundSlot } from './ArenaMatchPageClient';
 
 type PixiModule = typeof import('pixi.js');
@@ -118,15 +119,17 @@ const PASTEL = {
 
 const CARD_STYLE = {
   player: {
-    fillTop: 0xffffff,
-    fillBottom: 0xffedf0,
-    rim: 0xfb7185,
-    glow: 0xff9aa9
+    fillTop: 0xfffffb,
+    fillBottom: 0xffeef2,
+    rail: 0xfb7185,
+    chip: 0xfff5f6,
+    glow: 0xffa3ad
   },
   opponent: {
-    fillTop: 0xffffff,
-    fillBottom: 0xffe4ec,
-    rim: 0xf472b6,
+    fillTop: 0xfffffb,
+    fillBottom: 0xffeaf1,
+    rail: 0xf472b6,
+    chip: 0xfff1f6,
     glow: 0xf9a8d4
   }
 };
@@ -181,6 +184,7 @@ const skillTypeDescriptions: Record<string, string> = {
   ultimate: '에너지가 충분할 때 전세를 크게 바꾸는 강한 한 번의 효과입니다.'
 };
 
+const MAX_TEXTURE_CACHE_ENTRIES = 90;
 const textureCache = new Map<string, Promise<PixiTexture>>();
 
 const normalizeCombatToken = (value?: string | null) => String(value || '').trim().toLowerCase();
@@ -188,13 +192,46 @@ const normalizeCombatToken = (value?: string | null) => String(value || '').trim
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 const colorForAction = (turn?: ArenaBattleTurn) => {
-  const text = `${turn?.actionType || ''} ${turn?.skillName || ''} ${turn?.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ') || ''}`.toLowerCase();
-  if (turn?.actionType === 'heal' || text.includes('heal') || text.includes('회복')) return PASTEL.green;
-  if (turn?.actionType === 'guard' || text.includes('guard') || text.includes('shield') || text.includes('보호')) return PASTEL.blue;
-  if (turn?.actionType === 'control' || text.includes('stun') || text.includes('slow') || text.includes('기절')) return PASTEL.violet;
-  if (text.includes('ultimate') || text.includes('ult') || text.includes('궁극')) return PASTEL.amber;
-  if (turn?.actionType === 'retire') return PASTEL.slate;
-  return PASTEL.rose;
+  return visualProfileForTurn(turn).color;
+};
+
+type TurnVisualKind = ArenaVfxPresetKind;
+
+const getTurnVisualKind = (turn?: ArenaBattleTurn): TurnVisualKind => {
+  return visualProfileForTurn(turn).kind;
+};
+
+const visualProfileForTurn = (turn?: ArenaBattleTurn) => {
+  const text = turn ? `${turn.actionType || ''} ${turn.skillName || ''} ${turn.events.map((event) => `${event.type || ''} ${event.message || ''}`).join(' ')}` : '';
+  const preset = resolveArenaVfxPreset({
+    vfxKind: turn?.vfxKind,
+    damageType: turn?.damageType,
+    actionType: turn?.actionType,
+    skillType: turn?.skillType,
+    effectTags: turn?.effectTags,
+    text
+  });
+  if (turn?.actionType === 'attack' && preset.kind === 'effect') return { ...preset, kind: 'attack' as const };
+  if (turn?.actionType === 'skill' && preset.kind === 'effect') return { ...preset, kind: 'skill' as const };
+  return preset;
+};
+
+const turnPhaseLabel = (stage: BattleStageKind, turn?: ArenaBattleTurn, progress = 0) => {
+  if (stage === 'result') return '결산';
+  if (stage !== 'battle') return '준비';
+  if (!turn || turn.actionType === 'start') return '개전';
+  if (progress < 0.22) return '시전';
+  if (progress < 0.58) return turn.actionType === 'attack' ? '돌진' : '발사';
+  if (progress < 0.78) return '충돌';
+  return '정리';
+};
+
+const statusLabelForTurn = (turn?: ArenaBattleTurn) => {
+  return turn ? visualProfileForTurn(turn).label : '';
+};
+
+const actionGlyphForTurn = (turn?: ArenaBattleTurn) => {
+  return turn ? visualProfileForTurn(turn).glyph : '•';
 };
 
 const prefersReducedMotion = () =>
@@ -211,11 +248,68 @@ const detectQuality = (): RendererQuality => {
   return 'high';
 };
 
-const loadTextureCached = (PIXI: PixiModule, url: string) => {
-  const cached = textureCache.get(url);
+const resolvePixiImageUrls = (
+  url: string,
+  options: { width?: number; quality?: number }
+) => {
+  const proxied = proxiedImage(url, options);
+  return Array.from(new Set([url, proxied].filter(Boolean)));
+};
+
+const loadImageElementTexture = async (PIXI: PixiModule, url: string) => {
+  const response = await fetch(url, {
+    cache: 'force-cache',
+    credentials: 'same-origin'
+  });
+  if (!response.ok) throw new Error(`IMAGE_FETCH_${response.status}`);
+  const blob = await response.blob();
+  if (blob.type && !blob.type.startsWith('image/')) throw new Error('IMAGE_FETCH_NOT_IMAGE');
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('IMAGE_ELEMENT_LOAD_FAILED'));
+      image.src = objectUrl;
+    });
+    try {
+      await image.decode?.();
+    } catch {
+      // onload is enough for older or already-decoded images.
+    }
+    return PIXI.Texture.from(image) as PixiTexture;
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+};
+
+const loadTextureCached = (PIXI: PixiModule, urls: string | string[]) => {
+  const candidates = Array.isArray(urls) ? urls.filter(Boolean) : [urls].filter(Boolean);
+  const cacheKey = candidates.join('|');
+  const cached = textureCache.get(cacheKey);
   if (cached) return cached;
-  const promise = PIXI.Assets.load(url) as Promise<PixiTexture>;
-  textureCache.set(url, promise);
+  if (textureCache.size >= MAX_TEXTURE_CACHE_ENTRIES) {
+    const oldestKey = textureCache.keys().next().value;
+    if (oldestKey) textureCache.delete(oldestKey);
+  }
+  const promise = (async () => {
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        return await loadImageElementTexture(PIXI, candidate);
+      } catch (error) {
+        lastError = error;
+      }
+      try {
+        return await PIXI.Assets.load(candidate) as PixiTexture;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('IMAGE_LOAD_FAILED');
+  })();
+  textureCache.set(cacheKey, promise);
   return promise;
 };
 
@@ -229,6 +323,19 @@ const renderPixiFrame = (app: PixiApp) => {
       // Rendering is best-effort here; the next ticker frame can still recover.
     }
   }
+};
+
+const schedulePixiFrame = (app: PixiApp) => {
+  if (typeof window === 'undefined') {
+    renderPixiFrame(app);
+    return;
+  }
+  const anyApp = app as PixiApp & { __arenaRenderFrame?: number };
+  if (anyApp.__arenaRenderFrame) return;
+  anyApp.__arenaRenderFrame = window.requestAnimationFrame(() => {
+    anyApp.__arenaRenderFrame = undefined;
+    renderPixiFrame(app);
+  });
 };
 
 const clearContainer = (container: PixiContainer) => {
@@ -496,6 +603,175 @@ const drawTargetMarker = (
   marker.roundRect(card.x + inset + 5, card.y + inset + 5, card.width - inset * 2 - 10, card.height - inset * 2 - 10, 22)
     .stroke({ color: PASTEL.white, alpha: mode === 'actor' ? 0.28 : 0.38, width: 1.5 });
   parent.addChild(marker);
+  const badgeWidth = mode === 'actor' ? 62 : 64;
+  const badgeX = mode === 'actor' ? card.x + 10 : card.x + card.width - badgeWidth - 10;
+  const badgeY = card.y - 17;
+  drawRoundRect(PIXI, parent, badgeX, badgeY, badgeWidth, 20, 999, mode === 'actor' ? color : PASTEL.white, mode === 'actor' ? 0.94 : 0.9, { color, alpha: 0.72, width: 1.4 });
+  addText(PIXI, parent, mode === 'actor' ? 'ACTION' : 'TARGET', badgeX + 12, badgeY + 5, {
+    fill: mode === 'actor' ? PASTEL.white : color,
+    fontSize: 9,
+    fontWeight: '900',
+    fontFamily: 'Arial, sans-serif'
+  });
+};
+
+const drawActionFocus = (
+  PIXI: PixiModule,
+  parent: PixiContainer,
+  actor: PositionedCard | undefined,
+  targets: PositionedCard[],
+  color: number,
+  turnProgress: number
+) => {
+  if (!actor && targets.length === 0) return;
+  const focus = new PIXI.Graphics();
+  const pulse = 0.5 + Math.sin(turnProgress * Math.PI) * 0.5;
+  const drawGlow = (card: PositionedCard, intensity: number) => {
+    const cx = card.x + card.width / 2;
+    const cy = card.y + card.height / 2;
+    focus.ellipse(cx, cy, card.width * (0.72 + pulse * 0.08), card.height * (0.62 + pulse * 0.06))
+      .fill({ color, alpha: 0.055 * intensity });
+    focus.roundRect(card.x - 10, card.y - 10, card.width + 20, card.height + 20, 30)
+      .stroke({ color, alpha: 0.14 * intensity + pulse * 0.08, width: 2 });
+  };
+  if (actor) drawGlow(actor, 0.9);
+  targets.forEach((target) => drawGlow(target, 1.15));
+  if (actor && targets[0]) {
+    const ax = actor.x + actor.width / 2;
+    const ay = actor.y + actor.height / 2;
+    targets.slice(0, 3).forEach((target, index) => {
+      const tx = target.x + target.width / 2;
+      const ty = target.y + target.height / 2;
+      const midX = (ax + tx) / 2;
+      const midY = (ay + ty) / 2;
+      const bend = (index - 1) * 8;
+      focus.moveTo(ax, ay)
+        .quadraticCurveTo(midX - (ty - ay) * 0.08 + bend, midY + (tx - ax) * 0.08, tx, ty)
+        .stroke({ color: PASTEL.white, alpha: 0.24, width: 7, cap: 'round' });
+      focus.moveTo(ax, ay)
+        .quadraticCurveTo(midX - (ty - ay) * 0.08 + bend, midY + (tx - ax) * 0.08, tx, ty)
+        .stroke({ color, alpha: 0.34, width: 3, cap: 'round' });
+      const angle = Math.atan2(ty - ay, tx - ax);
+      const arrowX = tx - Math.cos(angle) * target.width * 0.34;
+      const arrowY = ty - Math.sin(angle) * target.height * 0.34;
+      focus.moveTo(arrowX, arrowY)
+        .lineTo(arrowX - Math.cos(angle - 0.55) * 18, arrowY - Math.sin(angle - 0.55) * 18)
+        .lineTo(arrowX - Math.cos(angle + 0.55) * 18, arrowY - Math.sin(angle + 0.55) * 18)
+        .lineTo(arrowX, arrowY)
+        .fill({ color, alpha: 0.58 });
+    });
+  }
+  parent.addChild(focus);
+};
+
+const drawStageBanner = (
+  PIXI: PixiModule,
+  parent: PixiContainer,
+  layout: BattleResponsiveLayout,
+  width: number,
+  height: number,
+  stage: BattleStageKind,
+  activeTurn: ArenaBattleTurn | undefined,
+  roundReveal: RoundRevealState | null,
+  roundResult?: ArenaRoundResultDto
+) => {
+  const showBattleStart = stage === 'battle' && activeTurn?.actionType === 'start';
+  const showResult = stage === 'result';
+  if (!showBattleStart && !showResult) return;
+
+  const color = showResult
+    ? roundReveal?.winner === 'player'
+      ? PASTEL.rose
+      : roundReveal?.winner === 'bot'
+        ? 0xec4899
+        : PASTEL.violet
+    : PASTEL.rose;
+  const title = showResult
+    ? roundReveal?.winner === 'player'
+      ? '라운드 승리'
+      : roundReveal?.winner === 'bot'
+        ? '라운드 패배'
+        : '라운드 무승부'
+    : '라운드 시작';
+  const playerDamage = Number(roundResult?.player_total_damage || 0);
+  const opponentDamage = Number(roundResult?.bot_total_damage || 0);
+  const caption = showResult
+    ? `피해 ${playerDamage} : ${opponentDamage} · 생존 ${roundResult?.player_remaining_units ?? 0} : ${roundResult?.bot_remaining_units ?? 0}`
+    : '선택한 전술대로 전투가 전개됩니다';
+  const bannerWidth = clamp(width * 0.56, 260, 520);
+  const bannerHeight = clamp(height * 0.12, 64, 92);
+  const x = (width - bannerWidth) / 2;
+  const y = clamp(layout.centerLineY - bannerHeight / 2, layout.opponentFrontTop + layout.cardHeight + 6, layout.playerFrontTop - bannerHeight - 6);
+  const banner = new PIXI.Container();
+  parent.addChild(banner);
+
+  const aura = new PIXI.Graphics();
+  aura.ellipse(width / 2, y + bannerHeight / 2, bannerWidth * 0.62, bannerHeight * 0.92)
+    .fill({ color, alpha: showResult ? 0.16 : 0.11 });
+  aura.ellipse(width / 2, y + bannerHeight / 2, bannerWidth * 0.42, bannerHeight * 0.54)
+    .fill({ color: PASTEL.white, alpha: 0.16 });
+  banner.addChild(aura);
+
+  const panel = new PIXI.Graphics();
+  panel.roundRect(x, y, bannerWidth, bannerHeight, 30)
+    .fill({ color: PASTEL.white, alpha: 0.9 })
+    .stroke({ color, alpha: 0.52, width: 2.2 });
+  panel.roundRect(x + 7, y + 7, bannerWidth - 14, bannerHeight - 14, 24)
+    .stroke({ color: PASTEL.white, alpha: 0.72, width: 1.3 });
+  panel.moveTo(x + 20, y + bannerHeight - 18)
+    .lineTo(x + bannerWidth - 20, y + 18)
+    .stroke({ color, alpha: 0.08, width: 12, cap: 'round' });
+  banner.addChild(panel);
+
+  const leftWing = new PIXI.Graphics();
+  const rightWing = new PIXI.Graphics();
+  leftWing.moveTo(x - 34, y + bannerHeight / 2)
+    .lineTo(x + 24, y + 13)
+    .lineTo(x + 20, y + bannerHeight - 12)
+    .fill({ color, alpha: 0.18 });
+  rightWing.moveTo(x + bannerWidth + 34, y + bannerHeight / 2)
+    .lineTo(x + bannerWidth - 24, y + 13)
+    .lineTo(x + bannerWidth - 20, y + bannerHeight - 12)
+    .fill({ color, alpha: 0.18 });
+  banner.addChild(leftWing, rightWing);
+
+  const titleText = new PIXI.Text({
+    text: title,
+    style: {
+      fill: PASTEL.text,
+      fontSize: clamp(bannerHeight * 0.32, 22, 32),
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif',
+      stroke: { color: PASTEL.white, width: 4 }
+    }
+  });
+  titleText.anchor.set(0.5);
+  titleText.position.set(width / 2, y + bannerHeight * 0.42);
+  banner.addChild(titleText);
+
+  const captionText = new PIXI.Text({
+    text: caption,
+    style: {
+      fill: PASTEL.muted,
+      fontSize: clamp(bannerHeight * 0.13, 10, 12),
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    }
+  });
+  captionText.anchor.set(0.5);
+  captionText.position.set(width / 2, y + bannerHeight * 0.72);
+  banner.addChild(captionText);
+
+  const sparkleCount = showResult ? 18 : 10;
+  for (let index = 0; index < sparkleCount; index += 1) {
+    const angle = (Math.PI * 2 * index) / sparkleCount;
+    const sx = width / 2 + Math.cos(angle) * bannerWidth * (0.38 + (index % 3) * 0.045);
+    const sy = y + bannerHeight / 2 + Math.sin(angle) * bannerHeight * (0.42 + (index % 2) * 0.12);
+    const sparkle = new PIXI.Graphics();
+    sparkle.moveTo(sx, sy - 5).lineTo(sx + 4, sy).lineTo(sx, sy + 5).lineTo(sx - 4, sy)
+      .fill({ color: index % 2 === 0 ? PASTEL.white : color, alpha: showResult ? 0.72 : 0.46 });
+    banner.addChild(sparkle);
+  }
 };
 
 const drawTeamMat = (
@@ -511,12 +787,18 @@ const drawTeamMat = (
   const maxY = Math.max(...cards.map((card) => card.y + card.height));
   const color = side === 'player' ? PASTEL.rose : 0xec4899;
   const mat = new PIXI.Graphics();
-  mat.roundRect(minX - 10, minY - 12, maxX - minX + 20, maxY - minY + 24, 30)
-    .fill({ color: side === 'player' ? 0xfff1f2 : 0xfdf2f8, alpha: 0.36 })
-    .stroke({ color, alpha: 0.18, width: 1.5 });
-  mat.moveTo(minX - 2, side === 'player' ? minY + (maxY - minY) / 2 : minY + (maxY - minY) / 2)
-    .lineTo(maxX + 2, side === 'player' ? minY + (maxY - minY) / 2 : minY + (maxY - minY) / 2)
-    .stroke({ color, alpha: 0.18, width: 1 });
+  mat.roundRect(minX - 12, minY - 14, maxX - minX + 24, maxY - minY + 28, 32)
+    .fill({ color: side === 'player' ? 0xfff1f2 : 0xfdf2f8, alpha: 0.42 })
+    .stroke({ color, alpha: 0.2, width: 1.5 });
+  mat.roundRect(minX - 6, minY - 8, maxX - minX + 12, maxY - minY + 16, 26)
+    .stroke({ color: PASTEL.white, alpha: 0.46, width: 1 });
+  const splitY = minY + (maxY - minY) / 2;
+  mat.moveTo(minX + 8, splitY)
+    .lineTo(maxX - 8, splitY)
+    .stroke({ color, alpha: 0.18, width: 1.5, cap: 'round' });
+  mat.moveTo(minX + 18, side === 'player' ? maxY + 10 : minY - 10)
+    .lineTo(maxX - 18, side === 'player' ? maxY + 10 : minY - 10)
+    .stroke({ color, alpha: 0.22, width: 3, cap: 'round' });
   parent.addChild(mat);
   const frontRow = cards.find((card) => card.slot.row === 1);
   const backRow = cards.find((card) => card.slot.row === 0);
@@ -534,22 +816,21 @@ const fitSprite = (sprite: PixiSprite, x: number, y: number, width: number, heig
 
 const computeBattleLayout = (width: number, height: number): BattleResponsiveLayout => {
   const compact = width < 620;
+  const short = height < 660;
   const marginX = clamp(width * (compact ? 0.032 : 0.042), compact ? 10 : 18, compact ? 18 : 38);
   const cardGap = clamp(width * (compact ? 0.012 : 0.016), 6, compact ? 10 : 16);
-  const rowGap = clamp(height * 0.014, 6, compact ? 10 : 14);
+  const rowGap = clamp(height * (short ? 0.01 : 0.014), short ? 4 : 6, compact ? 10 : 14);
   const cardWidth = Math.floor((width - marginX * 2 - cardGap * 2) / 3);
-  const portraitWidth = clamp(width * (compact ? 0.54 : 0.34), compact ? 170 : 210, compact ? 224 : 250);
-  const portraitHeight = clamp(height * 0.072, compact ? 40 : 44, compact ? 48 : 54);
+  const portraitWidth = clamp(width * (compact ? 0.54 : 0.34), compact ? 164 : 210, compact ? 224 : 250);
+  const portraitHeight = clamp(height * 0.072, compact ? 36 : 44, compact ? 48 : 54);
   const portraitGap = clamp(height * 0.014, 6, 13);
   const topReserved = portraitHeight + portraitGap + clamp(height * 0.012, 6, 12);
   const bottomReserved = portraitHeight + portraitGap + clamp(height * 0.014, 7, 14);
-  const desiredMiddleGap = clamp(height * (compact ? 0.12 : 0.13), compact ? 58 : 70, compact ? 94 : 116);
+  const desiredMiddleGap = clamp(height * (compact ? 0.12 : 0.13), short ? 48 : compact ? 58 : 70, compact ? 94 : 116);
   const maxCardHeightByCanvas = Math.floor((height - topReserved - bottomReserved - rowGap * 2 - desiredMiddleGap) / 4);
   const maxCardHeightByWidth = Math.floor(cardWidth * (compact ? 0.84 : 0.76));
-  const cardHeight = Math.max(
-    compact ? 118 : 104,
-    Math.min(maxCardHeightByCanvas, maxCardHeightByWidth, compact ? 132 : 124)
-  );
+  const minCardHeight = short ? compact ? 94 : 98 : compact ? 118 : 104;
+  const cardHeight = clamp(Math.min(maxCardHeightByCanvas, maxCardHeightByWidth, compact ? 132 : 124), minCardHeight, compact ? 132 : 124);
   const opponentBackTop = topReserved;
   const opponentFrontTop = opponentBackTop + cardHeight + rowGap;
   const playerBackTop = height - bottomReserved - cardHeight;
@@ -609,9 +890,11 @@ const makeLayout = (
     const positioned = getCardBySlots(cards, slots);
     return positioned.map(({ card, slot, visualIndex }) => {
       const unitState = findUnitState(unitStates, side, card);
-      const retired = stage === 'result'
+      const resultRetired = stage === 'result'
         ? unitState ? !unitState.alive : battleEvents.some((event) => eventKillsCard(event, card))
         : false;
+      const health = estimateCardHealth(card, side, battleEvents, battleEventIndex, resultRetired, unitStates);
+      const retired = resultRetired || health.remaining <= 0;
       return {
         card,
         side,
@@ -622,7 +905,7 @@ const makeLayout = (
         height: layout.cardHeight,
         retired,
         hidden: side === 'opponent' && !revealed,
-        health: estimateCardHealth(card, side, battleEvents, battleEventIndex, retired, unitStates)
+        health
       };
     });
   };
@@ -665,7 +948,14 @@ const drawCard = (
   const value = getTurnValueForCard(activeTurn, card.card);
   const actionColor = colorForAction(activeTurn);
   const isFrontline = card.slot.row === 1;
-  const alpha = card.retired || card.health.remaining <= 0 ? 0.5 : card.hidden ? 0.86 : 1;
+  const isInactiveDuringAction = battleStage === 'battle'
+    && Boolean(activeTurn)
+    && activeTurn?.actionType !== 'start'
+    && !acting
+    && !targeted
+    && card.health.remaining > 0
+    && !card.retired;
+  const alpha = (card.retired || card.health.remaining <= 0 ? 0.5 : card.hidden ? 0.86 : 1) * (isInactiveDuringAction ? 0.78 : 1);
   const role = getCardRole(card.card, classLookup);
   const roleColor = roleAccent[role] || PASTEL.rose;
   const palette = card.side === 'player' ? CARD_STYLE.player : CARD_STYLE.opponent;
@@ -673,52 +963,49 @@ const drawCard = (
   const cornerRadius = clamp(card.width * 0.12, 18, 26);
   const narrowCard = card.width < 155;
 
-  drawSoftShadow(PIXI, root, 4, 6, card.width - 8, card.height - 8, cornerRadius, targeted ? actionColor : palette.glow, targeted ? 0.22 : 0.13);
-  drawRoundRect(PIXI, root, 0, 0, card.width, card.height, cornerRadius, palette.fillBottom, 0.96, { color: borderColor, alpha: acting || targeted ? 0.98 : 0.58, width: acting || targeted ? 3 : 1.4 });
-  const surface = new PIXI.Graphics();
-  surface.roundRect(3, 3, card.width - 6, card.height - 6, cornerRadius - 4)
-    .fill({ color: palette.fillTop, alpha: 0.62 });
-  surface.roundRect(5, card.height * 0.52, card.width - 10, card.height * 0.42, cornerRadius - 8)
-    .fill({ color: 0xffdbe3, alpha: 0.16 });
-  surface.circle(card.width - 20, 18, 32).fill({ color: roleColor, alpha: 0.1 });
-  surface.circle(18, card.height - 18, 28).fill({ color: PASTEL.white, alpha: 0.24 });
-  root.addChild(surface);
+  drawSoftShadow(PIXI, root, 3, 8, card.width - 6, card.height - 9, cornerRadius, targeted ? actionColor : palette.glow, targeted ? 0.24 : 0.14);
+  drawRoundRect(PIXI, root, 0, 0, card.width, card.height, cornerRadius, palette.fillBottom, 0.98, { color: borderColor, alpha: acting || targeted ? 0.96 : 0.42, width: acting || targeted ? 2.8 : 1.2 });
 
-  const topBar = new PIXI.Graphics();
-  topBar.roundRect(6, 6, card.width - 12, 20, 999)
-    .fill({ color: roleColor, alpha: card.hidden ? 0.36 : 0.88 });
-  topBar.roundRect(8, 7, card.width - 16, 8, 999).fill({ color: PASTEL.white, alpha: 0.22 });
-  root.addChild(topBar);
-  addText(PIXI, root, isFrontline ? '전열' : '후열', 15, 10, {
-    fill: PASTEL.white,
-    fontSize: 8,
-    fontWeight: '900',
-    fontFamily: 'Arial, sans-serif'
-  });
-  addText(PIXI, root, roleLabels[role] || '전투', card.width - 38, 10, {
-    fill: PASTEL.white,
-    fontSize: 8,
-    fontWeight: '900',
-    fontFamily: 'Arial, sans-serif'
-  });
+  const cardSurface = new PIXI.Graphics();
+  cardSurface.roundRect(3, 3, card.width - 6, card.height - 6, cornerRadius - 3)
+    .fill({ color: palette.fillTop, alpha: 0.82 });
+  cardSurface.roundRect(3, Math.max(4, card.height * 0.45), card.width - 6, card.height * 0.52, cornerRadius - 5)
+    .fill({ color: palette.fillBottom, alpha: 0.7 });
+  cardSurface.circle(card.width - 20, 18, 34).fill({ color: roleColor, alpha: 0.08 });
+  cardSurface.circle(card.width - 30, card.height - 18, 46).fill({ color: roleColor, alpha: 0.045 });
+  root.addChild(cardSurface);
+
+  const accentRail = new PIXI.Graphics();
+  if (narrowCard) {
+    accentRail.roundRect(10, 8, card.width - 20, 5, 999).fill({ color: roleColor, alpha: card.hidden ? 0.38 : 0.86 });
+  } else {
+    accentRail.roundRect(7, 12, 5, card.height - 24, 999).fill({ color: roleColor, alpha: card.hidden ? 0.35 : 0.82 });
+  }
+  root.addChild(accentRail);
 
   const shine = new PIXI.Graphics();
   shine.roundRect(2, 2, card.width - 4, card.height - 4, cornerRadius - 2)
-    .stroke({ color: PASTEL.white, alpha: 0.45, width: 1 });
-  shine.moveTo(8, card.height * 0.24).lineTo(card.width * 0.44, 8).lineTo(card.width * 0.7, 8).lineTo(8, card.height * 0.45).fill({ color: PASTEL.white, alpha: 0.16 });
+    .stroke({ color: PASTEL.white, alpha: 0.52, width: 1.2 });
+  shine.moveTo(10, 9).lineTo(card.width * 0.52, 9).lineTo(card.width * 0.28, 24).lineTo(10, 27).fill({ color: PASTEL.white, alpha: 0.15 });
+  shine.moveTo(card.width - 12, 10).lineTo(card.width - 34, 10).lineTo(card.width - 12, 32).fill({ color: PASTEL.white, alpha: 0.12 });
   root.addChild(shine);
 
   const mediaSize = narrowCard
-    ? Math.min(card.width - 24, card.height * 0.44)
-    : Math.min(card.height - 34, card.width * 0.36);
-  const mediaX = narrowCard ? (card.width - mediaSize) / 2 : 10;
-  const mediaY = 30;
-  drawSoftShadow(PIXI, root, mediaX + 1, mediaY + 3, mediaSize, mediaSize, 18, roleColor, 0.11);
-  drawRoundRect(PIXI, root, mediaX, mediaY, mediaSize, mediaSize, 18, PASTEL.white, 0.9, { color: roleColor, alpha: 0.34, width: 1.8 });
+    ? Math.min(card.width - 24, card.height * 0.43)
+    : Math.min(card.height - 24, card.width * 0.43);
+  const mediaX = narrowCard ? (card.width - mediaSize) / 2 : 17;
+  const mediaY = narrowCard ? 18 : (card.height - mediaSize) / 2;
+  drawSoftShadow(PIXI, root, mediaX + 1, mediaY + 4, mediaSize, mediaSize, 20, roleColor, 0.12);
+  drawRoundRect(PIXI, root, mediaX, mediaY, mediaSize, mediaSize, 20, PASTEL.white, 0.94, { color: PASTEL.white, alpha: 0.86, width: 2.2 });
+  const mediaInner = new PIXI.Graphics();
+  mediaInner.roundRect(mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8, 16)
+    .fill({ color: palette.chip, alpha: 0.9 })
+    .stroke({ color: roleColor, alpha: 0.24, width: 1 });
+  mediaInner.circle(mediaX + mediaSize - 12, mediaY + 12, 18).fill({ color: roleColor, alpha: 0.08 });
+  root.addChild(mediaInner);
   const mediaLayer = new PIXI.Container();
   const mediaMask = new PIXI.Graphics();
   mediaMask.roundRect(mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8, 14).fill({ color: PASTEL.white, alpha: 1 });
-  mediaMask.renderable = false;
   mediaLayer.mask = mediaMask;
   root.addChild(mediaMask, mediaLayer);
 
@@ -740,7 +1027,7 @@ const drawCard = (
       fontWeight: '900',
       fontFamily: 'Arial, sans-serif'
     });
-    loadTextureCached(PIXI, proxiedImage(card.card.image_url, { width: 160, quality: quality === 'high' ? 78 : 62 }))
+    loadTextureCached(PIXI, resolvePixiImageUrls(card.card.image_url, { width: 220, quality: quality === 'high' ? 82 : 68 }))
       .then((texture) => {
         if ((root as any).destroyed) return;
         fallbackInitial.destroy();
@@ -748,6 +1035,13 @@ const drawCard = (
         sprite.alpha = alpha;
         fitSprite(sprite, mediaX + 4, mediaY + 4, mediaSize - 8, mediaSize - 8);
         mediaLayer.addChild(sprite);
+        const imageGloss = new PIXI.Graphics();
+        imageGloss.moveTo(mediaX + 8, mediaY + 8)
+          .lineTo(mediaX + mediaSize * 0.78, mediaY + 8)
+          .lineTo(mediaX + mediaSize * 0.4, mediaY + mediaSize * 0.38)
+          .lineTo(mediaX + 8, mediaY + mediaSize * 0.48)
+          .fill({ color: PASTEL.white, alpha: 0.12 });
+        mediaLayer.addChild(imageGloss);
         requestRender?.();
       })
       .catch(() => {
@@ -758,21 +1052,55 @@ const drawCard = (
   const infoX = narrowCard ? 10 : mediaX + mediaSize + 10;
   const infoW = narrowCard ? card.width - 20 : card.width - infoX - 10;
   const title = card.hidden ? '상대 카드' : card.card.name;
-  const titleY = narrowCard ? mediaY + mediaSize + 6 : 31;
-  addText(PIXI, root, shortenName(title, narrowCard ? 7 : card.width < 270 ? 10 : 14), infoX, titleY, {
+  const titleY = narrowCard ? mediaY + mediaSize + 7 : 15;
+  if (!narrowCard) {
+    const titleUnderlay = new PIXI.Graphics();
+    titleUnderlay.roundRect(infoX - 3, titleY - 4, Math.min(infoW + 6, card.width - infoX - 7), 23, 10)
+      .fill({ color: PASTEL.white, alpha: 0.44 });
+    root.addChild(titleUnderlay);
+  }
+  addText(PIXI, root, shortenName(title, narrowCard ? 7 : card.width < 270 ? 11 : 15), infoX, titleY, {
     fill: PASTEL.text,
-    fontSize: narrowCard ? 9 : clamp(card.width * 0.057, 11, 14),
+    fontSize: narrowCard ? 9 : clamp(card.width * 0.056, 12, 15),
     fontWeight: '900',
     fontFamily: 'Arial, sans-serif',
     wordWrap: true,
     wordWrapWidth: infoW
   });
-  const classY = narrowCard ? titleY + 14 : 51;
+  const metaY = narrowCard ? titleY + 15 : 38;
   if (!narrowCard) {
-    drawRoundRect(PIXI, root, infoX, classY - 2, Math.min(infoW, 92), 16, 999, roleColor, 0.1, { color: roleColor, alpha: 0.24, width: 1 });
-    addText(PIXI, root, card.hidden ? '비공개' : shortenName(card.card.class_name, 9), infoX + 8, classY + 1, {
+    const rowChipW = 34;
+    drawRoundRect(PIXI, root, infoX, metaY - 2, rowChipW, 16, 999, roleColor, 0.88);
+    addText(PIXI, root, isFrontline ? '전열' : '후열', infoX + 8, metaY + 1, {
+      fill: PASTEL.white,
+      fontSize: 8,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+    const classChipX = infoX + rowChipW + 5;
+    const classChipW = Math.min(infoW - rowChipW - 5, 86);
+    drawRoundRect(PIXI, root, classChipX, metaY - 2, classChipW, 16, 999, palette.chip, 0.94, { color: roleColor, alpha: 0.22, width: 1 });
+    addText(PIXI, root, card.hidden ? '비공개' : shortenName(card.card.class_name, 8), classChipX + 8, metaY + 1, {
       fill: roleColor,
       fontSize: 9,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+  } else {
+    const rowChipW = 32;
+    const roleChipW = 38;
+    const chipX = (card.width - rowChipW - roleChipW - 4) / 2;
+    drawRoundRect(PIXI, root, chipX, 19, rowChipW, 14, 999, roleColor, 0.86);
+    addText(PIXI, root, isFrontline ? '전열' : '후열', chipX + 6, 22, {
+      fill: PASTEL.white,
+      fontSize: 7,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+    drawRoundRect(PIXI, root, chipX + rowChipW + 4, 19, roleChipW, 14, 999, PASTEL.white, 0.76, { color: roleColor, alpha: 0.2, width: 1 });
+    addText(PIXI, root, roleLabels[role] || '전투', chipX + rowChipW + 11, 22, {
+      fill: roleColor,
+      fontSize: 7,
       fontWeight: '900',
       fontFamily: 'Arial, sans-serif'
     });
@@ -780,7 +1108,7 @@ const drawCard = (
   if (!card.hidden) {
     hoverZones.push({
       x: card.x + infoX,
-      y: card.y + (narrowCard ? 8 : classY),
+      y: card.y + (narrowCard ? 19 : metaY),
       width: infoW,
       height: narrowCard ? 18 : 16,
       label: card.card.class_name,
@@ -788,19 +1116,19 @@ const drawCard = (
     });
   }
 
-  const skillY = narrowCard ? mediaY + mediaSize - 9 : classY - 1;
+  const skillY = narrowCard ? mediaY + mediaSize - 8 : 59;
   if (!card.hidden) {
     (card.card.skills || []).slice(0, 3).forEach((skill, index) => {
-      const dotSize = narrowCard || card.height < 104 ? 15 : 18;
+      const dotSize = narrowCard || card.height < 104 ? 15 : 17;
       const skillStartX = narrowCard
         ? (card.width - (dotSize * 3 + 8)) / 2
-        : infoX + Math.max(48, Math.min(infoW - 58, 96));
+        : infoX;
       const dotX = skillStartX + index * (dotSize + 4);
       const skillColor = skill.type === 'ultimate' ? PASTEL.amber : skill.type === 'passive' ? PASTEL.blue : PASTEL.rose;
       const dot = new PIXI.Graphics();
-      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2).fill({ color: PASTEL.white, alpha: 0.86 })
-        .stroke({ color: skillColor, alpha: 0.9, width: 2 });
-      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2 - 4).fill({ color: skillColor, alpha: 0.9 });
+      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2).fill({ color: PASTEL.white, alpha: 0.92 })
+        .stroke({ color: skillColor, alpha: 0.78, width: 1.6 });
+      dot.circle(dotX + dotSize / 2, skillY + dotSize / 2, dotSize / 2 - 4).fill({ color: skillColor, alpha: 0.86 });
       root.addChild(dot);
       addText(PIXI, root, skillGlyphs[skill.type] || 'S', dotX + dotSize / 2 - 3.5, skillY + dotSize / 2 - 4.8, {
         fill: PASTEL.white,
@@ -820,13 +1148,14 @@ const drawCard = (
   }
 
   const hpY = card.height - 17;
+  const hpLabelX = narrowCard ? infoX : infoX + 63;
   addText(PIXI, root, 'HP', infoX, hpY - 14, {
     fill: PASTEL.muted,
     fontSize: 8,
     fontWeight: '900',
     fontFamily: 'Arial, sans-serif'
   });
-  addText(PIXI, root, `${card.health.remaining}/${card.health.max}`, infoX + Math.max(0, infoW - 58), hpY - 14, {
+  addText(PIXI, root, `${card.health.remaining}/${card.health.max}`, hpLabelX + Math.max(0, infoW - (hpLabelX - infoX) - 58), hpY - 14, {
     fill: PASTEL.text,
     fontSize: 8,
     fontWeight: '900',
@@ -834,8 +1163,12 @@ const drawCard = (
   });
   drawRoundRect(PIXI, root, infoX, hpY, infoW, 8, 999, 0x7f1d1d, 0.12, { color: PASTEL.white, alpha: 0.5, width: 1 });
   drawRoundRect(PIXI, root, infoX + 1.5, hpY + 1.5, Math.max(0, (infoW - 3) * card.health.percent / 100), 5, 999, card.health.percent < 30 ? 0xef4444 : roleColor, 0.96);
+  const hpGloss = new PIXI.Graphics();
+  hpGloss.roundRect(infoX + 2, hpY + 2, Math.max(0, (infoW - 4) * card.health.percent / 100), 2, 999)
+    .fill({ color: PASTEL.white, alpha: 0.32 });
+  root.addChild(hpGloss);
 
-  if (!narrowCard && !card.hidden && card.card.stats && card.height >= 104 && infoW >= 104) {
+  if (!narrowCard && !card.hidden && card.card.stats && card.height >= 118 && infoW >= 104) {
     const statKeys = ['attack', 'defense', 'speed', 'focus'] as const;
     statKeys.forEach((key, index) => {
       const chipW = Math.min(33, Math.max(25, (infoW - 6) / 4));
@@ -866,15 +1199,57 @@ const drawCard = (
     });
   }
 
+  if (targeted && !card.hidden && !(card.retired || card.health.remaining <= 0)) {
+    const stateColor = activeTurn?.actionType === 'heal'
+      ? PASTEL.green
+      : activeTurn?.actionType === 'guard'
+        ? PASTEL.blue
+        : activeTurn?.actionType === 'control'
+          ? PASTEL.violet
+          : actionColor;
+    const bracket = new PIXI.Graphics();
+    const inset = 7;
+    const len = Math.min(22, card.width * 0.16);
+    bracket.moveTo(inset, inset + len).lineTo(inset, inset).lineTo(inset + len, inset)
+      .moveTo(card.width - inset - len, inset).lineTo(card.width - inset, inset).lineTo(card.width - inset, inset + len)
+      .moveTo(inset, card.height - inset - len).lineTo(inset, card.height - inset).lineTo(inset + len, card.height - inset)
+      .moveTo(card.width - inset - len, card.height - inset).lineTo(card.width - inset, card.height - inset).lineTo(card.width - inset, card.height - inset - len)
+      .stroke({ color: stateColor, alpha: 0.78, width: 3, cap: 'round' });
+    root.addChild(bracket);
+    const badgeText = statusLabelForTurn(activeTurn);
+    if (badgeText && !narrowCard) {
+      drawRoundRect(PIXI, root, card.width - 54, card.height - 34, 42, 16, 999, PASTEL.white, 0.88, { color: stateColor, alpha: 0.42, width: 1.2 });
+      addText(PIXI, root, badgeText, card.width - 45, card.height - 31, {
+        fill: stateColor,
+        fontSize: 8,
+        fontWeight: '900',
+        fontFamily: 'Arial, sans-serif'
+      });
+    }
+  }
+
+  if (!card.hidden && card.health.percent > 0 && card.health.percent <= 30 && !(card.retired || card.health.remaining <= 0)) {
+    drawRoundRect(PIXI, root, 14, card.height - 34, 34, 15, 999, 0xef4444, 0.9);
+    addText(PIXI, root, '위험', 22, card.height - 31, {
+      fill: PASTEL.white,
+      fontSize: 8,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+  }
+
   if (card.retired || card.health.remaining <= 0) {
     const veil = new PIXI.Graphics();
-    veil.roundRect(0, 0, card.width, card.height, 22).fill({ color: 0x111827, alpha: 0.36 });
-    veil.moveTo(20, 15).lineTo(card.width - 20, card.height - 15).stroke({ color: PASTEL.white, alpha: 0.7, width: 4 });
-    veil.moveTo(card.width - 20, 15).lineTo(20, card.height - 15).stroke({ color: PASTEL.white, alpha: 0.42, width: 2 });
+    veil.roundRect(0, 0, card.width, card.height, 22).fill({ color: 0x111827, alpha: 0.42 });
+    veil.moveTo(18, 16).lineTo(card.width * 0.42, card.height * 0.5).lineTo(24, card.height - 17)
+      .moveTo(card.width - 18, 14).lineTo(card.width * 0.58, card.height * 0.5).lineTo(card.width - 26, card.height - 18)
+      .stroke({ color: PASTEL.white, alpha: 0.42, width: 2.2, cap: 'round' });
+    veil.moveTo(24, 20).lineTo(card.width - 24, card.height - 20).stroke({ color: PASTEL.white, alpha: 0.52, width: 3.2, cap: 'round' });
     root.addChild(veil);
-    addText(PIXI, root, 'RETIRE', card.width / 2 - 32, card.height / 2 - 10, {
+    drawRoundRect(PIXI, root, card.width / 2 - 40, card.height / 2 - 16, 80, 27, 999, 0x111827, 0.58, { color: PASTEL.white, alpha: 0.28, width: 1 });
+    addText(PIXI, root, '전투불능', card.width / 2 - 29, card.height / 2 - 8, {
       fill: PASTEL.white,
-      fontSize: 15,
+      fontSize: 13,
       fontWeight: '900',
       fontFamily: 'Arial, sans-serif'
     });
@@ -882,6 +1257,10 @@ const drawCard = (
 
   if (acting) {
     drawTimer(PIXI, root, card.width - 16, 16, 14, 1 - turnProgress, actionColor);
+    const actionGlow = new PIXI.Graphics();
+    actionGlow.roundRect(-5, -5, card.width + 10, card.height + 10, cornerRadius + 4)
+      .stroke({ color: actionColor, alpha: 0.32 + Math.sin(turnProgress * Math.PI) * 0.18, width: 4 });
+    root.addChildAt(actionGlow, 0);
   }
 
   if (targeted && value > 0) {
@@ -925,7 +1304,7 @@ const drawPortrait = (
   const frameColor = loadout?.border_item ? PASTEL.amber : side === 'player' ? PASTEL.rose : PASTEL.roseSoft;
   drawRoundRect(PIXI, root, avatarX, avatarY, avatarSize, avatarSize, Math.min(14, avatarSize / 2.2), 0xfff1f2, 0.95, { color: frameColor, alpha: 0.82, width: 2 });
   if (imageUrl) {
-    loadTextureCached(PIXI, proxiedImage(imageUrl, { width: 96, quality: 72 }))
+    loadTextureCached(PIXI, resolvePixiImageUrls(imageUrl, { width: 96, quality: 72 }))
       .then((texture) => {
         if ((root as any).destroyed) return;
       const sprite = new PIXI.Sprite(texture);
@@ -960,7 +1339,10 @@ const drawCenterHud = (
   stage: BattleStageKind,
   activeTurn: ArenaBattleTurn | undefined,
   roundReveal: RoundRevealState | null,
-  allCards: ArenaSnapshotCardDto[]
+  allCards: ArenaSnapshotCardDto[],
+  turnProgress = 0,
+  battleEventIndex = 0,
+  battleEventCount = 0
 ) => {
   const hudWidth = layout.hudWidth;
   const hudHeight = layout.hudHeight;
@@ -972,6 +1354,27 @@ const drawCenterHud = (
   const accent = new PIXI.Graphics();
   accent.roundRect(x + 8, y + 8, 4, hudHeight - 16, 999).fill({ color: actionColor, alpha: 0.86 });
   parent.addChild(accent);
+  const glyphX = x + hudWidth - 24;
+  const glyphY = y + hudHeight - 22;
+  const glyphRing = new PIXI.Graphics();
+  glyphRing.circle(glyphX, glyphY, 13)
+    .fill({ color: PASTEL.white, alpha: 0.72 })
+    .stroke({ color: actionColor, alpha: 0.52, width: 1.8 });
+  glyphRing.circle(glyphX, glyphY, 7 + Math.sin(turnProgress * Math.PI) * 2)
+    .stroke({ color: actionColor, alpha: stage === 'battle' ? 0.36 : 0.16, width: 1.4 });
+  parent.addChild(glyphRing);
+  const glyph = new PIXI.Text({
+    text: actionGlyphForTurn(activeTurn),
+    style: {
+      fill: actionColor,
+      fontSize: 13,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    }
+  });
+  glyph.anchor.set(0.5);
+  glyph.position.set(glyphX, glyphY - 1);
+  parent.addChild(glyph);
   const kicker = stage === 'battle' ? '행동' : stage === 'result' ? '라운드 결과' : '전술 준비';
   const title = stage === 'result'
     ? roundReveal?.winner === 'player'
@@ -986,6 +1389,8 @@ const drawCenterHud = (
   const caption = stage === 'battle' && activeTurn
     ? `${resolveName(allCards, activeTurn.actor) || '전투 카드'} → ${target || '대상'}`
     : '카드 배치와 전술 선택이 전투 흐름을 만듭니다.';
+  const phase = turnPhaseLabel(stage, activeTurn, turnProgress);
+  const turnCounter = battleEventCount > 0 ? `${Math.min(battleEventIndex + 1, battleEventCount)}/${battleEventCount}` : '-';
   addText(PIXI, parent, kicker, x + 22, y + 10, {
     fill: actionColor,
     fontSize: clamp(hudHeight * 0.14, 8, 10),
@@ -1008,12 +1413,60 @@ const drawCenterHud = (
     wordWrap: true,
     wordWrapWidth: Math.max(120, hudWidth - 54)
   });
+  if (stage === 'battle' && activeTurn && hudWidth > 300) {
+    const chipY = y + hudHeight - 18;
+    drawRoundRect(PIXI, parent, x + hudWidth - 132, chipY, 46, 16, 999, PASTEL.white, 0.72, { color: actionColor, alpha: 0.2, width: 1 });
+    addText(PIXI, parent, `턴 ${turnCounter}`, x + hudWidth - 121, chipY + 3, {
+      fill: actionColor,
+      fontSize: 8,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+    drawRoundRect(PIXI, parent, x + hudWidth - 80, chipY, 56, 16, 999, actionColor, 0.9);
+    addText(PIXI, parent, phase, x + hudWidth - 61, chipY + 3, {
+      fill: PASTEL.white,
+      fontSize: 8,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
+  }
   if (stage === 'battle' && hudWidth > 310) {
-    drawRoundRect(PIXI, parent, x + hudWidth - 108, y + 17, 78, 8, 999, 0x7f1d1d, 0.12);
-    drawRoundRect(PIXI, parent, x + hudWidth - 108, y + 17, 54, 8, 999, actionColor, 0.72);
+    const timerX = x + hudWidth - 116;
+    const timerW = 82;
+    drawRoundRect(PIXI, parent, timerX, y + 17, timerW, 8, 999, 0x7f1d1d, 0.12);
+    drawRoundRect(PIXI, parent, timerX + 1, y + 18, Math.max(0, (timerW - 2) * (1 - turnProgress)), 6, 999, actionColor, 0.78);
+    addText(PIXI, parent, phase, timerX + 23, y + 29, {
+      fill: actionColor,
+      fontSize: 9,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    });
     const pulse = new PIXI.Graphics();
-    pulse.circle(x + hudWidth - 18, y + 22, 7).fill({ color: actionColor, alpha: 0.88 }).circle(x + hudWidth - 18, y + 22, 13).stroke({ color: actionColor, alpha: 0.28, width: 2 });
+    pulse.circle(x + hudWidth - 18, y + 22, 7).fill({ color: actionColor, alpha: 0.88 }).circle(x + hudWidth - 18, y + 22, 13 + Math.sin(turnProgress * Math.PI) * 3).stroke({ color: actionColor, alpha: 0.28, width: 2 });
     parent.addChild(pulse);
+  }
+  if (stage === 'battle' && battleEventCount > 1 && hudWidth > 250) {
+    const dotCount = Math.min(7, Math.max(3, Math.ceil(battleEventCount / 2)));
+    const progress = clamp(battleEventIndex / Math.max(1, battleEventCount - 1), 0, 1);
+    const startX = x + 24;
+    const dotY = y + hudHeight + 8;
+    const railW = Math.min(116, hudWidth - 48);
+    const rail = new PIXI.Graphics();
+    rail.roundRect(startX, dotY - 3, railW, 6, 999)
+      .fill({ color: PASTEL.white, alpha: 0.38 })
+      .stroke({ color: actionColor, alpha: 0.12, width: 1 });
+    rail.roundRect(startX + 1, dotY - 2, Math.max(4, (railW - 2) * progress), 4, 999)
+      .fill({ color: actionColor, alpha: 0.72 });
+    parent.addChild(rail);
+    for (let index = 0; index < dotCount; index += 1) {
+      const dotProgress = dotCount === 1 ? 0 : index / (dotCount - 1);
+      const active = progress + 0.001 >= dotProgress;
+      const dot = new PIXI.Graphics();
+      dot.circle(startX + railW * dotProgress, dotY, active ? 4.2 : 3)
+        .fill({ color: active ? actionColor : PASTEL.white, alpha: active ? 0.9 : 0.58 })
+        .stroke({ color: active ? PASTEL.white : actionColor, alpha: active ? 0.72 : 0.2, width: 1 });
+      parent.addChild(dot);
+    }
   }
 };
 
@@ -1024,19 +1477,34 @@ const animate = (
   done?: () => void
 ) => {
   const start = performance.now();
+  let disposed = false;
   app.ticker.start();
   const ticker = () => {
+    if (disposed) return;
     const progress = Math.min(1, (performance.now() - start) / durationMs);
-    update(progress);
-    if (progress >= 1) {
+    try {
+      update(progress);
+    } catch {
+      disposed = true;
       app.ticker.remove(ticker);
-      done?.();
+      if (app.ticker.count === 0) app.ticker.stop();
+      return;
+    }
+    if (progress >= 1) {
+      disposed = true;
+      app.ticker.remove(ticker);
+      try {
+        done?.();
+      } catch {
+        // Animation cleanup should never break the ticker for the next combat turn.
+      }
       renderPixiFrame(app);
       if (app.ticker.count === 0) app.ticker.stop();
     }
   };
   app.ticker.add(ticker);
   return () => {
+    disposed = true;
     app.ticker.remove(ticker);
     if (app.ticker.count === 0) app.ticker.stop();
   };
@@ -1044,6 +1512,369 @@ const animate = (
 
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+const destroyPixiContainerSafe = (container: PixiContainer) => {
+  try {
+    if (!(container as any).destroyed) container.destroy({ children: true });
+  } catch {
+    // A previous render may have already cleaned up this transient effect.
+  }
+};
+
+const actionValueText = (turn: ArenaBattleTurn | undefined) => {
+  const value = Math.max(0, Number(turn?.value || 0));
+  if (!turn || value <= 0) return '';
+  if (turn.actionType === 'heal' || turn.actionType === 'guard') return `+${value}`;
+  return `-${value}`;
+};
+
+const playFloatingText = (
+  PIXI: PixiModule,
+  app: PixiApp,
+  layer: PixiContainer,
+  text: string,
+  x: number,
+  y: number,
+  color: number
+) => {
+  if (!text) return;
+  const shadow = new PIXI.Text({
+    text,
+    style: {
+      fill: 0x7f1d1d,
+      fontSize: 24,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif',
+      stroke: { color: PASTEL.white, width: 4 }
+    }
+  });
+  shadow.anchor.set(0.5);
+  shadow.position.set(x + 2, y + 2);
+  shadow.alpha = 0.34;
+  const label = new PIXI.Text({
+    text,
+    style: {
+      fill: color,
+      fontSize: 24,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif',
+      stroke: { color: PASTEL.white, width: 5 }
+    }
+  });
+  label.anchor.set(0.5);
+  label.position.set(x, y);
+  layer.addChild(shadow, label);
+  animate(app, 520, (progress) => {
+    const eased = easeOut(progress);
+    const pop = progress < 0.22 ? 0.82 + 0.32 * easeOut(progress / 0.22) : 1.14 - 0.14 * easeOut((progress - 0.22) / 0.78);
+    label.position.set(x, y - 46 * eased);
+    shadow.position.set(x + 2, y + 2 - 46 * eased);
+    label.scale.set(pop);
+    shadow.scale.set(pop);
+    label.alpha = progress < 0.72 ? 1 : 1 - (progress - 0.72) / 0.28;
+    shadow.alpha = label.alpha * 0.34;
+  }, () => {
+    label.destroy();
+    shadow.destroy();
+  });
+};
+
+const playCardMicroPulse = (
+  app: PixiApp,
+  target: CardVisual,
+  unitX: number,
+  unitY: number,
+  strength = 1
+) => {
+  const originX = target.card.x + target.card.width / 2;
+  const originY = target.card.y + target.card.height / 2;
+  animate(app, 280, (progress) => {
+    const pulse = Math.sin(progress * Math.PI);
+    const shake = Math.sin(progress * Math.PI * 18) * 7 * pulse * strength;
+    target.root.position.set(originX + unitX * shake, originY + unitY * shake);
+    target.root.rotation = Math.sin(progress * Math.PI * 12) * 0.026 * pulse * strength;
+    target.root.scale.set(1 - 0.018 * pulse * strength, 1 + 0.026 * pulse * strength);
+  }, () => {
+    target.root.position.set(originX, originY);
+    target.root.rotation = 0;
+    target.root.scale.set(1);
+  });
+};
+
+const playRetireEffect = (
+  PIXI: PixiModule,
+  app: PixiApp,
+  layer: PixiContainer,
+  target: CardVisual,
+  color: number,
+  quality: RendererQuality
+) => {
+  const x = target.card.x + target.card.width / 2;
+  const y = target.card.y + target.card.height / 2;
+  const effect = new PIXI.Container();
+  layer.addChild(effect);
+  const crack = new PIXI.Graphics();
+  const dim = new PIXI.Graphics();
+  effect.addChild(dim, crack);
+  const count = quality === 'high' ? 18 : 8;
+  const shards = Array.from({ length: count }, (_, index) => {
+    const shard = new PIXI.Graphics();
+    effect.addChild(shard);
+    return {
+      shard,
+      angle: -Math.PI / 2 + (Math.PI * 2 * index) / count,
+      distance: 22 + (index % 5) * 13,
+      size: 5 + (index % 3) * 2
+    };
+  });
+  animate(app, 620, (progress) => {
+    const eased = easeOut(progress);
+    const pulse = Math.sin(progress * Math.PI);
+    target.root.alpha = 1 - progress * 0.44;
+    target.root.scale.set(1 - pulse * 0.035);
+    target.root.rotation = Math.sin(progress * Math.PI * 7) * 0.018 * pulse;
+    dim.clear();
+    dim.roundRect(target.card.x - 8, target.card.y - 8, target.card.width + 16, target.card.height + 16, 26)
+      .fill({ color: 0x111827, alpha: 0.1 + progress * 0.22 })
+      .stroke({ color, alpha: 0.36 * (1 - progress), width: 3 });
+    crack.clear();
+    crack.moveTo(x - 34, y - 30).lineTo(x - 7, y - 4).lineTo(x - 24, y + 34)
+      .moveTo(x + 32, y - 28).lineTo(x + 8, y - 2).lineTo(x + 24, y + 34)
+      .moveTo(x - 46, y + 8).lineTo(x + 46, y - 10)
+      .stroke({ color: PASTEL.white, alpha: 0.72 * (1 - progress), width: 3, cap: 'round' });
+    shards.forEach(({ shard, angle, distance, size }, index) => {
+      shard.clear();
+      const drift = distance * eased;
+      const wobble = Math.sin(progress * Math.PI * 3 + index) * 8;
+      const sx = x + Math.cos(angle) * drift + Math.cos(angle + Math.PI / 2) * wobble;
+      const sy = y + Math.sin(angle) * drift + Math.sin(angle + Math.PI / 2) * wobble;
+      shard.moveTo(sx, sy - size)
+        .lineTo(sx + size * 0.8, sy + size * 0.5)
+        .lineTo(sx - size * 0.8, sy + size * 0.6)
+        .fill({ color: index % 3 === 0 ? PASTEL.white : color, alpha: 0.82 * (1 - progress) });
+    });
+  }, () => {
+    target.root.alpha = 0.52;
+    target.root.scale.set(1);
+    target.root.rotation = 0;
+    playFloatingText(PIXI, app, layer, '전투불능', x, y - 16, color);
+    destroyPixiContainerSafe(effect);
+  });
+};
+
+const playSecondaryTargetEffects = (
+  PIXI: PixiModule,
+  app: PixiApp,
+  layer: PixiContainer,
+  targets: CardVisual[],
+  primary: CardVisual,
+  turn: ArenaBattleTurn,
+  color: number,
+  quality: RendererQuality
+) => {
+  targets.filter((target) => target !== primary).slice(0, quality === 'high' ? 5 : 2).forEach((target, index) => {
+    const x = target.card.x + target.card.width / 2;
+    const y = target.card.y + target.card.height / 2;
+    window.setTimeout(() => {
+      if ((target.root as any).destroyed || (layer as any).destroyed) return;
+      playImpactBurst(PIXI, app, layer, x, y, color, 0.72, quality, visualProfileForTurn(turn).kind);
+      playFloatingText(PIXI, app, layer, actionValueText(turn), x, y - 18, color);
+      playCardMicroPulse(app, target, 0.4 + index * 0.1, -0.8, 0.72);
+    }, 70 + index * 45);
+  });
+};
+
+const drawSupportBeam = (
+  PIXI: PixiModule,
+  layer: PixiContainer,
+  actorX: number,
+  actorY: number,
+  targetX: number,
+  targetY: number,
+  color: number,
+  progress: number
+) => {
+  const eased = easeOut(progress);
+  const beam = new PIXI.Graphics();
+  const endX = actorX + (targetX - actorX) * eased;
+  const endY = actorY + (targetY - actorY) * eased;
+  const wave = Math.sin(progress * Math.PI * 2) * 10;
+  const midX = (actorX + endX) / 2 - (targetY - actorY) * 0.04;
+  const midY = (actorY + endY) / 2 + (targetX - actorX) * 0.04 + wave;
+  beam.moveTo(actorX, actorY)
+    .quadraticCurveTo(midX, midY, endX, endY)
+    .stroke({ color: PASTEL.white, alpha: 0.42 * (1 - progress * 0.35), width: 8, cap: 'round' });
+  beam.moveTo(actorX, actorY)
+    .quadraticCurveTo(midX, midY, endX, endY)
+    .stroke({ color, alpha: 0.58 * (1 - progress * 0.25), width: 4, cap: 'round' });
+  layer.addChild(beam);
+  return beam;
+};
+
+const drawActionRibbon = (
+  PIXI: PixiModule,
+  layer: PixiContainer,
+  label: string,
+  x: number,
+  y: number,
+  color: number
+) => {
+  const ribbon = new PIXI.Container();
+  ribbon.position.set(x, y);
+  const bg = new PIXI.Graphics();
+  bg.roundRect(-58, -18, 116, 28, 999)
+    .fill({ color: PASTEL.white, alpha: 0.9 })
+    .stroke({ color, alpha: 0.72, width: 2 });
+  bg.roundRect(-52, -13, 104, 7, 999).fill({ color, alpha: 0.16 });
+  ribbon.addChild(bg);
+  const text = new PIXI.Text({
+    text: label,
+    style: {
+      fill: color,
+      fontSize: 12,
+      fontWeight: '900',
+      fontFamily: 'Arial, sans-serif'
+    }
+  });
+  text.anchor.set(0.5);
+  text.position.set(0, -4);
+  ribbon.addChild(text);
+  layer.addChild(ribbon);
+  return ribbon;
+};
+
+const playSignatureEffect = (
+  PIXI: PixiModule,
+  app: PixiApp,
+  layer: PixiContainer,
+  x: number,
+  y: number,
+  profile: ReturnType<typeof visualProfileForTurn>,
+  quality: RendererQuality
+) => {
+  if (quality === 'off') return;
+  const effect = new PIXI.Container();
+  layer.addChild(effect);
+  const primary = new PIXI.Graphics();
+  const secondary = new PIXI.Graphics();
+  const tertiary = new PIXI.Graphics();
+  effect.addChild(primary, secondary, tertiary);
+  const particleCount = quality === 'high'
+    ? profile.kind === 'ultimate' ? 28 : 16
+    : profile.kind === 'ultimate' ? 14 : 8;
+  const particles = Array.from({ length: particleCount }, (_, index) => {
+    const particle = new PIXI.Graphics();
+    effect.addChild(particle);
+    return {
+      particle,
+      angle: (Math.PI * 2 * index) / particleCount,
+      distance: 24 + (index % 5) * 10,
+      size: 2.6 + (index % 3)
+    };
+  });
+  const duration = profile.kind === 'ultimate' ? 620 : 420;
+  animate(app, duration, (progress) => {
+    const eased = easeOut(progress);
+    const fade = 1 - progress;
+    primary.clear();
+    secondary.clear();
+    tertiary.clear();
+
+    if (profile.kind === 'heal') {
+      primary.circle(x, y, 20 + 48 * eased).stroke({ color: profile.color, alpha: 0.46 * fade, width: 5 });
+      primary.circle(x, y, 10 + 24 * eased).stroke({ color: PASTEL.white, alpha: 0.4 * fade, width: 2 });
+      secondary.moveTo(x, y - 34 - 10 * eased).lineTo(x, y + 34 + 10 * eased).stroke({ color: PASTEL.white, alpha: 0.72 * fade, width: 7, cap: 'round' });
+      secondary.moveTo(x - 34 - 10 * eased, y).lineTo(x + 34 + 10 * eased, y).stroke({ color: profile.color, alpha: 0.58 * fade, width: 5, cap: 'round' });
+      tertiary.ellipse(x, y + 28 - 28 * eased, 42 + 12 * eased, 9 + 3 * eased)
+        .stroke({ color: profile.secondary, alpha: 0.5 * fade, width: 3 });
+    } else if (profile.kind === 'guard') {
+      primary.roundRect(x - 58 - 10 * eased, y - 44 - 8 * eased, 116 + 20 * eased, 88 + 16 * eased, 26)
+        .stroke({ color: profile.color, alpha: 0.52 * fade, width: 5 });
+      primary.roundRect(x - 42 - 8 * eased, y - 34 - 6 * eased, 84 + 16 * eased, 68 + 12 * eased, 20)
+        .fill({ color: profile.color, alpha: 0.08 * fade });
+      secondary.moveTo(x, y - 56).lineTo(x + 44, y - 18).lineTo(x + 28, y + 48).lineTo(x - 34, y + 48).lineTo(x - 48, y - 18).lineTo(x, y - 56)
+        .stroke({ color: PASTEL.white, alpha: 0.46 * fade, width: 3, cap: 'round' });
+      for (let index = 0; index < 4; index += 1) {
+        const laneY = y - 30 + index * 20;
+        tertiary.moveTo(x - 48 - 8 * eased, laneY)
+          .lineTo(x + 48 + 8 * eased, laneY)
+          .stroke({ color: index % 2 === 0 ? PASTEL.white : profile.secondary, alpha: 0.22 * fade, width: 2, cap: 'round' });
+      }
+    } else if (profile.kind === 'control') {
+      const offset = Math.sin(progress * Math.PI * 8) * 5;
+      primary.circle(x + offset, y, 26 + 30 * eased).stroke({ color: profile.color, alpha: 0.48 * fade, width: 4 });
+      primary.circle(x - offset, y, 12 + 22 * eased).stroke({ color: PASTEL.white, alpha: 0.55 * fade, width: 3 });
+      secondary.moveTo(x - 54, y - 30).lineTo(x + 54, y + 30).moveTo(x + 54, y - 30).lineTo(x - 54, y + 30)
+        .stroke({ color: profile.secondary, alpha: 0.4 * fade, width: 4, cap: 'round' });
+      for (let index = 0; index < 5; index += 1) {
+        const linkX = x - 48 + index * 24 + Math.sin(progress * Math.PI * 5 + index) * 3;
+        tertiary.roundRect(linkX - 5, y - 8, 10, 16, 4)
+          .stroke({ color: index % 2 === 0 ? profile.color : PASTEL.white, alpha: 0.5 * fade, width: 2 });
+      }
+    } else if (profile.kind === 'burn') {
+      primary.moveTo(x - 46, y + 36).lineTo(x - 22, y - 36 - 16 * eased).lineTo(x, y + 14).lineTo(x + 24, y - 44 - 12 * eased).lineTo(x + 48, y + 36)
+        .fill({ color: profile.color, alpha: 0.22 * fade });
+      secondary.circle(x, y, 24 + 34 * eased).stroke({ color: profile.secondary, alpha: 0.34 * fade, width: 5 });
+      tertiary.moveTo(x - 18, y + 26).lineTo(x - 4, y - 28 - 12 * eased).lineTo(x + 11, y + 14).lineTo(x + 27, y - 22 - 8 * eased)
+        .stroke({ color: PASTEL.white, alpha: 0.52 * fade, width: 3, cap: 'round' });
+    } else if (profile.kind === 'poison') {
+      primary.circle(x, y, 18 + 42 * eased).fill({ color: profile.color, alpha: 0.08 * fade }).stroke({ color: profile.color, alpha: 0.42 * fade, width: 4 });
+      secondary.circle(x - 20, y + 12, 8 + 12 * eased).stroke({ color: PASTEL.white, alpha: 0.48 * fade, width: 2 });
+      secondary.circle(x + 28, y - 16, 6 + 10 * eased).stroke({ color: profile.secondary, alpha: 0.5 * fade, width: 2 });
+      tertiary.circle(x + Math.sin(progress * Math.PI * 3) * 18, y + 20 - 34 * eased, 5 + 8 * eased)
+        .fill({ color: profile.secondary, alpha: 0.18 * fade })
+        .stroke({ color: PASTEL.white, alpha: 0.42 * fade, width: 1.5 });
+    } else if (profile.kind === 'tempo') {
+      for (let index = 0; index < 5; index += 1) {
+        const lane = index - 2;
+        primary.moveTo(x - 70 + 88 * eased, y + lane * 13)
+          .lineTo(x + 18 + 104 * eased, y + lane * 13 - 8)
+          .stroke({ color: index % 2 === 0 ? PASTEL.white : profile.color, alpha: 0.42 * fade, width: 4, cap: 'round' });
+      }
+      secondary.circle(x, y, 22 + 36 * eased).stroke({ color: profile.secondary, alpha: 0.32 * fade, width: 3 });
+      tertiary.moveTo(x - 18, y - 18).lineTo(x + 4, y).lineTo(x - 14, y + 18).lineTo(x + 28, y - 6)
+        .stroke({ color: PASTEL.white, alpha: 0.5 * fade, width: 4, cap: 'round' });
+    } else if (profile.kind === 'skill') {
+      primary.circle(x, y, 20 + 52 * eased).stroke({ color: profile.color, alpha: 0.5 * fade, width: 5 });
+      primary.circle(x, y, 34 + 24 * eased).stroke({ color: PASTEL.white, alpha: 0.3 * fade, width: 2 });
+      for (let index = 0; index < 6; index += 1) {
+        const angle = (Math.PI * 2 * index) / 6 + progress * 0.55;
+        secondary.moveTo(x + Math.cos(angle) * 14, y + Math.sin(angle) * 14)
+          .lineTo(x + Math.cos(angle) * (58 + 18 * eased), y + Math.sin(angle) * (58 + 18 * eased))
+          .stroke({ color: index % 2 === 0 ? profile.secondary : PASTEL.white, alpha: 0.42 * fade, width: 3, cap: 'round' });
+      }
+      tertiary.moveTo(x - 30, y).lineTo(x, y - 30).lineTo(x + 30, y).lineTo(x, y + 30).lineTo(x - 30, y)
+        .stroke({ color: profile.color, alpha: 0.32 * fade, width: 3, cap: 'round' });
+    } else if (profile.kind === 'ultimate') {
+      primary.circle(x, y, 26 + 78 * eased).stroke({ color: profile.color, alpha: 0.62 * fade, width: 7 });
+      primary.circle(x, y, 10 + 34 * eased).fill({ color: PASTEL.white, alpha: 0.3 * fade });
+      tertiary.circle(x, y, 54 + 44 * eased).stroke({ color: PASTEL.white, alpha: 0.22 * fade, width: 2 });
+      tertiary.rect(x - 90 - 16 * eased, y - 6, 180 + 32 * eased, 12).fill({ color: profile.secondary, alpha: 0.12 * fade });
+      for (let index = 0; index < 8; index += 1) {
+        const angle = (Math.PI * 2 * index) / 8 + progress * 0.8;
+        secondary.moveTo(x + Math.cos(angle) * 20, y + Math.sin(angle) * 20)
+          .lineTo(x + Math.cos(angle) * (86 + 34 * eased), y + Math.sin(angle) * (86 + 34 * eased))
+          .stroke({ color: index % 2 === 0 ? PASTEL.white : profile.secondary, alpha: 0.5 * fade, width: 4, cap: 'round' });
+      }
+    } else {
+      primary.circle(x, y, 18 + 42 * eased).stroke({ color: profile.color, alpha: 0.42 * fade, width: 4 });
+      secondary.moveTo(x - 46, y - 24).lineTo(x + 46, y + 24).stroke({ color: PASTEL.white, alpha: 0.46 * fade, width: 5, cap: 'round' });
+      tertiary.moveTo(x - 36, y + 20).lineTo(x + 36, y - 20).stroke({ color: profile.color, alpha: 0.38 * fade, width: 4, cap: 'round' });
+    }
+
+    particles.forEach(({ particle, angle, distance, size }, index) => {
+      particle.clear();
+      const local = clamp((progress - index * 0.012) / 0.88, 0, 1);
+      const drift = distance * (0.5 + local);
+      const wobble = Math.sin(progress * Math.PI * 3 + index) * 10;
+      const px = x + Math.cos(angle) * (drift + wobble);
+      const py = y + Math.sin(angle) * (drift + wobble) - (profile.kind === 'heal' ? 34 * local : 0);
+      particle.circle(px, py, size * (1 - local * 0.45)).fill({ color: index % 3 === 0 ? PASTEL.white : profile.secondary, alpha: (1 - local) * 0.76 });
+    });
+  }, () => {
+    destroyPixiContainerSafe(effect);
+  });
+};
 
 const playAction = (
   PIXI: PixiModule,
@@ -1058,7 +1889,9 @@ const playAction = (
   const targets = visuals.filter((visual) => !visual.card.hidden && activeTurn.targetIds.some((target) => eventMatchesCard(target, visual.card.card)));
   const target = targets[0];
   if (!target) return;
-  const color = colorForAction(activeTurn);
+  const profile = visualProfileForTurn(activeTurn);
+  const color = profile.color || colorForAction(activeTurn);
+  const hitStrength = profile.hitStop || 1;
   const effectLayer = new PIXI.Container();
   layer.addChild(effectLayer);
   const targetX = target.card.x + target.card.width / 2;
@@ -1072,19 +1905,62 @@ const playAction = (
   const unitY = dy / distance;
   const isSupport = activeTurn.actionType === 'heal' || activeTurn.actionType === 'guard';
   const isProjectile = activeTurn.actionType === 'skill' || activeTurn.actionType === 'control';
-  const duration = isProjectile ? 480 : isSupport ? 520 : 620;
-  const particles = quality === 'high' ? 14 : 7;
+  const duration = activeTurn.actionType === 'attack'
+    ? 520
+    : profile.kind === 'ultimate'
+      ? 650
+      : isProjectile ? 500 : isSupport ? 520 : 600;
+  const particles = quality === 'high' ? (profile.kind === 'ultimate' ? 22 : 14) : 7;
+  const actionLabel = activeTurn.skillName || getTurnActionLabel(activeTurn);
+  const ribbon = drawActionRibbon(
+    PIXI,
+    effectLayer,
+    actionLabel.length > 8 ? `${actionLabel.slice(0, 7)}…` : actionLabel,
+    actorX || targetX,
+    actorY - 28,
+    color
+  );
+  animate(app, 360, (progress) => {
+    const eased = easeOut(progress);
+    ribbon.position.y = actorY - 28 - eased * 16;
+    ribbon.alpha = progress < 0.72 ? 1 : 1 - (progress - 0.72) / 0.28;
+    ribbon.scale.set(0.82 + 0.18 * eased);
+  });
+
+  if (activeTurn.actionType === 'retire') {
+    playRetireEffect(PIXI, app, effectLayer, target, color, quality);
+    window.setTimeout(() => destroyPixiContainerSafe(effectLayer), 900);
+    return;
+  }
 
   if (isSupport) {
     const aura = new PIXI.Graphics();
+    const beamLayer = new PIXI.Container();
+    effectLayer.addChild(beamLayer);
     effectLayer.addChild(aura);
     const motes = Array.from({ length: particles }, (_, index) => {
       const mote = new PIXI.Graphics();
       effectLayer.addChild(mote);
       return { mote, index };
     });
+    if (actor && actor !== target) {
+      const originScaleX = actor.root.scale.x;
+      const originScaleY = actor.root.scale.y;
+      animate(app, 240, (progress) => {
+        const pulse = Math.sin(progress * Math.PI);
+        actor.root.scale.set(originScaleX + pulse * 0.045, originScaleY + pulse * 0.045);
+      }, () => {
+        actor.root.scale.set(originScaleX, originScaleY);
+      });
+    }
     animate(app, duration, (progress) => {
       const eased = easeOut(progress);
+      const pulse = Math.sin(progress * Math.PI);
+      target.root.scale.set(1 + pulse * 0.045, 1 + pulse * 0.045);
+      beamLayer.removeChildren().forEach((child) => child.destroy());
+      if (actor && actor !== target) {
+        drawSupportBeam(PIXI, beamLayer, actorX, actorY, targetX, targetY, color, progress);
+      }
       aura.clear();
       aura.circle(targetX, targetY, 28 + eased * 58).stroke({ color, alpha: 0.62 * (1 - progress), width: 5 });
       if (activeTurn.actionType === 'guard') aura.roundRect(target.card.x - 8, target.card.y - 8, target.card.width + 16, target.card.height + 16, 26).stroke({ color, alpha: 0.44 * (1 - progress), width: 4 });
@@ -1095,7 +1971,11 @@ const playAction = (
         mote.circle(targetX + Math.cos(angle) * 36 * local, targetY + 32 - local * 76, 3.5).fill({ color, alpha: 1 - local });
       });
     }, () => {
-      effectLayer.destroy({ children: true });
+      target.root.scale.set(1);
+      playSignatureEffect(PIXI, app, effectLayer, targetX, targetY, profile, quality);
+      playFloatingText(PIXI, app, effectLayer, actionValueText(activeTurn), targetX, targetY - 18, color);
+      playSecondaryTargetEffects(PIXI, app, effectLayer, targets, target, activeTurn, color, quality);
+      window.setTimeout(() => destroyPixiContainerSafe(effectLayer), 560);
     });
     return;
   }
@@ -1103,7 +1983,26 @@ const playAction = (
   if (isProjectile) {
     const trail = new PIXI.Graphics();
     const projectile = new PIXI.Graphics();
+    const comet = Array.from({ length: quality === 'high' ? 8 : 4 }, (_, index) => {
+      const mote = new PIXI.Graphics();
+      effectLayer.addChild(mote);
+      return { mote, index };
+    });
     effectLayer.addChild(trail, projectile);
+    if (actor) {
+      const originX = actor.root.position.x;
+      const originY = actor.root.position.y;
+      animate(app, 220, (progress) => {
+        const pulse = Math.sin(progress * Math.PI);
+        actor.root.position.set(originX - unitX * 12 * pulse, originY - unitY * 12 * pulse);
+        actor.root.rotation = -unitX * 0.018 * pulse;
+        actor.root.scale.set(1 + pulse * 0.035, 1 + pulse * 0.035);
+      }, () => {
+        actor.root.position.set(originX, originY);
+        actor.root.rotation = 0;
+        actor.root.scale.set(1);
+      });
+    }
     animate(app, duration, (progress) => {
       const eased = easeInOut(progress);
       const curve = Math.sin(progress * Math.PI) * (activeTurn.actionType === 'control' ? 34 : 18);
@@ -1114,13 +2013,48 @@ const playAction = (
       trail.clear();
       trail.moveTo(actorX, actorY).lineTo(x, y).stroke({ color, alpha: 0.38, width: activeTurn.actionType === 'control' ? 7 : 5, cap: 'round' });
       projectile.clear();
-      projectile.ellipse(x, y, activeTurn.actionType === 'control' ? 20 : 17, 7).fill({ color: PASTEL.white, alpha: 0.92 }).stroke({ color, alpha: 0.86, width: 3 });
+      if (activeTurn.actionType === 'control' || profile.kind === 'poison') {
+        projectile.circle(x, y, 16).stroke({ color: PASTEL.white, alpha: 0.82, width: 3 })
+          .circle(x, y, profile.kind === 'poison' ? 11 : 8).fill({ color, alpha: 0.78 });
+        if (profile.kind === 'poison') {
+          projectile.circle(x - 12, y + 7, 5).fill({ color: profile.secondary, alpha: 0.72 });
+          projectile.circle(x + 10, y - 8, 4).fill({ color: PASTEL.white, alpha: 0.7 });
+        } else {
+          projectile.moveTo(x - 18, y).lineTo(x + 18, y).stroke({ color, alpha: 0.78, width: 3, cap: 'round' });
+          projectile.moveTo(x, y - 18).lineTo(x, y + 18).stroke({ color, alpha: 0.78, width: 3, cap: 'round' });
+        }
+      } else if (profile.kind === 'burn' || profile.kind === 'ultimate') {
+        projectile.moveTo(x + 22, y)
+          .lineTo(x - 10, y - 13)
+          .lineTo(x - 5, y)
+          .lineTo(x - 10, y + 13)
+          .fill({ color: PASTEL.white, alpha: 0.88 })
+          .stroke({ color, alpha: 0.86, width: 3 });
+        projectile.circle(x + 10, y, profile.kind === 'ultimate' ? 9 : 6).fill({ color: profile.secondary, alpha: 0.82 });
+      } else {
+        projectile.ellipse(x, y, profile.kind === 'tempo' ? 26 : 20, profile.projectileWidth).fill({ color: PASTEL.white, alpha: 0.92 }).stroke({ color, alpha: 0.86, width: 3 });
+        projectile.circle(x + 8, y, 5).fill({ color, alpha: 0.88 });
+      }
       projectile.rotation = Math.atan2(dy, dx);
+      comet.forEach(({ mote, index }) => {
+        mote.clear();
+        const lag = clamp(progress - index * 0.035, 0, 1);
+        const lagEased = easeInOut(lag);
+        const lagCurve = Math.sin(lag * Math.PI) * (activeTurn.actionType === 'control' ? 30 : 16);
+        const mx = actorX + dx * lagEased - unitY * lagCurve;
+        const my = actorY + dy * lagEased + unitX * lagCurve;
+        mote.circle(mx, my, 4 - Math.min(2.6, index * 0.28)).fill({ color: index % 2 === 0 ? PASTEL.white : color, alpha: 0.46 * (1 - index / comet.length) });
+      });
     }, () => {
       trail.destroy();
       projectile.destroy();
-      playImpactBurst(PIXI, app, effectLayer, targetX, targetY, color, activeTurn.actionType === 'control' ? 1.15 : 1, quality);
-      window.setTimeout(() => effectLayer.destroy({ children: true }), 420);
+      comet.forEach(({ mote }) => mote.destroy());
+      playImpactBurst(PIXI, app, effectLayer, targetX, targetY, color, profile.impactScale, quality, profile.kind);
+      playSignatureEffect(PIXI, app, effectLayer, targetX, targetY, profile, quality);
+      playFloatingText(PIXI, app, effectLayer, actionValueText(activeTurn), targetX, targetY - 20, color);
+      playCardMicroPulse(app, target, unitX, unitY, activeTurn.actionType === 'control' ? 1.18 : 0.92);
+      playSecondaryTargetEffects(PIXI, app, effectLayer, targets, target, activeTurn, color, quality);
+      window.setTimeout(() => destroyPixiContainerSafe(effectLayer), 620);
     });
     return;
   }
@@ -1133,7 +2067,8 @@ const playAction = (
     const contact = Math.max(0, distance - actorHalf - targetHalf * 0.78);
     const attackTrail = new PIXI.Graphics();
     const contactSpark = new PIXI.Graphics();
-    effectLayer.addChild(attackTrail, contactSpark);
+    const hitFlash = new PIXI.Graphics();
+    effectLayer.addChild(attackTrail, contactSpark, hitFlash);
     animate(app, duration, (progress) => {
       let travel = 0;
       if (progress < 0.18) {
@@ -1146,7 +2081,7 @@ const playAction = (
         travel = 1.06 * (1 - easeOut((progress - 0.64) / 0.36));
       }
       const hitWindow = progress >= 0.46 && progress <= 0.72;
-      const impactPulse = hitWindow ? Math.sin((progress - 0.46) / 0.26 * Math.PI) : 0;
+      const impactPulse = hitWindow ? Math.sin((progress - 0.46) / 0.26 * Math.PI) * hitStrength : 0;
       const travelX = unitX * contact * travel;
       const travelY = unitY * contact * travel;
       actor.root.position.set(originX + travelX, originY + travelY);
@@ -1165,11 +2100,31 @@ const playAction = (
       }
 
       contactSpark.clear();
+      hitFlash.clear();
       if (impactPulse > 0) {
         const sparkX = targetX - unitX * target.card.width * 0.22;
         const sparkY = targetY - unitY * target.card.height * 0.22;
-        contactSpark.circle(sparkX, sparkY, 16 + impactPulse * 18).stroke({ color, alpha: 0.58 * impactPulse, width: 4 });
-        contactSpark.moveTo(sparkX - 38 * unitY, sparkY + 38 * unitX).lineTo(sparkX + 38 * unitY, sparkY - 38 * unitX).stroke({ color: PASTEL.white, alpha: 0.72 * impactPulse, width: 5, cap: 'round' });
+        const slashAngle = Math.atan2(unitY, unitX) + Math.PI / 2;
+        contactSpark.circle(sparkX, sparkY, 16 + impactPulse * 18).stroke({ color, alpha: 0.62 * impactPulse, width: 4 });
+        contactSpark.circle(sparkX, sparkY, 5 + impactPulse * 8).fill({ color: PASTEL.white, alpha: 0.72 * impactPulse });
+        contactSpark.moveTo(sparkX - 42 * Math.cos(slashAngle), sparkY - 42 * Math.sin(slashAngle))
+          .lineTo(sparkX + 42 * Math.cos(slashAngle), sparkY + 42 * Math.sin(slashAngle))
+          .stroke({ color: PASTEL.white, alpha: 0.86 * impactPulse, width: 6, cap: 'round' });
+        contactSpark.moveTo(sparkX - 30 * unitY - 16 * unitX, sparkY + 30 * unitX - 16 * unitY)
+          .lineTo(sparkX + 30 * unitY + 16 * unitX, sparkY - 30 * unitX + 16 * unitY)
+          .stroke({ color, alpha: 0.78 * impactPulse, width: 4, cap: 'round' });
+        const flashScale = 0.72 + impactPulse * 0.48;
+        hitFlash.moveTo(sparkX, sparkY - 34 * flashScale)
+          .lineTo(sparkX + 10 * flashScale, sparkY - 8 * flashScale)
+          .lineTo(sparkX + 38 * flashScale, sparkY)
+          .lineTo(sparkX + 10 * flashScale, sparkY + 8 * flashScale)
+          .lineTo(sparkX, sparkY + 34 * flashScale)
+          .lineTo(sparkX - 10 * flashScale, sparkY + 8 * flashScale)
+          .lineTo(sparkX - 38 * flashScale, sparkY)
+          .lineTo(sparkX - 10 * flashScale, sparkY - 8 * flashScale)
+          .closePath()
+          .fill({ color: PASTEL.white, alpha: 0.38 * impactPulse })
+          .stroke({ color, alpha: 0.6 * impactPulse, width: 2 });
       }
 
       if (hitWindow) {
@@ -1193,8 +2148,12 @@ const playAction = (
       app.stage.position.set(0, 0);
       attackTrail.destroy();
       contactSpark.destroy();
-      playImpactBurst(PIXI, app, effectLayer, targetX, targetY, color, 1.2, quality);
-      window.setTimeout(() => effectLayer.destroy({ children: true }), 480);
+      hitFlash.destroy();
+      playImpactBurst(PIXI, app, effectLayer, targetX, targetY, color, Math.max(1.16, profile.impactScale), quality, profile.kind);
+      playSignatureEffect(PIXI, app, effectLayer, targetX, targetY, profile, quality);
+      playFloatingText(PIXI, app, effectLayer, actionValueText(activeTurn), targetX, targetY - 20, color);
+      playSecondaryTargetEffects(PIXI, app, effectLayer, targets, target, activeTurn, color, quality);
+      window.setTimeout(() => destroyPixiContainerSafe(effectLayer), 660);
     });
   }
 };
@@ -1207,35 +2166,169 @@ const playImpactBurst = (
   y: number,
   color: number,
   scale: number,
-  quality: RendererQuality
+  quality: RendererQuality,
+  kind: TurnVisualKind = 'attack'
 ) => {
   const burst = new PIXI.Container();
   layer.addChild(burst);
   const ring = new PIXI.Graphics();
+  const innerRing = new PIXI.Graphics();
   const core = new PIXI.Graphics();
   const slashA = new PIXI.Graphics();
-  burst.addChild(ring, core, slashA);
-  const count = quality === 'high' ? 16 : 8;
+  const flash = new PIXI.Graphics();
+  burst.addChild(ring, innerRing, core, slashA, flash);
+  const count = quality === 'high' ? 22 : 10;
   const particles = Array.from({ length: count }, (_, index) => {
     const particle = new PIXI.Graphics();
     burst.addChild(particle);
-    return { particle, angle: (Math.PI * 2 * index) / count, distance: 34 + (index % 3) * 12 };
+    return {
+      particle,
+      angle: (Math.PI * 2 * index) / count,
+      distance: 34 + (index % 4) * 13,
+      size: 2.4 + (index % 3)
+    };
   });
   animate(app, 340, (progress) => {
     const eased = easeOut(progress);
     ring.clear();
+    innerRing.clear();
     core.clear();
     slashA.clear();
-    ring.circle(x, y, (24 + 52 * eased) * scale).stroke({ color, alpha: 0.72 * (1 - progress), width: Math.max(1, 6 * (1 - progress)) });
-    core.circle(x, y, (18 + 10 * eased) * scale).fill({ color: PASTEL.white, alpha: 0.5 * (1 - progress) });
-    slashA.moveTo(x - 58 * scale, y - 22 * scale).lineTo(x + 58 * scale, y + 22 * scale).stroke({ color: PASTEL.white, alpha: 0.95 * (1 - progress), width: 7, cap: 'round' });
-    slashA.moveTo(x - 42 * scale, y + 28 * scale).lineTo(x + 42 * scale, y - 28 * scale).stroke({ color, alpha: 0.78 * (1 - progress), width: 5, cap: 'round' });
-    particles.forEach(({ particle, angle, distance }) => {
+    flash.clear();
+    const fade = 1 - progress;
+    ring.circle(x, y, (20 + 62 * eased) * scale).stroke({ color, alpha: 0.72 * fade, width: Math.max(1, 7 * fade) });
+    innerRing.circle(x, y, (9 + 28 * eased) * scale).stroke({ color: PASTEL.white, alpha: 0.82 * fade, width: Math.max(1, 4 * fade) });
+    core.circle(x, y, (20 + 12 * eased) * scale).fill({ color: PASTEL.white, alpha: 0.54 * fade });
+    if (kind === 'guard') {
+      flash.roundRect(x - 54 * scale, y - 40 * scale, 108 * scale, 80 * scale, 24 * scale)
+        .stroke({ color, alpha: 0.46 * fade, width: 5 });
+      slashA.moveTo(x, y - 48 * scale).lineTo(x + 36 * scale, y - 12 * scale).lineTo(x + 22 * scale, y + 42 * scale).lineTo(x - 28 * scale, y + 42 * scale).lineTo(x - 40 * scale, y - 12 * scale).lineTo(x, y - 48 * scale)
+        .stroke({ color: PASTEL.white, alpha: 0.65 * fade, width: 4, cap: 'round' });
+    } else if (kind === 'heal') {
+      flash.circle(x, y, 38 * scale * (0.7 + eased)).stroke({ color, alpha: 0.5 * fade, width: 5 });
+      slashA.moveTo(x, y - 46 * scale).lineTo(x, y + 46 * scale).stroke({ color: PASTEL.white, alpha: 0.82 * fade, width: 7, cap: 'round' });
+      slashA.moveTo(x - 46 * scale, y).lineTo(x + 46 * scale, y).stroke({ color, alpha: 0.7 * fade, width: 5, cap: 'round' });
+    } else if (kind === 'control') {
+      for (let index = 0; index < 3; index += 1) {
+        const offset = (index - 1) * 18 * scale;
+        flash.circle(x + offset, y, (18 + 34 * eased) * scale).stroke({ color: index % 2 === 0 ? color : PASTEL.white, alpha: 0.38 * fade, width: 3 });
+      }
+      slashA.moveTo(x - 58 * scale, y - 30 * scale).lineTo(x + 58 * scale, y + 30 * scale).moveTo(x + 58 * scale, y - 30 * scale).lineTo(x - 58 * scale, y + 30 * scale)
+        .stroke({ color, alpha: 0.72 * fade, width: 4, cap: 'round' });
+    } else if (kind === 'ultimate') {
+      flash.rect(x - 98 * scale, y - 8 * scale, 196 * scale, 16 * scale).fill({ color: PASTEL.white, alpha: 0.28 * fade });
+      flash.rect(x - 8 * scale, y - 98 * scale, 16 * scale, 196 * scale).fill({ color, alpha: 0.22 * fade });
+      for (let index = 0; index < 8; index += 1) {
+        const angle = (Math.PI * 2 * index) / 8 + progress * 0.4;
+        slashA.moveTo(x + Math.cos(angle) * 18 * scale, y + Math.sin(angle) * 18 * scale)
+          .lineTo(x + Math.cos(angle) * 86 * scale, y + Math.sin(angle) * 86 * scale)
+          .stroke({ color: index % 2 === 0 ? PASTEL.white : color, alpha: 0.72 * fade, width: 4, cap: 'round' });
+      }
+    } else if (kind === 'burn' || kind === 'poison' || kind === 'tempo') {
+      const mainAlpha = kind === 'poison' ? 0.18 : 0.24;
+      flash.circle(x, y, (24 + 48 * eased) * scale).fill({ color, alpha: mainAlpha * fade });
+      for (let index = 0; index < 4; index += 1) {
+        const lane = index - 1.5;
+        slashA.moveTo(x - 62 * scale + 36 * eased * scale, y + lane * 13 * scale)
+          .lineTo(x + 62 * scale + 64 * eased * scale, y + lane * 13 * scale - 12 * scale)
+          .stroke({ color: index % 2 === 0 ? PASTEL.white : color, alpha: 0.52 * fade, width: 4, cap: 'round' });
+      }
+    } else {
+      flash.moveTo(x - 12 * scale, y).lineTo(x - 56 * scale, y - 16 * scale).lineTo(x - 18 * scale, y + 8 * scale)
+        .lineTo(x - 58 * scale, y + 22 * scale).lineTo(x - 8 * scale, y + 12 * scale).fill({ color, alpha: 0.22 * fade });
+      slashA.moveTo(x - 62 * scale, y - 24 * scale).lineTo(x + 62 * scale, y + 24 * scale).stroke({ color: PASTEL.white, alpha: 0.95 * fade, width: 7, cap: 'round' });
+      slashA.moveTo(x - 46 * scale, y + 30 * scale).lineTo(x + 46 * scale, y - 30 * scale).stroke({ color, alpha: 0.78 * fade, width: 5, cap: 'round' });
+    }
+    particles.forEach(({ particle, angle, distance, size }, index) => {
       particle.clear();
-      particle.circle(x + Math.cos(angle) * distance * eased, y + Math.sin(angle) * distance * eased, 3 * (1 - progress * 0.45)).fill({ color, alpha: 0.9 * (1 - progress) });
+      const wobble = Math.sin(progress * Math.PI * 2 + index) * 7;
+      particle.circle(
+        x + Math.cos(angle) * (distance * eased + wobble),
+        y + Math.sin(angle) * (distance * eased + wobble),
+        size * (1 - progress * 0.48)
+      ).fill({ color: index % 3 === 0 ? PASTEL.white : color, alpha: 0.9 * fade });
     });
   }, () => {
     burst.destroy({ children: true });
+  });
+};
+
+const playStageEffect = (
+  PIXI: PixiModule,
+  app: PixiApp,
+  layer: PixiContainer,
+  width: number,
+  height: number,
+  layout: BattleResponsiveLayout,
+  stage: BattleStageKind,
+  activeTurn: ArenaBattleTurn | undefined,
+  roundReveal: RoundRevealState | null,
+  quality: RendererQuality
+) => {
+  const isStart = stage === 'battle' && activeTurn?.actionType === 'start';
+  const isResult = stage === 'result';
+  if (!isStart && !isResult) return;
+  const color = isResult
+    ? roundReveal?.winner === 'player'
+      ? PASTEL.rose
+      : roundReveal?.winner === 'bot'
+        ? 0xec4899
+        : PASTEL.violet
+    : PASTEL.rose;
+  const effect = new PIXI.Container();
+  layer.addChild(effect);
+  const flash = new PIXI.Graphics();
+  const sweepA = new PIXI.Graphics();
+  const sweepB = new PIXI.Graphics();
+  effect.addChild(flash, sweepA, sweepB);
+  const centerX = width / 2;
+  const centerY = layout.centerLineY;
+  const count = quality === 'high' ? 26 : 12;
+  const particles = Array.from({ length: count }, (_, index) => {
+    const particle = new PIXI.Graphics();
+    effect.addChild(particle);
+    return {
+      particle,
+      angle: (Math.PI * 2 * index) / count,
+      radius: Math.min(width, height) * (0.12 + (index % 4) * 0.025)
+    };
+  });
+
+  animate(app, isResult ? 860 : 620, (progress) => {
+    const eased = easeOut(progress);
+    const fade = 1 - progress;
+    flash.clear();
+    sweepA.clear();
+    sweepB.clear();
+    flash.rect(0, 0, width, height).fill({ color: PASTEL.white, alpha: (isResult ? 0.18 : 0.12) * Math.sin(progress * Math.PI) });
+    flash.ellipse(centerX, centerY, width * (0.18 + eased * 0.22), height * (0.035 + eased * 0.045))
+      .fill({ color, alpha: 0.16 * fade });
+    const sweepOffset = width * (progress * 1.28 - 0.14);
+    sweepA.moveTo(sweepOffset - 90, centerY - 44)
+      .lineTo(sweepOffset + 44, centerY - 20)
+      .lineTo(sweepOffset + 88, centerY + 36)
+      .lineTo(sweepOffset - 28, centerY + 22)
+      .fill({ color: PASTEL.white, alpha: 0.26 * fade });
+    sweepB.moveTo(width - sweepOffset + 90, centerY + 44)
+      .lineTo(width - sweepOffset - 44, centerY + 20)
+      .lineTo(width - sweepOffset - 88, centerY - 36)
+      .lineTo(width - sweepOffset + 28, centerY - 22)
+      .fill({ color, alpha: 0.18 * fade });
+    particles.forEach(({ particle, angle, radius }, index) => {
+      particle.clear();
+      const local = clamp((progress - (index % 5) * 0.026) / 0.72, 0, 1);
+      const spiral = angle + local * (isResult ? 1.2 : 0.65);
+      const px = centerX + Math.cos(spiral) * radius * (0.38 + local * 1.1);
+      const py = centerY + Math.sin(spiral) * radius * (0.22 + local * 0.7);
+      const size = 3.2 + (index % 3) * 1.3;
+      particle.moveTo(px, py - size)
+        .lineTo(px + size, py)
+        .lineTo(px, py + size)
+        .lineTo(px - size, py)
+        .fill({ color: index % 2 === 0 ? PASTEL.white : color, alpha: (1 - local) * (isResult ? 0.78 : 0.58) });
+    });
+  }, () => {
+    destroyPixiContainerSafe(effect);
   });
 };
 
@@ -1266,7 +2359,9 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
   const actionLayerRef = React.useRef<PixiContainer | null>(null);
   const hoverZonesRef = React.useRef<HoverZone[]>([]);
   const latestRenderIdRef = React.useRef(0);
-  const lastTurnIdRef = React.useRef<string | null>(null);
+  const lastActionKeyRef = React.useRef<string | null>(null);
+  const lastStageEffectKeyRef = React.useRef<string | null>(null);
+  const lastCanvasSizeRef = React.useRef<string | null>(null);
   const renderSceneRef = React.useRef<() => void>(() => {});
   const [tooltip, setTooltip] = React.useState<TooltipState | null>(null);
   const qualityRef = React.useRef<RendererQuality>('high');
@@ -1287,9 +2382,21 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
     latestRenderIdRef.current = renderId;
     hoverZonesRef.current = [];
     clearContainer(scene);
-    clearContainer(actionLayer);
     const width = app.renderer.width / app.renderer.resolution;
     const height = app.renderer.height / app.renderer.resolution;
+    const canvasSizeKey = `${Math.round(width)}x${Math.round(height)}`;
+    const actionKey = stage === 'battle' && activeTurn ? `${match.id}:${activeTurn.id}:${battleEventIndex}` : null;
+    const stageEffectKey = stage === 'result'
+      ? `${match.id}:result:${roundReveal?.roundNo || match.round_count}:${roundReveal?.winner || 'draw'}`
+      : stage === 'battle' && activeTurn?.actionType === 'start'
+        ? `${match.id}:start:${activeTurn.id}:${battleEventIndex}`
+        : null;
+    const sizeChanged = lastCanvasSizeRef.current !== canvasSizeKey;
+    const shouldPlayAction = Boolean(actionKey && (lastActionKeyRef.current !== actionKey || sizeChanged));
+    const shouldPlayStageEffect = Boolean(stageEffectKey && (lastStageEffectKeyRef.current !== stageEffectKey || sizeChanged));
+    if (!actionKey || shouldPlayAction) clearContainer(actionLayer);
+    lastCanvasSizeRef.current = canvasSizeKey;
+    if (!actionKey) lastActionKeyRef.current = null;
     const layout = computeBattleLayout(width, height);
     const cards = makeLayout(layout, playerCards, opponentCards, playerSlots, opponentSlots, revealOpponent, battleEvents, unitStates, battleEventIndex, roundReveal, roundResult);
     const bg = new PIXI.Graphics();
@@ -1297,38 +2404,42 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
     bg.circle(width * 0.5, height * 0.5, Math.min(width, height) * 0.42).fill({ color: PASTEL.white, alpha: 0.18 });
     bg.circle(width * 0.22, height * 0.3, Math.min(width, height) * 0.2).fill({ color: PASTEL.roseSoft, alpha: 0.08 });
     bg.circle(width * 0.78, height * 0.72, Math.min(width, height) * 0.24).fill({ color: PASTEL.rose, alpha: 0.07 });
-    bg.moveTo(0, layout.centerLineY).lineTo(width, layout.centerLineY).stroke({ color: PASTEL.roseSoft, alpha: 0.22, width: 2 });
+    bg.ellipse(width * 0.5, layout.centerLineY, width * 0.34, Math.max(32, height * 0.045))
+      .fill({ color: PASTEL.white, alpha: 0.2 })
+      .stroke({ color: PASTEL.roseSoft, alpha: 0.16, width: 1.5 });
+    bg.moveTo(width * 0.08, layout.centerLineY).lineTo(width * 0.92, layout.centerLineY).stroke({ color: PASTEL.roseSoft, alpha: 0.28, width: 2.5, cap: 'round' });
+    bg.moveTo(width * 0.18, layout.centerLineY - 9).lineTo(width * 0.82, layout.centerLineY - 9).stroke({ color: PASTEL.white, alpha: 0.26, width: 1.5, cap: 'round' });
+    bg.moveTo(width * 0.18, layout.centerLineY + 9).lineTo(width * 0.82, layout.centerLineY + 9).stroke({ color: PASTEL.rose, alpha: 0.1, width: 1.5, cap: 'round' });
     scene.addChild(bg);
     drawTeamMat(PIXI, scene, cards.filter((card) => card.side === 'opponent'), 'opponent');
     drawTeamMat(PIXI, scene, cards.filter((card) => card.side === 'player'), 'player');
 
-    const requestFrame = () => renderPixiFrame(app);
+    const requestFrame = () => schedulePixiFrame(app);
     drawPortrait(PIXI, scene, layout.opponentPortraitX, layout.opponentPortraitY, opponentLabel, `${displayOpponentRoundWins ?? match.player_b_round_wins ?? 0} 라운드 승`, revealOpponent ? opponentAvatar : null, 'opponent', null, { width: layout.portraitWidth, height: layout.portraitHeight }, requestFrame);
     drawPortrait(PIXI, scene, layout.playerPortraitX, layout.playerPortraitY, playerLabel, `${displayPlayerRoundWins ?? match.player_a_round_wins ?? 0} 라운드 승`, user?.avatarUrl, 'player', loadout, { width: layout.portraitWidth, height: layout.portraitHeight }, requestFrame);
 
-    drawCenterHud(PIXI, scene, layout, stage, activeTurn, roundReveal, allCards);
+    const turnProgress = stage === 'battle' ? Math.min(1, ((Date.now() % PIXI_BATTLE_TURN_MS) / PIXI_BATTLE_TURN_MS)) : 0;
+    drawCenterHud(PIXI, scene, layout, stage, activeTurn, roundReveal, allCards, turnProgress, battleEventIndex, battleEvents.length);
     if (stage === 'battle' && activeTurn) {
       const actionColor = colorForAction(activeTurn);
       const actorCard = cards.find((card) => !card.hidden && eventMatchesCard(activeTurn.actor, card.card));
       const targetCards = cards.filter((card) => !card.hidden && activeTurn.targetIds.some((target) => eventMatchesCard(target, card.card)));
+      drawActionFocus(PIXI, scene, actorCard, targetCards, actionColor, turnProgress);
       if (actorCard) drawTargetMarker(PIXI, scene, actorCard, actionColor, 'actor');
       targetCards.forEach((card) => drawTargetMarker(PIXI, scene, card, actionColor, 'target'));
-      if (actorCard && targetCards[0]) {
-        const line = new PIXI.Graphics();
-        line.moveTo(actorCard.x + actorCard.width / 2, actorCard.y + actorCard.height / 2)
-          .lineTo(targetCards[0].x + targetCards[0].width / 2, targetCards[0].y + targetCards[0].height / 2)
-          .stroke({ color: actionColor, alpha: 0.2, width: 3, cap: 'round' });
-        scene.addChild(line);
-      }
     }
-    const turnProgress = stage === 'battle' ? Math.min(1, ((Date.now() % PIXI_BATTLE_TURN_MS) / PIXI_BATTLE_TURN_MS)) : 0;
     const zoneLayer = new PIXI.Container();
     scene.addChild(zoneLayer);
     const visuals = cards.map((card) => drawCard(PIXI, zoneLayer, card, activeTurn, stage, turnProgress, qualityRef.current, skillLookup, classLookup, hoverZonesRef.current, requestFrame));
+    drawStageBanner(PIXI, scene, layout, width, height, stage, activeTurn, roundReveal, roundResult);
     if (renderId !== latestRenderIdRef.current) return;
     renderPixiFrame(app);
-    if (stage === 'battle' && activeTurn && activeTurn.id !== lastTurnIdRef.current && qualityRef.current !== 'off') {
-      lastTurnIdRef.current = activeTurn.id;
+    if (shouldPlayStageEffect && qualityRef.current !== 'off') {
+      lastStageEffectKeyRef.current = stageEffectKey;
+      playStageEffect(PIXI, app, actionLayer, width, height, layout, stage, activeTurn, roundReveal, qualityRef.current);
+    }
+    if (stage === 'battle' && activeTurn && shouldPlayAction && qualityRef.current !== 'off') {
+      lastActionKeyRef.current = actionKey;
       playAction(PIXI, app, actionLayer, visuals, activeTurn, qualityRef.current);
     }
   }, [activeTurn, allCards, battleEventIndex, battleEvents, classLookup, displayOpponentRoundWins, displayPlayerRoundWins, loadout, match.id, match.match_type, match.player_a_round_wins, match.player_b_id, match.player_b_round_wins, opponentAvatar, opponentCards, opponentLabel, opponentSlots, playerCards, playerLabel, playerSlots, revealOpponent, roundResult, roundReveal, skillLookup, stage, unitStates, user?.avatarUrl]);

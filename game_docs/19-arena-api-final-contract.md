@@ -85,6 +85,8 @@ GET /api/arena/matches/{match_id}/replay
 GET /api/arena/matches/recent
 ```
 
+리플레이 이벤트는 `replay_version: 2` 기준으로 체력/실드 상태(`hp_before`, `hp_after`, `shield_before`, `shield_after`, `alive_after`)와 렌더링 메타데이터(`vfx_kind`, `damage_type`, `skill_id`, `skill_type`, `effect_tags`)를 선택적으로 포함한다. 클라이언트는 렌더링 메타데이터를 우선 사용하고, 필드가 없는 과거 리플레이는 이벤트 타입과 메시지 기반 fallback으로 재생한다.
+
 ### MMR/랭킹
 
 ```text

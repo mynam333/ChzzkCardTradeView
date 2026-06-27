@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
 import { ArenaDeck, getArenaDeck, validateArenaDeckInput } from './arenaDeckService';
 import { getArenaCurrentSeasonId, isArenaSeasonOpen } from './arenaSeasonService';
-import { ArenaDeckSnapshot, buildArenaReplayJsonForStorage, ensureArenaMatchTables, loadArenaDeckSnapshot } from './arenaMatchService';
+import { ArenaDeckSnapshot, buildArenaReplayStoragePayload, ensureArenaMatchTables, loadArenaDeckSnapshot } from './arenaMatchService';
 import { pickArenaBattlefieldRule, simulateArenaSet } from './arenaBattleSimulator';
 import { ARENA_MATCH_FORMAT, ARENA_ROUNDS_TO_WIN } from './arenaRules';
 import { getArenaOpsConfigSync } from './arenaOpsConfig';
@@ -87,11 +87,12 @@ const countCupReplayEvents = (replay: any) => (Array.isArray(replay?.matches) ? 
     .reduce((roundTotal: number, round: any) => roundTotal + (Array.isArray(round?.events) ? round.events.length : 0), 0), 0);
 
 const saveArenaCupReplay = async (cupId: string, replay: any): Promise<string | null> => {
-  const replayJson = buildArenaReplayJsonForStorage(replay);
-  if (!replayJson) return null;
+  const storagePayload = buildArenaReplayStoragePayload(replay);
+  if (!storagePayload) return null;
+  const replayJson = storagePayload.json;
   await ensureArenaCupTables();
   const replayBytes = Buffer.byteLength(replayJson, 'utf8');
-  const eventCount = countCupReplayEvents(replay);
+  const eventCount = countCupReplayEvents(storagePayload.replay);
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
       `INSERT INTO arena_cup_replays
@@ -685,7 +686,6 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
   const seed = hashHex(`${getArenaCurrentSeasonId()}:${rows.map((row) => `${row.id}:${row.user_id}:${row.deck_hash}`).join('|')}`);
   const simulated = __test_simulateCupBracket(deckEntries, seed);
   const bracketJson = JSON.stringify(simulated.bracket);
-  const replayJson = buildArenaReplayJsonForStorage(simulated.replay);
   const ids = rows.map((row) => row.id);
   const placeholders = ids.map(() => '?').join(', ');
 
@@ -710,7 +710,7 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
       );
       return String(inserted.insertId);
     });
-    if (replayJson) await saveArenaCupReplay(cupId, simulated.replay);
+    await saveArenaCupReplay(cupId, simulated.replay);
     rows.forEach((row) => emitArenaCupQueueEvent(row.user_id, { ...toQueueResponse({ ...row, status: 'MATCHED', cup_id: cupId }), queued_count: CUP_SIZE }));
     return cupId;
   }
@@ -732,7 +732,7 @@ const createCupFromReservedRows = async (rows: RawCupQueueRow[]) => {
     ).run(inserted.lastInsertRowid, ...ids);
     return String(inserted.lastInsertRowid);
   })();
-  if (replayJson) await saveArenaCupReplay(cupId, simulated.replay);
+  await saveArenaCupReplay(cupId, simulated.replay);
   rows.forEach((row) => emitArenaCupQueueEvent(row.user_id, { ...toQueueResponse({ ...row, status: 'MATCHED', cup_id: cupId }), queued_count: CUP_SIZE }));
   return cupId;
 };

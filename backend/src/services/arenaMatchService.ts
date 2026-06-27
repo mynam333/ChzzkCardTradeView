@@ -7,6 +7,7 @@ import { listArenaStreamerCardStates } from './arenaStreamerCardState';
 import { ArenaBattleEvent, pickArenaBattlefieldRule, simulateArenaRound } from './arenaBattleSimulator';
 import { ARENA_MAX_ROUNDS_PER_MATCH, ARENA_MATCH_FORMAT, ARENA_ROUNDS_TO_WIN, ARENA_TACTIC_CHIPS } from './arenaRules';
 import { getArenaOpsConfigSync } from './arenaOpsConfig';
+import { validateArenaReplayPayload } from './arenaReplayDiagnostics';
 import { streamerRepository } from '../repositories';
 import type { ArenaCompactMatchSummaryDto, ArenaDeckSnapshotDto, ArenaRoundPlanSlotDto } from '@chikapo/arena-contract';
 
@@ -36,7 +37,15 @@ export interface ArenaReplayPayload {
   match_format: typeof ARENA_MATCH_FORMAT;
   rounds_to_win: typeof ARENA_ROUNDS_TO_WIN;
   replay_version?: number;
+  replay_schema_version?: 2;
   replay_storage: 'compact_summary' | 'tick_events';
+  storage_policy?: ReturnType<typeof getArenaReplayStoragePolicy>;
+  diagnostic_summary?: {
+    schema: 'arena-replay-diagnostic-v1';
+    issue_count: number;
+    warning_count: number;
+    error_count: number;
+  };
   rounds: ArenaRoundReplay[];
 }
 
@@ -208,18 +217,47 @@ const ARENA_MATCH_WITH_REPLAY_COLUMNS = `id, season_id, match_type, match_format
 
 export const getArenaReplayStoragePolicy = () => ({
   enabled: isArenaReplayWriteEnabled(),
+  mode: 'event_log_with_snapshots',
+  write_path: 'arena_match_replays',
+  legacy_inline_replay_json: 'read_fallback_only',
   max_events_per_round: REPLAY_MAX_EVENTS_PER_ROUND,
   max_bytes: REPLAY_MAX_BYTES,
   prune_retention_days: REPLAY_RETENTION_DAYS,
   prune_batch_limit: REPLAY_PRUNE_LIMIT
 });
 
-const boundReplayRounds = (rounds: any[]) => rounds.map((round: any) => {
+const getArenaReplayStoragePolicySnapshot = () => ({
+  mode: 'event_log_with_snapshots',
+  max_events_per_round: REPLAY_MAX_EVENTS_PER_ROUND,
+  max_bytes: REPLAY_MAX_BYTES,
+  prune_retention_days: REPLAY_RETENTION_DAYS
+});
+
+type ReplayStorageRoundLike = Partial<Omit<ArenaRoundReplay, 'events'>> & { events?: unknown[] };
+type ReplayStorageInput = {
+  match_id?: unknown;
+  match_format?: unknown;
+  rounds_to_win?: unknown;
+  replay_version?: unknown;
+  replay_schema_version?: unknown;
+  replay_storage?: unknown;
+  storage_policy?: unknown;
+  diagnostic_summary?: unknown;
+  rounds?: ReplayStorageRoundLike[];
+  matches?: Array<Record<string, unknown> & { rounds?: ReplayStorageRoundLike[] }>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const boundReplayRounds = (rounds: ReplayStorageRoundLike[], maxEventsPerRound = REPLAY_MAX_EVENTS_PER_ROUND) => rounds.map((round) => {
   const events = Array.isArray(round?.events) ? round.events : [];
-  const boundedEvents = events.slice(0, REPLAY_MAX_EVENTS_PER_ROUND);
+  const boundedEvents = events.slice(0, maxEventsPerRound);
   const omittedEventCount = Math.max(0, events.length - boundedEvents.length);
   const firstEvent = events[0];
-  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+  const lastEvent = events.length > 0 ? events[events.length - 1] : undefined;
+  const firstRecord = isRecord(firstEvent) ? firstEvent : null;
+  const lastRecord = isRecord(lastEvent) ? lastEvent : null;
   return {
     ...round,
     replay_truncated: omittedEventCount > 0 || Boolean(round?.replay_truncated),
@@ -228,8 +266,8 @@ const boundReplayRounds = (rounds: any[]) => rounds.map((round: any) => {
       : events.length,
     timeline_summary: omittedEventCount > 0
       ? {
-          first_event_t: Number.isFinite(Number(firstEvent?.t)) ? Number(firstEvent.t) : undefined,
-          last_event_t: Number.isFinite(Number(lastEvent?.t)) ? Number(lastEvent.t) : undefined,
+          first_event_t: Number.isFinite(Number(firstRecord?.t)) ? Number(firstRecord?.t) : undefined,
+          last_event_t: Number.isFinite(Number(lastRecord?.t)) ? Number(lastRecord?.t) : undefined,
           omitted_event_count: omittedEventCount
         }
       : round?.timeline_summary,
@@ -237,40 +275,78 @@ const boundReplayRounds = (rounds: any[]) => rounds.map((round: any) => {
   };
 });
 
-export const buildArenaReplayJsonForStorage = (replay: ArenaReplayPayload | any): string | null => {
-  if (!isArenaReplayWriteEnabled()) return null;
+export const normalizeArenaReplayForStorage = (replay: ReplayStorageInput, maxEventsPerRound = REPLAY_MAX_EVENTS_PER_ROUND): ReplayStorageInput => {
   const bounded = {
     ...replay,
     replay_version: Number.isFinite(Number(replay?.replay_version)) ? Number(replay.replay_version) : 2,
+    replay_schema_version: 2 as const,
     replay_storage: replay?.replay_storage || 'tick_events',
-    rounds: Array.isArray(replay?.rounds) ? boundReplayRounds(replay.rounds) : replay?.rounds,
+    storage_policy: getArenaReplayStoragePolicySnapshot(),
+    rounds: Array.isArray(replay?.rounds) ? boundReplayRounds(replay.rounds, maxEventsPerRound) : undefined,
     matches: Array.isArray(replay?.matches)
-      ? replay.matches.map((match: any) => ({
+      ? replay.matches.map((match) => ({
           ...match,
           replay_version: Number.isFinite(Number(match?.replay_version)) ? Number(match.replay_version) : 2,
-          rounds: Array.isArray(match?.rounds) ? boundReplayRounds(match.rounds) : []
+          replay_schema_version: 2 as const,
+          rounds: Array.isArray(match?.rounds) ? boundReplayRounds(match.rounds, maxEventsPerRound) : []
         }))
       : replay?.matches
   };
-  const encoded = JSON.stringify(bounded);
-  return Buffer.byteLength(encoded, 'utf8') <= REPLAY_MAX_BYTES ? encoded : null;
+  const diagnostic = validateArenaReplayPayload({
+    match_id: String(bounded.match_id || ''),
+    replay_storage: String(bounded.replay_storage || 'tick_events'),
+    rounds: Array.isArray(bounded.rounds) ? bounded.rounds as ArenaReplayPayload['rounds'] : []
+  });
+  return {
+    ...bounded,
+    diagnostic_summary: {
+      schema: diagnostic.schema,
+      issue_count: diagnostic.issue_count,
+      warning_count: diagnostic.warning_count,
+      error_count: diagnostic.error_count
+    }
+  };
 };
 
-const countReplayEvents = (replay: ArenaReplayPayload | any) => {
+const getReplayStorageEventLimits = () => Array.from(new Set([
+  REPLAY_MAX_EVENTS_PER_ROUND,
+  Math.max(20, Math.floor(REPLAY_MAX_EVENTS_PER_ROUND / 2)),
+  20
+])).filter((limit) => limit > 0);
+
+export const buildArenaReplayStoragePayload = (replay: ReplayStorageInput): { json: string; replay: ReplayStorageInput } | null => {
+  if (!isArenaReplayWriteEnabled()) return null;
+  for (const maxEventsPerRound of getReplayStorageEventLimits()) {
+    const bounded = normalizeArenaReplayForStorage(replay, maxEventsPerRound);
+    const encoded = JSON.stringify(bounded);
+    if (Buffer.byteLength(encoded, 'utf8') <= REPLAY_MAX_BYTES) {
+      return { json: encoded, replay: bounded };
+    }
+  }
+  return null;
+};
+
+export const buildArenaReplayJsonForStorage = (replay: ReplayStorageInput): string | null => {
+  return buildArenaReplayStoragePayload(replay)?.json || null;
+};
+
+const countReplayEvents = (replay: ReplayStorageInput) => {
   const rounds = Array.isArray(replay?.rounds) ? replay.rounds : [];
-  return rounds.reduce((total: number, round: any) => total + (Array.isArray(round?.events) ? round.events.length : 0), 0);
+  const matchRounds = Array.isArray(replay?.matches) ? replay.matches.flatMap((match) => Array.isArray(match.rounds) ? match.rounds : []) : [];
+  return [...rounds, ...matchRounds].reduce((total, round) => total + (Array.isArray(round?.events) ? round.events.length : 0), 0);
 };
 
 const replayExpiresAtSql = () => getDbMode() === 'MYSQL'
   ? 'DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY)'
   : "datetime('now', '+' || ? || ' days')";
 
-const saveArenaMatchReplay = async (matchId: string, replay: ArenaReplayPayload | any): Promise<string | null> => {
-  const replayJson = buildArenaReplayJsonForStorage(replay);
-  if (!replayJson) return null;
+const saveArenaMatchReplay = async (matchId: string, replay: ReplayStorageInput): Promise<string | null> => {
+  const storagePayload = buildArenaReplayStoragePayload(replay);
+  if (!storagePayload) return null;
+  const replayJson = storagePayload.json;
   await ensureArenaReplayTable();
   const replayBytes = Buffer.byteLength(replayJson, 'utf8');
-  const eventCount = countReplayEvents(replay);
+  const eventCount = countReplayEvents(storagePayload.replay);
   if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
       `INSERT INTO arena_match_replays
@@ -1301,6 +1377,7 @@ export const commitArenaMatchRound = async (
     match_format: ARENA_MATCH_FORMAT,
     rounds_to_win: ARENA_ROUNDS_TO_WIN,
     replay_version: 2,
+    replay_schema_version: 2,
     replay_storage: 'tick_events',
     rounds: [...(previousReplay?.rounds || []), simulatedRound.replay]
   };
@@ -1432,6 +1509,31 @@ export const getArenaReplayForUser = async (userId: string, matchId: string): Pr
   const replay = parseJson<ArenaReplayPayload | null>(await loadArenaMatchReplayJson(matchId, row.replay_json), null);
   if (!replay) return null;
   return { ...replay, match_id: String(row.id) };
+};
+
+export const getArenaMatchReplayDiagnosticForAdmin = async (matchId: string) => {
+  await ensureArenaMatchTables();
+  let row: RawMatchRow | undefined;
+  if (getDbMode() === 'MYSQL') {
+    row = await getMysqlDb().get<RawMatchRow>(
+      `SELECT ${ARENA_MATCH_WITH_REPLAY_COLUMNS} FROM arena_matches WHERE id = ? LIMIT 1`,
+      matchId
+    );
+  } else {
+    row = getSqliteDb()
+      .prepare(`SELECT ${ARENA_MATCH_WITH_REPLAY_COLUMNS} FROM arena_matches WHERE id = ? LIMIT 1`)
+      .get(matchId) as RawMatchRow | undefined;
+  }
+  if (!row) return null;
+  const replay = parseJson<ArenaReplayPayload | null>(await loadArenaMatchReplayJson(matchId, row.replay_json), null);
+  const match = mapMatchRow(row, row.player_a_id);
+  const diagnostic = validateArenaReplayPayload(replay ? { ...replay, match_id: String(row.id) } : { match_id: String(row.id), replay_storage: 'tick_events', rounds: [] } as Partial<ArenaReplayPayload>);
+  return {
+    match,
+    replay_available: Boolean(replay),
+    replay_policy: getArenaReplayStoragePolicy(),
+    diagnostic
+  };
 };
 
 export const recoverExpiredArenaRoundCommits = async (limitInput?: unknown) => {
@@ -1668,6 +1770,11 @@ export const listArenaRankings = async (limitInput: unknown): Promise<ArenaRanki
   if (rankingCache.size > 20) {
     for (const [key, value] of rankingCache) {
       if (value.expiresAt <= Date.now()) rankingCache.delete(key);
+    }
+    while (rankingCache.size > 20) {
+      const oldestKey = rankingCache.keys().next().value;
+      if (!oldestKey) break;
+      rankingCache.delete(oldestKey);
     }
   }
   return data;

@@ -60,6 +60,7 @@
 | 24 | `24-arena-service-readiness-qa.md` | 상용 출시 전 실데이터 QA, 스모크/부하 테스트, Go/No-Go 기준 |
 | 25 | `25-arena-point-cosmetic-policy.md` | 아레나 내부 포인트 사용처, 코스메틱 구매/보유/장착, P2W 방지 기준 |
 | 26 | `26-arena-balance-simulation-guide.md` | 클래스/스탯/스킬/태그/전술 조합 오프라인 밸런스 시뮬레이션 가이드 |
+| 27 | `27-arena-commercial-battle-screen-upgrade-plan.md` | 상용 게임 수준의 실제 전투 화면 HUD, VFX, 결과 모달, 모바일/성능 고도화 기준 |
 
 ## 4. 권장 읽는 순서
 
@@ -96,6 +97,7 @@
 11. `24-arena-service-readiness-qa.md`
 12. `25-arena-point-cosmetic-policy.md`
 13. `26-arena-balance-simulation-guide.md`
+14. `27-arena-commercial-battle-screen-upgrade-plan.md`
 
 ## 5. 구현 전 반드시 잠글 항목
 
