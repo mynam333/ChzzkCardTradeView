@@ -237,61 +237,11 @@ export class SqliteMinigameRepository implements IMinigameRepository {
       `).all(cutoff, safeLimit) as any[];
 
       for (const session of expired) {
-        const update = db.prepare(`
+        db.prepare(`
           UPDATE minigame_sessions
           SET status = 'EXPIRED', completed_at = ?
           WHERE id = ? AND status = 'STARTED'
         `).run(formatKstDbTime(), session.id);
-
-        if (update.changes <= 0) continue;
-
-        let practiceMode = false;
-        try {
-          practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true;
-        } catch {
-          practiceMode = false;
-        }
-        if (practiceMode || session.ticket_spent_type === 'NONE') continue;
-
-        const spentType = session.ticket_spent_type === 'BONUS' ? 'BONUS' : 'BASE';
-        const now = new Date().toISOString();
-        db.prepare(`
-          INSERT OR IGNORE INTO user_minigame_tickets
-            (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
-          VALUES (?, ${MAX_AUTO_TICKETS}, 0, ?, ?)
-        `).run(session.user_id, now, now);
-
-        if (spentType === 'BONUS') {
-          db.prepare(`
-            UPDATE user_minigame_tickets
-            SET bonus_tickets = bonus_tickets + 1,
-                updated_at = datetime('now')
-            WHERE user_id = ?
-          `).run(session.user_id);
-          continue;
-        }
-
-        const ticket = db.prepare(`
-          SELECT current_tickets
-          FROM user_minigame_tickets
-          WHERE user_id = ?
-        `).get(session.user_id) as any;
-
-        if ((ticket?.current_tickets ?? 0) < MAX_AUTO_TICKETS) {
-          db.prepare(`
-            UPDATE user_minigame_tickets
-            SET current_tickets = current_tickets + 1,
-                updated_at = datetime('now')
-            WHERE user_id = ?
-          `).run(session.user_id);
-        } else {
-          db.prepare(`
-            UPDATE user_minigame_tickets
-            SET bonus_tickets = bonus_tickets + 1,
-                updated_at = datetime('now')
-            WHERE user_id = ?
-          `).run(session.user_id);
-        }
       }
     });
     txn();

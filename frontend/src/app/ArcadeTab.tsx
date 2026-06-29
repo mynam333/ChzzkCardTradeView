@@ -138,7 +138,7 @@ type StartGameResponse = {
   game_data: MinigameData;
   message?: string;
   practice_mode?: boolean;
-  resumed?: boolean;
+  interrupted_session_closed?: boolean;
   timing?: {
     server_now: string;
     session_started_at: string | null;
@@ -1777,11 +1777,10 @@ export const ArcadeTab: React.FC = () => {
       setGameData(data.game_data);
       setActiveGame(type);
       setIsPracticeMode(data.practice_mode === true);
-      if (data.resumed) {
-        toast(data.message || '끊긴 미니게임 세션을 이어서 시작합니다.', 'info');
+      if (data.interrupted_session_closed) {
+        toast(data.message || '이전 미니게임은 실패 처리되었고 새 게임을 시작합니다.', 'warning');
       }
 
-      const isResumed = data.resumed === true;
       const remainingSeconds = data.timing?.time_remaining_ms !== undefined
         ? Math.max(0, Math.ceil(data.timing.time_remaining_ms / 1000))
         : null;
@@ -1794,7 +1793,7 @@ export const ArcadeTab: React.FC = () => {
         setRoundCorrectCount(0);
         setRoundChecking(false);
         setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
-        roundDeadlineRef.current = isResumed ? Date.now() + QUIZ_TIME_LIMIT_SECONDS * 1000 : null;
+        roundDeadlineRef.current = null;
         setQuizStartTime(Date.now());
         setQuizIntensity(100);
         // 첫 문제는 랜덤 블러로 시작하되, 연습 URL에 blur가 있으면 첫 문제만 강제할 수 있습니다.
@@ -1807,12 +1806,12 @@ export const ArcadeTab: React.FC = () => {
         setPuzzlePieces(createInitialPuzzlePieces());
         const puzzleRemaining = remainingSeconds ?? PUZZLE_TIME_LIMIT_SECONDS;
         setPuzzleTimeLeft(puzzleRemaining);
-        puzzleDeadlineRef.current = isResumed ? Date.now() + puzzleRemaining * 1000 : null;
+        puzzleDeadlineRef.current = null;
       } else if (type === 'match') {
-        setRevealActive(!isResumed); // 재개 세션은 이미 선공개 시간이 지났다고 보고 바로 플레이로 복귀합니다.
+        setRevealActive(true);
         const matchRemaining = remainingSeconds ?? MATCH_TIME_LIMIT_SECONDS;
         setGameTimeLeft(matchRemaining);
-        matchDeadlineRef.current = isResumed ? Date.now() + matchRemaining * 1000 : null;
+        matchDeadlineRef.current = null;
 
         const rawCards = data.game_data.cards ?? [];
         const deck: MatchCard[] = [...rawCards, ...rawCards]
@@ -1821,7 +1820,7 @@ export const ArcadeTab: React.FC = () => {
             channel_id: card.channel_id,
             name: card.name,
             logo_url: card.logo_url,
-            isFlipped: !isResumed, // 2초 공개를 위해 처음에 flipped로 시작
+            isFlipped: true, // 2초 공개를 위해 처음에 flipped로 시작
             isMatched: false
           }))
           .sort(() => 0.5 - Math.random()); // 셔플
@@ -1833,11 +1832,11 @@ export const ArcadeTab: React.FC = () => {
         setRoundCorrectCount(0);
         setRoundChecking(false);
         setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-        roundDeadlineRef.current = isResumed ? Date.now() + ROUND_GAME_ROUND_SECONDS * 1000 : null;
+        roundDeadlineRef.current = null;
       }
 
       // 3초 카운트다운 가동
-      setCountdownLeft(isResumed ? 0 : 3);
+      setCountdownLeft(3);
 
       if (!practiceMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
 

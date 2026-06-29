@@ -396,8 +396,8 @@ describe('MinigameRepository practice mode', () => {
   });
 });
 
-describe('MinigameRepository stale started session recovery', () => {
-  it('expires old paid sessions and refunds the consumed base ticket', async () => {
+describe('MinigameRepository stale started session cleanup', () => {
+  it('expires old paid sessions without refunding the consumed base ticket', async () => {
     seedUser(db, 'refund-base');
     const now = new Date().toISOString();
     db.prepare(`
@@ -418,7 +418,7 @@ describe('MinigameRepository stale started session recovery', () => {
       FROM user_minigame_tickets
       WHERE user_id = ?
     `).get('refund-base')).toEqual({
-      current_tickets: 5,
+      current_tickets: 4,
       bonus_tickets: 0
     });
     expect(db.prepare('SELECT status FROM minigame_sessions WHERE id = ?').get('expired-base-session')).toEqual({
@@ -426,7 +426,7 @@ describe('MinigameRepository stale started session recovery', () => {
     });
   });
 
-  it('returns an active paid session so reconnects do not spend another ticket', async () => {
+  it('returns an active paid session so interrupted attempts can be closed', async () => {
     seedUser(db, 'resume-user');
     const now = new Date().toISOString();
     db.prepare(`

@@ -128,6 +128,15 @@ const getTestRotatedCropSafeMargin = (size: number, rotation: number) => {
   return Math.min(0.48, (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2 + 0.025);
 };
 
+const createPlayableStreamers = (count = 6) =>
+  Array.from({ length: count }, (_, index) => ({
+    channel_id: `channel-${index}`,
+    name: `streamer-${index}`,
+    logo_url: `https://example.com/${index}.png`,
+    custom_images: Array.from({ length: 6 }, (_, star) => `https://example.com/${index}-${star}.png`),
+    base_value: 1000 + index
+  }));
+
 const runPuzzleSubmission = async (elapsedMs: number, practiceMode = false) => {
   findSessionById.mockResolvedValue({
     id: 'puzzle-session',
@@ -789,37 +798,26 @@ describe('daily minigame selection', () => {
     }
   });
 
-  it('resumes an active paid session before reading or spending another ticket', async () => {
+  it('closes an interrupted paid session as failed before starting a fresh game', async () => {
     vi.setSystemTime(new Date('2026-06-07T03:00:00.000Z'));
     const todayGame = getDailyMinigame().game_type;
-    const activeTarget = todayGame === 'quiz'
-      ? {
-        practice_mode: false,
-        rounds: quizRounds
-      }
-      : todayGame === 'puzzle'
-        ? {
-          practice_mode: false,
-          correct_id: 'channel-answer',
-          correct_name: '정답 스트리머',
-          image_url: 'https://example.com/answer.png',
-          star: 3
-        }
-        : {
-          practice_mode: false,
-          cards: [
-            { channel_id: 'channel-1', name: '보기1', logo_url: 'https://example.com/1.png' },
-            { channel_id: 'channel-2', name: '보기2', logo_url: 'https://example.com/2.png' }
-          ]
-        };
     findActiveStartedSession.mockResolvedValue({
       id: 'started-session',
       user_id: 'user-1',
       game_type: todayGame,
       status: 'STARTED',
       ticket_spent_type: 'BASE',
-      target_data: JSON.stringify(activeTarget)
+      target_data: JSON.stringify({ practice_mode: false })
     });
+    completeSession.mockResolvedValue({ ok: true, newPoints: 5000 });
+    getTicketStatus.mockResolvedValue({
+      user_id: 'user-1',
+      current_tickets: 1,
+      bonus_tickets: 0,
+      last_charged_at: new Date('2026-06-07T02:00:00.000Z').toISOString()
+    });
+    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
+    startSession.mockResolvedValue({ ok: true });
     const request = {
       user: { id: 'user-1' },
       body: { game_type: todayGame }
@@ -830,16 +828,17 @@ describe('daily minigame selection', () => {
 
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      session_id: 'started-session',
-      resumed: true,
-      game_data: todayGame === 'match'
-        ? expect.objectContaining({ cards: expect.arrayContaining([expect.objectContaining({ channel_id: 'channel-1' })]) })
-        : todayGame === 'quiz'
-          ? expect.objectContaining({ rounds: expect.arrayContaining([expect.objectContaining({ image_url: 'https://example.com/quiz-answer-0.png' })]) })
-          : expect.objectContaining({ image_url: 'https://example.com/answer.png' })
+      practice_mode: false,
+      interrupted_session_closed: true,
+      message: expect.stringContaining('실패 처리')
     }));
-    expect(getTicketStatus).not.toHaveBeenCalled();
-    expect(startSession).not.toHaveBeenCalled();
+    expect(completeSession).toHaveBeenCalledWith('started-session', 0);
+    expect(getTicketStatus).toHaveBeenCalledWith('user-1');
+    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: 'user-1',
+      game_type: todayGame,
+      status: 'STARTED'
+    }));
   });
 
   it('keeps the puzzle answer private until the game is submitted', async () => {

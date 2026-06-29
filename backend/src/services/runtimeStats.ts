@@ -2,6 +2,7 @@ import { getNotificationStreamStats } from './notificationStream';
 import { getRealtimeStreamStats } from './realtimeStream';
 import { getPlayControllerStats } from '../controllers/playController';
 import { getSoftBanStats } from '../middlewares/softBan';
+import { getRateLimitStats } from '../middlewares/rateLimit';
 import { isLiveWorkerProcess } from './processRole';
 import { getMysqlQueryStats } from './mysqlDb';
 
@@ -51,7 +52,8 @@ export const getRuntimeStats = () => {
       mysql: getMysqlQueryStats()
     },
     protection: {
-      softBan: getSoftBanStats()
+      softBan: getSoftBanStats(),
+      rateLimit: getRateLimitStats()
     }
   };
 };

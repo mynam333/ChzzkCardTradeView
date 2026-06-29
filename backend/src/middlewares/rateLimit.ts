@@ -11,14 +11,32 @@ interface Bucket {
 }
 
 const store = new Map<string, Bucket>();
+const maxBuckets = Math.max(1000, Number(process.env.RATE_LIMIT_MAX_BUCKETS || 50_000));
 
-// 주기적으로 만료된 버킷 정리 (메모리 누수 방지)
-setInterval(() => {
-  const now = Date.now();
+const pruneExpiredBuckets = (now = Date.now()) => {
   for (const [key, bucket] of store.entries()) {
     if (bucket.resetAt <= now) store.delete(key);
   }
+};
+
+const trimOverflowBuckets = () => {
+  while (store.size > maxBuckets) {
+    const oldestKey = store.keys().next().value;
+    if (!oldestKey) break;
+    store.delete(oldestKey);
+  }
+};
+
+// 주기적으로 만료된 버킷 정리 (메모리 누수 방지)
+setInterval(() => {
+  pruneExpiredBuckets();
+  trimOverflowBuckets();
 }, 60 * 1000).unref?.();
+
+export const getRateLimitStats = () => ({
+  buckets: store.size,
+  maxBuckets
+});
 
 const getClientIp = (req: Request): string => {
   // app.set('trust proxy', 1) 설정 하에서 Express가 신뢰 프록시 체인을 반영해 req.ip를 산출하므로
@@ -49,6 +67,10 @@ export const rateLimit = (options: { windowMs: number; max: number; key: string;
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + windowMs };
       store.set(bucketKey, bucket);
+      if (store.size > maxBuckets) {
+        pruneExpiredBuckets(now);
+        trimOverflowBuckets();
+      }
     }
 
     bucket.count += 1;

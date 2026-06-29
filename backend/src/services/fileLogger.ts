@@ -19,9 +19,13 @@ let runtimeStatsProvider: RuntimeStatsProvider | null = null;
 let runtimeStatsTimer: NodeJS.Timeout | null = null;
 let pruneTimer: NodeJS.Timeout | null = null;
 let maxLogStringLength = 2000;
+let maxLogBufferBytes = 1024 * 1024;
 let logFilePrefix = 'backend';
 let logFileRole = 'process';
 let splitByProcessRole = true;
+let logStream: fs.WriteStream | null = null;
+let logStreamPath = '';
+let droppedLogLines = 0;
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -100,9 +104,59 @@ const serializeArg = (arg: any): string => {
 const writeLine = (line: string) => {
   if (!initialized || !logDir) return;
   try {
-    fs.appendFileSync(currentLogPath(), `${line}\n`, 'utf8');
+    const stream = getLogStream();
+    if (!stream) return;
+
+    if (stream.writableLength >= maxLogBufferBytes) {
+      droppedLogLines += 1;
+      return;
+    }
+
+    if (droppedLogLines > 0) {
+      const dropped = droppedLogLines;
+      droppedLogLines = 0;
+      stream.write(`[${new Date().toISOString()}] [WARN] [FileLogger] dropped ${dropped} buffered log lines\n`);
+    }
+
+    stream.write(`${line}\n`);
   } catch {
     // 파일 로그 실패가 서비스 동작을 막으면 안 됩니다.
+  }
+};
+
+const closeLogStream = () => {
+  if (!logStream) return;
+  try {
+    logStream.end();
+  } catch {
+    // 파일 로그 종료 실패는 무시합니다.
+  }
+  logStream = null;
+  logStreamPath = '';
+};
+
+const getLogStream = () => {
+  const targetPath = currentLogPath();
+  if (logStream && logStreamPath === targetPath && !logStream.destroyed) {
+    return logStream;
+  }
+
+  closeLogStream();
+  try {
+    const stream = fs.createWriteStream(targetPath, { flags: 'a', encoding: 'utf8' });
+    stream.on('error', (err: any) => {
+      originalConsole.warn('[FileLogger] 파일 로그 쓰기 실패:', err?.message || err);
+      if (logStream === stream) {
+        logStream = null;
+        logStreamPath = '';
+      }
+      stream.destroy();
+    });
+    logStream = stream;
+    logStreamPath = targetPath;
+    return stream;
+  } catch {
+    return null;
   }
 };
 
@@ -136,6 +190,7 @@ export const initFileLogging = () => {
   logDir = path.resolve(process.env.LOG_DIR || path.join(process.cwd(), 'logs'));
   retentionDays = Math.max(1, Math.floor(Number(process.env.LOG_RETENTION_DAYS || 14)));
   maxLogStringLength = Math.max(500, Number(process.env.LOG_MAX_STRING_LENGTH || 2000));
+  maxLogBufferBytes = Math.max(64 * 1024, Number(process.env.LOG_MAX_BUFFER_BYTES || 1024 * 1024));
   logFilePrefix = sanitizeLogNamePart(process.env.LOG_FILE_PREFIX || 'backend', 'backend');
   logFileRole = sanitizeLogNamePart(process.env.LOG_PROCESS_NAME || process.env.PROCESS_ROLE || 'process', 'process');
   splitByProcessRole = process.env.LOG_SPLIT_BY_PROCESS !== 'false';
@@ -185,3 +240,5 @@ export const stopRuntimeStatsLogging = () => {
   clearInterval(runtimeStatsTimer);
   runtimeStatsTimer = null;
 };
+
+process.once('beforeExit', closeLogStream);

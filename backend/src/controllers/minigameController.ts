@@ -571,86 +571,6 @@ async function getAnswerReveal(
   };
 }
 
-async function buildRecoverableGameData(
-  gameType: DailyMinigameType,
-  target: any
-): Promise<any | null> {
-  if (target?.practice_mode === true) return null;
-
-  if (gameType === 'quiz') {
-    if (!Array.isArray(target?.rounds) || target.rounds.length !== QUIZ_ROUND_COUNT) return null;
-    return {
-      rounds: target.rounds.map((round: any) => ({
-        round: Number(round.round),
-        image_url: round.image_url,
-        choices: Array.isArray(round.choices)
-          ? round.choices.map((choice: any) => ({
-            channel_id: choice.channel_id,
-            name: choice.name
-          }))
-          : []
-      }))
-    };
-  }
-
-  if (gameType === 'puzzle') {
-    if (!target?.image_url) return null;
-    return { image_url: target.image_url };
-  }
-
-  if (gameType === 'match') {
-    if (Array.isArray(target?.cards) && target.cards.length >= 2) {
-      return {
-        cards: target.cards.map((card: any) => ({
-          channel_id: card.channel_id,
-          name: card.name,
-          logo_url: card.logo_url
-        }))
-      };
-    }
-
-    if (!Array.isArray(target?.channel_ids) || target.channel_ids.length < 2) return null;
-    const streamers = await streamerRepository.findByIds(target.channel_ids);
-    if (streamers.length < 2) return null;
-    const byId = new Map(streamers.map((streamer: any) => [streamer.channel_id, streamer]));
-    return {
-      cards: target.channel_ids
-        .map((channelId: string) => byId.get(channelId))
-        .filter(Boolean)
-        .map((streamer: any) => ({
-          channel_id: streamer.channel_id,
-          name: streamer.name,
-          logo_url: streamer.logo_url
-        }))
-    };
-  }
-
-  if (gameType === 'value_duel') {
-    if (!Array.isArray(target?.rounds) || target.rounds.length !== VALUE_DUEL_ROUND_COUNT) return null;
-    return {
-      rounds: target.rounds.map((round: any) => ({
-        round: Number(round.round),
-        left: stripCardValue(round.left || {}),
-        right: stripCardValue(round.right || {})
-      }))
-    };
-  }
-
-  if (gameType === 'crop_detective') {
-    if (!Array.isArray(target?.rounds) || target.rounds.length !== CROP_DETECTIVE_ROUND_COUNT) return null;
-    return {
-      rounds: target.rounds.map((round: any) => ({
-        round: Number(round.round),
-        crop: round.crop,
-        source_image_url: round.source_image_url,
-        choices: Array.isArray(round.choices) ? round.choices.map(stripCardValue) : []
-      }))
-    };
-  }
-
-  return null;
-}
-
 // 1. GET /api/minigames/status
 export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
@@ -717,6 +637,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const dailyMinigame = getDailyMinigame();
+    let interruptedSessionClosed = false;
     if (!practiceMode && game_type !== dailyMinigame.game_type) {
       return res.status(409).json({
         error: 'DailyMinigameChanged',
@@ -730,35 +651,17 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     if (!practiceMode) {
       scheduleMinigameSessionExpiry();
 
-      let activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
+      const activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
       if (activeSession) {
-        let activeTarget: any = null;
-        try {
-          activeTarget = JSON.parse(activeSession.target_data || '{}');
-        } catch {
-          activeTarget = null;
-        }
-
-        const recoveredGameData = await buildRecoverableGameData(activeSession.game_type, activeTarget);
-        if (recoveredGameData) {
-          const timing = getSessionTiming(activeSession);
-          if (timing.time_remaining_ms > 0 && timing.server_elapsed_ms <= timing.submit_allowance_ms + CLIENT_REPORTED_GRACE_MS) {
-            return res.status(200).json({
-              session_id: activeSession.id,
-              game_type,
-              practice_mode: false,
-              resumed: true,
-              message: '끊긴 미니게임 세션을 이어서 시작합니다.',
-              game_data: recoveredGameData,
-              timing
-            });
-          }
-
-          await minigameRepository.completeSession(activeSession.id, 0).catch((err) => {
-            console.warn('[MinigameController] expired active session close failed:', err);
+        const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+        if (!closeResult.ok) {
+          console.warn('[MinigameController] interrupted active session close failed:', closeResult.reason);
+          return res.status(409).json({
+            error: 'ActiveSessionCloseFailed',
+            message: '이전 미니게임 세션을 정리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
           });
-          activeSession = null;
         }
+        interruptedSessionClosed = true;
       }
 
       // 일반 게임만 티켓 정보 조회 및 dynamic 충전을 반영합니다.
@@ -991,6 +894,10 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       game_type,
       practice_mode: practiceMode,
       game_data: gameData,
+      interrupted_session_closed: interruptedSessionClosed,
+      message: interruptedSessionClosed
+        ? '이전에 진행 중이던 미니게임은 실패 처리되었고 새 게임을 시작했습니다.'
+        : undefined,
       timing: getSessionTiming({
         ...newSession,
         created_at: sessionStartedAt

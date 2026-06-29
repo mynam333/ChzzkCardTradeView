@@ -170,28 +170,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         FOR UPDATE
       `, cutoff, safeLimit);
       for (const session of expired) {
-        const update = await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND status = 'STARTED'", formatKstDbTime(), session.id);
-        if (update.changes <= 0) continue;
-        let practiceMode = false;
-        try { practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true; } catch { practiceMode = false; }
-        if (practiceMode || session.ticket_spent_type === 'NONE') continue;
-
-        const spentType = session.ticket_spent_type === 'BONUS' ? 'BONUS' : 'BASE';
-        const now = new Date().toISOString();
-        await tx.run(
-          'INSERT IGNORE INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at) VALUES (?, ?, 0, ?, ?)',
-          session.user_id, MAX_AUTO_TICKETS, now, now
-        );
-        if (spentType === 'BONUS') {
-          await tx.run('UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets + 1, updated_at = UTC_TIMESTAMP() WHERE user_id = ?', session.user_id);
-          continue;
-        }
-        const ticket = await tx.get('SELECT current_tickets FROM user_minigame_tickets WHERE user_id = ? FOR UPDATE', session.user_id);
-        if ((ticket?.current_tickets ?? 0) < MAX_AUTO_TICKETS) {
-          await tx.run('UPDATE user_minigame_tickets SET current_tickets = current_tickets + 1, updated_at = UTC_TIMESTAMP() WHERE user_id = ?', session.user_id);
-        } else {
-          await tx.run('UPDATE user_minigame_tickets SET bonus_tickets = bonus_tickets + 1, updated_at = UTC_TIMESTAMP() WHERE user_id = ?', session.user_id);
-        }
+        await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND status = 'STARTED'", formatKstDbTime(), session.id);
       }
     });
   }

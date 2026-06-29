@@ -33,6 +33,13 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { borderClass, borderStyle, ensureCosmeticCss, parseStyle } from '@/lib/cosmetics';
+import {
+  arenaRoleDescriptions as sharedArenaRoleDescriptions,
+  arenaRoleLabels as sharedArenaRoleLabels,
+  arenaStatDescriptions,
+  getArenaClassDescription,
+  getArenaSkillDescription
+} from '@/lib/arenaRuleDescriptions';
 import { useApp } from './AppContext';
 import { ArenaAdminPanel } from './ArenaAdminPanel';
 import { CosmeticFrame } from './CosmeticFrame';
@@ -359,33 +366,16 @@ const statLabels: Array<[keyof ArenaCard['stats'], string]> = [
 ];
 
 const statDescriptions: Record<keyof ArenaCard['stats'], string> = {
-  hp: '라운드에서 버틸 수 있는 기본 생존력입니다.',
-  attack: '기본 공격과 물리형 피해의 중심 수치입니다.',
-  defense: '받는 피해를 줄이고 전열 유지력을 높입니다.',
-  speed: '행동 순서와 공격 템포에 영향을 줍니다.',
-  focus: '스킬 발동 흐름과 스킬형 효과 안정성에 영향을 줍니다.'
+  ...arenaStatDescriptions
 };
 
 const roleLabels: Record<string, string> = {
-  frontline: '전열',
-  damage: '공격',
-  control: '제어',
-  support: '지원',
-  tempo: '템포'
+  ...sharedArenaRoleLabels
 };
 
 const roleDescriptions: Record<string, string> = {
-  frontline: '앞줄에서 피해를 받아내고 팀의 전투 시간을 벌어주는 역할입니다.',
-  damage: '상대 카드를 빠르게 쓰러뜨리는 주 피해 역할입니다.',
-  control: '상태 이상과 행동 지연으로 상대의 전투 흐름을 흔드는 역할입니다.',
-  support: '회복, 보호, 강화로 아군 카드의 안정성을 높이는 역할입니다.',
-  tempo: '행동 순서와 스킬 흐름을 조절해 라운드 주도권을 잡는 역할입니다.'
+  ...sharedArenaRoleDescriptions
 };
-
-const getStatTooltip = (key: keyof ArenaCard['stats'], label: string, value?: number) => `${label}${typeof value === 'number' ? ` ${value}` : ''}: ${statDescriptions[key]}`;
-const getRoleTooltip = (role: string) => `${roleLabels[role] || role}: ${roleDescriptions[role] || '카드의 전투 포지션과 라운드 운영 성향을 나타냅니다.'}`;
-const getClassTooltip = (cardClass: ArenaCard['class']) => `${cardClass.name}: ${cardClass.description || getRoleTooltip(cardClass.role)}`;
-const getSkillTooltip = (skill: ArenaCard['skills'][number]) => `${skill.name} (${arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type}): ${skill.description}`;
 
 type ArenaTagMeta = { label: string; description: string };
 
@@ -411,7 +401,7 @@ const ArenaInfoTooltip: React.FC<{
 );
 
 const ArenaClassTooltip: React.FC<{ cardClass: ArenaCard['class']; children: React.ReactNode; className?: string }> = ({ cardClass, children, className }) => (
-  <ArenaInfoTooltip label={cardClass.name} description={cardClass.description || getRoleTooltip(cardClass.role)} className={className}>
+  <ArenaInfoTooltip label={cardClass.name} description={getArenaClassDescription(cardClass)} className={className}>
     {children}
   </ArenaInfoTooltip>
 );
@@ -429,7 +419,7 @@ const ArenaStatTooltip: React.FC<{ statKey: keyof ArenaCard['stats']; label: str
 );
 
 const ArenaSkillTooltip: React.FC<{ skill: ArenaCard['skills'][number]; children: React.ReactNode; className?: string }> = ({ skill, children, className }) => (
-  <ArenaInfoTooltip label={`${skill.name} (${arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type})`} description={skill.description} className={className}>
+  <ArenaInfoTooltip label={`${skill.name} (${arenaSkillSlotLabels[skill.type as ArenaSkillSlotType] || skill.type})`} description={getArenaSkillDescription(skill)} className={className}>
     {children}
   </ArenaInfoTooltip>
 );

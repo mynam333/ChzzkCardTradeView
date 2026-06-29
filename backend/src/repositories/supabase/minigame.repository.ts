@@ -314,34 +314,6 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
         .maybeSingle();
 
       if (updateError || !expired) continue;
-
-      let practiceMode = false;
-      try {
-        practiceMode = JSON.parse(session.target_data || '{}')?.practice_mode === true;
-      } catch {
-        practiceMode = false;
-      }
-      if (practiceMode || session.ticket_spent_type === 'NONE') continue;
-
-      const spentType = session.ticket_spent_type === 'BONUS' ? 'BONUS' : 'BASE';
-      if (spentType === 'BONUS') {
-        await this.addBonusTickets(session.user_id, 1);
-        continue;
-      }
-
-      const ticket = await this.getTicketStatus(session.user_id);
-      const now = new Date().toISOString();
-      if ((ticket.current_tickets || 0) < MAX_AUTO_TICKETS) {
-        await client
-          .from('user_minigame_tickets')
-          .update({
-            current_tickets: (ticket.current_tickets || 0) + 1,
-            updated_at: now
-          })
-          .eq('user_id', session.user_id);
-      } else {
-        await this.addBonusTickets(session.user_id, 1);
-      }
     }
   }
 }

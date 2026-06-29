@@ -26,6 +26,11 @@ import { useApp } from '../../AppContext';
 import { StreamerTooltip } from '../../StreamerTooltip';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import {
+  arenaStatDescriptions,
+  getArenaClassDescription,
+  getArenaSkillDescription
+} from '@/lib/arenaRuleDescriptions';
+import {
   buildArenaBattleTurns,
   summarizeArenaBattleTurn,
   validateArenaBattleTimeline,
@@ -193,28 +198,6 @@ const statLabels: Array<[keyof NonNullable<ArenaSnapshotCardDto['stats']>, strin
   ['focus', 'FOC', '집중']
 ];
 
-const statDescriptions: Record<keyof NonNullable<ArenaSnapshotCardDto['stats']>, string> = {
-  hp: '라운드에서 버틸 수 있는 기본 생존력입니다.',
-  attack: '기본 공격과 물리형 피해의 중심 수치입니다.',
-  defense: '받는 피해를 줄이고 전열 유지력을 높입니다.',
-  speed: '행동 순서와 공격 템포에 영향을 줍니다.',
-  focus: '스킬 발동 흐름과 스킬형 효과 안정성에 영향을 줍니다.'
-};
-
-const classRoleDescriptions: Record<string, string> = {
-  frontline: '앞줄에서 피해를 받아내고 팀의 전투 시간을 벌어주는 역할입니다.',
-  damage: '상대 카드를 빠르게 쓰러뜨리는 주 피해 역할입니다.',
-  control: '상태 이상과 행동 지연으로 상대의 전투 흐름을 흔드는 역할입니다.',
-  support: '회복, 보호, 강화로 아군 카드의 안정성을 높이는 역할입니다.',
-  tempo: '행동 순서와 스킬 흐름을 조절해 라운드 주도권을 잡는 역할입니다.'
-};
-
-const skillTypeDescriptions: Record<string, string> = {
-  active: '조건을 만족하면 직접 발동해 피해, 회복, 보호, 방해 같은 즉시 효과를 만듭니다.',
-  passive: '전투 내내 조건부로 적용되어 카드의 역할과 스탯 운용을 보조합니다.',
-  ultimate: '에너지가 충분할 때 전세를 크게 바꾸는 강한 한 번의 효과입니다.'
-};
-
 const turnSummaryToneClass: Record<ArenaBattleTurnSummaryItem['key'], string> = {
   damage: 'bg-rose-500/10 text-rose-700 dark:text-rose-100',
   heal: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-100',
@@ -247,20 +230,17 @@ const ArenaInfoTooltip: React.FC<{
 
 const getSkillDescription = (skill: NonNullable<ArenaSnapshotCardDto['skills']>[number], skillLookup: Map<string, ArenaRuleSkill>) => {
   const catalogSkill = skillLookup.get(skill.id) || [...skillLookup.values()].find((item) => item.name === skill.name);
-  if (catalogSkill?.description) return catalogSkill.description;
-  const slotLabel = arenaSkillSlotLabels[skill.type] || skill.type || '스킬';
-  const typeHint = skillTypeDescriptions[skill.type] || '라운드 계산에서 카드의 역할과 스탯에 맞춰 적용됩니다.';
-  return `${skill.name}은 ${slotLabel} 슬롯 스킬입니다. ${typeHint}`;
+  return getArenaSkillDescription({ ...catalogSkill, ...skill });
 };
 
 const getClassDescription = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
   const catalogClass = classLookup.get(card.class_id) || [...classLookup.values()].find((item) => item.name === card.class_name);
-  if (catalogClass?.description) return catalogClass.description;
-  if (catalogClass?.role && classRoleDescriptions[catalogClass.role]) return classRoleDescriptions[catalogClass.role];
-  const stats = card.stats || {};
-  const topStat = (Object.entries(stats).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))[0]?.[0] || '') as keyof typeof statDescriptions;
-  const statHint = statDescriptions[topStat] || '카드의 전투 역할과 기본 스탯 성향을 결정합니다.';
-  return `${card.class_name || '클래스'}는 ${statHint}`;
+  return getArenaClassDescription({
+    ...catalogClass,
+    id: catalogClass?.id || card.class_id,
+    class_id: catalogClass?.class_id || card.class_id,
+    name: catalogClass?.name || card.class_name
+  });
 };
 
 export const formatDateTime = (value?: string | null) => {
@@ -382,7 +362,7 @@ const MatchCard: React.FC<{
     {card.stats ? (
       <div className="mt-3 grid grid-cols-5 gap-1 text-center">
         {statLabels.map(([statKey, shortLabel, label]) => (
-          <ArenaInfoTooltip key={statKey} label={`${label} ${card.stats?.[statKey] ?? 0}`} description={statDescriptions[statKey]}>
+          <ArenaInfoTooltip key={statKey} label={`${label} ${card.stats?.[statKey] ?? 0}`} description={arenaStatDescriptions[statKey]}>
             <div className="cursor-help rounded-2xl bg-white/64 px-1 py-1.5 dark:bg-white/10">
               <p className="text-[8px] font-black text-muted-foreground">{shortLabel}</p>
               <p className="text-[10px] font-black text-foreground">{card.stats?.[statKey] ?? 0}</p>
@@ -634,7 +614,6 @@ const estimateCardHealth = (
     return { max, remaining: finalRemaining, percent: Math.max(0, Math.min(100, Math.round((finalRemaining / max) * 100))) };
   }
   const visibleEvents = events.slice(0, Math.max(0, eventIndex + 1));
-  const dead = visibleEvents.some((event) => eventKillsCard(event, card));
   const remaining = visibleEvents.reduce((hp, event) => {
     const type = String(event.type || '').toUpperCase();
     if (eventKillsCard(event, card)) return 0;
@@ -650,7 +629,7 @@ const estimateCardHealth = (
     }
     return hp;
   }, Math.max(0, Math.min(max, Number(unitState?.start_hp || max))));
-  const displayRemaining = !dead && remaining <= 0 ? 1 : remaining;
+  const displayRemaining = Math.max(0, remaining);
   return { max, remaining: displayRemaining, percent: Math.max(0, Math.min(100, Math.round((displayRemaining / max) * 100))) };
 };
 
@@ -2345,7 +2324,7 @@ export const ArenaMatchPageClient: React.FC<{ matchId?: string | null }> = ({ ma
       </div>
       {resultModalOpen && match && displayCompleted ? (
         <div className={`arena-result-modal-backdrop is-${resultTone} fixed inset-0 z-[80] flex items-center justify-center px-4 py-6`}>
-          <div className={`arena-result-modal is-${resultTone} relative w-full max-w-3xl overflow-hidden rounded-[2.35rem] border p-4 shadow-[0_34px_110px_rgba(136,19,55,0.34)] md:p-5`}>
+          <div className={`arena-result-modal is-${resultTone} relative w-full max-w-3xl overflow-x-hidden overflow-y-auto rounded-[2.35rem] border p-4 shadow-[0_34px_110px_rgba(136,19,55,0.34)] md:p-5`}>
             <div className="arena-result-modal-aura" />
             <div className="arena-result-modal-sheen" />
             <div className="arena-result-modal-sparks" aria-hidden="true">

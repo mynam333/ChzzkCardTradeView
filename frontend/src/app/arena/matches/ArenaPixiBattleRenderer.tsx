@@ -10,6 +10,7 @@ import type {
 import type { TextStyleOptions } from 'pixi.js';
 import { proxiedImage } from '@/lib/cosmetics';
 import { resolveArenaVfxPreset, type ArenaVfxPresetKind } from '@/lib/arenaVfxPresets';
+import { arenaStatDescriptions, getArenaClassDescription, getArenaSkillDescription } from '@/lib/arenaRuleDescriptions';
 import type { ArenaBattleTurn, ArenaCosmeticLoadout, ArenaRuleClass, ArenaRuleSkill, RoundRevealState, SelectedRoundSlot } from './ArenaMatchPageClient';
 
 type PixiModule = typeof import('pixi.js');
@@ -160,28 +161,6 @@ const arenaSkillSlotLabels: Record<string, string> = {
   active: '액티브',
   passive: '패시브',
   ultimate: '궁극기'
-};
-
-const statDescriptions: Record<string, string> = {
-  hp: '라운드에서 버틸 수 있는 기본 생존력입니다.',
-  attack: '기본 공격과 물리형 피해의 중심 수치입니다.',
-  defense: '받는 피해를 줄이고 전열 유지력을 높입니다.',
-  speed: '행동 순서와 공격 템포에 영향을 줍니다.',
-  focus: '스킬 발동 흐름과 스킬형 효과 안정성에 영향을 줍니다.'
-};
-
-const roleDescriptions: Record<string, string> = {
-  frontline: '전열에서 피해를 받아내고 상대의 공격 흐름을 붙잡는 역할입니다.',
-  damage: '핵심 대상에게 피해를 누적해 라운드 승리 조건을 앞당기는 역할입니다.',
-  control: '둔화, 약화, 방해 효과로 상대 전술의 템포를 흔드는 역할입니다.',
-  support: '회복, 보호막, 버프를 통해 팀 전체의 안정성을 높이는 역할입니다.',
-  tempo: '행동 순서와 배치 변수를 활용해 라운드 흐름을 바꾸는 역할입니다.'
-};
-
-const skillTypeDescriptions: Record<string, string> = {
-  active: '라운드 중 조건을 만족하면 직접 발동해 피해, 회복, 보호, 방해 같은 즉시 효과를 만듭니다.',
-  passive: '전투 내내 조건부로 적용되어 카드의 역할과 스탯 운용을 보조합니다.',
-  ultimate: '에너지가 충분할 때 전세를 크게 바꾸는 강한 한 번의 효과입니다.'
 };
 
 const MAX_TEXTURE_CACHE_ENTRIES = 90;
@@ -404,7 +383,6 @@ const estimateCardHealth = (
     return { max, remaining: finalRemaining, percent: Math.max(0, Math.min(100, Math.round((finalRemaining / max) * 100))) };
   }
   const visibleEvents = events.slice(0, Math.max(0, eventIndex + 1));
-  const dead = visibleEvents.some((event) => eventKillsCard(event, card));
   const remaining = visibleEvents.reduce((hp, event) => {
     const type = String(event.type || '').toUpperCase();
     if (eventKillsCard(event, card)) return 0;
@@ -420,8 +398,17 @@ const estimateCardHealth = (
     }
     return hp;
   }, Math.max(0, Math.min(max, Number(unitState?.start_hp || max))));
-  const displayRemaining = !dead && remaining <= 0 ? 1 : remaining;
+  const displayRemaining = Math.max(0, remaining);
   return { max, remaining: displayRemaining, percent: Math.max(0, Math.min(100, Math.round((displayRemaining / max) * 100))) };
+};
+
+const getBattleEventCursorForTurn = (
+  turn: ArenaBattleTurn | undefined,
+  events: ArenaReplayEvent[],
+  fallbackIndex: number
+) => {
+  const indices = turn?.events.map((event) => events.indexOf(event)).filter((index) => index >= 0) || [];
+  return indices.length > 0 ? Math.max(...indices) : fallbackIndex;
 };
 
 const getTurnValueForCard = (turn: ArenaBattleTurn | undefined, card: ArenaSnapshotCardDto) => {
@@ -459,21 +446,17 @@ const getCardBySlots = (
 
 const getClassDescription = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
   const catalogClass = classLookup.get(card.class_id) || [...classLookup.values()].find((item) => item.name === card.class_name);
-  if (catalogClass?.description) return catalogClass.description;
-  const role = String(catalogClass?.role || (card as any).class_role || '').trim();
-  if (role && roleDescriptions[role]) return roleDescriptions[role];
-  const stats = card.stats || {};
-  const topStat = (Object.entries(stats).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))[0]?.[0] || '') as keyof typeof statDescriptions;
-  const statHint = statDescriptions[topStat] || '카드의 전투 역할과 기본 스탯 성향을 결정합니다.';
-  return `${card.class_name || '클래스'}는 ${statHint}`;
+  return getArenaClassDescription({
+    ...catalogClass,
+    id: catalogClass?.id || card.class_id,
+    class_id: catalogClass?.class_id || card.class_id,
+    name: catalogClass?.name || card.class_name
+  });
 };
 
 const getSkillDescription = (skill: NonNullable<ArenaSnapshotCardDto['skills']>[number], skillLookup: Map<string, ArenaRuleSkill>) => {
   const catalogSkill = skillLookup.get(skill.id) || [...skillLookup.values()].find((item) => item.name === skill.name);
-  if (catalogSkill?.description) return catalogSkill.description;
-  const slotLabel = arenaSkillSlotLabels[skill.type] || skill.type || '스킬';
-  const typeHint = skillTypeDescriptions[skill.type] || '라운드 계산 중 카드의 역할과 스탯에 맞춰 적용됩니다.';
-  return `${skill.name}은 ${slotLabel} 슬롯 스킬입니다. ${typeHint}`;
+  return getArenaSkillDescription({ ...catalogSkill, ...skill });
 };
 
 const getCardRole = (card: ArenaSnapshotCardDto, classLookup: Map<string, ArenaRuleClass>) => {
@@ -817,8 +800,8 @@ const fitSprite = (sprite: PixiSprite, x: number, y: number, width: number, heig
 const computeBattleLayout = (width: number, height: number): BattleResponsiveLayout => {
   const compact = width < 620;
   const short = height < 660;
-  const marginX = clamp(width * (compact ? 0.032 : 0.042), compact ? 10 : 18, compact ? 18 : 38);
-  const cardGap = clamp(width * (compact ? 0.012 : 0.016), 6, compact ? 10 : 16);
+  const marginX = clamp(width * (compact ? 0.024 : 0.038), compact ? 7 : 16, compact ? 14 : 34);
+  const cardGap = clamp(width * (compact ? 0.009 : 0.014), compact ? 4 : 6, compact ? 8 : 14);
   const rowGap = clamp(height * (short ? 0.01 : 0.014), short ? 4 : 6, compact ? 10 : 14);
   const cardWidth = Math.floor((width - marginX * 2 - cardGap * 2) / 3);
   const portraitWidth = clamp(width * (compact ? 0.54 : 0.34), compact ? 164 : 210, compact ? 224 : 250);
@@ -877,10 +860,12 @@ const makeLayout = (
   battleEvents: ArenaReplayEvent[],
   unitStates: ArenaReplayUnitState[] | undefined,
   battleEventIndex: number,
+  activeTurn: ArenaBattleTurn | undefined,
   roundReveal: RoundRevealState | null,
   roundResult?: ArenaRoundResultDto
 ) => {
   const stage = stageKind(roundReveal);
+  const eventCursor = getBattleEventCursorForTurn(activeTurn, battleEvents, battleEventIndex);
   const xForCol = (col: number) => layout.marginX + col * (layout.cardWidth + layout.cardGap);
   const yForSlot = (side: CombatSide, row: 0 | 1) => {
     if (side === 'opponent') return row === 0 ? layout.opponentBackTop : layout.opponentFrontTop;
@@ -893,7 +878,7 @@ const makeLayout = (
       const resultRetired = stage === 'result'
         ? unitState ? !unitState.alive : battleEvents.some((event) => eventKillsCard(event, card))
         : false;
-      const health = estimateCardHealth(card, side, battleEvents, battleEventIndex, resultRetired, unitStates);
+      const health = estimateCardHealth(card, side, battleEvents, eventCursor, resultRetired, unitStates);
       const retired = resultRetired || health.remaining <= 0;
       return {
         card,
@@ -992,7 +977,7 @@ const drawCard = (
 
   const mediaSize = narrowCard
     ? Math.min(card.width - 24, card.height * 0.43)
-    : Math.min(card.height - 24, card.width * 0.43);
+    : Math.min(card.height - 24, card.width * 0.38);
   const mediaX = narrowCard ? (card.width - mediaSize) / 2 : 17;
   const mediaY = narrowCard ? 18 : (card.height - mediaSize) / 2;
   drawSoftShadow(PIXI, root, mediaX + 1, mediaY + 4, mediaSize, mediaSize, 20, roleColor, 0.12);
@@ -1078,11 +1063,11 @@ const drawCard = (
       fontFamily: 'Arial, sans-serif'
     });
     const classChipX = infoX + rowChipW + 5;
-    const classChipW = Math.min(infoW - rowChipW - 5, 86);
+    const classChipW = Math.max(42, infoW - rowChipW - 5);
     drawRoundRect(PIXI, root, classChipX, metaY - 2, classChipW, 16, 999, palette.chip, 0.94, { color: roleColor, alpha: 0.22, width: 1 });
-    addText(PIXI, root, card.hidden ? '비공개' : shortenName(card.card.class_name, 8), classChipX + 8, metaY + 1, {
+    addText(PIXI, root, card.hidden ? '비공개' : shortenName(card.card.class_name, classChipW >= 76 ? 8 : 5), classChipX + 8, metaY + 1, {
       fill: roleColor,
-      fontSize: 9,
+      fontSize: classChipW >= 62 ? 9 : 8,
       fontWeight: '900',
       fontFamily: 'Arial, sans-serif'
     });
@@ -1148,18 +1133,21 @@ const drawCard = (
   }
 
   const hpY = card.height - 17;
-  const hpLabelX = narrowCard ? infoX : infoX + 63;
+  const hpValueText = `${card.health.remaining}/${card.health.max}`;
+  const hpValueWidth = clamp(hpValueText.length * 4.8 + 8, 34, Math.max(34, infoW - 24));
+  const hpValueX = infoX + Math.max(24, infoW - hpValueWidth);
   addText(PIXI, root, 'HP', infoX, hpY - 14, {
     fill: PASTEL.muted,
     fontSize: 8,
     fontWeight: '900',
     fontFamily: 'Arial, sans-serif'
   });
-  addText(PIXI, root, `${card.health.remaining}/${card.health.max}`, hpLabelX + Math.max(0, infoW - (hpLabelX - infoX) - 58), hpY - 14, {
+  addText(PIXI, root, hpValueText, hpValueX, hpY - 14, {
     fill: PASTEL.text,
-    fontSize: 8,
+    fontSize: hpValueText.length >= 8 ? 7 : 8,
     fontWeight: '900',
-    fontFamily: 'Arial, sans-serif'
+    fontFamily: 'Arial, sans-serif',
+    align: 'right'
   });
   drawRoundRect(PIXI, root, infoX, hpY, infoW, 8, 999, 0x7f1d1d, 0.12, { color: PASTEL.white, alpha: 0.5, width: 1 });
   drawRoundRect(PIXI, root, infoX + 1.5, hpY + 1.5, Math.max(0, (infoW - 3) * card.health.percent / 100), 5, 999, card.health.percent < 30 ? 0xef4444 : roleColor, 0.96);
@@ -1171,7 +1159,7 @@ const drawCard = (
   if (!narrowCard && !card.hidden && card.card.stats && card.height >= 118 && infoW >= 104) {
     const statKeys = ['attack', 'defense', 'speed', 'focus'] as const;
     statKeys.forEach((key, index) => {
-      const chipW = Math.min(33, Math.max(25, (infoW - 6) / 4));
+      const chipW = Math.min(39, Math.max(29, (infoW - 6) / 4));
       const x = infoX + index * (chipW + 2);
       const y = card.height - 36;
       const label = key === 'attack' ? 'ATK' : key === 'defense' ? 'DEF' : key === 'speed' ? 'SPD' : 'FOC';
@@ -1182,9 +1170,10 @@ const drawCard = (
         fontWeight: '900',
         fontFamily: 'Arial, sans-serif'
       });
-      addText(PIXI, root, String(card.card.stats?.[key] ?? 0), x + chipW - 13, y + 1, {
+      const valueText = String(card.card.stats?.[key] ?? 0);
+      addText(PIXI, root, valueText, x + chipW - (valueText.length >= 3 ? 17 : 13), y + 1, {
         fill: PASTEL.text,
-        fontSize: 7,
+        fontSize: valueText.length >= 3 ? 6.5 : 7,
         fontWeight: '900',
         fontFamily: 'Arial, sans-serif'
       });
@@ -1194,7 +1183,7 @@ const drawCard = (
         width: chipW,
         height: 15,
         label: `${label} ${card.card.stats?.[key] ?? 0}`,
-        description: statDescriptions[key]
+        description: arenaStatDescriptions[key]
       });
     });
   }
@@ -2398,7 +2387,7 @@ export const ArenaPixiBattleRenderer: React.FC<ArenaPixiBattleRendererProps> = (
     lastCanvasSizeRef.current = canvasSizeKey;
     if (!actionKey) lastActionKeyRef.current = null;
     const layout = computeBattleLayout(width, height);
-    const cards = makeLayout(layout, playerCards, opponentCards, playerSlots, opponentSlots, revealOpponent, battleEvents, unitStates, battleEventIndex, roundReveal, roundResult);
+    const cards = makeLayout(layout, playerCards, opponentCards, playerSlots, opponentSlots, revealOpponent, battleEvents, unitStates, battleEventIndex, activeTurn, roundReveal, roundResult);
     const bg = new PIXI.Graphics();
     bg.rect(0, 0, width, height).fill({ color: 0xfff1f2, alpha: 0.2 });
     bg.circle(width * 0.5, height * 0.5, Math.min(width, height) * 0.42).fill({ color: PASTEL.white, alpha: 0.18 });
