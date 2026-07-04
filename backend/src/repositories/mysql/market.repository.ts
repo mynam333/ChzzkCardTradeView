@@ -1,4 +1,4 @@
-import { getMysqlDb } from '../../services/db';
+import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { IMarketRepository, MarketListing } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
 import { fuzzyMatch } from '../../utils/search';
@@ -274,6 +274,27 @@ export class MysqlMarketRepository implements IMarketRepository {
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const search = options.search?.trim();
     if (search) {
+      if (getSqlDialect() === 'postgres') {
+        const searchLike = `%${search}%`;
+        const searchWhereSql = `${whereSql} AND (s.name ILIKE ? OR u.username ILIKE ?)`;
+        const searchParams = [...params, searchLike, searchLike];
+        const countRow = await this.getDb().get<{ total: number }>(`
+          SELECT COUNT(*) AS total
+            FROM market_listings ml
+            JOIN users u ON u.id = ml.seller_id
+            JOIN user_cards uc ON uc.id = ml.user_card_id
+            JOIN streamers s ON s.channel_id = uc.channel_id
+           ${searchWhereSql}
+        `, searchParams);
+        const offset = (options.page - 1) * options.limit;
+        const rows = await this.getDb().all(
+          `${this.listingSelectWhere(searchWhereSql)} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+          ...searchParams,
+          options.limit,
+          offset
+        );
+        return { listings: rows.map((r) => this.mapRow(r)), total: Number(countRow?.total || 0) };
+      }
       const rows = await this.getDb().all<any>(
         `SELECT ml.id, s.name AS streamer_name, u.username AS seller_username
            FROM market_listings ml

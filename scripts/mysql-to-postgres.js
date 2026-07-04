@@ -672,24 +672,50 @@ const tableOrder = (sourceTables) => {
   return ordered;
 };
 
-const normalizeCell = (value, pgColumn) => {
+const normalizeDateCell = (value, pgColumn) => {
+  const type = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
+  const isDateOnly = type === 'date';
+
+  if (value instanceof Date) {
+    const time = value.getTime();
+    if (!Number.isFinite(time)) return null;
+    const iso = value.toISOString();
+    return isDateOnly ? iso.slice(0, 10) : iso;
+  }
+
+  if (typeof value !== 'string') return value;
+  const raw = value.trim();
+  if (!raw || raw.startsWith('0000-00-00') || /^invalid date$/i.test(raw)) return null;
+  if (isDateOnly) return raw.slice(0, 10);
+
+  const normalized = raw.replace(' ', 'T');
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) return normalized;
+  return `${normalized}Z`;
+};
+
+const normalizeCell = (value, pgColumn, context = {}) => {
   if (value === undefined) return null;
   if (value === null) return null;
   const type = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
-  if (type === 'boolean' || pgColumn?.udt_name === 'bool') {
-    if (value === true || value === false) return value;
-    if (value === 1 || value === '1') return true;
-    if (value === 0 || value === '0') return false;
+  try {
+    if (type === 'boolean' || pgColumn?.udt_name === 'bool') {
+      if (value === true || value === false) return value;
+      if (value === 1 || value === '1') return true;
+      if (value === 0 || value === '0') return false;
+    }
+    if ((type === 'jsonb' || type === 'json') && typeof value === 'string') {
+      if (!value.trim()) return type === 'jsonb' ? {} : null;
+      return JSON.parse(value);
+    }
+    if (type.includes('timestamp') || pgColumn?.udt_name === 'timestamptz' || type === 'date') {
+      return normalizeDateCell(value, pgColumn);
+    }
+    return value;
+  } catch (err) {
+    const location = [context.table, context.column].filter(Boolean).join('.');
+    const suffix = location ? ` (${location}, offset=${context.offset ?? 'unknown'})` : '';
+    throw new Error(`값 변환 실패${suffix}: ${err.message}; value=${JSON.stringify(value)}`);
   }
-  if ((type === 'jsonb' || type === 'json') && typeof value === 'string') {
-    if (!value.trim()) return type === 'jsonb' ? {} : null;
-    return JSON.parse(value);
-  }
-  if ((type.includes('timestamp') || pgColumn?.udt_name === 'timestamptz') && typeof value === 'string') {
-    if (value.startsWith('0000-00-00')) return null;
-    return value.replace(' ', 'T').endsWith('Z') ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}Z`;
-  }
-  return value;
 };
 
 const importTable = async (mysql, pg, table) => {
@@ -713,9 +739,9 @@ const importTable = async (mysql, pg, table) => {
     const [rows] = await mysql.query(selectSql, [batchSize, offset]);
     if (rows.length === 0) break;
     const params = [];
-    const tuples = rows.map((row) => {
+    const tuples = rows.map((row, rowIndex) => {
       const placeholders = columns.map((column) => {
-        params.push(normalizeCell(row[column], pgColumnMap.get(column)));
+        params.push(normalizeCell(row[column], pgColumnMap.get(column), { table, column, offset: offset + rowIndex }));
         return `$${params.length}`;
       });
       return `(${placeholders.join(', ')})`;
@@ -725,7 +751,12 @@ const importTable = async (mysql, pg, table) => {
       VALUES ${tuples.join(', ')}
       ON CONFLICT DO NOTHING
     `;
-    await pg.unsafe(insertSql, params);
+    try {
+      await pg.unsafe(insertSql, params);
+    } catch (err) {
+      err.message = `${err.message}\n[table] ${table}\n[offset] ${offset}\n[columns] ${columns.join(', ')}`;
+      throw err;
+    }
     imported += rows.length;
     process.stdout.write(`\r[MySQL -> PostgreSQL] ${table}: ${imported}/${total}`);
   }

@@ -3,6 +3,8 @@
 -- SQLite 문법과 다른 부분: SERIAL, TIMESTAMP, BOOLEAN 타입 등
 -- ============================================================
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- 1. 유저 테이블
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,                         -- 치지직 로그인 UID
@@ -31,6 +33,44 @@ CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     avatar_url_snapshot TEXT,
     point_at_deletion INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_users_id_trgm ON users USING GIN (id gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_users_banned_until ON users(banned_until) WHERE banned_until IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_deleted_user_accounts_username_trgm ON deleted_user_accounts USING GIN (username_snapshot gin_trgm_ops);
+
+CREATE TABLE IF NOT EXISTS user_asset_rankings (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    avatar_url TEXT,
+    role TEXT NOT NULL DEFAULT 'USER',
+    point INTEGER NOT NULL DEFAULT 0,
+    last_free_draw TIMESTAMPTZ,
+    banned_until TIMESTAMPTZ,
+    ban_reason TEXT,
+    status_message TEXT,
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    card_count BIGINT NOT NULL DEFAULT 0,
+    cards_value BIGINT NOT NULL DEFAULT 0,
+    total_asset BIGINT NOT NULL DEFAULT 0,
+    total_rank BIGINT NOT NULL,
+    cards_rank BIGINT NOT NULL,
+    snapshot_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings(total_rank, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings(cards_rank, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_asset_rankings_username_trgm ON user_asset_rankings USING GIN (username gin_trgm_ops);
+
+CREATE TABLE IF NOT EXISTS user_asset_ranking_cards (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id TEXT NOT NULL,
+    star INTEGER NOT NULL DEFAULT 0,
+    card_count BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY(user_id, channel_id, star)
+);
+CREATE INDEX IF NOT EXISTS idx_user_asset_ranking_cards_channel_star_user ON user_asset_ranking_cards(channel_id, star, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_asset_ranking_cards_user ON user_asset_ranking_cards(user_id);
 
 CREATE TABLE IF NOT EXISTS point_ledger_entries (
     id BIGSERIAL PRIMARY KEY,
@@ -144,6 +184,8 @@ CREATE TABLE IF NOT EXISTS streamers (
     registered_by TEXT,                           -- 카드를 등록한 유저의 ID (nullable)
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_streamers_name_trgm ON streamers USING GIN (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_streamers_active_value ON streamers(is_active, base_value DESC);
 
 -- 상점 아이템 (기존 13번 테이블)
 -- user_cards가 shop_items를 외래키로 참조하므로 먼저 생성합니다.
@@ -1692,6 +1734,9 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_listings_pending_latest ON market_listings(updated_at DESC, id DESC) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_market_listings_pending_oldest ON market_listings(created_at ASC, id ASC) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_market_listings_pending_seller ON market_listings(seller_id, id DESC) WHERE status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_status_check;
 ALTER TABLE market_listings
   ADD CONSTRAINT market_listings_status_check CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED'));
@@ -1707,6 +1752,8 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFAULT 0;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_market_listings_fixed_price ON market_listings(price, id) WHERE status = 'PENDING' AND listing_type = 'fixed';
+CREATE INDEX IF NOT EXISTS idx_market_listings_auction_price ON market_listings(COALESCE(current_bid, starting_bid, price, 0), id) WHERE status = 'PENDING' AND listing_type = 'auction';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
   ON market_listings(pending_user_card_id);
@@ -1719,6 +1766,7 @@ CREATE TABLE IF NOT EXISTS market_bids (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);
+CREATE INDEX IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id);
 
 CREATE OR REPLACE FUNCTION place_market_bid_atomic(p_listing_id INTEGER, p_bidder_id TEXT, p_amount INTEGER)
 RETURNS JSONB AS $$

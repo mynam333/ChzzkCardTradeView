@@ -15,7 +15,7 @@ import { getUserReservations } from './tradeController';
 import { clearSessionCookie } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
 import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService';
-import { getDbMode, getMysqlDb, getSqliteDb } from '../services/db';
+import { getDbMode, getMysqlDb, getSqliteDb, getSqlDialect } from '../services/db';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { recordAchievementEvent } from '../services/achievementService';
 
@@ -691,9 +691,50 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
   userRankingSnapshotInFlight = (async () => {
     if (mode === 'MYSQL') {
       const db = getMysqlDb();
+      const isPostgres = getSqlDialect() === 'postgres';
       const releaseLock = await acquireSchedulerLock('snapshot:user-ranking', 60_000);
       if (!releaseLock) return waitForUserRankingSnapshot();
       try {
+        if (isPostgres) {
+          await db.transaction(async (tx) => {
+            await tx.run('TRUNCATE TABLE user_asset_ranking_cards, user_asset_rankings');
+            await tx.run(`
+              INSERT INTO user_asset_rankings
+                (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
+                 card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
+              WITH UserCardValues AS (
+                SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                       u.status_message, u.last_seen_at, u.created_at,
+                       COUNT(uc.id) AS card_count,
+                       COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+                  FROM users u
+                  LEFT JOIN user_cards uc ON uc.user_id = u.id AND uc.is_hidden IS NOT TRUE
+                  LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+                 WHERE u.banned_until IS NULL OR u.banned_until <= NOW()
+                 GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.last_seen_at, u.created_at
+              ),
+              RankedUsers AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (ORDER BY (point + cards_value_raw) DESC, id ASC) AS total_rank,
+                       ROW_NUMBER() OVER (ORDER BY cards_value_raw DESC, id ASC) AS cards_rank
+                  FROM UserCardValues
+              )
+              SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
+                     card_count, ROUND(cards_value_raw)::BIGINT, (point + ROUND(cards_value_raw))::BIGINT, total_rank, cards_rank, NOW()
+                FROM RankedUsers
+            `);
+            await tx.run(`
+              INSERT INTO user_asset_ranking_cards (user_id, channel_id, star, card_count)
+              SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
+                FROM user_cards uc
+                JOIN user_asset_rankings r
+                  ON r.user_id = uc.user_id
+               WHERE uc.is_hidden IS NOT TRUE
+               GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
+            `);
+          });
+          return true;
+        }
         await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
         await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
         await db.run('DROP TABLE IF EXISTS user_asset_rankings_next');
@@ -836,7 +877,10 @@ const readUserRankingsFromSnapshot = async (
   const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
   const rankColumn = mode === 'cards' ? 'cards_rank' : 'total_rank';
   const isMysql = getDbMode() === 'MYSQL';
-  const usernameFilter = isMysql
+  const isPostgres = isMysql && getSqlDialect() === 'postgres';
+  const usernameFilter = isPostgres
+    ? "? = '' OR r.username ILIKE ?"
+    : isMysql
     ? '? = \'\' OR r.username COLLATE utf8mb4_unicode_ci LIKE ? COLLATE utf8mb4_unicode_ci'
     : "? = '' OR r.username LIKE ?";
   const cardFilterJoin = channelId

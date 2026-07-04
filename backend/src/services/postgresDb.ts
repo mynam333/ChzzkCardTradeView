@@ -217,6 +217,113 @@ const rewriteDeleteLimit = (sql: string): string => {
   return sql;
 };
 
+const postgresBooleanColumns = [
+  'is_hidden',
+  'is_locked',
+  'is_read',
+  'is_popup',
+  'is_pinned',
+  'is_active',
+  'is_image_banned',
+  'active',
+  'with_cosmetics',
+  'deleted_for_a',
+  'deleted_for_b',
+  'muted_for_a',
+  'muted_for_b'
+];
+const postgresBooleanColumnSet = new Set(postgresBooleanColumns);
+
+const toPostgresBooleanParam = (value: any) => {
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  return value;
+};
+
+const normalizeBooleanSql = (sql: string): string => {
+  let normalized = sql;
+  for (const column of postgresBooleanColumns) {
+    const ident = `((?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${column})`;
+    normalized = normalized
+      .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*=\\s*0`, 'gi'), 'COALESCE($1, FALSE) = FALSE')
+      .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*=\\s*1`, 'gi'), 'COALESCE($1, FALSE) = TRUE')
+      .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*<>\\s*0`, 'gi'), 'COALESCE($1, FALSE) <> FALSE')
+      .replace(new RegExp(`\\b${ident}\\s*=\\s*0\\b`, 'gi'), '$1 = FALSE')
+      .replace(new RegExp(`\\b${ident}\\s*=\\s*1\\b`, 'gi'), '$1 = TRUE')
+      .replace(new RegExp(`\\b${ident}\\s+IS\\s+0\\b`, 'gi'), '$1 IS FALSE')
+      .replace(new RegExp(`\\b${ident}\\s+IS\\s+1\\b`, 'gi'), '$1 IS TRUE');
+  }
+  return normalized;
+};
+
+const splitSqlList = (value: string): string[] => {
+  const items: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    const next = value[i + 1];
+    if (quote) {
+      current += ch;
+      if (ch === quote) {
+        if (quote === "'" && next === "'") {
+          current += next;
+          i += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      items.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+};
+
+const normalizeBooleanParams = (sql: string, params: any[]): any[] => {
+  if (params.length === 0) return params;
+  const next = [...params];
+
+  const insertMatch = sql.match(/\bINSERT\s+INTO\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+  if (insertMatch) {
+    const columns = splitSqlList(insertMatch[1]).map((column) => column.replace(/"/g, '').trim());
+    const values = splitSqlList(insertMatch[2]);
+    let paramIndex = 0;
+    for (let i = 0; i < values.length; i += 1) {
+      const placeholders = (values[i].match(/\?/g) || []).length;
+      if (placeholders === 1 && values[i].trim() === '?' && postgresBooleanColumnSet.has(columns[i])) {
+        next[paramIndex] = toPostgresBooleanParam(next[paramIndex]);
+      }
+      paramIndex += placeholders;
+    }
+  }
+
+  const segments = sql.split('?');
+  for (let i = 0; i < segments.length - 1 && i < next.length; i += 1) {
+    const prefix = segments[i].slice(-120);
+    const comparisonMatch = prefix.match(/(?:^|[\s,(])(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|<>|IS)\s*$/i);
+    if (comparisonMatch && postgresBooleanColumnSet.has(comparisonMatch[1])) {
+      next[i] = toPostgresBooleanParam(next[i]);
+    }
+  }
+
+  return next;
+};
+
 export const normalizePostgresSql = (input: string): string => {
   let sql = input.trim().replace(/`/g, '');
   sql = sql.replace(/\bCOLLATE\s+utf8mb4_unicode_ci\b/gi, '');
@@ -234,6 +341,7 @@ export const normalizePostgresSql = (input: string): string => {
   sql = sql.replace(/\bSTR_TO_DATE\(\s*SUBSTRING_INDEX\(REPLACE\(([^,]+),\s*'T',\s*' '\),\s*'\.',\s*1\),\s*'%Y-%m-%d %H:%i:%s'\s*\)/gi, "NULLIF($1, '')::timestamptz");
   sql = sql.replace(/\bCONCAT\(/gi, 'CONCAT(');
   sql = sql.replace(/\bJSON_OBJECT\(\)/gi, "'{}'::jsonb");
+  sql = normalizeBooleanSql(sql);
   sql = rewriteDeleteLimit(sql);
   if (/^\s*INSERT\s+IGNORE\s+INTO\b/i.test(sql)) sql = rewriteInsertIgnore(sql);
   sql = rewriteOnDuplicateKey(sql);
@@ -252,7 +360,7 @@ const preparePostgresStatement = (sql: string, params: any[], options: { returni
   const limitRewritten = rewriteLimitOffsetParams(sql, params);
   let normalized = normalizePostgresSql(limitRewritten.sql);
   if (options.returningId) normalized = appendReturningId(normalized);
-  return { sql: rewriteQuestionPlaceholders(normalized), params: limitRewritten.params };
+  return { sql: rewriteQuestionPlaceholders(normalized), params: normalizeBooleanParams(normalized, limitRewritten.params) };
 };
 
 const PG_TRANSACTION_MAX_ATTEMPTS = Math.max(1, Number(process.env.POSTGRES_TRANSACTION_MAX_ATTEMPTS || 3));
