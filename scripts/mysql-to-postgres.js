@@ -167,10 +167,12 @@ const splitSqlStatements = (sql) => {
       const match = sql.slice(i).match(/^\$[a-zA-Z0-9_]*\$/);
       if (match) {
         const tag = match[0];
-        current += tag;
-        i += tag.length - 1;
-        dollarQuote = dollarQuote === tag ? null : tag;
-        continue;
+        if (!dollarQuote || dollarQuote === tag) {
+          current += tag;
+          i += tag.length - 1;
+          dollarQuote = dollarQuote === tag ? null : tag;
+          continue;
+        }
       }
     }
 
@@ -199,6 +201,13 @@ const splitSqlStatements = (sql) => {
     }
   }
 
+  if (dollarQuote) {
+    throw new Error(`SQL 파일의 dollar quote가 닫히지 않았습니다: ${dollarQuote}`);
+  }
+  if (quote) {
+    throw new Error(`SQL 파일의 문자열 quote가 닫히지 않았습니다: ${quote}`);
+  }
+
   const tail = current.trim();
   if (tail) statements.push(tail);
   return statements;
@@ -207,7 +216,7 @@ const splitSqlStatements = (sql) => {
 const quoteMysqlIdent = (name) => `\`${String(name).replace(/`/g, '``')}\``;
 const quotePgIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
 
-const sqlPreview = (statement) => statement.replace(/\s+/g, ' ').trim().slice(0, 240);
+const sqlPreview = (statement, limit = 1200) => statement.replace(/\s+/g, ' ').trim().slice(0, limit);
 
 const parseDbUrl = (url, defaultPort) => {
   if (!url) return {};
@@ -380,6 +389,12 @@ const validateMigrationConfig = (config) => {
 };
 
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+const remoteShellPath = (value) => {
+  const raw = String(value);
+  if (raw === '~') return '$HOME';
+  if (raw.startsWith('~/')) return `$HOME/${shellQuote(raw.slice(2))}`;
+  return shellQuote(raw);
+};
 
 const runShellCommand = (command, options = {}) =>
   new Promise((resolve, reject) => {
@@ -414,7 +429,8 @@ const syncProjectFiles = async (config) => {
     .map((pattern) => `--exclude=${shellQuote(pattern)}`)
     .join(' ');
   const sshBase = ['ssh', ...sshOptions.map(shellQuote), shellQuote(target)].join(' ');
-  const remotePrepare = `mkdir -p ${shellQuote(config.files.targetPath)} && tar -xzf - -C ${shellQuote(config.files.targetPath)}`;
+  const remoteTargetPath = remoteShellPath(config.files.targetPath);
+  const remotePrepare = `mkdir -p ${remoteTargetPath} && tar -xzf - -C ${remoteTargetPath}`;
   const command = `tar -C ${shellQuote(sourceDir)} ${tarExcludes} -czf - . | ${sshBase} ${shellQuote(remotePrepare)}`;
 
   console.log(`[MySQL -> PostgreSQL] project file sync: ${sourceDir} -> ${target}:${config.files.targetPath}`);
@@ -668,7 +684,7 @@ const importTable = async (mysql, pg, table) => {
   const mysqlColumns = await loadMysqlColumns(mysql, table);
   const columns = mysqlColumns
     .map((col) => col.COLUMN_NAME)
-    .filter((name) => pgColumnMap.has(name) && !String(pgColumnMap.get(name).column_default || '').startsWith('nextval('));
+    .filter((name) => pgColumnMap.has(name));
   if (columns.length === 0) return 0;
 
   const [[countRow]] = await mysql.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)}`);
