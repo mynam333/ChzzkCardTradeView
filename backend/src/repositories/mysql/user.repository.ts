@@ -1,4 +1,4 @@
-import { getMysqlDb } from '../../services/db';
+import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { MysqlTx } from '../../services/mysqlDb';
 import { fuzzyScore, isExactSearchMatch } from '../../utils/search';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
@@ -83,6 +83,32 @@ export class MysqlUserRepository implements IUserRepository {
   async searchByUsername(keyword: string, limit: number): Promise<User[]> {
     const kw = (keyword || '').trim();
     if (!kw) return [];
+    if (getSqlDialect() === 'postgres') {
+      const rows = await this.getDb().all(
+        `SELECT * FROM users
+          WHERE username ILIKE ?
+          ORDER BY CASE WHEN lower(username) = lower(?) THEN 0 ELSE 1 END,
+                   username ASC,
+                   created_at ASC
+          LIMIT ?`,
+        `%${kw}%`,
+        kw,
+        Math.max(limit * 5, 50)
+      );
+      const ranked = rows
+        .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
+        .filter((x): x is { r: any; score: number } => x.score !== null)
+        .sort((a, b) => a.score - b.score || String(a.r.username).localeCompare(String(b.r.username)))
+        .slice(0, limit)
+        .map((x) => this.mapUser(x.r));
+      if (ranked.length > 0) return ranked;
+      return (await this.loadSearchPool())
+        .map((r) => ({ r, score: fuzzyScore(r.username || '', kw) }))
+        .filter((x): x is { r: any; score: number } => x.score !== null)
+        .sort((a, b) => a.score - b.score || String(a.r.username).localeCompare(String(b.r.username)))
+        .slice(0, limit)
+        .map((x) => this.mapUser(x.r));
+    }
     const exactRows = await this.getDb().all('SELECT * FROM users WHERE username = ? ORDER BY created_at ASC LIMIT ?', kw, limit);
     if (exactRows.length > 0) return exactRows.map((r) => this.mapUser(r));
 
@@ -379,11 +405,12 @@ export class MysqlUserRepository implements IUserRepository {
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {
     const kw = (keyword || '').trim();
     const like = `%${kw}%`;
+    const likeOp = getSqlDialect() === 'postgres' ? 'ILIKE' : 'LIKE';
     const total = kw
-      ? (await this.getDb().get('SELECT COUNT(*) AS c FROM users WHERE username LIKE ? OR id LIKE ?', like, like))?.c || 0
+      ? (await this.getDb().get(`SELECT COUNT(*) AS c FROM users WHERE username ${likeOp} ? OR id ${likeOp} ?`, like, like))?.c || 0
       : (await this.getDb().get('SELECT COUNT(*) AS c FROM users'))?.c || 0;
-    const activeWhere = kw ? 'WHERE u.username LIKE ? OR u.id LIKE ?' : '';
-    const deletedWhere = kw ? 'AND (du.username_snapshot LIKE ? OR du.user_id LIKE ?)' : '';
+    const activeWhere = kw ? `WHERE u.username ${likeOp} ? OR u.id ${likeOp} ?` : '';
+    const deletedWhere = kw ? `AND (du.username_snapshot ${likeOp} ? OR du.user_id ${likeOp} ?)` : '';
     const params = kw ? [like, like, like, like, limit, offset] : [limit, offset];
     const rows = await this.getDb().all(`
       SELECT * FROM (
@@ -439,7 +466,8 @@ export class MysqlUserRepository implements IUserRepository {
     let where = 'banned_until IS NOT NULL AND banned_until > UTC_TIMESTAMP()';
     const kw = (keyword || '').trim();
     if (kw) {
-      where += ' AND (username LIKE ? OR id LIKE ?)';
+      const likeOp = getSqlDialect() === 'postgres' ? 'ILIKE' : 'LIKE';
+      where += ` AND (username ${likeOp} ? OR id ${likeOp} ?)`;
       params.push(`%${kw}%`, `%${kw}%`);
     }
     const total = (await this.getDb().get(`SELECT COUNT(*) AS c FROM users WHERE ${where}`, params))?.c || 0;
@@ -481,6 +509,59 @@ export class MysqlUserRepository implements IUserRepository {
     const channelId = (options.channelId || '').trim();
     const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
     const orderExpr = mode === 'cards' ? 'cards_value' : '(point + cards_value)';
+    if (getSqlDialect() === 'postgres') {
+      const params: any[] = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
+      const rows = await this.getDb().all(`
+        WITH UserCardValues AS (
+          SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until,
+                 u.ban_reason, u.status_message, u.last_seen_at, u.created_at,
+                 COUNT(uc.id) AS card_count,
+                 COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value
+            FROM users u
+            LEFT JOIN user_cards uc ON uc.user_id = u.id AND uc.is_hidden IS NOT TRUE
+            LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+           WHERE u.banned_until IS NULL OR u.banned_until <= NOW()
+           GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until,
+                    u.ban_reason, u.status_message, u.last_seen_at, u.created_at
+        ),
+        RankedUsers AS (
+          SELECT *,
+                 ROW_NUMBER() OVER (ORDER BY ${orderExpr} DESC, id ASC) AS user_rank
+            FROM UserCardValues
+        )
+        SELECT *, (point + cards_value) AS total_asset FROM RankedUsers
+         WHERE (? = '' OR username ILIKE ?)
+           AND (
+             ? = ''
+             OR EXISTS (
+               SELECT 1
+                 FROM user_cards fc
+                WHERE fc.user_id = RankedUsers.id
+                  AND fc.is_hidden IS NOT TRUE
+                  AND fc.channel_id = ?
+                  AND (? IS NULL OR COALESCE(fc.star, 0) = ?)
+             )
+           )
+         LIMIT ?
+      `, params);
+      return rows.map((row: any) => ({
+        id: row.id,
+        username: row.username,
+        avatar_url: row.avatar_url,
+        role: row.role as 'USER' | 'ADMIN',
+        point: Number(row.point || 0),
+        last_free_draw: row.last_free_draw,
+        banned_until: row.banned_until,
+        ban_reason: row.ban_reason ?? null,
+        status_message: row.status_message ?? null,
+        last_seen_at: row.last_seen_at ?? null,
+        created_at: row.created_at,
+        card_count: Number(row.card_count || 0),
+        cards_value: Math.round(Number(row.cards_value || 0)),
+        total_asset: Number(row.point || 0) + Math.round(Number(row.cards_value || 0)),
+        rank: Number(row.user_rank || 0)
+      }));
+    }
     const params: any[] = [keyword, `%${keyword}%`, channelId, channelId, star, star, limit];
     const rows = await this.getDb().all(`
       WITH NormalizedUsers AS (

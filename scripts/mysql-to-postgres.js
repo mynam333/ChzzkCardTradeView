@@ -43,6 +43,22 @@ const schemaPath = path.resolve(projectRoot, process.env.POSTGRES_SCHEMA_PATH ||
 let envUpdatePath = path.resolve(projectRoot, getCliValue('--env-path') || process.env.PG_IMPORT_ENV_PATH || path.join('backend', '.env'));
 let migrationConfig = null;
 
+const SCRIPT_DEFAULTS = {
+  mysql: {
+    host: '193.123.229.21',
+    port: 3306,
+    user: 'mynam333',
+    database: 'chikapo'
+  },
+  postgres: {
+    host: '127.0.0.1',
+    port: 5432,
+    user: 'ubuntu',
+    database: 'chikapo',
+    ssl: false
+  }
+};
+
 const DEFAULT_FILE_EXCLUDES = [
   'node_modules',
   '*/node_modules',
@@ -245,19 +261,19 @@ const readConfigDefaults = () => {
   const syncTargetUser = getCliValue('--target-user') || getCliValue('--ssh-user') || process.env.PG_IMPORT_TARGET_USER || process.env.USER || '';
   return {
     mysql: {
-      host: getCliValue('--mysql-host') || mysqlUrl.host || process.env.MYSQL_HOST || '127.0.0.1',
-      port: Number(getCliValue('--mysql-port') || mysqlUrl.port || process.env.MYSQL_PORT || 3306),
-      user: getCliValue('--mysql-user') || mysqlUrl.user || process.env.MYSQL_USER || 'root',
+      host: getCliValue('--mysql-host') || mysqlUrl.host || process.env.MYSQL_HOST || SCRIPT_DEFAULTS.mysql.host,
+      port: Number(getCliValue('--mysql-port') || mysqlUrl.port || process.env.MYSQL_PORT || SCRIPT_DEFAULTS.mysql.port),
+      user: getCliValue('--mysql-user') || mysqlUrl.user || process.env.MYSQL_USER || SCRIPT_DEFAULTS.mysql.user,
       password: getCliValue('--mysql-password') ?? mysqlUrl.password ?? process.env.MYSQL_PASSWORD ?? '',
-      database: getCliValue('--mysql-database') || mysqlUrl.database || process.env.MYSQL_DATABASE || 'chzzk_card_trade_view'
+      database: getCliValue('--mysql-database') || mysqlUrl.database || process.env.MYSQL_DATABASE || SCRIPT_DEFAULTS.mysql.database
     },
     postgres: {
-      host: getCliValue('--postgres-host') || getCliValue('--pg-host') || postgresUrl.host || process.env.POSTGRES_HOST || process.env.PGHOST || '127.0.0.1',
-      port: Number(getCliValue('--postgres-port') || getCliValue('--pg-port') || postgresUrl.port || process.env.POSTGRES_PORT || process.env.PGPORT || 5432),
-      user: getCliValue('--postgres-user') || getCliValue('--pg-user') || postgresUrl.user || process.env.POSTGRES_USER || process.env.PGUSER || 'postgres',
+      host: getCliValue('--postgres-host') || getCliValue('--pg-host') || postgresUrl.host || process.env.POSTGRES_HOST || process.env.PGHOST || SCRIPT_DEFAULTS.postgres.host,
+      port: Number(getCliValue('--postgres-port') || getCliValue('--pg-port') || postgresUrl.port || process.env.POSTGRES_PORT || process.env.PGPORT || SCRIPT_DEFAULTS.postgres.port),
+      user: getCliValue('--postgres-user') || getCliValue('--pg-user') || postgresUrl.user || process.env.POSTGRES_USER || process.env.PGUSER || SCRIPT_DEFAULTS.postgres.user,
       password: getCliValue('--postgres-password') ?? getCliValue('--pg-password') ?? postgresUrl.password ?? process.env.POSTGRES_PASSWORD ?? process.env.PGPASSWORD ?? '',
-      database: getCliValue('--postgres-database') || getCliValue('--pg-database') || postgresUrl.database || process.env.POSTGRES_DATABASE || process.env.POSTGRES_DB || process.env.PGDATABASE || 'chzzk_card_trade_view',
-      ssl: String(getCliValue('--postgres-ssl') ?? process.env.POSTGRES_SSL ?? 'false').toLowerCase() === 'true'
+      database: getCliValue('--postgres-database') || getCliValue('--pg-database') || postgresUrl.database || process.env.POSTGRES_DATABASE || process.env.POSTGRES_DB || process.env.PGDATABASE || SCRIPT_DEFAULTS.postgres.database,
+      ssl: String(getCliValue('--postgres-ssl') ?? process.env.POSTGRES_SSL ?? String(SCRIPT_DEFAULTS.postgres.ssl)).toLowerCase() === 'true'
     },
     files: {
       enabled: shouldSyncFiles,

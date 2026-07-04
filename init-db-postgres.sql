@@ -1727,6 +1727,7 @@ DECLARE
   bidder_point INTEGER;
   current_amount INTEGER;
   current_reserved INTEGER;
+  min_bid INTEGER;
   payable_now INTEGER;
   previous_bidder TEXT;
   next_ends_at TIMESTAMPTZ;
@@ -1749,8 +1750,12 @@ BEGIN
   current_amount := COALESCE(listing.current_bid, listing.starting_bid, listing.price, 0);
   current_reserved := COALESCE(listing.bid_reserved, 0);
   previous_bidder := listing.current_bidder_id;
+  min_bid := current_amount;
+  IF previous_bidder IS NOT NULL AND current_reserved > 0 THEN
+    min_bid := current_amount + 100;
+  END IF;
 
-  IF p_amount < CASE WHEN previous_bidder IS NOT NULL AND current_reserved > 0 THEN current_amount + 100 ELSE current_amount END THEN
+  IF p_amount < min_bid THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
   END IF;
 
