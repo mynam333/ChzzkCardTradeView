@@ -108,13 +108,16 @@ CREATE TABLE IF NOT EXISTS user_titles (
     title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
     awarded_at TIMESTAMPTZ DEFAULT NOW(),
     is_equipped BOOLEAN NOT NULL DEFAULT FALSE,
+    grant_source TEXT NOT NULL DEFAULT 'manual',
     PRIMARY KEY (user_id, title_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id);
 ALTER TABLE titles ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE user_titles ADD COLUMN IF NOT EXISTS is_equipped BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_titles ADD COLUMN IF NOT EXISTS grant_source TEXT NOT NULL DEFAULT 'manual';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_titles_equipped ON user_titles(user_id) WHERE is_equipped = TRUE;
+CREATE INDEX IF NOT EXISTS idx_user_titles_grant_source ON user_titles(grant_source, title_id);
 
 -- 2. 스트리머 테이블
 CREATE TABLE IF NOT EXISTS streamers (
@@ -168,9 +171,16 @@ CREATE TABLE IF NOT EXISTS user_cards (
     border_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
     name_effect_item_id INTEGER REFERENCES shop_items(id) ON DELETE SET NULL,
     is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
     favorite_order INTEGER,
     favorite_at TIMESTAMPTZ,
     acquired_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_card_serials (
+    channel_id TEXT PRIMARY KEY REFERENCES streamers(channel_id) ON DELETE CASCADE,
+    last_serial BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 4. 1:1 교환 제안 테이블
@@ -290,12 +300,16 @@ CREATE TABLE IF NOT EXISTS notifications (
     title TEXT NOT NULL,
     body TEXT,
     link TEXT,
+    group_key TEXT,
     is_read BOOLEAN DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS group_key TEXT;
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_group_key ON notifications(user_id, group_key, deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications(user_id, group_key) WHERE group_key IS NOT NULL;
 
 -- 14. 유저 보유 코스메틱 (미장착 수량)
 CREATE TABLE IF NOT EXISTS user_cosmetics (
@@ -342,6 +356,81 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY(blocker_id, blocked_id)
 );
+CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_id);
+
+CREATE TABLE IF NOT EXISTS friend_requests (
+    id BIGSERIAL PRIMARY KEY,
+    requester_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    responded_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_requester ON friend_requests(requester_id, status);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests(receiver_id, status);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_pair_status ON friend_requests(requester_id, receiver_id, status);
+
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY(user_a_id, user_b_id)
+);
+CREATE INDEX IF NOT EXISTS idx_friendships_user_b ON friendships(user_b_id);
+
+CREATE TABLE IF NOT EXISTS chat_rooms (
+    id BIGSERIAL PRIMARY KEY,
+    user_a_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_admin_room BOOLEAN DEFAULT FALSE,
+    closed_at TIMESTAMPTZ,
+    closed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    deleted_for_a BOOLEAN DEFAULT FALSE,
+    deleted_for_b BOOLEAN DEFAULT FALSE,
+    hidden_after_a TIMESTAMPTZ,
+    hidden_after_b TIMESTAMPTZ,
+    muted_for_a BOOLEAN DEFAULT FALSE,
+    muted_for_b BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_a_id, user_b_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_a ON chat_rooms(user_a_id, deleted_for_a, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_b ON chat_rooms(user_b_id, deleted_for_b, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_closed_by ON chat_rooms(closed_by_user_id);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGSERIAL PRIMARY KEY,
+    room_id BIGINT NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    message_type TEXT NOT NULL DEFAULT 'text',
+    attachment_url TEXT,
+    attachment_mime TEXT,
+    attachment_size_bytes BIGINT,
+    attachment_width INTEGER,
+    attachment_height INTEGER,
+    attachment_expires_at TIMESTAMPTZ,
+    attachment_deleted_at TIMESTAMPTZ,
+    link_preview_json JSONB,
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_room_id ON chat_messages(room_id, id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_expiry ON chat_messages(message_type, attachment_expires_at, attachment_deleted_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_attachments ON chat_messages(sender_id, message_type, attachment_deleted_at, attachment_expires_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender ON chat_messages(sender_id);
+
+CREATE TABLE IF NOT EXISTS link_previews (
+    url_hash TEXT PRIMARY KEY,
+    normalized_url TEXT NOT NULL,
+    preview_json JSONB,
+    status TEXT NOT NULL DEFAULT 'success',
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_link_previews_expires ON link_previews(expires_at);
 
 -- ============================================================
 -- 기존 배포 호환: 신규 컬럼 멱등 추가 (CREATE TABLE IF NOT EXISTS는 컬럼을 추가하지 않으므로 필요)
@@ -376,6 +465,7 @@ ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_order INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_at TIMESTAMPTZ;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
@@ -413,6 +503,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order
   ON user_cards(user_id, favorite_order ASC NULLS LAST, id DESC);
@@ -1579,6 +1670,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
   id BIGSERIAL PRIMARY KEY,
   seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE,
+  pending_user_card_id INTEGER,
   price INTEGER NOT NULL CHECK (price >= 10),
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED')),
   listing_type TEXT NOT NULL DEFAULT 'fixed',
@@ -1604,6 +1696,7 @@ ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_status_che
 ALTER TABLE market_listings
   ADD CONSTRAINT market_listings_status_check CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED'));
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS listing_type TEXT NOT NULL DEFAULT 'fixed';
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS pending_user_card_id INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS buy_now_price INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid INTEGER;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid INTEGER;
@@ -1616,8 +1709,7 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPT
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
-  ON market_listings(user_card_id)
-  WHERE status = 'PENDING';
+  ON market_listings(pending_user_card_id);
 
 CREATE TABLE IF NOT EXISTS market_bids (
   id BIGSERIAL PRIMARY KEY,

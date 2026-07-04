@@ -141,6 +141,23 @@ const formatRemaining = (ms: number): string => {
   return `${seconds}초`;
 };
 
+const maskBidderDisplayName = (username: string | null | undefined): string => {
+  const value = String(username || '').trim();
+  if (!value) return '입찰자 ***';
+  return `${Array.from(value)[0]}***`;
+};
+
+const getBidderDisplayName = (
+  listing: any,
+  currentUser: { id: string; username?: string | null } | null | undefined
+): string => {
+  if (!listing?.current_bidder_id) return '';
+  if (currentUser?.id && String(listing.current_bidder_id) === String(currentUser.id)) {
+    return currentUser.username || String(listing.current_bidder_username || '').trim() || '나';
+  }
+  return maskBidderDisplayName(listing.current_bidder_username);
+};
+
 const getPaginationItems = (currentPage: number, totalPages: number): Array<number | 'ellipsis'> => {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
@@ -1890,6 +1907,7 @@ export const ShopTab: React.FC = () => {
                     const isUrgent = isAuction && !isEnded && remainingMs <= 3 * 60_000; // 3분 이하
                     const isSoon = isAuction && !isEnded && remainingMs < 5 * 60_000;   // 5분 미만
                     const listingImageUrl = cardImage(streamer, star);
+                    const currentBidderDisplayName = getBidderDisplayName(listing, user);
 
                     return (
                       <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
@@ -1986,7 +2004,7 @@ export const ShopTab: React.FC = () => {
                               {/* 최고 입찰자 / 마감 임박 안내 */}
                               <div className="flex items-center justify-between gap-1 text-[9px] font-semibold text-violet-700/70 dark:text-violet-100/60">
                                 <span className="truncate">
-                                  {listing.current_bidder_username ? `🏆 ${listing.current_bidder_username}` : '아직 입찰 없음'}
+                                  {currentBidderDisplayName ? `🏆 ${currentBidderDisplayName}` : '아직 입찰 없음'}
                                 </span>
                                 {isUrgent && <span className="shrink-0 font-black text-red-500">입찰 시 3분으로 연장</span>}
                               </div>

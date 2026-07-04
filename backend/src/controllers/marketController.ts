@@ -44,6 +44,35 @@ const hasExpiredAuctionListing = (data: any) => {
   });
 };
 
+const maskBidderUsername = (username: string | null | undefined): string | null => {
+  const value = String(username || '').trim();
+  if (!value) return null;
+  return `${Array.from(value)[0]}***`;
+};
+
+const bidderUsernameForViewer = (listing: MarketListing, viewerId?: string): string | null => {
+  if (!listing.current_bidder_id || !listing.current_bidder_username) return null;
+  return listing.current_bidder_id === viewerId
+    ? listing.current_bidder_username
+    : maskBidderUsername(listing.current_bidder_username);
+};
+
+const marketListingForViewer = (listing: MarketListing, viewerId?: string): MarketListing => ({
+  ...listing,
+  current_bidder_username: bidderUsernameForViewer(listing, viewerId) ?? undefined
+});
+
+const marketListingsForViewer = (listings: MarketListing[], viewerId?: string): MarketListing[] =>
+  listings.map((listing) => marketListingForViewer(listing, viewerId));
+
+const marketListResultForViewer = (
+  result: { listings: MarketListing[]; total: number },
+  viewerId?: string
+) => ({
+  ...result,
+  listings: marketListingsForViewer(result.listings || [], viewerId)
+});
+
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (
   userId: string,
@@ -57,7 +86,7 @@ const notify = (
   createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
 };
 
-const realtimeListingPatch = (listing: MarketListing | null | undefined) => {
+const realtimeListingPatch = (listing: MarketListing | null | undefined, viewerId?: string) => {
   if (!listing?.id) return null;
   return {
     id: listing.id,
@@ -68,7 +97,9 @@ const realtimeListingPatch = (listing: MarketListing | null | undefined) => {
     starting_bid: listing.starting_bid ?? null,
     current_bid: listing.current_bid ?? null,
     current_bidder_id: listing.current_bidder_id ?? null,
-    current_bidder_username: listing.current_bidder_username ?? null,
+    current_bidder_username: viewerId
+      ? bidderUsernameForViewer(listing, viewerId)
+      : maskBidderUsername(listing.current_bidder_username),
     auction_ends_at: listing.auction_ends_at ?? null,
     updated_at: listing.updated_at ?? new Date().toISOString()
   };
@@ -106,7 +137,7 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const cached = marketListCache.get(cacheKey);
   if (cached && cached.expiresAt > now && !hasExpiredAuctionListing(cached.data)) {
     setMarketListCacheHeaders(res);
-    return res.json(cached.data);
+    return res.json(marketListResultForViewer(cached.data, req.user?.id));
   }
   if (cached) {
     marketListCache.delete(cacheKey);
@@ -124,12 +155,12 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
       }
     }
     setMarketListCacheHeaders(res);
-    return res.json(result);
+    return res.json(marketListResultForViewer(result, req.user?.id));
   } catch (err: any) {
     console.error('[MarketController] listActiveListings 에러:', err);
     if (cached) {
       setMarketListCacheHeaders(res);
-      return res.json(cached.data);
+      return res.json(marketListResultForViewer(cached.data, req.user?.id));
     }
     return res.status(500).json({ error: 'ServerError', message: '마켓 목록을 가져오는 중 오류가 발생했습니다.' });
   }
@@ -147,7 +178,7 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
 
   try {
     const listings = await marketRepository.listByUser(user.id);
-    return res.json(listings);
+    return res.json(marketListingsForViewer(listings, user.id));
   } catch (err: any) {
     console.error('[MarketController] listMyListings 에러:', err);
     return res.status(500).json({ error: 'ServerError', message: '내 판매 목록을 가져오는 중 오류가 발생했습니다.' });
@@ -465,12 +496,12 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     );
   }
   const updatedListing = await marketRepository.findById(id).catch(() => null);
-  const listingPatch = realtimeListingPatch(updatedListing);
+  const listingPatch = realtimeListingPatch(updatedListing, user.id);
   publishMarketUpdated('auction_bid', updatedListing, {
     listingId: id,
     current_bid: result.current_bid,
     current_bidder_id: updatedListing?.current_bidder_id ?? user.id,
-    current_bidder_username: updatedListing?.current_bidder_username ?? user.username,
+    current_bidder_username: maskBidderUsername(updatedListing?.current_bidder_username ?? user.username),
     auction_ends_at: result.auction_ends_at ?? null
   });
   recordAchievementEvent({
@@ -549,7 +580,7 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
     const history = scope === 'all'
       ? await marketRepository.listAllHistory(historyLimit)
       : await marketRepository.listHistory(user.id);
-    return res.json(history);
+    return res.json(marketListingsForViewer(history, user.id));
   } catch (err: any) {
     console.error('[MarketController] listMarketHistory 에러:', err);
     return res.status(500).json({ error: 'ServerError', message: '거래 내역을 가져오는 중 오류가 발생했습니다.' });
@@ -594,7 +625,7 @@ export const settleExpiredAuctions = async () => {
       const changedListings = [...settledAuctionListings, ...cancelledListings];
       publishMarketUpdated('market_scheduled_cleanup', null, {
         listingIds: changedListings.map((listing) => listing.id).filter(Boolean),
-        listings: changedListings.map(realtimeListingPatch).filter(Boolean)
+        listings: changedListings.map((listing) => realtimeListingPatch(listing)).filter(Boolean)
       });
     }
     if (soldListings.length > 0) {

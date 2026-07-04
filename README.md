@@ -155,9 +155,10 @@
   * SQLite의 `-wal`, `-shm` 파일도 같은 디렉터리에 생성되므로 DB 파일이 위치한 디렉터리 전체가 persistent disk여야 합니다.
   * 운영에서는 `SQLITE_REQUIRE_PERSISTENT_PATH=true`를 설정해 경로 누락 시 서버가 기동되지 않게 하는 것을 권장합니다.
   * 커스텀 카드 이미지도 보존하려면 `UPLOADS_DIR` 역시 같은 persistent volume 내부 경로로 지정합니다.
-* **DB 모드 지정:** `.env`의 `DB_MODE`로 `sqlite`, `mysql`, `supabase` 중 하나를 명시합니다.
+* **DB 모드 지정:** `.env`의 `DB_MODE`로 `sqlite`, `mysql`, `postgres`, `supabase` 중 하나를 명시합니다.
   * `DB_MODE=sqlite`: Supabase URL/Key가 남아 있어도 연결 검사를 건너뛰고 SQLite 모드로 바로 동작합니다.
   * `DB_MODE=mysql`: MySQL 리포지토리로 동작하며, `MYSQL_URL` 또는 개별 MySQL 접속 환경 변수가 필요합니다.
+  * `DB_MODE=postgres`: PostgreSQL 직접 연결로 동작하며, `POSTGRES_URL` 또는 `DATABASE_URL`이 필요합니다.
   * `DB_MODE=supabase`: 백엔드 구동 시 Supabase DB에 대한 PING 및 인증 연결 상태를 검사하고 실패 시 기동을 중단합니다.
 * **Legacy 호환:** `DB_MODE`가 없을 때만 기존 `DB_CLIENT`, `DATABASE_CLIENT`, `MYSQL_REQUIRED`, `SUPABASE_REQUIRED` 값을 보조적으로 인식합니다.
 * **SQLite 폴백:** 
@@ -410,6 +411,9 @@ DB_MODE=sqlite
 # MYSQL_URL=mysql://user:password@127.0.0.1:3306/chzzk_card_trade_view
 # 백엔드를 MySQL 런타임으로 실행할 때 설정
 # DB_MODE=mysql
+# MySQL을 원격 PostgreSQL로 이전할 때 설정
+# POSTGRES_URL=postgres://user:password@postgres-host:5432/chzzk_card_trade_view
+# DB_MODE=postgres
 # MySQL 런타임에서 하루 1회 SQLite 백업을 만들 때 설정
 # MYSQL_SQLITE_BACKUP_DIR=./backups/mysql-sqlite
 # MYSQL_SQLITE_BACKUP_RETENTION_DAYS=7
@@ -461,7 +465,8 @@ npm run dev
   * Render 예시: disk mount path `/var/data`, `SQLITE_DB_PATH=/var/data/chikapo.sqlite`, `UPLOADS_DIR=/var/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
   * Fly.io 예시: volume mount path `/data`, `SQLITE_DB_PATH=/data/chikapo.sqlite`, `UPLOADS_DIR=/data/uploads`, `SQLITE_REQUIRE_PERSISTENT_PATH=true`
 * SQLite 파일을 MySQL 8로 이전하려면 [docs/mysql-migration.md](docs/mysql-migration.md)를 참고합니다.
-* DB 모드는 `DB_MODE=sqlite`, `DB_MODE=mysql`, `DB_MODE=supabase` 중 하나로 명시합니다.
+* MySQL을 원격 PostgreSQL로 이전하려면 [docs/postgres-migration.md](docs/postgres-migration.md)를 참고합니다.
+* DB 모드는 `DB_MODE=sqlite`, `DB_MODE=mysql`, `DB_MODE=postgres`, `DB_MODE=supabase` 중 하나로 명시합니다.
 * 한 대의 Ubuntu 서버에서 API/라이브·채팅/백업/이미지 프록시를 프로세스별로 분리하려면 [docs/process-workers.md](docs/process-workers.md)를 참고합니다.
 * Supabase를 쓰지 않을 때는 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`을 설정하지 않고 `DB_MODE=sqlite` 또는 `DB_MODE=mysql`로 둡니다.
 * Supabase 운영 시에는 데이터베이스 환경 변수(`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) 및 치지직 OpenAPI 키를 백엔드 환경 변수에 추가해야 합니다.

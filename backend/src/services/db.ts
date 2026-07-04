@@ -4,23 +4,26 @@ import fs from 'fs';
 import path from 'path';
 import { ensureParentDirectory, getSqliteDbPath } from './storagePaths';
 import { createMysqlDb, MysqlDb } from './mysqlDb';
+import { createPostgresDb, PostgresDb } from './postgresDb';
 import { ensureArenaMysqlSchema, ensureArenaSqliteSchema } from './arenaSchemaMigration';
 
 let sqliteDb: Database.Database | null = null;
 let supabaseClient: SupabaseClient | null = null;
-let mysqlDb: MysqlDb | null = null;
+let mysqlDb: MysqlDb | PostgresDb | null = null;
 export type DbMode = 'LOCAL_SQL' | 'SUPABASE' | 'MYSQL';
 let dbMode: DbMode = 'LOCAL_SQL';
+let sqlDialect: 'mysql' | 'postgres' | null = null;
 
-type ConfiguredDbMode = 'sqlite' | 'supabase' | 'mysql' | null;
+type ConfiguredDbMode = 'sqlite' | 'supabase' | 'mysql' | 'postgres' | null;
 
 const normalizeConfiguredDbMode = (value: string | undefined): ConfiguredDbMode => {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return null;
   if (['sqlite', 'local_sql', 'local-sql', 'local', 'file'].includes(normalized)) return 'sqlite';
   if (['mysql', 'mariadb'].includes(normalized)) return 'mysql';
-  if (['supabase', 'postgres', 'postgresql'].includes(normalized)) return 'supabase';
-  throw new Error(`[DB] DB_MODE 값이 올바르지 않습니다: ${value}. 허용값: sqlite, mysql, supabase`);
+  if (['postgres', 'postgresql', 'pg'].includes(normalized)) return 'postgres';
+  if (['supabase'].includes(normalized)) return 'supabase';
+  throw new Error(`[DB] DB_MODE 값이 올바르지 않습니다: ${value}. 허용값: sqlite, mysql, postgres, supabase`);
 };
 
 const getConfiguredDbMode = (): ConfiguredDbMode => {
@@ -30,6 +33,7 @@ const getConfiguredDbMode = (): ConfiguredDbMode => {
   if (legacyClient) return legacyClient;
   if (process.env.MYSQL_REQUIRED === 'true') return 'mysql';
   if (process.env.SUPABASE_REQUIRED === 'true') return 'supabase';
+  if (process.env.POSTGRES_REQUIRED === 'true' || process.env.POSTGRESQL_REQUIRED === 'true') return 'postgres';
   return null;
 };
 
@@ -765,11 +769,22 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
 export const initDatabaseConnection = async (): Promise<void> => {
   const configuredDbMode = getConfiguredDbMode();
   if (configuredDbMode === 'mysql') {
-    mysqlDb = createMysqlDb();
-    await mysqlDb.get('SELECT 1 AS ok');
-    await ensureMysqlCompatibilityMigrations(mysqlDb);
+    const db = createMysqlDb();
+    mysqlDb = db;
+    await db.get('SELECT 1 AS ok');
+    await ensureMysqlCompatibilityMigrations(db);
     dbMode = 'MYSQL';
+    sqlDialect = 'mysql';
     console.log('[DB] MySQL 데이터베이스와 연동되었습니다. (MYSQL MODE)');
+    return;
+  }
+
+  if (configuredDbMode === 'postgres') {
+    mysqlDb = createPostgresDb();
+    await mysqlDb.get('SELECT 1 AS ok');
+    dbMode = 'MYSQL';
+    sqlDialect = 'postgres';
+    console.log('[DB] PostgreSQL 데이터베이스와 연동되었습니다. (POSTGRES MODE, SQL repository layer)');
     return;
   }
 
@@ -795,6 +810,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
       }
       
       dbMode = 'SUPABASE';
+      sqlDialect = null;
       console.log('[DB] Supabase 클라우드 데이터베이스와 연동되었습니다. (SUPABASE MODE)');
       return;
     } catch (err: any) {
@@ -805,6 +821,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
   // 로컬 SQLite로 Fallback 처리
   try {
     dbMode = 'LOCAL_SQL';
+    sqlDialect = null;
     if (configuredDbMode === 'sqlite') {
       console.log('[DB] DB_MODE=sqlite 설정에 따라 SQLite 모드로 동작합니다.');
     } else {
@@ -1668,6 +1685,10 @@ export const getDbMode = (): DbMode => {
   return dbMode;
 };
 
+export const getSqlDialect = (): 'mysql' | 'postgres' | null => {
+  return sqlDialect;
+};
+
 /**
  * 로컬 SQLite3 데이터베이스 커넥션을 반환합니다.
  */
@@ -1688,7 +1709,7 @@ export const getSupabaseClient = (): SupabaseClient => {
   return supabaseClient;
 };
 
-export const getMysqlDb = (): MysqlDb => {
+export const getMysqlDb = (): MysqlDb | PostgresDb => {
   if (dbMode !== 'MYSQL' || !mysqlDb) {
     throw new Error('현재 데이터베이스 모드가 MYSQL이 아닙니다.');
   }
