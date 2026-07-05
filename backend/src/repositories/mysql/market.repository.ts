@@ -686,7 +686,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     return row ? Number(row.price) : null;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; auction_ends_at?: string | null }> {
     try {
       return await this.getDb().transaction(async (tx) => {
         const listing = await tx.get("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction' FOR UPDATE", listingId);
@@ -937,7 +937,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     const channelId = listing.card?.channel_id;
     if (!channelId) return [];
     const star = listing.card?.star ?? 0;
-    const price = listing.listing_type === 'auction' ? (listing.buy_now_price ?? listing.current_bid ?? listing.starting_bid ?? listing.price) : listing.price;
+    const price = listing.listing_type === 'auction' ? (listing.buy_now_price ?? listing.starting_bid ?? listing.price) : listing.price;
     return this.getDb().all(
       'SELECT * FROM market_watches WHERE channel_id = ? AND (star IS NULL OR star = ?) AND (max_price IS NULL OR max_price >= ?) AND user_id <> ?',
       channelId, star, price, listing.seller_id

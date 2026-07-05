@@ -109,7 +109,7 @@ const tuningStatements = [
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_oldest ON market_listings(created_at ASC, id ASC) WHERE status = \'PENDING\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_seller ON market_listings(seller_id, id DESC) WHERE status = \'PENDING\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_fixed_price ON market_listings(price, id) WHERE status = \'PENDING\' AND listing_type = \'fixed\'',
-  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_auction_price ON market_listings((COALESCE(current_bid, starting_bid, price, 0)), id) WHERE status = \'PENDING\' AND listing_type = \'auction\'',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_auction_price ON market_listings((COALESCE(starting_bid, price, 0)), id) WHERE status = \'PENDING\' AND listing_type = \'auction\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_a_active ON chat_rooms(user_a_id, updated_at DESC) WHERE deleted_for_a = FALSE',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_b_active ON chat_rooms(user_b_id, updated_at DESC) WHERE deleted_for_b = FALSE',

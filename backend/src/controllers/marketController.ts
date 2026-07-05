@@ -637,7 +637,7 @@ const notifyMatchingWatches = async (listing: any) => {
   const streamerName = listing.card?.streamer?.name || '관심 카드';
   const star = listing.card?.star ?? 0;
   const price = listing.listing_type === 'auction'
-    ? (listing.buy_now_price ?? listing.current_bid ?? listing.starting_bid ?? listing.price)
+    ? (listing.buy_now_price ?? listing.starting_bid ?? listing.price)
     : listing.price;
   for (const watch of watches) {
     notify(

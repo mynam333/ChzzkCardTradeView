@@ -562,68 +562,28 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return (data as any).price;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
-    const listing = await this.findById(listingId);
-    if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
-      return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; auction_ends_at?: string | null }> {
+    const { data, error } = await this.getClient().rpc('place_market_bid_atomic', {
+      p_listing_id: listingId,
+      p_bidder_id: bidderId,
+      p_amount: amount
+    });
+    if (error) {
+      console.error('[SupabaseMarketRepository] place_market_bid_atomic RPC 에러:', error.message);
+      return { ok: false, reason: 'RPC_ERROR' };
     }
-    if (listing.seller_id === bidderId) return { ok: false, reason: 'CANNOT_BID_OWN_ITEM' };
-    if (listing.auction_ends_at && new Date(listing.auction_ends_at).getTime() <= Date.now()) {
-      return { ok: false, reason: 'AUCTION_ENDED' };
+    let result: any = data;
+    if (typeof data === 'string') {
+      try {
+        result = JSON.parse(data);
+      } catch {
+        result = { ok: false, reason: data || 'FAILED' };
+      }
     }
-
-    const minBid = Number(listing.starting_bid || listing.price || 0);
-    if (amount < minBid) return { ok: false, reason: 'BID_TOO_LOW' };
-
-    const { data: bidder, error: bidderError } = await this.getClient()
-      .from('users')
-      .select('point')
-      .eq('id', bidderId)
-      .maybeSingle();
-    const { data: previousRows } = await this.getClient()
-      .from('market_bids')
-      .select('amount')
-      .eq('listing_id', listingId)
-      .eq('bidder_id', bidderId)
-      .order('id', { ascending: false })
-      .limit(1);
-    const previousAmount = Number(previousRows?.[0]?.amount || 0);
-    const payableNow = amount - previousAmount;
-    if (bidderError || !bidder || (payableNow > 0 && Number(bidder.point || 0) < payableNow)) {
-      return { ok: false, reason: 'INSUFFICIENT_POINT' };
-    }
-
-    if (payableNow > 0) {
-      const { data: deductedBidder, error: deductError } = await this.getClient()
-        .from('users')
-        .update({ point: Number(bidder.point || 0) - payableNow })
-        .eq('id', bidderId)
-        .gte('point', payableNow)
-        .select('id')
-        .maybeSingle();
-      if (deductError) throw deductError;
-      if (!deductedBidder) return { ok: false, reason: 'INSUFFICIENT_POINT' };
-    } else if (payableNow < 0) {
-      await this.getClient().rpc('increment_user_point', { p_id: bidderId, p_delta: Math.abs(payableNow) });
-    }
-
-    const nowIso = new Date().toISOString();
-    const { error: bidError } = await this.getClient()
-      .from('market_bids')
-      .insert([{ listing_id: listingId, bidder_id: bidderId, amount, created_at: nowIso }]);
-    if (bidError) throw bidError;
-
-    const { error: updateError } = await this.getClient()
-      .from('market_listings')
-      .update({ updated_at: nowIso })
-      .eq('id', listingId)
-      .eq('status', 'PENDING');
-    if (updateError) throw updateError;
-
     return {
-      ok: true,
-      reason: 'OK',
-      auction_ends_at: listing.auction_ends_at
+      ok: !!result?.ok,
+      reason: result?.reason || 'FAILED',
+      auction_ends_at: result?.auction_ends_at ?? null
     };
   }
 
@@ -797,7 +757,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
     const channelId = listing.card?.channel_id || listing.card?.streamer?.channel_id;
     if (!channelId) return [];
     const star = listing.card?.star ?? 0;
-    const price = Number(listing.buy_now_price || listing.current_bid || listing.price || 0);
+    const price = Number(listing.listing_type === 'auction'
+      ? (listing.buy_now_price ?? listing.starting_bid ?? listing.price ?? 0)
+      : (listing.price ?? 0));
     const { data, error } = await this.getClient()
       .from('market_watches')
       .select('*, streamer:streamers(*)')

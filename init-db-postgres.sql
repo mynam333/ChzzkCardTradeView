@@ -1988,7 +1988,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 기존 단일 최고입찰자 저장 방식으로 남은 예약금도 호환 환불
+  -- 기존 단일 입찰자 저장 방식으로 남은 예약금도 호환 환불
   IF listing.current_bidder_id IS NOT NULL
      AND listing.current_bidder_id <> p_buyer_id
      AND COALESCE(listing.bid_reserved, 0) > 0

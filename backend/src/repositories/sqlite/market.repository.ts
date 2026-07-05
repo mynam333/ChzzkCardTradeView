@@ -790,7 +790,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     return row ? row.price : null;
   }
 
-  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
+  async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; auction_ends_at?: string | null }> {
     const db = this.getDb();
     const txn = db.transaction(() => {
       const listing = db.prepare("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction'").get(listingId) as any;
@@ -1074,7 +1074,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     if (!channelId) return [];
     const star = listing.card?.star ?? 0;
     const price = listing.listing_type === 'auction'
-      ? (listing.buy_now_price ?? listing.current_bid ?? listing.starting_bid ?? listing.price)
+      ? (listing.buy_now_price ?? listing.starting_bid ?? listing.price)
       : listing.price;
     return this.getDb().prepare(`
       SELECT * FROM market_watches
