@@ -772,6 +772,29 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
       throw err;
     }
   };
+  const dedupeRows = async (table: string, partitionBy: string, orderBy: string, where = 'TRUE') => {
+    try {
+      await db.run(`
+        DELETE FROM ${table}
+         WHERE ctid IN (
+           SELECT ctid
+             FROM (
+               SELECT ctid,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY ${partitionBy}
+                        ORDER BY ${orderBy}
+                      ) AS rn
+                 FROM ${table}
+                WHERE ${where}
+             ) ranked
+            WHERE rn > 1
+         )
+      `);
+    } catch (err: any) {
+      if (err?.code === '42P01' || err?.code === '42703' || String(err?.message || '').includes('does not exist')) return;
+      throw err;
+    }
+  };
 
   // Keep this hot-path function in sync with init-db-postgres.sql. The live worker
   // calls it every cycle, so it must update the whole batch with one set-based SQL
@@ -820,9 +843,64 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
                                     END,
              updated_at           = NOW()
         FROM updates u
-       WHERE s.channel_id = u.channel_id;
+      WHERE s.channel_id = u.channel_id;
     $$ LANGUAGE sql;
   `);
+
+  await dedupeRows(
+    'user_achievements',
+    'user_id, achievement_id, repeat_key',
+    `CASE status WHEN 'claimed' THEN 0 WHEN 'completed' THEN 1 WHEN 'in_progress' THEN 2 ELSE 3 END,
+     progress_current DESC,
+     claimed_at DESC NULLS LAST,
+     completed_at DESC NULLS LAST,
+     last_evaluated_at DESC NULLS LAST,
+     id DESC`
+  );
+  await dedupeRows(
+    'user_achievement_stats',
+    'user_id, stat_key',
+    'stat_value DESC, updated_at DESC NULLS LAST'
+  );
+  await dedupeRows(
+    'achievement_grant_logs',
+    'user_id, achievement_id, repeat_key',
+    `CASE status WHEN 'success' THEN 0 WHEN 'pending' THEN 1 WHEN 'revoked' THEN 2 ELSE 3 END,
+     created_at DESC NULLS LAST,
+     id DESC`
+  );
+  await dedupeRows('achievement_events', 'event_key', 'occurred_at DESC NULLS LAST, id DESC');
+  await dedupeRows('achievement_evaluation_queue', 'dedupe_key', 'priority DESC, created_at ASC NULLS LAST, id ASC');
+  await dedupeRows('achievements', 'code', 'is_active DESC, sort_order ASC, id DESC');
+  await dedupeRows('streamers', 'channel_id', 'updated_at DESC NULLS LAST');
+  await dedupeRows('system_configs', 'key', 'ctid DESC');
+  await dedupeRows('user_card_serials', 'channel_id', 'last_serial DESC, updated_at DESC NULLS LAST');
+  await dedupeRows('push_subscriptions', 'endpoint', 'created_at DESC NULLS LAST, id DESC');
+  await dedupeRows('streamer_registration_blocks', 'channel_id', 'created_at DESC NULLS LAST');
+  await dedupeRows('chat_attachments', 'owner_user_id, source_hash', 'last_used_at DESC NULLS LAST, id DESC');
+  await dedupeRows('user_cosmetics', 'user_id, item_id', 'quantity DESC, id DESC');
+  await dedupeRows('shop_purchases', 'user_id, item_id', 'count DESC');
+  await dedupeRows('user_minigame_tickets', 'user_id', 'updated_at DESC NULLS LAST');
+  await dedupeRows('user_titles', 'user_id, title_id', 'is_equipped DESC, awarded_at DESC NULLS LAST');
+  await dedupeRows('subscription_title_states', 'user_id, rule_id', 'checked_at DESC NULLS LAST');
+  await dedupeRows('user_image_blinds', 'user_id, image_key', 'created_at DESC NULLS LAST');
+  await dedupeRows('link_previews', 'url_hash', 'fetched_at DESC NULLS LAST');
+  await dedupeRows('puzzle_excluded_images', 'image_key', 'id DESC');
+  await dedupeRows('arena_worker_heartbeats', 'worker_id', 'heartbeat_at DESC NULLS LAST');
+  await dedupeRows('arena_user_cosmetic_loadouts', 'user_id', 'updated_at DESC NULLS LAST');
+  await dedupeRows('arena_cup_replays', 'cup_id', 'updated_at DESC NULLS LAST');
+  await dedupeRows('arena_match_replays', 'match_id', 'updated_at DESC NULLS LAST');
+  await dedupeRows('arena_player_ratings', 'season_id, user_id', 'rating_points DESC, mmr DESC, updated_at DESC NULLS LAST');
+  await dedupeRows('notifications', 'user_id, group_key', 'created_at DESC NULLS LAST, id DESC', 'group_key IS NOT NULL');
+  await dedupeRows('market_watches', 'user_id, channel_id, star', 'created_at DESC NULLS LAST, id DESC');
+  await dedupeRows('market_transaction_audit_logs', 'audit_key', 'recorded_at DESC NULLS LAST, id DESC');
+  await dedupeRows('asset_event_logs', 'event_key', 'created_at DESC NULLS LAST, id DESC');
+  await dedupeRows('tutorial_rewards', 'user_id, reward_key', 'created_at DESC NULLS LAST');
+  await dedupeRows('coupon_logs', 'coupon_id, user_id', 'used_at DESC NULLS LAST, id DESC');
+  await dedupeRows('coupons', 'code', 'created_at DESC NULLS LAST, id DESC');
+  await dedupeRows('friendships', 'user_a_id, user_b_id', 'created_at DESC NULLS LAST');
+  await dedupeRows('user_blocks', 'blocker_id, blocked_id', 'created_at DESC NULLS LAST');
+  await dedupeRows('deleted_user_accounts', 'user_id', 'deleted_at DESC NULLS LAST');
 
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_repeat ON user_achievements (user_id, achievement_id, repeat_key)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_stats_key ON user_achievement_stats (user_id, stat_key)');
