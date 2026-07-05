@@ -3,7 +3,7 @@ import { MysqlTx } from '../../services/mysqlDb';
 import { fuzzyScore, isExactSearchMatch } from '../../utils/search';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { DeletedUserAccount, IUserRepository, User, UserRanking } from '../interfaces';
-import { parseMysqlDateTimeMs, toMysqlDateTime } from './dateUtils';
+import { parseMysqlDateTimeMs, toMysqlDateTime, toSqlDateTime } from './dateUtils';
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -184,8 +184,8 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async claimFreeDrawIfEligible(id: string, nowIso: string, segmentStartIso: string | null): Promise<boolean> {
-    const now = toMysqlDateTime(nowIso);
-    const segmentStart = toMysqlDateTime(segmentStartIso);
+    const now = toSqlDateTime(nowIso, getSqlDialect());
+    const segmentStart = toSqlDateTime(segmentStartIso, getSqlDialect());
     if (segmentStartIso === null) {
       await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', now, id);
       return true;
@@ -222,7 +222,8 @@ export class MysqlUserRepository implements IUserRepository {
       const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
       const grantCount = row.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
       const nextTickets = Math.min(safeMaxStack, currentTickets + grantCount);
-      await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextTickets, toMysqlDateTime(segmentStartIso), id);
+      const updated = await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextTickets, toSqlDateTime(segmentStartIso, getSqlDialect()), id);
+      if (updated.changes !== 1) throw new Error('FREE_TICKET_SYNC_FAILED');
       return this.mapUser({ ...row, free_draw_tickets: nextTickets, last_free_draw: segmentStartIso });
     });
   }
@@ -363,7 +364,7 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async updateLastFreeDraw(id: string, time: string): Promise<void> {
-    await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', toMysqlDateTime(time), id);
+    await this.getDb().run('UPDATE users SET last_free_draw = ? WHERE id = ?', toSqlDateTime(time, getSqlDialect()), id);
   }
 
   async updateProfile(id: string, username: string, avatarUrl: string | null, accessToken?: string | null, refreshToken?: string | null): Promise<void> {

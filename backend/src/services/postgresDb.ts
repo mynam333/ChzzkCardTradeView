@@ -669,6 +669,9 @@ export const createPostgresDb = (): PostgresDb => new PostgresDb(postgres(getPos
   idle_timeout: Math.max(1, Number(process.env.POSTGRES_IDLE_TIMEOUT_SECONDS || 20)),
   connect_timeout: Math.max(1, Number(process.env.POSTGRES_CONNECT_TIMEOUT_SECONDS || 10)),
   ssl: getSslConfig() as any,
+  connection: {
+    TimeZone: 'UTC'
+  },
   transform: {
     undefined: null
   }

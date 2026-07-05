@@ -1,9 +1,9 @@
-import { getMysqlDb } from '../../services/db';
+import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
 import { IUserCardRepository } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
-import { parseMysqlDateTimeMs, toMysqlDateTime } from './dateUtils';
+import { parseMysqlDateTimeMs, toSqlDateTime } from './dateUtils';
 
 export class MysqlUserCardRepository implements IUserCardRepository {
   private getDb() {
@@ -79,7 +79,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
           const intervalMs = Math.max(1, Number(intervalHours || 1)) * 60 * 60 * 1000;
           const grantCount = user.last_free_draw ? Math.max(1, Math.floor(diffMs / intervalMs)) : 1;
           nextFreeTickets = Math.min(safeMaxFreeTickets, nextFreeTickets + grantCount);
-          await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextFreeTickets, toMysqlDateTime(segmentStartIso), userId);
+          const refreshed = await tx.run('UPDATE users SET free_draw_tickets = ?, last_free_draw = ? WHERE id = ?', nextFreeTickets, toSqlDateTime(segmentStartIso, getSqlDialect()), userId);
+          if (refreshed.changes !== 1) throw new Error('FREE_TICKET_REFRESH_FAILED');
           if (grantCount > 0) {
             await recordMysqlAssetEvent(tx, {
               userId,
@@ -98,7 +99,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       if (nextFreeTickets > 0) {
         nextFreeTickets -= 1;
         freeDrawSource = 'reset';
-        await tx.run('UPDATE users SET free_draw_tickets = ? WHERE id = ?', nextFreeTickets, userId);
+        const spent = await tx.run('UPDATE users SET free_draw_tickets = ? WHERE id = ? AND free_draw_tickets > 0', nextFreeTickets, userId);
+        if (spent.changes !== 1) throw new Error('FREE_TICKET_SPEND_FAILED');
         await recordMysqlAssetEvent(tx, {
           userId,
           assetType: 'ticket',
@@ -112,7 +114,8 @@ export class MysqlUserCardRepository implements IUserCardRepository {
       } else if (nextBonusTickets > 0) {
         nextBonusTickets -= 1;
         freeDrawSource = 'bonus';
-        await tx.run('UPDATE users SET bonus_free_draw_tickets = ? WHERE id = ?', nextBonusTickets, userId);
+        const spent = await tx.run('UPDATE users SET bonus_free_draw_tickets = ? WHERE id = ? AND bonus_free_draw_tickets > 0', nextBonusTickets, userId);
+        if (spent.changes !== 1) throw new Error('BONUS_FREE_TICKET_SPEND_FAILED');
         await recordMysqlAssetEvent(tx, {
           userId,
           assetType: 'ticket',
@@ -154,14 +157,18 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         star: 0,
         metadata: { channel_id: channelId, free_draw_source: freeDrawSource }
       });
+      const balance = await tx.get<{ point: number; free_draw_tickets: number; bonus_free_draw_tickets: number }>(
+        'SELECT point, free_draw_tickets, bonus_free_draw_tickets FROM users WHERE id = ?',
+        userId
+      );
       return {
         ok: true,
         reason: 'OK',
         is_free: freeDrawSource !== 'point',
         free_draw_source: freeDrawSource,
-        points_left: nextPoint,
-        free_draw_tickets_left: nextFreeTickets,
-        bonus_free_draw_tickets_left: nextBonusTickets,
+        points_left: Number(balance?.point ?? nextPoint),
+        free_draw_tickets_left: Number(balance?.free_draw_tickets ?? nextFreeTickets),
+        bonus_free_draw_tickets_left: Number(balance?.bonus_free_draw_tickets ?? nextBonusTickets),
         card: { id: Number(result.insertId), user_id: userId, channel_id: channelId, serial_number: serialNumber, star: 0 }
       };
     });
