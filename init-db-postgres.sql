@@ -912,7 +912,7 @@ RETURNS VOID AS $$
          updated_at           = NOW()
     FROM updates u
    WHERE s.channel_id = u.channel_id;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE sql;
 
 -- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트/코스메틱을 단일 트랜잭션으로 정산
 -- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE'

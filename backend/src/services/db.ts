@@ -807,7 +807,7 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
              updated_at           = NOW()
         FROM updates u
        WHERE s.channel_id = u.channel_id;
-    $$ LANGUAGE plpgsql;
+    $$ LANGUAGE sql;
   `);
 };
 
