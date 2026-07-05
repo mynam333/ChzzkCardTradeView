@@ -6,6 +6,7 @@ import { getRateLimitStats } from '../middlewares/rateLimit';
 import { isLiveWorkerProcess } from './processRole';
 import { getMysqlQueryStats } from './mysqlDb';
 import { getPostgresQueryStats } from './postgresDb';
+import { getDbMode, getSqlDialect } from './db';
 
 let chatStatsProvider: (() => any) | null = null;
 
@@ -50,6 +51,8 @@ export const getRuntimeStats = () => {
       play: getPlayControllerStats()
     },
     db: {
+      mode: getDbMode(),
+      sqlDialect: getSqlDialect(),
       mysql: getMysqlQueryStats(),
       postgres: getPostgresQueryStats()
     },

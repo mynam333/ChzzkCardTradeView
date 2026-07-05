@@ -287,11 +287,13 @@ export class MysqlMarketRepository implements IMarketRepository {
     type?: 'all' | 'fixed' | 'auction' | 'bidding';
     bidderId?: string;
   }): Promise<{ listings: MarketListing[]; total: number }> {
+    const isPostgres = getSqlDialect() === 'postgres';
+    const auctionEndsAtExpr = isPostgres ? "NULLIF(ml.auction_ends_at::text, '')::timestamptz" : 'ml.auction_ends_at';
     const where: string[] = [
       "ml.status = 'PENDING'",
-      "(COALESCE(ml.listing_type, 'fixed') <> 'auction' OR ml.auction_ends_at IS NULL OR ml.auction_ends_at > ?)"
+      `(COALESCE(ml.listing_type, 'fixed') <> 'auction' OR ml.auction_ends_at IS NULL OR ${auctionEndsAtExpr} > ${isPostgres ? 'NOW()' : '?'})`
     ];
-    const params: any[] = [toMysqlDateTime(new Date())];
+    const params: any[] = isPostgres ? [] : [toMysqlDateTime(new Date())];
     const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.starting_bid, ml.price, 0) ELSE ml.price END";
 
     if (options.type === 'bidding') {
@@ -739,10 +741,16 @@ export class MysqlMarketRepository implements IMarketRepository {
   }
 
   async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {
+    const isPostgres = getSqlDialect() === 'postgres';
     const now = toMysqlDateTime(nowIso) ?? toMysqlDateTime(new Date());
     const expiredRows = await this.getDb().all<{ id: number }>(
-      "SELECT id FROM market_listings WHERE status = 'PENDING' AND listing_type = 'auction' AND auction_ends_at IS NOT NULL AND auction_ends_at <= ?",
-      now
+      `SELECT id
+         FROM market_listings
+        WHERE status = 'PENDING'
+          AND listing_type = 'auction'
+          AND ${isPostgres ? "NULLIF(auction_ends_at::text, '') IS NOT NULL" : 'auction_ends_at IS NOT NULL'}
+          AND ${isPostgres ? "NULLIF(auction_ends_at::text, '')::timestamptz <= NOW()" : 'auction_ends_at <= ?'}`,
+      ...(isPostgres ? [] : [now])
     );
     const completed: MarketListing[] = [];
     const loadCompletedListing = async (id: number, status: MarketListing['status']): Promise<MarketListing | null> => {
@@ -861,13 +869,17 @@ export class MysqlMarketRepository implements IMarketRepository {
   }
 
   async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
+    const isPostgres = getSqlDialect() === 'postgres';
     const cutoff = toMysqlDateTime(cutoffIso) ?? toMysqlDateTime(new Date());
     const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
+    const cutoffWhere = isPostgres
+      ? "WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND NULLIF(ml.created_at::text, '')::timestamptz <= ?::timestamptz"
+      : "WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND ml.created_at <= ?";
     const staleRows = await this.getDb().all<any>(
-      `${this.listingSelectWhere("WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND ml.created_at <= ?")}
+      `${this.listingSelectWhere(cutoffWhere)}
        ORDER BY ml.created_at ASC, ml.id ASC
        LIMIT ?`,
-      cutoff,
+      isPostgres ? new Date(cutoffIso).toISOString() : cutoff,
       maxRows
     );
     const staleListings = staleRows.map((row) => this.mapRow(row));

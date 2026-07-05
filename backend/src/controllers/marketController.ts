@@ -540,7 +540,12 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
 export const listMarketWatches = async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   if (!user) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
-  return res.json(await marketRepository.listWatches(user.id));
+  try {
+    return res.json(await marketRepository.listWatches(user.id));
+  } catch (err: any) {
+    console.error('[MarketController] listMarketWatches 에러:', err?.message || err);
+    return res.status(500).json({ error: 'ServerError', message: '관심 매물 목록을 가져오는 중 오류가 발생했습니다.' });
+  }
 };
 
 export const upsertMarketWatch = async (req: AuthenticatedRequest, res: Response) => {
@@ -558,17 +563,22 @@ export const upsertMarketWatch = async (req: AuthenticatedRequest, res: Response
   }
   const maxPrice = rawMaxPrice === null ? null : Math.max(100, rawMaxPrice);
   if (!channelId) return res.status(400).json({ error: 'BadRequest', message: '스트리머를 선택해 주세요.' });
-  const watch = await marketRepository.upsertWatch({ user_id: user.id, channel_id: channelId, star, max_price: maxPrice });
-  recordAchievementEvent({
-    eventKey: `market:watch:${user.id}:${channelId}:${star ?? 'all'}`,
-    userId: user.id,
-    eventType: 'market.watch',
-    sourceType: 'market_watch',
-    sourceId: channelId,
-    value: 1,
-    metadata: { channel_id: channelId, star: star ?? -1, max_price: maxPrice ?? 0 }
-  }).catch(() => undefined);
-  return res.status(200).json({ ok: true, watch });
+  try {
+    const watch = await marketRepository.upsertWatch({ user_id: user.id, channel_id: channelId, star, max_price: maxPrice });
+    recordAchievementEvent({
+      eventKey: `market:watch:${user.id}:${channelId}:${star ?? 'all'}`,
+      userId: user.id,
+      eventType: 'market.watch',
+      sourceType: 'market_watch',
+      sourceId: channelId,
+      value: 1,
+      metadata: { channel_id: channelId, star: star ?? -1, max_price: maxPrice ?? 0 }
+    }).catch(() => undefined);
+    return res.status(200).json({ ok: true, watch });
+  } catch (err: any) {
+    console.error('[MarketController] upsertMarketWatch 에러:', err?.message || err);
+    return res.status(500).json({ error: 'ServerError', message: '관심 매물 저장 중 오류가 발생했습니다.' });
+  }
 };
 
 export const deleteMarketWatch = async (req: AuthenticatedRequest, res: Response) => {
@@ -576,8 +586,13 @@ export const deleteMarketWatch = async (req: AuthenticatedRequest, res: Response
   if (!user) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'BadRequest', message: '관심상품 ID가 올바르지 않습니다.' });
-  const ok = await marketRepository.deleteWatch(user.id, id);
-  return res.status(ok ? 200 : 404).json({ ok });
+  try {
+    const ok = await marketRepository.deleteWatch(user.id, id);
+    return res.status(ok ? 200 : 404).json({ ok });
+  } catch (err: any) {
+    console.error('[MarketController] deleteMarketWatch 에러:', err?.message || err);
+    return res.status(500).json({ error: 'ServerError', message: '관심 매물 삭제 중 오류가 발생했습니다.' });
+  }
 };
 
 /**

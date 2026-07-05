@@ -431,7 +431,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       }
       const { error } = await this.getClient()
         .from('market_listings')
-        .update({ status, current_bidder_id: null, bid_reserved: 0, updated_at: new Date().toISOString() })
+        .update({ status, pending_user_card_id: null, current_bidder_id: null, bid_reserved: 0, updated_at: new Date().toISOString() })
         .eq('id', id);
 
       if (error) throw error;
@@ -443,6 +443,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       payload.buyer_id = extra.buyer_id ?? null;
       payload.fee = extra.fee ?? 0;
       payload.settled_amount = extra.settled_amount ?? 0;
+      payload.pending_user_card_id = null;
     }
 
     const { error } = await this.getClient()
@@ -466,6 +467,12 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if (result !== 'OK') {
       return { ok: false, reason: result };
     }
+
+    await this.getClient()
+      .from('market_listings')
+      .update({ pending_user_card_id: null })
+      .eq('id', listingId)
+      .eq('status', 'SOLD');
 
     const { data: updatedListing } = await this.getClient()
       .from('market_listings')
@@ -637,6 +644,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
           .from('market_listings')
           .update({
             status: 'SOLD',
+            pending_user_card_id: null,
             buyer_id: bidderId,
             current_bidder_id: bidderId,
             current_bid: amount,
@@ -683,6 +691,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .from('market_listings')
       .update({
         status: 'CANCELLED',
+        pending_user_card_id: null,
         bid_reserved: 0,
         updated_at: new Date().toISOString()
       })

@@ -490,6 +490,11 @@ export const normalizePostgresSql = (input: string): string => {
   sql = sql.replace(/\bSTR_TO_DATE\(\s*SUBSTRING_INDEX\(REPLACE\(([^,]+),\s*'T',\s*' '\),\s*'\.',\s*1\),\s*'%Y-%m-%d %H:%i:%s'\s*\)/gi, "NULLIF($1, '')::timestamptz");
   sql = sql.replace(/\bCONCAT\(/gi, 'CONCAT(');
   sql = sql.replace(/\bJSON_OBJECT\(\)/gi, "'{}'::jsonb");
+  sql = sql
+    .replace(/\?(?=\s+IS\s+NULL\b)/gi, '?::text')
+    .replace(/\?(?=\s+IS\s+NOT\s+NULL\b)/gi, '?::text')
+    .replace(/\?(?=\s*=\s*'')/gi, '?::text')
+    .replace(/\?(?=\s*<>\s*'')/gi, '?::text');
   sql = normalizeBooleanSql(sql);
   sql = rewriteDeleteLimit(sql);
   if (/^\s*INSERT\s+IGNORE\s+INTO\b/i.test(sql)) sql = rewriteInsertIgnore(sql);
