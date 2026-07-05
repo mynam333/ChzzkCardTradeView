@@ -12,6 +12,39 @@ export class SqliteMarketRepository implements IMarketRepository {
     return getSqliteDb();
   }
 
+  private latestBidRows(db: any, listingId: number): any[] {
+    return db.prepare(`
+      SELECT mb.*
+        FROM market_bids mb
+        JOIN (
+          SELECT bidder_id, MAX(id) AS id
+            FROM market_bids
+           WHERE listing_id = ?
+           GROUP BY bidder_id
+        ) latest ON latest.id = mb.id
+       ORDER BY mb.amount DESC, datetime(mb.created_at) ASC, mb.id ASC
+    `).all(listingId) as any[];
+  }
+
+  private refundLatestBids(db: any, listingId: number, sellerId: string, exceptBidderId?: string | null) {
+    for (const bid of this.latestBidRows(db, listingId)) {
+      if (exceptBidderId && bid.bidder_id === exceptBidderId) continue;
+      const amount = Number(bid.amount || 0);
+      if (amount <= 0) continue;
+      db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(amount, bid.bidder_id);
+      recordSqlitePointLedger(db, {
+        userId: bid.bidder_id,
+        counterpartyUserId: sellerId,
+        amount,
+        sourceType: 'market_bid_refund',
+        sourceId: listingId,
+        reason: 'auction_lost_refund',
+        description: `경매 #${listingId} 미낙찰 입찰 예약금 환불`,
+        metadata: { listing_id: listingId, refunded_bid: amount }
+      });
+    }
+  }
+
   private mapRow(row: any): MarketListing {
     return {
       id: row.id,
@@ -200,6 +233,11 @@ export class SqliteMarketRepository implements IMarketRepository {
     return row ? this.mapRow(row) : null;
   }
 
+  async hasBids(listingId: number): Promise<boolean> {
+    const row = this.getDb().prepare('SELECT 1 FROM market_bids WHERE listing_id = ? LIMIT 1').get(listingId);
+    return !!row;
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const rows = this.getDb().prepare(`
       SELECT user_card_id FROM market_listings
@@ -222,7 +260,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       "(COALESCE(ml.listing_type, 'fixed') <> 'auction' OR ml.auction_ends_at IS NULL OR datetime(ml.auction_ends_at) > datetime(?))"
     ];
     const params: any[] = [new Date().toISOString()];
-    const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.current_bid, ml.starting_bid, ml.price, 0) ELSE ml.price END";
+    const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.starting_bid, ml.price, 0) ELSE ml.price END";
 
     if (options.type === 'bidding') {
       if (!options.bidderId) return { listings: [], total: 0 };
@@ -374,10 +412,11 @@ export class SqliteMarketRepository implements IMarketRepository {
     if (!extra && (status === 'CANCELLED' || status === 'AUCTION_ENDED')) {
       const listing = db.prepare('SELECT * FROM market_listings WHERE id = ? AND status = ?').get(id, 'PENDING') as any;
       if (listing) {
+        this.refundLatestBids(db, id, listing.seller_id);
         this.refundReservedBid(db, listing);
         db.prepare(`
           UPDATE market_listings
-             SET status = ?, bid_reserved = 0, updated_at = datetime('now')
+             SET status = ?, current_bidder_id = NULL, bid_reserved = 0, updated_at = datetime('now')
            WHERE id = ?
         `).run(status, id);
         return;
@@ -403,6 +442,7 @@ export class SqliteMarketRepository implements IMarketRepository {
   }
 
   private refundReservedBid(db: any, listing: any) {
+    if (listing?.id && this.latestBidRows(db, Number(listing.id)).length > 0) return;
     const reserved = Number(listing?.bid_reserved || 0);
     if (reserved > 0 && listing?.current_bidder_id) {
       db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
@@ -453,17 +493,23 @@ export class SqliteMarketRepository implements IMarketRepository {
         ? Number(listing.buy_now_price || listing.price)
         : Number(listing.price);
 
-      const reserved = Number(listing.bid_reserved || 0);
-      const reservedByBuyer = listing.current_bidder_id === buyerId ? reserved : 0;
-      const payableNow = Math.max(0, finalPrice - reservedByBuyer);
-      const reservedRefundToBuyer = Math.max(0, reservedByBuyer - finalPrice);
+      const payableNow = finalPrice;
+      const buyerBid = listing.listing_type === 'auction'
+        ? db.prepare('SELECT amount FROM market_bids WHERE listing_id = ? AND bidder_id = ? ORDER BY id DESC LIMIT 1').get(listingId, buyerId) as any
+        : null;
+      const refundableToBuyer = Number(buyerBid?.amount || 0);
 
-      if (buyer.point < payableNow) {
+      if (Number(buyer.point || 0) + refundableToBuyer < payableNow) {
         throw new Error('INSUFFICIENT_POINT');
       }
 
       const feeRate = Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE);
       const { fee, settledAmount } = calculateMarketFee(finalPrice, feeRate);
+
+      if (listing.listing_type === 'auction') {
+        this.refundLatestBids(db, listingId, listing.seller_id);
+        this.refundReservedBid(db, listing);
+      }
 
       // 정산
       db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, buyerId);
@@ -477,32 +523,6 @@ export class SqliteMarketRepository implements IMarketRepository {
         description: `오픈마켓 매물 #${listingId} 구매`,
         metadata: { listing_id: listingId, price: finalPrice, payable_now: payableNow }
       });
-      if (reservedRefundToBuyer > 0) {
-        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reservedRefundToBuyer, buyerId);
-        recordSqlitePointLedger(db, {
-          userId: buyerId,
-          counterpartyUserId: listing.seller_id,
-          amount: reservedRefundToBuyer,
-          sourceType: 'market_bid_refund',
-          sourceId: listingId,
-          reason: 'market_buy_reserved_refund',
-          description: `오픈마켓 매물 #${listingId} 즉시구매 차액 환불`,
-          metadata: { listing_id: listingId, price: finalPrice, reserved_refund: reservedRefundToBuyer }
-        });
-      }
-      if (reserved > 0 && listing.current_bidder_id && listing.current_bidder_id !== buyerId) {
-        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(reserved, listing.current_bidder_id);
-        recordSqlitePointLedger(db, {
-          userId: listing.current_bidder_id,
-          counterpartyUserId: listing.seller_id,
-          amount: reserved,
-          sourceType: 'market_bid_refund',
-          sourceId: listingId,
-          reason: 'market_buy_outbid_refund',
-          description: `오픈마켓 매물 #${listingId} 즉시구매로 기존 입찰금 환불`,
-          metadata: { listing_id: listingId, reserved }
-        });
-      }
       db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, listing.seller_id);
       recordSqlitePointLedger(db, {
         userId: listing.seller_id,
@@ -518,7 +538,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       // 매물 갱신
       db.prepare(`
         UPDATE market_listings
-           SET status = 'SOLD', buyer_id = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
+           SET status = 'SOLD', buyer_id = ?, current_bidder_id = NULL, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
          WHERE id = ?
       `).run(buyerId, fee, settledAmount, listingId);
       this.recordTransactionAudit(db, listingId, 'sold');
@@ -777,67 +797,48 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (!listing) throw new Error('NOT_FOUND_OR_NOT_AUCTION');
       if (listing.seller_id === bidderId) throw new Error('CANNOT_BID_OWN_ITEM');
       if (listing.auction_ends_at && new Date(listing.auction_ends_at).getTime() <= Date.now()) throw new Error('AUCTION_ENDED');
-      const currentBid = Number(listing.current_bid || listing.starting_bid || 0);
-      const currentReserved = Number(listing.bid_reserved || 0);
-      const hasActiveBid = Boolean(listing.current_bidder_id) && currentReserved > 0;
-      const minBid = hasActiveBid ? currentBid + 100 : currentBid;
+      const minBid = Number(listing.starting_bid || listing.price || 0);
       if (amount < minBid) throw new Error('BID_TOO_LOW');
       const bidder = db.prepare('SELECT point FROM users WHERE id = ?').get(bidderId) as any;
       if (!bidder) throw new Error('BIDDER_NOT_FOUND');
-      const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
-      const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
-      if (payableNow <= 0) throw new Error('BID_TOO_LOW');
-      if (Number(bidder.point || 0) < payableNow) throw new Error('INSUFFICIENT_POINT');
+      const previousBid = db.prepare('SELECT amount FROM market_bids WHERE listing_id = ? AND bidder_id = ? ORDER BY id DESC LIMIT 1').get(listingId, bidderId) as any;
+      const previousAmount = Number(previousBid?.amount || 0);
+      const payableNow = amount - previousAmount;
+      if (payableNow > 0 && Number(bidder.point || 0) < payableNow) throw new Error('INSUFFICIENT_POINT');
 
       db.prepare('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)').run(listingId, bidderId, amount);
-      db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, bidderId);
-      recordSqlitePointLedger(db, {
-        userId: bidderId,
-        counterpartyUserId: listing.seller_id,
-        amount: -payableNow,
-        sourceType: 'market_bid',
-        sourceId: listingId,
-        reason: 'auction_bid_reserved',
-        description: `경매 #${listingId} 입찰 예약`,
-        metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
-      });
-      if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
-        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(currentReserved, listing.current_bidder_id);
+      if (payableNow > 0) {
+        db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, bidderId);
         recordSqlitePointLedger(db, {
-          userId: listing.current_bidder_id,
+          userId: bidderId,
           counterpartyUserId: listing.seller_id,
-          amount: currentReserved,
+          amount: -payableNow,
+          sourceType: 'market_bid',
+          sourceId: listingId,
+          reason: 'auction_bid_reserved',
+          description: `경매 #${listingId} 입찰 예약`,
+          metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
+        });
+      } else if (payableNow < 0) {
+        const refund = Math.abs(payableNow);
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(refund, bidderId);
+        recordSqlitePointLedger(db, {
+          userId: bidderId,
+          counterpartyUserId: listing.seller_id,
+          amount: refund,
           sourceType: 'market_bid_refund',
           sourceId: listingId,
-          reason: 'auction_outbid_refund',
-          description: `경매 #${listingId} 상위 입찰로 기존 예약금 환불`,
-          metadata: { listing_id: listingId, refunded_bid: currentReserved, new_bidder_id: bidderId }
+          reason: 'auction_bid_adjust_refund',
+          description: `경매 #${listingId} 입찰 예약금 차액 환불`,
+          metadata: { listing_id: listingId, previous_bid: previousAmount, bid_amount: amount, refunded_bid: refund }
         });
       }
 
-      // 안티-스나이프: 마감까지 3분 이하일 때 입찰이 들어오면 남은 시간을 다시 3분으로 맞춥니다.
-      const ANTI_SNIPE_THRESHOLD_MS = 3 * 60_000;
-      const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;
-      const nowMs = Date.now();
-      const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
-      const remainingMs = endsAtMs - nowMs;
-      const extendedEndsAt = remainingMs > 0 && remainingMs <= ANTI_SNIPE_THRESHOLD_MS
-        ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
-        : null;
-
-      if (extendedEndsAt) {
-        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, auction_ends_at = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run(amount, bidderId, amount, extendedEndsAt, listingId);
-      } else {
-        db.prepare('UPDATE market_listings SET current_bid = ?, current_bidder_id = ?, bid_reserved = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run(amount, bidderId, amount, listingId);
-      }
+      db.prepare("UPDATE market_listings SET updated_at = datetime('now') WHERE id = ?").run(listingId);
       return {
         ok: true,
         reason: 'OK',
-        current_bid: amount,
-        auction_ends_at: extendedEndsAt ?? listing.auction_ends_at,
-        previous_bidder_id: listing.current_bidder_id ?? null
+        auction_ends_at: listing.auction_ends_at ?? null
       };
     });
 
@@ -892,41 +893,31 @@ export class SqliteMarketRepository implements IMarketRepository {
         const result = this.getDb().transaction(() => {
           const locked = db.prepare("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction'").get(row.id) as any;
           if (!locked) return false;
-          const reserved = Number(locked.bid_reserved || 0);
-          const price = Number(locked.current_bid || locked.starting_bid || locked.price || 0);
           const startingBid = Number(locked.starting_bid || 0);
-          if (!locked.current_bidder_id || !price || price < startingBid) {
-            this.refundReservedBid(db, locked);
+          const bids = this.latestBidRows(db, row.id);
+          const winningBid = bids[0];
+          const price = Number(winningBid?.amount || 0);
+          const winnerId = winningBid?.bidder_id as string | undefined;
+          if (!winnerId || !price || price < startingBid) {
+            this.refundLatestBids(db, row.id, locked.seller_id);
             db.prepare("UPDATE market_listings SET status = 'AUCTION_ENDED', bid_reserved = 0, updated_at = datetime('now') WHERE id = ?").run(row.id);
             return 'ended';
           }
 
-          const buyer = db.prepare('SELECT point FROM users WHERE id = ?').get(locked.current_bidder_id) as any;
-          if (!buyer || (reserved <= 0 && Number(buyer.point || 0) < price)) {
-            this.refundReservedBid(db, locked);
+          const buyer = db.prepare('SELECT id FROM users WHERE id = ?').get(winnerId) as any;
+          if (!buyer) {
+            this.refundLatestBids(db, row.id, locked.seller_id);
             db.prepare("UPDATE market_listings SET status = 'AUCTION_ENDED', bid_reserved = 0, updated_at = datetime('now') WHERE id = ?").run(row.id);
             return 'ended';
           }
 
           const feeRate = Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE);
           const { fee, settledAmount } = calculateMarketFee(price, feeRate);
-          if (reserved <= 0) {
-            db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(price, locked.current_bidder_id);
-            recordSqlitePointLedger(db, {
-              userId: locked.current_bidder_id,
-              counterpartyUserId: locked.seller_id,
-              amount: -price,
-              sourceType: 'market_purchase',
-              sourceId: row.id,
-              reason: 'auction_win_charge',
-              description: `경매 #${row.id} 낙찰 대금 차감`,
-              metadata: { listing_id: row.id, price }
-            });
-          }
+          this.refundLatestBids(db, row.id, locked.seller_id, winnerId);
           db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, locked.seller_id);
           recordSqlitePointLedger(db, {
             userId: locked.seller_id,
-            counterpartyUserId: locked.current_bidder_id,
+            counterpartyUserId: winnerId,
             amount: settledAmount,
             sourceType: 'market_sale',
             sourceId: row.id,
@@ -936,20 +927,20 @@ export class SqliteMarketRepository implements IMarketRepository {
           });
           db.prepare(`
             UPDATE market_listings
-               SET status = 'SOLD', buyer_id = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
+               SET status = 'SOLD', buyer_id = ?, current_bidder_id = ?, current_bid = ?, price = ?, fee = ?, bid_reserved = 0, settled_amount = ?, updated_at = datetime('now')
              WHERE id = ?
-          `).run(locked.current_bidder_id, price, fee, settledAmount, row.id);
+          `).run(winnerId, winnerId, price, price, fee, settledAmount, row.id);
           this.recordTransactionAudit(db, row.id, 'sold');
           const movingCard = db.prepare(
             'SELECT channel_id, serial_number, COALESCE(star, 0) AS star FROM user_cards WHERE id = ?'
           ).get(locked.user_card_id) as any;
-          db.prepare('UPDATE user_cards SET user_id = ? WHERE id = ?').run(locked.current_bidder_id, locked.user_card_id);
+          db.prepare('UPDATE user_cards SET user_id = ? WHERE id = ?').run(winnerId, locked.user_card_id);
           if (movingCard) {
             recordSqliteAssetEvent(db, {
               userId: locked.seller_id,
-              counterpartyUserId: locked.current_bidder_id,
+              counterpartyUserId: winnerId,
               fromUserId: locked.seller_id,
-              toUserId: locked.current_bidder_id,
+              toUserId: winnerId,
               assetType: 'card',
               action: 'move',
               quantity: 1,

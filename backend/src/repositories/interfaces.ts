@@ -572,6 +572,7 @@ export interface IMarketRepository {
     fee_rate?: number;
   }): Promise<MarketListing>;
   findById(id: number): Promise<MarketListing | null>;
+  hasBids(listingId: number): Promise<boolean>;
   /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */
   findPendingCardIdsByUser(userId: string): Promise<number[]>;
   /** 마켓 목록 조회 (유사도 검색 필터 및 페이지네이션, 정렬 지원) */

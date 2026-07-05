@@ -1054,17 +1054,16 @@ describe('MarketRepository 재등록 제약', () => {
     });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 4000 });
     expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
-      current_bidder_id: 'auction-bidder-a',
+      current_bidder_id: null,
       current_bid: 1000,
-      bid_reserved: 1000
+      bid_reserved: 0
     });
 
     expect(await marketRepository.placeBid(listing.id as number, 'auction-bidder-b', 2000)).toMatchObject({
       ok: true,
-      reason: 'OK',
-      previous_bidder_id: 'auction-bidder-a'
+      reason: 'OK'
     });
-    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 5000 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 4000 });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
     expect(db.prepare(`
       SELECT user_id, counterparty_user_id, amount, source_type, reason
@@ -1085,19 +1084,12 @@ describe('MarketRepository 재등록 제약', () => {
         amount: -2000,
         source_type: 'market_bid',
         reason: 'auction_bid_reserved'
-      },
-      {
-        user_id: 'auction-bidder-a',
-        counterparty_user_id: 'auction-seller',
-        amount: 1000,
-        source_type: 'market_bid_refund',
-        reason: 'auction_outbid_refund'
       }
     ]);
     expect(db.prepare('SELECT current_bidder_id, current_bid, bid_reserved FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
-      current_bidder_id: 'auction-bidder-b',
-      current_bid: 2000,
-      bid_reserved: 2000
+      current_bidder_id: null,
+      current_bid: 1000,
+      bid_reserved: 0
     });
     const bidderAActive = await marketRepository.listActive({
       page: 1,
@@ -1109,8 +1101,8 @@ describe('MarketRepository 재등록 제약', () => {
     expect(bidderAActive.total).toBe(1);
     expect(bidderAActive.listings[0]).toMatchObject({
       id: listing.id,
-      current_bidder_id: 'auction-bidder-b',
-      bid_reserved: 2000
+      current_bidder_id: null,
+      bid_reserved: 0
     });
     const bidderBActive = await marketRepository.listActive({
       page: 1,
@@ -1122,14 +1114,15 @@ describe('MarketRepository 재등록 제약', () => {
     expect(bidderBActive.total).toBe(1);
     expect(bidderBActive.listings[0]).toMatchObject({
       id: listing.id,
-      current_bidder_id: 'auction-bidder-b',
-      bid_reserved: 2000
+      current_bidder_id: null,
+      bid_reserved: 0
     });
 
     db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(listing.id);
     const soldListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
 
     expect(soldListings).toHaveLength(1);
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 5000 });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-seller')).toEqual({ point: 1900 });
     expect(db.prepare('SELECT status, buyer_id, price, fee, bid_reserved, settled_amount FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
@@ -1166,7 +1159,7 @@ describe('MarketRepository 재등록 제약', () => {
         counterparty_user_id: 'auction-seller',
         amount: 1000,
         source_type: 'market_bid_refund',
-        reason: 'auction_outbid_refund'
+        reason: 'auction_lost_refund'
       },
       {
         user_id: 'auction-seller',

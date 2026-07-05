@@ -37,7 +37,8 @@ const shouldPrompt = !args.has('--non-interactive') && (args.has('--interactive'
 const shouldAutoYes = args.has('--yes') || args.has('-y');
 let shouldUpdateEnv = !args.has('--skip-env-update') && process.env.PG_IMPORT_UPDATE_ENV !== 'false' && !shouldSchemaOnly && !shouldVerifyOnly;
 let shouldSyncFiles = !args.has('--skip-file-sync') && (args.has('--sync-files') || process.env.PG_IMPORT_SYNC_FILES === 'true');
-const batchSize = Math.max(1, Number(process.env.PG_IMPORT_BATCH_SIZE || 500));
+const batchSize = Math.max(1, Number(getCliValue('--batch-size') || process.env.PG_IMPORT_BATCH_SIZE || 5000));
+const maxInsertParams = Math.max(1000, Number(getCliValue('--max-insert-params') || process.env.PG_IMPORT_MAX_INSERT_PARAMS || 60000));
 
 const schemaPath = path.resolve(projectRoot, process.env.POSTGRES_SCHEMA_PATH || 'init-db-postgres.sql');
 let envUpdatePath = path.resolve(projectRoot, getCliValue('--env-path') || process.env.PG_IMPORT_ENV_PATH || path.join('backend', '.env'));
@@ -672,6 +673,46 @@ const tableOrder = (sourceTables) => {
   return ordered;
 };
 
+const isNumericMysqlType = (type) => ['tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint'].includes(String(type || '').toLowerCase());
+
+const canUseKeysetImport = (mysqlColumns, columns) => {
+  const idColumn = mysqlColumns.find((col) => col.COLUMN_NAME === 'id');
+  return columns.includes('id') && idColumn && isNumericMysqlType(idColumn.DATA_TYPE);
+};
+
+const fastRebuildIndexes = {
+  value_history: {
+    drop: [
+      'DROP INDEX IF EXISTS idx_value_history_channel_id',
+      'DROP INDEX IF EXISTS idx_value_history_recorded_at',
+      'DROP INDEX IF EXISTS idx_value_history_channel_recorded'
+    ],
+    create: [
+      'CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id)',
+      'CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(recorded_at)',
+      'CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC)'
+    ]
+  }
+};
+
+const prepareFastImportForTable = async (pg, table) => {
+  if (!shouldReset || shouldSchemaOnly || shouldVerifyOnly || args.has('--keep-import-indexes')) return;
+  const plan = fastRebuildIndexes[table];
+  if (!plan) return;
+  for (const statement of plan.drop) {
+    await pg.unsafe(statement);
+  }
+};
+
+const finalizeFastImportForTable = async (pg, table) => {
+  if (!shouldReset || shouldSchemaOnly || shouldVerifyOnly || args.has('--keep-import-indexes')) return;
+  const plan = fastRebuildIndexes[table];
+  if (!plan) return;
+  for (const statement of plan.create) {
+    await pg.unsafe(statement);
+  }
+};
+
 const normalizeDateCell = (value, pgColumn) => {
   const type = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
   const isDateOnly = type === 'date';
@@ -733,32 +774,52 @@ const importTable = async (mysql, pg, table) => {
   const total = Number(countRow?.count || 0);
   if (total === 0) return 0;
 
-  const selectSql = `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} LIMIT ? OFFSET ?`;
+  const effectiveBatchSize = Math.max(1, Math.min(batchSize, Math.floor(maxInsertParams / Math.max(columns.length, 1))));
+  const useKeyset = canUseKeysetImport(mysqlColumns, columns);
+  const selectSql = useKeyset
+    ? `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} WHERE ${quoteMysqlIdent('id')} > ? ORDER BY ${quoteMysqlIdent('id')} ASC LIMIT ?`
+    : `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} LIMIT ? OFFSET ?`;
   let imported = 0;
-  for (let offset = 0; offset < total; offset += batchSize) {
-    const [rows] = await mysql.query(selectSql, [batchSize, offset]);
-    if (rows.length === 0) break;
-    const params = [];
-    const tuples = rows.map((row, rowIndex) => {
-      const placeholders = columns.map((column) => {
-        params.push(normalizeCell(row[column], pgColumnMap.get(column), { table, column, offset: offset + rowIndex }));
-        return `$${params.length}`;
+  let lastId = 0;
+  await prepareFastImportForTable(pg, table);
+  try {
+    for (let offset = 0; offset < total; offset += effectiveBatchSize) {
+      const [rows] = useKeyset
+        ? await mysql.query(selectSql, [lastId, effectiveBatchSize])
+        : await mysql.query(selectSql, [effectiveBatchSize, offset]);
+      if (rows.length === 0) break;
+      const params = [];
+      const tuples = rows.map((row, rowIndex) => {
+        const placeholders = columns.map((column) => {
+          params.push(normalizeCell(row[column], pgColumnMap.get(column), { table, column, offset: offset + rowIndex }));
+          return `$${params.length}`;
+        });
+        return `(${placeholders.join(', ')})`;
       });
-      return `(${placeholders.join(', ')})`;
-    });
-    const insertSql = `
-      INSERT INTO ${quotePgIdent(table)} (${columns.map(quotePgIdent).join(', ')})
-      VALUES ${tuples.join(', ')}
-      ON CONFLICT DO NOTHING
-    `;
-    try {
-      await pg.unsafe(insertSql, params);
-    } catch (err) {
-      err.message = `${err.message}\n[table] ${table}\n[offset] ${offset}\n[columns] ${columns.join(', ')}`;
-      throw err;
+      const insertSql = `
+        INSERT INTO ${quotePgIdent(table)} (${columns.map(quotePgIdent).join(', ')})
+        VALUES ${tuples.join(', ')}
+        ON CONFLICT DO NOTHING
+      `;
+      try {
+        await pg.unsafe(insertSql, params);
+      } catch (err) {
+        err.message = `${err.message}\n[table] ${table}\n[offset] ${offset}\n[columns] ${columns.join(', ')}`;
+        throw err;
+      }
+      imported += rows.length;
+      if (useKeyset) {
+        const nextLastId = Number(rows[rows.length - 1]?.id);
+        if (!Number.isFinite(nextLastId) || nextLastId <= lastId) {
+          throw new Error(`${table} keyset import id 순서가 올바르지 않습니다. lastId=${lastId}, next=${nextLastId}`);
+        }
+        lastId = nextLastId;
+      }
+      process.stdout.write(`\r[MySQL -> PostgreSQL] ${table}: ${imported}/${total}`);
+      if (useKeyset && rows.length < effectiveBatchSize) break;
     }
-    imported += rows.length;
-    process.stdout.write(`\r[MySQL -> PostgreSQL] ${table}: ${imported}/${total}`);
+  } finally {
+    await finalizeFastImportForTable(pg, table);
   }
   process.stdout.write('\n');
   return imported;

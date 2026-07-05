@@ -141,23 +141,6 @@ const formatRemaining = (ms: number): string => {
   return `${seconds}초`;
 };
 
-const maskBidderDisplayName = (username: string | null | undefined): string => {
-  const value = String(username || '').trim();
-  if (!value) return '입찰자 ***';
-  return `${Array.from(value)[0]}***`;
-};
-
-const getBidderDisplayName = (
-  listing: any,
-  currentUser: { id: string; username?: string | null } | null | undefined
-): string => {
-  if (!listing?.current_bidder_id) return '';
-  if (currentUser?.id && String(listing.current_bidder_id) === String(currentUser.id)) {
-    return currentUser.username || String(listing.current_bidder_username || '').trim() || '나';
-  }
-  return maskBidderDisplayName(listing.current_bidder_username);
-};
-
 const getPaginationItems = (currentPage: number, totalPages: number): Array<number | 'ellipsis'> => {
   if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
@@ -518,7 +501,7 @@ export const ShopTab: React.FC = () => {
   };
 
   // silent=true(백그라운드 폴링)일 때는 로딩 스켈레톤을 띄우지 않고 변경분만 조용히 반영합니다.
-  // → 경매 정보(입찰가·남은 시간 등) 갱신은 받아오되, 10초마다 리스트가 통째로 새로고침되는 현상 방지.
+  // → 경매 정보(시작가·남은 시간 등) 갱신은 받아오되, 10초마다 리스트가 통째로 새로고침되는 현상 방지.
   const fetchMarketListings = async (silent = false) => {
     lastMarketRefreshAtRef.current = Date.now();
     if (!silent) setIsLoadingMarket(true);
@@ -1028,9 +1011,7 @@ export const ShopTab: React.FC = () => {
       return;
     }
     const amount = Math.floor(Number(bidInputs[listing.id]));
-    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
-    const hasActiveBid = Boolean(listing.current_bidder_id);
-    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
+    const minBid = Number(listing.starting_bid || listing.price || 0);
     if (!Number.isFinite(amount) || amount < minBid) {
       toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
       return;
@@ -1767,7 +1748,7 @@ export const ShopTab: React.FC = () => {
                 <option value="price_desc">높은 가격순</option>
                 <option value="price_asc">낮은 가격순</option>
                 <option value="ending_soon">마감 임박순</option>
-                <option value="bid_desc">현재 입찰가순</option>
+                <option value="bid_desc">시작가 높은순</option>
               </select>
               <select
                 value={marketType}
@@ -1897,17 +1878,15 @@ export const ShopTab: React.FC = () => {
                     const star = listing.card?.star ?? 0;
                     const border = listing.card?.border;
                     const isAuction = listing.listing_type === 'auction';
-                    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
+                    const startBid = Number(listing.starting_bid || listing.price || 0);
                     const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
-                    const hasActiveBid = Boolean(listing.current_bidder_id);
-                    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
+                    const minBid = startBid;
                     const endsAt = parseAppDate(listing.auction_ends_at);
                     const remainingMs = endsAt ? endsAt.getTime() - nowTs : 0;
                     const isEnded = !!endsAt && remainingMs <= 0;
                     const isUrgent = isAuction && !isEnded && remainingMs <= 3 * 60_000; // 3분 이하
                     const isSoon = isAuction && !isEnded && remainingMs < 5 * 60_000;   // 5분 미만
                     const listingImageUrl = cardImage(streamer, star);
-                    const currentBidderDisplayName = getBidderDisplayName(listing, user);
 
                     return (
                       <div key={listing.id} className="cute-card-pop flex flex-col gap-2 rounded-[1.75rem] border border-border/60 bg-secondary/20 p-2 shadow-sm hover:border-primary/30 hover:shadow-md">
@@ -1975,7 +1954,7 @@ export const ShopTab: React.FC = () => {
                             <span className="text-muted-foreground truncate" title={listing.seller_username}>판매: {listing.seller_username}</span>
                             <span className={`cute-number-font flex shrink-0 items-center font-black ${isAuction ? 'text-violet-500' : 'text-primary'}`}>
                               {isAuction ? <Gavel className="h-3 w-3 mr-0.5" /> : <Coins className="h-3 w-3 mr-0.5" />}
-                              {(isAuction ? currentBid : listing.price).toLocaleString()}
+                              {(isAuction ? startBid : listing.price).toLocaleString()}
                             </span>
                           </div>
                           {isAuction && (
@@ -1996,17 +1975,15 @@ export const ShopTab: React.FC = () => {
                                 <Clock className="h-3 w-3 shrink-0" />
                                 {isEnded ? '마감 처리 중' : `${formatRemaining(remainingMs)} 남음`}
                               </div>
-                              {/* 현재가 */}
+                              {/* 시작가 */}
                               <div className="flex items-center justify-between text-[10px] font-bold text-violet-700 dark:text-violet-200">
-                                <span>현재가</span>
-                                <span className="cute-number-font">{currentBid.toLocaleString()} P</span>
+                                <span>시작가</span>
+                                <span className="cute-number-font">{startBid.toLocaleString()} P</span>
                               </div>
-                              {/* 최고 입찰자 / 마감 임박 안내 */}
+                              {/* 비공개 입찰 안내 */}
                               <div className="flex items-center justify-between gap-1 text-[9px] font-semibold text-violet-700/70 dark:text-violet-100/60">
-                                <span className="truncate">
-                                  {currentBidderDisplayName ? `🏆 ${currentBidderDisplayName}` : '아직 입찰 없음'}
-                                </span>
-                                {isUrgent && <span className="shrink-0 font-black text-red-500">입찰 시 3분으로 연장</span>}
+                                <span className="truncate">입찰 정보 비공개</span>
+                                {isUrgent && <span className="shrink-0 font-black text-red-500">마감 임박</span>}
                               </div>
                             </div>
                           )}
@@ -2059,7 +2036,7 @@ export const ShopTab: React.FC = () => {
                               )}
                               {streamer?.channel_id && (
                                 <button
-                                  onClick={() => handleCreateWatch({ channel_id: streamer.channel_id, star, max_price: isAuction ? buyNowPrice || currentBid : listing.price })}
+                                  onClick={() => handleCreateWatch({ channel_id: streamer.channel_id, star, max_price: isAuction ? buyNowPrice || startBid : listing.price })}
                                   disabled={watchBusy}
                                   className="flex w-full items-center justify-center gap-1 rounded-2xl border border-sky-200 bg-sky-50 py-1.5 text-[10px] font-black text-sky-600 transition hover:bg-sky-100 disabled:opacity-50 dark:border-sky-300/15 dark:bg-sky-400/10 dark:text-sky-200"
                                 >
@@ -2172,9 +2149,8 @@ export const ShopTab: React.FC = () => {
                         const streamer = l.card?.streamer;
                         const star = l.card?.star ?? 0;
                         const isAuction = l.listing_type === 'auction';
-                        const currentBid = Number(l.current_bid || l.starting_bid || l.price || 0);
+                        const startBid = Number(l.starting_bid || l.price || 0);
                         const feeRate = Number(l.fee_rate ?? 5);
-                        const hasActiveBid = isAuction && Boolean(l.current_bidder_id) && Number(l.bid_reserved || 0) > 0;
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
                             <td className="py-3 flex items-center gap-2">
@@ -2191,7 +2167,7 @@ export const ShopTab: React.FC = () => {
                             </td>
                             <td className="py-3">
                               <div className={`font-black ${isAuction ? 'text-violet-500' : 'text-yellow-500'}`}>
-                                {isAuction ? `${currentBid.toLocaleString()} P 입찰` : `${l.price.toLocaleString()} P`}
+                                {isAuction ? `${startBid.toLocaleString()} P 시작` : `${l.price.toLocaleString()} P`}
                               </div>
                               {isAuction && (
                                 <div className="mt-0.5 text-[9px] font-bold text-muted-foreground">
@@ -2236,17 +2212,11 @@ export const ShopTab: React.FC = () => {
                                 <div className="flex flex-col items-end gap-1">
                                   <button
                                     onClick={() => handleCancelMarketItem(l.id)}
-                                    disabled={cancellingListingId === l.id || hasActiveBid}
-                                    title={hasActiveBid ? '이미 입찰자가 있는 경매는 취소할 수 없습니다.' : undefined}
+                                    disabled={cancellingListingId === l.id}
                                     className="rounded-lg bg-rose-600/10 px-2.5 py-1 text-[10px] font-bold text-rose-500 transition hover:bg-rose-600/20 disabled:pointer-events-none disabled:opacity-45"
                                   >
                                     {cancellingListingId === l.id ? '취소 중...' : '등록 취소'}
                                   </button>
-                                  {hasActiveBid && (
-                                    <span className="max-w-[8rem] text-right text-[9px] font-bold leading-tight text-muted-foreground">
-                                      입찰 후 취소 불가
-                                    </span>
-                                  )}
                                 </div>
                               ) : (
                                 <button

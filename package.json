@@ -24,6 +24,7 @@
     "migrate:backend": "npm run migrate --workspace=backend",
     "migrate:sqlite-to-mysql": "node scripts/sqlite-to-mysql.js",
     "migrate:mysql-to-postgres": "node scripts/mysql-to-postgres.js",
+    "postgres:tune": "node scripts/postgres-tune.js",
     "arena:readiness": "node scripts/arena-service-readiness.mjs",
     "arena:balance": "npm run arena:balance --workspace=backend"
   }

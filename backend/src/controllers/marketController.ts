@@ -57,10 +57,21 @@ const bidderUsernameForViewer = (listing: MarketListing, viewerId?: string): str
     : maskBidderUsername(listing.current_bidder_username);
 };
 
-const marketListingForViewer = (listing: MarketListing, viewerId?: string): MarketListing => ({
-  ...listing,
-  current_bidder_username: bidderUsernameForViewer(listing, viewerId) ?? undefined
-});
+const marketListingForViewer = (listing: MarketListing, viewerId?: string): MarketListing => {
+  if (listing.status === 'PENDING' && listing.listing_type === 'auction') {
+    return {
+      ...listing,
+      current_bid: listing.starting_bid ?? listing.price,
+      current_bidder_id: null,
+      current_bidder_username: undefined,
+      bid_reserved: 0
+    };
+  }
+  return {
+    ...listing,
+    current_bidder_username: bidderUsernameForViewer(listing, viewerId) ?? undefined
+  };
+};
 
 const marketListingsForViewer = (listings: MarketListing[], viewerId?: string): MarketListing[] =>
   listings.map((listing) => marketListingForViewer(listing, viewerId));
@@ -88,20 +99,19 @@ const notify = (
 
 const realtimeListingPatch = (listing: MarketListing | null | undefined, viewerId?: string) => {
   if (!listing?.id) return null;
+  const publicListing = marketListingForViewer(listing, viewerId);
   return {
-    id: listing.id,
-    status: listing.status,
-    price: listing.price,
-    listing_type: listing.listing_type,
-    buy_now_price: listing.buy_now_price ?? null,
-    starting_bid: listing.starting_bid ?? null,
-    current_bid: listing.current_bid ?? null,
-    current_bidder_id: listing.current_bidder_id ?? null,
-    current_bidder_username: viewerId
-      ? bidderUsernameForViewer(listing, viewerId)
-      : maskBidderUsername(listing.current_bidder_username),
-    auction_ends_at: listing.auction_ends_at ?? null,
-    updated_at: listing.updated_at ?? new Date().toISOString()
+    id: publicListing.id,
+    status: publicListing.status,
+    price: publicListing.price,
+    listing_type: publicListing.listing_type,
+    buy_now_price: publicListing.buy_now_price ?? null,
+    starting_bid: publicListing.starting_bid ?? null,
+    current_bid: publicListing.current_bid ?? null,
+    current_bidder_id: publicListing.current_bidder_id ?? null,
+    current_bidder_username: publicListing.current_bidder_username ?? null,
+    auction_ends_at: publicListing.auction_ends_at ?? null,
+    updated_at: publicListing.updated_at ?? new Date().toISOString()
   };
 };
 
@@ -319,10 +329,10 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: 'BadRequest', message: '판매 중인 매물만 취소할 수 있습니다.' });
     }
 
-    if (listing.listing_type === 'auction' && listing.current_bidder_id && Number(listing.bid_reserved || 0) > 0) {
+    if (listing.listing_type === 'auction' && await marketRepository.hasBids(id)) {
       return res.status(400).json({
         error: 'BadRequest',
-        message: '이미 입찰자가 있는 경매는 등록자가 취소할 수 없습니다.'
+        message: '이미 입찰이 있는 경매는 등록자가 취소할 수 없습니다.'
       });
     }
 
@@ -477,31 +487,15 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
       NOT_FOUND_OR_NOT_AUCTION: '진행 중인 경매 매물을 찾을 수 없습니다.',
       CANNOT_BID_OWN_ITEM: '본인의 경매에는 입찰할 수 없습니다.',
       AUCTION_ENDED: '이미 종료된 경매입니다.',
-      BID_TOO_LOW: '입찰자가 없으면 현재가부터, 이후에는 현재가보다 100P 이상 높은 금액으로 입찰해 주세요.',
+      BID_TOO_LOW: '시작가 이상으로 입찰해 주세요.',
       INSUFFICIENT_POINT: '보유 포인트가 부족합니다.'
     };
     return res.status(400).json({ error: result.reason, message: messageMap[result.reason] || '입찰에 실패했습니다.' });
-  }
-  const previousBidderId = result.previous_bidder_id;
-  if (previousBidderId && previousBidderId !== user.id) {
-    const listing = await marketRepository.findById(id);
-    const streamerName = listing?.card?.streamer?.name || '스트리머';
-    const star = listing?.card?.star ?? 0;
-    notify(
-      previousBidderId,
-      '[오픈마켓] 경매 상위 입찰 발생',
-      `[${streamerName}] ${star}성 카드 경매에서 다른 유저가 ${amount.toLocaleString()}P로 상위 입찰했습니다.`,
-      'shop:market',
-      `market-auction:${id}`
-    );
   }
   const updatedListing = await marketRepository.findById(id).catch(() => null);
   const listingPatch = realtimeListingPatch(updatedListing, user.id);
   publishMarketUpdated('auction_bid', updatedListing, {
     listingId: id,
-    current_bid: result.current_bid,
-    current_bidder_id: updatedListing?.current_bidder_id ?? user.id,
-    current_bidder_username: maskBidderUsername(updatedListing?.current_bidder_username ?? user.username),
     auction_ends_at: result.auction_ends_at ?? null
   });
   recordAchievementEvent({

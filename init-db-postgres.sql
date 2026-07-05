@@ -351,6 +351,12 @@ ALTER TABLE notifications ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS group_key TEXT;
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_notifications_group_key ON notifications(user_id, group_key, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_active_latest
+  ON notifications(user_id, created_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread_active
+  ON notifications(user_id)
+  WHERE is_read = FALSE AND deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications(user_id, group_key) WHERE group_key IS NOT NULL;
 
 -- 14. 유저 보유 코스메틱 (미장착 수량)
@@ -439,6 +445,8 @@ CREATE TABLE IF NOT EXISTS chat_rooms (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_a ON chat_rooms(user_a_id, deleted_for_a, updated_at);
 CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_b ON chat_rooms(user_b_id, deleted_for_b, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_a_active ON chat_rooms(user_a_id, updated_at DESC) WHERE deleted_for_a = FALSE;
+CREATE INDEX IF NOT EXISTS idx_chat_rooms_user_b_active ON chat_rooms(user_b_id, updated_at DESC) WHERE deleted_for_b = FALSE;
 CREATE INDEX IF NOT EXISTS idx_chat_rooms_closed_by ON chat_rooms(closed_by_user_id);
 
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -459,6 +467,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_room_id ON chat_messages(room_id, id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_room_visible_latest
+  ON chat_messages(room_id, id DESC)
+  WHERE attachment_deleted_at IS NULL OR message_type <> 'image';
 CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_attachment_expiry ON chat_messages(message_type, attachment_expires_at, attachment_deleted_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_attachments ON chat_messages(sender_id, message_type, attachment_deleted_at, attachment_expires_at);
@@ -547,6 +558,14 @@ CREATE INDEX IF NOT EXISTS idx_user_cards_channel_id ON user_cards(channel_id);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked);
 CREATE INDEX IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden);
+CREATE INDEX IF NOT EXISTS idx_user_cards_visible_user_channel_star
+  ON user_cards(user_id, channel_id, star)
+  WHERE is_hidden = FALSE;
+CREATE INDEX IF NOT EXISTS idx_user_cards_channel_serial
+  ON user_cards(channel_id, serial_number);
+CREATE INDEX IF NOT EXISTS idx_user_cards_unlocked_user_channel_id
+  ON user_cards(user_id, channel_id, id)
+  WHERE is_locked = FALSE;
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_inventory_order
   ON user_cards(user_id, favorite_order ASC NULLS LAST, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_cards_user_favorite_max
@@ -1773,12 +1792,9 @@ RETURNS JSONB AS $$
 DECLARE
   listing market_listings%ROWTYPE;
   bidder_point INTEGER;
-  current_amount INTEGER;
-  current_reserved INTEGER;
+  previous_amount INTEGER;
   min_bid INTEGER;
   payable_now INTEGER;
-  previous_bidder TEXT;
-  next_ends_at TIMESTAMPTZ;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('market_bid:' || p_listing_id::TEXT));
 
@@ -1795,61 +1811,41 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'reason', 'AUCTION_ENDED');
   END IF;
 
-  current_amount := COALESCE(listing.current_bid, listing.starting_bid, listing.price, 0);
-  current_reserved := COALESCE(listing.bid_reserved, 0);
-  previous_bidder := listing.current_bidder_id;
-  min_bid := current_amount;
-  IF previous_bidder IS NOT NULL AND current_reserved > 0 THEN
-    min_bid := current_amount + 100;
-  END IF;
+  min_bid := COALESCE(listing.starting_bid, listing.price, 0);
 
   IF p_amount < min_bid THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
+    RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW');
   END IF;
 
-  IF previous_bidder = p_bidder_id AND current_reserved > 0 THEN
-    payable_now := p_amount - current_reserved;
-  ELSE
-    payable_now := p_amount;
-  END IF;
-  IF payable_now <= 0 THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'BID_TOO_LOW', 'current_bid', current_amount);
-  END IF;
+  SELECT amount INTO previous_amount
+    FROM market_bids
+   WHERE listing_id = p_listing_id AND bidder_id = p_bidder_id
+   ORDER BY id DESC
+   LIMIT 1;
+  payable_now := p_amount - COALESCE(previous_amount, 0);
 
   SELECT point INTO bidder_point FROM users WHERE id = p_bidder_id FOR UPDATE;
-  IF bidder_point IS NULL OR bidder_point < payable_now THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'INSUFFICIENT_POINT', 'current_bid', current_amount);
+  IF bidder_point IS NULL OR (payable_now > 0 AND bidder_point < payable_now) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'INSUFFICIENT_POINT');
   END IF;
 
-  UPDATE users SET point = point - payable_now WHERE id = p_bidder_id;
-  IF previous_bidder IS NOT NULL AND previous_bidder <> p_bidder_id AND current_reserved > 0 THEN
-    UPDATE users SET point = point + current_reserved WHERE id = previous_bidder;
+  IF payable_now > 0 THEN
+    UPDATE users SET point = point - payable_now WHERE id = p_bidder_id;
+  ELSIF payable_now < 0 THEN
+    UPDATE users SET point = point + ABS(payable_now) WHERE id = p_bidder_id;
   END IF;
 
   INSERT INTO market_bids (listing_id, bidder_id, amount)
   VALUES (p_listing_id, p_bidder_id, p_amount);
 
-  IF listing.auction_ends_at IS NOT NULL
-     AND listing.auction_ends_at - NOW() < INTERVAL '1 minute' THEN
-    next_ends_at := NOW() + INTERVAL '3 minutes';
-  ELSE
-    next_ends_at := listing.auction_ends_at;
-  END IF;
-
   UPDATE market_listings
-     SET current_bid = p_amount,
-         current_bidder_id = p_bidder_id,
-         bid_reserved = p_amount,
-         auction_ends_at = next_ends_at,
-         updated_at = NOW()
+     SET updated_at = NOW()
    WHERE id = p_listing_id;
 
   RETURN jsonb_build_object(
     'ok', true,
     'reason', 'OK',
-    'current_bid', p_amount,
-    'auction_ends_at', next_ends_at,
-    'previous_bidder_id', previous_bidder
+    'auction_ends_at', listing.auction_ends_at
   );
 END;
 $$ LANGUAGE plpgsql;

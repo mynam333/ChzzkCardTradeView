@@ -105,11 +105,42 @@ npm run migrate:mysql-to-postgres -- --schema-only
 npm run migrate:mysql-to-postgres -- --data-only --reset
 ```
 
+대량 이력 테이블이 오래 걸리면 batch를 키울 수 있다. 스크립트는 숫자 `id`가 있는 테이블을 `LIMIT/OFFSET` 대신 keyset 방식으로 읽고, `value_history`는 reset 마이그레이션 중 인덱스를 잠시 내렸다가 import 후 재생성한다.
+
+```bash
+npm run migrate:mysql-to-postgres -- --reset --batch-size 10000 --max-insert-params 60000
+```
+
+기존 인덱스를 유지한 채 import하려면 `--keep-import-indexes`를 붙인다.
+
 검증만 다시 수행하려면:
 
 ```bash
 npm run migrate:mysql-to-postgres -- --verify-only
 ```
+
+## PostgreSQL final tuning
+
+마이그레이션 후 실데이터가 들어간 대상 PostgreSQL에서 다음을 실행하면 확장/인덱스 적용, 통계 갱신, 대표 쿼리 `EXPLAIN ANALYZE` 리포트 생성을 한 번에 수행한다. 이 스크립트도 `.env`를 수정하지 않는다.
+
+```bash
+npm run postgres:tune -- --interactive
+```
+
+명령줄로 실행할 수도 있다.
+
+```bash
+npm run postgres:tune -- \
+  --host 10.0.0.20 \
+  --port 5432 \
+  --database chikapo \
+  --user chikapo_app \
+  --password 'POSTGRES_PASSWORD' \
+  --ssl false \
+  --yes
+```
+
+리포트는 기본적으로 `logs/postgres-tuning-report-*.json`에 저장된다. 운영 부하가 걱정되면 `--skip-explain` 또는 `--skip-analyze`를 붙여 단계별로 실행한다. 테이블 bloat 정리까지 같이 하고 싶을 때만 `--vacuum`을 추가한다. 큰 DB에서 인덱스 생성 시간이 길면 `--statement-timeout-ms 0` 기본값을 유지하고, 락 대기만 `--lock-timeout-ms 10000`처럼 조절한다.
 
 ## 백엔드 전환
 

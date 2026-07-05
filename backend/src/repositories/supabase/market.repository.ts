@@ -9,6 +9,34 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return getSupabaseClient();
   }
 
+  private async latestBidRows(listingId: number): Promise<any[]> {
+    const { data } = await this.getClient()
+      .from('market_bids')
+      .select('id, listing_id, bidder_id, amount, created_at')
+      .eq('listing_id', listingId)
+      .order('id', { ascending: false });
+    const byBidder = new Map<string, any>();
+    for (const bid of data || []) {
+      if (!byBidder.has(bid.bidder_id)) byBidder.set(bid.bidder_id, bid);
+    }
+    return Array.from(byBidder.values()).sort((a, b) => {
+      const amountDiff = Number(b.amount || 0) - Number(a.amount || 0);
+      if (amountDiff !== 0) return amountDiff;
+      const timeDiff = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+  }
+
+  private async refundLatestBids(listingId: number, exceptBidderId?: string | null): Promise<void> {
+    for (const bid of await this.latestBidRows(listingId)) {
+      if (exceptBidderId && bid.bidder_id === exceptBidderId) continue;
+      const amount = Number(bid.amount || 0);
+      if (amount <= 0) continue;
+      await this.getClient().rpc('increment_user_point', { p_id: bid.bidder_id, p_delta: amount });
+    }
+  }
+
   private mapRow(row: any, card: any): MarketListing {
     const streamer = card?.streamer;
     return {
@@ -170,6 +198,16 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return this.mapRow(data, cardData);
   }
 
+  async hasBids(listingId: number): Promise<boolean> {
+    const { data, error } = await this.getClient()
+      .from('market_bids')
+      .select('id')
+      .eq('listing_id', listingId)
+      .limit(1)
+      .maybeSingle();
+    return !error && !!data;
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const { data, error } = await this.getClient()
       .from('market_listings')
@@ -274,7 +312,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
 
     // 정렬 적용
     const visiblePrice = (listing: MarketListing) => (listing.listing_type === 'auction'
-      ? Number(listing.current_bid ?? listing.starting_bid ?? listing.price ?? 0)
+      ? Number(listing.starting_bid ?? listing.price ?? 0)
       : Number(listing.price || 0));
     listings.sort((a, b) => {
       if (options.sort === 'latest') {
@@ -382,12 +420,18 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if (!extra && (status === 'CANCELLED' || status === 'AUCTION_ENDED')) {
       const listing = await this.findById(id);
       const reserved = Number(listing?.bid_reserved || 0);
+      if (listing?.status === 'PENDING') {
+        await this.refundLatestBids(id);
+      }
       if (listing?.status === 'PENDING' && reserved > 0 && listing.current_bidder_id) {
-        await this.getClient().rpc('increment_user_point', { p_id: listing.current_bidder_id, p_delta: reserved });
+        const hasBidRows = await this.hasBids(id);
+        if (!hasBidRows) {
+          await this.getClient().rpc('increment_user_point', { p_id: listing.current_bidder_id, p_delta: reserved });
+        }
       }
       const { error } = await this.getClient()
         .from('market_listings')
-        .update({ status, bid_reserved: 0, updated_at: new Date().toISOString() })
+        .update({ status, current_bidder_id: null, bid_reserved: 0, updated_at: new Date().toISOString() })
         .eq('id', id);
 
       if (error) throw error;
@@ -422,6 +466,8 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if (result !== 'OK') {
       return { ok: false, reason: result };
     }
+
+    await this.refundLatestBids(listingId);
 
     const { data: updatedListing } = await this.getClient()
       .from('market_listings')
@@ -519,25 +565,6 @@ export class SupabaseMarketRepository implements IMarketRepository {
   }
 
   async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; current_bid?: number; auction_ends_at?: string | null; previous_bidder_id?: string | null }> {
-    const { data: rpcData, error: rpcError } = await this.getClient().rpc('place_market_bid_atomic', {
-      p_listing_id: listingId,
-      p_bidder_id: bidderId,
-      p_amount: amount
-    });
-    if (!rpcError && rpcData) {
-      const result = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-      return {
-        ok: !!result.ok,
-        reason: String(result.reason || (result.ok ? 'OK' : 'FAILED')),
-        current_bid: result.current_bid == null ? undefined : Number(result.current_bid),
-        auction_ends_at: result.auction_ends_at ?? null,
-        previous_bidder_id: result.previous_bidder_id ?? null
-      };
-    }
-    if (rpcError) {
-      console.warn('[SupabaseMarketRepository] place_market_bid_atomic RPC 실패, 폴백 사용:', rpcError.message);
-    }
-
     const listing = await this.findById(listingId);
     if (!listing || listing.status !== 'PENDING' || listing.listing_type !== 'auction') {
       return { ok: false, reason: 'NOT_FOUND_OR_NOT_AUCTION' };
@@ -547,33 +574,40 @@ export class SupabaseMarketRepository implements IMarketRepository {
       return { ok: false, reason: 'AUCTION_ENDED' };
     }
 
-    const currentBid = Number(listing.current_bid || listing.starting_bid || listing.price || 0);
-    const currentReserved = Number(listing.bid_reserved || 0);
-    const hasActiveBid = Boolean(listing.current_bidder_id) && currentReserved > 0;
-    const minBid = hasActiveBid ? currentBid + 100 : currentBid;
-    if (amount < minBid) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
+    const minBid = Number(listing.starting_bid || listing.price || 0);
+    if (amount < minBid) return { ok: false, reason: 'BID_TOO_LOW' };
 
     const { data: bidder, error: bidderError } = await this.getClient()
       .from('users')
       .select('point')
       .eq('id', bidderId)
       .maybeSingle();
-    const isRaisingOwnBid = listing.current_bidder_id === bidderId && currentReserved > 0;
-    const payableNow = isRaisingOwnBid ? amount - currentReserved : amount;
-    if (payableNow <= 0) return { ok: false, reason: 'BID_TOO_LOW', current_bid: currentBid };
-    if (bidderError || !bidder || Number(bidder.point || 0) < payableNow) {
-      return { ok: false, reason: 'INSUFFICIENT_POINT', current_bid: currentBid };
+    const { data: previousRows } = await this.getClient()
+      .from('market_bids')
+      .select('amount')
+      .eq('listing_id', listingId)
+      .eq('bidder_id', bidderId)
+      .order('id', { ascending: false })
+      .limit(1);
+    const previousAmount = Number(previousRows?.[0]?.amount || 0);
+    const payableNow = amount - previousAmount;
+    if (bidderError || !bidder || (payableNow > 0 && Number(bidder.point || 0) < payableNow)) {
+      return { ok: false, reason: 'INSUFFICIENT_POINT' };
     }
 
-    const { data: deductedBidder, error: deductError } = await this.getClient()
-      .from('users')
-      .update({ point: Number(bidder.point || 0) - payableNow })
-      .eq('id', bidderId)
-      .gte('point', payableNow)
-      .select('id')
-      .maybeSingle();
-    if (deductError) throw deductError;
-    if (!deductedBidder) return { ok: false, reason: 'INSUFFICIENT_POINT', current_bid: currentBid };
+    if (payableNow > 0) {
+      const { data: deductedBidder, error: deductError } = await this.getClient()
+        .from('users')
+        .update({ point: Number(bidder.point || 0) - payableNow })
+        .eq('id', bidderId)
+        .gte('point', payableNow)
+        .select('id')
+        .maybeSingle();
+      if (deductError) throw deductError;
+      if (!deductedBidder) return { ok: false, reason: 'INSUFFICIENT_POINT' };
+    } else if (payableNow < 0) {
+      await this.getClient().rpc('increment_user_point', { p_id: bidderId, p_delta: Math.abs(payableNow) });
+    }
 
     const nowIso = new Date().toISOString();
     const { error: bidError } = await this.getClient()
@@ -581,24 +615,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
       .insert([{ listing_id: listingId, bidder_id: bidderId, amount, created_at: nowIso }]);
     if (bidError) throw bidError;
 
-    if (!isRaisingOwnBid && currentReserved > 0 && listing.current_bidder_id) {
-      await this.getClient().rpc('increment_user_point', { p_id: listing.current_bidder_id, p_delta: currentReserved });
-    }
-
-    // 안티-스나이프: 마감까지 1분 미만일 때 입찰이 들어오면 마감을 3분 연장합니다.
-    const ANTI_SNIPE_THRESHOLD_MS = 60_000;   // 마감 1분 미만이면
-    const ANTI_SNIPE_EXTEND_MS = 3 * 60_000;  // 3분 연장
-    const nowMs = Date.now();
-    const endsAtMs = listing.auction_ends_at ? new Date(listing.auction_ends_at).getTime() : 0;
-    const extendedEndsAt = endsAtMs && endsAtMs - nowMs < ANTI_SNIPE_THRESHOLD_MS
-      ? new Date(nowMs + ANTI_SNIPE_EXTEND_MS).toISOString()
-      : null;
-
-    const updatePayload: any = { current_bid: amount, current_bidder_id: bidderId, bid_reserved: amount, updated_at: nowIso };
-    if (extendedEndsAt) updatePayload.auction_ends_at = extendedEndsAt;
     const { error: updateError } = await this.getClient()
       .from('market_listings')
-      .update(updatePayload)
+      .update({ updated_at: nowIso })
       .eq('id', listingId)
       .eq('status', 'PENDING');
     if (updateError) throw updateError;
@@ -606,9 +625,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return {
       ok: true,
       reason: 'OK',
-      current_bid: amount,
-      auction_ends_at: extendedEndsAt ?? listing.auction_ends_at,
-      previous_bidder_id: listing.current_bidder_id ?? null
+      auction_ends_at: listing.auction_ends_at
     };
   }
 
@@ -631,21 +648,22 @@ export class SupabaseMarketRepository implements IMarketRepository {
 
     for (const row of rows) {
       try {
-        const amount = Number(row.current_bid || row.starting_bid || row.price || 0);
         const startingBid = Number(row.starting_bid || 0);
-        const bidderId = row.current_bidder_id as string | null;
+        const bids = await this.latestBidRows(row.id);
+        const winningBid = bids[0];
+        const amount = Number(winningBid?.amount || 0);
+        const bidderId = winningBid?.bidder_id as string | null;
         if (!bidderId || amount <= 0 || amount < startingBid) {
           await pushEnded(row);
           continue;
         }
 
-        const reserved = Number(row.bid_reserved || 0);
         const { data: bidder } = await this.getClient()
           .from('users')
-          .select('point')
+          .select('id')
           .eq('id', bidderId)
           .maybeSingle();
-        if (!bidder || (reserved <= 0 && Number(bidder.point || 0) < amount)) {
+        if (!bidder) {
           await pushEnded(row);
           continue;
         }
@@ -653,15 +671,8 @@ export class SupabaseMarketRepository implements IMarketRepository {
         const feeRate = Number(row.fee_rate ?? FIXED_MARKET_FEE_RATE);
         const { fee, settledAmount } = calculateMarketFee(amount, feeRate);
         const client = this.getClient();
-        if (reserved <= 0) {
-          const { error: buyerError } = await client
-            .from('users')
-            .update({ point: Number(bidder.point || 0) - amount })
-            .eq('id', bidderId)
-            .gte('point', amount);
-          if (buyerError) throw buyerError;
-        }
 
+        await this.refundLatestBids(row.id, bidderId);
         await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
         await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
         const { error: listingError } = await client
@@ -669,6 +680,8 @@ export class SupabaseMarketRepository implements IMarketRepository {
           .update({
             status: 'SOLD',
             buyer_id: bidderId,
+            current_bidder_id: bidderId,
+            current_bid: amount,
             price: amount,
             fee,
             bid_reserved: 0,
@@ -680,7 +693,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
         if (listingError) throw listingError;
 
         const cardData = await this.getCardDetail(row.user_card_id);
-        settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
+        settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, current_bidder_id: bidderId, current_bid: amount, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
       } catch (err: any) {
         console.warn('[SupabaseMarketRepository] 만료 경매 정리 실패, 경매 종료 처리 시도:', row.id, err?.message || err);
         try {
