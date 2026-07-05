@@ -254,6 +254,19 @@ DB_SCHEMA_RETRY_DELAY="${DB_SCHEMA_RETRY_DELAY:-5}"
 USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
 PORT_VALUE="$(env_value PORT 5000)"
 CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
+API_HEALTHCHECK_ATTEMPTS="${API_HEALTHCHECK_ATTEMPTS:-60}"
+API_HEALTHCHECK_INTERVAL_SECONDS="${API_HEALTHCHECK_INTERVAL_SECONDS:-2}"
+CHAT_HEALTHCHECK_ATTEMPTS="${CHAT_HEALTHCHECK_ATTEMPTS:-30}"
+CHAT_HEALTHCHECK_INTERVAL_SECONDS="${CHAT_HEALTHCHECK_INTERVAL_SECONDS:-2}"
+
+is_positive_integer() {
+  [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
+}
+
+if ! is_positive_integer "${API_HEALTHCHECK_ATTEMPTS}"; then API_HEALTHCHECK_ATTEMPTS=60; fi
+if ! is_positive_integer "${API_HEALTHCHECK_INTERVAL_SECONDS}"; then API_HEALTHCHECK_INTERVAL_SECONDS=2; fi
+if ! is_positive_integer "${CHAT_HEALTHCHECK_ATTEMPTS}"; then CHAT_HEALTHCHECK_ATTEMPTS=30; fi
+if ! is_positive_integer "${CHAT_HEALTHCHECK_INTERVAL_SECONDS}"; then CHAT_HEALTHCHECK_INTERVAL_SECONDS=2; fi
 
 run_with_db_timeout() {
   if command -v timeout >/dev/null 2>&1; then
@@ -502,6 +515,12 @@ if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; th
 fi
 
 echo "[deploy] reload api without downtime"
+if [ "${DEPLOY_RECOVERY_MODE:-false}" = "true" ]; then
+  echo "[deploy] recovery mode: stop workers before api reload"
+  for app_name in ${WORKER_APP_NAMES}; do
+    "${PM2_BIN}" stop "${app_name}" >/dev/null 2>&1 || true
+  done
+fi
 "${PM2_BIN}" startOrReload ecosystem.config.cjs --only "${API_APP_NAME}" --update-env
 
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
@@ -514,17 +533,18 @@ if [ -z "${HEALTHCHECK_URL}" ]; then
 fi
 
 echo "[deploy] health check: ${HEALTHCHECK_URL}"
-for attempt in $(seq 1 30); do
+for attempt in $(seq 1 "${API_HEALTHCHECK_ATTEMPTS}"); do
   if curl -fsSk "${HEALTHCHECK_URL}" >/dev/null; then
     echo "[deploy] api is healthy"
     break
   fi
-  if [ "${attempt}" = "30" ]; then
+  if [ "${attempt}" = "${API_HEALTHCHECK_ATTEMPTS}" ]; then
     echo "[deploy] api health check failed"
     "${PM2_BIN}" status
+    "${PM2_BIN}" logs "${API_APP_NAME}" --lines 80 --nostream || true
     exit 1
   fi
-  sleep 1
+  sleep "${API_HEALTHCHECK_INTERVAL_SECONDS}"
 done
 
 echo "[deploy] reload workers sequentially"
@@ -533,17 +553,18 @@ for app_name in ${WORKER_APP_NAMES}; do
   if [ "${app_name}" = "chikapo-chat-worker" ]; then
     CHAT_HEALTHCHECK_URL="${CHAT_HEALTHCHECK_URL:-http://127.0.0.1:${CHAT_WORKER_PORT_VALUE}/health}"
     echo "[deploy] chat worker health check: ${CHAT_HEALTHCHECK_URL}"
-    for attempt in $(seq 1 20); do
+    for attempt in $(seq 1 "${CHAT_HEALTHCHECK_ATTEMPTS}"); do
       if curl -fsSk "${CHAT_HEALTHCHECK_URL}" >/dev/null; then
         echo "[deploy] chat worker is healthy"
         break
       fi
-      if [ "${attempt}" = "20" ]; then
+      if [ "${attempt}" = "${CHAT_HEALTHCHECK_ATTEMPTS}" ]; then
         echo "[deploy] chat worker health check failed"
         "${PM2_BIN}" status
+        "${PM2_BIN}" logs "${app_name}" --lines 80 --nostream || true
         exit 1
       fi
-      sleep 1
+      sleep "${CHAT_HEALTHCHECK_INTERVAL_SECONDS}"
     done
   fi
   sleep 2

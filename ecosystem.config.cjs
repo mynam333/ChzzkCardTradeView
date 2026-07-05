@@ -7,8 +7,8 @@ module.exports = {
       instances: process.env.API_INSTANCES || 2,
       exec_mode: 'cluster',
       wait_ready: true,
-      listen_timeout: 15000,
-      kill_timeout: 15000,
+      listen_timeout: Number(process.env.API_LISTEN_TIMEOUT_MS || 60000),
+      kill_timeout: Number(process.env.API_KILL_TIMEOUT_MS || 30000),
       max_memory_restart: process.env.API_MAX_MEMORY_RESTART || '700M',
       env: {
         NODE_ENV: 'production',
@@ -70,8 +70,8 @@ module.exports = {
       instances: 1,
       exec_mode: 'fork',
       wait_ready: true,
-      listen_timeout: 15000,
-      kill_timeout: 15000,
+      listen_timeout: Number(process.env.CHAT_WORKER_LISTEN_TIMEOUT_MS || 60000),
+      kill_timeout: Number(process.env.CHAT_WORKER_KILL_TIMEOUT_MS || 30000),
       max_memory_restart: process.env.CHAT_WORKER_MAX_MEMORY_RESTART || '650M',
       env: {
         NODE_ENV: 'production',
