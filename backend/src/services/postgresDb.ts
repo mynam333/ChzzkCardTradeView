@@ -422,6 +422,7 @@ const normalizeBooleanSql = (sql: string): string => {
       .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*=\\s*0`, 'gi'), 'COALESCE($1, FALSE) = FALSE')
       .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*=\\s*1`, 'gi'), 'COALESCE($1, FALSE) = TRUE')
       .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)\\s*<>\\s*0`, 'gi'), 'COALESCE($1, FALSE) <> FALSE')
+      .replace(new RegExp(`COALESCE\\(\\s*${ident}\\s*,\\s*0\\s*\\)`, 'gi'), 'COALESCE($1, FALSE)')
       .replace(new RegExp(`\\b${ident}\\s*=\\s*0\\b`, 'gi'), '$1 = FALSE')
       .replace(new RegExp(`\\b${ident}\\s*=\\s*1\\b`, 'gi'), '$1 = TRUE')
       .replace(new RegExp(`\\b${ident}\\s+IS\\s+0\\b`, 'gi'), '$1 IS FALSE')

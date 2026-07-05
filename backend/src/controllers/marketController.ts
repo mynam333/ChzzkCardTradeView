@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { marketRepository, userCardRepository } from '../repositories';
+import { marketRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { sendPushToUser } from './pushController';
 import { getUserReservations } from './tradeController';
@@ -9,6 +9,7 @@ import { publishRealtimeEvent } from '../services/realtimeStream';
 import { clearUserRankingCaches } from './playController';
 import type { MarketListing } from '../repositories/interfaces';
 import { recordAchievementEvent } from '../services/achievementService';
+import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000));
@@ -130,6 +131,81 @@ const publishMarketUpdated = (reason: string, listing?: MarketListing | null, ex
 const publishRankingUpdated = (reason: string) => {
   clearUserRankingCaches();
   publishRealtimeEvent('ranking', { reason });
+};
+
+type MarketOwnedCard = {
+  id: number;
+  user_id: string;
+  channel_id: string;
+  star: number;
+  is_locked: boolean;
+};
+
+const toBooleanFlag = (value: unknown): boolean =>
+  value === true || value === 1 || value === '1';
+
+const normalizeOwnedCard = (row: any): MarketOwnedCard => ({
+  id: Number(row.id),
+  user_id: String(row.user_id),
+  channel_id: String(row.channel_id),
+  star: Number(row.star ?? 0),
+  is_locked: toBooleanFlag(row.is_locked)
+});
+
+const findMarketOwnedCard = async (userId: string, cardId: number): Promise<MarketOwnedCard | null> => {
+  if (getDbMode() === 'MYSQL') {
+    const row = await getMysqlDb().get(
+      'SELECT id, user_id, channel_id, COALESCE(star, 0) AS star, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ?',
+      cardId,
+      userId
+    );
+    return row ? normalizeOwnedCard(row) : null;
+  }
+
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient()
+      .from('user_cards')
+      .select('id,user_id,channel_id,star,is_locked')
+      .eq('id', cardId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? normalizeOwnedCard(data) : null;
+  }
+
+  const row = getSqliteDb().prepare(
+    'SELECT id, user_id, channel_id, COALESCE(star, 0) AS star, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ?'
+  ).get(cardId, userId);
+  return row ? normalizeOwnedCard(row) : null;
+};
+
+const countUnlockedOwnedCardsForMarket = async (userId: string, channelId: string, star: number): Promise<number> => {
+  if (getDbMode() === 'MYSQL') {
+    const row = await getMysqlDb().get(
+      'SELECT COUNT(*) AS count FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star, 0) = ? AND COALESCE(is_locked, 0) = 0',
+      userId,
+      channelId,
+      star
+    );
+    return Number(row?.count || 0);
+  }
+
+  if (getDbMode() === 'SUPABASE') {
+    const { data, error } = await getSupabaseClient()
+      .from('user_cards')
+      .select('id,star,is_locked')
+      .eq('user_id', userId)
+      .eq('channel_id', channelId);
+    if (error) throw error;
+    return (data || []).filter((card: any) =>
+      Number(card.star ?? 0) === star && !toBooleanFlag(card.is_locked)
+    ).length;
+  }
+
+  const row = getSqliteDb().prepare(
+    'SELECT COUNT(*) AS count FROM user_cards WHERE user_id = ? AND channel_id = ? AND COALESCE(star, 0) = ? AND COALESCE(is_locked, 0) = 0'
+  ).get(userId, channelId, star) as any;
+  return Number(row?.count || 0);
 };
 
 /**
@@ -257,9 +333,9 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
   const feeRate = listingType === 'auction' ? getAuctionFeeRate(auctionHours) : FIXED_MARKET_FEE_RATE;
 
   try {
-    // 1) 내 소유 카드인지 검사
-    const myCards = await userCardRepository.findByUserId(user.id);
-    const targetCard = myCards.find(c => c.id === cardId);
+    // 1) 내 소유 카드인지 검사. 보관함 목록 조회는 streamer 조인 결과에 의존하므로
+    // 마켓 등록 검증은 user_cards 원본을 직접 확인한다.
+    const targetCard = await findMarketOwnedCard(user.id, cardId);
     if (!targetCard) {
       return res.status(404).json({ error: 'NotFound', message: '소유하고 있지 않은 카드입니다.' });
     }
@@ -279,7 +355,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     // 3) 에스크로(교환 예약 등) 검증
     const reservations = await getUserReservations(user.id);
     const key = `${targetCard.channel_id}#${targetCard.star ?? 0}`;
-    const ownedCount = myCards.filter(c => !c.is_locked && c.channel_id === targetCard.channel_id && (c.star ?? 0) === (targetCard.star ?? 0)).length;
+    const ownedCount = await countUnlockedOwnedCardsForMarket(user.id, targetCard.channel_id, targetCard.star ?? 0);
     const reservedCount = reservations.cardsByStar[key] || 0;
 
     if (ownedCount - reservedCount <= 0) {
