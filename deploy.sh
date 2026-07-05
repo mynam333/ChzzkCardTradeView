@@ -11,6 +11,7 @@ API_APP_NAME="${API_APP_NAME:-chikapo-api}"
 WORKER_APP_NAMES="${WORKER_APP_NAMES:-chikapo-live-worker chikapo-scheduler-worker chikapo-backup-worker chikapo-image-worker chikapo-chat-worker chikapo-arena-worker}"
 KEEP_RELEASES="${KEEP_RELEASES:-0}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
+PNPM_VERSION="${PNPM_VERSION:-10.10.0}"
 CLEANUP_RELEASE_ARTIFACTS="${CLEANUP_RELEASE_ARTIFACTS:-true}"
 
 cleanup_release_artifacts() {
@@ -443,13 +444,37 @@ if [ "${NEED_INSTALL}" != "true" ]; then
 fi
 
 if [ "${NEED_INSTALL}" = "true" ]; then
-  if ! command -v pnpm >/dev/null 2>&1; then
+  PNPM_COMMAND=()
+  PNPM_BIN="$(resolve_command pnpm || true)"
+  if [ -n "${PNPM_BIN}" ]; then
+    PNPM_COMMAND=("${PNPM_BIN}")
+  else
+    COREPACK_BIN="$(resolve_command corepack || true)"
+    if [ -n "${COREPACK_BIN}" ]; then
+      echo "[deploy] pnpm not found; preparing pnpm@${PNPM_VERSION} with corepack"
+      "${COREPACK_BIN}" enable >/dev/null 2>&1 || true
+      if ! "${COREPACK_BIN}" prepare "pnpm@${PNPM_VERSION}" --activate; then
+        echo "[deploy] corepack failed to prepare pnpm@${PNPM_VERSION}"
+      fi
+      PNPM_BIN="$(resolve_command pnpm || true)"
+      if [ -n "${PNPM_BIN}" ]; then
+        PNPM_COMMAND=("${PNPM_BIN}")
+      elif "${COREPACK_BIN}" pnpm --version >/dev/null 2>&1; then
+        PNPM_COMMAND=("${COREPACK_BIN}" "pnpm")
+      fi
+    fi
+  fi
+  if [ "${#PNPM_COMMAND[@]}" -eq 0 ]; then
     echo "[deploy] pnpm is required on the server when dependencies changed"
+    echo "[deploy] install pnpm for the deploy user, or enable corepack with Node.js ${REQUIRED_NODE_MAJOR}+."
+    echo "[deploy] examples:"
+    echo "[deploy]   corepack enable"
+    echo "[deploy]   corepack prepare pnpm@${PNPM_VERSION} --activate"
     exit 1
   fi
   echo "[deploy] install production dependencies because package metadata changed"
   CI=true PNPM_CONFIG_CONFIRM_MODULES_PURGE=false \
-    nice -n 15 ionice -c2 -n7 pnpm install --prod --no-lockfile --config.confirm-modules-purge=false --filter backend...
+    nice -n 15 ionice -c2 -n7 "${PNPM_COMMAND[@]}" install --prod --no-lockfile --config.confirm-modules-purge=false --filter backend...
 else
   echo "[deploy] dependencies unchanged; skip install"
 fi
