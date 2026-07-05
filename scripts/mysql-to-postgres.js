@@ -159,6 +159,46 @@ const CORE_TABLE_ORDER = [
   'arena_worker_heartbeats'
 ];
 
+const PLACEHOLDER_USER_STATUS = '__mysql_to_postgres_placeholder_user__';
+const USER_REFERENCE_COLUMNS = {
+  tutorial_rewards: ['user_id'],
+  user_titles: ['user_id'],
+  user_cards: ['user_id'],
+  trades: ['sender_id', 'receiver_id'],
+  coupon_logs: ['user_id'],
+  push_subscriptions: ['user_id'],
+  push_notifications: ['user_id'],
+  card_reports: ['reporter_id'],
+  notifications: ['user_id'],
+  user_cosmetics: ['user_id'],
+  shop_purchases: ['user_id'],
+  user_minigame_tickets: ['user_id'],
+  minigame_sessions: ['user_id'],
+  user_blocks: ['blocker_id', 'blocked_id'],
+  friend_requests: ['requester_id', 'receiver_id'],
+  friendships: ['user_a_id', 'user_b_id'],
+  chat_rooms: ['user_a_id', 'user_b_id', 'closed_by_user_id'],
+  chat_messages: ['sender_id'],
+  market_listings: ['seller_id', 'buyer_id', 'current_bidder_id'],
+  market_bids: ['bidder_id'],
+  market_watches: ['user_id'],
+  subscription_title_states: ['user_id'],
+  puzzle_excluded_images: ['blocked_by'],
+  user_image_blinds: ['user_id'],
+  chat_attachments: ['owner_user_id'],
+  achievement_events: ['user_id'],
+  achievement_grant_logs: ['user_id'],
+  achievement_evaluation_queue: ['user_id'],
+  arena_decks: ['user_id'],
+  arena_matches: ['player_a_id', 'player_b_id', 'winner_user_id'],
+  arena_player_ratings: ['user_id'],
+  arena_match_queue: ['user_id'],
+  arena_cup_queue: ['user_id'],
+  arena_admin_audit_logs: ['actor_user_id'],
+  arena_spectator_links: ['owner_user_id'],
+  arena_user_cosmetic_loadouts: ['user_id']
+};
+
 const splitSqlStatements = (sql) => {
   const statements = [];
   let current = '';
@@ -622,6 +662,80 @@ const addMissingColumns = async (pg, table, mysqlColumns, pgColumns) => {
   }
 };
 
+const findMissingReferencedUsers = async (mysql, table, column) => {
+  const [rows] = await mysql.query(`
+    SELECT DISTINCT t.${quoteMysqlIdent(column)} AS id
+      FROM ${quoteMysqlIdent(table)} t
+      LEFT JOIN ${quoteMysqlIdent('users')} u
+        ON u.${quoteMysqlIdent('id')} = t.${quoteMysqlIdent(column)}
+     WHERE t.${quoteMysqlIdent(column)} IS NOT NULL
+       AND t.${quoteMysqlIdent(column)} <> ''
+       AND u.${quoteMysqlIdent('id')} IS NULL
+  `);
+  return rows.map((row) => String(row.id || '').trim()).filter(Boolean);
+};
+
+const insertPlaceholderUsers = async (pg, userIds, context) => {
+  const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return 0;
+
+  const pgUserColumns = await loadPostgresColumns(pg, 'users');
+  const userColumnSet = new Set(pgUserColumns.map((col) => col.column_name));
+  const insertColumns = ['id', 'username'];
+  if (userColumnSet.has('role')) insertColumns.push('role');
+  if (userColumnSet.has('point')) insertColumns.push('point');
+  if (userColumnSet.has('status_message')) insertColumns.push('status_message');
+  if (userColumnSet.has('created_at')) insertColumns.push('created_at');
+
+  let inserted = 0;
+  for (let i = 0; i < uniqueIds.length; i += 500) {
+    const group = uniqueIds.slice(i, i + 500);
+    const params = [];
+    const tuples = group.map((id) => {
+      const values = insertColumns.map((column) => {
+        if (column === 'id') return id;
+        if (column === 'username') return `Deleted user ${id.slice(0, 12)}`;
+        if (column === 'role') return 'USER';
+        if (column === 'point') return 0;
+        if (column === 'status_message') return PLACEHOLDER_USER_STATUS;
+        if (column === 'created_at') return new Date().toISOString();
+        return null;
+      });
+      const placeholders = values.map((value) => {
+        params.push(value);
+        return `$${params.length}`;
+      });
+      return `(${placeholders.join(', ')})`;
+    });
+    const rows = await pg.unsafe(`
+      INSERT INTO users (${insertColumns.map(quotePgIdent).join(', ')})
+      VALUES ${tuples.join(', ')}
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `, params);
+    inserted += rows.length;
+  }
+
+  if (inserted > 0) {
+    console.log(`[MySQL -> PostgreSQL] ${context}: 누락 users placeholder ${inserted}개 생성`);
+  }
+  return inserted;
+};
+
+const ensureReferencedUsers = async (mysql, pg, table, mysqlColumns) => {
+  if (shouldSchemaOnly || shouldVerifyOnly) return 0;
+  const refColumns = USER_REFERENCE_COLUMNS[table];
+  if (!refColumns?.length) return 0;
+  const mysqlColumnSet = new Set(mysqlColumns.map((col) => col.COLUMN_NAME));
+  const missingIds = [];
+  for (const column of refColumns) {
+    if (!mysqlColumnSet.has(column)) continue;
+    const ids = await findMissingReferencedUsers(mysql, table, column);
+    missingIds.push(...ids);
+  }
+  return insertPlaceholderUsers(pg, missingIds, table);
+};
+
 const runSchema = async (pg) => {
   if (shouldDataOnly || shouldVerifyOnly) return;
   if (!fs.existsSync(schemaPath)) throw new Error(`PostgreSQL 스키마 파일을 찾을 수 없습니다: ${schemaPath}`);
@@ -801,6 +915,7 @@ const importTable = async (mysql, pg, table) => {
     .map((col) => col.COLUMN_NAME)
     .filter((name) => pgColumnMap.has(name));
   if (columns.length === 0) return 0;
+  await ensureReferencedUsers(mysql, pg, table, mysqlColumns);
 
   const effectiveBatchSize = Math.max(1, Math.min(batchSize, Math.floor(maxInsertParams / Math.max(columns.length, 1))));
   const useKeyset = canUseKeysetImport(mysqlColumns, columns);
@@ -892,7 +1007,14 @@ const verifyCounts = async (mysql, pg, tables) => {
     const [[source]] = await mysql.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)}`);
     const [target] = await pg.unsafe(`SELECT COUNT(*)::BIGINT AS count FROM ${quotePgIdent(table)}`);
     const sourceCount = Number(source?.count || 0);
-    const targetCount = Number(target?.count || 0);
+    let targetCount = Number(target?.count || 0);
+    if (table === 'users') {
+      const [placeholder] = await pg.unsafe(
+        `SELECT COUNT(*)::BIGINT AS count FROM users WHERE status_message = $1`,
+        [PLACEHOLDER_USER_STATUS]
+      );
+      targetCount -= Number(placeholder?.count || 0);
+    }
     if (sourceCount !== targetCount) failures.push(`${table}: mysql=${sourceCount}, postgres=${targetCount}`);
   }
   if (failures.length > 0) {
