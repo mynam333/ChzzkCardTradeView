@@ -763,6 +763,54 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureArenaMysqlSchema(db);
 };
 
+const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
+  // Keep this hot-path function in sync with init-db-postgres.sql. The live worker
+  // calls it every cycle, so it must update the whole batch with one set-based SQL
+  // statement instead of issuing one UPDATE per streamer inside PL/pgSQL.
+  await db.run(`
+    CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
+    RETURNS VOID AS $$
+      WITH updates AS (
+        SELECT *
+          FROM jsonb_to_recordset(p_updates) AS u(
+            channel_id TEXT,
+            prev_value INTEGER,
+            base_value INTEGER,
+            activity_score INTEGER,
+            broadcast_multiplier REAL,
+            add_minutes INTEGER,
+            add_broadcast_count INTEGER,
+            consumed_chats INTEGER,
+            polled BOOLEAN,
+            is_active BOOLEAN,
+            follower_count INTEGER,
+            logo_url TEXT,
+            last_broadcast_at TEXT
+          )
+      )
+      UPDATE streamers s
+         SET prev_value           = u.prev_value,
+             base_value           = u.base_value,
+             activity_score       = u.activity_score,
+             broadcast_multiplier = u.broadcast_multiplier,
+             broadcast_minutes    = s.broadcast_minutes + COALESCE(u.add_minutes, 0),
+             broadcast_count      = s.broadcast_count + COALESCE(u.add_broadcast_count, 0),
+             chat_count           = GREATEST(s.chat_count - COALESCE(u.consumed_chats, 0), 0),
+             is_active            = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.is_active, FALSE) ELSE s.is_active END,
+             follower_count       = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.follower_count, s.follower_count) ELSE s.follower_count END,
+             logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.logo_url, s.logo_url) ELSE s.logo_url END,
+             last_broadcast_at    = CASE
+                                      WHEN COALESCE(u.polled, FALSE)
+                                      THEN COALESCE(NULLIF(u.last_broadcast_at, '')::TIMESTAMPTZ, s.last_broadcast_at)
+                                      ELSE s.last_broadcast_at
+                                    END,
+             updated_at           = NOW()
+        FROM updates u
+       WHERE s.channel_id = u.channel_id;
+    $$ LANGUAGE plpgsql;
+  `);
+};
+
 /**
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
@@ -782,6 +830,7 @@ export const initDatabaseConnection = async (): Promise<void> => {
   if (configuredDbMode === 'postgres') {
     mysqlDb = createPostgresDb();
     await mysqlDb.get('SELECT 1 AS ok');
+    await ensurePostgresCompatibilityMigrations(mysqlDb as PostgresDb);
     dbMode = 'MYSQL';
     sqlDialect = 'postgres';
     console.log('[DB] PostgreSQL 데이터베이스와 연동되었습니다. (POSTGRES MODE, SQL repository layer)');

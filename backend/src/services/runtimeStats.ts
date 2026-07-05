@@ -5,6 +5,7 @@ import { getSoftBanStats } from '../middlewares/softBan';
 import { getRateLimitStats } from '../middlewares/rateLimit';
 import { isLiveWorkerProcess } from './processRole';
 import { getMysqlQueryStats } from './mysqlDb';
+import { getPostgresQueryStats } from './postgresDb';
 
 let chatStatsProvider: (() => any) | null = null;
 
@@ -49,7 +50,8 @@ export const getRuntimeStats = () => {
       play: getPlayControllerStats()
     },
     db: {
-      mysql: getMysqlQueryStats()
+      mysql: getMysqlQueryStats(),
+      postgres: getPostgresQueryStats()
     },
     protection: {
       softBan: getSoftBanStats(),

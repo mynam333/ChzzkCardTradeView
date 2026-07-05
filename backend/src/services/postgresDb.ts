@@ -75,8 +75,15 @@ const autoIdTables = new Set([
 ]);
 
 const conflictTargets: Record<string, string> = {
+  achievement_grant_logs: '(user_id, achievement_id, repeat_key)',
   achievements: '(code)',
+  arena_cup_replays: '(cup_id)',
+  arena_match_replays: '(match_id)',
+  arena_player_ratings: '(season_id, user_id)',
+  arena_user_cosmetic_loadouts: '(user_id)',
+  arena_worker_heartbeats: '(worker_id)',
   asset_event_logs: '(event_key)',
+  chat_attachments: '(owner_user_id, source_hash)',
   chat_rooms: '(user_a_id, user_b_id)',
   coupon_logs: '(coupon_id, user_id)',
   coupons: '(code)',
@@ -85,7 +92,8 @@ const conflictTargets: Record<string, string> = {
   link_previews: '(url_hash)',
   market_transaction_audit_logs: '(audit_key)',
   market_watches: '(user_id, channel_id, star)',
-  notifications: '(user_id, group_key)',
+  notifications: '(user_id, group_key) WHERE group_key IS NOT NULL',
+  puzzle_excluded_images: '(image_key)',
   push_subscriptions: '(endpoint)',
   shop_purchases: '(user_id, item_id)',
   streamers: '(channel_id)',
@@ -93,6 +101,8 @@ const conflictTargets: Record<string, string> = {
   subscription_title_states: '(user_id, rule_id)',
   system_configs: '(key)',
   tutorial_rewards: '(user_id, reward_key)',
+  user_achievements: '(user_id, achievement_id, repeat_key)',
+  user_achievement_stats: '(user_id, stat_key)',
   user_blocks: '(blocker_id, blocked_id)',
   user_card_serials: '(channel_id)',
   user_cosmetics: '(user_id, item_id)',
@@ -187,6 +197,98 @@ const rewriteQuestionPlaceholders = (sql: string): string => {
 const rewriteInsertIgnore = (sql: string) =>
   sql.replace(/\bINSERT\s+IGNORE\s+INTO\b/i, 'INSERT INTO').replace(/($|;)\s*$/i, ' ON CONFLICT DO NOTHING');
 
+const splitSqlTopLevel = (value: string): string[] => {
+  const items: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    const next = value[i + 1];
+    if (quote) {
+      current += ch;
+      if (ch === quote) {
+        if (quote === "'" && next === "'") {
+          current += next;
+          i += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      items.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) items.push(current.trim());
+  return items;
+};
+
+const extractInsertColumns = (sql: string): string[] => {
+  const match = sql.match(/\bINSERT\s+INTO\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(([^)]+)\)/i);
+  if (!match) return [];
+  return splitSqlTopLevel(match[1])
+    .map((column) => column.replace(/"/g, '').trim())
+    .filter(Boolean);
+};
+
+const qualifyExistingColumnRefs = (expr: string, table: string, columns: Set<string>): string => {
+  let out = '';
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < expr.length; i += 1) {
+    const ch = expr[i];
+    const next = expr[i + 1];
+    if (quote) {
+      out += ch;
+      if (ch === quote) {
+        if (quote === "'" && next === "'") {
+          out += next;
+          i += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(ch)) {
+      const match = expr.slice(i).match(/^[a-zA-Z_][a-zA-Z0-9_]*/);
+      if (match) {
+        const token = match[0];
+        const before = expr.slice(0, i).match(/\S\s*$/)?.[0].trim() || '';
+        const after = expr.slice(i + token.length).match(/^\s*\S/)?.[0].trim() || '';
+        const isQualified = before === '.';
+        const isFunction = after === '(';
+        const isKeyword = ['AND', 'OR', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE'].includes(token.toUpperCase());
+        if (columns.has(token) && !isQualified && !isFunction && !isKeyword) {
+          out += `${table}.${token}`;
+        } else {
+          out += token;
+        }
+        i += token.length - 1;
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
+};
+
 const rewriteOnDuplicateKey = (sql: string): string => {
   const duplicateMatch = sql.match(/\s+ON\s+DUPLICATE\s+KEY\s+UPDATE\s+/i);
   if (!duplicateMatch || duplicateMatch.index === undefined) return sql;
@@ -199,9 +301,18 @@ const rewriteOnDuplicateKey = (sql: string): string => {
     return `${before} ON CONFLICT DO NOTHING`;
   }
 
-  const rewrittenUpdate = update
-    .replace(/\bVALUES\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/gi, 'EXCLUDED.$1')
-    .replace(/\bVALUES\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s*\)/gi, 'EXCLUDED.$1');
+  const insertColumns = new Set(extractInsertColumns(before));
+  const rewrittenUpdate = splitSqlTopLevel(update)
+    .map((assignment) => {
+      const match = assignment.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([\s\S]+)$/);
+      if (!match || !table) return assignment;
+      const lhs = match[1];
+      const rhs = match[2]
+        .replace(/\bVALUES\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/gi, 'EXCLUDED.$1')
+        .replace(/\bVALUES\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s*\)/gi, 'EXCLUDED.$1');
+      return `${lhs} = ${qualifyExistingColumnRefs(rhs, table, insertColumns)}`;
+    })
+    .join(', ');
   return `${before} ON CONFLICT ${target} DO UPDATE SET ${rewrittenUpdate}`;
 };
 
@@ -311,41 +422,7 @@ const normalizeBooleanSql = (sql: string): string => {
 };
 
 const splitSqlList = (value: string): string[] => {
-  const items: string[] = [];
-  let current = '';
-  let depth = 0;
-  let quote: "'" | '"' | null = null;
-  for (let i = 0; i < value.length; i += 1) {
-    const ch = value[i];
-    const next = value[i + 1];
-    if (quote) {
-      current += ch;
-      if (ch === quote) {
-        if (quote === "'" && next === "'") {
-          current += next;
-          i += 1;
-        } else {
-          quote = null;
-        }
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === '(') depth += 1;
-    if (ch === ')') depth = Math.max(0, depth - 1);
-    if (ch === ',' && depth === 0) {
-      items.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += ch;
-  }
-  if (current.trim()) items.push(current.trim());
-  return items;
+  return splitSqlTopLevel(value);
 };
 
 const normalizeBooleanParams = (sql: string, params: any[]): any[] => {
@@ -559,8 +636,34 @@ export class PostgresTx {
   }
 }
 
+const readPositiveInteger = (value: string | undefined): number | null => {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getRoleDefaultPostgresConnections = () => {
+  const role = String(process.env.PROCESS_ROLE || 'api').trim().toLowerCase();
+  if (role === 'api') return 3;
+  if (role === 'live-worker') return 2;
+  if (role === 'scheduler-worker') return 1;
+  if (role === 'chat-worker') return 2;
+  return 1;
+};
+
+const getPostgresConnectionLimit = () => {
+  const explicit = readPositiveInteger(process.env.POSTGRES_CONNECTION_LIMIT);
+  if (explicit) return explicit;
+
+  const roleDefault = getRoleDefaultPostgresConnections();
+  const fallbackCap = readPositiveInteger(process.env.POSTGRES_FALLBACK_CONNECTION_LIMIT_MAX) || roleDefault;
+  const mysqlCompat = readPositiveInteger(process.env.MYSQL_CONNECTION_LIMIT);
+  if (mysqlCompat) return Math.min(mysqlCompat, fallbackCap);
+
+  return roleDefault;
+};
+
 export const createPostgresDb = (): PostgresDb => new PostgresDb(postgres(getPostgresUrl(), {
-  max: Math.max(1, Number(process.env.POSTGRES_CONNECTION_LIMIT || process.env.MYSQL_CONNECTION_LIMIT || 5)),
+  max: getPostgresConnectionLimit(),
   idle_timeout: Math.max(1, Number(process.env.POSTGRES_IDLE_TIMEOUT_SECONDS || 20)),
   connect_timeout: Math.max(1, Number(process.env.POSTGRES_CONNECT_TIMEOUT_SECONDS || 10)),
   ssl: getSslConfig() as any,

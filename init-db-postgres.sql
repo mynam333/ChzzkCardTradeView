@@ -875,31 +875,43 @@ $$ LANGUAGE sql;
 -- is_active/follower_count는 polled=true(이번 주기 HTTP 폴링)인 경우에만 갱신.
 CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
 RETURNS VOID AS $$
-DECLARE
-  u JSONB;
-BEGIN
-  FOR u IN SELECT * FROM jsonb_array_elements(p_updates)
-  LOOP
-    UPDATE streamers SET
-      prev_value           = (u->>'prev_value')::INTEGER,
-      base_value           = (u->>'base_value')::INTEGER,
-      activity_score       = (u->>'activity_score')::INTEGER,
-      broadcast_multiplier = (u->>'broadcast_multiplier')::REAL,
-      broadcast_minutes    = broadcast_minutes + COALESCE((u->>'add_minutes')::INTEGER, 0),
-      broadcast_count      = broadcast_count + COALESCE((u->>'add_broadcast_count')::INTEGER, 0),
-      chat_count           = GREATEST(chat_count - COALESCE((u->>'consumed_chats')::INTEGER, 0), 0),
-      is_active            = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
-                                  THEN (u->>'is_active')::BOOLEAN ELSE is_active END,
-      follower_count       = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
-                                  THEN (u->>'follower_count')::INTEGER ELSE follower_count END,
-      logo_url             = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
-                                  THEN COALESCE(u->>'logo_url', logo_url) ELSE logo_url END,
-      last_broadcast_at    = CASE WHEN COALESCE((u->>'polled')::BOOLEAN, FALSE)
-                                  THEN COALESCE(NULLIF(u->>'last_broadcast_at', '')::TIMESTAMPTZ, last_broadcast_at) ELSE last_broadcast_at END,
-      updated_at           = NOW()
-    WHERE channel_id = u->>'channel_id';
-  END LOOP;
-END;
+  WITH updates AS (
+    SELECT *
+      FROM jsonb_to_recordset(p_updates) AS u(
+        channel_id TEXT,
+        prev_value INTEGER,
+        base_value INTEGER,
+        activity_score INTEGER,
+        broadcast_multiplier REAL,
+        add_minutes INTEGER,
+        add_broadcast_count INTEGER,
+        consumed_chats INTEGER,
+        polled BOOLEAN,
+        is_active BOOLEAN,
+        follower_count INTEGER,
+        logo_url TEXT,
+        last_broadcast_at TEXT
+      )
+  )
+  UPDATE streamers s
+     SET prev_value           = u.prev_value,
+         base_value           = u.base_value,
+         activity_score       = u.activity_score,
+         broadcast_multiplier = u.broadcast_multiplier,
+         broadcast_minutes    = s.broadcast_minutes + COALESCE(u.add_minutes, 0),
+         broadcast_count      = s.broadcast_count + COALESCE(u.add_broadcast_count, 0),
+         chat_count           = GREATEST(s.chat_count - COALESCE(u.consumed_chats, 0), 0),
+         is_active            = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.is_active, FALSE) ELSE s.is_active END,
+         follower_count       = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.follower_count, s.follower_count) ELSE s.follower_count END,
+         logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.logo_url, s.logo_url) ELSE s.logo_url END,
+         last_broadcast_at    = CASE
+                                  WHEN COALESCE(u.polled, FALSE)
+                                  THEN COALESCE(NULLIF(u.last_broadcast_at, '')::TIMESTAMPTZ, s.last_broadcast_at)
+                                  ELSE s.last_broadcast_at
+                                END,
+         updated_at           = NOW()
+    FROM updates u
+   WHERE s.channel_id = u.channel_id;
 $$ LANGUAGE plpgsql;
 
 -- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트/코스메틱을 단일 트랜잭션으로 정산

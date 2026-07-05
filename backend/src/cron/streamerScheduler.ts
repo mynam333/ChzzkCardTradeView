@@ -6,7 +6,7 @@ import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from 
 import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { publishRealtimeEvent } from '../services/realtimeStream';
-import { clearRankingCaches } from '../controllers/playController';
+import { clearStreamerRankingCaches } from '../controllers/playController';
 import {
   formatCardDeletionCompensationReward,
   formatCardDeletionCompensationSummary,
@@ -147,14 +147,14 @@ const readPositiveIntegerEnv = (name: string, fallback: number): number => {
 
 // 오프라인 스트리머는 매 주기 전부가 아니라 N개 샤드로 나눠 순회 폴링합니다.
 // (라이브 중인 스트리머는 항상 매 주기 폴링) → HTTP 호출량 대폭 절감.
-const OFFLINE_POLL_SHARDS = readPositiveIntegerEnv('OFFLINE_POLL_SHARDS', 3); // 기본 3주기(약 6분)에 걸쳐 오프라인 1회 폴링
+const OFFLINE_POLL_SHARDS = readPositiveIntegerEnv('OFFLINE_POLL_SHARDS', 10); // 기본 10주기(약 20분)에 걸쳐 오프라인 1회 폴링
 const OFFLINE_COMPUTE_EVERY_CYCLES = readPositiveIntegerEnv(
   'OFFLINE_COMPUTE_EVERY_CYCLES',
   OFFLINE_POLL_SHARDS
 ); // 폴링하지 않은 오프라인 스트리머의 DB 시세/이력 반영 주기
 const PRUNE_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_PRUNE_EVERY_CYCLES', 30); // 기본 약 1시간마다 정리
 const VALUE_HISTORY_RETENTION_DAYS = readPositiveIntegerEnv('VALUE_HISTORY_RETENTION_DAYS', 7); // 기본 7일 초과 시세 이력 삭제
-const VALUE_HISTORY_RECORD_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_RECORD_EVERY_CYCLES', 3);
+const VALUE_HISTORY_RECORD_EVERY_CYCLES = readPositiveIntegerEnv('VALUE_HISTORY_RECORD_EVERY_CYCLES', 10);
 const VALUE_HISTORY_MIN_ABS_DELTA = readPositiveIntegerEnv('VALUE_HISTORY_MIN_ABS_DELTA', 25);
 const VALUE_HISTORY_MIN_PCT_DELTA = Math.max(
   0,
@@ -440,7 +440,7 @@ export const syncAllStreamersLiveStatus = async () => {
         `[LiveStatusScheduler] 시세 이력 기록 확인: ${filteredHistoryPoints.length}/${historyPoints.length}건 ` +
         `(${Date.now() - historyStart}ms, 샘플링 ${VALUE_HISTORY_RECORD_EVERY_CYCLES}주기)`
       );
-      clearRankingCaches();
+      clearStreamerRankingCaches();
       publishRealtimeEvent('ranking', {
         reason: 'streamer_sync',
         streamers: streamers.length,

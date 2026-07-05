@@ -591,16 +591,16 @@ export const getUserProfile = async (req: Request, res: Response) => {
 // 랭킹은 모든 유저×보유카드를 매번 집계·정렬하는 무거운 쿼리이고, 동시 접속도 많습니다.
 // 프론트는 주로 SSE(ranking 이벤트)로 갱신하고 폴링은 긴 fallback만 돌리지만, 시세는 2분 주기로
 // 갱신되므로 실시간일 필요가 없습니다. 동일 파라미터 응답을 짧게 캐싱해 집계 RPC 반복 실행을 막습니다.
-const RANKINGS_CACHE_TTL = 60_000; // 60초
-const USER_RANKING_SNAPSHOT_TTL = Math.max(60_000, Number(process.env.USER_RANKING_SNAPSHOT_TTL_MS || 300_000));
+const RANKINGS_CACHE_TTL = Math.max(60_000, Number(process.env.RANKINGS_CACHE_TTL_MS || 120_000));
+const USER_RANKING_SNAPSHOT_TTL = Math.max(60_000, Number(process.env.USER_RANKING_SNAPSHOT_TTL_MS || 15 * 60_000));
 const USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL = Math.max(
   60_000,
-  Number(process.env.USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL_MS || 180_000)
+  Number(process.env.USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL_MS || 10 * 60_000)
 );
 const USER_RANKING_SNAPSHOT_REFRESH_IN_API = process.env.USER_RANKING_SNAPSHOT_REFRESH_IN_API === 'true';
 const USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS = Math.max(
   60_000,
-  Number(process.env.USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS || 300_000)
+  Number(process.env.USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS || 15 * 60_000)
 );
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
@@ -640,6 +640,10 @@ export const clearUserRankingCaches = () => {
 
 export const clearRankingCaches = () => {
   clearUserRankingCaches();
+  clearStreamerRankingCaches();
+};
+
+export const clearStreamerRankingCaches = () => {
   streamerRankingsCache.clear();
   streamerRankingsInFlight.clear();
   streamerRankingSnapshots.clear();
