@@ -100,20 +100,49 @@ const tuningStatements = [
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_deleted_user_accounts_username_trgm ON deleted_user_accounts USING GIN (username_snapshot gin_trgm_ops)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_name_trgm ON streamers USING GIN (name gin_trgm_ops)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_active_value ON streamers(is_active, base_value DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_base_value ON streamers(base_value DESC, channel_id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible ON user_cards(user_id, is_hidden)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible_channel_star ON user_cards(user_id, is_hidden, channel_id, star)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_locked ON user_cards(user_id, is_locked)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards(channel_id, star, is_hidden)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_visible_user_channel_star ON user_cards(user_id, channel_id, star) WHERE is_hidden = FALSE',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_channel_serial ON user_cards(channel_id, serial_number)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_unlocked_user_channel_id ON user_cards(user_id, channel_id, id) WHERE is_locked = FALSE',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards(user_id, favorite_order, id DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards(user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_value_history_recorded_channel ON value_history(recorded_at DESC, channel_id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_point_ledger_user_id ON point_ledger_entries(user_id, id DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_point_ledger_counterparty ON point_ledger_entries(counterparty_user_id, id DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_event_user ON asset_event_logs(user_id, id DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_event_source ON asset_event_logs(source_type, source_id)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_user_active_latest ON notifications(user_id, created_at DESC, id DESC) WHERE deleted_at IS NULL',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_user_unread_active ON notifications(user_id) WHERE is_read = FALSE AND deleted_at IS NULL',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_latest ON market_listings(updated_at DESC, id DESC) WHERE status = \'PENDING\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_oldest ON market_listings(created_at ASC, id ASC) WHERE status = \'PENDING\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_seller ON market_listings(seller_id, id DESC) WHERE status = \'PENDING\'',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_updated ON market_listings(status, listing_type, updated_at DESC, id DESC)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_created ON market_listings(status, listing_type, created_at, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_price ON market_listings(status, price, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings(status, auction_ends_at, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_bidder_active ON market_listings(status, listing_type, current_bidder_id, bid_reserved)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_fixed_price ON market_listings(price, id) WHERE status = \'PENDING\' AND listing_type = \'fixed\'',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_auction_price ON market_listings((COALESCE(starting_bid, price, 0)), id) WHERE status = \'PENDING\' AND listing_type = \'auction\'',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id)',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_a_active ON chat_rooms(user_a_id, updated_at DESC) WHERE deleted_for_a = FALSE',
   'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_b_active ON chat_rooms(user_b_id, updated_at DESC) WHERE deleted_for_b = FALSE',
-  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_visible_latest ON chat_messages(room_id, id DESC) WHERE attachment_deleted_at IS NULL OR message_type <> \'image\''
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_visible_latest ON chat_messages(room_id, id DESC) WHERE attachment_deleted_at IS NULL OR message_type <> \'image\'',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_unread ON chat_messages(room_id, sender_id, read_at)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_owner_active ON chat_attachments(owner_user_id, deleted_at, expires_at)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_expiry ON chat_attachments(expires_at, deleted_at)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_friend_requests_receiver ON friend_requests(receiver_id, status, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_friend_requests_requester ON friend_requests(requester_id, status, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_rules_active ON subscription_title_rules(active, title_id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_valid ON subscription_title_states(rule_id, is_subscribed, checked_until)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_user ON subscription_title_states(user_id, checked_until)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_status_created ON minigame_sessions(status, created_at, id)',
+  'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_user_game_status_created ON minigame_sessions(user_id, game_type, status, created_at DESC)'
 ];
 
 const schemaStatements = [
@@ -155,11 +184,25 @@ const analyzeTables = [
   'deleted_user_accounts',
   'streamers',
   'user_cards',
+  'value_history',
   'market_listings',
   'market_bids',
   'notifications',
   'chat_rooms',
   'chat_messages',
+  'chat_attachments',
+  'point_ledger_entries',
+  'asset_event_logs',
+  'trades',
+  'shop_items',
+  'user_cosmetics',
+  'shop_purchases',
+  'minigame_sessions',
+  'user_minigame_tickets',
+  'arena_matches',
+  'arena_player_ratings',
+  'arena_match_queue',
+  'arena_cup_queue',
   'user_asset_rankings',
   'user_asset_ranking_cards'
 ];
@@ -173,6 +216,7 @@ const runStatement = async (sql, statement, report) => {
     report.applied.push({ ok: true, duration_ms: Date.now() - startedAt, sql: statement });
   } catch (err) {
     report.applied.push({ ok: false, duration_ms: Date.now() - startedAt, sql: statement, error: err.message, code: err.code });
+    if (err.code === '42P01' || err.code === '42703' || err.code === '42704') return;
     throw err;
   }
 };

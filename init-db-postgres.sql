@@ -586,6 +586,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_value_history_channel_id ON value_history(channel_id);
 CREATE INDEX IF NOT EXISTS idx_value_history_recorded_at ON value_history(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_value_history_channel_recorded ON value_history(channel_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_value_history_recorded_channel ON value_history(recorded_at DESC, channel_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 CREATE INDEX IF NOT EXISTS idx_card_reports_status ON card_reports(status);

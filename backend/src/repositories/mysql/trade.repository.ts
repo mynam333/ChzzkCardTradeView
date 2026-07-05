@@ -8,13 +8,23 @@ export class MysqlTradeRepository implements ITradeRepository {
     return getMysqlDb();
   }
 
+  private parseJsonValue<T>(value: any, fallback: T): T {
+    if (value == null) return fallback;
+    if (typeof value === 'object') return value as T;
+    try {
+      return JSON.parse(String(value)) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
   private mapRow(row: any): Trade {
     return {
       id: row.id,
       sender_id: row.sender_id,
       receiver_id: row.receiver_id,
-      sender_offer: JSON.parse(row.sender_offer),
-      receiver_offer: JSON.parse(row.receiver_offer),
+      sender_offer: this.parseJsonValue(row.sender_offer, { cards: [], point: 0 }),
+      receiver_offer: this.parseJsonValue(row.receiver_offer, { cards: [], point: 0 }),
       status: row.status,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -144,7 +154,7 @@ export class MysqlTradeRepository implements ITradeRepository {
     if (!row) return { ok: false, reason: 'NOT_FOUND' };
     if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
     if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
-    const receiverOffer = JSON.parse(row.receiver_offer);
+    const receiverOffer = this.parseJsonValue(row.receiver_offer, { cards: [], point: 0 } as any);
     receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
     await this.getDb().run(
       "UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ?",
@@ -162,8 +172,8 @@ export class MysqlTradeRepository implements ITradeRepository {
         if (row.status !== 'CONFIRMED') throw new Error('NOT_CONFIRMED');
         if (row.sender_id !== actorId) throw new Error('FORBIDDEN');
 
-        const senderOffer = JSON.parse(row.sender_offer);
-        const receiverOffer = JSON.parse(row.receiver_offer);
+        const senderOffer = this.parseJsonValue(row.sender_offer, { cards: [], point: 0 } as any);
+        const receiverOffer = this.parseJsonValue(row.receiver_offer, { cards: [], point: 0 } as any);
         const senderOut = Number(senderOffer.point || 0);
         const receiverOut = Number(receiverOffer.point || 0);
 

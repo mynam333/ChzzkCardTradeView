@@ -1,4 +1,4 @@
-import { getMysqlDb } from '../../services/db';
+import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { IStreamerRepository, Streamer, StreamerScheduleResult } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, extractStarImages } from './shared';
 import { formatUploadUrl } from '../../services/imageService';
@@ -400,6 +400,14 @@ export class MysqlStreamerRepository implements IStreamerRepository {
         this.valueAgoCache.set(hours, { data, expiresAt: Date.now() + MysqlStreamerRepository.VALUE_AGO_CACHE_TTL_MS });
         return data;
       })
+      .catch((err) => {
+        if (cached) {
+          cached.expiresAt = Date.now() + Math.min(MysqlStreamerRepository.VALUE_AGO_CACHE_TTL_MS, 60_000);
+          console.warn(`[ValueHistory] ${hours}시간 전 시세 조회 실패, stale 캐시를 사용합니다:`, err?.message || err);
+          return cached.data;
+        }
+        throw err;
+      })
       .finally(() => this.valueAgoInFlight.delete(hours));
     this.valueAgoInFlight.set(hours, request);
     return request;
@@ -409,14 +417,23 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     const cutoffMs = Date.now() - hours * 60 * 60 * 1000;
     const cutoff = this.toUtcString(new Date(cutoffMs));
     const windowStart = this.toUtcString(new Date(cutoffMs - MysqlStreamerRepository.VALUE_AGO_LOOKBACK_HOURS * 60 * 60 * 1000));
-    const rows = await this.getDb().all(
-      `SELECT vh.channel_id, vh.value
-         FROM value_history vh FORCE INDEX (idx_value_history_recorded_channel)
-        WHERE vh.recorded_at <= ?
-          AND vh.recorded_at >= ?
-        ORDER BY vh.recorded_at DESC`,
-      cutoff, windowStart
-    );
+    const rows = getSqlDialect() === 'postgres'
+      ? await this.getDb().all(
+        `SELECT DISTINCT ON (vh.channel_id) vh.channel_id, vh.value
+           FROM value_history vh
+          WHERE vh.recorded_at <= ?
+            AND vh.recorded_at >= ?
+          ORDER BY vh.channel_id, vh.recorded_at DESC`,
+        cutoff, windowStart
+      )
+      : await this.getDb().all(
+        `SELECT vh.channel_id, vh.value
+           FROM value_history vh FORCE INDEX (idx_value_history_recorded_channel)
+          WHERE vh.recorded_at <= ?
+            AND vh.recorded_at >= ?
+          ORDER BY vh.recorded_at DESC`,
+        cutoff, windowStart
+      );
     return this.mapValueAgoRows(rows);
   }
 

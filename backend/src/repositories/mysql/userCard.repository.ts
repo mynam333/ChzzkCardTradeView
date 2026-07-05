@@ -95,9 +95,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
         }
       }
 
-      if (segmentStartIso === null) {
-        freeDrawSource = 'unlimited';
-      } else if (nextFreeTickets > 0) {
+      if (nextFreeTickets > 0) {
         nextFreeTickets -= 1;
         freeDrawSource = 'reset';
         await tx.run('UPDATE users SET free_draw_tickets = ? WHERE id = ?', nextFreeTickets, userId);

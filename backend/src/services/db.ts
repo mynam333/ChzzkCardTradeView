@@ -764,9 +764,23 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
 };
 
 const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
+  const ensureIndex = async (sql: string) => {
+    try {
+      await db.run(sql);
+    } catch (err: any) {
+      if (err?.code === '42P01' || err?.code === '42703' || err?.code === '42704' || err?.code === '42P07' || String(err?.message || '').includes('does not exist')) return;
+      throw err;
+    }
+  };
+
   // Keep this hot-path function in sync with init-db-postgres.sql. The live worker
   // calls it every cycle, so it must update the whole batch with one set-based SQL
   // statement instead of issuing one UPDATE per streamer inside PL/pgSQL.
+  try {
+    await db.run('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+  } catch (err: any) {
+    console.warn('[DB] pg_trgm 확장 보정 실패, trigram 검색 인덱스는 건너뜁니다:', err?.message || err);
+  }
   await db.run(`
     CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
     RETURNS VOID AS $$
@@ -809,6 +823,91 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
        WHERE s.channel_id = u.channel_id;
     $$ LANGUAGE sql;
   `);
+
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_repeat ON user_achievements (user_id, achievement_id, repeat_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_stats_key ON user_achievement_stats (user_id, stat_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_grant ON achievement_grant_logs (user_id, achievement_id, repeat_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_event_key ON achievement_events (event_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_queue_dedupe ON achievement_evaluation_queue (dedupe_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievements_code ON achievements (code)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_streamers_channel ON streamers (channel_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_system_configs_key ON system_configs (key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_card_serials_channel ON user_card_serials (channel_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_push_subscriptions_endpoint ON push_subscriptions (endpoint)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_streamer_registration_blocks_channel ON streamer_registration_blocks (channel_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_chat_attachments_owner_hash ON chat_attachments (owner_user_id, source_hash)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_cosmetics_item ON user_cosmetics (user_id, item_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_shop_purchases_item ON shop_purchases (user_id, item_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_minigame_tickets_user ON user_minigame_tickets (user_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_titles_user_title ON user_titles (user_id, title_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_subscription_title_states_rule ON subscription_title_states (user_id, rule_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_image_blinds_key ON user_image_blinds (user_id, image_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_link_previews_hash ON link_previews (url_hash)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_puzzle_excluded_images_key ON puzzle_excluded_images (image_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_worker_heartbeats_worker ON arena_worker_heartbeats (worker_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_user_cosmetic_loadouts_user ON arena_user_cosmetic_loadouts (user_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_cup_replays_cup ON arena_cup_replays (cup_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_match_replays_match ON arena_match_replays (match_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_player_ratings_user ON arena_player_ratings (season_id, user_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications (user_id, group_key) WHERE group_key IS NOT NULL');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_watches_user_channel_star ON market_watches (user_id, channel_id, star)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_audit_key ON market_transaction_audit_logs (audit_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_asset_event_logs_key ON asset_event_logs (event_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_tutorial_rewards_key ON tutorial_rewards (user_id, reward_key)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_coupon_logs_user ON coupon_logs (coupon_id, user_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_coupons_code ON coupons (code)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_friendships_pair ON friendships (user_a_id, user_b_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_blocks_pair ON user_blocks (blocker_id, blocked_id)');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_deleted_user_accounts_user ON deleted_user_accounts (user_id)');
+
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_id_trgm ON users USING GIN (id gin_trgm_ops)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_banned_until ON users (banned_until) WHERE banned_until IS NOT NULL');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_name_trgm ON streamers USING GIN (name gin_trgm_ops)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_active_value ON streamers (is_active, base_value DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_base_value ON streamers (base_value DESC, channel_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible ON user_cards (user_id, is_hidden)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible_channel_star ON user_cards (user_id, is_hidden, channel_id, star)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_locked ON user_cards (user_id, is_locked)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_channel_star_visible ON user_cards (channel_id, star, is_hidden)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_channel_serial ON user_cards (channel_id, serial_number)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_unlocked_user_channel_id ON user_cards (user_id, channel_id, id) WHERE is_locked IS NOT TRUE');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_inventory_order ON user_cards (user_id, favorite_order, id DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_favorite_max ON user_cards (user_id, favorite_order DESC) WHERE favorite_order IS NOT NULL');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_value_history_channel_recorded ON value_history (channel_id, recorded_at DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_value_history_recorded_channel ON value_history (recorded_at DESC, channel_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_rankings_total ON user_asset_rankings (total_rank, user_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_rankings_cards ON user_asset_rankings (cards_rank, user_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_rankings_username_trgm ON user_asset_rankings USING GIN (username gin_trgm_ops)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_ranking_cards_channel_star_user ON user_asset_ranking_cards (channel_id, star, user_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_ranking_cards_user ON user_asset_ranking_cards (user_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_updated ON market_listings (status, updated_at DESC, id DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_updated ON market_listings (status, listing_type, updated_at DESC, id DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_created ON market_listings (status, listing_type, created_at, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_price ON market_listings (status, price, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings (status, auction_ends_at, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_bidder_active ON market_listings (status, listing_type, current_bidder_id, bid_reserved)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_latest ON market_listings (updated_at DESC, id DESC) WHERE status = \'PENDING\'');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings (user_card_id) WHERE status = \'PENDING\'');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_listing ON market_bids (listing_id, amount DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids (bidder_id, listing_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_a_active ON chat_rooms (user_a_id, updated_at DESC) WHERE deleted_for_a = FALSE');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_b_active ON chat_rooms (user_b_id, updated_at DESC) WHERE deleted_for_b = FALSE');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_id ON chat_messages (room_id, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_visible_latest ON chat_messages (room_id, id DESC) WHERE attachment_deleted_at IS NULL OR message_type <> \'image\'');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_unread ON chat_messages (room_id, sender_id, read_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_owner_active ON chat_attachments (owner_user_id, deleted_at, expires_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_expiry ON chat_attachments (expires_at, deleted_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_user_active_latest ON notifications (user_id, created_at DESC, id DESC) WHERE deleted_at IS NULL');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_user_unread_active ON notifications (user_id, created_at DESC) WHERE deleted_at IS NULL AND is_read = FALSE');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_friend_requests_receiver ON friend_requests (receiver_id, status, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_friend_requests_requester ON friend_requests (requester_id, status, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_friendships_user_b ON friendships (user_b_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_rules_active ON subscription_title_rules (active, title_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_valid ON subscription_title_states (rule_id, is_subscribed, checked_until)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_user ON subscription_title_states (user_id, checked_until)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_status_created ON minigame_sessions (status, created_at, id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_user_game_status_created ON minigame_sessions (user_id, game_type, status, created_at DESC)');
 };
 
 /**

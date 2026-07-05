@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import cron from 'node-cron';
 import Database from 'better-sqlite3';
-import { getDbMode, getMysqlDb } from './db';
+import { getDbMode, getMysqlDb, getSqlDialect } from './db';
 import { ensureDirectory } from './storagePaths';
 import { getRuntimeStats } from './runtimeStats';
 import { acquireSchedulerLock } from './schedulerLock';
@@ -43,6 +43,11 @@ const BACKUP_TABLES = [
   'user_minigame_tickets',
   'minigame_sessions'
 ] as const;
+
+const getBackupTables = () => {
+  if (process.env.MYSQL_SQLITE_BACKUP_INCLUDE_VALUE_HISTORY === 'true') return BACKUP_TABLES;
+  return BACKUP_TABLES.filter((table) => table !== 'value_history');
+};
 
 type ColumnInfo = {
   name: string;
@@ -249,6 +254,9 @@ const copyTable = async (sqlite: Database.Database, table: string, batchSize: nu
 
 export const runMysqlToSqliteBackupOnce = async (): Promise<{ ok: boolean; path?: string; reason?: string; rows?: number }> => {
   if (getDbMode() !== 'MYSQL') return { ok: false, reason: 'MYSQL_MODE_ONLY' };
+  if (getSqlDialect() === 'postgres' && process.env.POSTGRES_SQLITE_BACKUP_ENABLED !== 'true') {
+    return { ok: false, reason: 'POSTGRES_BACKUP_DISABLED' };
+  }
 
   const backupDir = getBackupDir();
   ensureDirectory(backupDir);
@@ -284,12 +292,13 @@ export const runMysqlToSqliteBackupOnce = async (): Promise<{ ok: boolean; path?
     sqlite.pragma('journal_mode = OFF');
     sqlite.pragma('synchronous = OFF');
     sqlite.exec(fs.readFileSync(schemaPath, 'utf8'));
-    for (const table of [...BACKUP_TABLES].reverse()) {
+    const backupTables = getBackupTables();
+    for (const table of [...backupTables].reverse()) {
       sqlite.prepare(`DELETE FROM ${quoteSqliteIdent(table)}`).run();
     }
 
     let rows = 0;
-    for (const table of BACKUP_TABLES) {
+    for (const table of backupTables) {
       rows += await copyTable(sqlite, table, batchSize);
     }
     sqlite.pragma('foreign_keys = ON');
@@ -320,6 +329,10 @@ let lastSkipLogAt = 0;
 export const startMysqlSqliteBackupScheduler = () => {
   if (backupTask || process.env.MYSQL_SQLITE_BACKUP_ENABLED === 'false') return;
   if (getDbMode() !== 'MYSQL') return;
+  if (getSqlDialect() === 'postgres' && process.env.POSTGRES_SQLITE_BACKUP_ENABLED !== 'true') {
+    console.log('[MySQLBackup] PostgreSQL 모드에서는 SQLite 백업 스케줄러를 기본 비활성화합니다. POSTGRES_SQLITE_BACKUP_ENABLED=true로 활성화할 수 있습니다.');
+    return;
+  }
 
   const expression = process.env.MYSQL_SQLITE_BACKUP_CRON || '*/30 * * * *';
   backupTask = cron.schedule(expression, async () => {

@@ -280,6 +280,7 @@ const registerLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REGISTER_R
 const reportLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REPORT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REPORT_RATE_LIMIT_MAX', 60), key: 'report' });
 const chatImageLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('CHAT_IMAGE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('CHAT_IMAGE_RATE_LIMIT_MAX', 60), key: 'chat-image' });
 const minigameLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('MINIGAME_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('MINIGAME_RATE_LIMIT_MAX', 120), key: 'minigame' });
+const streamerReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('STREAMER_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('STREAMER_READ_RATE_LIMIT_MAX', 240), key: 'streamer-read' });
 const arenaReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_READ_RATE_LIMIT_MAX', 240), key: 'arena-read' });
 const arenaDeckWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_DECK_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_DECK_WRITE_RATE_LIMIT_MAX', 12), key: 'arena-deck-write', keyByUser: true });
 const arenaBotMatchLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_BOT_MATCH_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_BOT_MATCH_RATE_LIMIT_MAX', 10), key: 'arena-bot-match', keyByUser: true });
@@ -389,7 +390,7 @@ router.post('/achievements/:id/claim', authMiddleware, banCheckMiddleware, accou
 router.put('/users/me/status-message', authMiddleware, banCheckMiddleware, updateMyStatusMessage);
 router.delete('/users/me', authMiddleware, deleteMyAccount);
 router.put('/users/me/title', authMiddleware, banCheckMiddleware, equipMyTitle);
-router.get('/users/ranking', getUserRankings);
+router.get('/users/ranking', streamerReadLimiter, getUserRankings);
 router.get('/public/stats', getPublicLandingStats);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
 router.get('/users/me/cards/groups', authMiddleware, banCheckMiddleware, getUserCardGroups);
@@ -572,6 +573,7 @@ let streamersCacheInFlight: Promise<any[]> | null = null;
 const streamersCacheTtlEnv = Number(process.env.STREAMERS_CACHE_TTL_MS);
 const STREAMERS_CACHE_TTL = Number.isFinite(streamersCacheTtlEnv) && streamersCacheTtlEnv > 0 ? streamersCacheTtlEnv : 60_000;
 const STREAMERS_CACHE_MAX_AGE_SECONDS = Math.max(15, Math.floor(STREAMERS_CACHE_TTL / 1000));
+const STREAMERS_INCLUDE_VALUE_1H_HISTORY = process.env.STREAMERS_INCLUDE_VALUE_1H_HISTORY === 'true';
 
 const loadStreamerValueMap = async (
   label: string,
@@ -613,7 +615,7 @@ const loadStreamerTitles = async (channelIds: string[]) => {
   }
 };
 
-router.get('/streamers', async (req, res) => {
+router.get('/streamers', streamerReadLimiter, async (req, res) => {
   try {
     const now = Date.now();
     if (streamersCache && streamersCache.expiresAt > now) {
@@ -627,7 +629,9 @@ router.get('/streamers', async (req, res) => {
           const streamers = await streamerRepository.findAll();
           // 1시간 전 시세는 등락률 계산에만 필요합니다. 24h 표시값은 streamers.prev_value를 사용해 전체 이력 조회를 피합니다.
           const [value1hMap, titlesByUser] = await Promise.all([
-            loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap()),
+            STREAMERS_INCLUDE_VALUE_1H_HISTORY
+              ? loadStreamerValueMap('1시간 전', () => streamerRepository.getValue1hAgoMap())
+              : Promise.resolve({} as Record<string, number>),
             loadStreamerTitles(streamers.map((streamer) => streamer.channel_id))
           ]);
 
@@ -645,7 +649,7 @@ router.get('/streamers', async (req, res) => {
             serial_number: s.serial_number,
             titles: (titlesByUser[s.channel_id] || []).filter((title) => title.is_equipped),
             prev_value: s.prev_value,
-            value_1h_ago: value1hMap[s.channel_id] ?? s.base_value
+            value_1h_ago: value1hMap[s.channel_id] ?? s.prev_value ?? s.base_value
           }));
 
           streamersCache = { data: enriched, expiresAt: Date.now() + STREAMERS_CACHE_TTL };
@@ -681,13 +685,13 @@ router.get('/streamers', async (req, res) => {
 });
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
-router.get('/streamers/ranking', getStreamerRankings);
+router.get('/streamers/ranking', streamerReadLimiter, getStreamerRankings);
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, uploadSingleImage, uploadCustomImage);
 // 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제
 router.post('/streamers/me/image/reset', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, deleteOwnCustomImage);
 
 // 특정 스트리머 상세 + 시세 변화 그래프 데이터 (공개) — /streamers/search, /streamers/register 보다 뒤에 위치
-router.get('/streamers/:channel_id', getStreamerDetail);
+router.get('/streamers/:channel_id', streamerReadLimiter, getStreamerDetail);
 
 // ==========================================
 // 2. 일반 유저 및 공용 기능

@@ -121,7 +121,7 @@ const withUserDrawLock = async <T>(userId: string, task: () => Promise<T>): Prom
 };
 
 const computeFreeDrawSegment = (intervalHours: number): { segmentStartIso: string | null; nextFreeDrawAt: string | null } => {
-  if (intervalHours <= 0) {
+  if (!Number.isFinite(intervalHours) || intervalHours <= 0) {
     return { segmentStartIso: null, nextFreeDrawAt: null };
   }
 
@@ -142,6 +142,11 @@ const computeFreeDrawSegment = (intervalHours: number): { segmentStartIso: strin
   };
 };
 
+const normalizeFreeDrawIntervalHours = (value: string, fallback = 24): number => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const isInactiveForThreeMonths = (lastLiveAt?: string | null): boolean => {
   if (!lastLiveAt) return false;
   const lastLiveMs = new Date(lastLiveAt).getTime();
@@ -153,7 +158,7 @@ const getDrawSettings = async () => {
   const drawCostStr = await systemConfigRepository.get('draw_cost', '10000');
   const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
   const intervalStr = await systemConfigRepository.get('free_draw_interval', '24');
-  const intervalHours = parseFloat(intervalStr);
+  const intervalHours = normalizeFreeDrawIntervalHours(intervalStr);
   const maxStackStr = await systemConfigRepository.get('free_draw_max_stack', '1');
   const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
   const { segmentStartIso } = computeFreeDrawSegment(intervalHours);
@@ -235,7 +240,7 @@ export const getUserMe = async (req: Request, res: Response) => {
       titleRepository.findByUserId(userId)
     ]);
 
-    const intervalHours = parseFloat(intervalStr);
+    const intervalHours = normalizeFreeDrawIntervalHours(intervalStr);
     const freeDrawMaxStack = Math.max(1, parseInt(maxStackStr, 10) || 1);
     const drawCost = Math.max(0, parseInt(drawCostStr, 10) || 10000);
 
@@ -598,24 +603,42 @@ const USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL = Math.max(
   Number(process.env.USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL_MS || 10 * 60_000)
 );
 const USER_RANKING_SNAPSHOT_REFRESH_IN_API = process.env.USER_RANKING_SNAPSHOT_REFRESH_IN_API === 'true';
+const USER_RANKING_ALLOW_LIVE_FALLBACK = process.env.USER_RANKING_ALLOW_LIVE_FALLBACK === 'true';
+const USER_RANKING_SNAPSHOT_SCHEDULER_ENABLED = process.env.USER_RANKING_SNAPSHOT_SCHEDULER_ENABLED === 'true';
 const USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS = Math.max(
   60_000,
   Number(process.env.USER_RANKING_SNAPSHOT_SCHEDULER_INTERVAL_MS || 15 * 60_000)
 );
+const USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS || 45_000)
+);
+const USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS = Math.max(
+  1_000,
+  Number(process.env.USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS || 10_000)
+);
+const STREAMER_RANKING_CHANGE_HISTORY_ENABLED = process.env.STREAMER_RANKING_CHANGE_HISTORY_ENABLED === 'true';
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const streamerRankingsInFlight = new Map<string, Promise<any[]>>();
 const streamerRankingSnapshots = new Map<'value' | 'change', { data: any[]; expiresAt: number }>();
 const streamerRankingSnapshotInFlight = new Map<'value' | 'change', Promise<any[]>>();
+let streamerRankingTitlesCache: { data: Record<string, any[]>; expiresAt: number } | null = null;
 const streamerDetailCache = new Map<string, { data: any; expiresAt: number }>();
 const streamerDetailInFlight = new Map<string, Promise<any>>();
 const STREAMER_DETAIL_CACHE_TTL = 30_000;
 const STREAMER_RANKING_MAX_LIMIT = Math.max(1000, Number(process.env.STREAMER_RANKING_MAX_LIMIT || 10_000));
+const STREAMER_RANKING_TITLES_CACHE_TTL = Math.max(
+  60_000,
+  Number(process.env.STREAMER_RANKING_TITLES_CACHE_TTL_MS || 5 * 60_000)
+);
 let userRankingSnapshotExpiresAt = 0;
 let userRankingSnapshotLastBuiltAt = 0;
 let userRankingSnapshotInFlight: Promise<boolean> | null = null;
 let userRankingSnapshotSchedulerTimer: NodeJS.Timeout | null = null;
+let userRankingLiveFallbackSkipWarnedAt = 0;
+let userRankingSnapshotPresenceCache: { rankingPresent: boolean; cardFilterPresent: boolean; expiresAt: number } | null = null;
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -628,6 +651,7 @@ export const clearUserRankingCaches = () => {
   rankingsCache.clear();
   rankingsInFlight.clear();
   rankingPoolCache.clear();
+  userRankingSnapshotPresenceCache = null;
   if (userRankingSnapshotLastBuiltAt > 0) {
     userRankingSnapshotExpiresAt = Math.max(
       userRankingSnapshotExpiresAt,
@@ -648,6 +672,7 @@ export const clearStreamerRankingCaches = () => {
   streamerRankingsInFlight.clear();
   streamerRankingSnapshots.clear();
   streamerRankingSnapshotInFlight.clear();
+  streamerRankingTitlesCache = null;
   streamerDetailCache.clear();
   streamerDetailInFlight.clear();
   clearDrawPoolCache();
@@ -667,22 +692,34 @@ const waitForUserRankingSnapshot = async (attempts = 8, delayMs = 250): Promise<
   return false;
 };
 
-const hasUserRankingSnapshot = async (): Promise<boolean> => {
+const hasUserRankingSnapshot = async (requireCardFilter = true): Promise<boolean> => {
   if (getDbMode() !== 'MYSQL') return false;
+  const now = Date.now();
+  if (userRankingSnapshotPresenceCache && userRankingSnapshotPresenceCache.expiresAt > now) {
+    return userRankingSnapshotPresenceCache.rankingPresent
+      && (!requireCardFilter || userRankingSnapshotPresenceCache.cardFilterPresent);
+  }
   const row = await getMysqlDb().get<{ ranking_present: number | null; card_filter_present: number | null }>(`
     SELECT
       (SELECT 1 FROM user_asset_rankings LIMIT 1) AS ranking_present,
       (SELECT 1 FROM user_asset_ranking_cards LIMIT 1) AS card_filter_present
   `);
-  return !!row?.ranking_present && !!row?.card_filter_present;
+  userRankingSnapshotPresenceCache = {
+    rankingPresent: !!row?.ranking_present,
+    cardFilterPresent: !!row?.card_filter_present,
+    expiresAt: now + USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS
+  };
+  return userRankingSnapshotPresenceCache.rankingPresent
+    && (!requireCardFilter || userRankingSnapshotPresenceCache.cardFilterPresent);
 };
 
-export const refreshUserRankingSnapshot = async (options: { force?: boolean } = {}): Promise<boolean> => {
+export const refreshUserRankingSnapshot = async (options: { force?: boolean; requireCardFilter?: boolean } = {}): Promise<boolean> => {
   const mode = getDbMode();
   if (mode === 'SUPABASE') return false;
   const force = options.force === true;
-  if (!force && mode === 'MYSQL' && !USER_RANKING_SNAPSHOT_REFRESH_IN_API && await hasUserRankingSnapshot()) {
-    return true;
+  const requireCardFilter = options.requireCardFilter !== false;
+  if (!force && mode === 'MYSQL' && !USER_RANKING_SNAPSHOT_REFRESH_IN_API) {
+    return hasUserRankingSnapshot(requireCardFilter);
   }
   if (userRankingSnapshotExpiresAt > Date.now()) return true;
   if (userRankingSnapshotInFlight) {
@@ -701,21 +738,30 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
       try {
         if (isPostgres) {
           await db.transaction(async (tx) => {
-            await tx.run('TRUNCATE TABLE user_asset_ranking_cards, user_asset_rankings');
+            await tx.run(`SET LOCAL statement_timeout = '${USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS}ms'`);
+            await tx.run('CREATE TEMP TABLE user_asset_rankings_next (LIKE user_asset_rankings INCLUDING ALL) ON COMMIT DROP');
+            await tx.run('CREATE TEMP TABLE user_asset_ranking_cards_next (LIKE user_asset_ranking_cards INCLUDING ALL) ON COMMIT DROP');
             await tx.run(`
-              INSERT INTO user_asset_rankings
+              INSERT INTO user_asset_rankings_next
                 (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                  card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
-              WITH UserCardValues AS (
-                SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                       u.status_message, u.last_seen_at, u.created_at,
+              WITH CardValues AS (
+                SELECT uc.user_id,
                        COUNT(uc.id) AS card_count,
                        COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
-                  FROM users u
-                  LEFT JOIN user_cards uc ON uc.user_id = u.id AND uc.is_hidden IS NOT TRUE
+                  FROM user_cards uc
                   LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+                 WHERE uc.is_hidden IS NOT TRUE
+                 GROUP BY uc.user_id
+              ),
+              UserCardValues AS (
+                SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                       u.status_message, u.last_seen_at, u.created_at,
+                       COALESCE(cv.card_count, 0) AS card_count,
+                       COALESCE(cv.cards_value_raw, 0) AS cards_value_raw
+                  FROM users u
+                  LEFT JOIN CardValues cv ON cv.user_id = u.id
                  WHERE u.banned_until IS NULL OR u.banned_until <= NOW()
-                 GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.last_seen_at, u.created_at
               ),
               RankedUsers AS (
                 SELECT *,
@@ -728,14 +774,18 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
                 FROM RankedUsers
             `);
             await tx.run(`
-              INSERT INTO user_asset_ranking_cards (user_id, channel_id, star, card_count)
+              INSERT INTO user_asset_ranking_cards_next (user_id, channel_id, star, card_count)
               SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
                 FROM user_cards uc
-                JOIN user_asset_rankings r
+                JOIN user_asset_rankings_next r
                   ON r.user_id = uc.user_id
                WHERE uc.is_hidden IS NOT TRUE
                GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
             `);
+            await tx.run('DELETE FROM user_asset_ranking_cards');
+            await tx.run('DELETE FROM user_asset_rankings');
+            await tx.run('INSERT INTO user_asset_rankings SELECT * FROM user_asset_rankings_next');
+            await tx.run('INSERT INTO user_asset_ranking_cards SELECT * FROM user_asset_ranking_cards_next');
           });
           return true;
         }
@@ -758,16 +808,23 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
                      ${mysqlDateValueSql('u.created_at')} AS created_at
                 FROM users u
             ),
+            CardValues AS (
+              SELECT uc.user_id,
+                     COUNT(uc.id) AS card_count,
+                     COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+                FROM user_cards uc
+                LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
+               WHERE COALESCE(uc.is_hidden, 0) = 0
+               GROUP BY uc.user_id
+            ),
             UserCardValues AS (
               SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
                      u.status_message, u.last_seen_at, u.created_at,
-                     COUNT(uc.id) AS card_count,
-                     COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
+                     COALESCE(cv.card_count, 0) AS card_count,
+                     COALESCE(cv.cards_value_raw, 0) AS cards_value_raw
                 FROM NormalizedUsers u
-                LEFT JOIN user_cards uc ON uc.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci AND COALESCE(uc.is_hidden, 0) = 0
-                LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = uc.channel_id COLLATE utf8mb4_unicode_ci
+                LEFT JOIN CardValues cv ON cv.user_id COLLATE utf8mb4_unicode_ci = u.id COLLATE utf8mb4_unicode_ci
                WHERE u.banned_until IS NULL OR u.banned_until <= UTC_TIMESTAMP()
-               GROUP BY u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason, u.status_message, u.last_seen_at, u.created_at
             ),
             RankedUsers AS (
               SELECT *,
@@ -806,16 +863,23 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
         db.prepare('DELETE FROM user_asset_rankings').run();
         db.prepare('DELETE FROM user_asset_ranking_cards').run();
         db.prepare(`
-          WITH UserCardValues AS (
-            SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
-                   u.status_message, u.last_seen_at, u.created_at,
+          WITH CardValues AS (
+            SELECT uc.user_id,
                    COUNT(uc.id) AS card_count,
                    COALESCE(SUM(s.base_value * (1 + COALESCE(uc.star, 0) * 0.8)), 0) AS cards_value_raw
-              FROM users u
-              LEFT JOIN user_cards uc ON uc.user_id = u.id AND COALESCE(uc.is_hidden, 0) = 0
+              FROM user_cards uc
               LEFT JOIN streamers s ON s.channel_id = uc.channel_id
+             WHERE COALESCE(uc.is_hidden, 0) = 0
+             GROUP BY uc.user_id
+          ),
+          UserCardValues AS (
+            SELECT u.id, u.username, u.avatar_url, u.role, u.point, u.last_free_draw, u.banned_until, u.ban_reason,
+                   u.status_message, u.last_seen_at, u.created_at,
+                   COALESCE(cv.card_count, 0) AS card_count,
+                   COALESCE(cv.cards_value_raw, 0) AS cards_value_raw
+              FROM users u
+              LEFT JOIN CardValues cv ON cv.user_id = u.id
              WHERE u.banned_until IS NULL OR datetime(u.banned_until) <= datetime('now')
-             GROUP BY u.id
           ),
           RankedUsers AS (
             SELECT *,
@@ -842,6 +906,11 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
     }
     userRankingSnapshotLastBuiltAt = Date.now();
     userRankingSnapshotExpiresAt = userRankingSnapshotLastBuiltAt + USER_RANKING_SNAPSHOT_TTL;
+    userRankingSnapshotPresenceCache = {
+      rankingPresent: true,
+      cardFilterPresent: true,
+      expiresAt: Date.now() + USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS
+    };
     return true;
   })()
     .catch((err) => {
@@ -858,6 +927,10 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean } = 
 
 export const startUserRankingSnapshotScheduler = () => {
   if (userRankingSnapshotSchedulerTimer) return;
+  if (!USER_RANKING_SNAPSHOT_SCHEDULER_ENABLED) {
+    console.log('[RankingSnapshot] 자동 스냅샷 갱신은 비활성화되어 있습니다. USER_RANKING_SNAPSHOT_SCHEDULER_ENABLED=true로 활성화할 수 있습니다.');
+    return;
+  }
   const run = () => {
     refreshUserRankingSnapshot({ force: true }).catch((err: any) => {
       console.warn('[RankingSnapshot] 예약 갱신 실패:', err?.message || err);
@@ -874,11 +947,11 @@ const readUserRankingsFromSnapshot = async (
   keyword: string = '',
   options: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null } = {}
 ): Promise<any[] | null> => {
-  const refreshed = await refreshUserRankingSnapshot();
-  if (!refreshed) return null;
   const mode = options.mode === 'cards' ? 'cards' : 'total';
   const channelId = (options.channelId || '').trim();
   const star = options.star == null || Number.isNaN(Number(options.star)) ? null : Number(options.star);
+  const refreshed = await refreshUserRankingSnapshot({ requireCardFilter: !!channelId });
+  if (!refreshed) return null;
   const rankColumn = mode === 'cards' ? 'cards_rank' : 'total_rank';
   const isMysql = getDbMode() === 'MYSQL';
   const isPostgres = isMysql && getSqlDialect() === 'postgres';
@@ -928,6 +1001,26 @@ const readUserRankingsFromSnapshot = async (
   }));
 };
 
+const loadUserRankings = async (
+  limit: number,
+  keyword: string = '',
+  options: { mode?: 'total' | 'cards'; channelId?: string; star?: number | null } = {}
+) => {
+  const snapshotRows = await readUserRankingsFromSnapshot(limit, keyword, options);
+  if (snapshotRows) return snapshotRows;
+
+  if (getSqlDialect() === 'postgres' && !USER_RANKING_ALLOW_LIVE_FALLBACK) {
+    const now = Date.now();
+    if (now - userRankingLiveFallbackSkipWarnedAt > 60_000) {
+      console.warn('[RankingSnapshot] 스냅샷이 없어 Postgres 실시간 유저 랭킹 집계를 건너뜁니다. USER_RANKING_ALLOW_LIVE_FALLBACK=true로 기존 fallback을 허용할 수 있습니다.');
+      userRankingLiveFallbackSkipWarnedAt = now;
+    }
+    return [];
+  }
+
+  return userRepository.findRankings(limit, keyword, options);
+};
+
 const loadRankingPool = async (
   mode: 'total' | 'cards',
   channelId: string,
@@ -939,10 +1032,10 @@ const loadRankingPool = async (
   if (hit && hit.expiresAt > now) return hit.data;
   const inFlight = rankingsInFlight.get(`pool|${key}`);
   if (inFlight) return inFlight;
-  const request = (async () => (await readUserRankingsFromSnapshot(100, '', { mode, channelId, star }))
-    ?? userRepository.findRankings(100, '', { mode, channelId, star }))()
+  const request = loadUserRankings(100, '', { mode, channelId, star })
     .then((data) => {
-      rankingPoolCache.set(key, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
+      const ttl = data.length > 0 ? RANKINGS_CACHE_TTL : Math.min(15_000, RANKINGS_CACHE_TTL);
+      rankingPoolCache.set(key, { data, expiresAt: Date.now() + ttl });
       if (rankingPoolCache.size > 100) {
         for (const [k, v] of rankingPoolCache) if (v.expiresAt <= Date.now()) rankingPoolCache.delete(k);
       }
@@ -964,13 +1057,13 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
 
   const request = (async () => {
     const streamers = await streamerRepository.findRankingBase(undefined);
-    const value1hMap = mode === 'change'
+    const value1hMap = mode === 'change' && STREAMER_RANKING_CHANGE_HISTORY_ENABLED
       ? await streamerRepository.getValue1hAgoMap()
       : {} as Record<string, number>;
 
     const scoreChange = (streamer: any) => {
       const current = Number(streamer.base_value || 0);
-      const previous = Number(value1hMap[streamer.channel_id] ?? current);
+      const previous = Number(value1hMap[streamer.channel_id] ?? streamer.prev_value ?? current);
       return previous > 0 ? ((current - previous) / previous) * 100 : 0;
     };
 
@@ -985,7 +1078,7 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
       .map((streamer: any, index: number) => ({ streamer, rank: index + 1 }));
 
     const channelIds = ranked.map((item) => item.streamer.channel_id);
-    const titlesByUser = await titleRepository.findByUserIds(channelIds).catch(() => ({} as Record<string, any[]>));
+    const titlesByUser = await loadStreamerRankingTitles(channelIds);
 
     const data = ranked.map(({ streamer, rank }) => ({
       channel_id: streamer.channel_id,
@@ -998,7 +1091,7 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
       rank,
       titles: (titlesByUser[streamer.channel_id] || []).filter((title) => title.is_equipped),
       prev_value: mode === 'value' ? (streamer.prev_value ?? streamer.base_value) : streamer.prev_value,
-      value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.base_value) : streamer.base_value
+      value_1h_ago: mode === 'change' ? (value1hMap[streamer.channel_id] ?? streamer.prev_value ?? streamer.base_value) : streamer.base_value
     }));
     streamerRankingSnapshots.set(mode, { data, expiresAt: Date.now() + RANKINGS_CACHE_TTL });
     return data;
@@ -1008,6 +1101,26 @@ const loadStreamerRankingSnapshot = async (mode: 'value' | 'change') => {
 
   streamerRankingSnapshotInFlight.set(mode, request);
   return request;
+};
+
+const loadStreamerRankingTitles = async (channelIds: string[]) => {
+  const now = Date.now();
+  if (streamerRankingTitlesCache && streamerRankingTitlesCache.expiresAt > now) {
+    return streamerRankingTitlesCache.data;
+  }
+  try {
+    const data = await titleRepository.findByUserIds(channelIds);
+    streamerRankingTitlesCache = { data, expiresAt: now + STREAMER_RANKING_TITLES_CACHE_TTL };
+    return data;
+  } catch (err: any) {
+    if (streamerRankingTitlesCache) {
+      streamerRankingTitlesCache.expiresAt = now + Math.min(60_000, STREAMER_RANKING_TITLES_CACHE_TTL);
+      console.warn('[PlayController] 스트리머 랭킹 칭호 조회 실패, stale 캐시를 사용합니다:', err?.message || err);
+      return streamerRankingTitlesCache.data;
+    }
+    console.warn('[PlayController] 스트리머 랭킹 칭호 조회 실패:', err?.message || err);
+    return {} as Record<string, any[]>;
+  }
 };
 
 /**
@@ -1042,8 +1155,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
     let rankings;
     if (keyword) {
       const [matched, topPool] = await Promise.all([
-        (async () => (await readUserRankingsFromSnapshot(100, keyword, { mode, channelId, star }))
-          ?? userRepository.findRankings(100, keyword, { mode, channelId, star }))(),
+        loadUserRankings(100, keyword, { mode, channelId, star }),
         loadRankingPool(mode, channelId, star)
       ]);
       const byId = new Map<string, typeof matched[number]>();
@@ -1058,6 +1170,11 @@ export const getUserRankings = async (req: Request, res: Response) => {
         .map((x) => x.u);
     } else {
       rankings = await loadRankingPool(mode, channelId, star);
+    }
+    if (rankings.length === 0) {
+      const emptyResult: any[] = [];
+      rankingsCache.set(cacheKey, { data: emptyResult, expiresAt: Date.now() + Math.min(15_000, RANKINGS_CACHE_TTL) });
+      return emptyResult;
     }
     const userIds = rankings.map((user) => user.id);
     const [titlesByUser, linkedStreamers] = await Promise.all([
@@ -1097,7 +1214,14 @@ export const getUserRankings = async (req: Request, res: Response) => {
       rankingsInFlight.delete(cacheKey);
     });
     rankingsInFlight.set(cacheKey, request);
-    const mapped = await request;
+    const mapped = await request.catch((err) => {
+      if (cached) {
+        console.warn('[PlayController] getUserRankings 갱신 실패, stale 캐시로 응답합니다:', err?.message || err);
+        res.set('X-Ranking-Cache', 'stale');
+        return cached.data;
+      }
+      throw err;
+    });
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(mapped);
   } catch (err: any) {
@@ -1152,7 +1276,14 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
       streamerRankingsInFlight.delete(cacheKey);
     });
     streamerRankingsInFlight.set(cacheKey, request);
-    const data = await request;
+    const data = await request.catch((err) => {
+      if (cached) {
+        console.warn('[PlayController] getStreamerRankings 갱신 실패, stale 캐시로 응답합니다:', err?.message || err);
+        res.set('X-Streamer-Ranking-Cache', 'stale');
+        return cached.data;
+      }
+      throw err;
+    });
 
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(data);
@@ -1446,7 +1577,7 @@ export const drawCards = async (req: Request, res: Response) => {
 
   try {
     return await withUserDrawLock(userId, async () => {
-      const { drawCost, intervalHours, freeDrawMaxStack, segmentStartIso } = await getDrawSettings();
+      const { drawCost, intervalHours, freeDrawMaxStack } = await getDrawSettings();
       const streamers = await loadDrawPool();
       if (streamers.length === 0) {
         return res.status(400).json({ error: 'BadRequest', message: '소환할 스트리머 정보가 없습니다. DB를 점검해 주세요.' });
@@ -1459,10 +1590,8 @@ export const drawCards = async (req: Request, res: Response) => {
         return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
       }
 
-      const availableTickets = segmentStartIso === null
-        ? count
-        : Number(user.free_draw_tickets || 0) + Number(user.bonus_free_draw_tickets || 0);
-      const paidDraws = segmentStartIso === null ? 0 : Math.max(0, count - availableTickets);
+      const availableTickets = Number(user.free_draw_tickets || 0) + Number(user.bonus_free_draw_tickets || 0);
+      const paidDraws = Math.max(0, count - availableTickets);
       const requiredPoint = paidDraws * drawCost;
       if (Number(user.point || 0) < requiredPoint) {
         return res.status(400).json({
@@ -1484,7 +1613,8 @@ export const drawCards = async (req: Request, res: Response) => {
 
       for (let i = 0; i < count; i++) {
         const luckyStreamer = pickWeightedStreamer(streamers, weights, totalWeight);
-        const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, drawCost, new Date().toISOString(), segmentStartIso, freeDrawMaxStack, intervalHours);
+        const { segmentStartIso: drawSegmentStartIso } = computeFreeDrawSegment(intervalHours);
+        const draw = await userCardRepository.drawAtomic(userId, luckyStreamer.channel_id, drawCost, new Date().toISOString(), drawSegmentStartIso, freeDrawMaxStack, intervalHours);
         if (!draw.ok) {
           throw new Error(draw.reason || 'DRAW_FAILED');
         }

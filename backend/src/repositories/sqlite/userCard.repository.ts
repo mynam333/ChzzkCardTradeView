@@ -93,9 +93,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         }
       }
 
-      if (segmentStartIso === null) {
-        freeDrawSource = 'unlimited';
-      } else if (nextFreeTickets > 0) {
+      if (nextFreeTickets > 0) {
         nextFreeTickets -= 1;
         freeDrawSource = 'reset';
         db.prepare('UPDATE users SET free_draw_tickets = ? WHERE id = ?').run(nextFreeTickets, userId);
