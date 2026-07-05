@@ -4,6 +4,8 @@ import { ITitleRepository, UserTitle } from '../interfaces';
 type MysqlUserTitleRow = Omit<UserTitle, 'is_equipped'> & { is_equipped: number };
 type MysqlUserTitleWithUserRow = MysqlUserTitleRow & { user_id: string };
 
+const toBoolean = (value: any): boolean => value === true || value === 1 || value === '1';
+
 const subscriptionVisibilitySql = `
   AND (
     NOT EXISTS (
@@ -71,7 +73,7 @@ export class MysqlTitleRepository implements ITitleRepository {
         ORDER BY ut.is_equipped DESC, ut.awarded_at ASC, t.id ASC
       `, userId);
     }
-    return rows.map((row) => ({ ...row, is_equipped: row.is_equipped === 1 }));
+    return rows.map((row) => ({ ...row, is_equipped: toBoolean(row.is_equipped) }));
   }
 
   async findByUserIds(userIds: string[]): Promise<Record<string, UserTitle[]>> {
@@ -102,7 +104,7 @@ export class MysqlTitleRepository implements ITitleRepository {
     }
     for (const row of rows) {
       const { user_id, ...title } = row;
-      (result[user_id] ||= []).push({ ...title, is_equipped: title.is_equipped === 1 });
+      (result[user_id] ||= []).push({ ...title, is_equipped: toBoolean(title.is_equipped) });
     }
     return result;
   }
