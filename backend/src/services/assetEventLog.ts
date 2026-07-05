@@ -1,4 +1,4 @@
-import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } from './db';
 
 export type AssetEventAssetType = 'card' | 'point' | 'cosmetic' | 'ticket' | 'title' | 'unknown';
 export type AssetEventAction =
@@ -254,6 +254,7 @@ const ensureSqliteAssetEventTable = (db: any) => {
 };
 
 const ensureMysqlAssetEventColumn = async (db: any, column: string, ddl: string) => {
+  if (getSqlDialect() === 'postgres') return;
   const existing = await db.get(
     `SELECT 1 AS present
        FROM information_schema.columns
@@ -268,6 +269,7 @@ const ensureMysqlAssetEventColumn = async (db: any, column: string, ddl: string)
 };
 
 const ensureMysqlAssetEventIndex = async (db: any, indexName: string, ddl: string) => {
+  if (getSqlDialect() === 'postgres') return;
   const existing = await db.get(
     `SELECT 1 AS present
        FROM information_schema.statistics
@@ -319,6 +321,10 @@ const ensureMysqlAssetEventTable = async (db: any) => {
       INDEX idx_asset_event_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  if (getSqlDialect() === 'postgres') {
+    mysqlAssetEventTableReady = true;
+    return;
+  }
 
   const columns: Array<[string, string]> = [
     ['event_key', 'event_key VARCHAR(255) NULL AFTER id'],

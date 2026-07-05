@@ -237,6 +237,57 @@ const postgresBooleanColumns = [
 ];
 const postgresBooleanColumnSet = new Set(postgresBooleanColumns);
 
+const normalizeMysqlDdlForPostgres = (sql: string): string => {
+  let normalized = sql;
+
+  const addIndexMatch = normalized.match(/^\s*ALTER\s+TABLE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+ADD\s+(UNIQUE\s+)?INDEX\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([\s\S]+)\)\s*$/i);
+  if (addIndexMatch) {
+    const [, table, unique, indexName, columns] = addIndexMatch;
+    return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${indexName} ON ${table} (${columns.trim()})`;
+  }
+
+  if (/^\s*ALTER\s+TABLE\s+[a-zA-Z_][a-zA-Z0-9_]*\s+CONVERT\s+TO\s+CHARACTER\s+SET\b/i.test(normalized)) {
+    return 'SELECT 1';
+  }
+
+  if (/^\s*ALTER\s+TABLE\s+[a-zA-Z_][a-zA-Z0-9_]*\s+MODIFY\s+COLUMN\b/i.test(normalized)) {
+    return 'SELECT 1';
+  }
+
+  normalized = normalized.replace(
+    /^\s*CREATE\s+TABLE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+LIKE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;?\s*$/i,
+    'CREATE TABLE $1 (LIKE $2 INCLUDING ALL)'
+  );
+
+  normalized = normalized
+    .replace(/\bDATABASE\(\)/gi, 'current_schema()')
+    .replace(/\bBIGINT\s+AUTO_INCREMENT\s+PRIMARY\s+KEY\b/gi, 'BIGSERIAL PRIMARY KEY')
+    .replace(/\bINT\s+AUTO_INCREMENT\s+PRIMARY\s+KEY\b/gi, 'SERIAL PRIMARY KEY')
+    .replace(/\bINTEGER\s+AUTO_INCREMENT\s+PRIMARY\s+KEY\b/gi, 'SERIAL PRIMARY KEY')
+    .replace(/\s+ON\s+UPDATE\s+CURRENT_TIMESTAMP\b/gi, '')
+    .replace(/\s+AFTER\s+[a-zA-Z_][a-zA-Z0-9_]*\b/gi, '')
+    .replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
+    .replace(/\bLONGTEXT\b/gi, 'TEXT')
+    .replace(/\bMEDIUMTEXT\b/gi, 'TEXT')
+    .replace(/\bJSON\b/gi, 'JSONB');
+
+  for (const column of postgresBooleanColumns) {
+    normalized = normalized.replace(
+      new RegExp(`\\b${column}\\s+TINYINT(\\s+NOT\\s+NULL)?\\s+DEFAULT\\s+([01])`, 'gi'),
+      (_match, notNull, value) => `${column} BOOLEAN${notNull || ''} DEFAULT ${value === '1' ? 'TRUE' : 'FALSE'}`
+    );
+  }
+
+  normalized = normalized
+    .replace(/\bTINYINT\b/gi, 'SMALLINT')
+    .replace(/,\s*UNIQUE\s+KEY\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]+)\)/gi, ', CONSTRAINT $1 UNIQUE ($2)')
+    .replace(/,\s*(?:KEY|INDEX)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]+\)/gi, '')
+    .replace(/\)\s*ENGINE\s*=\s*[a-zA-Z0-9_]+(?:\s+DEFAULT\s+CHARSET\s*=\s*[a-zA-Z0-9_]+)?(?:\s+COLLATE\s*=\s*[a-zA-Z0-9_]+)?\s*;?\s*$/i, ')')
+    .replace(/\)\s*DEFAULT\s+CHARSET\s*=\s*[a-zA-Z0-9_]+(?:\s+COLLATE\s*=\s*[a-zA-Z0-9_]+)?\s*;?\s*$/i, ')');
+
+  return normalized;
+};
+
 const toPostgresBooleanParam = (value: any) => {
   if (value === 1 || value === '1') return true;
   if (value === 0 || value === '0') return false;
@@ -329,6 +380,7 @@ const normalizeBooleanParams = (sql: string, params: any[]): any[] => {
 
 export const normalizePostgresSql = (input: string): string => {
   let sql = input.trim().replace(/`/g, '');
+  sql = normalizeMysqlDdlForPostgres(sql);
   sql = sql.replace(/\bCOLLATE\s+utf8mb4_unicode_ci\b/gi, '');
   sql = sql.replace(/\s+FORCE\s+INDEX\s*\([^)]+\)/gi, '');
   sql = sql.replace(/\bUTC_TIMESTAMP\(\)/gi, 'NOW()');
@@ -341,6 +393,11 @@ export const normalizePostgresSql = (input: string): string => {
   sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+MINUTE\s*\)/gi, "NOW() - INTERVAL '$1 minute'");
   sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+DAY\s*\)/gi, "NOW() - INTERVAL '$1 day'");
   sql = sql.replace(/\bNOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+(DAY|MINUTE|SECOND)\b/gi, (_m, n, unit) => `NOW() - INTERVAL '${n} ${String(unit).toLowerCase()}'`);
+  sql = sql.replace(/\bTIMESTAMPDIFF\(\s*DAY\s*,\s*COALESCE\(([^,]+),\s*NOW\(\)\)\s*,\s*NOW\(\)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE($1, NOW()))) / 86400)::INTEGER');
+  sql = sql.replace(/\bTIMESTAMPDIFF\(\s*DAY\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)) / 86400)::INTEGER');
+  sql = sql.replace(/\bTIMESTAMPDIFF\(\s*HOUR\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)) / 3600)::INTEGER');
+  sql = sql.replace(/\bTIMESTAMPDIFF\(\s*MINUTE\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)) / 60)::INTEGER');
+  sql = sql.replace(/\bTIMESTAMPDIFF\(\s*SECOND\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)))::INTEGER');
   sql = sql.replace(/\bSTR_TO_DATE\(\s*SUBSTRING_INDEX\(REPLACE\(([^,]+),\s*'T',\s*' '\),\s*'\.',\s*1\),\s*'%Y-%m-%d %H:%i:%s'\s*\)/gi, "NULLIF($1, '')::timestamptz");
   sql = sql.replace(/\bCONCAT\(/gi, 'CONCAT(');
   sql = sql.replace(/\bJSON_OBJECT\(\)/gi, "'{}'::jsonb");
@@ -391,6 +448,7 @@ const observePostgresQuery = async <T>(scope: string, sql: string, task: () => P
     return await task();
   } catch (err: any) {
     if (err?.code === '23505') err.code = 'ER_DUP_ENTRY';
+    if (err?.code === '42701') err.code = 'ER_DUP_FIELDNAME';
     throw err;
   } finally {
     const durationMs = Date.now() - startedAt;
