@@ -467,8 +467,6 @@ export class SupabaseMarketRepository implements IMarketRepository {
       return { ok: false, reason: result };
     }
 
-    await this.refundLatestBids(listingId);
-
     const { data: updatedListing } = await this.getClient()
       .from('market_listings')
       .select('settled_amount, seller_id, price')

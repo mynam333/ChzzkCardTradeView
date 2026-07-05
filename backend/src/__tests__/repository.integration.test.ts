@@ -1023,8 +1023,8 @@ describe('MarketRepository 재등록 제약', () => {
       event_type: 'account_deleted',
       related_user_id: 'delete-auction-seller',
       seller_id: 'delete-auction-seller',
-      current_bidder_id: 'delete-auction-bidder',
-      bid_reserved: 1200
+      current_bidder_id: null,
+      bid_reserved: 0
     });
   });
 
@@ -1261,7 +1261,7 @@ describe('MarketRepository 재등록 제약', () => {
     expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(older.id);
   });
 
-  it('오픈마켓 활성 목록은 만료 경매를 제외하고 경매 현재가 기준으로 가격 정렬한다', async () => {
+  it('오픈마켓 활성 목록은 만료 경매를 제외하고 경매 시작가 기준으로 가격 정렬한다', async () => {
     seedUser(db, 'market-sort-seller-a');
     seedUser(db, 'market-sort-seller-b');
     seedUser(db, 'market-sort-bidder', 10000);
@@ -1295,7 +1295,7 @@ describe('MarketRepository 재등록 제약', () => {
 
     expect(await marketRepository.placeBid(auction.id as number, 'market-sort-bidder', 4000)).toMatchObject({ ok: true });
     expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'price_desc', type: 'all' })).listings.map((item) => item.id))
-      .toEqual([auction.id, fixed.id]);
+      .toEqual([fixed.id, auction.id]);
 
     db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(auction.id);
     const activeAfterEnd = await marketRepository.listActive({ page: 1, limit: 10, sort: 'ending_soon', type: 'bidding', bidderId: 'market-sort-bidder' });

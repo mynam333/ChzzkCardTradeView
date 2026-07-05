@@ -1326,10 +1326,17 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
              SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
              SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
              SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
-             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count,
-             SUM(CASE WHEN current_bidder_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_bid_count
+             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count
         FROM market_listings
-    `).get(userId, userId, userId, userId, userId, userId) as any;
+    `).get(userId, userId, userId, userId, userId) as any;
+    const activeBidStats = db.prepare(`
+      SELECT COUNT(DISTINCT ml.id) AS c
+        FROM market_listings ml
+        JOIN market_bids mb ON mb.listing_id = ml.id
+       WHERE ml.status = 'PENDING'
+         AND ml.listing_type = 'auction'
+         AND mb.bidder_id = ?
+    `).get(userId) as any;
     const watchStats = db.prepare('SELECT COUNT(*) AS c FROM market_watches WHERE user_id = ?').get(userId) as any;
     const shopStats = db.prepare('SELECT COUNT(*) AS c FROM shop_purchases WHERE user_id = ?').get(userId) as any;
     const couponStats = db.prepare('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?').get(userId) as any;
@@ -1404,7 +1411,7 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
       'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
       'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
-      'market.active_bid_count': Number(marketStats?.active_bid_count || 0),
+      'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),
       'coupon.redeemed_unique_count': Number(couponStats?.c || 0),
@@ -1466,10 +1473,17 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
              SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
              SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
              SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
-             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count,
-             SUM(CASE WHEN current_bidder_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_bid_count
+             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count
         FROM market_listings
-    `, userId, userId, userId, userId, userId, userId);
+    `, userId, userId, userId, userId, userId);
+    const activeBidStats = await db.get(`
+      SELECT COUNT(DISTINCT ml.id) AS c
+        FROM market_listings ml
+        JOIN market_bids mb ON mb.listing_id = ml.id
+       WHERE ml.status = 'PENDING'
+         AND ml.listing_type = 'auction'
+         AND mb.bidder_id = ?
+    `, userId);
     const watchStats = await db.get('SELECT COUNT(*) AS c FROM market_watches WHERE user_id = ?', userId);
     const shopStats = await db.get('SELECT COUNT(*) AS c FROM shop_purchases WHERE user_id = ?', userId);
     const couponStats = await db.get('SELECT COUNT(*) AS c FROM coupon_logs WHERE user_id = ?', userId);
@@ -1544,7 +1558,7 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
       'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
       'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
-      'market.active_bid_count': Number(marketStats?.active_bid_count || 0),
+      'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),
       'coupon.redeemed_unique_count': Number(couponStats?.c || 0),

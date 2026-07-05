@@ -589,7 +589,7 @@ const loadPostgresTables = async (pg) => {
 
 const loadPostgresColumns = async (pg, table) => {
   const rows = await pg`
-    SELECT column_name, data_type, udt_name, column_default
+    SELECT column_name, data_type, udt_name, column_default, is_nullable
       FROM information_schema.columns
      WHERE table_schema = 'public'
        AND table_name = ${table}
@@ -734,9 +734,41 @@ const normalizeDateCell = (value, pgColumn) => {
   return `${normalized}Z`;
 };
 
+const postgresDefaultValue = (pgColumn) => {
+  const defaultSql = String(pgColumn?.column_default || '').trim();
+  const type = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
+  if (!defaultSql) return undefined;
+
+  if (type === 'jsonb' || type === 'json') {
+    if (/^'\[\]'::jsonb/i.test(defaultSql) || /^'\[\]'::json/i.test(defaultSql)) return [];
+    if (/^'\{\}'::jsonb/i.test(defaultSql) || /^'\{\}'::json/i.test(defaultSql)) return {};
+  }
+  if (type === 'boolean' || pgColumn?.udt_name === 'bool') {
+    if (/^(false|'0'::|0\b)/i.test(defaultSql)) return false;
+    if (/^(true|'1'::|1\b)/i.test(defaultSql)) return true;
+  }
+  if (['integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'].includes(type)) {
+    const numeric = Number(defaultSql);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  if (type === 'text' || type.includes('character')) {
+    const stringMatch = defaultSql.match(/^'(.*)'::/);
+    if (stringMatch) return stringMatch[1].replace(/''/g, "'");
+  }
+  return undefined;
+};
+
+const normalizeNullCell = (pgColumn) => {
+  if (pgColumn?.is_nullable === 'NO') {
+    const defaultValue = postgresDefaultValue(pgColumn);
+    if (defaultValue !== undefined) return defaultValue;
+  }
+  return null;
+};
+
 const normalizeCell = (value, pgColumn, context = {}) => {
-  if (value === undefined) return null;
-  if (value === null) return null;
+  if (value === undefined) return normalizeNullCell(pgColumn);
+  if (value === null) return normalizeNullCell(pgColumn);
   const type = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
   try {
     if (type === 'boolean' || pgColumn?.udt_name === 'bool') {
@@ -770,23 +802,30 @@ const importTable = async (mysql, pg, table) => {
     .filter((name) => pgColumnMap.has(name));
   if (columns.length === 0) return 0;
 
-  const [[countRow]] = await mysql.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)}`);
+  const effectiveBatchSize = Math.max(1, Math.min(batchSize, Math.floor(maxInsertParams / Math.max(columns.length, 1))));
+  const useKeyset = canUseKeysetImport(mysqlColumns, columns);
+  const [[highWaterRow]] = useKeyset
+    ? await mysql.query(`SELECT COALESCE(MAX(${quoteMysqlIdent('id')}), 0) AS max_id FROM ${quoteMysqlIdent(table)}`)
+    : [[{ max_id: null }]];
+  const highWaterId = Number(highWaterRow?.max_id || 0);
+  const [[countRow]] = useKeyset
+    ? await mysql.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)} WHERE ${quoteMysqlIdent('id')} <= ?`, [highWaterId])
+    : await mysql.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdent(table)}`);
   const total = Number(countRow?.count || 0);
   if (total === 0) return 0;
 
-  const effectiveBatchSize = Math.max(1, Math.min(batchSize, Math.floor(maxInsertParams / Math.max(columns.length, 1))));
-  const useKeyset = canUseKeysetImport(mysqlColumns, columns);
   const selectSql = useKeyset
-    ? `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} WHERE ${quoteMysqlIdent('id')} > ? ORDER BY ${quoteMysqlIdent('id')} ASC LIMIT ?`
+    ? `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} WHERE ${quoteMysqlIdent('id')} > ? AND ${quoteMysqlIdent('id')} <= ? ORDER BY ${quoteMysqlIdent('id')} ASC LIMIT ?`
     : `SELECT ${columns.map(quoteMysqlIdent).join(', ')} FROM ${quoteMysqlIdent(table)} LIMIT ? OFFSET ?`;
   let imported = 0;
   let lastId = 0;
   await prepareFastImportForTable(pg, table);
   try {
-    for (let offset = 0; offset < total; offset += effectiveBatchSize) {
+    for (let offset = 0; offset < total;) {
+      const limit = useKeyset ? Math.min(effectiveBatchSize, total - imported) : effectiveBatchSize;
       const [rows] = useKeyset
-        ? await mysql.query(selectSql, [lastId, effectiveBatchSize])
-        : await mysql.query(selectSql, [effectiveBatchSize, offset]);
+        ? await mysql.query(selectSql, [lastId, highWaterId, limit])
+        : await mysql.query(selectSql, [limit, offset]);
       if (rows.length === 0) break;
       const params = [];
       const tuples = rows.map((row, rowIndex) => {
@@ -816,6 +855,7 @@ const importTable = async (mysql, pg, table) => {
         lastId = nextLastId;
       }
       process.stdout.write(`\r[MySQL -> PostgreSQL] ${table}: ${imported}/${total}`);
+      offset += rows.length;
       if (useKeyset && rows.length < effectiveBatchSize) break;
     }
   } finally {

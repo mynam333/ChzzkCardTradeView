@@ -355,6 +355,59 @@ export class SupabaseUserRepository implements IUserRepository {
       });
     });
 
+    const { data: sellerListings } = await client
+      .from('market_listings')
+      .select('id, current_bidder_id, bid_reserved')
+      .eq('seller_id', id)
+      .eq('status', 'PENDING');
+    const sellerListingIds = (sellerListings || []).map((row: any) => Number(row.id)).filter(Number.isFinite);
+    if (sellerListingIds.length > 0) {
+      const { data: bidRows, error: bidError } = await client
+        .from('market_bids')
+        .select('id, listing_id, bidder_id, amount')
+        .in('listing_id', sellerListingIds)
+        .order('id', { ascending: false });
+      if (bidError) {
+        console.warn('[Supabase] 탈퇴 판매자 경매 입찰 조회 실패:', bidError.message);
+      }
+      const latestByBidder = new Map<string, any>();
+      const listingIdsWithBids = new Set<number>();
+      for (const bid of bidRows || []) {
+        const listingId = Number((bid as any).listing_id);
+        const key = `${listingId}:${(bid as any).bidder_id}`;
+        listingIdsWithBids.add(listingId);
+        if (!latestByBidder.has(key)) latestByBidder.set(key, bid);
+      }
+      const refunds = Array.from(latestByBidder.values());
+      for (const listing of sellerListings || []) {
+        const listingId = Number((listing as any).id);
+        const amount = Number((listing as any).bid_reserved || 0);
+        const bidderId = (listing as any).current_bidder_id;
+        if (!listingIdsWithBids.has(listingId) && bidderId && amount > 0) {
+          refunds.push({ listing_id: listingId, bidder_id: bidderId, amount });
+        }
+      }
+      for (const refund of refunds) {
+        const amount = Number((refund as any).amount || 0);
+        const bidderId = (refund as any).bidder_id;
+        const listingId = Number((refund as any).listing_id);
+        if (!bidderId || amount <= 0) continue;
+        await client.rpc('increment_user_point', { p_id: bidderId, p_delta: amount });
+        const { error: ledgerError } = await client.from('point_ledger_entries').insert([{
+          user_id: bidderId,
+          counterparty_user_id: id,
+          amount,
+          balance_after: null,
+          source_type: 'market_bid_refund',
+          source_id: String(listingId),
+          reason: 'seller_account_deleted_refund',
+          description: `판매자 ${id} 탈퇴로 진행 중 경매 예약금 환불`,
+          metadata: { deleted_seller_id: id, listing_id: listingId }
+        }]);
+        if (ledgerError) console.warn('[Supabase] 탈퇴 판매자 경매 환불 원장 기록 실패:', ledgerError.message);
+      }
+    }
+
     await client.from('market_listings').update({ buyer_id: null }).eq('buyer_id', id);
     await deleteEq('market_listings', 'seller_id');
     await client.from('trades').delete().or(`sender_id.eq.${id},receiver_id.eq.${id}`);

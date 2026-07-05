@@ -280,38 +280,34 @@ export class MysqlUserRepository implements IUserRepository {
           avatar_url_snapshot = VALUES(avatar_url_snapshot),
           point_at_deletion = VALUES(point_at_deletion)
       `, id, deletingUser?.username || null, deletingUser?.avatar_url || null, deletingUser?.point ?? null);
-      await tx.run(`
-        UPDATE users
-           SET point = point + COALESCE((
-             SELECT SUM(ml.bid_reserved)
-               FROM market_listings ml
-              WHERE ml.seller_id = ?
-                AND ml.status = 'PENDING'
-                AND ml.current_bidder_id = users.id
-                AND ml.bid_reserved > 0
-           ), 0)
-         WHERE id IN (
-           SELECT current_bidder_id
-             FROM market_listings
-            WHERE seller_id = ?
-              AND status = 'PENDING'
-              AND current_bidder_id IS NOT NULL
-              AND bid_reserved > 0
-         )
-      `, id, id);
       const pendingBidRefunds = await tx.all<{ listing_id: number; user_id: string; amount: number }>(`
-        SELECT id AS listing_id, current_bidder_id AS user_id, bid_reserved AS amount
-          FROM market_listings
-         WHERE seller_id = ?
-           AND status = 'PENDING'
-           AND current_bidder_id IS NOT NULL
-           AND bid_reserved > 0
-      `, id);
+        SELECT ml.id AS listing_id, mb.bidder_id AS user_id, mb.amount AS amount
+          FROM market_listings ml
+          JOIN market_bids mb ON mb.listing_id = ml.id
+          JOIN (
+            SELECT listing_id, bidder_id, MAX(id) AS id
+              FROM market_bids
+             GROUP BY listing_id, bidder_id
+          ) latest ON latest.id = mb.id
+         WHERE ml.seller_id = ?
+           AND ml.status = 'PENDING'
+        UNION ALL
+        SELECT ml.id AS listing_id, ml.current_bidder_id AS user_id, ml.bid_reserved AS amount
+          FROM market_listings ml
+         WHERE ml.seller_id = ?
+           AND ml.status = 'PENDING'
+           AND ml.current_bidder_id IS NOT NULL
+           AND ml.bid_reserved > 0
+           AND NOT EXISTS (SELECT 1 FROM market_bids mb WHERE mb.listing_id = ml.id)
+      `, id, id);
       for (const refund of pendingBidRefunds) {
+        const amount = Number(refund.amount || 0);
+        if (amount <= 0) continue;
+        await tx.run('UPDATE users SET point = point + ? WHERE id = ?', amount, refund.user_id);
         await recordMysqlPointLedger(tx, {
           userId: refund.user_id,
           counterpartyUserId: id,
-          amount: Number(refund.amount || 0),
+          amount,
           sourceType: 'market_bid_refund',
           sourceId: refund.listing_id,
           reason: 'seller_account_deleted_refund',

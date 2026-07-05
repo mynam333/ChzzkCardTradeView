@@ -764,6 +764,34 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION delete_user_account(p_user_id TEXT)
 RETURNS VOID AS $$
 BEGIN
+  UPDATE users u
+     SET point = u.point + refunds.amount
+    FROM (
+      SELECT bidder_id AS user_id, SUM(amount) AS amount
+        FROM (
+          SELECT mb.listing_id, mb.bidder_id, mb.amount
+            FROM market_listings ml
+            JOIN market_bids mb ON mb.listing_id = ml.id
+            JOIN (
+              SELECT listing_id, bidder_id, MAX(id) AS id
+                FROM market_bids
+               GROUP BY listing_id, bidder_id
+            ) latest ON latest.id = mb.id
+           WHERE ml.seller_id = p_user_id
+             AND ml.status = 'PENDING'
+          UNION ALL
+          SELECT ml.id AS listing_id, ml.current_bidder_id AS bidder_id, ml.bid_reserved AS amount
+            FROM market_listings ml
+           WHERE ml.seller_id = p_user_id
+             AND ml.status = 'PENDING'
+             AND ml.current_bidder_id IS NOT NULL
+             AND COALESCE(ml.bid_reserved, 0) > 0
+             AND NOT EXISTS (SELECT 1 FROM market_bids mb WHERE mb.listing_id = ml.id)
+        ) pending_refunds
+       GROUP BY bidder_id
+    ) refunds
+   WHERE u.id = refunds.user_id;
+
   UPDATE market_listings SET buyer_id = NULL WHERE buyer_id = p_user_id;
   DELETE FROM market_listings WHERE seller_id = p_user_id;
   DELETE FROM trades WHERE sender_id = p_user_id OR receiver_id = p_user_id;
@@ -1772,7 +1800,7 @@ ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFA
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_market_listings_fixed_price ON market_listings(price, id) WHERE status = 'PENDING' AND listing_type = 'fixed';
-CREATE INDEX IF NOT EXISTS idx_market_listings_auction_price ON market_listings(COALESCE(current_bid, starting_bid, price, 0), id) WHERE status = 'PENDING' AND listing_type = 'auction';
+CREATE INDEX IF NOT EXISTS idx_market_listings_auction_price ON market_listings(COALESCE(starting_bid, price, 0), id) WHERE status = 'PENDING' AND listing_type = 'auction';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
   ON market_listings(pending_user_card_id);
@@ -1872,10 +1900,11 @@ DECLARE
   b_point INTEGER;
   calc_fee INTEGER;
   calc_settled INTEGER;
-  reserved_amount INTEGER;
+  reserved_amount INTEGER := 0;
   payable_now INTEGER;
   card_border_id INTEGER;
   card_name_effect_id INTEGER;
+  bid_refund RECORD;
 BEGIN
   -- 동시 거래 락 획득
   PERFORM pg_advisory_xact_lock(hashtext('buy_market_item:' || p_listing_id::TEXT));
@@ -1895,12 +1924,14 @@ BEGIN
   IF b_point IS NULL THEN
     RETURN 'BUYER_NOT_FOUND';
   END IF;
-  reserved_amount := COALESCE(listing.bid_reserved, 0);
-  IF listing.current_bidder_id = p_buyer_id AND reserved_amount > 0 THEN
-    payable_now := GREATEST(listing.price - reserved_amount, 0);
-  ELSE
-    payable_now := listing.price;
-  END IF;
+  SELECT amount INTO reserved_amount
+    FROM market_bids
+   WHERE listing_id = p_listing_id
+     AND bidder_id = p_buyer_id
+   ORDER BY id DESC
+   LIMIT 1;
+  reserved_amount := COALESCE(reserved_amount, CASE WHEN listing.current_bidder_id = p_buyer_id THEN COALESCE(listing.bid_reserved, 0) ELSE 0 END);
+  payable_now := GREATEST(listing.price - reserved_amount, 0);
 
   IF b_point < payable_now THEN
     RETURN 'INSUFFICIENT_POINT';
@@ -1913,17 +1944,34 @@ BEGIN
   -- 구매자 포인트 차감
   UPDATE users SET point = point - payable_now WHERE id = p_buyer_id;
 
-  -- 현재 최고 입찰자가 즉시구매하고 예약금이 구매가보다 크면 차액 환불
-  IF listing.current_bidder_id = p_buyer_id
-     AND reserved_amount > listing.price THEN
+  -- 즉시구매자가 이미 예약한 입찰금이 구매가보다 크면 차액 환불
+  IF reserved_amount > listing.price THEN
     UPDATE users SET point = point + (reserved_amount - listing.price) WHERE id = p_buyer_id;
   END IF;
 
-  -- 기존 최고 입찰자가 따로 있으면 묶여 있던 입찰금을 환불
+  -- 다른 입찰자의 최신 예약금 환불
+  FOR bid_refund IN
+    SELECT mb.bidder_id, mb.amount
+      FROM market_bids mb
+      JOIN (
+        SELECT bidder_id, MAX(id) AS id
+          FROM market_bids
+         WHERE listing_id = p_listing_id
+         GROUP BY bidder_id
+      ) latest ON latest.id = mb.id
+     WHERE mb.bidder_id <> p_buyer_id
+  LOOP
+    IF COALESCE(bid_refund.amount, 0) > 0 THEN
+      UPDATE users SET point = point + bid_refund.amount WHERE id = bid_refund.bidder_id;
+    END IF;
+  END LOOP;
+
+  -- 기존 단일 최고입찰자 저장 방식으로 남은 예약금도 호환 환불
   IF listing.current_bidder_id IS NOT NULL
      AND listing.current_bidder_id <> p_buyer_id
-     AND reserved_amount > 0 THEN
-    UPDATE users SET point = point + reserved_amount WHERE id = listing.current_bidder_id;
+     AND COALESCE(listing.bid_reserved, 0) > 0
+     AND NOT EXISTS (SELECT 1 FROM market_bids mb WHERE mb.listing_id = p_listing_id) THEN
+    UPDATE users SET point = point + listing.bid_reserved WHERE id = listing.current_bidder_id;
   END IF;
 
   -- 판매자 포인트 가산
@@ -1933,6 +1981,7 @@ BEGIN
   UPDATE market_listings
      SET status = 'SOLD',
          buyer_id = p_buyer_id,
+         current_bidder_id = NULL,
          fee = calc_fee,
          bid_reserved = 0,
          settled_amount = calc_settled,
