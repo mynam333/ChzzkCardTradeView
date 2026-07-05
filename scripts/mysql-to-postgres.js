@@ -272,6 +272,7 @@ const splitSqlStatements = (sql) => {
 
 const quoteMysqlIdent = (name) => `\`${String(name).replace(/`/g, '``')}\``;
 const quotePgIdent = (name) => `"${String(name).replace(/"/g, '""')}"`;
+const quotePgQualifiedIdent = (name) => String(name).split('.').map(quotePgIdent).join('.');
 
 const sqlPreview = (statement, limit = 1200) => statement.replace(/\s+/g, ' ').trim().slice(0, limit);
 
@@ -652,10 +653,37 @@ const createMissingTable = async (pg, table, columns) => {
   await pg.unsafe(`CREATE TABLE IF NOT EXISTS ${quotePgIdent(table)} (${definitions.join(', ')})`);
 };
 
+const shouldWidenToBigint = (mysqlColumn, pgColumn) => {
+  const mysqlType = String(mysqlColumn?.DATA_TYPE || '').toLowerCase();
+  const pgType = String(pgColumn?.data_type || pgColumn?.udt_name || '').toLowerCase();
+  return mysqlType === 'bigint' && ['integer', 'smallint', 'int4', 'int2'].includes(pgType);
+};
+
+const widenPostgresColumnIfNeeded = async (pg, table, mysqlColumn, pgColumn) => {
+  if (!shouldWidenToBigint(mysqlColumn, pgColumn)) return;
+  const column = mysqlColumn.COLUMN_NAME;
+  console.log(`[MySQL -> PostgreSQL] ${table}.${column}: PostgreSQL INTEGER -> BIGINT 타입 확장`);
+  await pg.unsafe(`
+    ALTER TABLE ${quotePgIdent(table)}
+    ALTER COLUMN ${quotePgIdent(column)} TYPE BIGINT
+    USING ${quotePgIdent(column)}::BIGINT
+  `);
+
+  if (String(pgColumn.column_default || '').includes('nextval(')) {
+    const [seq] = await pg.unsafe('SELECT pg_get_serial_sequence($1, $2) AS name', [table, column]);
+    if (seq?.name) {
+      await pg.unsafe(`ALTER SEQUENCE ${quotePgQualifiedIdent(seq.name)} AS BIGINT`);
+    }
+  }
+};
+
 const addMissingColumns = async (pg, table, mysqlColumns, pgColumns) => {
-  const existing = new Set(pgColumns.map((col) => col.column_name));
+  const existing = new Map(pgColumns.map((col) => [col.column_name, col]));
   for (const col of mysqlColumns) {
-    if (existing.has(col.COLUMN_NAME)) continue;
+    if (existing.has(col.COLUMN_NAME)) {
+      await widenPostgresColumnIfNeeded(pg, table, col, existing.get(col.COLUMN_NAME));
+      continue;
+    }
     const type = mysqlTypeToPostgres(col);
     const defaultSql = normalizeDefault(col.COLUMN_DEFAULT, type);
     await pg.unsafe(`ALTER TABLE ${quotePgIdent(table)} ADD COLUMN IF NOT EXISTS ${quotePgIdent(col.COLUMN_NAME)} ${type}${defaultSql}`);

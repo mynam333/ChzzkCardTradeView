@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL,                      -- 치지직 닉네임
     avatar_url TEXT,                             -- 프로필 이미지 URL
     role TEXT DEFAULT 'USER',                    -- 권한 구분 ('USER' 또는 'ADMIN')
-    point INTEGER DEFAULT 0,                     -- 보유 재화
+    point BIGINT DEFAULT 0,                      -- 보유 재화
     last_free_draw TIMESTAMPTZ,                  -- 마지막 무료 뽑기 충전 구간
     free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 주기 충전 무료 소환 기회
     bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0, -- 쿠폰/보상 추가 무료 소환 티켓
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     username_snapshot TEXT,
     avatar_url_snapshot TEXT,
-    point_at_deletion INTEGER
+    point_at_deletion BIGINT
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS user_asset_rankings (
     username TEXT NOT NULL,
     avatar_url TEXT,
     role TEXT NOT NULL DEFAULT 'USER',
-    point INTEGER NOT NULL DEFAULT 0,
+    point BIGINT NOT NULL DEFAULT 0,
     last_free_draw TIMESTAMPTZ,
     banned_until TIMESTAMPTZ,
     ban_reason TEXT,
@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS point_ledger_entries (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL,
     counterparty_user_id TEXT,
-    amount INTEGER NOT NULL,
-    balance_after INTEGER,
+    amount BIGINT NOT NULL,
+    balance_after BIGINT,
     source_type TEXT NOT NULL,
     source_id TEXT,
     reason TEXT NOT NULL,
@@ -98,9 +98,9 @@ CREATE TABLE IF NOT EXISTS asset_event_logs (
     to_user_id TEXT,
     asset_type TEXT NOT NULL,
     action TEXT NOT NULL,
-    amount INTEGER,
+    amount BIGINT,
     quantity INTEGER,
-    balance_after INTEGER,
+    balance_after BIGINT,
     source_type TEXT NOT NULL DEFAULT 'unknown',
     source_id TEXT,
     reason TEXT NOT NULL,
@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
     type TEXT NOT NULL,                          -- 'border' 또는 'name_effect'
     name TEXT NOT NULL,
     description TEXT,
-    price INTEGER NOT NULL DEFAULT 0,
+    price BIGINT NOT NULL DEFAULT 0,
     style_json TEXT,                             -- React 인라인 스타일 객체(JSON 문자열)
     font_url TEXT,                               -- 이름 이펙트용 웹폰트 URL (선택)
     font_family TEXT,                            -- 폰트 패밀리명 (선택)
@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE TABLE IF NOT EXISTS value_history (
     id SERIAL PRIMARY KEY,
     channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
-    value INTEGER NOT NULL,
+    value BIGINT NOT NULL,
     recorded_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -497,6 +497,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS free_draw_tickets INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_free_draw_tickets INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ALTER COLUMN point TYPE BIGINT USING point::BIGINT;
+ALTER TABLE deleted_user_accounts ALTER COLUMN point_at_deletion TYPE BIGINT USING point_at_deletion::BIGINT;
+ALTER TABLE user_asset_rankings ALTER COLUMN point TYPE BIGINT USING point::BIGINT;
+ALTER TABLE point_ledger_entries ALTER COLUMN amount TYPE BIGINT USING amount::BIGINT;
+ALTER TABLE point_ledger_entries ALTER COLUMN balance_after TYPE BIGINT USING balance_after::BIGINT;
+ALTER TABLE asset_event_logs ALTER COLUMN amount TYPE BIGINT USING amount::BIGINT;
+ALTER TABLE asset_event_logs ALTER COLUMN balance_after TYPE BIGINT USING balance_after::BIGINT;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS broadcast_minutes INTEGER DEFAULT 0;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS last_broadcast_at TIMESTAMPTZ;
 ALTER TABLE streamers ADD COLUMN IF NOT EXISTS custom_image_url_1 TEXT;
@@ -514,6 +521,7 @@ ALTER TABLE coupons ADD COLUMN IF NOT EXISTS rewards JSONB NOT NULL DEFAULT '[]'
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS purchase_limit INTEGER DEFAULT 0;
 ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
+ALTER TABLE shop_items ALTER COLUMN price TYPE BIGINT USING price::BIGINT;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;
@@ -523,6 +531,7 @@ ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_order INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_at TIMESTAMPTZ;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS ticket_spent_type TEXT DEFAULT 'NONE';
+ALTER TABLE value_history ALTER COLUMN value TYPE BIGINT USING value::BIGINT;
 
 -- 하위 호환성 유지: user_cards 테이블에 코스메틱 외래키 제약조건 추가
 DO $$
@@ -592,13 +601,15 @@ CREATE TABLE IF NOT EXISTS system_configs (
 -- ============================================================
 
 -- 포인트 원자적 증감 (delta 음수 가능)
-CREATE OR REPLACE FUNCTION increment_user_point(p_id TEXT, p_delta INTEGER)
+DROP FUNCTION IF EXISTS increment_user_point(TEXT, INTEGER);
+CREATE OR REPLACE FUNCTION increment_user_point(p_id TEXT, p_delta BIGINT)
 RETURNS VOID AS $$
   UPDATE users SET point = point + p_delta WHERE id = p_id;
 $$ LANGUAGE sql;
 
 -- 잔액이 충분할 때만 차감 (성공 시 TRUE, 부족 시 FALSE)
-CREATE OR REPLACE FUNCTION deduct_user_point(p_id TEXT, p_amount INTEGER)
+DROP FUNCTION IF EXISTS deduct_user_point(TEXT, INTEGER);
+CREATE OR REPLACE FUNCTION deduct_user_point(p_id TEXT, p_amount BIGINT)
 RETURNS BOOLEAN AS $$
 DECLARE
   updated INTEGER;
@@ -906,12 +917,12 @@ DECLARE
   picked_count          INTEGER;
   sender_out            INTEGER;
   receiver_out          INTEGER;
-  s_point               INTEGER;
-  r_point               INTEGER;
-  sender_balance_after  INTEGER;
-  receiver_balance_after INTEGER;
-  sender_delta          INTEGER;
-  receiver_delta        INTEGER;
+  s_point               BIGINT;
+  r_point               BIGINT;
+  sender_balance_after  BIGINT;
+  receiver_balance_after BIGINT;
+  sender_delta          BIGINT;
+  receiver_delta        BIGINT;
   sender_with_cosmetics BOOLEAN;
   receiver_with_cosmetics BOOLEAN;
 BEGIN
@@ -1413,7 +1424,7 @@ DROP FUNCTION IF EXISTS public.get_user_rankings(INTEGER, TEXT);
 
 CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER)
 RETURNS TABLE (
-  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
+  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point BIGINT,
   last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, status_message TEXT, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT
 ) AS $$
@@ -1433,7 +1444,7 @@ $$ LANGUAGE sql;
 -- [추가] 검색어 대응 및 전체 랭킹 인덱스(rank)를 포함하는 오버로딩 유저 랭킹 RPC
 CREATE OR REPLACE FUNCTION get_user_rankings(p_limit INTEGER, p_keyword TEXT)
 RETURNS TABLE (
-  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point INTEGER,
+  id TEXT, username TEXT, avatar_url TEXT, role TEXT, point BIGINT,
   last_free_draw TIMESTAMPTZ, banned_until TIMESTAMPTZ, status_message TEXT, created_at TIMESTAMPTZ,
   card_count BIGINT, total_asset BIGINT, rank BIGINT
 ) AS $$
@@ -1492,6 +1503,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 뽑기: 무료권/포인트 차감, 시리얼 채번, 카드 생성을 단일 트랜잭션으로 처리
+DROP FUNCTION IF EXISTS draw_card_atomic(TEXT, TEXT, INTEGER, TIMESTAMPTZ, TIMESTAMPTZ, INTEGER, DOUBLE PRECISION);
 CREATE OR REPLACE FUNCTION draw_card_atomic(
   p_user_id TEXT,
   p_channel_id TEXT,
@@ -1507,7 +1519,7 @@ RETURNS TABLE (
   card_id INTEGER,
   serial_number INTEGER,
   is_free BOOLEAN,
-  points_left INTEGER,
+  points_left BIGINT,
   free_draw_tickets_left INTEGER,
   bonus_free_draw_tickets_left INTEGER,
   free_draw_source TEXT
@@ -1526,7 +1538,7 @@ BEGIN
 
   SELECT * INTO u FROM users WHERE id = p_user_id FOR UPDATE;
   IF NOT FOUND THEN
-    RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND', NULL::INTEGER, NULL::INTEGER, FALSE, NULL::INTEGER, NULL::INTEGER, NULL::INTEGER, NULL::TEXT;
+    RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND', NULL::INTEGER, NULL::INTEGER, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::INTEGER, NULL::TEXT;
     RETURN;
   END IF;
 
@@ -1586,8 +1598,8 @@ RETURNS TABLE (
   ok BOOLEAN,
   reason TEXT,
   reward_type TEXT,
-  points_added INTEGER,
-  new_points INTEGER,
+  points_added BIGINT,
+  new_points BIGINT,
   reward_channel_id TEXT,
   reward_item_id INTEGER,
   reward_quantity INTEGER,
@@ -1597,29 +1609,29 @@ DECLARE
   c coupons%ROWTYPE;
   base_serial INTEGER;
   i INTEGER;
-  updated_point INTEGER;
+  updated_point BIGINT;
   r JSONB;
   rewards_json JSONB;
   reward_kind TEXT;
-  reward_points INTEGER;
+  reward_points BIGINT;
   reward_quantity_value INTEGER;
   reward_channel TEXT;
   reward_item INTEGER;
-  total_points INTEGER := 0;
+  total_points BIGINT := 0;
 BEGIN
   SELECT * INTO c FROM coupons WHERE id = p_coupon_id FOR UPDATE;
   IF NOT FOUND THEN
-    RETURN QUERY SELECT FALSE, 'NOT_FOUND', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
+    RETURN QUERY SELECT FALSE, 'NOT_FOUND', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
   IF c.expires_at IS NOT NULL AND c.expires_at < NOW() THEN
-    RETURN QUERY SELECT FALSE, 'EXPIRED', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
+    RETURN QUERY SELECT FALSE, 'EXPIRED', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
   IF c.coupon_type = 'single' AND c.used_count >= c.max_uses THEN
-    RETURN QUERY SELECT FALSE, 'SOLD_OUT', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
+    RETURN QUERY SELECT FALSE, 'SOLD_OUT', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, '[]'::JSONB;
     RETURN;
   END IF;
 
@@ -1633,29 +1645,29 @@ BEGIN
 
   FOR r IN SELECT value FROM jsonb_array_elements(rewards_json) LOOP
     reward_kind := r->>'type';
-    reward_points := COALESCE((r->>'points')::INTEGER, 0);
+    reward_points := COALESCE((r->>'points')::BIGINT, 0);
     reward_quantity_value := COALESCE((r->>'quantity')::INTEGER, 0);
     reward_channel := NULLIF(r->>'channel_id', '');
     reward_item := NULLIF(r->>'item_id', '')::INTEGER;
 
     IF reward_kind = 'point' AND reward_points <= 0 THEN
-      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
       RETURN;
     END IF;
     IF reward_kind = 'card' AND (reward_channel IS NULL OR reward_quantity_value <= 0) THEN
-      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
       RETURN;
     END IF;
     IF reward_kind = 'cosmetic' AND (reward_item IS NULL OR reward_quantity_value <= 0) THEN
-      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
       RETURN;
     END IF;
     IF reward_kind IN ('minigame_ticket', 'free_draw_ticket') AND reward_quantity_value <= 0 THEN
-      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
       RETURN;
     END IF;
     IF reward_kind NOT IN ('point', 'card', 'cosmetic', 'minigame_ticket', 'free_draw_ticket') THEN
-      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
       RETURN;
     END IF;
   END LOOP;
@@ -1663,7 +1675,7 @@ BEGIN
   BEGIN
     INSERT INTO coupon_logs (coupon_id, user_id) VALUES (p_coupon_id, p_user_id);
   EXCEPTION WHEN unique_violation THEN
-    RETURN QUERY SELECT FALSE, 'DUPLICATE', NULL::TEXT, 0, NULL::INTEGER, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
+    RETURN QUERY SELECT FALSE, 'DUPLICATE', NULL::TEXT, 0::BIGINT, NULL::BIGINT, NULL::TEXT, NULL::INTEGER, 0, rewards_json;
     RETURN;
   END;
 
@@ -1671,7 +1683,7 @@ BEGIN
 
   FOR r IN SELECT value FROM jsonb_array_elements(rewards_json) LOOP
     reward_kind := r->>'type';
-    reward_points := COALESCE((r->>'points')::INTEGER, 0);
+    reward_points := COALESCE((r->>'points')::BIGINT, 0);
     reward_quantity_value := COALESCE((r->>'quantity')::INTEGER, 0);
     reward_channel := NULLIF(r->>'channel_id', '');
     reward_item := NULLIF(r->>'item_id', '')::INTEGER;
@@ -1760,19 +1772,19 @@ CREATE TABLE IF NOT EXISTS market_listings (
   seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE,
   pending_user_card_id INTEGER,
-  price INTEGER NOT NULL CHECK (price >= 10),
+  price BIGINT NOT NULL CHECK (price >= 10),
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED')),
   listing_type TEXT NOT NULL DEFAULT 'fixed',
-  buy_now_price INTEGER,
-  starting_bid INTEGER,
-  current_bid INTEGER,
+  buy_now_price BIGINT,
+  starting_bid BIGINT,
+  current_bid BIGINT,
   current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   auction_ends_at TIMESTAMPTZ,
-  bid_reserved INTEGER DEFAULT 0,
+  bid_reserved BIGINT DEFAULT 0,
   buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  fee INTEGER DEFAULT 0,
+  fee BIGINT DEFAULT 0,
   fee_rate INTEGER DEFAULT 5,
-  settled_amount INTEGER DEFAULT 0,
+  settled_amount BIGINT DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
   seller_hidden_at TIMESTAMPTZ,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
@@ -1789,14 +1801,21 @@ ALTER TABLE market_listings
   ADD CONSTRAINT market_listings_status_check CHECK (status IN ('PENDING', 'SOLD', 'CANCELLED', 'AUCTION_ENDED'));
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS listing_type TEXT NOT NULL DEFAULT 'fixed';
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS pending_user_card_id INTEGER;
-ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS buy_now_price INTEGER;
-ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid INTEGER;
-ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid INTEGER;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS buy_now_price BIGINT;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS starting_bid BIGINT;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bid BIGINT;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ;
-ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS bid_reserved INTEGER DEFAULT 0;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS bid_reserved BIGINT DEFAULT 0;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5;
-ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount INTEGER DEFAULT 0;
+ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS settled_amount BIGINT DEFAULT 0;
+ALTER TABLE market_listings ALTER COLUMN price TYPE BIGINT USING price::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN buy_now_price TYPE BIGINT USING buy_now_price::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN starting_bid TYPE BIGINT USING starting_bid::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN current_bid TYPE BIGINT USING current_bid::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN bid_reserved TYPE BIGINT USING bid_reserved::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN fee TYPE BIGINT USING fee::BIGINT;
+ALTER TABLE market_listings ALTER COLUMN settled_amount TYPE BIGINT USING settled_amount::BIGINT;
 ALTER TABLE market_listings ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_market_listings_auction_ends ON market_listings(auction_ends_at) WHERE listing_type = 'auction' AND status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_market_listings_fixed_price ON market_listings(price, id) WHERE status = 'PENDING' AND listing_type = 'fixed';
@@ -1809,20 +1828,22 @@ CREATE TABLE IF NOT EXISTS market_bids (
   id BIGSERIAL PRIMARY KEY,
   listing_id INTEGER NOT NULL REFERENCES market_listings(id) ON DELETE CASCADE,
   bidder_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  amount INTEGER NOT NULL,
+  amount BIGINT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE market_bids ALTER COLUMN amount TYPE BIGINT USING amount::BIGINT;
 CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);
 CREATE INDEX IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id);
 
-CREATE OR REPLACE FUNCTION place_market_bid_atomic(p_listing_id INTEGER, p_bidder_id TEXT, p_amount INTEGER)
+DROP FUNCTION IF EXISTS place_market_bid_atomic(INTEGER, TEXT, INTEGER);
+CREATE OR REPLACE FUNCTION place_market_bid_atomic(p_listing_id INTEGER, p_bidder_id TEXT, p_amount BIGINT)
 RETURNS JSONB AS $$
 DECLARE
   listing market_listings%ROWTYPE;
-  bidder_point INTEGER;
-  previous_amount INTEGER;
-  min_bid INTEGER;
-  payable_now INTEGER;
+  bidder_point BIGINT;
+  previous_amount BIGINT;
+  min_bid BIGINT;
+  payable_now BIGINT;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('market_bid:' || p_listing_id::TEXT));
 
@@ -1883,10 +1904,11 @@ CREATE TABLE IF NOT EXISTS market_watches (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   channel_id TEXT NOT NULL REFERENCES streamers(channel_id) ON DELETE CASCADE,
   star INTEGER,
-  max_price INTEGER,
+  max_price BIGINT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, channel_id, star)
 );
+ALTER TABLE market_watches ALTER COLUMN max_price TYPE BIGINT USING max_price::BIGINT;
 CREATE INDEX IF NOT EXISTS idx_market_watches_card ON market_watches(channel_id, star);
 
 -- ============================================================
@@ -1896,12 +1918,12 @@ CREATE OR REPLACE FUNCTION buy_market_item_atomic(p_listing_id INTEGER, p_buyer_
 RETURNS TEXT AS $$
 DECLARE
   listing market_listings%ROWTYPE;
-  s_point INTEGER;
-  b_point INTEGER;
-  calc_fee INTEGER;
-  calc_settled INTEGER;
-  reserved_amount INTEGER := 0;
-  payable_now INTEGER;
+  s_point BIGINT;
+  b_point BIGINT;
+  calc_fee BIGINT;
+  calc_settled BIGINT;
+  reserved_amount BIGINT := 0;
+  payable_now BIGINT;
   card_border_id INTEGER;
   card_name_effect_id INTEGER;
   bid_refund RECORD;
@@ -1938,7 +1960,7 @@ BEGIN
   END IF;
 
   -- 수수료 계산: 매물 등록 시 저장된 수수료율 사용
-  calc_fee := FLOOR(listing.price * (COALESCE(listing.fee_rate, 5)::NUMERIC / 100))::INTEGER;
+  calc_fee := FLOOR(listing.price * (COALESCE(listing.fee_rate, 5)::NUMERIC / 100))::BIGINT;
   calc_settled := listing.price - calc_fee;
 
   -- 구매자 포인트 차감
