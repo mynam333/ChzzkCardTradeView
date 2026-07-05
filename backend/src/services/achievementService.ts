@@ -869,6 +869,26 @@ export const ensureAchievementTables = async (): Promise<void> => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     if (getSqlDialect() === 'postgres') {
+      const dedupeRows = async (table: string, partitionBy: string, orderBy = 'ctid DESC') => {
+        await db.run(`
+          DELETE FROM ${table}
+           WHERE ctid IN (
+             SELECT ctid
+               FROM (
+                 SELECT ctid,
+                        ROW_NUMBER() OVER (PARTITION BY ${partitionBy} ORDER BY ${orderBy}) AS rn
+                   FROM ${table}
+               ) ranked
+              WHERE rn > 1
+           )
+        `);
+      };
+      await dedupeRows('achievements', 'code');
+      await dedupeRows('user_achievements', 'user_id, achievement_id, repeat_key');
+      await dedupeRows('user_achievement_stats', 'user_id, stat_key');
+      await dedupeRows('achievement_grant_logs', 'user_id, achievement_id, repeat_key');
+      await dedupeRows('achievement_events', 'event_key');
+      await dedupeRows('achievement_evaluation_queue', 'dedupe_key');
       await db.run('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_repeat ON user_achievements (user_id, achievement_id, repeat_key)');
       await db.run('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_achievement_stats_key ON user_achievement_stats (user_id, stat_key)');
       await db.run('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_grant ON achievement_grant_logs (user_id, achievement_id, repeat_key)');

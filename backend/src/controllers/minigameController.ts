@@ -79,6 +79,16 @@ const parseDbKstTimeMs = (value: string | undefined | null): number => {
   return new Date(trimmed).getTime();
 };
 
+const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value as T;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
+};
+
 const getGamePreplayMs = (gameType: DailyMinigameType): number => {
   if (gameType === 'match') return COUNTDOWN_MS + MATCH_REVEAL_MS;
   return COUNTDOWN_MS;
@@ -929,7 +939,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     if (session.user_id !== userId) {
       return res.status(403).json({ error: 'Forbidden', message: '잘못된 세션 소유권입니다.' });
     }
-    const target = JSON.parse(session.target_data);
+    const target = parseDbJson<any>(session.target_data, {});
     const practiceMode = target.practice_mode === true;
     const answer = await getAnswerReveal(session.game_type, target);
 
@@ -1198,7 +1208,7 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
       return res.status(400).json({ error: 'BadRequest', message: '라운드 판정을 지원하지 않는 미니게임입니다.' });
     }
 
-    const target = JSON.parse(session.target_data || '{}');
+    const target = parseDbJson<any>(session.target_data, {});
     const round = Number(payload?.round);
     const selectedChannelId = String(payload?.selected_channel_id || '').trim();
     if (!Number.isInteger(round) || round < 0 || !selectedChannelId) {

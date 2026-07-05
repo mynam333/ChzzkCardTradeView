@@ -477,7 +477,7 @@ export class MysqlUserCardRepository implements IUserCardRepository {
 
   async count(): Promise<number> {
     const row = await this.getDb().get('SELECT COUNT(*) AS c FROM user_cards');
-    return row?.c || 0;
+    return Number(row?.c || 0);
   }
 
   async findByChannel(channelId: string): Promise<{ user_id: string; star: number; id?: number; serial_number?: number; border_item_id?: number | null; name_effect_item_id?: number | null }[]> {

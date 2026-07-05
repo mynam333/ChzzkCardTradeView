@@ -396,7 +396,7 @@ export class MysqlUserRepository implements IUserRepository {
 
   async count(): Promise<number> {
     const row = await this.getDb().get('SELECT COUNT(*) AS c FROM users');
-    return row?.c || 0;
+    return Number(row?.c || 0);
   }
 
   async listUsers(keyword: string, limit: number, offset: number): Promise<{ users: User[]; total: number }> {

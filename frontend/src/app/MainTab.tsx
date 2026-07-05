@@ -108,9 +108,10 @@ export const MainTab: React.FC = () => {
     }
   };
 
-  const formatLandingStat = (value?: number) => (
-    typeof value === 'number' ? value.toLocaleString() : '--'
-  );
+  const formatLandingStat = (value?: number | string | null) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)).toLocaleString() : '--';
+  };
 
   const dismissPopup = (popupId: number, permanently = false) => {
     if (permanently) {

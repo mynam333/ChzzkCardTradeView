@@ -1980,11 +1980,11 @@ export const ShopTab: React.FC = () => {
                                 <span>시작가</span>
                                 <span className="cute-number-font">{startBid.toLocaleString()} P</span>
                               </div>
-                              {/* 비공개 입찰 안내 */}
-                              <div className="flex items-center justify-between gap-1 text-[9px] font-semibold text-violet-700/70 dark:text-violet-100/60">
-                                <span className="truncate">입찰 정보 비공개</span>
-                                {isUrgent && <span className="shrink-0 font-black text-red-500">마감 임박</span>}
-                              </div>
+                              {isUrgent && (
+                                <div className="text-[9px] font-black text-red-500">
+                                  마감 임박
+                                </div>
+                              )}
                             </div>
                           )}
 

@@ -17,10 +17,11 @@ type ArenaAdminJobRow = {
 const MAX_JOB_READ_LIMIT = 20;
 let ensureArenaAdminJobsPromise: Promise<void> | null = null;
 
-const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
-  if (!raw) return fallback;
+const parseJson = <T>(raw: unknown, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  if (typeof raw === 'object') return raw as T;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(String(raw)) as T;
   } catch {
     return fallback;
   }

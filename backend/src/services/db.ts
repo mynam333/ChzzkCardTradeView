@@ -334,6 +334,34 @@ const ensureMysqlUniqueIndex = async (db: MysqlDb, table: string, indexName: str
   await db.run(`ALTER TABLE ${table} ADD UNIQUE INDEX ${indexName} ${ddl}`);
 };
 
+const dropMysqlSingleColumnUniqueIndexes = async (db: MysqlDb, table: string, column: string, keepIndexNames: string[] = []) => {
+  const indexes = await db.all<{ index_name: string }>(
+    `SELECT s.index_name
+       FROM information_schema.statistics s
+       JOIN (
+         SELECT index_name, COUNT(*) AS column_count
+           FROM information_schema.statistics
+          WHERE table_schema = DATABASE()
+            AND table_name = ?
+          GROUP BY index_name
+       ) grouped ON grouped.index_name = s.index_name
+      WHERE s.table_schema = DATABASE()
+        AND s.table_name = ?
+        AND s.column_name = ?
+        AND s.non_unique = 0
+        AND grouped.column_count = 1`,
+    table,
+    table,
+    column
+  );
+  const keep = new Set(keepIndexNames);
+  for (const { index_name: indexName } of indexes) {
+    if (!indexName || indexName === 'PRIMARY' || keep.has(indexName)) continue;
+    console.log(`[DB Migration] MySQL ${table}.${indexName} 전역 UNIQUE 인덱스를 제거합니다.`);
+    await db.run(`ALTER TABLE ${table} DROP INDEX ${indexName}`);
+  }
+};
+
 const ensureMysqlTableCollation = async (db: MysqlDb, table: string, collation = 'utf8mb4_unicode_ci') => {
   const existing = await db.get<{ table_collation: string }>(
     `SELECT table_collation
@@ -664,6 +692,75 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'chat_messages', 'idx_chat_messages_sender_attachments', '(sender_id, message_type, attachment_deleted_at, attachment_expires_at)');
   await ensureMysqlColumn(db, 'notifications', 'group_key', 'group_key VARCHAR(191) NULL AFTER link');
   await ensureMysqlIndex(db, 'notifications', 'idx_notifications_group_key', '(user_id, group_key, deleted_at)');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_listings (
+      id BIGINT PRIMARY KEY AUTO_INCREMENT,
+      seller_id VARCHAR(191) NOT NULL,
+      user_card_id BIGINT NOT NULL,
+      pending_user_card_id BIGINT NULL,
+      price BIGINT NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+      listing_type VARCHAR(32) NOT NULL DEFAULT 'fixed',
+      buy_now_price BIGINT NULL,
+      starting_bid BIGINT NULL,
+      current_bid BIGINT NULL,
+      current_bidder_id VARCHAR(191) NULL,
+      auction_ends_at VARCHAR(64) NULL,
+      bid_reserved BIGINT DEFAULT 0,
+      buyer_id VARCHAR(191) NULL,
+      fee BIGINT DEFAULT 0,
+      fee_rate INT DEFAULT 5,
+      settled_amount BIGINT DEFAULT 0,
+      with_cosmetics TINYINT DEFAULT 0,
+      seller_hidden_at VARCHAR(64) NULL,
+      created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+      updated_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+      UNIQUE KEY idx_market_listings_pending_card (pending_user_card_id),
+      KEY idx_market_listings_status (status),
+      KEY idx_market_listings_seller (seller_id),
+      KEY idx_market_listings_card (user_card_id),
+      KEY idx_market_listings_buyer (buyer_id),
+      KEY idx_market_listings_current_bidder (current_bidder_id),
+      CONSTRAINT fk_market_listings_seller FOREIGN KEY(seller_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_market_listings_card FOREIGN KEY(user_card_id) REFERENCES user_cards(id) ON DELETE CASCADE,
+      CONSTRAINT fk_market_listings_current_bidder FOREIGN KEY(current_bidder_id) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_market_listings_buyer FOREIGN KEY(buyer_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await ensureMysqlColumn(db, 'market_listings', 'listing_type', "listing_type VARCHAR(32) NOT NULL DEFAULT 'fixed' AFTER status");
+  await ensureMysqlColumn(db, 'market_listings', 'buy_now_price', 'buy_now_price BIGINT NULL AFTER listing_type');
+  await ensureMysqlColumn(db, 'market_listings', 'starting_bid', 'starting_bid BIGINT NULL AFTER buy_now_price');
+  await ensureMysqlColumn(db, 'market_listings', 'current_bid', 'current_bid BIGINT NULL AFTER starting_bid');
+  await ensureMysqlColumn(db, 'market_listings', 'current_bidder_id', 'current_bidder_id VARCHAR(191) NULL AFTER current_bid');
+  await ensureMysqlColumn(db, 'market_listings', 'auction_ends_at', 'auction_ends_at VARCHAR(64) NULL AFTER current_bidder_id');
+  await ensureMysqlColumn(db, 'market_listings', 'bid_reserved', 'bid_reserved BIGINT DEFAULT 0 AFTER auction_ends_at');
+  await ensureMysqlColumn(db, 'market_listings', 'fee_rate', 'fee_rate INT DEFAULT 5 AFTER fee');
+  await ensureMysqlColumn(db, 'market_listings', 'settled_amount', 'settled_amount BIGINT DEFAULT 0 AFTER fee_rate');
+  await ensureMysqlColumn(db, 'market_listings', 'with_cosmetics', 'with_cosmetics TINYINT DEFAULT 0 AFTER settled_amount');
+  await ensureMysqlColumn(db, 'market_listings', 'seller_hidden_at', 'seller_hidden_at VARCHAR(64) NULL AFTER with_cosmetics');
+  await ensureMysqlColumn(db, 'market_listings', 'pending_user_card_id', 'pending_user_card_id BIGINT NULL AFTER updated_at');
+  await db.run(`
+    UPDATE market_listings
+       SET listing_type = COALESCE(listing_type, 'fixed'),
+           bid_reserved = COALESCE(bid_reserved, 0),
+           fee_rate = COALESCE(fee_rate, 5),
+           settled_amount = COALESCE(settled_amount, 0),
+           with_cosmetics = COALESCE(with_cosmetics, 0),
+           pending_user_card_id = CASE WHEN status = 'PENDING' THEN COALESCE(pending_user_card_id, user_card_id) ELSE NULL END
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_bids (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      listing_id BIGINT NOT NULL,
+      bidder_id VARCHAR(191) NOT NULL,
+      amount BIGINT NOT NULL,
+      created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
+      KEY idx_market_bids_listing (listing_id, amount),
+      KEY idx_market_bids_bidder (bidder_id),
+      CONSTRAINT fk_market_bids_listing FOREIGN KEY(listing_id) REFERENCES market_listings(id) ON DELETE CASCADE,
+      CONSTRAINT fk_market_bids_bidder FOREIGN KEY(bidder_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
   await ensureMysqlIndex(db, 'streamers', 'idx_streamers_base_value', '(base_value DESC, channel_id)');
   await ensureMysqlIndex(db, 'value_history', 'idx_value_history_channel_recorded', '(channel_id, recorded_at DESC)');
   await ensureMysqlIndex(db, 'value_history', 'idx_value_history_recorded_channel', '(recorded_at DESC, channel_id)');
@@ -679,6 +776,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_auction_end', '(status, listing_type, auction_ends_at, id)');
+  await dropMysqlSingleColumnUniqueIndexes(db, 'market_listings', 'user_card_id');
+  await ensureMysqlUniqueIndex(db, 'market_listings', 'idx_market_listings_pending_card', '(pending_user_card_id)');
   await normalizeMysqlIsoDateColumn(db, 'market_listings', 'auction_ends_at');
   const marketBidsTable = await db.get<{ present: number }>(
     `SELECT 1 AS present
@@ -804,6 +903,79 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   } catch (err: any) {
     console.warn('[DB] pg_trgm 확장 보정 실패, trigram 검색 인덱스는 건너뜁니다:', err?.message || err);
   }
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_listings (
+      id BIGSERIAL PRIMARY KEY,
+      seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_card_id INTEGER NOT NULL REFERENCES user_cards(id) ON DELETE CASCADE,
+      pending_user_card_id INTEGER,
+      price BIGINT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      listing_type TEXT NOT NULL DEFAULT 'fixed',
+      buy_now_price BIGINT,
+      starting_bid BIGINT,
+      current_bid BIGINT,
+      current_bidder_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      auction_ends_at TIMESTAMPTZ,
+      bid_reserved BIGINT DEFAULT 0,
+      buyer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      fee BIGINT DEFAULT 0,
+      fee_rate INTEGER DEFAULT 5,
+      settled_amount BIGINT DEFAULT 0,
+      with_cosmetics BOOLEAN DEFAULT FALSE,
+      seller_hidden_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+    )
+  `);
+  await db.run(`
+    ALTER TABLE market_listings
+      ADD COLUMN IF NOT EXISTS pending_user_card_id INTEGER,
+      ADD COLUMN IF NOT EXISTS listing_type TEXT NOT NULL DEFAULT 'fixed',
+      ADD COLUMN IF NOT EXISTS buy_now_price BIGINT,
+      ADD COLUMN IF NOT EXISTS starting_bid BIGINT,
+      ADD COLUMN IF NOT EXISTS current_bid BIGINT,
+      ADD COLUMN IF NOT EXISTS current_bidder_id TEXT,
+      ADD COLUMN IF NOT EXISTS auction_ends_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS bid_reserved BIGINT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS fee_rate INTEGER DEFAULT 5,
+      ADD COLUMN IF NOT EXISTS settled_amount BIGINT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS with_cosmetics BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS seller_hidden_at TIMESTAMPTZ
+  `);
+  await db.run(`
+    UPDATE market_listings
+       SET listing_type = COALESCE(listing_type, 'fixed'),
+           bid_reserved = COALESCE(bid_reserved, 0),
+           fee_rate = COALESCE(fee_rate, 5),
+           settled_amount = COALESCE(settled_amount, 0),
+           with_cosmetics = COALESCE(with_cosmetics, FALSE),
+           pending_user_card_id = CASE WHEN status = 'PENDING' THEN COALESCE(pending_user_card_id, user_card_id) ELSE NULL END
+  `);
+  await db.run('ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key');
+  await db.run(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+          FROM pg_indexes
+         WHERE schemaname = current_schema()
+           AND indexname = 'idx_market_listings_pending_card'
+           AND indexdef NOT ILIKE '%(pending_user_card_id)%'
+      ) THEN
+        DROP INDEX idx_market_listings_pending_card;
+      END IF;
+    END $$;
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_bids (
+      id BIGSERIAL PRIMARY KEY,
+      listing_id INTEGER NOT NULL REFERENCES market_listings(id) ON DELETE CASCADE,
+      bidder_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount BIGINT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
   await db.run(`
     CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
     RETURNS VOID AS $$
@@ -966,7 +1138,7 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings (status, auction_ends_at, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_bidder_active ON market_listings (status, listing_type, current_bidder_id, bid_reserved)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_latest ON market_listings (updated_at DESC, id DESC) WHERE status = \'PENDING\'');
-  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings (user_card_id) WHERE status = \'PENDING\'');
+  await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings (pending_user_card_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_listing ON market_bids (listing_id, amount DESC)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids (bidder_id, listing_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_rooms_user_a_active ON chat_rooms (user_a_id, updated_at DESC) WHERE deleted_for_a = FALSE');

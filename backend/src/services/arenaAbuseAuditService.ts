@@ -69,10 +69,11 @@ let auditInFlight: Promise<any> | null = null;
 const normalizeLimit = (input: unknown) =>
   Math.max(50, Math.min(AUDIT_MAX_LIMIT, Number.parseInt(String(input || AUDIT_DEFAULT_LIMIT), 10) || AUDIT_DEFAULT_LIMIT));
 
-const parseJson = <T>(raw: string | null | undefined, fallback: T): T => {
-  if (!raw) return fallback;
+const parseJson = <T>(raw: unknown, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  if (typeof raw === 'object') return raw as T;
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(String(raw)) as T;
   } catch {
     return fallback;
   }

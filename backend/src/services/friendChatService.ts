@@ -106,6 +106,16 @@ const normalizeUtcDateTime = (value: any): string => {
   return timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
 };
 
+const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value as T;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
+};
+
 const mapUser = (row: any): ChatUserSummary => ({
   id: row.id,
   username: row.username,
@@ -125,10 +135,7 @@ const mapMessage = (row: any): ChatMessageRow => ({
     const attachmentDeletedAt = row.effective_attachment_deleted_at ?? row.attachment_deleted_at;
     const expiresAt = attachmentExpiresAt ? new Date(normalizeUtcDateTime(attachmentExpiresAt)).getTime() : 0;
     const expired = Boolean(attachmentDeletedAt) || Boolean(expiresAt && expiresAt <= Date.now());
-    let linkPreview: ChatLinkPreview | null = null;
-    if (row.link_preview_json) {
-      try { linkPreview = JSON.parse(row.link_preview_json); } catch { linkPreview = null; }
-    }
+    const linkPreview = parseDbJson<ChatLinkPreview | null>(row.link_preview_json, null);
     return {
       id: Number(row.id),
       room_id: Number(row.room_id),

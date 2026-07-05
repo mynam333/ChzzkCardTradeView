@@ -345,6 +345,8 @@ const postgresBooleanColumns = [
   'with_cosmetics',
   'deleted_for_a',
   'deleted_for_b',
+  'is_deleted',
+  'is_enabled',
   'muted_for_a',
   'muted_for_b'
 ];
@@ -380,6 +382,11 @@ const normalizeMysqlDdlForPostgres = (sql: string): string => {
     .replace(/\s+ON\s+UPDATE\s+CURRENT_TIMESTAMP\b/gi, '')
     .replace(/\s+AFTER\s+[a-zA-Z_][a-zA-Z0-9_]*\b/gi, '')
     .replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
+    .replace(/\bDOUBLE(?!\s+PRECISION)\b/gi, 'DOUBLE PRECISION')
+    .replace(/\bFLOAT\b/gi, 'REAL')
+    .replace(/\bBIGINT\s+UNSIGNED\b/gi, 'NUMERIC(20,0)')
+    .replace(/\bINT\s+UNSIGNED\b/gi, 'BIGINT')
+    .replace(/\bINTEGER\s+UNSIGNED\b/gi, 'BIGINT')
     .replace(/\bLONGTEXT\b/gi, 'TEXT')
     .replace(/\bMEDIUMTEXT\b/gi, 'TEXT')
     .replace(/\bJSON\b/gi, 'JSONB');
@@ -449,7 +456,11 @@ const normalizeBooleanParams = (sql: string, params: any[]): any[] => {
   for (let i = 0; i < segments.length - 1 && i < next.length; i += 1) {
     const prefix = segments[i].slice(-120);
     const comparisonMatch = prefix.match(/(?:^|[\s,(])(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|<>|IS)\s*$/i);
-    if (comparisonMatch && postgresBooleanColumnSet.has(comparisonMatch[1])) {
+    const greatestMatch = prefix.match(/\bGREATEST\(\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*$/i);
+    if (
+      (comparisonMatch && postgresBooleanColumnSet.has(comparisonMatch[1])) ||
+      (greatestMatch && postgresBooleanColumnSet.has(greatestMatch[1]))
+    ) {
       next[i] = toPostgresBooleanParam(next[i]);
     }
   }
@@ -463,15 +474,14 @@ export const normalizePostgresSql = (input: string): string => {
   sql = sql.replace(/\bCOLLATE\s+utf8mb4_unicode_ci\b/gi, '');
   sql = sql.replace(/\s+FORCE\s+INDEX\s*\([^)]+\)/gi, '');
   sql = sql.replace(/\bUTC_TIMESTAMP\(\)/gi, 'NOW()');
-  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+SECOND\s*\)/gi, "(NOW() + (? * INTERVAL '1 second'))");
-  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+MINUTE\s*\)/gi, "(NOW() + (? * INTERVAL '1 minute'))");
-  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+DAY\s*\)/gi, "(NOW() + (? * INTERVAL '1 day'))");
-  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+DAY\s*\)/gi, "NOW() + INTERVAL '$1 day'");
-  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+MINUTE\s*\)/gi, "(NOW() - (? * INTERVAL '1 minute'))");
-  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+DAY\s*\)/gi, "(NOW() - (? * INTERVAL '1 day'))");
-  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+MINUTE\s*\)/gi, "NOW() - INTERVAL '$1 minute'");
-  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+DAY\s*\)/gi, "NOW() - INTERVAL '$1 day'");
-  sql = sql.replace(/\bNOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+(DAY|MINUTE|SECOND)\b/gi, (_m, n, unit) => `NOW() - INTERVAL '${n} ${String(unit).toLowerCase()}'`);
+  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+(SECOND|MINUTE|HOUR|DAY)\s*\)/gi, (_m, unit) => `(NOW() + (? * INTERVAL '1 ${String(unit).toLowerCase()}'))`);
+  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+\?\s+(SECOND|MINUTE|HOUR|DAY)\s*\)/gi, (_m, unit) => `(NOW() - (? * INTERVAL '1 ${String(unit).toLowerCase()}'))`);
+  sql = sql.replace(/\bDATE_ADD\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+(SECOND|MINUTE|HOUR|DAY)\s*\)/gi, (_m, n, unit) => `NOW() + INTERVAL '${n} ${String(unit).toLowerCase()}'`);
+  sql = sql.replace(/\bDATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+(SECOND|MINUTE|HOUR|DAY)\s*\)/gi, (_m, n, unit) => `NOW() - INTERVAL '${n} ${String(unit).toLowerCase()}'`);
+  sql = sql.replace(/\bNOW\(\)\s*-\s*INTERVAL\s+\?\s+(DAY|MINUTE|SECOND|HOUR)\b/gi, (_m, unit) => `(NOW() - (? * INTERVAL '1 ${String(unit).toLowerCase()}'))`);
+  sql = sql.replace(/\bNOW\(\)\s*\+\s*INTERVAL\s+\?\s+(DAY|MINUTE|SECOND|HOUR)\b/gi, (_m, unit) => `(NOW() + (? * INTERVAL '1 ${String(unit).toLowerCase()}'))`);
+  sql = sql.replace(/\bNOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+(DAY|MINUTE|SECOND|HOUR)\b/gi, (_m, n, unit) => `NOW() - INTERVAL '${n} ${String(unit).toLowerCase()}'`);
+  sql = sql.replace(/\bNOW\(\)\s*\+\s*INTERVAL\s+(\d+)\s+(DAY|MINUTE|SECOND|HOUR)\b/gi, (_m, n, unit) => `NOW() + INTERVAL '${n} ${String(unit).toLowerCase()}'`);
   sql = sql.replace(/\bTIMESTAMPDIFF\(\s*DAY\s*,\s*COALESCE\(([^,]+),\s*NOW\(\)\)\s*,\s*NOW\(\)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE($1, NOW()))) / 86400)::INTEGER');
   sql = sql.replace(/\bTIMESTAMPDIFF\(\s*DAY\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)) / 86400)::INTEGER');
   sql = sql.replace(/\bTIMESTAMPDIFF\(\s*HOUR\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, 'FLOOR(EXTRACT(EPOCH FROM ($2 - $1)) / 3600)::INTEGER');

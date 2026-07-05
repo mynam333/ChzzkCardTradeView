@@ -2015,6 +2015,7 @@ BEGIN
   -- 매물 상태 업데이트
   UPDATE market_listings
      SET status = 'SOLD',
+         pending_user_card_id = NULL,
          buyer_id = p_buyer_id,
          current_bidder_id = NULL,
          fee = calc_fee,

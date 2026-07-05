@@ -38,6 +38,16 @@ const normalizeConfig = (raw: any): ArenaAdminControlConfig => ({
   updated_at: String(raw?.updated_at || new Date().toISOString())
 });
 
+const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value as T;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
+};
+
 export const getArenaAdminControlConfigSync = (): ArenaAdminControlConfig => cache?.config || defaultConfig();
 
 export const loadArenaAdminControlConfig = async (force = false): Promise<ArenaAdminControlConfig> => {
@@ -47,7 +57,7 @@ export const loadArenaAdminControlConfig = async (force = false): Promise<ArenaA
 
   inFlight = systemConfigRepository.get(CONFIG_KEY, '')
     .then((raw) => {
-      const parsed = raw ? JSON.parse(raw) : null;
+      const parsed = parseDbJson(raw, null);
       const config = normalizeConfig(parsed || {});
       cache = { config, expiresAt: Date.now() + CACHE_TTL_MS };
       return config;
@@ -185,7 +195,7 @@ export const listArenaAdminAuditLogs = async (limitInput?: unknown) => {
       target_type: String(row.target_type || ''),
       target_id: row.target_id || null,
       reason: row.reason || null,
-      payload: row.payload_json ? JSON.parse(row.payload_json) : null,
+      payload: parseDbJson(row.payload_json, null),
       created_at: row.created_at
     })),
     source: 'arena_admin_audit_logs'

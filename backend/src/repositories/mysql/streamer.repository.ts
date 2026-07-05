@@ -280,7 +280,7 @@ export class MysqlStreamerRepository implements IStreamerRepository {
 
   async count(): Promise<number> {
     const row = await this.getDb().get('SELECT COUNT(*) AS c FROM streamers');
-    return row?.c || 0;
+    return Number(row?.c || 0);
   }
 
   async incrementChatCount(channelId: string, count: number = 1): Promise<void> {

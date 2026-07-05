@@ -11,6 +11,16 @@ const formatKstDbTime = (dateMs = Date.now()): string => {
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')} ${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}:${String(kst.getUTCSeconds()).padStart(2, '0')}`;
 };
 
+const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return value as T;
+  try {
+    return JSON.parse(String(value)) as T;
+  } catch {
+    return fallback;
+  }
+};
+
 export class MysqlMinigameRepository implements IMinigameRepository {
   private getDb() {
     return getMysqlDb();
@@ -79,7 +89,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
   async startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }> {
     let practiceMode = false;
     let ticketSpentType: 'BASE' | 'BONUS' | 'NONE' = 'NONE';
-    try { practiceMode = JSON.parse(session.target_data)?.practice_mode === true; } catch { practiceMode = false; }
+    practiceMode = parseDbJson<any>(session.target_data, {})?.practice_mode === true;
 
     return this.getDb().transaction(async (tx) => {
       if (!practiceMode) {

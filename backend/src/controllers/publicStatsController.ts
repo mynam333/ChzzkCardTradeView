@@ -13,6 +13,11 @@ const PUBLIC_STATS_CACHE_TTL_MS = 60_000;
 let cachedStats: { data: PublicLandingStats; expiresAt: number } | null = null;
 let inFlightStats: Promise<PublicLandingStats> | null = null;
 
+const toSafeCount = (value: unknown): number => {
+  const count = Number(value || 0);
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+};
+
 const loadPublicLandingStats = async (): Promise<PublicLandingStats> => {
   const [userCount, streamerCount, cardCount] = await Promise.all([
     userRepository.count(),
@@ -21,9 +26,9 @@ const loadPublicLandingStats = async (): Promise<PublicLandingStats> => {
   ]);
 
   return {
-    user_count: userCount,
-    streamer_count: streamerCount,
-    card_distributed: cardCount
+    user_count: toSafeCount(userCount),
+    streamer_count: toSafeCount(streamerCount),
+    card_distributed: toSafeCount(cardCount)
   };
 };
 

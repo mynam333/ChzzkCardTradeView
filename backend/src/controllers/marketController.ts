@@ -19,11 +19,13 @@ const MARKET_HISTORY_DEFAULT_LIMIT = Math.max(100, Number(process.env.MARKET_HIS
 const MARKET_HISTORY_MAX_LIMIT = Math.max(MARKET_HISTORY_DEFAULT_LIMIT, Number(process.env.MARKET_HISTORY_MAX_LIMIT || 5000));
 
 const marketListCache = new Map<string, { data: any; expiresAt: number }>();
+const marketListInFlight = new Map<string, Promise<any>>();
 let marketSettleInFlight: Promise<void> | null = null;
 let lastMarketSettleAt = 0;
 
 const clearMarketListCache = () => {
   marketListCache.clear();
+  marketListInFlight.clear();
 };
 
 const setMarketListCacheHeaders = (res: Response) => {
@@ -152,12 +154,33 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   if (cached) {
     marketListCache.delete(cacheKey);
   }
+  const inFlight = marketListInFlight.get(cacheKey);
+  if (inFlight) {
+    try {
+      const result = await inFlight;
+      setMarketListCacheHeaders(res);
+      return res.json(marketListResultForViewer(result, req.user?.id));
+    } catch (err: any) {
+      if (cached) {
+        setMarketListCacheHeaders(res);
+        return res.json(marketListResultForViewer(cached.data, req.user?.id));
+      }
+      console.error('[MarketController] listActiveListings 공유 요청 에러:', err);
+      return res.status(500).json({ error: 'ServerError', message: '마켓 목록을 가져오는 중 오류가 발생했습니다.' });
+    }
+  }
 
   try {
-    await settleExpiredAuctions().catch((err: any) => {
-      console.warn('[MarketController] 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
+    const request = (async () => {
+      await settleExpiredAuctions({ force: true }).catch((err: any) => {
+        console.warn('[MarketController] 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
+      });
+      return marketRepository.listActive({ page, limit, search, sort, type, bidderId });
+    })().finally(() => {
+      marketListInFlight.delete(cacheKey);
     });
-    const result = await marketRepository.listActive({ page, limit, search, sort, type, bidderId });
+    marketListInFlight.set(cacheKey, request);
+    const result = await request;
     marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
     if (marketListCache.size > 200) {
       for (const [key, value] of marketListCache) {
@@ -187,6 +210,9 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
   }
 
   try {
+    await settleExpiredAuctions({ force: true }).catch((err: any) => {
+      console.warn('[MarketController] 내 판매 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
+    });
     const listings = await marketRepository.listByUser(user.id);
     return res.json(marketListingsForViewer(listings, user.id));
   } catch (err: any) {
@@ -479,7 +505,7 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
   const result = await marketRepository.placeBid(id, user.id, amount);
   if (!result.ok) {
     if (result.reason === 'AUCTION_ENDED') {
-      settleExpiredAuctions().catch((err: any) => {
+      settleExpiredAuctions({ force: true }).catch((err: any) => {
         console.warn('[MarketController] 종료 경매 즉시 정리 실패:', err?.message || err);
       });
     }
@@ -581,10 +607,10 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
   }
 };
 
-export const settleExpiredAuctions = async () => {
+export const settleExpiredAuctions = async (options: { force?: boolean } = {}) => {
   const now = Date.now();
   if (marketSettleInFlight) return marketSettleInFlight;
-  if (now - lastMarketSettleAt < MARKET_SETTLE_MIN_INTERVAL_MS) return;
+  if (!options.force && now - lastMarketSettleAt < MARKET_SETTLE_MIN_INTERVAL_MS) return;
 
   marketSettleInFlight = (async () => {
     lastMarketSettleAt = now;
