@@ -662,15 +662,12 @@ const addMissingColumns = async (pg, table, mysqlColumns, pgColumns) => {
   }
 };
 
-const findMissingReferencedUsers = async (mysql, table, column) => {
+const findReferencedUsers = async (mysql, table, column) => {
   const [rows] = await mysql.query(`
-    SELECT DISTINCT t.${quoteMysqlIdent(column)} AS id
-      FROM ${quoteMysqlIdent(table)} t
-      LEFT JOIN ${quoteMysqlIdent('users')} u
-        ON u.${quoteMysqlIdent('id')} = t.${quoteMysqlIdent(column)}
-     WHERE t.${quoteMysqlIdent(column)} IS NOT NULL
-       AND t.${quoteMysqlIdent(column)} <> ''
-       AND u.${quoteMysqlIdent('id')} IS NULL
+    SELECT DISTINCT ${quoteMysqlIdent(column)} AS id
+      FROM ${quoteMysqlIdent(table)}
+     WHERE ${quoteMysqlIdent(column)} IS NOT NULL
+       AND ${quoteMysqlIdent(column)} <> ''
   `);
   return rows.map((row) => String(row.id || '').trim()).filter(Boolean);
 };
@@ -730,7 +727,7 @@ const ensureReferencedUsers = async (mysql, pg, table, mysqlColumns) => {
   const missingIds = [];
   for (const column of refColumns) {
     if (!mysqlColumnSet.has(column)) continue;
-    const ids = await findMissingReferencedUsers(mysql, table, column);
+    const ids = await findReferencedUsers(mysql, table, column);
     missingIds.push(...ids);
   }
   return insertPlaceholderUsers(pg, missingIds, table);
