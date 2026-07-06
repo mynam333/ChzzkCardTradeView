@@ -801,9 +801,11 @@ export class MysqlMarketRepository implements IMarketRepository {
           const startingBid = Number(locked.starting_bid || 0);
           const bids = await this.latestBidRows(tx, row.id);
           const winningBid = bids[0];
-          const price = Number(winningBid?.amount || 0);
+          const winningAmount = Number(winningBid?.amount || 0);
+          const secondAmount = Number(bids[1]?.amount || 0);
+          const price = Math.max(startingBid, secondAmount);
           const winnerId = winningBid?.bidder_id as string | undefined;
-          if (!winnerId || !price || price < startingBid) {
+          if (!winnerId || !winningAmount || winningAmount < startingBid) {
             await this.refundLatestBids(tx, row.id, locked.seller_id);
             await this.refundReservedBid(tx, locked);
             await tx.run("UPDATE market_listings SET status = 'AUCTION_ENDED', pending_user_card_id = NULL, bid_reserved = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?", row.id);
@@ -821,6 +823,20 @@ export class MysqlMarketRepository implements IMarketRepository {
           const { fee, settledAmount } = calculateMarketFee(price, Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE));
           await this.refundLatestBids(tx, row.id, locked.seller_id, winnerId);
           await this.refundReservedBid(tx, locked);
+          const winnerRefund = Math.max(0, winningAmount - price);
+          if (winnerRefund > 0) {
+            await tx.run('UPDATE users SET point = point + ? WHERE id = ?', winnerRefund, winnerId);
+            await recordMysqlPointLedger(tx, {
+              userId: winnerId,
+              counterpartyUserId: locked.seller_id,
+              amount: winnerRefund,
+              sourceType: 'market_bid_refund',
+              sourceId: row.id,
+              reason: 'auction_vickrey_refund',
+              description: `경매 #${row.id} 낙찰 차액 환불`,
+              metadata: { listing_id: row.id, winning_bid: winningAmount, price, refunded_bid: winnerRefund }
+            });
+          }
           await tx.run('UPDATE users SET point = point + ? WHERE id = ?', settledAmount, locked.seller_id);
           await recordMysqlPointLedger(tx, {
             userId: locked.seller_id,

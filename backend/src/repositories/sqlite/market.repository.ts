@@ -306,7 +306,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (options.sort === 'price_asc') return `${visiblePriceExpr} ASC, ml.id ASC`;
       if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
       if (options.sort === 'bid_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
-      return 'ml.created_at DESC, ml.id DESC';
+      return 'datetime(ml.updated_at) DESC, ml.id DESC';
     })();
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
@@ -922,9 +922,11 @@ export class SqliteMarketRepository implements IMarketRepository {
           const startingBid = Number(locked.starting_bid || 0);
           const bids = this.latestBidRows(db, row.id);
           const winningBid = bids[0];
-          const price = Number(winningBid?.amount || 0);
+          const winningAmount = Number(winningBid?.amount || 0);
+          const secondAmount = Number(bids[1]?.amount || 0);
+          const price = Math.max(startingBid, secondAmount);
           const winnerId = winningBid?.bidder_id as string | undefined;
-          if (!winnerId || !price || price < startingBid) {
+          if (!winnerId || !winningAmount || winningAmount < startingBid) {
             this.refundLatestBids(db, row.id, locked.seller_id);
             db.prepare("UPDATE market_listings SET status = 'AUCTION_ENDED', bid_reserved = 0, updated_at = datetime('now') WHERE id = ?").run(row.id);
             return 'ended';
@@ -940,6 +942,20 @@ export class SqliteMarketRepository implements IMarketRepository {
           const feeRate = Number(locked.fee_rate ?? FIXED_MARKET_FEE_RATE);
           const { fee, settledAmount } = calculateMarketFee(price, feeRate);
           this.refundLatestBids(db, row.id, locked.seller_id, winnerId);
+          const winnerRefund = Math.max(0, winningAmount - price);
+          if (winnerRefund > 0) {
+            db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(winnerRefund, winnerId);
+            recordSqlitePointLedger(db, {
+              userId: winnerId,
+              counterpartyUserId: locked.seller_id,
+              amount: winnerRefund,
+              sourceType: 'market_bid_refund',
+              sourceId: row.id,
+              reason: 'auction_vickrey_refund',
+              description: `경매 #${row.id} 낙찰 차액 환불`,
+              metadata: { listing_id: row.id, winning_bid: winningAmount, price, refunded_bid: winnerRefund }
+            });
+          }
           db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(settledAmount, locked.seller_id);
           recordSqlitePointLedger(db, {
             userId: locked.seller_id,

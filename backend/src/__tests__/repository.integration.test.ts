@@ -1123,15 +1123,15 @@ describe('MarketRepository 재등록 제약', () => {
 
     expect(soldListings).toHaveLength(1);
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-a')).toEqual({ point: 5000 });
-    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 5000 });
-    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-seller')).toEqual({ point: 1900 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-bidder-b')).toEqual({ point: 6000 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('auction-seller')).toEqual({ point: 950 });
     expect(db.prepare('SELECT status, buyer_id, price, fee, bid_reserved, settled_amount FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
       status: 'SOLD',
       buyer_id: 'auction-bidder-b',
-      price: 2000,
-      fee: 100,
+      price: 1000,
+      fee: 50,
       bid_reserved: 0,
-      settled_amount: 1900
+      settled_amount: 950
     });
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'auction-bidder-b' });
     expect(db.prepare(`
@@ -1162,9 +1162,16 @@ describe('MarketRepository 재등록 제약', () => {
         reason: 'auction_lost_refund'
       },
       {
+        user_id: 'auction-bidder-b',
+        counterparty_user_id: 'auction-seller',
+        amount: 1000,
+        source_type: 'market_bid_refund',
+        reason: 'auction_vickrey_refund'
+      },
+      {
         user_id: 'auction-seller',
         counterparty_user_id: 'auction-bidder-b',
-        amount: 1900,
+        amount: 950,
         source_type: 'market_sale',
         reason: 'auction_sale_settlement'
       }
@@ -1235,6 +1242,40 @@ describe('MarketRepository 재등록 제약', () => {
       my_bid: 1200,
       current_bidder_id: null,
       bid_reserved: 0
+    });
+  });
+
+  it('단독 유효 입찰자는 시작가로 낙찰되고 초과 예약금을 환불받는다', async () => {
+    seedUser(db, 'single-vickrey-seller');
+    seedUser(db, 'single-vickrey-bidder', 5000);
+    seedStreamer(db, 'single-vickrey-channel', '단독 빅크리 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('single-vickrey-seller', 'single-vickrey-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'single-vickrey-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'single-vickrey-bidder', 3000)).toMatchObject({ ok: true });
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(listing.id);
+    await marketRepository.finishExpiredAuctions(new Date().toISOString());
+
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('single-vickrey-bidder')).toEqual({ point: 4000 });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('single-vickrey-seller')).toEqual({ point: 950 });
+    expect(db.prepare('SELECT status, buyer_id, price, fee, settled_amount FROM market_listings WHERE id = ?').get(listing.id)).toEqual({
+      status: 'SOLD',
+      buyer_id: 'single-vickrey-bidder',
+      price: 1000,
+      fee: 50,
+      settled_amount: 950
     });
   });
 

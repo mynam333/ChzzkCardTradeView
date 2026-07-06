@@ -42,6 +42,7 @@ const reasonLabels: Record<string, string> = {
   market_bid: '입찰 예약',
   auction_bid_reserved: '입찰 예약',
   auction_bid_adjust_refund: '입찰 조정 환불',
+  auction_vickrey_refund: '낙찰 차액 환불',
   auction_lost_refund: '미낙찰 환불',
   outbid_refund: '입찰 환불',
   auction_outbid_refund: '입찰 환불',

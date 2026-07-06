@@ -642,9 +642,11 @@ export class SupabaseMarketRepository implements IMarketRepository {
         const startingBid = Number(row.starting_bid || 0);
         const bids = await this.latestBidRows(row.id);
         const winningBid = bids[0];
-        const amount = Number(winningBid?.amount || 0);
+        const winningAmount = Number(winningBid?.amount || 0);
+        const secondAmount = Number(bids[1]?.amount || 0);
+        const amount = Math.max(startingBid, secondAmount);
         const bidderId = winningBid?.bidder_id as string | null;
-        if (!bidderId || amount <= 0 || amount < startingBid) {
+        if (!bidderId || winningAmount <= 0 || winningAmount < startingBid) {
           await pushEnded(row);
           continue;
         }
@@ -664,6 +666,10 @@ export class SupabaseMarketRepository implements IMarketRepository {
         const client = this.getClient();
 
         await this.refundLatestBids(row.id, bidderId);
+        const winnerRefund = Math.max(0, winningAmount - amount);
+        if (winnerRefund > 0) {
+          await client.rpc('increment_user_point', { p_id: bidderId, p_delta: winnerRefund });
+        }
         await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
         await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
         const { error: listingError } = await client
