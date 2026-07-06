@@ -12,7 +12,7 @@ import { recordAchievementEvent } from '../services/achievementService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
-const MARKET_LIST_CACHE_TTL_MS = Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000));
+const MARKET_LIST_CACHE_TTL_MS = Math.min(5000, Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000)));
 const MARKET_SETTLE_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.MARKET_SETTLE_MIN_INTERVAL_MS || 15_000));
 const MARKET_STALE_LISTING_DAYS = Math.max(1, Number(process.env.MARKET_STALE_LISTING_DAYS || 7));
 const MARKET_STALE_CANCEL_BATCH = Math.max(1, Math.min(500, Number(process.env.MARKET_STALE_CANCEL_BATCH || 200)));
@@ -225,16 +225,17 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const type = (['all', 'fixed', 'auction', 'bidding'].includes(rawType) ? rawType : 'all') as 'all' | 'fixed' | 'auction' | 'bidding';
   const bidderId = req.user?.id;
   const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type, bidderId: bidderId || '' });
+  const cacheEnabled = sort !== 'latest';
   const now = Date.now();
-  const cached = marketListCache.get(cacheKey);
-  if (cached && cached.expiresAt > now && !hasExpiredAuctionListing(cached.data)) {
+  const cached = cacheEnabled ? marketListCache.get(cacheKey) : undefined;
+  if (cacheEnabled && cached && cached.expiresAt > now && !hasExpiredAuctionListing(cached.data)) {
     setMarketListCacheHeaders(res);
     return res.json(marketListResultForViewer(cached.data, req.user?.id));
   }
-  if (cached) {
+  if (cacheEnabled && cached) {
     marketListCache.delete(cacheKey);
   }
-  const inFlight = marketListInFlight.get(cacheKey);
+  const inFlight = cacheEnabled ? marketListInFlight.get(cacheKey) : undefined;
   if (inFlight) {
     try {
       const result = await inFlight;
@@ -259,12 +260,16 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
     })().finally(() => {
       marketListInFlight.delete(cacheKey);
     });
-    marketListInFlight.set(cacheKey, request);
+    if (cacheEnabled) {
+      marketListInFlight.set(cacheKey, request);
+    }
     const result = await request;
-    marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
-    if (marketListCache.size > 200) {
-      for (const [key, value] of marketListCache) {
-        if (value.expiresAt <= Date.now()) marketListCache.delete(key);
+    if (cacheEnabled) {
+      marketListCache.set(cacheKey, { data: result, expiresAt: Date.now() + MARKET_LIST_CACHE_TTL_MS });
+      if (marketListCache.size > 200) {
+        for (const [key, value] of marketListCache) {
+          if (value.expiresAt <= Date.now()) marketListCache.delete(key);
+        }
       }
     }
     setMarketListCacheHeaders(res);

@@ -34,6 +34,7 @@ const CROP_DETECTIVE_ROUND_TIME_MS = 10_000;
 const CROP_DETECTIVE_MIN_CORRECT = 3;
 const CROP_DETECTIVE_CHOICES = 4;
 const CROP_DETECTIVE_EDGE_PADDING = 0.025;
+const CROP_DETECTIVE_CARD_ASPECT_RATIO = 4 / 5;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
@@ -523,10 +524,20 @@ const getUniquePlayableImageCards = (streamers: any[], imageBlindKeys = new Set<
   return Array.from(byChannel.values()).map((cards) => shuffle(cards)[0]);
 };
 
-const getRotatedCropSafeMargin = (size: number, rotation: number) => {
+const getRotatedCropHalfExtent = (size: number, rotation: number) => {
   const radians = (rotation * Math.PI) / 180;
-  const rotatedHalfExtent = (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
-  return Math.min(0.48, rotatedHalfExtent + CROP_DETECTIVE_EDGE_PADDING);
+  return (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
+};
+
+const getCropDetectiveBounds = (size: number, rotation: number) => {
+  const halfExtent = getRotatedCropHalfExtent(size, rotation) + CROP_DETECTIVE_EDGE_PADDING;
+  const horizontalInset = (1 - CROP_DETECTIVE_CARD_ASPECT_RATIO) / 2;
+  return {
+    minX: Math.min(0.5, horizontalInset + halfExtent),
+    maxX: Math.max(0.5, 1 - horizontalInset - halfExtent),
+    minY: Math.min(0.5, halfExtent),
+    maxY: Math.max(0.5, 1 - halfExtent)
+  };
 };
 
 const buildCrop = (roundIndex: number) => {
@@ -534,15 +545,14 @@ const buildCrop = (roundIndex: number) => {
   const maxSize = 0.10;
   const size = Number((maxSize - (roundIndex / Math.max(1, CROP_DETECTIVE_ROUND_COUNT - 1)) * (maxSize - minSize)).toFixed(3));
   const rotation = Math.floor(Math.random() * 360);
-  const min = getRotatedCropSafeMargin(size, rotation);
-  const max = 1 - min;
-  const pick = () => {
+  const bounds = getCropDetectiveBounds(size, rotation);
+  const pick = (min: number, max: number) => {
     if (max <= min) return 0.5;
     return Number((min + Math.random() * (max - min)).toFixed(3));
   };
   return {
-    x: pick(),
-    y: pick(),
+    x: pick(bounds.minX, bounds.maxX),
+    y: pick(bounds.minY, bounds.maxY),
     size,
     rotation
   };

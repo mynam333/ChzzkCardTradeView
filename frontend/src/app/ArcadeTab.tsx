@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
+import { proxiedImage } from '@/lib/cosmetics';
 
 type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
 type QuizChoice = {
@@ -909,10 +910,29 @@ const clampCropValue = (value: number, min: number, max: number) => {
   return Math.max(min, Math.min(max, value));
 };
 
-const getRotatedCropSafeMargin = (size: number, rotation: number) => {
+const CROP_DETECTIVE_CARD_ASPECT_RATIO = 4 / 5;
+const CROP_DETECTIVE_STILL_PREVIEW_WIDTH = 720;
+const CROP_DETECTIVE_STILL_CHOICE_WIDTH = 360;
+
+const getRotatedCropHalfExtent = (size: number, rotation: number) => {
   const radians = (rotation * Math.PI) / 180;
-  const rotatedHalfExtent = (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
-  return Math.min(0.48, rotatedHalfExtent + 0.025);
+  return (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
+};
+
+const getCropDetectiveBounds = (size: number, rotation: number) => {
+  const halfExtent = getRotatedCropHalfExtent(size, rotation) + 0.025;
+  const horizontalInset = (1 - CROP_DETECTIVE_CARD_ASPECT_RATIO) / 2;
+  return {
+    minX: Math.min(0.5, horizontalInset + halfExtent),
+    maxX: Math.max(0.5, 1 - horizontalInset - halfExtent),
+    minY: Math.min(0.5, halfExtent),
+    maxY: Math.max(0.5, 1 - halfExtent)
+  };
+};
+
+const getCropDetectiveStillImage = (url?: string | null, width = CROP_DETECTIVE_STILL_CHOICE_WIDTH) => {
+  if (!url) return '/icon.png';
+  return proxiedImage(url, { width, quality: 82 }) || '/icon.png';
 };
 
 const CROP_ALPHA_CANVAS_SIZE = 128;
@@ -945,16 +965,18 @@ const createSeededRandom = (seed: number) => {
 const buildCropCandidates = (
   baseX: number,
   baseY: number,
-  min: number,
-  max: number,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number },
   seedSource: string
 ) => {
-  const clamp = (value: number) => clampCropValue(value, min, max);
+  const clampX = (value: number) => clampCropValue(value, bounds.minX, bounds.maxX);
+  const clampY = (value: number) => clampCropValue(value, bounds.minY, bounds.maxY);
   const random = createSeededRandom(hashStringToSeed(seedSource));
   const candidates: Array<{ x: number; y: number }> = [{ x: baseX, y: baseY }];
-  const range = Math.max(0, max - min);
+  const rangeX = Math.max(0, bounds.maxX - bounds.minX);
+  const rangeY = Math.max(0, bounds.maxY - bounds.minY);
+  const range = Math.max(rangeX, rangeY);
   const pushCandidate = (x: number, y: number) => {
-    const candidate = { x: clamp(x), y: clamp(y) };
+    const candidate = { x: clampX(x), y: clampY(y) };
     const exists = candidates.some(item => Math.abs(item.x - candidate.x) < 0.001 && Math.abs(item.y - candidate.y) < 0.001);
     if (!exists) candidates.push(candidate);
   };
@@ -968,7 +990,7 @@ const buildCropCandidates = (
   }
 
   while (candidates.length < CROP_ALPHA_CANDIDATE_COUNT) {
-    pushCandidate(min + random() * range, min + random() * range);
+    pushCandidate(bounds.minX + random() * rangeX, bounds.minY + random() * rangeY);
   }
 
   pushCandidate(0.5, 0.5);
@@ -1096,10 +1118,27 @@ const CardImageTile: React.FC<{
   imageBlindEnabled?: boolean;
   darkImageBackground?: boolean;
   showStarLabel?: boolean;
+  freezeImage?: boolean;
+  hideImageUntilRevealed?: boolean;
   onClick?: () => void;
-}> = ({ card, selected = false, correct = false, wrong = false, disabled = false, imageBlindEnabled = false, darkImageBackground = false, showStarLabel = true, onClick }) => {
-  const imageUrl = card.image_url || '/icon.png';
+}> = ({
+  card,
+  selected = false,
+  correct = false,
+  wrong = false,
+  disabled = false,
+  imageBlindEnabled = false,
+  darkImageBackground = false,
+  showStarLabel = true,
+  freezeImage = false,
+  hideImageUntilRevealed = false,
+  onClick
+}) => {
+  const imageUrl = freezeImage
+    ? getCropDetectiveStillImage(card.image_url, CROP_DETECTIVE_STILL_CHOICE_WIDTH)
+    : card.image_url || '/icon.png';
   const nativeDisabled = disabled && !imageBlindEnabled;
+  const shouldHideImage = hideImageUntilRevealed && !correct && !wrong;
 
   return (
     <button
@@ -1127,13 +1166,19 @@ const CardImageTile: React.FC<{
       title="우클릭으로 같은 이미지를 블라인드/해제"
     >
       <div className={`aspect-[4/5] w-full overflow-hidden ${darkImageBackground ? 'bg-zinc-950' : 'bg-secondary/50'}`}>
-        <BlindableCardImage
-          src={imageUrl}
-          alt={card.name}
-          className="h-full w-full object-cover"
-          draggable={false}
-          imageBlindMenuEnabled={imageBlindEnabled}
-        />
+        {shouldHideImage ? (
+          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_50%_25%,rgba(232,121,249,0.22),rgba(24,24,27,0.96)_68%)] text-white">
+            <HelpCircle className="h-8 w-8 opacity-80" aria-hidden="true" />
+          </div>
+        ) : (
+          <BlindableCardImage
+            src={imageUrl}
+            alt={card.name}
+            className="h-full w-full object-cover"
+            draggable={false}
+            imageBlindMenuEnabled={imageBlindEnabled}
+          />
+        )}
       </div>
       <div className="px-2.5 py-2 sm:px-3">
         <p className="truncate text-[11px] font-black text-foreground sm:text-sm">{card.name}</p>
@@ -1146,19 +1191,19 @@ const CardImageTile: React.FC<{
 };
 
 const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
-  const imageUrl = round.source_image_url || '/icon.png';
+  const imageUrl = getCropDetectiveStillImage(round.source_image_url, CROP_DETECTIVE_STILL_PREVIEW_WIDTH);
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
-  const safeMargin = getRotatedCropSafeMargin(size, rotation);
-  const x = clampCropValue(Number(round.crop?.x || 0.5), safeMargin, 1 - safeMargin);
-  const y = clampCropValue(Number(round.crop?.y || 0.5), safeMargin, 1 - safeMargin);
+  const cropBounds = getCropDetectiveBounds(size, rotation);
+  const { minX, maxX, minY, maxY } = cropBounds;
+  const x = clampCropValue(Number(round.crop?.x || 0.5), minX, maxX);
+  const y = clampCropValue(Number(round.crop?.y || 0.5), minY, maxY);
   const [visibleCrop, setVisibleCrop] = useState({ x, y });
   const imageScalePercent = 100 / size;
 
   useEffect(() => {
     let cancelled = false;
     const baseCrop = { x, y };
-    setVisibleCrop(baseCrop);
 
     if (!imageUrl || typeof document === 'undefined') return;
 
@@ -1180,8 +1225,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
         const candidates = buildCropCandidates(
           x,
           y,
-          safeMargin,
-          1 - safeMargin,
+          { minX, maxX, minY, maxY },
           `${imageUrl}:${round.round}:${size}:${rotation}:${x}:${y}`
         );
 
@@ -1208,7 +1252,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, round.round, rotation, safeMargin, size, x, y]);
+  }, [imageUrl, maxX, maxY, minX, minY, round.round, rotation, size, x, y]);
 
   return (
     <div
@@ -2988,7 +3032,7 @@ export const ArcadeTab: React.FC = () => {
                 </div>
 
                 <CropPreview
-                  key={`${currentRound.round}-${currentRound.source_image_url}-${currentRound.crop.x}-${currentRound.crop.y}-${currentRound.crop.rotation || 0}`}
+                  key={`${currentRound.round}-${currentRound.source_image_url}-${currentRound.crop.x}-${currentRound.crop.y}-${currentRound.crop.size}-${currentRound.crop.rotation || 0}`}
                   round={currentRound}
                 />
 
@@ -3007,6 +3051,8 @@ export const ArcadeTab: React.FC = () => {
                         disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
                         imageBlindEnabled={Boolean(roundFeedback)}
                         darkImageBackground
+                        freezeImage
+                        hideImageUntilRevealed={!roundFeedback}
                         onClick={() => handleRoundChoice(choice.channel_id)}
                       />
                     );

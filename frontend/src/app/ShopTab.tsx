@@ -510,6 +510,7 @@ export const ShopTab: React.FC = () => {
         page: String(marketPage),
         limit: '12',
         sort: marketSort,
+        _: String(Date.now()),
       });
       if (marketType !== 'all') {
         query.append('type', marketType);
@@ -517,7 +518,7 @@ export const ShopTab: React.FC = () => {
       if (marketSearch.trim()) {
         query.append('search', marketSearch.trim());
       }
-      const res = await apiFetch(`/market/listings?${query.toString()}`);
+      const res = await apiFetch(`/market/listings?${query.toString()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const incoming = data.listings || [];
