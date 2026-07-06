@@ -1109,6 +1109,20 @@ const isCropContentGoodEnough = (contentScore: CropContentScore) =>
   contentScore.detailScore >= CROP_MIN_DETAIL_SCORE &&
   contentScore.score >= CROP_GOOD_CONTENT_SCORE;
 
+const preloadImage = (src: string) => new Promise<void>((resolve) => {
+  if (!src || typeof Image === 'undefined') {
+    resolve();
+    return;
+  }
+  const image = new Image();
+  image.onload = () => resolve();
+  image.onerror = () => resolve();
+  image.src = src;
+});
+
+const getCropDetectiveRoundKey = (round: CropDetectiveRound) =>
+  `${round.round}-${round.source_image_url}-${round.crop.x}-${round.crop.y}-${round.crop.size}-${round.crop.rotation || 0}`;
+
 const CardImageTile: React.FC<{
   card: ArcadeCardOption;
   selected?: boolean;
@@ -1167,8 +1181,9 @@ const CardImageTile: React.FC<{
     >
       <div className={`aspect-[4/5] w-full overflow-hidden ${darkImageBackground ? 'bg-zinc-950' : 'bg-secondary/50'}`}>
         {shouldHideImage ? (
-          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_50%_25%,rgba(232,121,249,0.22),rgba(24,24,27,0.96)_68%)] text-white">
-            <HelpCircle className="h-8 w-8 opacity-80" aria-hidden="true" />
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_25%,rgba(232,121,249,0.22),rgba(24,24,27,0.96)_68%)] px-3 text-center text-white">
+            <RefreshCw className="h-6 w-6 animate-spin opacity-80" aria-hidden="true" />
+            <span className="text-[10px] font-black text-white/80">후보 이미지 로딩</span>
           </div>
         ) : (
           <BlindableCardImage
@@ -1190,7 +1205,7 @@ const CardImageTile: React.FC<{
   );
 };
 
-const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
+const CropPreview: React.FC<{ round: CropDetectiveRound; onImageReady?: () => void }> = ({ round, onImageReady }) => {
   const imageUrl = getCropDetectiveStillImage(round.source_image_url, CROP_DETECTIVE_STILL_PREVIEW_WIDTH);
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
@@ -1212,6 +1227,7 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
     image.decoding = 'async';
     image.onload = () => {
       if (cancelled) return;
+      onImageReady?.();
       try {
         const canvas = document.createElement('canvas');
         canvas.width = CROP_ALPHA_CANVAS_SIZE;
@@ -1247,12 +1263,15 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
         // Cross-origin images may block canvas reads. In that case, keep the server-issued crop.
       }
     };
+    image.onerror = () => {
+      if (!cancelled) onImageReady?.();
+    };
     image.src = imageUrl;
 
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, maxX, maxY, minX, minY, round.round, rotation, size, x, y]);
+  }, [imageUrl, maxX, maxY, minX, minY, onImageReady, round.round, rotation, size, x, y]);
 
   return (
     <div
@@ -1284,6 +1303,103 @@ const CropPreview: React.FC<{ round: CropDetectiveRound }> = ({ round }) => {
         ZOOM CROP
       </div>
     </div>
+  );
+};
+
+const CropDetectiveChoices: React.FC<{
+  round: CropDetectiveRound;
+  roundFeedback: RoundFeedback | null;
+  roundChecking: boolean;
+  gameBusy: boolean;
+  isGameOver: boolean;
+  countdownLeft: number | null;
+  onChoice: (channelId: string) => void;
+}> = ({
+  round,
+  roundFeedback,
+  roundChecking,
+  gameBusy,
+  isGameOver,
+  countdownLeft,
+  onChoice
+}) => {
+  const roundKey = getCropDetectiveRoundKey(round);
+  const [readyState, setReadyState] = useState({ roundKey: '', cropReady: false, choicesReady: false });
+  const cropReady = readyState.roundKey === roundKey && readyState.cropReady;
+  const choicesReady = readyState.roundKey === roundKey && readyState.choicesReady;
+  const selectedId = roundFeedback?.selected_channel_id || null;
+  const correctIds = roundFeedback?.correct_channel_ids || [];
+
+  const handleCropReady = useCallback(() => {
+    setReadyState((prev) => (
+      prev.roundKey === roundKey && prev.cropReady
+        ? prev
+        : { roundKey, cropReady: true, choicesReady: false }
+    ));
+  }, [roundKey]);
+
+  useEffect(() => {
+    if (!cropReady || choicesReady || typeof window === 'undefined') return;
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const choiceUrls = round.choices.map((choice) =>
+      getCropDetectiveStillImage(choice.image_url, CROP_DETECTIVE_STILL_CHOICE_WIDTH)
+    );
+    const allLoaded = Promise.all(choiceUrls.map(preloadImage)).then(() => undefined);
+    const maxWait = new Promise<void>((resolve) => {
+      timeoutId = window.setTimeout(resolve, 5000);
+    });
+
+    Promise.race([allLoaded, maxWait]).then(() => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (cancelled) return;
+      setReadyState((prev) => (
+        prev.roundKey === roundKey
+          ? { ...prev, choicesReady: true }
+          : prev
+      ));
+    });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [choicesReady, cropReady, round.choices, roundKey]);
+
+  const hideChoices = !roundFeedback && !choicesReady;
+  const choiceDisabled = hideChoices || Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0);
+
+  return (
+    <>
+      <CropPreview
+        key={roundKey}
+        round={round}
+        onImageReady={handleCropReady}
+      />
+
+      <div className="grid w-full max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-4">
+        {round.choices.map((choice) => {
+          const selected = selectedId === choice.channel_id;
+          const correct = correctIds.includes(choice.channel_id);
+          const wrong = selected && roundFeedback?.correct === false;
+          return (
+            <CardImageTile
+              key={`${round.round}-${choice.channel_id}`}
+              card={choice}
+              selected={selected}
+              correct={correct}
+              wrong={wrong}
+              disabled={choiceDisabled}
+              imageBlindEnabled={Boolean(roundFeedback)}
+              darkImageBackground
+              freezeImage
+              hideImageUntilRevealed={hideChoices}
+              onClick={() => onChoice(choice.channel_id)}
+            />
+          );
+        })}
+      </div>
+    </>
   );
 };
 
@@ -3012,8 +3128,6 @@ export const ArcadeTab: React.FC = () => {
           {activeGame === 'crop_detective' && gameData.rounds && (() => {
             const currentRound = gameData.rounds[roundIndex];
             if (!isCropDetectiveRound(currentRound)) return null;
-            const selectedId = roundFeedback?.selected_channel_id || null;
-            const correctIds = roundFeedback?.correct_channel_ids || [];
 
             return (
               <div className="flex flex-1 flex-col items-center justify-center space-y-4 sm:space-y-5">
@@ -3031,33 +3145,15 @@ export const ArcadeTab: React.FC = () => {
                   <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
 
-                <CropPreview
-                  key={`${currentRound.round}-${currentRound.source_image_url}-${currentRound.crop.x}-${currentRound.crop.y}-${currentRound.crop.size}-${currentRound.crop.rotation || 0}`}
+                <CropDetectiveChoices
                   round={currentRound}
+                  roundFeedback={roundFeedback}
+                  roundChecking={roundChecking}
+                  gameBusy={gameBusy}
+                  isGameOver={isGameOver}
+                  countdownLeft={countdownLeft}
+                  onChoice={handleRoundChoice}
                 />
-
-                <div className="grid w-full max-w-4xl grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-4">
-                  {currentRound.choices.map((choice) => {
-                    const selected = selectedId === choice.channel_id;
-                    const correct = correctIds.includes(choice.channel_id);
-                    const wrong = selected && roundFeedback?.correct === false;
-                    return (
-                      <CardImageTile
-                        key={`${currentRound.round}-${choice.channel_id}`}
-                        card={choice}
-                        selected={selected}
-                        correct={correct}
-                        wrong={wrong}
-                        disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0)}
-                        imageBlindEnabled={Boolean(roundFeedback)}
-                        darkImageBackground
-                        freezeImage
-                        hideImageUntilRevealed={!roundFeedback}
-                        onClick={() => handleRoundChoice(choice.channel_id)}
-                      />
-                    );
-                  })}
-                </div>
 
                 <div className="min-h-16 w-full max-w-4xl">
                   {roundChecking && (
