@@ -147,6 +147,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     const startingBid = listingType === 'auction' ? Math.max(100, Number(listing.starting_bid || listing.price)) : null;
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
+    const now = new Date().toISOString();
     if (price < 100 || (startingBid != null && startingBid < 100)) {
       throw new Error('MIN_PRICE_LIMIT');
     }
@@ -209,8 +210,8 @@ export class SqliteMarketRepository implements IMarketRepository {
 
       const result = db.prepare(`
         INSERT INTO market_listings
-          (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
+          (seller_id, user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING', ?, ?)
       `).run(
         listing.seller_id,
         listing.user_card_id,
@@ -221,7 +222,9 @@ export class SqliteMarketRepository implements IMarketRepository {
         startingBid,
         listing.auction_ends_at ?? null,
         feeRate,
-        listing.with_cosmetics ? 1 : 0
+        listing.with_cosmetics ? 1 : 0,
+        now,
+        now
       );
       return Number(result.lastInsertRowid);
     })();
@@ -287,6 +290,8 @@ export class SqliteMarketRepository implements IMarketRepository {
     ];
     const params: any[] = [new Date().toISOString()];
     const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.starting_bid, ml.price, 0) ELSE ml.price END";
+    const createdAtExpr = 'CASE WHEN ml.created_at IS NULL THEN 1 ELSE 0 END ASC, ml.created_at DESC, ml.id DESC';
+    const createdAtAscExpr = 'CASE WHEN ml.created_at IS NULL THEN 1 ELSE 0 END ASC, ml.created_at ASC, ml.id ASC';
 
     if (options.type === 'bidding') {
       if (!options.bidderId) return { listings: [], total: 0 };
@@ -301,12 +306,12 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
 
     const orderBy = (() => {
-      if (options.sort === 'oldest') return 'ml.created_at ASC, ml.id ASC';
+      if (options.sort === 'oldest') return createdAtAscExpr;
       if (options.sort === 'price_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
       if (options.sort === 'price_asc') return `${visiblePriceExpr} ASC, ml.id ASC`;
       if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
       if (options.sort === 'bid_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
-      return 'ml.created_at DESC, ml.id DESC';
+      return createdAtExpr;
     })();
 
     const whereSql = `WHERE ${where.join(' AND ')}`;

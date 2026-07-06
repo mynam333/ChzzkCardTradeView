@@ -163,6 +163,46 @@ assert_can_write_path() {
   fi
 }
 
+runtime_user() {
+  if [ -n "${APP_RUN_USER:-}" ]; then
+    printf '%s\n' "${APP_RUN_USER}"
+    return
+  fi
+  if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+    printf '%s\n' "${SUDO_USER}"
+    return
+  fi
+  stat -c '%U' "${PROJECT_DIR}" 2>/dev/null || whoami
+}
+
+runtime_group() {
+  local user="$1"
+  id -gn "${user}" 2>/dev/null || stat -c '%G' "${PROJECT_DIR}" 2>/dev/null || id -gn
+}
+
+ensure_runtime_writable_dir() {
+  local target="$1"
+  local user group probe
+
+  mkdir -p "${target}"
+  user="$(runtime_user)"
+  group="$(runtime_group "${user}")"
+
+  if [ "$(id -u)" -eq 0 ] && [ -n "${user}" ] && [ "${user}" != "root" ]; then
+    chown -R "${user}:${group}" "${target}"
+  fi
+  chmod u+rwX "${target}" 2>/dev/null || true
+
+  probe="${target}/.deploy-write-test-${TIMESTAMP}"
+  if ! ( : > "${probe}" ) 2>/dev/null; then
+    echo "[deploy] permission denied: ${target} is not writable by $(whoami)"
+    echo "[deploy] fix ownership on the server, for example:"
+    echo "[deploy]   sudo chown -R ${user}:${group} '${target}'"
+    exit 1
+  fi
+  rm -f "${probe}"
+}
+
 read_env_value() {
   local key="$1"
   local result=""
@@ -398,6 +438,7 @@ done
 for writable in package.json pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql deploy.sh backend/dist backend; do
   assert_can_write_path "${writable}"
 done
+ensure_runtime_writable_dir "public/uploads"
 
 if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2>&1; then
   if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then

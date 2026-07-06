@@ -779,6 +779,10 @@ export const ShopTab: React.FC = () => {
       if (!shouldRefreshMarketAfterRealtime(detail)) {
         return;
       }
+      if (detail?.reason === 'listing_created') {
+        scheduleMarketRefresh(150, 0);
+        return;
+      }
       scheduleMarketRefresh(detail?.reason === 'auction_bid' ? 300 : 700, detail?.reason === 'auction_bid' ? 0 : 3500);
     };
     const handleVisible = () => {

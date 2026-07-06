@@ -204,6 +204,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
     const auctionEndsAt = listingType === 'auction' ? toSqlDateTime(listing.auction_ends_at, getSqlDialect()) : null;
+    const now = toSqlDateTime(new Date(), getSqlDialect());
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
       const card = await tx.get(
@@ -265,9 +266,9 @@ export class MysqlMarketRepository implements IMarketRepository {
 
       const result = await tx.run(`
         INSERT INTO market_listings
-          (seller_id, user_card_id, pending_user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING')
-      `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, auctionEndsAt, feeRate, listing.with_cosmetics ? 1 : 0);
+          (seller_id, user_card_id, pending_user_card_id, price, listing_type, buy_now_price, starting_bid, current_bid, auction_ends_at, bid_reserved, fee_rate, with_cosmetics, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'PENDING', ?, ?)
+      `, listing.seller_id, listing.user_card_id, listing.user_card_id, price, listingType, buyNowPrice, startingBid, startingBid, auctionEndsAt, feeRate, listing.with_cosmetics ? 1 : 0, now, now);
       return Number(result.insertId);
     });
     const created = await this.findById(insertId);
@@ -306,6 +307,12 @@ export class MysqlMarketRepository implements IMarketRepository {
     ];
     const params: any[] = isPostgres ? [] : [toSqlDateTime(new Date(), 'mysql')];
     const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.starting_bid, ml.price, 0) ELSE ml.price END";
+    const createdAtExpr = isPostgres
+      ? 'ml.created_at DESC NULLS LAST, ml.id DESC'
+      : 'CASE WHEN ml.created_at IS NULL THEN 1 ELSE 0 END ASC, ml.created_at DESC, ml.id DESC';
+    const createdAtAscExpr = isPostgres
+      ? 'ml.created_at ASC NULLS LAST, ml.id ASC'
+      : 'CASE WHEN ml.created_at IS NULL THEN 1 ELSE 0 END ASC, ml.created_at ASC, ml.id ASC';
 
     if (options.type === 'bidding') {
       if (!options.bidderId) return { listings: [], total: 0 };
@@ -320,12 +327,12 @@ export class MysqlMarketRepository implements IMarketRepository {
     }
 
     const orderBy = (() => {
-      if (options.sort === 'oldest') return 'ml.created_at ASC, ml.id ASC';
+      if (options.sort === 'oldest') return createdAtAscExpr;
       if (options.sort === 'price_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
       if (options.sort === 'price_asc') return `${visiblePriceExpr} ASC, ml.id ASC`;
       if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
       if (options.sort === 'bid_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
-      return 'ml.created_at DESC, ml.id DESC';
+      return createdAtExpr;
     })();
 
     const whereSql = `WHERE ${where.join(' AND ')}`;

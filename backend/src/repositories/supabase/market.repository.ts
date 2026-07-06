@@ -170,6 +170,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     const startingBid = Math.floor(Number(listing.starting_bid ?? listing.price));
     const buyNowPrice = listing.buy_now_price == null ? null : Math.floor(Number(listing.buy_now_price));
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
+    const now = new Date().toISOString();
     if ((listingType === 'auction' ? startingBid : listing.price) < 100) {
       throw new Error('MIN_PRICE_LIMIT');
     }
@@ -197,7 +198,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
         bid_reserved: 0,
         fee_rate: feeRate,
         with_cosmetics: !!listing.with_cosmetics,
-        status: 'PENDING'
+        status: 'PENDING',
+        created_at: now,
+        updated_at: now
       }])
       .select()
       .single();
@@ -342,9 +345,15 @@ export class SupabaseMarketRepository implements IMarketRepository {
       : Number(listing.price || 0));
     listings.sort((a, b) => {
       if (options.sort === 'latest') {
-        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+        const bTime = new Date(b.created_at || '').getTime();
+        const aTime = new Date(a.created_at || '').getTime();
+        return (Number.isFinite(bTime) ? bTime : -Infinity) - (Number.isFinite(aTime) ? aTime : -Infinity)
+          || Number(b.id || 0) - Number(a.id || 0);
       } else if (options.sort === 'oldest') {
-        return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
+        const aTime = new Date(a.created_at || '').getTime();
+        const bTime = new Date(b.created_at || '').getTime();
+        return (Number.isFinite(aTime) ? aTime : Infinity) - (Number.isFinite(bTime) ? bTime : Infinity)
+          || Number(a.id || 0) - Number(b.id || 0);
       } else if (options.sort === 'price_desc') {
         return visiblePrice(b) - visiblePrice(a);
       } else if (options.sort === 'price_asc') {
