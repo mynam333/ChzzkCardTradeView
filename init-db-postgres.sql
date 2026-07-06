@@ -1806,7 +1806,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
 CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_market_listings_pending_latest ON market_listings(updated_at DESC, id DESC) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_market_listings_pending_created_latest ON market_listings(created_at DESC, id DESC) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_market_listings_pending_oldest ON market_listings(created_at ASC, id ASC) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_market_listings_pending_seller ON market_listings(seller_id, id DESC) WHERE status = 'PENDING';
 ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_status_check;

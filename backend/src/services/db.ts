@@ -770,6 +770,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible_channel_star', '(user_id, is_hidden, channel_id, star)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_channel_star_visible', '(channel_id, star, is_hidden)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_updated', '(status, updated_at DESC, id DESC)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_created_latest', '(status, created_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_updated', '(status, listing_type, updated_at DESC, id DESC)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_created', '(status, listing_type, created_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_price', '(status, price, id)');
@@ -1132,12 +1133,13 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_ranking_cards_channel_star_user ON user_asset_ranking_cards (channel_id, star, user_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_asset_ranking_cards_user ON user_asset_ranking_cards (user_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_updated ON market_listings (status, updated_at DESC, id DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_created_latest ON market_listings (status, created_at DESC, id DESC)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_updated ON market_listings (status, listing_type, updated_at DESC, id DESC)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_type_created ON market_listings (status, listing_type, created_at, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_price ON market_listings (status, price, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings (status, auction_ends_at, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_bidder_active ON market_listings (status, listing_type, current_bidder_id, bid_reserved)');
-  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_latest ON market_listings (updated_at DESC, id DESC) WHERE status = \'PENDING\'');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_created_latest ON market_listings (created_at DESC, id DESC) WHERE status = \'PENDING\'');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings (pending_user_card_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_listing ON market_bids (listing_id, amount DESC)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids (bidder_id, listing_id)');

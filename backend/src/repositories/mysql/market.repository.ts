@@ -325,7 +325,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       if (options.sort === 'price_asc') return `${visiblePriceExpr} ASC, ml.id ASC`;
       if (options.sort === 'ending_soon') return "CASE WHEN ml.auction_ends_at IS NULL THEN 1 ELSE 0 END ASC, ml.auction_ends_at ASC, ml.id ASC";
       if (options.sort === 'bid_desc') return `${visiblePriceExpr} DESC, ml.id DESC`;
-      return 'ml.updated_at DESC, ml.id DESC';
+      return 'ml.created_at DESC, ml.id DESC';
     })();
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
