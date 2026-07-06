@@ -1171,6 +1171,73 @@ describe('MarketRepository 재등록 제약', () => {
     ]);
   });
 
+  it('같은 사용자가 재입찰하면 이전 예약금을 환불한 뒤 새 입찰금 전체를 다시 예약한다', async () => {
+    seedUser(db, 'rebid-seller');
+    seedUser(db, 'rebid-bidder', 5000);
+    seedStreamer(db, 'rebid-channel', '재입찰 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('rebid-seller', 'rebid-channel', 1, 0)
+    `).run().lastInsertRowid);
+
+    const listing = await marketRepository.create({
+      seller_id: 'rebid-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'rebid-bidder', 3000)).toMatchObject({ ok: true });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('rebid-bidder')).toEqual({ point: 2000 });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'rebid-bidder', 4500)).toMatchObject({ ok: true });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('rebid-bidder')).toEqual({ point: 500 });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'rebid-bidder', 1200)).toMatchObject({ ok: true });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('rebid-bidder')).toEqual({ point: 3800 });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'rebid-bidder', 6000)).toMatchObject({
+      ok: false,
+      reason: 'INSUFFICIENT_POINT'
+    });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('rebid-bidder')).toEqual({ point: 3800 });
+    expect(db.prepare(`
+      SELECT amount FROM market_bids
+       WHERE listing_id = ? AND bidder_id = ?
+       ORDER BY id DESC LIMIT 1
+    `).get(listing.id, 'rebid-bidder')).toEqual({ amount: 1200 });
+
+    expect(db.prepare(`
+      SELECT amount, source_type, reason
+        FROM point_ledger_entries
+       WHERE source_id = ?
+       ORDER BY id ASC
+    `).all(String(listing.id))).toEqual([
+      { amount: -3000, source_type: 'market_bid', reason: 'auction_bid_reserved' },
+      { amount: 3000, source_type: 'market_bid_refund', reason: 'auction_bid_adjust_refund' },
+      { amount: -4500, source_type: 'market_bid', reason: 'auction_bid_reserved' },
+      { amount: 4500, source_type: 'market_bid_refund', reason: 'auction_bid_adjust_refund' },
+      { amount: -1200, source_type: 'market_bid', reason: 'auction_bid_reserved' }
+    ]);
+
+    const active = await marketRepository.listActive({
+      page: 1,
+      limit: 12,
+      sort: 'latest',
+      type: 'all',
+      bidderId: 'rebid-bidder'
+    });
+    expect(active.listings.find((item) => item.id === listing.id)).toMatchObject({
+      id: listing.id,
+      my_bid: 1200,
+      current_bidder_id: null,
+      bid_reserved: 0
+    });
+  });
+
   it('만료 경매 정리는 상세 조인이 불가능한 오류 데이터도 방치하지 않고 다른 경매까지 처리한다', async () => {
     seedUser(db, 'broken-auction-seller');
     seedUser(db, 'healthy-auction-seller');

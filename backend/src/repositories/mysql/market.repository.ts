@@ -5,24 +5,7 @@ import { fuzzyMatch } from '../../utils/search';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent } from '../../services/assetEventLog';
-
-const parseMysqlUtcTime = (value: string | Date | null | undefined): number => {
-  if (!value) return 0;
-  if (value instanceof Date) return value.getTime();
-  const trimmed = String(value).trim();
-  if (!trimmed) return 0;
-  const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
-  const normalized = hasTimezone ? trimmed : `${trimmed.replace(' ', 'T')}Z`;
-  const time = new Date(normalized).getTime();
-  return Number.isNaN(time) ? 0 : time;
-};
-
-const toMysqlDateTime = (value: string | Date | null | undefined): string | null => {
-  if (!value) return null;
-  const time = parseMysqlUtcTime(value);
-  if (!time) return null;
-  return new Date(time).toISOString().slice(0, 19).replace('T', ' ');
-};
+import { parseMysqlDateTimeMs, toSqlDateTime } from './dateUtils';
 
 export class MysqlMarketRepository implements IMarketRepository {
   private getDb() {
@@ -66,6 +49,33 @@ export class MysqlMarketRepository implements IMarketRepository {
         metadata: { listing_id: listingId, refunded_bid: amount }
       });
     }
+  }
+
+  private async attachMyBids(listings: MarketListing[], bidderId?: string): Promise<MarketListing[]> {
+    if (!bidderId || listings.length === 0) return listings;
+    const listingIds = listings.map((listing) => Number(listing.id)).filter(Number.isFinite);
+    if (listingIds.length === 0) return listings;
+    const placeholders = listingIds.map(() => '?').join(',');
+    const rows = await this.getDb().all(
+      `SELECT mb.listing_id, mb.amount
+         FROM market_bids mb
+         JOIN (
+           SELECT listing_id, MAX(id) AS id
+             FROM market_bids
+            WHERE bidder_id = ?
+              AND listing_id IN (${placeholders})
+            GROUP BY listing_id
+         ) latest ON latest.id = mb.id`,
+      bidderId,
+      ...listingIds
+    );
+    const bidsByListing = new Map(rows.map((row: any) => [Number(row.listing_id), Number(row.amount || 0)]));
+    return listings.map((listing) => {
+      const listingId = Number(listing.id);
+      return bidsByListing.has(listingId)
+        ? { ...listing, my_bid: bidsByListing.get(listingId) ?? null }
+        : listing;
+    });
   }
 
   private listingSelectWhere(where: string, options: { includeHistoricalRefs?: boolean } = {}) {
@@ -129,6 +139,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       starting_bid: row.starting_bid ?? null,
       current_bid: row.current_bid ?? null,
       current_bidder_id: row.current_bidder_id ?? null,
+      my_bid: row.my_bid == null ? null : Number(row.my_bid),
       auction_ends_at: row.auction_ends_at ?? null,
       bid_reserved: Number(row.bid_reserved || 0),
       fee: Number(row.fee || 0),
@@ -192,7 +203,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     const startingBid = listingType === 'auction' ? Math.max(100, Number(listing.starting_bid || listing.price)) : null;
     const price = listingType === 'auction' ? (buyNowPrice || startingBid || listing.price) : listing.price;
     const feeRate = Math.max(0, Math.floor(Number(listing.fee_rate ?? FIXED_MARKET_FEE_RATE)));
-    const auctionEndsAt = listingType === 'auction' ? toMysqlDateTime(listing.auction_ends_at) : null;
+    const auctionEndsAt = listingType === 'auction' ? toSqlDateTime(listing.auction_ends_at, getSqlDialect()) : null;
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
       const card = await tx.get(
@@ -293,7 +304,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       "ml.status = 'PENDING'",
       `(COALESCE(ml.listing_type, 'fixed') <> 'auction' OR ml.auction_ends_at IS NULL OR ${auctionEndsAtExpr} > ${isPostgres ? 'NOW()' : '?'})`
     ];
-    const params: any[] = isPostgres ? [] : [toMysqlDateTime(new Date())];
+    const params: any[] = isPostgres ? [] : [toSqlDateTime(new Date(), 'mysql')];
     const visiblePriceExpr = "CASE WHEN COALESCE(ml.listing_type, 'fixed') = 'auction' THEN COALESCE(ml.starting_bid, ml.price, 0) ELSE ml.price END";
 
     if (options.type === 'bidding') {
@@ -339,7 +350,7 @@ export class MysqlMarketRepository implements IMarketRepository {
           options.limit,
           offset
         );
-        return { listings: rows.map((r) => this.mapRow(r)), total: Number(countRow?.total || 0) };
+        return { listings: await this.attachMyBids(rows.map((r) => this.mapRow(r)), options.bidderId), total: Number(countRow?.total || 0) };
       }
       const rows = await this.getDb().all<any>(
         `SELECT ml.id, s.name AS streamer_name, u.username AS seller_username
@@ -363,7 +374,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         ...pageIds
       );
       const byId = new Map(detailRows.map((row: any) => [Number(row.id), this.mapRow(row)]));
-      return { listings: pageIds.map((id) => byId.get(id)).filter(Boolean) as MarketListing[], total: matchedIds.length };
+      return { listings: await this.attachMyBids(pageIds.map((id) => byId.get(id)).filter(Boolean) as MarketListing[], options.bidderId), total: matchedIds.length };
     }
 
     const countRow = await this.getDb().get<{ total: number }>(`
@@ -378,7 +389,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       options.limit,
       offset
     );
-    return { listings: rows.map((r) => this.mapRow(r)), total: Number(countRow?.total || 0) };
+    return { listings: await this.attachMyBids(rows.map((r) => this.mapRow(r)), options.bidderId), total: Number(countRow?.total || 0) };
   }
 
   async listByUser(userId: string): Promise<MarketListing[]> {
@@ -694,41 +705,41 @@ export class MysqlMarketRepository implements IMarketRepository {
         const listing = await tx.get("SELECT * FROM market_listings WHERE id = ? AND status = 'PENDING' AND listing_type = 'auction' FOR UPDATE", listingId);
         if (!listing) throw new Error('NOT_FOUND_OR_NOT_AUCTION');
         if (listing.seller_id === bidderId) throw new Error('CANNOT_BID_OWN_ITEM');
-        if (listing.auction_ends_at && parseMysqlUtcTime(listing.auction_ends_at) <= Date.now()) throw new Error('AUCTION_ENDED');
+        if (listing.auction_ends_at && parseMysqlDateTimeMs(listing.auction_ends_at) <= Date.now()) throw new Error('AUCTION_ENDED');
         const minBid = Number(listing.starting_bid || listing.price || 0);
         if (amount < minBid) throw new Error('BID_TOO_LOW');
         const bidder = await tx.get('SELECT point FROM users WHERE id = ? FOR UPDATE', bidderId);
         if (!bidder) throw new Error('BIDDER_NOT_FOUND');
         const previousBid = await tx.get('SELECT amount FROM market_bids WHERE listing_id = ? AND bidder_id = ? ORDER BY id DESC LIMIT 1', listingId, bidderId);
         const previousAmount = Number(previousBid?.amount || 0);
-        const payableNow = amount - previousAmount;
-        if (payableNow > 0 && Number(bidder.point || 0) < payableNow) throw new Error('INSUFFICIENT_POINT');
+        const availableAfterRefund = Number(bidder.point || 0) + previousAmount;
+        if (availableAfterRefund < amount) throw new Error('INSUFFICIENT_POINT');
 
         await tx.run('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)', listingId, bidderId, amount);
-        if (payableNow > 0) {
-          await tx.run('UPDATE users SET point = point - ? WHERE id = ?', payableNow, bidderId);
+        if (previousAmount > 0) {
+          await tx.run('UPDATE users SET point = point + ? WHERE id = ?', previousAmount, bidderId);
           await recordMysqlPointLedger(tx, {
             userId: bidderId,
             counterpartyUserId: listing.seller_id,
-            amount: -payableNow,
+            amount: previousAmount,
+            sourceType: 'market_bid_refund',
+            sourceId: listingId,
+            reason: 'auction_bid_adjust_refund',
+            description: `경매 #${listingId} 이전 입찰 예약금 환불`,
+            metadata: { listing_id: listingId, previous_bid: previousAmount, bid_amount: amount, refunded_bid: previousAmount }
+          });
+        }
+        if (amount > 0) {
+          await tx.run('UPDATE users SET point = point - ? WHERE id = ?', amount, bidderId);
+          await recordMysqlPointLedger(tx, {
+            userId: bidderId,
+            counterpartyUserId: listing.seller_id,
+            amount: -amount,
             sourceType: 'market_bid',
             sourceId: listingId,
             reason: 'auction_bid_reserved',
             description: `경매 #${listingId} 입찰 예약`,
-            metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
-          });
-        } else if (payableNow < 0) {
-          const refund = Math.abs(payableNow);
-          await tx.run('UPDATE users SET point = point + ? WHERE id = ?', refund, bidderId);
-          await recordMysqlPointLedger(tx, {
-            userId: bidderId,
-            counterpartyUserId: listing.seller_id,
-            amount: refund,
-            sourceType: 'market_bid_refund',
-            sourceId: listingId,
-            reason: 'auction_bid_adjust_refund',
-            description: `경매 #${listingId} 입찰 예약금 차액 환불`,
-            metadata: { listing_id: listingId, previous_bid: previousAmount, bid_amount: amount, refunded_bid: refund }
+            metadata: { listing_id: listingId, bid_amount: amount, refunded_previous_bid: previousAmount }
           });
         }
 
@@ -742,7 +753,7 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async finishExpiredAuctions(nowIso: string): Promise<MarketListing[]> {
     const isPostgres = getSqlDialect() === 'postgres';
-    const now = toMysqlDateTime(nowIso) ?? toMysqlDateTime(new Date());
+    const now = toSqlDateTime(nowIso, 'mysql') ?? toSqlDateTime(new Date(), 'mysql');
     const expiredRows = await this.getDb().all<{ id: number }>(
       `SELECT id
          FROM market_listings
@@ -870,7 +881,7 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async cancelStaleListings(cutoffIso: string, limit = 200): Promise<MarketListing[]> {
     const isPostgres = getSqlDialect() === 'postgres';
-    const cutoff = toMysqlDateTime(cutoffIso) ?? toMysqlDateTime(new Date());
+    const cutoff = toSqlDateTime(cutoffIso, getSqlDialect()) ?? toSqlDateTime(new Date(), getSqlDialect());
     const maxRows = Math.max(1, Math.min(500, Math.floor(limit)));
     const cutoffWhere = isPostgres
       ? "WHERE ml.status = 'PENDING' AND COALESCE(ml.listing_type, 'fixed') = 'fixed' AND NULLIF(ml.created_at::text, '')::timestamptz <= ?::timestamptz"
@@ -879,7 +890,7 @@ export class MysqlMarketRepository implements IMarketRepository {
       `${this.listingSelectWhere(cutoffWhere)}
        ORDER BY ml.created_at ASC, ml.id ASC
        LIMIT ?`,
-      isPostgres ? new Date(cutoffIso).toISOString() : cutoff,
+      cutoff,
       maxRows
     );
     const staleListings = staleRows.map((row) => this.mapRow(row));

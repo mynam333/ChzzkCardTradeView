@@ -154,9 +154,9 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
               const parseTime = (iso: string) => {
                 const raw = String(iso || '').trim();
                 const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
-                const normalized = raw.includes('T')
-                  ? raw
-                  : `${raw.replace(' ', 'T')}${hasTimezone ? '' : 'Z'}`;
+                const normalized = hasTimezone
+                  ? raw.replace(' ', 'T')
+                  : `${raw.replace(' ', 'T')}+09:00`;
                 const ts = new Date(normalized).getTime();
                 return Number.isFinite(ts) ? ts : Date.now();
               };

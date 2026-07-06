@@ -2,6 +2,7 @@ import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } 
 import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 import { createRealtimeNotification } from './notificationDelivery';
+import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type AchievementCategory =
   | 'start'
@@ -606,7 +607,7 @@ const toMysqlDateTime = (value: string | Date | null | undefined): string | null
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  return toSqlDateTime(date, getDbMode() === 'MYSQL' ? getSqlDialect() : 'mysql');
 };
 
 const mapAchievementRow = (row: any): Achievement => ({

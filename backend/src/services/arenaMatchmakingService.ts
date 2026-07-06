@@ -86,7 +86,8 @@ const mmrBucket = (mmr: number) => Math.floor(mmr / MMR_BUCKET_SIZE) * MMR_BUCKE
 
 const parseDbTime = (value: string | null | undefined): number => {
   if (!value) return Date.now();
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const normalized = hasTimezone ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}+09:00`;
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? parsed : Date.now();
 };

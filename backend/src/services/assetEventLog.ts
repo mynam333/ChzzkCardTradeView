@@ -1,4 +1,5 @@
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } from './db';
+import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type AssetEventAssetType = 'card' | 'point' | 'cosmetic' | 'ticket' | 'title' | 'unknown';
 export type AssetEventAction =
@@ -578,7 +579,7 @@ export const listAssetEvents = async (
 
 const sinceSqlDate = (days: number) => {
   const date = new Date(Date.now() - Math.max(1, Math.min(90, days)) * 24 * 60 * 60 * 1000);
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  return toSqlDateTime(date, getDbMode() === 'MYSQL' ? getSqlDialect() : 'mysql');
 };
 
 type AssetEventSuspectCounterpartyStats = {

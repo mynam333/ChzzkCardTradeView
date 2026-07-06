@@ -46,7 +46,7 @@ export const parseDeletedAccountTime = (deletedAt?: string | Date | null): numbe
   if (!raw) return null;
 
   const timezoneLessDateTime = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-  const normalized = timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+  const normalized = timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}+09:00` : raw;
   const time = new Date(normalized).getTime();
   return Number.isFinite(time) ? time : null;
 };

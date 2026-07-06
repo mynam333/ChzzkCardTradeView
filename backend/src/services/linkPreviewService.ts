@@ -2,6 +2,7 @@ import dns from 'dns/promises';
 import crypto from 'crypto';
 import net from 'net';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { toMysqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type ChatLinkPreview = {
   url: string;
@@ -70,7 +71,6 @@ const normalizeUrl = (raw: string) => {
 };
 
 const cacheKey = (normalizedUrl: string) => crypto.createHash('sha256').update(normalizedUrl).digest('hex');
-const toMysqlDateTime = (value: Date) => value.toISOString().slice(0, 19).replace('T', ' ');
 
 const parseCachedPreview = (value: any): ChatLinkPreview | null => {
   if (!value) return null;

@@ -28,7 +28,7 @@ const TRADE_ACCOUNT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 const parseUserCreatedAtMs = (createdAt?: string | null): number => {
   if (!createdAt) return NaN;
   const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAt)
-    ? `${createdAt.replace(' ', 'T')}Z`
+    ? `${createdAt.replace(' ', 'T')}+09:00`
     : createdAt;
   return new Date(normalized).getTime();
 };

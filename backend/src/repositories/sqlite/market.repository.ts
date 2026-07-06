@@ -45,6 +45,31 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
   }
 
+  private attachMyBids(listings: MarketListing[], bidderId?: string): MarketListing[] {
+    if (!bidderId || listings.length === 0) return listings;
+    const listingIds = listings.map((listing) => Number(listing.id)).filter(Number.isFinite);
+    if (listingIds.length === 0) return listings;
+    const placeholders = listingIds.map(() => '?').join(',');
+    const rows = this.getDb().prepare(`
+      SELECT mb.listing_id, mb.amount
+        FROM market_bids mb
+        JOIN (
+          SELECT listing_id, MAX(id) AS id
+            FROM market_bids
+           WHERE bidder_id = ?
+             AND listing_id IN (${placeholders})
+           GROUP BY listing_id
+        ) latest ON latest.id = mb.id
+    `).all(bidderId, ...listingIds) as any[];
+    const bidsByListing = new Map(rows.map((row) => [Number(row.listing_id), Number(row.amount || 0)]));
+    return listings.map((listing) => {
+      const listingId = Number(listing.id);
+      return bidsByListing.has(listingId)
+        ? { ...listing, my_bid: bidsByListing.get(listingId) ?? null }
+        : listing;
+    });
+  }
+
   private mapRow(row: any): MarketListing {
     return {
       id: row.id,
@@ -58,6 +83,7 @@ export class SqliteMarketRepository implements IMarketRepository {
       starting_bid: row.starting_bid ?? null,
       current_bid: row.current_bid ?? null,
       current_bidder_id: row.current_bidder_id ?? null,
+      my_bid: row.my_bid == null ? null : Number(row.my_bid),
       auction_ends_at: row.auction_ends_at ?? null,
       bid_reserved: row.bid_reserved ?? 0,
       fee: row.fee ?? 0,
@@ -325,7 +351,7 @@ export class SqliteMarketRepository implements IMarketRepository {
          WHERE ml.id IN (${placeholders})
       `).all(...pageIds) as any[];
       const byId = new Map(detailRows.map((row) => [Number(row.id), this.mapRow(row)]));
-      return { listings: pageIds.map((id) => byId.get(id)).filter(Boolean) as MarketListing[], total: matchedIds.length };
+      return { listings: this.attachMyBids(pageIds.map((id) => byId.get(id)).filter(Boolean) as MarketListing[], options.bidderId), total: matchedIds.length };
     }
 
     const total = (db.prepare(`
@@ -362,7 +388,7 @@ export class SqliteMarketRepository implements IMarketRepository {
        LIMIT ? OFFSET ?
     `).all(...params, options.limit, startIndex) as any[];
 
-    return { listings: rows.map(r => this.mapRow(r)), total };
+    return { listings: this.attachMyBids(rows.map(r => this.mapRow(r)), options.bidderId), total };
   }
 
   async listByUser(userId: string): Promise<MarketListing[]> {
@@ -803,34 +829,34 @@ export class SqliteMarketRepository implements IMarketRepository {
       if (!bidder) throw new Error('BIDDER_NOT_FOUND');
       const previousBid = db.prepare('SELECT amount FROM market_bids WHERE listing_id = ? AND bidder_id = ? ORDER BY id DESC LIMIT 1').get(listingId, bidderId) as any;
       const previousAmount = Number(previousBid?.amount || 0);
-      const payableNow = amount - previousAmount;
-      if (payableNow > 0 && Number(bidder.point || 0) < payableNow) throw new Error('INSUFFICIENT_POINT');
+      const availableAfterRefund = Number(bidder.point || 0) + previousAmount;
+      if (availableAfterRefund < amount) throw new Error('INSUFFICIENT_POINT');
 
       db.prepare('INSERT INTO market_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?)').run(listingId, bidderId, amount);
-      if (payableNow > 0) {
-        db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(payableNow, bidderId);
+      if (previousAmount > 0) {
+        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(previousAmount, bidderId);
         recordSqlitePointLedger(db, {
           userId: bidderId,
           counterpartyUserId: listing.seller_id,
-          amount: -payableNow,
+          amount: previousAmount,
+          sourceType: 'market_bid_refund',
+          sourceId: listingId,
+          reason: 'auction_bid_adjust_refund',
+          description: `경매 #${listingId} 이전 입찰 예약금 환불`,
+          metadata: { listing_id: listingId, previous_bid: previousAmount, bid_amount: amount, refunded_bid: previousAmount }
+        });
+      }
+      if (amount > 0) {
+        db.prepare('UPDATE users SET point = point - ? WHERE id = ?').run(amount, bidderId);
+        recordSqlitePointLedger(db, {
+          userId: bidderId,
+          counterpartyUserId: listing.seller_id,
+          amount: -amount,
           sourceType: 'market_bid',
           sourceId: listingId,
           reason: 'auction_bid_reserved',
           description: `경매 #${listingId} 입찰 예약`,
-          metadata: { listing_id: listingId, bid_amount: amount, payable_now: payableNow }
-        });
-      } else if (payableNow < 0) {
-        const refund = Math.abs(payableNow);
-        db.prepare('UPDATE users SET point = point + ? WHERE id = ?').run(refund, bidderId);
-        recordSqlitePointLedger(db, {
-          userId: bidderId,
-          counterpartyUserId: listing.seller_id,
-          amount: refund,
-          sourceType: 'market_bid_refund',
-          sourceId: listingId,
-          reason: 'auction_bid_adjust_refund',
-          description: `경매 #${listingId} 입찰 예약금 차액 환불`,
-          metadata: { listing_id: listingId, previous_bid: previousAmount, bid_amount: amount, refunded_bid: refund }
+          metadata: { listing_id: listingId, bid_amount: amount, refunded_previous_bid: previousAmount }
         });
       }
 

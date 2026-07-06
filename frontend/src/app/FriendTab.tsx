@@ -132,7 +132,7 @@ const isDraftRoom = (room: ActiveChatRoom | null): room is DraftChatRoom => Bool
 const parseChatDate = (value?: string) => {
   if (!value) return null;
   const timezoneLessDateTime = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-  const normalized = timezoneLessDateTime.test(value) ? `${value.replace(' ', 'T')}Z` : value;
+  const normalized = timezoneLessDateTime.test(value) ? `${value.replace(' ', 'T')}+09:00` : value;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 };

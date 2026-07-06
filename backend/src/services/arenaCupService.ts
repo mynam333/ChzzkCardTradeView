@@ -78,7 +78,8 @@ const hashInt = (input: string) => parseInt(hashHex(input).slice(0, 8), 16);
 
 const parseDbTime = (value: string | null | undefined): number => {
   if (!value) return Date.now();
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const normalized = hasTimezone ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}+09:00`;
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? parsed : Date.now();
 };

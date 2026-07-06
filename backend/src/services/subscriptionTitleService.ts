@@ -1,6 +1,7 @@
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
 import { getValidUserAccessToken } from './chzzkService';
 import { titleRepository } from '../repositories';
+import { toMysqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type SubscriptionTitleRule = {
   id: number;
@@ -61,8 +62,6 @@ const getSubscriberListMaxPages = () => {
   const pages = Number(process.env.CHZZK_SUBSCRIBER_LIST_MAX_PAGES || 200);
   return Math.max(1, Math.min(1000, Number.isFinite(pages) ? Math.floor(pages) : 200));
 };
-
-const toMysqlDateTime = (date: Date) => date.toISOString().slice(0, 19).replace('T', ' ');
 
 const mapRule = (row: any): SubscriptionTitleRule => ({
   id: Number(row.id),

@@ -3,9 +3,10 @@
  * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트) | 'emote'(아레나 이모트).
  * 카드 장착은 border/name_effect만 허용하며 emote는 아레나 전용 로드아웃에서만 사용합니다.
  */
-import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
+import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 
 export interface ShopItem {
   id: number;
@@ -69,7 +70,7 @@ const toDbDateTime = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  return toSqlDateTime(date, getDbMode() === 'MYSQL' ? getSqlDialect() : 'mysql');
 };
 
 const nowDbDateTime = () => toDbDateTime(new Date().toISOString());
@@ -79,7 +80,7 @@ const parseShopDateMs = (value: string | null | undefined): number => {
   const text = String(value).trim();
   if (!text) return NaN;
   if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) return new Date(text).getTime();
-  return new Date(text.replace(' ', 'T') + 'Z').getTime();
+  return new Date(`${text.replace(' ', 'T')}+09:00`).getTime();
 };
 
 const getItemSaleFailureReason = (item: any, now = Date.now()): string | null => {

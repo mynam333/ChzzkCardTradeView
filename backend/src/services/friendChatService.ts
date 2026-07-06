@@ -103,7 +103,7 @@ const normalizeUtcDateTime = (value: any): string => {
   if (value instanceof Date) return value.toISOString();
   const raw = String(value);
   const timezoneLessDateTime = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-  return timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+  return timezoneLessDateTime.test(raw) ? `${raw.replace(' ', 'T')}+09:00` : raw;
 };
 
 const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
@@ -957,7 +957,11 @@ export const sendChatMessage = async (roomId: number, senderId: string, body: st
   return { message, room, receiverId };
 };
 
-const toMysqlDateTime = (value: Date) => value.toISOString().slice(0, 19).replace('T', ' ');
+const toMysqlDateTime = (value: Date) => {
+  const kst = new Date(value.getTime() + 9 * 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())} ${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}:${pad(kst.getUTCSeconds())}`;
+};
 
 const mapAttachmentRow = (row: any, expiresAt?: Date): ChatAttachmentInput => ({
   attachmentId: Number(row.id),

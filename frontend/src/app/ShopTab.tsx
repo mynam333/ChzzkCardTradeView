@@ -85,7 +85,7 @@ const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
 // 동일 내용의 매물은 기존 객체 참조를 유지해 불필요한 카드 리렌더(및 입장 애니메이션 재생)를 막습니다.
 const MARKET_LISTING_VOLATILE_KEYS = [
   'price', 'status', 'current_bid', 'current_bidder_id', 'current_bidder_username',
-  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at'
+  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at', 'my_bid'
 ];
 const marketListingsEqual = (a: any, b: any): boolean =>
   MARKET_LISTING_VOLATILE_KEYS.every((key) => a?.[key] === b?.[key]);
@@ -1012,11 +1012,12 @@ export const ShopTab: React.FC = () => {
     }
     const amount = Math.floor(Number(bidInputs[listing.id]));
     const minBid = Number(listing.starting_bid || listing.price || 0);
+    const currentMyBid = Math.max(0, Number(listing.my_bid || 0));
     if (!Number.isFinite(amount) || amount < minBid) {
       toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
       return;
     }
-    if (user.point < amount) {
+    if (Number(user.point || 0) + currentMyBid < amount) {
       toast('입찰 가능한 포인트가 부족합니다.', 'warning');
       return;
     }
@@ -1879,6 +1880,7 @@ export const ShopTab: React.FC = () => {
                     const border = listing.card?.border;
                     const isAuction = listing.listing_type === 'auction';
                     const startBid = Number(listing.starting_bid || listing.price || 0);
+                    const myBid = Number(listing.my_bid || 0);
                     const buyNowPrice = Number(listing.buy_now_price || (isAuction ? 0 : listing.price) || 0);
                     const minBid = startBid;
                     const endsAt = parseAppDate(listing.auction_ends_at);
@@ -1980,6 +1982,12 @@ export const ShopTab: React.FC = () => {
                                 <span>시작가</span>
                                 <span className="cute-number-font">{startBid.toLocaleString()} P</span>
                               </div>
+                              {myBid > 0 && (
+                                <div className="flex items-center justify-between rounded-lg bg-white/70 px-2 py-1 text-[10px] font-black text-violet-900 dark:bg-black/20 dark:text-violet-100">
+                                  <span>내 입찰가</span>
+                                  <span className="cute-number-font">{myBid.toLocaleString()} P</span>
+                                </div>
+                              )}
                               {isUrgent && (
                                 <div className="text-[9px] font-black text-red-500">
                                   마감 임박

@@ -103,7 +103,7 @@ const notify = (
 const realtimeListingPatch = (listing: MarketListing | null | undefined, viewerId?: string) => {
   if (!listing?.id) return null;
   const publicListing = marketListingForViewer(listing, viewerId);
-  return {
+  const patch: Record<string, unknown> = {
     id: publicListing.id,
     status: publicListing.status,
     price: publicListing.price,
@@ -116,6 +116,10 @@ const realtimeListingPatch = (listing: MarketListing | null | undefined, viewerI
     auction_ends_at: publicListing.auction_ends_at ?? null,
     updated_at: publicListing.updated_at ?? new Date().toISOString()
   };
+  if (viewerId && publicListing.my_bid != null) {
+    patch.my_bid = publicListing.my_bid;
+  }
+  return patch;
 };
 
 const publishMarketUpdated = (reason: string, listing?: MarketListing | null, extra: Record<string, unknown> = {}) => {
@@ -219,7 +223,7 @@ export const listActiveListings = async (req: AuthenticatedRequest, res: Respons
   const sort = (req.query.sort || 'latest') as 'latest' | 'oldest' | 'price_desc' | 'price_asc' | 'ending_soon' | 'bid_desc';
   const rawType = String(req.query.type || 'all');
   const type = (['all', 'fixed', 'auction', 'bidding'].includes(rawType) ? rawType : 'all') as 'all' | 'fixed' | 'auction' | 'bidding';
-  const bidderId = type === 'bidding' ? req.user?.id : undefined;
+  const bidderId = req.user?.id;
   const cacheKey = JSON.stringify({ page, limit, search: search || '', sort, type, bidderId: bidderId || '' });
   const now = Date.now();
   const cached = marketListCache.get(cacheKey);
@@ -595,7 +599,10 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(400).json({ error: result.reason, message: messageMap[result.reason] || '입찰에 실패했습니다.' });
   }
   const updatedListing = await marketRepository.findById(id).catch(() => null);
-  const listingPatch = realtimeListingPatch(updatedListing, user.id);
+  const listingPatch = realtimeListingPatch(
+    updatedListing ? { ...updatedListing, my_bid: amount } : updatedListing,
+    user.id
+  );
   publishMarketUpdated('auction_bid', updatedListing, {
     listingId: id,
     auction_ends_at: result.auction_ends_at ?? null

@@ -1,4 +1,5 @@
-import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
+import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } from './db';
+import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 import {
   buyItem,
   getActiveItems,
@@ -42,7 +43,7 @@ const ARENA_EMOTE_SLOT_KEYS = [
   'emote_slot_4_item_id'
 ] as const;
 
-const nowDbDateTime = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+const nowDbDateTime = () => toSqlDateTime(new Date(), getDbMode() === 'MYSQL' ? getSqlDialect() : 'mysql');
 
 export const listArenaCosmeticShopItems = async (): Promise<ShopItem[]> => {
   const items = await getActiveItems();

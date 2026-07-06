@@ -37,6 +37,31 @@ export class SupabaseMarketRepository implements IMarketRepository {
     }
   }
 
+  private async attachMyBids(listings: MarketListing[], bidderId?: string): Promise<MarketListing[]> {
+    if (!bidderId || listings.length === 0) return listings;
+    const listingIds = listings.map((listing) => Number(listing.id)).filter(Number.isFinite);
+    if (listingIds.length === 0) return listings;
+    const { data } = await this.getClient()
+      .from('market_bids')
+      .select('id, listing_id, amount')
+      .eq('bidder_id', bidderId)
+      .in('listing_id', listingIds)
+      .order('id', { ascending: false });
+    const bidsByListing = new Map<number, number>();
+    for (const bid of data || []) {
+      const listingId = Number((bid as any).listing_id);
+      if (!bidsByListing.has(listingId)) {
+        bidsByListing.set(listingId, Number((bid as any).amount || 0));
+      }
+    }
+    return listings.map((listing) => {
+      const listingId = Number(listing.id);
+      return bidsByListing.has(listingId)
+        ? { ...listing, my_bid: bidsByListing.get(listingId) ?? null }
+        : listing;
+    });
+  }
+
   private mapRow(row: any, card: any): MarketListing {
     const streamer = card?.streamer;
     return {
@@ -51,6 +76,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
       starting_bid: row.starting_bid ?? null,
       current_bid: row.current_bid ?? null,
       current_bidder_id: row.current_bidder_id ?? null,
+      my_bid: row.my_bid == null ? null : Number(row.my_bid),
       auction_ends_at: row.auction_ends_at ?? null,
       bid_reserved: row.bid_reserved ?? 0,
       fee: row.fee ?? 0,
@@ -336,7 +362,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     const paginatedListings = listings.slice(startIndex, startIndex + options.limit);
 
     return {
-      listings: paginatedListings,
+      listings: await this.attachMyBids(paginatedListings, options.bidderId),
       total
     };
   }

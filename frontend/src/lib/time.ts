@@ -1,4 +1,5 @@
 const timezoneSuffixPattern = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
+const KST_OFFSET_SUFFIX = '+09:00';
 
 export const parseAppDate = (value?: string | number | Date | null) => {
   if (value === undefined || value === null || value === '') return null;
@@ -13,7 +14,7 @@ export const parseAppDate = (value?: string | number | Date | null) => {
 
   const normalized = timezoneSuffixPattern.test(trimmed)
     ? trimmed
-    : `${trimmed.replace(' ', 'T')}Z`;
+    : `${trimmed.replace(' ', 'T')}${KST_OFFSET_SUFFIX}`;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 };

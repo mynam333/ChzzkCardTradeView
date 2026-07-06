@@ -1800,8 +1800,8 @@ CREATE TABLE IF NOT EXISTS market_listings (
   settled_amount BIGINT DEFAULT 0,
   with_cosmetics BOOLEAN DEFAULT FALSE,
   seller_hidden_at TIMESTAMPTZ,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_listings_status ON market_listings(status);
