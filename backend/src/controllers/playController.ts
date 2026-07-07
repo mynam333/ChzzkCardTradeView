@@ -18,6 +18,7 @@ import { syncUserSubscriptionTitles } from '../services/subscriptionTitleService
 import { getDbMode, getMysqlDb, getSqliteDb, getSqlDialect } from '../services/db';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { recordAchievementEvent } from '../services/achievementService';
+import { publishRealtimeEvent } from '../services/realtimeStream';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -617,6 +618,18 @@ const USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS = Math.max(
   1_000,
   Number(process.env.USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS || 10_000)
 );
+const USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS = Math.max(
+  250,
+  Number(process.env.USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS || 1_500)
+);
+const USER_RANKING_MUTATION_REFRESH_MAX_DELAY_MS = Math.max(
+  USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS,
+  Number(process.env.USER_RANKING_MUTATION_REFRESH_MAX_DELAY_MS || 10_000)
+);
+const USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS = Math.max(
+  USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS,
+  Number(process.env.USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS || 5_000)
+);
 const STREAMER_RANKING_CHANGE_HISTORY_ENABLED = process.env.STREAMER_RANKING_CHANGE_HISTORY_ENABLED === 'true';
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
 const rankingsInFlight = new Map<string, Promise<any[]>>();
@@ -643,6 +656,10 @@ let userRankingSnapshotInFlight: Promise<boolean> | null = null;
 let userRankingSnapshotSchedulerTimer: NodeJS.Timeout | null = null;
 let userRankingLiveFallbackSkipWarnedAt = 0;
 let userRankingSnapshotPresenceCache: { rankingPresent: boolean; cardFilterPresent: boolean; expiresAt: number } | null = null;
+let userRankingMutationRefreshTimer: NodeJS.Timeout | null = null;
+let userRankingMutationRefreshFirstQueuedAt = 0;
+let userRankingMutationRefreshLastStartedAt = 0;
+const userRankingMutationRefreshReasons = new Set<string>();
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -669,6 +686,53 @@ export const clearUserRankingCaches = () => {
 export const clearRankingCaches = () => {
   clearUserRankingCaches();
   clearStreamerRankingCaches();
+};
+
+export const scheduleUserRankingRefresh = (reason = 'ranking_mutation') => {
+  clearUserRankingCaches();
+  userRankingMutationRefreshReasons.add(reason);
+  const now = Date.now();
+  if (!userRankingMutationRefreshFirstQueuedAt) {
+    userRankingMutationRefreshFirstQueuedAt = now;
+  }
+  const elapsed = now - userRankingMutationRefreshFirstQueuedAt;
+  const debounceDelay = elapsed >= USER_RANKING_MUTATION_REFRESH_MAX_DELAY_MS
+    ? 0
+    : USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS;
+  const throttleDelay = Math.max(0, userRankingMutationRefreshLastStartedAt + USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS - now);
+  const delay = Math.max(debounceDelay, throttleDelay);
+
+  if (userRankingMutationRefreshTimer) {
+    clearTimeout(userRankingMutationRefreshTimer);
+  }
+
+  userRankingMutationRefreshTimer = setTimeout(async () => {
+    userRankingMutationRefreshTimer = null;
+    userRankingMutationRefreshFirstQueuedAt = 0;
+    const reasons = Array.from(userRankingMutationRefreshReasons);
+    userRankingMutationRefreshReasons.clear();
+    const eventReason = reasons.length ? reasons.join(',') : reason;
+    try {
+      userRankingMutationRefreshLastStartedAt = Date.now();
+      const refreshed = await refreshUserRankingSnapshot({ force: true });
+      clearUserRankingCaches();
+      publishRealtimeEvent('ranking', {
+        reason: eventReason,
+        scope: 'users',
+        affects: ['user_rankings', 'user_assets', 'user_cards', 'user_live'],
+        refreshed
+      });
+    } catch (err: any) {
+      console.warn('[RankingSnapshot] 카드 변경 후 유저 랭킹 갱신 실패:', err?.message || err);
+      publishRealtimeEvent('ranking', {
+        reason: eventReason,
+        scope: 'users',
+        affects: ['user_rankings', 'user_assets', 'user_cards', 'user_live'],
+        refreshed: false
+      });
+    }
+  }, delay);
+  userRankingMutationRefreshTimer.unref?.();
 };
 
 export const clearStreamerRankingCaches = () => {
@@ -725,13 +789,13 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean; req
   if (!force && mode === 'MYSQL' && !USER_RANKING_SNAPSHOT_REFRESH_IN_API) {
     return hasUserRankingSnapshot(requireCardFilter);
   }
-  if (userRankingSnapshotExpiresAt > Date.now()) return true;
+  if (!force && userRankingSnapshotExpiresAt > Date.now()) return true;
   if (userRankingSnapshotInFlight) {
-    if (mode === 'MYSQL' && await hasUserRankingSnapshot()) return true;
+    if (!force && mode === 'MYSQL' && await hasUserRankingSnapshot()) return true;
     return userRankingSnapshotInFlight;
   }
 
-  const canServeStaleSnapshot = mode === 'MYSQL' && await hasUserRankingSnapshot();
+  const canServeStaleSnapshot = !force && mode === 'MYSQL' && await hasUserRankingSnapshot();
 
   userRankingSnapshotInFlight = (async () => {
     if (mode === 'MYSQL') {
@@ -1149,13 +1213,13 @@ export const getUserRankings = async (req: Request, res: Response) => {
     const now = Date.now();
     const cached = rankingsCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
-      res.set('Cache-Control', 'public, max-age=60');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(cached.data);
     }
     const inFlight = rankingsInFlight.get(cacheKey);
     if (inFlight) {
       const data = await inFlight;
-      res.set('Cache-Control', 'public, max-age=60');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(data);
     }
 
@@ -1233,7 +1297,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
       }
       throw err;
     });
-    res.set('Cache-Control', 'public, max-age=60');
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(mapped);
   } catch (err: any) {
     console.error('[PlayController] getUserRankings 에러:', err);
@@ -1253,13 +1317,13 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
     const now = Date.now();
     const cached = streamerRankingsCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
-      res.set('Cache-Control', 'public, max-age=60');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(cached.data);
     }
     const inFlight = streamerRankingsInFlight.get(cacheKey);
     if (inFlight) {
       const data = await inFlight;
-      res.set('Cache-Control', 'public, max-age=60');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(data);
     }
 
@@ -1296,7 +1360,7 @@ export const getStreamerRankings = async (req: Request, res: Response) => {
       throw err;
     });
 
-    res.set('Cache-Control', 'public, max-age=60');
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(data);
   } catch (err: any) {
     console.error('[PlayController] getStreamerRankings 에러:', err);
@@ -1364,6 +1428,7 @@ export const updateMyStatusMessage = async (req: Request, res: Response) => {
   }
   try {
     await userRepository.updateStatusMessage(userId, message);
+    scheduleUserRankingRefresh('profile_status_message');
     if (message.trim()) {
       recordAchievementEvent({
         eventKey: `profile:status:${userId}:${Date.now()}`,
@@ -1391,6 +1456,7 @@ export const updateMyCardVisibility = async (req: Request, res: Response) => {
     const ok = await userCardRepository.updateVisibility(userId, cardId, !!req.body?.hidden);
     if (!ok) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    scheduleUserRankingRefresh('card_visibility');
     recordAchievementEvent({
       eventKey: `card:visibility:${userId}:${cardId}:${req.body?.hidden ? 'hide' : 'show'}:${Date.now()}`,
       userId,
@@ -1424,6 +1490,7 @@ export const updateMyCardGroupVisibility = async (req: Request, res: Response) =
     const updated = await userCardRepository.updateVisibilityByGroup(userId, channelId, star, hidden);
     if (updated <= 0) return res.status(404).json({ error: 'NotFound', message: '보유 중인 카드를 찾을 수 없습니다.' });
     clearUserCardsInFlight(userId);
+    scheduleUserRankingRefresh('card_visibility_group');
     recordAchievementEvent({
       eventKey: `card:visibility-group:${userId}:${channelId}:${star}:${hidden ? 'hide' : 'show'}:${Date.now()}`,
       userId,
@@ -1542,6 +1609,7 @@ export const drawCard = async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'InternalServerError', message: '카드 뽑기 처리에 실패했습니다.' });
     }
     clearUserCardsInFlight(userId);
+    scheduleUserRankingRefresh('card_draw');
     recordAchievementEvent({
       eventKey: `card:draw:${userId}:${draw.card?.id || luckyStreamer.channel_id}`,
       userId,
@@ -1641,6 +1709,7 @@ export const drawCards = async (req: Request, res: Response) => {
         });
       }
       clearUserCardsInFlight(userId);
+      scheduleUserRankingRefresh('card_draw_many');
       recordAchievementEvent({
         eventKey: `card:draw-many:${userId}:${Date.now()}:${cards.length}`,
         userId,
@@ -1917,6 +1986,7 @@ export const sellCards = async (req: Request, res: Response) => {
     const refreshed = await userRepository.findById(userId);
     const nextPoint = refreshed ? refreshed.point : user.point + actualGainedPoints;
     clearUserCardsInFlight(userId);
+    scheduleUserRankingRefresh('card_sell');
     const soldCount = sellActions.reduce((sum, item) => sum + item.count, 0);
     recordAchievementEvent({
       eventKey: `card:sell:${userId}:${Date.now()}:${soldCount}`,
@@ -2050,6 +2120,7 @@ export const fuseCards = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'FuseFailed', reason: result.reason, message: msg });
     }
     clearUserCardsInFlight(userId);
+    scheduleUserRankingRefresh('card_fuse');
     recordAchievementEvent({
       eventKey: `card:fuse:${userId}:${channel_id}:${starNum}:${Date.now()}`,
       userId,

@@ -27,5 +27,8 @@
     "postgres:tune": "node scripts/postgres-tune.js",
     "arena:readiness": "node scripts/arena-service-readiness.mjs",
     "arena:balance": "npm run arena:balance --workspace=backend"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

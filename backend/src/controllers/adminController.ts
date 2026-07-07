@@ -13,7 +13,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { sendPushToUser } from './pushController';
 import { deleteLocalUploadByUrl } from '../services/imageService';
-import { clearRankingCaches, clearUserRankingCaches } from './playController';
+import { clearRankingCaches, scheduleUserRankingRefresh } from './playController';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { CardReport, Streamer } from '../repositories/interfaces';
 import { listPointLedgerForUser } from '../services/pointLedger';
@@ -469,7 +469,7 @@ export const bulkUpdateBans = async (req: Request, res: Response) => {
         results.push(userId);
       }
     }
-    if (results.length > 0) clearUserRankingCaches();
+    if (results.length > 0) scheduleUserRankingRefresh('admin_bulk_ban');
 
     return res.status(200).json({
       message: `${results.length}명의 사용자 제재가 수정되었습니다.`,
@@ -528,7 +528,7 @@ export const banUser = async (req: Request, res: Response) => {
 
     const bannedUntilIso = banDate.toISOString();
     await userRepository.updateBanStatus(user_id, bannedUntilIso, reason);
-    clearUserRankingCaches();
+    scheduleUserRankingRefresh('admin_ban_user');
 
     return res.status(200).json({
       message: `사용자(${targetUser.username})가 제재 처리되었습니다.`,
@@ -557,7 +557,7 @@ export const unbanUser = async (req: Request, res: Response) => {
     }
 
     await userRepository.updateBanStatus(user_id, null);
-    clearUserRankingCaches();
+    scheduleUserRankingRefresh('admin_unban_user');
 
     return res.status(200).json({
       message: `사용자(${targetUser.username})의 제재가 해제되어 정상 정상 활동이 가능합니다.`,
@@ -793,7 +793,7 @@ export const resetUserStatusMessage = async (req: Request, res: Response) => {
     }
 
     await userRepository.updateStatusMessage(user_id, null);
-    clearUserRankingCaches();
+    scheduleUserRankingRefresh('admin_status_message_reset');
     return res.status(200).json({
       message: `${targetUser.username}님의 상태 메시지를 초기화했습니다.`,
       user_id,

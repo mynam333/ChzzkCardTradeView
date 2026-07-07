@@ -7,7 +7,7 @@ import { ArrowLeftRight, Layers, Coins, Home, Moon, ShieldCheck, Store, Sun, Swo
 import { useApp } from './AppContext';
 import { NotificationBell } from './NotificationBell';
 import { UserTitleList } from './UserTitleBadge';
-import type { ArenaSiteTab } from './ArenaTab';
+import type { ArenaSiteTab } from './arena/types';
 import { apiFetch } from '@/lib/api';
 import { MobileLoopDock, type MobileLoopDockItem } from './MobileLoopDock';
 
@@ -23,7 +23,8 @@ export const ArenaLayout: React.FC<{
   activeTab: ArenaSiteTab;
   onTabChange: (tab: ArenaSiteTab) => void;
   children: React.ReactNode;
-}> = ({ activeTab, onTabChange, children }) => {
+  immersive?: boolean;
+}> = ({ activeTab, onTabChange, children, immersive = false }) => {
   const router = useRouter();
   const { user, authLoading, theme, toggleTheme, toast } = useApp();
   const navItems: ArenaNavItem[] = [
@@ -59,7 +60,8 @@ export const ArenaLayout: React.FC<{
   };
 
   return (
-    <div className="main-layout-shell arena-site-shell relative flex min-h-screen w-full flex-col text-foreground md:flex-row">
+    <div className={`main-layout-shell arena-site-shell relative flex min-h-screen w-full flex-col text-foreground md:flex-row ${immersive ? 'arena-site-shell-immersive' : ''}`}>
+      {immersive ? null : (
       <aside className="main-layout-sidebar arena-site-sidebar cute-surface scrollbar-none sticky top-0 z-20 hidden h-screen w-72 flex-col overflow-y-auto overscroll-contain rounded-r-[2rem] border-y-0 border-l-0 px-4 py-6 md:flex">
         <div className="mb-6 flex items-center gap-3 px-2">
           <button type="button" onClick={() => onTabChange('play')} className="flex min-w-0 flex-1 items-center gap-3 border-0 bg-transparent p-0 text-left">
@@ -148,7 +150,9 @@ export const ArenaLayout: React.FC<{
           </div>
         </div>
       </aside>
+      )}
 
+      {immersive ? null : (
       <header className="main-layout-mobile-header cute-surface sticky top-0 z-40 mx-3 mt-3 flex items-center justify-between rounded-3xl px-4 py-3.5 md:hidden">
         <button type="button" onClick={() => onTabChange('play')} className="flex min-w-0 items-center gap-2.5 border-0 bg-transparent p-0 text-left">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/80 p-1 shadow-sm dark:bg-white/10">
@@ -168,24 +172,27 @@ export const ArenaLayout: React.FC<{
           </button>
         </div>
       </header>
+      )}
 
-      <main className="main-layout-content relative mx-auto w-full max-w-7xl flex-1 overflow-y-auto px-4 pb-28 pt-6 md:px-8 md:py-8">
+      <main className={`main-layout-content relative mx-auto w-full flex-1 overflow-y-auto ${immersive ? 'max-w-none px-0 py-0 pb-0' : 'max-w-7xl px-4 pt-6 pb-28 md:px-8 md:py-8'}`}>
         {children}
       </main>
 
-      <MobileLoopDock
-        items={mobileDockItems}
-        activeId={activeTab}
-        ariaLabel="아레나 모바일 메뉴"
-        surfaceShadowClassName="shadow-[0_18px_46px_rgba(159,18,57,0.18)] dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
-        onSelect={(id) => {
-          if (id === 'chikapo') {
-            goChikapo();
-            return;
-          }
-          onTabChange(id);
-        }}
-      />
+      {immersive ? null : (
+        <MobileLoopDock
+          items={mobileDockItems}
+          activeId={activeTab}
+          ariaLabel="아레나 모바일 메뉴"
+          surfaceShadowClassName="shadow-[0_18px_46px_rgba(159,18,57,0.18)] dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)]"
+          onSelect={(id) => {
+            if (id === 'chikapo') {
+              goChikapo();
+              return;
+            }
+            onTabChange(id);
+          }}
+        />
+      )}
     </div>
   );
 };

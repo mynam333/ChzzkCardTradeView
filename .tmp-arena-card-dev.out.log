@@ -1,0 +1,24 @@
+
+> frontend@0.1.0 dev
+> node ../node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3021
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://127.0.0.1:3021
+- Network:       http://127.0.0.1:3021
+- Environments: .env
+✓ Ready in 712ms
+
+ GET /arena/play 200 in 580ms (next.js: 257ms, application-code: 322ms)
+ GET /arena/play 200 in 70ms (next.js: 7ms, application-code: 63ms)
+✓ Compiled in 534ms
+ GET /arena/play 200 in 58ms (next.js: 6ms, application-code: 51ms)
+ GET /arena/play 200 in 139ms (next.js: 97ms, application-code: 42ms)
+ GET /arena/play 200 in 227ms (next.js: 6ms, application-code: 221ms)
+ GET /arena/play 200 in 54ms (next.js: 6ms, application-code: 49ms)
+✓ Compiled in 333ms
+ GET /arena/play 200 in 57ms (next.js: 5ms, application-code: 52ms)
+✓ Compiled in 260ms
+✓ Compiled in 208ms
+ GET /arena/play 200 in 48ms (next.js: 5ms, application-code: 42ms)
+ GET /arena/play 200 in 75ms (next.js: 6ms, application-code: 69ms)
+[?25h

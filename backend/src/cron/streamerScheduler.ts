@@ -6,7 +6,7 @@ import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from 
 import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { publishRealtimeEvent } from '../services/realtimeStream';
-import { clearStreamerRankingCaches } from '../controllers/playController';
+import { clearStreamerRankingCaches, scheduleUserRankingRefresh } from '../controllers/playController';
 import {
   formatCardDeletionCompensationReward,
   formatCardDeletionCompensationSummary,
@@ -441,8 +441,11 @@ export const syncAllStreamersLiveStatus = async () => {
         `(${Date.now() - historyStart}ms, 샘플링 ${VALUE_HISTORY_RECORD_EVERY_CYCLES}주기)`
       );
       clearStreamerRankingCaches();
+      scheduleUserRankingRefresh('streamer_sync');
       publishRealtimeEvent('ranking', {
         reason: 'streamer_sync',
+        scope: 'streamers',
+        affects: ['streamer_rankings', 'streamer_values', 'streamer_live', 'user_live'],
         streamers: streamers.length,
         polled: pollTargets.length,
         live: liveCount

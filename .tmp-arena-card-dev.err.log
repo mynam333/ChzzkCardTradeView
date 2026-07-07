@@ -1,0 +1,148 @@
+⚠ Slow filesystem detected. The benchmark took 535ms. If D:\ChzzkCardTradeView\frontend/.next/dev is a network drive, consider moving it to a local folder.
+See more: https://nextjs.org/docs/app/guides/local-development
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: TypeError: Failed to fetch
+    at request (src/lib/api.ts:68:25)
+    at apiFetch (src/lib/api.ts:88:22)
+    at apiFetchWithTimeout (src/app/AppContext.tsx:43:26)
+    at checkMaintenanceStatus (src/app/AppContext.tsx:733:25)
+    at AppProviderInner.useEffect (src/app/AppContext.tsx:802:5)
+  66 |   }
+  67 |
+> 68 |   const request = () => fetch(`${API_BASE_URL}${path}`, {
+     |                         ^
+  69 |     ...options,
+  70 |     headers,
+  71 |     // httpOnly 세션 쿠키 전송 (CORS credentials) (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 점검 상태 조회 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:745:15)
+[browser] [AppContext] 유저 세션 갱신 실패: AbortError: signal is aborted without reason
+    at <unknown> (src/app/AppContext.tsx:41:52)
+  39 |
+  40 |   const controller = new AbortController();
+> 41 |   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+     |                                                    ^
+  42 |   try {
+  43 |     return await apiFetch(path, { ...options, signal: controller.signal });
+  44 |   } finally { (src/app/AppContext.tsx:939:15)
+npm error Lifecycle script `dev` failed with error:
+npm error code 4294967295
+npm error path D:\ChzzkCardTradeView\frontend
+npm error workspace frontend@0.1.0
+npm error location D:\ChzzkCardTradeView\frontend
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c node ../node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3021

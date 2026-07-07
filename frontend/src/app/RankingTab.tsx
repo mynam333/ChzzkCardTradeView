@@ -50,6 +50,12 @@ interface UserRank {
 
 type SubTab = 'value' | 'change' | 'user' | 'cards';
 const RANKING_SUB_TABS: SubTab[] = ['value', 'change', 'user', 'cards'];
+type RankingRealtimeDetail = {
+  scope?: 'users' | 'streamers' | string;
+  affects?: string[];
+  reason?: string;
+  refreshed?: boolean;
+};
 
 export const RankingTab: React.FC = () => {
   const router = useRouter();
@@ -171,10 +177,29 @@ export const RankingTab: React.FC = () => {
   useEffect(() => {
     fetchRankings();
     let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
+    const shouldRefreshForEvent = (detail: RankingRealtimeDetail | null) => {
+      if (!detail?.scope && !Array.isArray(detail?.affects)) return true;
+      const affects = new Set(detail.affects || []);
+      const isUserTab = subTab === 'user' || subTab === 'cards';
+      if (isUserTab) {
+        return detail.scope === 'users'
+          || affects.has('user_rankings')
+          || affects.has('user_assets')
+          || affects.has('user_cards')
+          || affects.has('user_live');
+      }
+      return detail.scope === 'streamers'
+        || affects.has('streamer_rankings')
+        || affects.has('streamer_values')
+        || affects.has('streamer_live');
+    };
+    const scheduleRefresh = (event?: Event) => {
       if (document.visibilityState !== 'visible') return;
+      const detail = (event as CustomEvent<RankingRealtimeDetail | null> | undefined)?.detail || null;
+      if (!shouldRefreshForEvent(detail)) return;
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => fetchRankings(true), 500);
+      const delay = detail?.scope === 'users' ? 100 : 500;
+      refreshTimer = window.setTimeout(() => fetchRankings(true), delay);
     };
     window.addEventListener('chikapo:ranking-updated', scheduleRefresh);
     // 스트림이 끊긴 환경을 위한 느린 fallback입니다.
@@ -208,7 +233,7 @@ export const RankingTab: React.FC = () => {
     const timer = window.setTimeout(async () => {
       try {
         const params = new URLSearchParams({ mode: 'value', q: query, limit: '50' });
-        const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
+        const res = await apiFetch(`/streamers/ranking?${params.toString()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
         if (!res.ok || canceled) return;
         const matches = await res.json();
         if (!Array.isArray(matches) || canceled) return;
@@ -263,10 +288,11 @@ export const RankingTab: React.FC = () => {
         if (cardFilterChannelId) params.set('channel_id', cardFilterChannelId);
         if (cardFilterStar !== '') params.set('star', cardFilterStar);
         const query = params.toString();
+        const rankingFetchOptions = { cache: 'no-store' as RequestCache, headers: { 'Cache-Control': 'no-cache' } };
         const [rankings, streamerOptions] = await Promise.all([
-          apiFetch(`/users/ranking${query ? `?${query}` : ''}`).then((res) => res.ok ? res.json() : null),
+          apiFetch(`/users/ranking${query ? `?${query}` : ''}`, rankingFetchOptions).then((res) => res.ok ? res.json() : null),
           supportsCardHolderFilter
-            ? apiFetch('/streamers/ranking?mode=value&limit=all').then((res) => res.ok ? res.json() : null)
+            ? apiFetch('/streamers/ranking?mode=value&limit=all', rankingFetchOptions).then((res) => res.ok ? res.json() : null)
             : Promise.resolve(null)
         ]);
         if (!isCurrentRequest()) return;
@@ -278,7 +304,7 @@ export const RankingTab: React.FC = () => {
           limit: '100'
         });
         if (serverSearchQuery.trim()) params.set('q', serverSearchQuery.trim());
-        const res = await apiFetch(`/streamers/ranking?${params.toString()}`);
+        const res = await apiFetch(`/streamers/ranking?${params.toString()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
         const streamersData = res.ok ? await res.json() : null;
         if (!isCurrentRequest()) return;
         if (streamersData) setStreamers(streamersData);

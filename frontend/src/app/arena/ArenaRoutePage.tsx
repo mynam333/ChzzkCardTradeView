@@ -3,8 +3,8 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { ArenaLayout } from '../ArenaLayout';
-import { ArenaTab } from '../ArenaTab';
-import type { ArenaSiteTab } from '../ArenaTab';
+import { ArenaV2Experience } from './ArenaV2Experience';
+import type { ArenaSiteTab } from './types';
 
 const arenaTabHref: Record<ArenaSiteTab, string> = {
   play: '/arena/play',
@@ -17,13 +17,13 @@ const arenaTabHref: Record<ArenaSiteTab, string> = {
 export const ArenaRoutePage: React.FC<{ activeTab: ArenaSiteTab }> = ({ activeTab }) => {
   const router = useRouter();
 
-  const moveArenaTab = React.useCallback((tab: ArenaSiteTab) => {
+  const moveArenaSection = React.useCallback((tab: ArenaSiteTab) => {
     router.push(arenaTabHref[tab] || '/arena');
   }, [router]);
 
   return (
-    <ArenaLayout activeTab={activeTab} onTabChange={moveArenaTab}>
-      <ArenaTab activeSiteTab={activeTab} onSiteTabChange={moveArenaTab} hideSiteTabs />
+    <ArenaLayout activeTab={activeTab} onTabChange={moveArenaSection}>
+      <ArenaV2Experience activeTab={activeTab} />
     </ArenaLayout>
   );
 };

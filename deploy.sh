@@ -191,7 +191,8 @@ ensure_runtime_writable_dir() {
   if [ "$(id -u)" -eq 0 ] && [ -n "${user}" ] && [ "${user}" != "root" ]; then
     chown -R "${user}:${group}" "${target}"
   fi
-  chmod u+rwX "${target}" 2>/dev/null || true
+  chmod -R u+rwX,g+rwX "${target}" 2>/dev/null || true
+  find "${target}" -type d -exec chmod g+s {} + 2>/dev/null || true
 
   probe="${target}/.deploy-write-test-${TIMESTAMP}"
   if ! ( : > "${probe}" ) 2>/dev/null; then

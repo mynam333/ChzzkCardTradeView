@@ -21,7 +21,6 @@ import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } fro
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
 import { readIntegerEnv } from './utils/env';
 import { startChatAttachmentCleanupScheduler } from './services/friendChatService';
-import { attachArenaRealtimeSocketServer } from './services/arenaRealtimeSocketServer';
 import {
   isApiProcess,
   isAllInOneProcess,
@@ -346,7 +345,6 @@ const startServer = async () => {
           };
 
           const httpsServer = https.createServer(sslOptions, app);
-          attachArenaRealtimeSocketServer(httpsServer);
           httpsServer.listen(PORT, () => {
             console.log(`[Server] HTTPS 인증서를 성공적으로 로드했습니다. (${source})`);
             console.log(`[Server]   ├─ key : ${resolvedKeyPath}`);
@@ -374,7 +372,6 @@ const startServer = async () => {
     const httpServer = app.listen(PORT, () => {
       registerServer(httpServer, `http://localhost:${PORT}`);
     });
-    attachArenaRealtimeSocketServer(httpServer);
   } catch (error) {
     console.error('[Server] 서버 시작 도중 초기화 오류가 발생했습니다:', error);
     process.exit(1);

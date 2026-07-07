@@ -40,8 +40,13 @@ export const MainTab: React.FC = () => {
     fetchHotStreamers();
     fetchLandingStats();
     let refreshTimer: number | null = null;
-    const scheduleHotStreamerRefresh = () => {
+    const scheduleHotStreamerRefresh = (event?: Event) => {
       if (document.visibilityState !== 'visible') return;
+      const detail = (event as CustomEvent<{ scope?: string; affects?: string[] } | null> | undefined)?.detail || null;
+      const affects = new Set(detail?.affects || []);
+      if (detail?.scope === 'users' && !affects.has('streamer_rankings') && !affects.has('streamer_values') && !affects.has('streamer_live')) {
+        return;
+      }
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => fetchHotStreamers(), 500);
     };
@@ -86,7 +91,7 @@ export const MainTab: React.FC = () => {
 
   const fetchHotStreamers = async () => {
     try {
-      const res = await apiFetch('/streamers/ranking?mode=value&limit=3');
+      const res = await apiFetch('/streamers/ranking?mode=value&limit=3', { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
       if (res.ok) {
         const data = await res.json();
         setHotStreamers(data);

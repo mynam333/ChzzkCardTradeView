@@ -6,7 +6,7 @@ import { getUserReservations } from './tradeController';
 import { createRealtimeNotification } from '../services/notificationDelivery';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
 import { publishRealtimeEvent } from '../services/realtimeStream';
-import { clearUserRankingCaches } from './playController';
+import { scheduleUserRankingRefresh } from './playController';
 import type { MarketListing } from '../repositories/interfaces';
 import { recordAchievementEvent } from '../services/achievementService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
@@ -133,8 +133,7 @@ const publishMarketUpdated = (reason: string, listing?: MarketListing | null, ex
 };
 
 const publishRankingUpdated = (reason: string) => {
-  clearUserRankingCaches();
-  publishRealtimeEvent('ranking', { reason });
+  scheduleUserRankingRefresh(reason);
 };
 
 type MarketOwnedCard = {

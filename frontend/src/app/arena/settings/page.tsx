@@ -1,5 +1,5 @@
-import { ArenaSettingsPageClient } from './ArenaSettingsPageClient';
+import { ArenaV2MatchPageClient } from '../matches/ArenaV2MatchPageClient';
 
 export default function ArenaSettingsPage() {
-  return <ArenaSettingsPageClient />;
+  return <ArenaV2MatchPageClient mode="settings" />;
 }

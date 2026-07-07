@@ -24,7 +24,7 @@
 ## 2. 공통 타입
 
 ```ts
-type ArenaMode = 'bot' | 'quick' | 'battle_royale';
+type ArenaMode = 'bot' | 'quick' | 'battle_royale_8';
 
 type SeasonStatus =
   | 'draft'
@@ -38,10 +38,18 @@ type SeasonStatus =
 type MatchStatus =
   | 'created'
   | 'mulligan'
-  | 'planning'
-  | 'resolving'
-  | 'finished'
+  | 'turn_planning'
+  | 'action_locked'
+  | 'combat_resolving'
+  | 'turn_result'
+  | 'completed'
   | 'cancelled';
+
+type QueueStatus =
+  | 'waiting'
+  | 'matched'
+  | 'cancelled'
+  | 'expired';
 
 type BoardRow = 'front' | 'back';
 type BoardColumn = 0 | 1 | 2;
@@ -129,6 +137,8 @@ type ArenaTier =
 
 - 같은 시즌 안에서 덱에는 동일 `streamer_id` 카드가 1장까지만 들어갈 수 있다.
 - `status='active'`인 카드만 공식 덱에 사용할 수 있다.
+- `active` 카드 버전은 `CHIKAPO_ARENA_CARD_DATA_DICTIONARY.md`의 클래스, 코스트별 스탯 상한, 키워드 비용, 조합 추가 비용, 금지 조합 검증을 통과해야 한다.
+- 공식 덱 검증은 저장된 `validation_result.valid=false` 카드와 런타임 재검증 실패 카드를 모두 불법 카드로 처리한다.
 
 ### 3.3. `arena_v2_decks`
 
@@ -140,8 +150,8 @@ type ArenaTier =
 | `user_id` | uuid | 소유 유저 |
 | `season_id` | uuid fk | 대상 시즌 |
 | `name` | text | 덱 이름 |
-| `mode_scope` | text | `all`, `quick`, `battle_royale`, `bot` |
-| `card_version_ids` | uuid[] | 30장 카드 버전 ID |
+| `mode_scope` | text | `all`, `quick`, `battle_royale_8`, `bot` |
+| `card_version_ids` | uuid[] | 14~20장 카드 버전 ID |
 | `validation_hash` | text | 마지막 검증 결과 해시 |
 | `is_valid` | boolean | 공식 대전 사용 가능 여부 |
 | `created_at` | timestamptz | 생성 시각 |
@@ -154,12 +164,63 @@ type ArenaTier =
 
 제약:
 
-- 카드 수는 30장이다.
+- 카드 수는 14~20장이다.
 - 동일 `card_version_id`는 1장까지만 허용한다.
 - 동일 `streamer_id`는 1장까지만 허용한다.
 - 덱의 모든 카드는 같은 `season_id`의 `active` 카드여야 한다.
 
-### 3.4. `arena_v2_matches`
+### 3.4. `arena_v2_match_queue`
+
+빠른대전 대기열을 저장한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | uuid pk | 큐 ID |
+| `season_id` | uuid fk | 시즌 ID |
+| `user_id` | uuid | 대기 유저 |
+| `deck_id` | uuid fk | 사용 덱 |
+| `mmr` | int | 큐 진입 시 MMR |
+| `status` | text | `QueueStatus` |
+| `search_min_mmr` | int | 현재 매칭 하한 |
+| `search_max_mmr` | int | 현재 매칭 상한 |
+| `matched_match_id` | uuid nullable | 생성된 매치 |
+| `joined_at` | timestamptz | 대기 시작 |
+| `updated_at` | timestamptz | 갱신 시각 |
+| `expires_at` | timestamptz | 대기 만료 |
+
+인덱스:
+
+- unique `(season_id, user_id, status)` where `status='waiting'`
+- `(season_id, status, mmr, joined_at)`
+
+원칙:
+
+- 같은 유저는 같은 시즌 빠른대전 큐에 1개만 대기할 수 있다.
+- 매칭 폭은 대기 시간이 길어질수록 넓어지되, 운영 설정으로 상한을 둔다.
+- 매치 생성은 DB transaction 안에서 두 큐 row를 잠그고 `matched`로 바꾼 뒤 한 번만 수행한다.
+
+### 3.5. `arena_v2_battle_royale_queue`
+
+8인전 대기열을 저장한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | uuid pk | 큐 ID |
+| `season_id` | uuid fk | 시즌 ID |
+| `user_id` | uuid | 대기 유저 |
+| `deck_id` | uuid fk | 사용 덱 |
+| `status` | text | `QueueStatus` |
+| `battle_royale_id` | uuid nullable | 생성된 8인전 |
+| `joined_at` | timestamptz | 대기 시작 |
+| `updated_at` | timestamptz | 갱신 시각 |
+| `expires_at` | timestamptz | 대기 만료 |
+
+인덱스:
+
+- unique `(season_id, user_id, status)` where `status='waiting'`
+- `(season_id, status, joined_at)`
+
+### 3.6. `arena_v2_matches`
 
 1:1 전투와 8인전 내부 라운드 전투의 공통 매치 정보를 저장한다.
 
@@ -190,7 +251,7 @@ type ArenaTier =
 - `(replay_expires_at)`
 - `(finished_at)`
 
-### 3.5. `arena_v2_match_players`
+### 3.7. `arena_v2_match_players`
 
 매치 참가자별 공개/비공개 상태 요약을 저장한다.
 
@@ -202,6 +263,7 @@ type ArenaTier =
 | `seat_no` | int | 좌석 번호 |
 | `deck_id` | uuid nullable | 사용 덱 |
 | `player_health` | int | 현재 플레이어 체력 |
+| `fatigue_count` | int | 덱이 빈 상태에서 드로우를 시도한 누적 횟수 |
 | `initial_deck_order` | uuid[] | 서버 확정 덱 순서 |
 | `hand_card_instance_ids` | uuid[] | 현재 손패 |
 | `deck_card_instance_ids` | uuid[] | 남은 덱 |
@@ -222,7 +284,7 @@ type ArenaTier =
 - 자기 자신에게만 손패와 덱 순서를 반환한다.
 - 상대에게는 공개 필드, 공개 묘지, 체력, 남은 손패 수, 남은 덱 수만 반환한다.
 
-### 3.6. `arena_v2_card_instances`
+### 3.8. `arena_v2_card_instances`
 
 매치 안에서 생성된 카드 인스턴스 상태를 저장한다.
 
@@ -246,7 +308,7 @@ type ArenaTier =
 - `(match_id, owner_seat_no, zone)`
 - `(match_id, card_version_id)`
 
-### 3.7. `arena_v2_action_submissions`
+### 3.9. `arena_v2_action_submissions`
 
 턴별 행동 제출 내역을 저장한다.
 
@@ -268,7 +330,7 @@ type ArenaTier =
 - unique `(match_id, seat_no, turn_no, revision)`
 - `(match_id, turn_no, is_final)`
 
-### 3.8. `arena_v2_replay_events`
+### 3.10. `arena_v2_replay_events`
 
 전투 재생용 이벤트를 저장한다.
 
@@ -293,7 +355,7 @@ type ArenaTier =
 - `expires_at < now()`이고 증거 보존 플래그가 없는 이벤트는 삭제한다.
 - 삭제 후에도 `arena_v2_matches.result_summary`는 유지한다.
 
-### 3.9. `arena_v2_ratings`
+### 3.11. `arena_v2_ratings`
 
 시즌별 빠른대전 MMR을 저장한다.
 
@@ -319,7 +381,7 @@ type ArenaTier =
 - `(season_id, mmr desc)`
 - `(season_id, peak_mmr desc)`
 
-### 3.10. `arena_v2_reward_grants`
+### 3.12. `arena_v2_reward_grants`
 
 시즌 종료 보상 지급 기록을 저장한다.
 
@@ -342,7 +404,7 @@ type ArenaTier =
 - unique `(season_id, user_id)`
 - `(season_id, status)`
 
-### 3.11. `arena_v2_battle_royales`
+### 3.13. `arena_v2_battle_royales`
 
 8인전 방과 전체 진행 상태를 저장한다.
 
@@ -364,7 +426,72 @@ type ArenaTier =
 - `(season_id, status)`
 - `(created_at)`
 
-### 3.12. `arena_v2_admin_audit_logs`
+### 3.14. `arena_v2_replay_holds`
+
+신고, 분쟁, 어뷰징 조사 대상 매치의 상세 리플레이 자동 삭제를 보류한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | uuid pk | 보존 ID |
+| `match_id` | uuid fk | 대상 매치 |
+| `reason` | text | 보존 사유 |
+| `status` | text | `active`, `released` |
+| `hold_until` | timestamptz nullable | 보존 만료 예정 |
+| `created_by` | uuid | 관리자 |
+| `released_by` | uuid nullable | 해제 관리자 |
+| `created_at` | timestamptz | 생성 시각 |
+| `released_at` | timestamptz nullable | 해제 시각 |
+
+인덱스:
+
+- unique `(match_id, status)` where `status='active'`
+- `(status, hold_until)`
+
+### 3.15. `arena_v2_reports`
+
+아레나 신고를 저장한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | uuid pk | 신고 ID |
+| `reporter_user_id` | uuid | 신고자 |
+| `target_type` | text | `card`, `match`, `replay`, `user`, `battle_royale` |
+| `target_id` | text | 대상 ID |
+| `reason` | text | 신고 사유 |
+| `status` | text | `received`, `reviewing`, `actioned`, `rejected` |
+| `admin_note` | text nullable | 관리자 메모 |
+| `created_at` | timestamptz | 생성 시각 |
+| `updated_at` | timestamptz | 수정 시각 |
+
+인덱스:
+
+- `(target_type, target_id)`
+- `(status, created_at)`
+- `(reporter_user_id, created_at)`
+
+### 3.16. `arena_v2_streamer_right_requests`
+
+스트리머 카드 권리 요청과 직접 설정 요청을 저장한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | uuid pk | 요청 ID |
+| `streamer_id` | uuid | 스트리머 ID |
+| `requester_user_id` | uuid | 요청자 |
+| `request_type` | text | `opt_out`, `image_change`, `text_change`, `card_config`, `disable_version` |
+| `payload` | jsonb | 요청 내용 |
+| `status` | text | `pending`, `approved`, `rejected`, `cancelled` |
+| `reviewed_by` | uuid nullable | 검토 관리자 |
+| `review_note` | text nullable | 검토 메모 |
+| `created_at` | timestamptz | 생성 시각 |
+| `updated_at` | timestamptz | 수정 시각 |
+
+인덱스:
+
+- `(streamer_id, status)`
+- `(requester_user_id, created_at)`
+
+### 3.17. `arena_v2_admin_audit_logs`
 
 관리자 변경 이력을 저장한다.
 
@@ -460,7 +587,7 @@ interface SaveDeckRequest {
   deckId?: string;
   seasonId: string;
   name: string;
-  modeScope: 'all' | 'quick' | 'battle_royale' | 'bot';
+  modeScope: 'all' | 'quick' | 'battle_royale_8' | 'bot';
   cardVersionIds: string[];
 }
 ```
@@ -468,7 +595,7 @@ interface SaveDeckRequest {
 검증:
 
 1. 시즌이 `draft`, `scheduled`, `active` 중 하나인지 확인한다.
-2. 카드 수가 30장인지 확인한다.
+2. 카드 수가 14~20장인지 확인한다.
 3. 동일 카드 버전이 없는지 확인한다.
 4. 동일 스트리머 카드가 1장까지만 있는지 확인한다.
 5. 모든 카드가 해당 시즌의 `active` 카드인지 확인한다.
@@ -481,6 +608,8 @@ POST /api/arena/decks/validate
 ```
 
 요청은 덱 저장과 동일하지만 저장하지 않는다. 덱 빌더의 실시간 오류 표시에 사용한다.
+
+서버는 덱 크기, 동일 카드 버전, 동일 스트리머, 시즌 일치, `active` 상태뿐 아니라 카드 버전의 전투 데이터가 카드 데이터 사전의 검증기를 통과하는지도 함께 확인한다. 검증 실패 코드는 덱 빌더가 카드별 불법 사유를 표시할 수 있도록 반환한다.
 
 ### 4.6. 매치 생성
 
@@ -495,17 +624,76 @@ interface CreateMatchRequest {
   mode: ArenaMode;
   seasonId?: string;
   deckId: string;
-  botDifficulty?: 'beginner' | 'normal' | 'hard' | 'expert';
+  botDifficulty?: 'beginner' | 'easy' | 'normal' | 'hard' | 'expert';
 }
 ```
 
 처리:
 
 - `bot`: 즉시 봇 매치를 생성한다.
-- `quick`: 매칭 큐에 등록하거나 이미 매칭된 상대와 매치를 생성한다.
-- `battle_royale`: 8인전 대기열 API 사용을 권장하며, 이 endpoint에서는 직접 생성하지 않는다.
+- `quick`: 빠른대전 큐 API 사용을 권장한다. 호환 처리가 필요하면 내부적으로 `POST /api/arena/matchmaking/quick/join`과 동일하게 처리한다.
+- `battle_royale_8`: 8인전 대기열 API 사용을 권장하며, 이 endpoint에서는 직접 생성하지 않는다.
 
-### 4.7. 멀리건 제출
+### 4.7. 빠른대전 큐 참가
+
+```http
+POST /api/arena/matchmaking/quick/join
+```
+
+요청:
+
+```ts
+interface JoinQuickQueueRequest {
+  seasonId: string;
+  deckId: string;
+}
+```
+
+처리:
+
+- 시즌이 `active`이고 빠른대전이 활성화되어야 한다.
+- 덱은 GDD 기준 14~20장, 동일 스트리머 1장 제한, active 카드 버전 조건을 통과해야 한다.
+- 같은 유저의 기존 `waiting` 큐 row가 있으면 새 row를 만들지 않고 현재 큐 상태를 반환한다.
+- 매칭이 성사되면 두 큐 row를 `matched`로 바꾸고 생성된 `matchId`를 반환한다.
+
+### 4.8. 빠른대전 큐 상태 조회
+
+```http
+GET /api/arena/matchmaking/quick/status?seasonId={seasonId}
+```
+
+응답:
+
+```ts
+interface QuickQueueStatusResponse {
+  status: QueueStatus | 'none';
+  queueId?: string;
+  joinedAt?: string;
+  estimatedRange?: { minMmr: number; maxMmr: number };
+  matchId?: string;
+}
+```
+
+### 4.9. 빠른대전 큐 취소
+
+```http
+POST /api/arena/matchmaking/quick/cancel
+```
+
+요청:
+
+```ts
+interface CancelQuickQueueRequest {
+  seasonId: string;
+}
+```
+
+처리:
+
+- `waiting` 상태만 취소할 수 있다.
+- 이미 `matched`가 된 큐는 취소하지 않고 생성된 매치 상태를 반환한다.
+
+### 4.10. 멀리건 제출
 
 ```http
 POST /api/arena/matches/{matchId}/mulligan
@@ -525,7 +713,7 @@ interface SubmitMulliganRequest {
 - 한 플레이어는 한 번만 제출할 수 있다.
 - 제출 대상은 자기 시작 손패 안에 있어야 한다.
 
-### 4.8. 턴 행동 제출
+### 4.11. 턴 행동 제출
 
 ```http
 POST /api/arena/matches/{matchId}/turn-action
@@ -549,14 +737,14 @@ interface SubmitTurnActionRequest {
 
 서버 검증:
 
-- 현재 상태가 `planning`인지 확인한다.
+- 현재 상태가 `turn_planning`인지 확인한다.
 - 제출 유저가 참가자인지 확인한다.
 - `turnNo`가 현재 턴과 일치하는지 확인한다.
 - `revision`이 이전 제출보다 큰지 확인한다.
 - 코스트, 배치 가능 칸, 이동 가능 카드, 교체 비용을 검증한다.
 - 검증 실패 시 현재 임시 제출은 갱신하지 않는다.
 
-### 4.9. 매치 상태 조회
+### 4.12. 매치 상태 조회
 
 ```http
 GET /api/arena/matches/{matchId}
@@ -582,8 +770,9 @@ interface MatchStateResponse {
 
 - `self`에는 자기 손패와 덱 수를 포함한다.
 - `opponentViews`에는 상대 손패 장수, 덱 장수, 공개 필드만 포함한다.
+- `cardInstances`는 자기 카드 전체와 상대 공개 zone(`board`, `graveyard`, `banished`)만 포함한다. 상대 `hand`, `deck` 인스턴스는 반환하지 않는다.
 
-### 4.10. 리플레이 조회
+### 4.13. 리플레이 조회
 
 ```http
 GET /api/arena/matches/{matchId}/replay
@@ -594,7 +783,7 @@ GET /api/arena/matches/{matchId}/replay
 - 리플레이 보존 기간 안이면 이벤트 목록을 반환한다.
 - 7일이 지나 삭제된 경우 `ArenaReplayExpired`를 반환하되, 결과 요약은 별도 `matches/{matchId}`에서 조회 가능하게 한다.
 
-### 4.11. 랭킹 조회
+### 4.14. 랭킹 조회
 
 ```http
 GET /api/arena/rankings?seasonId={seasonId}&limit=100
@@ -609,7 +798,7 @@ GET /api/arena/rankings?seasonId={seasonId}&limit=100
 - 시즌 최고 등급
 - 승패
 
-### 4.12. 내 보상 조회
+### 4.15. 내 보상 조회
 
 ```http
 GET /api/arena/rewards/current?seasonId={seasonId}
@@ -647,7 +836,36 @@ interface JoinBattleRoyaleRequest {
 - 같은 유저의 중복 대기열 등록을 막는다.
 - 8명이 모이면 `arena_v2_battle_royales`를 만들고 첫 라운드 매치를 생성한다.
 
-### 5.2. 8인전 상태 조회
+### 5.2. 8인전 대기열 상태 조회
+
+```http
+GET /api/arena/battle-royales/queue/status?seasonId={seasonId}
+```
+
+응답:
+
+```ts
+interface BattleRoyaleQueueStatusResponse {
+  status: QueueStatus | 'none';
+  queueId?: string;
+  joinedAt?: string;
+  participantCount?: number;
+  battleRoyaleId?: string;
+}
+```
+
+### 5.3. 8인전 대기열 취소
+
+```http
+POST /api/arena/battle-royales/queue/cancel
+```
+
+처리:
+
+- `waiting` 상태만 취소할 수 있다.
+- 이미 8인전이 생성된 경우 취소하지 않고 `battleRoyaleId`를 반환한다.
+
+### 5.4. 8인전 상태 조회
 
 ```http
 GET /api/arena/battle-royales/{battleRoyaleId}
@@ -662,7 +880,7 @@ GET /api/arena/battle-royales/{battleRoyaleId}
 - 내 현재 라운드 매치 ID
 - 탈락자 최종 순위
 
-### 5.3. 8인전 턴 행동 제출
+### 5.5. 8인전 턴 행동 제출
 
 8인전의 개별 전투 행동 제출은 `POST /api/arena/matches/{matchId}/turn-action`을 재사용한다.
 
@@ -707,11 +925,87 @@ GET /api/arena/wiki/{slug}
 
 ---
 
-## 7. 관리자 API
+## 7. 신고 및 스트리머 권리 API
+
+### 7.1. 신고 생성
+
+```http
+POST /api/arena/reports
+```
+
+요청:
+
+```ts
+interface CreateArenaReportRequest {
+  targetType: 'card' | 'match' | 'replay' | 'user' | 'battle_royale';
+  targetId: string;
+  reason: string;
+}
+```
+
+처리:
+
+- 신고 대상이 존재하는지 확인한다.
+- 신고가 매치/리플레이 대상이면 운영자가 `replay-hold`를 걸 수 있도록 관리자 검토 큐에 노출한다.
+- 반복 허위 신고는 계정 제한 대상이 될 수 있다.
+
+### 7.2. 내 신고 목록
+
+```http
+GET /api/arena/reports/mine?cursor={cursor}
+```
+
+응답:
+
+- 신고 ID
+- 대상 유형
+- 처리 상태
+- 생성 시각
+- 운영자 공개 메모
+
+### 7.3. 스트리머 권리 요청 생성
+
+```http
+POST /api/arena/streamer-right-requests
+```
+
+요청:
+
+```ts
+interface CreateStreamerRightRequest {
+  streamerId: string;
+  requestType: 'opt_out' | 'image_change' | 'text_change' | 'card_config' | 'disable_version';
+  payload: unknown;
+}
+```
+
+처리:
+
+- 요청자가 해당 스트리머를 관리할 권한이 있는지 확인한다.
+- 승인 전에는 공식 카드 버전을 변경하지 않는다.
+- 승인 후 새 공식 매치부터 최신 합법 카드 상태를 사용한다.
+
+### 7.4. 내 스트리머 권리 요청 목록
+
+```http
+GET /api/arena/streamer-right-requests/mine?streamerId={streamerId}
+```
+
+응답:
+
+- 요청 ID
+- 요청 유형
+- 상태
+- 제출 시각
+- 검토 메모
+
+---
+
+## 8. 관리자 API
 
 관리자 API는 모두 관리자 인증과 감사 로그를 요구한다.
 
-### 7.1. 시즌 생성
+### 8.1. 시즌 생성
 
 ```http
 POST /api/admin/arena/seasons
@@ -733,7 +1027,7 @@ interface CreateSeasonAdminRequest {
 }
 ```
 
-### 7.2. 시즌 설정 수정
+### 8.2. 시즌 설정 수정
 
 ```http
 PATCH /api/admin/arena/seasons/{seasonId}
@@ -745,7 +1039,7 @@ PATCH /api/admin/arena/seasons/{seasonId}
 - `active` 상태에서는 종료일 연장, 모드 비활성화, 긴급 공지, 보상 미리보기만 수정 가능하다.
 - `locked` 이후에는 보상 지급 관련 작업 외 수정 불가다.
 
-### 7.3. 시즌 상태 전환
+### 8.3. 시즌 상태 전환
 
 ```http
 POST /api/admin/arena/seasons/{seasonId}/transition
@@ -778,7 +1072,7 @@ draft/scheduled -> cancelled
 - `settling`: 보상 산정 job을 시작한다.
 - `closed`: 지급 완료 상태를 고정하고 시즌 종료 화면을 노출한다.
 
-### 7.4. 보상 미리보기
+### 8.4. 보상 미리보기
 
 ```http
 GET /api/admin/arena/seasons/{seasonId}/reward-preview
@@ -791,7 +1085,7 @@ GET /api/admin/arena/seasons/{seasonId}/reward-preview
 - 보류 예상 계정
 - 중복 지급 위험 여부
 
-### 7.5. 보상 지급 실행
+### 8.5. 보상 지급 실행
 
 ```http
 POST /api/admin/arena/seasons/{seasonId}/grant-rewards
@@ -809,10 +1103,10 @@ interface GrantRewardsRequest {
 처리:
 
 - `dryRun=true`이면 지급 기록을 만들지 않고 예상 결과만 반환한다.
-- `dryRun=false`이면 `arena_v2_reward_grants`를 생성하고 실제 보상 시스템에 지급 요청한다.
+- `dryRun=false`이면 `arena_v2_reward_grants`를 멱등 생성한다. 실제 보상 지급기는 `pending` grant를 소비해 지급 요청을 수행한다.
 - `idempotency_key`로 중복 지급을 방지한다.
 
-### 7.6. 보상 보류/해제
+### 8.6. 보상 보류/해제
 
 ```http
 POST /api/admin/arena/rewards/{grantId}/hold
@@ -824,7 +1118,7 @@ POST /api/admin/arena/rewards/{grantId}/release
 - 어뷰징 의심 계정 보상 보류
 - 검토 완료 후 지급 재개
 
-### 7.7. 리플레이 증거 보존
+### 8.7. 리플레이 증거 보존
 
 ```http
 POST /api/admin/arena/matches/{matchId}/replay-hold
@@ -834,7 +1128,42 @@ POST /api/admin/arena/matches/{matchId}/replay-hold
 
 - 신고, 어뷰징 조사, 운영 분쟁이 있는 매치의 리플레이 삭제를 일시 정지한다.
 
-### 7.8. Kill switch
+### 8.8. 신고 검토
+
+```http
+GET /api/admin/arena/reports?status={status}
+POST /api/admin/arena/reports/{reportId}/review
+```
+
+검토 결과:
+
+- `actioned`
+- `rejected`
+
+운영 조치:
+
+- 카드 이미지 블라인드
+- 카드 설명 문구 숨김
+- 카드 버전 비활성화
+- 리플레이 공유 차단
+- 보상 보류
+- 계정 큐 제한
+
+### 8.9. 스트리머 권리 요청 검토
+
+```http
+GET /api/admin/arena/streamer-right-requests?status={status}
+POST /api/admin/arena/streamer-right-requests/{requestId}/review
+```
+
+승인 가능한 조치:
+
+- 스트리머 opt-out 반영
+- 카드 이미지/문구 교체
+- 카드 설정 요청으로 새 카드 버전 생성
+- 특정 카드 버전 비활성화
+
+### 8.10. Kill switch
 
 ```http
 POST /api/admin/arena/ops/flags
@@ -850,7 +1179,7 @@ POST /api/admin/arena/ops/flags
 
 ---
 
-## 8. 에러 코드
+## 9. 에러 코드
 
 | 코드 | HTTP | 의미 |
 | --- | --- | --- |
@@ -869,10 +1198,13 @@ POST /api/admin/arena/ops/flags
 | `ArenaReplayExpired` | 410 | 리플레이 보존 기간 만료 |
 | `ArenaRewardAlreadyGranted` | 409 | 이미 보상이 지급됨 |
 | `ArenaRewardHeld` | 409 | 보상이 운영 검토로 보류됨 |
+| `ArenaQueueAlreadyWaiting` | 409 | 이미 대기열에 등록됨 |
+| `ArenaReportTargetInvalid` | 400 | 신고 대상을 찾을 수 없음 |
+| `ArenaStreamerRightForbidden` | 403 | 해당 스트리머 권리 요청 권한이 없음 |
 
 ---
 
-## 9. 상태별 허용 행동
+## 10. 상태별 허용 행동
 
 | 상태 | 유저 행동 | 관리자 행동 |
 | --- | --- | --- |
@@ -883,13 +1215,15 @@ POST /api/admin/arena/ops/flags
 | `settling` 시즌 | 결과 조회 | 보상 미리보기, 지급, 보류 |
 | `closed` 시즌 | 최종 결과/보상 조회 | 보상 이력 조회 |
 | `mulligan` 매치 | 멀리건 제출 | 매치 취소 |
-| `planning` 매치 | 행동 제출, 재접속 | 매치 취소 |
-| `resolving` 매치 | 상태 조회 | 매치 진단 |
-| `finished` 매치 | 결과/리플레이 조회 | 리플레이 보존, 신고 처리 |
+| `turn_planning` 매치 | 행동 제출, 재접속 | 매치 취소 |
+| `action_locked` 매치 | 상태 조회 | 매치 진단 |
+| `combat_resolving` 매치 | 상태 조회 | 매치 진단 |
+| `turn_result` 매치 | 턴 결과 조회 | 매치 진단 |
+| `completed` 매치 | 결과/리플레이 조회 | 리플레이 보존, 신고 처리 |
 
 ---
 
-## 10. MMR 처리
+## 11. MMR 처리
 
 빠른대전 매치 종료 시 서버는 다음 순서로 MMR을 반영한다.
 
@@ -901,7 +1235,7 @@ POST /api/admin/arena/ops/flags
 -> mmr, peak_mmr, tier, peak_tier 갱신
 -> last_match_id 기록
 -> 랭킹 캐시 갱신 이벤트 발행
--> 매치 finished 확정
+-> 매치 completed 확정
 ```
 
 원칙:
@@ -913,7 +1247,7 @@ POST /api/admin/arena/ops/flags
 
 ---
 
-## 11. 리플레이 삭제 배치
+## 12. 리플레이 삭제 배치
 
 실행 주기:
 
@@ -923,7 +1257,7 @@ POST /api/admin/arena/ops/flags
 
 ```text
 arena_v2_replay_events where expires_at < now()
-and match_id not in evidence_hold
+and match_id not in active arena_v2_replay_holds
 -> batch delete
 -> 삭제 건수 운영 로그 기록
 ```
@@ -936,7 +1270,7 @@ and match_id not in evidence_hold
 
 ---
 
-## 12. 시즌 보상 정산
+## 13. 시즌 보상 정산
 
 정산은 `locked -> settling` 전환 이후 실행한다.
 
@@ -948,7 +1282,7 @@ and match_id not in evidence_hold
 -> 보류 대상 표시
 -> 관리자 dry-run 확인
 -> reward_grants 생성
--> 보상 시스템 지급 요청
+-> 보상 지급기가 pending grant를 소비해 지급 요청
 -> granted/held/failed 상태 기록
 -> 시즌 closed 전환
 ```
@@ -968,7 +1302,7 @@ and match_id not in evidence_hold
 
 ---
 
-## 13. 구현 완료 조건
+## 14. 구현 완료 조건
 
 API/DB 구현은 다음 조건을 만족해야 완료로 본다.
 
@@ -979,6 +1313,9 @@ API/DB 구현은 다음 조건을 만족해야 완료로 본다.
 5. 빠른대전 MMR은 같은 매치에 중복 반영되지 않는다.
 6. 시즌 종료 보상은 멱등적으로 지급된다.
 7. 리플레이 이벤트는 7일 후 삭제된다.
+8. 빠른대전과 8인전 대기열은 중복 등록과 중복 매치 생성을 막는다.
+9. 신고/분쟁 매치의 리플레이 보존 hold가 7일 pruning보다 우선한다.
+10. 스트리머 권리 요청 승인 후 새 공식 매치는 최신 합법 카드 상태만 사용한다.
 8. 관리자 시즌 상태 전환은 허용된 그래프만 통과한다.
 9. 모든 관리자 변경은 감사 로그에 남는다.
 10. 주요 API는 통합 테스트와 권한 테스트를 가진다.
