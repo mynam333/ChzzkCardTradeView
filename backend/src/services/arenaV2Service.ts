@@ -289,6 +289,24 @@ const runSql = async (db: SqlExecutor, sql: string, params: any[] = []) => {
   return result instanceof Promise ? await result : result;
 };
 
+const defaultArenaV2PreparationSeasonInput = (): ArenaV2AdminSeasonInput => {
+  const now = new Date();
+  const endsAt = new Date(now.getTime());
+  endsAt.setFullYear(endsAt.getFullYear() + 1);
+  return {
+    seasonKey: 'default_preseason',
+    name: '아레나 준비 시즌',
+    startsAt: now.toISOString(),
+    endsAt: endsAt.toISOString(),
+    modesEnabled: { quick: false, bot: false, battle_royale_8: false },
+    cardPoolVersion: 'cards-v1',
+    balanceVersion: 'balance-v1',
+    rewardTable: [],
+    mmrTierTable: [],
+    createdBy: 'system'
+  };
+};
+
 export const serializeArenaV2Season = (row: ArenaV2SeasonRow | null | undefined) => {
   if (!row) return null;
   return {
@@ -307,6 +325,53 @@ export const serializeArenaV2Season = (row: ArenaV2SeasonRow | null | undefined)
   };
 };
 
+const findArenaV2CurrentOrPreparationSeasonRow = async (db: SqlExecutor) => queryGet<ArenaV2SeasonRow>(
+  db,
+  `
+    SELECT *
+      FROM arena_v2_seasons
+     WHERE status IN ('active', 'scheduled', 'draft')
+     ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END,
+              starts_at DESC
+     LIMIT 1
+  `
+);
+
+const ensureArenaV2PreparationSeason = async (db: SqlExecutor) => {
+  const existing = await findArenaV2CurrentOrPreparationSeasonRow(db);
+  if (existing) return existing;
+  const input = defaultArenaV2PreparationSeasonInput();
+  const id = 'arena_v2_default_preseason';
+  try {
+    await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_seasons
+          (id, season_key, name, status, starts_at, ends_at, modes_enabled, card_pool_version, balance_version, reward_table, mmr_tier_table, replay_retention_days, created_by)
+        VALUES
+          (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 7, ?)
+      `,
+      [
+        id,
+        input.seasonKey,
+        input.name,
+        input.startsAt,
+        input.endsAt,
+        JSON.stringify(input.modesEnabled),
+        input.cardPoolVersion,
+        input.balanceVersion,
+        JSON.stringify(input.rewardTable),
+        JSON.stringify(input.mmrTierTable),
+        input.createdBy
+      ]
+    );
+  } catch (err: any) {
+    if (!['ER_DUP_ENTRY', '23505'].includes(String(err?.code || ''))) throw err;
+  }
+  return await findArenaV2CurrentOrPreparationSeasonRow(db)
+    || await queryGet<ArenaV2SeasonRow>(db, 'SELECT * FROM arena_v2_seasons WHERE id = ? LIMIT 1', [id]);
+};
+
 export const getArenaV2CurrentSeason = async () => {
   const db = getExecutor();
   if (!db) return null;
@@ -320,7 +385,7 @@ export const getArenaV2CurrentSeason = async () => {
        LIMIT 1
     `
   );
-  return serializeArenaV2Season(row);
+  return serializeArenaV2Season(row || await ensureArenaV2PreparationSeason(db));
 };
 
 export const createArenaV2SeasonAdmin = async (input: ArenaV2AdminSeasonInput) => {

@@ -190,6 +190,12 @@ const makeExecutor = () => ({
       if (sql.includes('WHERE id = ?')) {
         return rows.seasons.find((season) => season.id === params[0] && (!params[1] || season.status === params[1]));
       }
+      if (sql.includes("status IN ('active', 'scheduled', 'draft')")) {
+        const statusOrder: Record<string, number> = { active: 0, scheduled: 1, draft: 2 };
+        return rows.seasons
+          .filter((season) => season.status in statusOrder)
+          .sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || String(b.starts_at).localeCompare(String(a.starts_at)))[0];
+      }
       return rows.seasons.find((season) => season.status === 'active');
     }
     if (sql.includes('FROM arena_v2_reward_grants')) {
@@ -760,6 +766,23 @@ describe('arena v2 service', () => {
     expect(season?.modesEnabled).toEqual({ quick: true, bot: true, battle_royale_8: true });
   });
 
+  it('uses a preparation season when no active season is running', async () => {
+    insertSeason({ id: 'season-draft', season_key: '2026_draft', status: 'draft', starts_at: '2026-09-01T00:00:00Z' });
+
+    const season = await getArenaV2CurrentSeason();
+
+    expect(season?.id).toBe('season-draft');
+    expect(season?.status).toBe('draft');
+  });
+
+  it('creates a default preparation season when no arena season exists', async () => {
+    const season = await getArenaV2CurrentSeason();
+
+    expect(season?.id).toBe('arena_v2_default_preseason');
+    expect(season?.status).toBe('draft');
+    expect(rows.seasons[0].created_by).toBe('system');
+  });
+
   it('creates seasons with the required admin creator for the SQL schema', async () => {
     const season = await createArenaV2SeasonAdmin({
       seasonKey: '2026_s2',
@@ -874,6 +897,27 @@ describe('arena v2 service', () => {
     expect(ownedCards[0].streamerId).toBe('owned-streamer');
     expect(ownedCards[0].ownedCount).toBe(2);
     expect(ownedCards[0].ownedStars).toEqual([0, 2]);
+  });
+
+  it('lists owned cards through the default preparation season without an active season', async () => {
+    rows.streamers.push({
+      channel_id: 'owned-preseason-streamer',
+      name: '준비 시즌 스트리머',
+      logo_url: null,
+      custom_image_url: 'https://img.example/preseason-card.png',
+      follower_count: 1000,
+      base_value: 800,
+      is_image_banned: 0,
+      registered_by: 'owned-preseason-streamer'
+    });
+    rows.userCards.push({ id: 1, user_id: 'user-1', channel_id: 'owned-preseason-streamer', serial_number: 1, star: 1 });
+
+    const ownedCards = await listArenaV2OwnedCardsForUser('user-1');
+
+    expect(rows.seasons[0].id).toBe('arena_v2_default_preseason');
+    expect(ownedCards).toHaveLength(1);
+    expect(ownedCards[0].seasonId).toBe('arena_v2_default_preseason');
+    expect(ownedCards[0].streamerId).toBe('owned-preseason-streamer');
   });
 
   it('lets a registered streamer customize their own card within the GDD cost budget', async () => {
