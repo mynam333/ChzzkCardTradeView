@@ -1278,6 +1278,33 @@
   display: block;
 }
 
+.arenaV2Scope :global(.arena-v2-builder-header) {
+  justify-content: space-between;
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 0.75rem;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-builder-header) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.arenaV2Scope :global(.arena-v2-card-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.25rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+  padding-top: 1rem;
+}
+
+.arenaV2Scope :global(.arena-v2-card-grid .arena-v2-card) {
+  width: 100%;
+  min-width: 0;
+  max-width: 13rem;
+  justify-self: center;
+}
+
 .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-readable) {
   padding: 0.32rem 1.92rem 0.42rem;
 }

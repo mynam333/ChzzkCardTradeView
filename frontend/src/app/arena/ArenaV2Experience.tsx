@@ -25,7 +25,7 @@ import {
   Users,
   Zap
 } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { useApp } from '../AppContext';
 import type { ArenaSiteTab } from './types';
 import styles from './ArenaV2Experience.module.css';
@@ -256,7 +256,41 @@ const targetTypeLabel = (type?: string) => {
   return labels[String(type || '')] || type || '대상';
 };
 
-const isImageSource = (value?: string | null) => Boolean(value && (/^https?:\/\//i.test(value) || value.startsWith('/')));
+const getBackendAssetOrigin = () => {
+  try {
+    if (/^https?:\/\//i.test(API_BASE_URL)) return new URL(API_BASE_URL).origin;
+    if (typeof window !== 'undefined') return new URL(API_BASE_URL, window.location.origin).origin;
+  } catch {
+    return '';
+  }
+  return '';
+};
+
+const resolveBackendImageUrl = (value?: string | null) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw) && raw.includes('/uploads/')) {
+    const backendOrigin = getBackendAssetOrigin();
+    if (!backendOrigin) return raw;
+    try {
+      const parsed = new URL(raw);
+      const uploadsIndex = parsed.pathname.indexOf('/uploads/');
+      return uploadsIndex >= 0 ? `${backendOrigin}${parsed.pathname.slice(uploadsIndex)}${parsed.search}` : raw;
+    } catch {
+      return raw;
+    }
+  }
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
+    const backendOrigin = getBackendAssetOrigin();
+    const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;
+    return backendOrigin ? `${backendOrigin}${cleanPath}` : cleanPath;
+  }
+  if (raw.startsWith('/')) return raw;
+  return '';
+};
+
+const isImageSource = (value?: string | null) => Boolean(resolveBackendImageUrl(value));
 const cardTooltip = (card: ArenaV2Card, classLabel: string) => {
   const keywordText = card.keywords.length ? card.keywords.join(', ') : '특수 효과 없음';
   return `${card.displayName}\n클래스: ${classLabel}\n효과: ${keywordText}\n공격력: ${card.attack}\n체력: ${card.health}`;
@@ -296,8 +330,9 @@ const parseKeywordEditorText = (value: string) => {
 
 const CardArt: React.FC<{ card: ArenaV2Card; compact?: boolean }> = ({ card, compact }) => {
   const initial = card.displayName.trim().slice(0, 1) || 'A';
-  if (isImageSource(card.artAssetId)) {
-    return <img src={card.artAssetId || ''} alt={card.displayName} className="h-full w-full object-cover" loading="lazy" />;
+  const imageUrl = resolveBackendImageUrl(card.artAssetId);
+  if (imageUrl) {
+    return <img src={imageUrl} alt={card.displayName} className="h-full w-full object-cover" loading="lazy" />;
   }
   return (
     <div className={`arena-v2-art-fallback arena-v2-accent-${classTone[card.cardClass]?.accent || 'cyan'} ${compact ? 'is-compact' : ''}`}>
@@ -393,8 +428,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     balanceVersion: 'balance-v1'
   });
 
-  const visibleCards = cards.slice(0, 24);
-  const boardCards = visibleCards.slice(0, 6);
+  const boardCards = cards.slice(0, 6);
   const deckCount = selectedCardIds.length;
   const deckReady = deckCount >= 14 && deckCount <= 20;
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
@@ -412,7 +446,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         setNotice('진행 중인 아레나 시즌이 없습니다.');
       } else {
         const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
-        const cardPath = `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48`;
+        const cardPath = `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=1000`;
         const cardJson = await fetchArenaJson(cardPath);
         const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
         setCards(normalized);
@@ -852,25 +886,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         </aside>
       </section>
 
-      <section className="arena-v2-hand-rail" aria-label="카드 풀과 덱 구성">
+      <section className="arena-v2-hand-rail" aria-label="덱 구성 이동">
         <div className="arena-v2-hand-header">
           <div>
-            <p className="arena-v2-kicker">CARD LINEUP</p>
-            <h3>공식 덱 구성</h3>
-            <span>한 스트리머는 한 장만 선택할 수 있습니다.</span>
+            <p className="arena-v2-kicker">DECK VAULT</p>
+            <h3>덱 구성은 보관함에서 진행합니다</h3>
+            <span>보유 카드 전체를 확인하고 카드 정보를 비교하면서 덱을 저장하세요.</span>
           </div>
           <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
             <strong>{deckCount}</strong>
             <span>/ 14~20</span>
           </div>
-          <button type="button" onClick={saveDeck} disabled={saving || !deckReady} className="arena-v2-secondary-button">
-            <Save className="h-4 w-4" /> 덱 저장
+          <button type="button" onClick={() => router.push('/arena/inventory')} className="arena-v2-secondary-button">
+            <Layers3 className="h-4 w-4" /> 보관함 열기
           </button>
-        </div>
-        <div className="arena-v2-card-row">
-          {visibleCards.map((card) => (
-            <ArenaV2CardView key={card.id} card={card} selected={selectedCardIds.includes(card.id)} onClick={() => toggleCard(card)} />
-          ))}
         </div>
       </section>
     </div>
@@ -907,10 +936,31 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   <span>{formatMode(deck.modeScope)}</span>
                   <span>{deck.cardVersionIds.length}장</span>
                   <span>{deckStateLabel(deck.isValid)}</span>
+                  <button type="button" onClick={() => setSelectedCardIds(deck.cardVersionIds)}>불러오기</button>
                   <button type="button" onClick={() => revalidateDeck(deck.id)}>상태 확인</button>
                   <button type="button" onClick={() => deleteDeck(deck.id)}>삭제</button>
                 </div>
-              )) : <p>저장된 덱이 없습니다. 플레이 탭에서 카드 14~20장을 선택해 저장합니다.</p>}
+              )) : <p>저장된 덱이 없습니다. 아래 카드 보관함에서 14~20장을 선택해 저장합니다.</p>}
+            </div>
+          </div>
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">덱 구성</span>
+            <div className="arena-v2-hand-header arena-v2-builder-header">
+              <div>
+                <p>{cards.length}장 중 {deckCount}장 선택됨 · 한 스트리머는 한 장만 사용할 수 있습니다.</p>
+              </div>
+              <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
+                <strong>{deckCount}</strong>
+                <span>/ 14~20</span>
+              </div>
+              <button type="button" onClick={saveDeck} disabled={saving || !deckReady} className="arena-v2-secondary-button">
+                <Save className="h-4 w-4" /> 덱 저장
+              </button>
+            </div>
+            <div className="arena-v2-card-grid" aria-label="보유 아레나 카드 전체 목록">
+              {cards.length ? cards.map((card) => (
+                <ArenaV2CardView key={card.id} card={card} selected={selectedCardIds.includes(card.id)} onClick={() => toggleCard(card)} />
+              )) : <p>아레나에서 사용할 보유 카드가 없습니다.</p>}
             </div>
           </div>
           <div className="arena-v2-panel-section">

@@ -956,7 +956,8 @@ describe('arena v2 service', () => {
     const ownedCards = await listArenaV2OwnedCardsForUser('user-1');
 
     expect(longArtUrl.length).toBeGreaterThan(191);
-    expect(ownedCards[0].artAssetId).toBe(longArtUrl);
+    expect(ownedCards[0].artAssetId?.length).toBeGreaterThan(191);
+    expect(ownedCards[0].artAssetId).toMatch(/^\/uploads\/long-card-art-path-/);
   });
 
   it('lets a registered streamer customize their own card within the GDD cost budget', async () => {

@@ -17,6 +17,7 @@ import {
   type ArenaV2RuntimePlayer,
   type ArenaV2TurnResolutionResult
 } from './arenaV2Engine';
+import { formatUploadUrl } from './imageService';
 
 type SqlExecutor = {
   all<T = any>(sql: string, ...args: any[]): Promise<T[]> | T[];
@@ -225,7 +226,7 @@ const defaultArenaV2ArtAssetForStreamer = (streamer: any): string | null => {
     streamer.custom_image_url_5,
     streamer.logo_url
   ].filter(Boolean);
-  return candidates.length ? String(candidates[0]) : null;
+  return candidates.length ? formatUploadUrl(String(candidates[0])) : null;
 };
 
 const serializeArenaV2CardVersionRow = (row: any) => ({
@@ -241,13 +242,13 @@ const serializeArenaV2CardVersionRow = (row: any) => ({
   keywords: jsonParse(row.keywords, []),
   balanceScore: Number(row.balance_score || 0),
   validationResult: jsonParse<ArenaV2ValidationResultDto | null>(row.validation_result, null),
-  artAssetId: row.art_asset_id || row.streamer_custom_image || row.streamer_logo || null,
+  artAssetId: formatUploadUrl(row.art_asset_id || row.streamer_custom_image || row.streamer_logo || null),
   status: row.status,
   streamer: row.streamer_name ? {
     channelId: row.streamer_id,
     name: row.streamer_name,
-    logoUrl: row.streamer_logo || null,
-    customImageUrl: row.streamer_custom_image || null,
+    logoUrl: formatUploadUrl(row.streamer_logo || null),
+    customImageUrl: formatUploadUrl(row.streamer_custom_image || null),
     isImageBanned: Boolean(Number(row.streamer_is_image_banned || 0))
   } : undefined
 });
@@ -272,6 +273,9 @@ const arenaV2OwnedStarsAggregateSql = () => (
     ? "STRING_AGG(DISTINCT COALESCE(star, 0)::text, ',')"
     : 'GROUP_CONCAT(DISTINCT COALESCE(star, 0))'
 );
+
+const normalizeArenaV2CardListLimit = (limit: unknown, fallback = 40) =>
+  Math.min(Math.max(Number(limit || fallback), 1), 1000);
 
 export const __setArenaV2ExecutorForTest = (executor: SqlExecutor | null) => {
   testExecutor = executor;
@@ -652,7 +656,7 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
   if (!db) throw new Error('ArenaV2SqlDbRequired');
   const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
   if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
-  const syncLimit = Math.min(Math.max(Math.floor(Number(options.limit || 500)), 1), 500);
+  const syncLimit = Math.min(Math.max(Math.floor(Number(options.limit || 500)), 1), 1000);
   const streamers = await queryAll<any>(
     db,
     `
@@ -775,7 +779,7 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
     params.push(`%${filters.streamerName}%`);
     params.push(`%${filters.streamerName}%`);
   }
-  params.push(Math.min(Math.max(Number(filters.limit || 40), 1), 100));
+  params.push(normalizeArenaV2CardListLimit(filters.limit));
 
   const rows = await queryAll<any>(
     db,
@@ -806,7 +810,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
   const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
-  const limit = Math.min(Math.max(Number(filters.limit || 40), 1), 100);
+  const limit = normalizeArenaV2CardListLimit(filters.limit);
   await syncArenaV2CardsFromOwnedCards(userId, seasonId, { limit: Math.max(limit, 100) });
   const ownedStarsAggregate = arenaV2OwnedStarsAggregateSql();
 
