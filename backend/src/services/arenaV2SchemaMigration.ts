@@ -60,7 +60,7 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
       keywords JSON NOT NULL,
       balance_score DECIMAL(10, 2) NOT NULL DEFAULT 0,
       validation_result JSON NOT NULL,
-      art_asset_id VARCHAR(191) NULL,
+      art_asset_id TEXT NULL,
       status VARCHAR(24) NOT NULL DEFAULT 'draft',
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -350,6 +350,15 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
     await db.run('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INT NOT NULL DEFAULT 0');
   } catch {
     // Existing v2 databases may already have this column.
+  }
+  try {
+    if (db instanceof PostgresDb) {
+      await db.run('ALTER TABLE arena_v2_card_versions ALTER COLUMN art_asset_id TYPE TEXT');
+    } else {
+      await db.run('ALTER TABLE arena_v2_card_versions MODIFY COLUMN art_asset_id TEXT NULL');
+    }
+  } catch {
+    // Existing databases may already have the widened URL column.
   }
 };
 

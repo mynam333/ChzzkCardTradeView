@@ -939,6 +939,26 @@ describe('arena v2 service', () => {
     expect(ownedCards[0].id).toMatch(/^arena_v2_card_[a-f0-9]{32}$/);
   });
 
+  it('preserves long card art urls for SQL TEXT storage', async () => {
+    const longArtUrl = `https://cdn.example.com/uploads/${'long-card-art-path-'.repeat(16)}image.png`;
+    rows.streamers.push({
+      channel_id: 'long-art-streamer',
+      name: '긴 이미지 스트리머',
+      logo_url: null,
+      custom_image_url: longArtUrl,
+      follower_count: 1000,
+      base_value: 800,
+      is_image_banned: 0,
+      registered_by: 'long-art-streamer'
+    });
+    rows.userCards.push({ id: 1, user_id: 'user-1', channel_id: 'long-art-streamer', serial_number: 1, star: 0 });
+
+    const ownedCards = await listArenaV2OwnedCardsForUser('user-1');
+
+    expect(longArtUrl.length).toBeGreaterThan(191);
+    expect(ownedCards[0].artAssetId).toBe(longArtUrl);
+  });
+
   it('lets a registered streamer customize their own card within the GDD cost budget', async () => {
     insertSeason();
     rows.streamers.push({
