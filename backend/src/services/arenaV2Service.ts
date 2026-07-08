@@ -153,6 +153,9 @@ const makeId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 const stableHash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
+const makeArenaV2DefaultCardId = (seasonId: string, streamerId: string): string =>
+  `arena_v2_card_${stableHash(`${seasonId}:${streamerId}`).slice(0, 32)}`;
+
 const stableShuffle = <T extends { id: string }>(items: T[], seed: string): T[] =>
   [...items].sort((a, b) => stableHash(`${seed}:${a.id}`).localeCompare(stableHash(`${seed}:${b.id}`)));
 
@@ -535,7 +538,7 @@ const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: a
   const stats = defaultArenaV2CardStatsForStreamer(streamer);
   const keywords = stats.cost <= 1 ? [] : defaultClassKeywords[cardClass] || [];
   const candidate = {
-    id: `arena_v2_card_${seasonId}_${streamerId}`,
+    id: makeArenaV2DefaultCardId(seasonId, streamerId),
     streamerId,
     seasonId,
     status: 'active' as const,

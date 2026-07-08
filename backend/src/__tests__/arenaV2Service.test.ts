@@ -920,6 +920,25 @@ describe('arena v2 service', () => {
     expect(ownedCards[0].streamerId).toBe('owned-preseason-streamer');
   });
 
+  it('keeps generated arena card ids within the SQL varchar limit', async () => {
+    rows.streamers.push({
+      channel_id: '387c808edb5995772719d7d63fbf6eb0',
+      name: '긴 ID 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 1000,
+      base_value: 800,
+      is_image_banned: 0,
+      registered_by: '387c808edb5995772719d7d63fbf6eb0'
+    });
+    rows.userCards.push({ id: 1, user_id: 'user-1', channel_id: '387c808edb5995772719d7d63fbf6eb0', serial_number: 1, star: 0 });
+
+    const ownedCards = await listArenaV2OwnedCardsForUser('user-1');
+
+    expect(ownedCards[0].id.length).toBeLessThanOrEqual(64);
+    expect(ownedCards[0].id).toMatch(/^arena_v2_card_[a-f0-9]{32}$/);
+  });
+
   it('lets a registered streamer customize their own card within the GDD cost budget', async () => {
     insertSeason();
     rows.streamers.push({
