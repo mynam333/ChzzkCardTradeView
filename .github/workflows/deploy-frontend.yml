@@ -24,14 +24,10 @@ jobs:
     environment:
       name: Production
     env:
-      NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'https://api.yuaru.com' }}
+      NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'https://api.yuaru.com/api' }}
       NEXT_PUBLIC_CHAT_WS_URL: ${{ secrets.NEXT_PUBLIC_CHAT_WS_URL || vars.NEXT_PUBLIC_CHAT_WS_URL || 'wss://api.yuaru.com/chat' }}
       NEXT_PUBLIC_ANALYTICS_ENABLED: ${{ secrets.NEXT_PUBLIC_ANALYTICS_ENABLED || vars.NEXT_PUBLIC_ANALYTICS_ENABLED || 'true' }}
-      NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY || vars.NEXT_PUBLIC_POSTHOG_KEY || '' }}
-      NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST || vars.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com' }}
-      NEXT_PUBLIC_POSTHOG_DASHBOARD_URL: ${{ secrets.NEXT_PUBLIC_POSTHOG_DASHBOARD_URL || vars.NEXT_PUBLIC_POSTHOG_DASHBOARD_URL || 'https://us.posthog.com' }}
       NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS: ${{ secrets.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || vars.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '60000' }}
-      NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN: ${{ secrets.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN || vars.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN || '' }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
 
     steps:
@@ -51,9 +47,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-lockfile
 
-      - name: Check analytics build env
+      - name: Check site insights build env
         run: |
-          node -e "console.log('[analytics]', { posthogKey: Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY), posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST || '', cloudflareWebAnalytics: Boolean(process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN), analyticsEnabled: process.env.NEXT_PUBLIC_ANALYTICS_ENABLED || '' })"
+          node -e "console.log('[site-insights]', { analyticsEnabled: process.env.NEXT_PUBLIC_ANALYTICS_ENABLED || '', heartbeatMs: process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '' })"
 
       - name: Build frontend
         run: pnpm --filter frontend build

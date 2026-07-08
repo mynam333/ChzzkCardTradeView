@@ -28,7 +28,7 @@ import {
   getPuzzleExcludedImageKeys,
   normalizePuzzleImageKey
 } from '../services/puzzleImageExclusionService';
-import { getPosthogInsights, normalizeInsightsRange } from '../services/posthogInsightsService';
+import { getSiteInsights, normalizeInsightsGranularity, normalizeInsightsRange } from '../services/siteInsightsService';
 import { createRealtimeNotification } from '../services/notificationDelivery';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
@@ -717,13 +717,14 @@ export const getAdminStats = async (req: Request, res: Response) => {
 export const getAdminInsights = async (req: Request, res: Response) => {
   try {
     const range = normalizeInsightsRange(req.query.range);
-    const data = await getPosthogInsights(range);
+    const granularity = normalizeInsightsGranularity(req.query.granularity, range);
+    const data = await getSiteInsights(range, granularity);
     res.set('Cache-Control', 'private, max-age=30');
     return res.status(200).json(data);
   } catch (err: any) {
     console.error('[AdminController] getAdminInsights 에러:', err?.message || err);
     return res.status(500).json({
-      error: 'PostHogInsightsFailed',
+      error: 'SiteInsightsFailed',
       message: '사이트 인사이트를 불러오지 못했습니다.',
       details: IS_PRODUCTION ? undefined : err.message
     });

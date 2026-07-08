@@ -26,7 +26,6 @@ import {
   Trophy,
   Activity,
   BarChart3,
-  ExternalLink,
   Clock3,
   MonitorSmartphone,
   MousePointerClick,
@@ -60,29 +59,35 @@ import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { AdminAchievementsTab } from './AdminAchievementsTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
-import { analyticsSettings } from '@/lib/analytics';
 
 type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'achievements' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'arena' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
-type InsightsRange = '24h' | '7d' | '30d';
+type InsightsRange = '24h' | '7d' | '30d' | 'all';
+type InsightsGranularity = 'hour' | 'day' | 'month';
 
 interface AdminInsights {
   enabled: boolean;
   range: InsightsRange;
+  granularity: InsightsGranularity;
   generated_at: string;
   cached_until: string | null;
+  retention_days: number;
   summary: {
     page_views: number;
     sessions: number;
     visitors: number;
     active_sessions_5m: number;
     avg_duration_seconds: number;
+    feature_events: number;
+    heartbeats: number;
   };
+  timeline: Array<{ bucket: string; views: number; sessions: number; visitors: number; duration_samples: number; avg_duration_seconds: number }>;
   hourly: Array<{ bucket: string; views: number; sessions: number; visitors: number }>;
   active_hourly: Array<{ bucket: string; active_sessions: number; heartbeats: number }>;
   pages: Array<{ path: string; route_group: string; views: number; sessions: number; avg_duration_seconds: number; duration_samples: number }>;
   devices: Array<{ device_type: string; browser_name: string; os_name: string; views: number; sessions: number }>;
   route_groups: Array<{ route_group: string; views: number; sessions: number }>;
+  features: Array<{ feature_name: string; count: number }>;
   navigation: Array<{ from_tab: string; to_tab: string; surface: string; count: number }>;
   notifications: Array<{ group_key: string; opens: number }>;
 }
@@ -139,7 +144,14 @@ const filterAdminStreamers = (streamers: any[], query: string): any[] => {
 const insightRangeLabel: Record<InsightsRange, string> = {
   '24h': '최근 24시간',
   '7d': '최근 7일',
-  '30d': '최근 30일'
+  '30d': '최근 30일',
+  all: '전체'
+};
+
+const insightGranularityLabel: Record<InsightsGranularity, string> = {
+  hour: '시간',
+  day: '일',
+  month: '월'
 };
 
 const formatInsightDuration = (seconds: number) => {
@@ -218,6 +230,7 @@ export const AdminTab: React.FC = () => {
   // 대시보드
   const [stats, setStats] = useState<any | null>(null);
   const [insightsRange, setInsightsRange] = useState<InsightsRange>('7d');
+  const [insightsGranularity, setInsightsGranularity] = useState<InsightsGranularity>('hour');
   const [insights, setInsights] = useState<AdminInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState('');
@@ -397,8 +410,8 @@ export const AdminTab: React.FC = () => {
 
   useEffect(() => {
     if (!isAdmin || subTab !== 'insights') return;
-    fetchInsights(insightsRange);
-  }, [insightsRange, subTab, isAdmin]);
+    fetchInsights(insightsRange, insightsGranularity);
+  }, [insightsRange, insightsGranularity, subTab, isAdmin]);
 
   useEffect(() => {
     if (!isAdmin || subTab !== 'trades') return;
@@ -463,11 +476,11 @@ export const AdminTab: React.FC = () => {
       if (res.ok) setStats(await res.json());
     } catch { /* noop */ }
   };
-  const fetchInsights = async (range: InsightsRange = insightsRange) => {
+  const fetchInsights = async (range: InsightsRange = insightsRange, granularity: InsightsGranularity = insightsGranularity) => {
     setInsightsLoading(true);
     setInsightsError('');
     try {
-      const res = await apiFetch(`/admin/insights?range=${encodeURIComponent(range)}`);
+      const res = await apiFetch(`/admin/insights?range=${encodeURIComponent(range)}&granularity=${encodeURIComponent(granularity)}`);
       const data = await res.json();
       if (!res.ok) {
         setInsightsError(data.message || '사이트 인사이트를 불러오지 못했습니다.');
@@ -1773,7 +1786,7 @@ export const AdminTab: React.FC = () => {
     { id: 'maintenance', label: 'DB 초기화', icon: Database }
   ];
 
-  const maxHourlyViews = Math.max(1, ...(insights?.hourly || []).map((item) => item.views));
+  const maxHourlyViews = Math.max(1, ...(insights?.timeline || insights?.hourly || []).map((item) => item.views));
   const maxPageViews = Math.max(1, ...(insights?.pages || []).map((item) => item.views));
   const maxDeviceViews = Math.max(1, ...(insights?.devices || []).map((item) => item.views));
   const maxRouteViews = Math.max(1, ...(insights?.route_groups || []).map((item) => item.views));
@@ -1845,13 +1858,13 @@ export const AdminTab: React.FC = () => {
                   <h3 className="text-base font-black text-foreground">사이트 인사이트</h3>
                 </div>
                 <p className="mt-2 max-w-2xl text-xs font-bold leading-relaxed text-muted-foreground">
-                  PostHog Query API에서 방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 읽어옵니다.
-                  백엔드는 PostHog 결과를 짧게 캐시하므로 치카포 MySQL에는 분석 부하가 생기지 않습니다.
+                  치카포가 직접 기록한 방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 보여줍니다.
+                  원시 이벤트는 짧게 보관하고 시간 단위 집계는 별도 테이블에 누적해 MySQL 부담을 낮춥니다.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded-2xl border border-border bg-card/80 p-1 shadow-sm">
-                  {(['24h', '7d', '30d'] as InsightsRange[]).map((range) => (
+                  {(['24h', '7d', '30d', 'all'] as InsightsRange[]).map((range) => (
                     <button
                       key={range}
                       type="button"
@@ -1862,24 +1875,27 @@ export const AdminTab: React.FC = () => {
                     </button>
                   ))}
                 </div>
+                <div className="flex rounded-2xl border border-border bg-card/80 p-1 shadow-sm">
+                  {(['hour', 'day', 'month'] as InsightsGranularity[]).map((granularity) => (
+                    <button
+                      key={granularity}
+                      type="button"
+                      onClick={() => setInsightsGranularity(granularity)}
+                      className={`rounded-xl px-3 py-1.5 text-[11px] font-black transition ${insightsGranularity === granularity ? 'bg-sky-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {insightGranularityLabel[granularity]}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
-                  onClick={() => fetchInsights(insightsRange)}
+                  onClick={() => fetchInsights(insightsRange, insightsGranularity)}
                   disabled={insightsLoading}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-xs font-black text-muted-foreground shadow-sm transition hover:-translate-y-0.5 hover:text-foreground disabled:opacity-50"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${insightsLoading ? 'animate-spin' : ''}`} />
                   새로고침
                 </button>
-                <a
-                  href={analyticsSettings.dashboardUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground shadow-md shadow-primary/20 transition hover:-translate-y-0.5 hover:bg-primary/95"
-                >
-                  PostHog
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
               </div>
             </div>
           </div>
@@ -1892,7 +1908,7 @@ export const AdminTab: React.FC = () => {
 
           {insights && !insights.enabled && (
             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-xs font-bold leading-relaxed text-amber-700 dark:text-amber-200">
-              PostHog 서버 조회 설정이 아직 없습니다. 백엔드 환경변수에 POSTHOG_PROJECT_ID와 POSTHOG_PERSONAL_API_KEY를 넣으면 이 화면에 실제 인사이트가 표시됩니다.
+              자체 인사이트 수집이 꺼져 있습니다. 백엔드 환경변수 SITE_INSIGHTS_ENABLED를 확인하면 됩니다.
             </div>
           )}
 
@@ -1931,7 +1947,7 @@ export const AdminTab: React.FC = () => {
                 </span>
               </div>
               <div className="space-y-2">
-                {(insights?.hourly || []).slice(-24).map((row) => (
+                {(insights?.timeline || insights?.hourly || []).slice(-48).map((row) => (
                   <div key={row.bucket} className="grid grid-cols-[5.5rem_1fr_5rem] items-center gap-2">
                     <span className="text-[10px] font-bold text-muted-foreground">{formatLocalDateTime(row.bucket, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: undefined })}</span>
                     <div className="h-3 overflow-hidden rounded-full bg-secondary">
@@ -1940,7 +1956,7 @@ export const AdminTab: React.FC = () => {
                     <span className="text-right text-[11px] font-black text-foreground">{row.views.toLocaleString()}</span>
                   </div>
                 ))}
-                {(!insights || insights.hourly.length === 0) && (
+                {(!insights || (insights.timeline || insights.hourly).length === 0) && (
                   <p className="py-8 text-center text-xs font-bold text-muted-foreground">아직 집계된 방문 데이터가 없습니다.</p>
                 )}
               </div>
@@ -2025,6 +2041,23 @@ export const AdminTab: React.FC = () => {
               <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
                 <h3 className="flex items-center gap-1.5 text-sm font-black">
                   <MousePointerClick className="h-4 w-4 text-amber-500" />
+                  핵심 기능 사용
+                </h3>
+                <div className="mt-4 space-y-2">
+                  {(insights?.features || []).slice(0, 8).map((row) => (
+                    <div key={row.feature_name} className="flex items-center justify-between rounded-xl bg-secondary/30 px-3 py-2">
+                      <span className="truncate text-[11px] font-bold">{row.feature_name}</span>
+                      <span className="shrink-0 text-[10px] font-black text-foreground">{row.count.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  {(!insights || insights.features.length === 0) && (
+                    <p className="py-6 text-center text-xs font-bold text-muted-foreground">기능 사용 데이터가 없습니다.</p>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                <h3 className="flex items-center gap-1.5 text-sm font-black">
+                  <MousePointerClick className="h-4 w-4 text-amber-500" />
                   메뉴 이동
                 </h3>
                 <div className="mt-4 space-y-2">
@@ -2069,23 +2102,23 @@ export const AdminTab: React.FC = () => {
               <div className="mt-4 grid gap-2 md:grid-cols-2">
                 <div className="rounded-xl bg-secondary/35 px-3 py-2">
                   <span className="text-[10px] font-bold text-muted-foreground">브라우저 수집</span>
-                  <p className={`mt-0.5 text-xs font-black ${analyticsSettings.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>{analyticsSettings.enabled ? 'PostHog 이벤트 전송 활성' : 'NEXT_PUBLIC_POSTHOG_KEY 미설정'}</p>
+                  <p className="mt-0.5 text-xs font-black text-emerald-600">자체 이벤트 전송</p>
                 </div>
                 <div className="rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[10px] font-bold text-muted-foreground">서버 조회</span>
-                  <p className={`mt-0.5 text-xs font-black ${insights?.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>{insights?.enabled ? 'PostHog Query API 연결' : '백엔드 키 미설정'}</p>
+                  <span className="text-[10px] font-bold text-muted-foreground">서버 집계</span>
+                  <p className={`mt-0.5 text-xs font-black ${insights?.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>{insights?.enabled ? 'DB 롤업 집계 활성' : '수집 비활성'}</p>
                 </div>
                 <div className="rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[10px] font-bold text-muted-foreground">Cloudflare Web Analytics</span>
-                  <p className={`mt-0.5 text-xs font-black ${analyticsSettings.cloudflareEnabled ? 'text-emerald-600' : 'text-muted-foreground'}`}>{analyticsSettings.cloudflareEnabled ? '토큰 방식 활성' : '선택 설정'}</p>
+                  <span className="text-[10px] font-bold text-muted-foreground">원시 이벤트 보관</span>
+                  <p className="mt-0.5 text-xs font-black text-foreground">{insights?.retention_days ? `${insights.retention_days}일` : '설정 대기'}</p>
                 </div>
                 <div className="rounded-xl bg-secondary/35 px-3 py-2">
-                  <span className="text-[10px] font-bold text-muted-foreground">PostHog Host</span>
-                  <p className="mt-0.5 truncate text-xs font-black text-foreground">{analyticsSettings.postHogHost}</p>
+                  <span className="text-[10px] font-bold text-muted-foreground">집계 단위</span>
+                  <p className="mt-0.5 truncate text-xs font-black text-foreground">{insights ? insightGranularityLabel[insights.granularity] : insightGranularityLabel[insightsGranularity]}</p>
                 </div>
               </div>
               <p className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2.5 text-[11px] font-bold leading-relaxed text-muted-foreground">
-                자동 클릭/폼 캡처와 세션 리플레이는 꺼져 있습니다. 닉네임, 채팅 내용, 검색어 원문, 쿠폰 코드 같은 내용 데이터는 분석 이벤트에 포함하지 않습니다.
+                자동 클릭/폼 캡처와 세션 리플레이는 없습니다. 닉네임, 채팅 내용, 검색어 원문, 쿠폰 코드 같은 내용 데이터는 분석 이벤트에 포함하지 않습니다.
               </p>
             </div>
           </div>

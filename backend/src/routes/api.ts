@@ -3,6 +3,7 @@ import multer from 'multer';
 import { subscribeRealtimeStream } from '../services/realtimeStream';
 import { getRuntimeStats } from '../services/runtimeStats';
 import { getLogFilePath } from '../services/fileLogger';
+import { collectSiteInsightEvent } from '../controllers/analyticsController';
 import { authMiddleware } from '../middlewares/auth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
@@ -248,6 +249,8 @@ import { shouldServeImageProxyInApi } from '../services/processRole';
 import { bytesToWholeMb, readBytesEnv, readIntegerEnv } from '../utils/env';
 
 const router = Router();
+
+router.post('/analytics/events', collectSiteInsightEvent);
 router.use(maintenanceCheckMiddleware);
 
 // 라우트별 레이트 리미터 (IP 기준 고정 윈도우)

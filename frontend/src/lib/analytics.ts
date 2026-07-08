@@ -1,4 +1,4 @@
-import posthog from 'posthog-js';
+import { API_BASE_URL } from './api';
 
 type AnalyticsUser = {
   id: string;
@@ -11,9 +11,6 @@ type PageVisit = {
 };
 
 const SESSION_ID_KEY = 'chikapo_analytics_session_id';
-const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || '';
-const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
-const POSTHOG_DASHBOARD_URL = process.env.NEXT_PUBLIC_POSTHOG_DASHBOARD_URL || 'https://us.posthog.com';
 const ANALYTICS_ENV_ENABLED = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED !== 'false';
 const HEARTBEAT_INTERVAL_MS = Math.max(
   30_000,
@@ -31,11 +28,7 @@ const isLocalHost = () => {
 };
 
 export const analyticsSettings = {
-  enabled: Boolean(POSTHOG_KEY && ANALYTICS_ENV_ENABLED),
-  hasPostHogKey: Boolean(POSTHOG_KEY),
-  postHogHost: POSTHOG_HOST,
-  dashboardUrl: POSTHOG_DASHBOARD_URL,
-  cloudflareEnabled: Boolean(process.env.NEXT_PUBLIC_CLOUDFLARE_WEB_ANALYTICS_TOKEN),
+  enabled: ANALYTICS_ENV_ENABLED,
   heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS
 };
 
@@ -117,58 +110,52 @@ const getPublicPageProperties = (path: string, user?: AnalyticsUser) => ({
   viewport_height: isBrowser() ? window.innerHeight : null,
   timezone: isBrowser() ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
   language: isBrowser() ? navigator.language : null,
-  is_authenticated: Boolean(user?.id),
-  user_role: user?.role || 'ANONYMOUS'
+  is_authenticated: Boolean(user?.id || identifiedUserId),
+  user_role: user?.role || 'ANONYMOUS',
+  referrer: isBrowser() ? document.referrer : ''
 });
+
+const sendAnalyticsEvent = (payload: Record<string, unknown>) => {
+  if (!initialized || !isBrowser()) return;
+  try {
+    void fetch(`${API_BASE_URL}/analytics/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      keepalive: true,
+      body: JSON.stringify(payload)
+    }).catch(() => undefined);
+  } catch {
+    // 분석 이벤트는 사용자 경험을 방해하지 않아야 합니다.
+  }
+};
 
 export const initAnalytics = () => {
   if (!isBrowser() || initialized || !analyticsSettings.enabled || isLocalHost()) return;
-  posthog.init(POSTHOG_KEY, {
-    api_host: POSTHOG_HOST,
-    autocapture: false,
-    capture_pageview: false,
-    capture_pageleave: false,
-    disable_session_recording: true,
-    disable_surveys: true,
-    disable_product_tours: true,
-    disable_external_dependency_loading: true,
-    advanced_disable_flags: true,
-    advanced_disable_feature_flags: true,
-    advanced_disable_feature_flags_on_first_load: true,
-    respect_dnt: true,
-    persistence: 'localStorage+cookie'
-  } as any);
   initialized = true;
 };
 
 export const identifyAnalyticsUser = (user: AnalyticsUser) => {
   if (!initialized || !user?.id) return;
-  const distinctId = `user:${user.id}`;
-  if (identifiedUserId === distinctId) return;
-  posthog.identify(distinctId, {
-    role: user.role || 'USER'
-  });
-  identifiedUserId = distinctId;
+  identifiedUserId = `user:${user.id}`;
 };
 
 export const resetAnalyticsUser = () => {
-  if (!initialized || !identifiedUserId) return;
-  posthog.reset();
   identifiedUserId = null;
 };
 
 export const trackPageView = (visit: PageVisit, user?: AnalyticsUser) => {
-  if (!initialized) return;
-  posthog.capture('chikapo_page_view', {
+  sendAnalyticsEvent({
+    event_type: 'page_view',
     ...getPublicPageProperties(visit.path, user),
     started_at: new Date(visit.startedAt).toISOString()
   });
 };
 
 export const trackPageDuration = (visit: PageVisit, endedAt: number, user?: AnalyticsUser) => {
-  if (!initialized) return;
   const durationMs = Math.max(0, endedAt - visit.startedAt);
-  posthog.capture('chikapo_page_duration', {
+  sendAnalyticsEvent({
+    event_type: 'page_duration',
     ...getPublicPageProperties(visit.path, user),
     duration_ms: durationMs,
     duration_seconds: Math.round(durationMs / 1000),
@@ -177,9 +164,10 @@ export const trackPageDuration = (visit: PageVisit, endedAt: number, user?: Anal
 };
 
 export const trackPageHeartbeat = (visit: PageVisit, user?: AnalyticsUser) => {
-  if (!initialized || !isBrowser() || document.visibilityState !== 'visible') return;
+  if (!isBrowser() || document.visibilityState !== 'visible') return;
   const elapsedMs = Math.max(0, Date.now() - visit.startedAt);
-  posthog.capture('chikapo_page_heartbeat', {
+  sendAnalyticsEvent({
+    event_type: 'page_heartbeat',
     ...getPublicPageProperties(visit.path, user),
     elapsed_seconds: Math.round(elapsedMs / 1000)
   });
@@ -190,14 +178,15 @@ export const trackFeatureEvent = (
   properties: Record<string, string | number | boolean | null | undefined> = {},
   user?: AnalyticsUser
 ) => {
-  if (!initialized) return;
-  posthog.capture(eventName, {
+  sendAnalyticsEvent({
+    event_type: 'feature',
+    feature_name: eventName,
     session_id: getSessionId(),
     device_type: getDeviceType(),
     browser_name: getBrowserName(),
     os_name: getOsName(),
-    is_authenticated: Boolean(user?.id),
+    is_authenticated: Boolean(user?.id || identifiedUserId),
     user_role: user?.role || 'ANONYMOUS',
-    ...properties
+    properties
   });
 };

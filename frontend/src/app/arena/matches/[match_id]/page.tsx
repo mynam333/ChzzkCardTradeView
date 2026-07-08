@@ -7,7 +7,7 @@ export function generateStaticParams() {
 export default async function ArenaMatchDynamicPage({
   params
 }: {
-  params: Promise<{ match_id?: string }> | { match_id?: string };
+  params: Promise<{ match_id?: string }>;
 }) {
   const resolvedParams = await params;
   return <ArenaV2MatchPageClient matchId={resolvedParams.match_id || null} />;
