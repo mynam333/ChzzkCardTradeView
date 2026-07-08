@@ -50,7 +50,6 @@ type ArenaV2Card = {
   keywords: string[];
   artAssetId?: string | null;
   status?: string;
-  sample?: boolean;
 };
 
 type ArenaV2Deck = {
@@ -103,36 +102,51 @@ type ArenaV2RightRequest = {
   createdAt?: string;
 };
 
-const sampleCards: ArenaV2Card[] = [
-  { id: 'sample-a', streamerId: 's-a', displayName: '라이트 콜러', cardClass: 'tempo', cost: 2, attack: 2, health: 4, keywords: ['선공', '드로우'], sample: true },
-  { id: 'sample-b', streamerId: 's-b', displayName: '스테이지 브레이커', cardClass: 'attack', cost: 3, attack: 5, health: 3, keywords: ['돌파'], sample: true },
-  { id: 'sample-c', streamerId: 's-c', displayName: '가드 디렉터', cardClass: 'guard', cost: 4, attack: 3, health: 7, keywords: ['보호', '도발'], sample: true },
-  { id: 'sample-d', streamerId: 's-d', displayName: '리듬 메딕', cardClass: 'heal', cost: 3, attack: 2, health: 6, keywords: ['회복'], sample: true },
-  { id: 'sample-e', streamerId: 's-e', displayName: '클러치 스나이퍼', cardClass: 'control', cost: 5, attack: 6, health: 4, keywords: ['저격', '침묵'], sample: true },
-  { id: 'sample-f', streamerId: 's-f', displayName: '파이널 앵커', cardClass: 'ultimate', cost: 7, attack: 8, health: 8, keywords: ['궁극기'], sample: true }
-];
+type ArenaV2MyStreamerCard = {
+  streamer?: {
+    channelId: string;
+    name: string;
+    logoUrl?: string | null;
+    customImageUrl?: string | null;
+    isImageBanned?: boolean;
+  };
+  card: ArenaV2Card | null;
+  canEdit: boolean;
+  validation?: { valid?: boolean; errors?: Array<{ code?: string; message?: string }> };
+};
 
 const classTone: Record<string, { label: string; icon: typeof Swords; accent: string; hint: string }> = {
-  attack: { label: '공격', icon: Swords, accent: 'coral', hint: '높은 피해와 돌파에 특화된 클래스' },
-  tempo: { label: '템포', icon: Zap, accent: 'cyan', hint: '빠른 전개와 카드 순환에 특화된 클래스' },
-  guard: { label: '방어', icon: Shield, accent: 'green', hint: '보호와 전열 유지에 특화된 클래스' },
-  heal: { label: '지원', icon: Sparkles, accent: 'green', hint: '회복과 보조 효과에 특화된 클래스' },
-  control: { label: '제어', icon: Target, accent: 'violet', hint: '침묵, 저격, 위치 제어에 특화된 클래스' },
-  ultimate: { label: '결정타', icon: Crown, accent: 'gold', hint: '높은 비용의 승부수에 특화된 클래스' }
+  charge: { label: '돌격', icon: Swords, accent: 'coral', hint: '라인 돌파와 직접 압박에 특화된 클래스' },
+  guardian: { label: '수호', icon: Shield, accent: 'green', hint: '보호막과 전열 유지에 특화된 클래스' },
+  sniper: { label: '저격', icon: Target, accent: 'violet', hint: '조준과 후열 압박에 특화된 클래스' },
+  support: { label: '지원', icon: Sparkles, accent: 'green', hint: '회복과 라인 보조에 특화된 클래스' },
+  trick: { label: '기만', icon: Zap, accent: 'violet', hint: '약화와 위치 교란에 특화된 클래스' },
+  specter: { label: '망령', icon: Crown, accent: 'violet', hint: '묘지와 손실 보상에 특화된 클래스' },
+  tech: { label: '기술', icon: Gauge, accent: 'cyan', hint: '카드 순환과 전술 보조에 특화된 클래스' },
+  attack: { label: '돌격', icon: Swords, accent: 'coral', hint: '라인 돌파와 직접 압박에 특화된 클래스' },
+  tempo: { label: '기술', icon: Gauge, accent: 'cyan', hint: '카드 순환과 전술 보조에 특화된 클래스' },
+  guard: { label: '수호', icon: Shield, accent: 'green', hint: '보호막과 전열 유지에 특화된 클래스' },
+  heal: { label: '지원', icon: Sparkles, accent: 'green', hint: '회복과 라인 보조에 특화된 클래스' },
+  control: { label: '기만', icon: Target, accent: 'violet', hint: '약화와 위치 교란에 특화된 클래스' },
+  ultimate: { label: '망령', icon: Crown, accent: 'violet', hint: '묘지와 손실 보상에 특화된 클래스' }
 };
+
+const legalCardClasses = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
 
 const phases = [
   { id: 'move', label: '이동', icon: Move, hint: '시작 카드 1회' },
   { id: 'place', label: '배치', icon: Plus, hint: '빈 칸에 소환' },
   { id: 'replace', label: '교체', icon: Hand, hint: '새 카드만 가능' },
-  { id: 'end', label: '종료', icon: Check, hint: '서버 확정' }
+  { id: 'end', label: '종료', icon: Check, hint: '선택 확정' }
 ];
 
 const normalizeCard = (raw: any): ArenaV2Card | null => {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id || raw.cardVersionId || raw.card_id || '');
   if (!id) return null;
-  const keywords = Array.isArray(raw.keywords) ? raw.keywords.map(String) : [];
+  const keywords = Array.isArray(raw.keywords)
+    ? raw.keywords.map((keyword: any) => typeof keyword === 'string' ? keyword : String(keyword?.type || '')).filter(Boolean)
+    : [];
   return {
     id,
     streamerId: String(raw.streamerId || raw.streamer_id || raw.channel_id || id),
@@ -142,7 +156,7 @@ const normalizeCard = (raw: any): ArenaV2Card | null => {
     attack: Number(raw.attack ?? raw.stats?.attack ?? 1),
     health: Number(raw.health ?? raw.hp ?? raw.stats?.hp ?? 1),
     keywords,
-    artAssetId: typeof raw.artAssetId === 'string' ? raw.artAssetId : typeof raw.image_url === 'string' ? raw.image_url : null,
+    artAssetId: typeof raw.artAssetId === 'string' ? raw.artAssetId : typeof raw.art_asset_id === 'string' ? raw.art_asset_id : typeof raw.image_url === 'string' ? raw.image_url : null,
     status: typeof raw.status === 'string' ? raw.status : undefined
   };
 };
@@ -154,15 +168,109 @@ const formatMode = (mode: ArenaV2Deck['modeScope']) => {
   return '전체';
 };
 
-const isUrl = (value?: string | null) => Boolean(value && /^https?:\/\//i.test(value));
+const seasonStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    draft: '준비 중',
+    scheduled: '곧 시작',
+    active: '진행 중',
+    locked: '결과 집계 중',
+    settling: '보상 준비 중',
+    closed: '종료',
+    cancelled: '취소됨'
+  };
+  return labels[String(status || '')] || status || '시즌 대기 중';
+};
+
+const deckStateLabel = (isValid?: boolean) => isValid ? '대전 가능' : '수정 필요';
+
+const rewardStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    pending: '수령 준비 중',
+    granted: '수령 완료',
+    held: '확인 중',
+    cancelled: '취소됨'
+  };
+  return labels[String(status || '')] || status || '아직 받을 보상이 없습니다.';
+};
+
+const requestStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    received: '접수됨',
+    pending: '확인 중',
+    approved: '반영됨',
+    rejected: '반려됨',
+    actioned: '처리됨',
+    waiting: '대기 중',
+    matched: '매칭 완료',
+    expired: '시간 만료',
+    none: '대기 없음'
+  };
+  return labels[String(status || '')] || status || '확인 중';
+};
+
+const requestTypeLabel = (type?: string) => {
+  const labels: Record<string, string> = {
+    text_change: '문구 수정',
+    image_change: '이미지 수정',
+    card_config: '카드 설정',
+    disable_version: '카드 숨김',
+    opt_out: '참여 제외'
+  };
+  return labels[String(type || '')] || type || '요청';
+};
+
+const targetTypeLabel = (type?: string) => {
+  const labels: Record<string, string> = {
+    card: '카드',
+    match: '경기',
+    replay: '장면',
+    user: '사용자',
+    battle_royale: '8인전'
+  };
+  return labels[String(type || '')] || type || '대상';
+};
+
+const isImageSource = (value?: string | null) => Boolean(value && (/^https?:\/\//i.test(value) || value.startsWith('/')));
 const cardTooltip = (card: ArenaV2Card, classLabel: string) => {
   const keywordText = card.keywords.length ? card.keywords.join(', ') : '특수 효과 없음';
   return `${card.displayName}\n클래스: ${classLabel}\n효과: ${keywordText}\n공격력: ${card.attack}\n체력: ${card.health}`;
 };
 
+const hydrateStreamerCardForm = (card: ArenaV2Card | null) => ({
+  displayName: card?.displayName || '',
+  cardClass: legalCardClasses.includes(card?.cardClass || '') ? card?.cardClass || 'charge' : 'charge',
+  cost: String(card?.cost ?? 2),
+  attack: String(card?.attack ?? 1),
+  health: String(card?.health ?? 4),
+  keywordsText: card?.keywords?.join(', ') || '',
+  artAssetId: card?.artAssetId || ''
+});
+
+const parseKeywordEditorText = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return trimmed
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [type, rawValue] = item.split(':').map((part) => part.trim());
+      const valueNumber = Number(rawValue);
+      return Number.isInteger(valueNumber) ? { type, value: valueNumber } : { type };
+    });
+};
+
 const CardArt: React.FC<{ card: ArenaV2Card; compact?: boolean }> = ({ card, compact }) => {
   const initial = card.displayName.trim().slice(0, 1) || 'A';
-  if (isUrl(card.artAssetId)) {
+  if (isImageSource(card.artAssetId)) {
     return <img src={card.artAssetId || ''} alt={card.displayName} className="h-full w-full object-cover" loading="lazy" />;
   }
   return (
@@ -233,7 +341,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const router = useRouter();
   const { user, toast } = useApp();
   const [season, setSeason] = React.useState<ArenaV2Season | null>(null);
-  const [cards, setCards] = React.useState<ArenaV2Card[]>(sampleCards);
+  const [cards, setCards] = React.useState<ArenaV2Card[]>([]);
   const [decks, setDecks] = React.useState<ArenaV2Deck[]>([]);
   const [selectedCardIds, setSelectedCardIds] = React.useState<string[]>([]);
   const [selectedDeckId, setSelectedDeckId] = React.useState<string>('');
@@ -245,9 +353,11 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const [wikiEntries, setWikiEntries] = React.useState<ArenaV2WikiEntry[]>([]);
   const [reports, setReports] = React.useState<ArenaV2Report[]>([]);
   const [rightRequests, setRightRequests] = React.useState<ArenaV2RightRequest[]>([]);
+  const [myStreamerCard, setMyStreamerCard] = React.useState<ArenaV2MyStreamerCard | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<{ quick?: any; battleRoyale?: any }>({});
   const [reportForm, setReportForm] = React.useState({ targetType: 'card', targetId: '', reason: '' });
   const [rightForm, setRightForm] = React.useState({ streamerId: '', requestType: 'text_change', payloadText: '' });
+  const [streamerCardForm, setStreamerCardForm] = React.useState(hydrateStreamerCardForm(null));
   const [adminSeasonForm, setAdminSeasonForm] = React.useState({
     seasonKey: '',
     name: '',
@@ -257,11 +367,10 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     balanceVersion: 'balance-v1'
   });
 
-  const realCards = cards.filter((card) => !card.sample);
   const visibleCards = cards.slice(0, 24);
-  const boardCards = visibleCards.length >= 6 ? visibleCards.slice(0, 6) : sampleCards;
+  const boardCards = visibleCards.slice(0, 6);
   const deckCount = selectedCardIds.length;
-  const deckReady = deckCount >= 14 && deckCount <= 20 && realCards.length > 0;
+  const deckReady = deckCount >= 14 && deckCount <= 20;
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
 
   const loadArenaV2 = React.useCallback(async () => {
@@ -277,7 +386,10 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const cardRes = await apiFetch(cardPath);
       const cardJson = cardRes.ok ? await cardRes.json() : { cards: [] };
       const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
-      setCards(normalized.length ? normalized : sampleCards);
+      setCards(normalized);
+      if (!normalized.length) {
+        setNotice('아직 사용할 수 있는 아레나 카드가 없습니다.');
+      }
 
       if (user && nextSeason?.id) {
         const deckRes = await apiFetch(`/arena/decks?seasonId=${encodeURIComponent(nextSeason.id)}`);
@@ -285,12 +397,13 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         const nextDecks = Array.isArray(deckJson?.decks) ? deckJson.decks as ArenaV2Deck[] : [];
         setDecks(nextDecks);
         setSelectedDeckId((current) => current || nextDecks.find((deck) => deck.isValid)?.id || nextDecks[0]?.id || '');
-        const [rewardRes, quickRes, battleRoyaleRes, reportsRes, rightsRes] = await Promise.all([
+        const [rewardRes, quickRes, battleRoyaleRes, reportsRes, rightsRes, myCardRes] = await Promise.all([
           apiFetch(`/arena/rewards/current?seasonId=${encodeURIComponent(nextSeason.id)}`),
           apiFetch(`/arena/matchmaking/quick/status?seasonId=${encodeURIComponent(nextSeason.id)}`),
           apiFetch(`/arena/battle-royales/queue/status?seasonId=${encodeURIComponent(nextSeason.id)}`),
           apiFetch('/arena/reports/mine'),
-          apiFetch('/arena/streamer-right-requests/mine')
+          apiFetch('/arena/streamer-right-requests/mine'),
+          apiFetch(`/arena/streamer-card/me?seasonId=${encodeURIComponent(nextSeason.id)}`)
         ]);
         setRewardState(rewardRes.ok ? await rewardRes.json().catch(() => null) : null);
         setQueueStatus({
@@ -299,12 +412,28 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         });
         setReports(reportsRes.ok ? ((await reportsRes.json().catch(() => ({})))?.reports || []) : []);
         setRightRequests(rightsRes.ok ? ((await rightsRes.json().catch(() => ({})))?.requests || []) : []);
+        if (myCardRes.ok) {
+          const myCardJson = await myCardRes.json().catch(() => null);
+          const card = normalizeCard(myCardJson?.card);
+          const nextMyCard = {
+            streamer: myCardJson?.streamer,
+            card,
+            canEdit: myCardJson?.canEdit !== false
+          };
+          setMyStreamerCard(nextMyCard);
+          setStreamerCardForm(hydrateStreamerCardForm(card));
+        } else {
+          setMyStreamerCard(null);
+          setStreamerCardForm(hydrateStreamerCardForm(null));
+        }
       } else {
         setDecks([]);
         setRewardState(null);
         setQueueStatus({});
         setReports([]);
         setRightRequests([]);
+        setMyStreamerCard(null);
+        setStreamerCardForm(hydrateStreamerCardForm(null));
       }
       const rankingsPath = nextSeason?.id ? `/arena/rankings?seasonId=${encodeURIComponent(nextSeason.id)}&limit=100` : '/arena/rankings?limit=100';
       const [rankingsRes, wikiRes] = await Promise.all([
@@ -316,8 +445,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setRankings(Array.isArray(rankingsJson?.items) ? rankingsJson.items : []);
       setWikiEntries(Array.isArray(wikiJson?.entries) ? wikiJson.entries : []);
     } catch {
-      setCards(sampleCards);
-      setNotice('서버 카드 풀을 불러오지 못해 샘플 보드로 표시 중입니다.');
+      setCards([]);
+      setNotice('카드 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }
@@ -328,10 +457,6 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   }, [loadArenaV2]);
 
   const toggleCard = (card: ArenaV2Card) => {
-    if (card.sample) {
-      setNotice('샘플 카드는 덱에 저장되지 않습니다. 실제 시즌 카드 풀이 필요합니다.');
-      return;
-    }
     setSelectedCardIds((current) => {
       if (current.includes(card.id)) return current.filter((id) => id !== card.id);
       if (current.length >= 20) return current;
@@ -345,7 +470,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       return;
     }
     if (!season?.id || !deckReady) {
-      setNotice('공식 덱은 실제 카드 14~20장으로만 저장할 수 있습니다.');
+      setNotice('덱은 카드 14~20장으로 구성해야 합니다.');
       return;
     }
     setSaving(true);
@@ -354,18 +479,18 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         method: 'POST',
         body: JSON.stringify({
           seasonId: season.id,
-          name: `V2 덱 ${new Date().toLocaleDateString('ko-KR')}`,
+          name: `아레나 덱 ${new Date().toLocaleDateString('ko-KR')}`,
           modeScope: 'all',
           cardVersionIds: selectedCardIds
         })
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '덱 저장 실패');
-      toast('아레나 v2 덱을 저장했습니다.', 'success');
+      toast('아레나 덱을 저장했습니다.', 'success');
       setSelectedCardIds([]);
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '덱 저장 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '덱 저장 중 문제가 발생했습니다.', 'error');
     } finally {
       setSaving(false);
     }
@@ -384,20 +509,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '봇전 생성 실패');
       const createdMatchId = json?.match?.matchId || json?.match?.id;
-      toast('봇전 매치가 생성되었습니다.', 'success');
+      toast('연습전이 시작되었습니다.', 'success');
       if (createdMatchId) {
         router.push(`/arena/matches/${encodeURIComponent(createdMatchId)}`);
       } else {
-        setNotice('매치가 멀리건 단계로 생성되었습니다.');
+        setNotice('시작 손패를 선택할 수 있습니다.');
       }
     } catch (error: any) {
-      toast(error?.message || '봇전 생성 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '연습전 시작 중 문제가 발생했습니다.', 'error');
     }
   };
 
   const joinQueue = async (queue: 'quick' | 'battle_royale_8') => {
     if (!selectedDeckId) {
-      setNotice('대전 큐에 진입하려면 먼저 유효한 공식 덱이 필요합니다.');
+      setNotice('대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.');
       return;
     }
     const endpoint = queue === 'quick' ? '/arena/matchmaking/quick/join' : '/arena/battle-royales/join';
@@ -407,17 +532,17 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         body: JSON.stringify({ deckId: selectedDeckId, seasonId: season?.id })
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '큐 진입 실패');
+      if (!res.ok) throw new Error(json?.message || '대기열 참가 실패');
       const matchedMatchId = json?.ticket?.matchedMatchId;
       if (matchedMatchId) {
         toast('상대가 매칭되었습니다.', 'success');
         router.push(`/arena/matches/${encodeURIComponent(matchedMatchId)}`);
         return;
       }
-      toast(queue === 'quick' ? '빠른대전 큐에 진입했습니다.' : '8인전 큐에 진입했습니다.', 'success');
+      toast(queue === 'quick' ? '빠른대전 상대를 찾기 시작했습니다.' : '8인전 참가를 신청했습니다.', 'success');
       setNotice(queue === 'quick' ? '빠른대전 상대를 찾는 중입니다.' : json?.ticket?.battleRoyaleId ? '8인전 방이 생성되었습니다.' : '8명이 모이면 1라운드가 생성됩니다.');
     } catch (error: any) {
-      toast(error?.message || '큐 진입 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '대기열 참가 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -425,11 +550,11 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     try {
       const res = await apiFetch(`/arena/decks/${encodeURIComponent(deckId)}/validate`, { method: 'POST' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '덱 재검증 실패');
-      toast('덱 검증 상태를 갱신했습니다.', 'success');
+      if (!res.ok) throw new Error(json?.message || '덱 상태 확인 실패');
+      toast('덱 상태를 확인했습니다.', 'success');
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '덱 재검증 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '덱 상태 확인 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -442,7 +567,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       if (selectedDeckId === deckId) setSelectedDeckId('');
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '덱 삭제 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '덱 삭제 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -454,18 +579,18 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         body: JSON.stringify({ seasonId: season?.id })
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '큐 취소 실패');
+      if (!res.ok) throw new Error(json?.message || '대기 취소 실패');
       if (json?.matchId) router.push(`/arena/matches/${encodeURIComponent(json.matchId)}`);
       else toast(json?.cancelled ? '대기열을 취소했습니다.' : '이미 매칭된 대기열입니다.', json?.cancelled ? 'success' : 'info');
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '큐 취소 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '대기 취소 중 문제가 발생했습니다.', 'error');
     }
   };
 
   const submitReport = async () => {
     if (!reportForm.targetId.trim() || !reportForm.reason.trim()) {
-      setNotice('신고 대상 ID와 사유가 필요합니다.');
+      setNotice('신고 대상과 사유가 필요합니다.');
       return;
     }
     try {
@@ -479,13 +604,13 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setReportForm({ targetType: 'card', targetId: '', reason: '' });
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '신고 접수 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '신고 접수 중 문제가 발생했습니다.', 'error');
     }
   };
 
   const submitRightRequest = async () => {
     if (!rightForm.streamerId.trim()) {
-      setNotice('스트리머 ID가 필요합니다.');
+      setNotice('스트리머 이름이 필요합니다.');
       return;
     }
     let payload: unknown = { note: rightForm.payloadText };
@@ -500,12 +625,55 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         body: JSON.stringify({ streamerId: rightForm.streamerId, requestType: rightForm.requestType, payload })
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '권리 요청 실패');
-      toast('스트리머 권리 요청을 접수했습니다.', 'success');
+      if (!res.ok) throw new Error(json?.message || '카드 문의 실패');
+      toast('카드 문의를 접수했습니다.', 'success');
       setRightForm({ streamerId: '', requestType: 'text_change', payloadText: '' });
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '권리 요청 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '카드 문의 중 문제가 발생했습니다.', 'error');
+    }
+  };
+
+  const saveMyStreamerCard = async () => {
+    if (!myStreamerCard?.canEdit) {
+      setNotice('현재 시즌 상태에서는 스트리머 카드 설정을 변경할 수 없습니다.');
+      return;
+    }
+    try {
+      const res = await apiFetch('/arena/streamer-card/me', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          displayName: streamerCardForm.displayName,
+          cardClass: streamerCardForm.cardClass,
+          cost: Number(streamerCardForm.cost),
+          attack: Number(streamerCardForm.attack),
+          health: Number(streamerCardForm.health),
+          keywords: parseKeywordEditorText(streamerCardForm.keywordsText),
+          artAssetId: streamerCardForm.artAssetId || undefined
+        })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.accepted === false) {
+        const message = json?.validation?.errors?.[0]?.message || json?.message || '현재 수치 조합으로는 저장할 수 없습니다.';
+        setMyStreamerCard((current) => current ? { ...current, validation: json?.validation } : current);
+        throw new Error(message);
+      }
+      toast('스트리머 카드 설정을 저장했습니다.', 'success');
+      await loadArenaV2();
+    } catch (error: any) {
+      toast(error?.message || '스트리머 카드 저장 중 문제가 발생했습니다.', 'error');
+    }
+  };
+
+  const toggleMyStreamerCard = async (enabled: boolean) => {
+    try {
+      const res = await apiFetch(enabled ? '/arena/streamer-card/me/enable' : '/arena/streamer-card/me/disable', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '스트리머 카드 상태 변경 실패');
+      toast(enabled ? '스트리머 카드를 활성화했습니다.' : '스트리머 카드를 비활성화했습니다.', 'success');
+      await loadArenaV2();
+    } catch (error: any) {
+      toast(error?.message || '스트리머 카드 상태 변경 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -525,7 +693,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       toast('시즌을 생성했습니다.', 'success');
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '시즌 생성 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '시즌 생성 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -541,7 +709,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       toast(`시즌 상태를 ${toStatus}(으)로 전환했습니다.`, 'success');
       await loadArenaV2();
     } catch (error: any) {
-      toast(error?.message || '시즌 상태 전환 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '시즌 상태 전환 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -554,9 +722,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '보상 작업 실패');
-      toast(dryRun ? `보상 미리보기 ${json?.preview?.totalPlayers ?? 0}명` : `보상 grant 생성 ${json?.granted ?? 0}건`, 'success');
+      toast(dryRun ? `보상 대상 ${json?.preview?.totalPlayers ?? 0}명 확인` : `보상 ${json?.granted ?? 0}건 준비 완료`, 'success');
     } catch (error: any) {
-      toast(error?.message || '보상 작업 중 오류가 발생했습니다.', 'error');
+      toast(error?.message || '보상 작업 중 문제가 발생했습니다.', 'error');
     }
   };
 
@@ -564,16 +732,16 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     <div className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div className="min-w-0">
-          <p className="arena-v2-kicker">CHIKAPO ARENA V2</p>
-          <h2>2x3 보드 기반 실시간 카드 배틀</h2>
-          <p>{season ? `${season.name} · ${season.status}` : '활성 시즌 대기 중'} · 덱 14~20장 · 턴 제한 40초</p>
+          <p className="arena-v2-kicker">CHIKAPO ARENA</p>
+          <h2>스트리머 카드로 라인을 장악하세요</h2>
+          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 덱 14~20장 · 40초 승부</p>
         </div>
         <div className="arena-v2-top-actions">
-          <button type="button" onClick={loadArenaV2} className="arena-v2-icon-button" aria-label="아레나 데이터 새로고침">
+          <button type="button" onClick={loadArenaV2} className="arena-v2-icon-button" aria-label="아레나 새로고침">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button type="button" onClick={startBotMatch} className="arena-v2-primary-button">
-            <Bot className="h-4 w-4" /> 봇전 시작
+            <Bot className="h-4 w-4" /> 연습전 시작
           </button>
         </div>
       </section>
@@ -603,7 +771,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <div className="arena-v2-player-strip is-opponent">
             <div>
               <span>상대</span>
-              <strong>BOT NORMAL</strong>
+              <strong>연습 상대</strong>
             </div>
             <div className="arena-v2-resource"><Gauge className="h-4 w-4" /> 6 / 9</div>
           </div>
@@ -611,7 +779,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             {boardCards.slice(0, 3).map((card, index) => <BoardSlot key={`op-${card.id}`} card={card} lane="전열" index={index} side="opponent" />)}
             {boardCards.slice(3, 6).map((card, index) => <BoardSlot key={`op-b-${card.id}`} card={index === 1 ? undefined : card} lane="후열" index={index} side="opponent" />)}
           </div>
-          <div className="arena-v2-lane-divider"><span>전투 해결은 서버 순서대로 처리됩니다</span></div>
+          <div className="arena-v2-lane-divider"><span>전열이 먼저 맞붙고, 후열이 빈틈을 노립니다</span></div>
           <div className="arena-v2-board" aria-label="내 2행 3열 보드">
             {boardCards.slice(0, 3).map((card, index) => <BoardSlot key={`pl-${card.id}`} card={index === 2 ? undefined : card} lane="전열" index={index} side="player" />)}
             {boardCards.slice(3, 6).map((card, index) => <BoardSlot key={`pl-b-${card.id}`} card={card} lane="후열" index={index} side="player" />)}
@@ -632,20 +800,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">선택 덱</span>
             <select value={selectedDeckId} onChange={(event) => setSelectedDeckId(event.target.value)} className="arena-v2-select" aria-label="봇전에 사용할 덱 선택">
-              <option value="">유효한 덱 없음</option>
+              <option value="">대전 가능한 덱 없음</option>
               {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name} · {formatMode(deck.modeScope)}</option>)}
             </select>
-            <p>{selectedDeck ? `${selectedDeck.cardVersionIds.length}장 · ${selectedDeck.isValid ? '검증 통과' : '검증 실패'}` : '덱을 저장하면 바로 선택할 수 있습니다.'}</p>
+            <p>{selectedDeck ? `${selectedDeck.cardVersionIds.length}장 · ${deckStateLabel(selectedDeck.isValid)}` : '덱을 저장하면 바로 선택할 수 있습니다.'}</p>
           </div>
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">현재 행동</span>
             <div className="arena-v2-action-order">
               {phases.map((phase) => <span key={phase.id}>{phase.label}</span>)}
             </div>
-            <p>클라이언트는 의도만 보내고, 검증과 처리 순서는 서버가 확정합니다.</p>
+            <p>카드를 옮기고, 빈 칸에 배치하고, 결정적인 순간에 교체하세요.</p>
           </div>
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">대전 큐</span>
+            <span className="arena-v2-panel-label">대전 찾기</span>
             <div className="arena-v2-queue-actions">
               <button type="button" onClick={() => joinQueue('quick')}><Swords className="h-4 w-4" /> 빠른대전</button>
               <button type="button" onClick={() => joinQueue('battle_royale_8')}><Users className="h-4 w-4" /> 8인전</button>
@@ -657,9 +825,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       <section className="arena-v2-hand-rail" aria-label="카드 풀과 덱 구성">
         <div className="arena-v2-hand-header">
           <div>
-            <p className="arena-v2-kicker">CARD POOL</p>
+            <p className="arena-v2-kicker">CARD LINEUP</p>
             <h3>공식 덱 구성</h3>
-            <span>동일 카드 버전과 동일 스트리머 중복은 서버 검증에서 제외됩니다.</span>
+            <span>한 스트리머는 한 장만 선택할 수 있습니다.</span>
           </div>
           <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
             <strong>{deckCount}</strong>
@@ -679,15 +847,15 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   );
 
   const issueText = (issue: string | { code?: string; message?: string }) =>
-    typeof issue === 'string' ? issue : issue.message || issue.code || '검증 이슈';
+    typeof issue === 'string' ? issue : issue.message || issue.code || '확인 필요';
 
   const renderInventory = () => (
     <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div>
-          <p className="arena-v2-kicker">DECK INVENTORY</p>
+          <p className="arena-v2-kicker">DECK VAULT</p>
           <h2>덱과 카드 보관함</h2>
-          <p>{season ? `${season.name} · ${season.status}` : '활성 시즌 없음'} · 저장 덱 {decks.length}개 · 카드 풀 {realCards.length}장</p>
+          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 저장 덱 {decks.length}개 · 카드 {cards.length}장</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
@@ -696,8 +864,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       <section className="arena-v2-stage">
         <aside className="arena-v2-command-panel">
           <StatTile icon={Layers3} label="저장 덱" value={`${decks.length}`} tone="cyan" />
-          <StatTile icon={Check} label="유효 덱" value={`${decks.filter((deck) => deck.isValid).length}`} tone="green" />
-          <StatTile icon={AlertTriangle} label="검증 실패" value={`${decks.filter((deck) => !deck.isValid).length}`} tone="gold" />
+          <StatTile icon={Check} label="대전 가능" value={`${decks.filter((deck) => deck.isValid).length}`} tone="green" />
+          <StatTile icon={AlertTriangle} label="수정 필요" value={`${decks.filter((deck) => !deck.isValid).length}`} tone="gold" />
         </aside>
         <div className="arena-v2-board-wrap">
           <div className="arena-v2-panel-section">
@@ -708,20 +876,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   <span>{deck.name}</span>
                   <span>{formatMode(deck.modeScope)}</span>
                   <span>{deck.cardVersionIds.length}장</span>
-                  <span>{deck.isValid ? '검증 통과' : '검증 실패'}</span>
-                  <button type="button" onClick={() => revalidateDeck(deck.id)}>재검증</button>
+                  <span>{deckStateLabel(deck.isValid)}</span>
+                  <button type="button" onClick={() => revalidateDeck(deck.id)}>상태 확인</button>
                   <button type="button" onClick={() => deleteDeck(deck.id)}>삭제</button>
                 </div>
-              )) : <p>저장된 v2 덱이 없습니다. 플레이 탭에서 실제 카드 14~20장을 선택해 저장합니다.</p>}
+              )) : <p>저장된 덱이 없습니다. 플레이 탭에서 카드 14~20장을 선택해 저장합니다.</p>}
             </div>
           </div>
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">검증 메시지</span>
+            <span className="arena-v2-panel-label">덱 점검</span>
             <div className="arena-v2-replay-list">
               {decks.flatMap((deck) => (deck.validationResult?.errors || []).map((issue, index) => (
                 <span key={`${deck.id}-error-${index}`}><AlertTriangle className="h-3.5 w-3.5" />{deck.name} · {issueText(issue)}</span>
               ))).slice(0, 12)}
-              {!decks.some((deck) => (deck.validationResult?.errors || []).length) ? <p>표시할 검증 오류가 없습니다.</p> : null}
+              {!decks.some((deck) => (deck.validationResult?.errors || []).length) ? <p>모든 덱이 대전 준비를 마쳤습니다.</p> : null}
             </div>
           </div>
         </div>
@@ -734,8 +902,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       <section className="arena-v2-topbar">
         <div>
           <p className="arena-v2-kicker">SEASON RANKING</p>
-          <h2>MMR 랭킹과 내 보상</h2>
-          <p>{season ? `${season.name} · ${season.status}` : '활성 시즌 없음'} · 빠른대전 결과 기준</p>
+          <h2>시즌 랭킹과 내 보상</h2>
+          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 빠른대전 결과 기준</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
@@ -744,11 +912,11 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       <section className="arena-v2-stage">
         <aside className="arena-v2-command-panel">
           <StatTile icon={Trophy} label="랭킹 인원" value={`${rankings.length}`} tone="gold" />
-          <StatTile icon={Gauge} label="내 MMR" value={`${rewardState?.rating?.mmr ?? 1000}`} tone="cyan" />
+          <StatTile icon={Gauge} label="내 점수" value={`${rewardState?.rating?.mmr ?? 1000}`} tone="cyan" />
           <StatTile icon={Crown} label="최고 등급" value={`${rewardState?.rating?.peakTier ?? 'bronze'}`} tone="green" />
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">보상 상태</span>
-            <p>{rewardState?.grant ? `${rewardState.grant.status}${rewardState.grant.holdReason ? ` · ${rewardState.grant.holdReason}` : ''}` : '아직 생성된 보상 grant가 없습니다.'}</p>
+            <p>{rewardState?.grant ? `${rewardStatusLabel(rewardState.grant.status)}${rewardState.grant.holdReason ? ` · ${rewardState.grant.holdReason}` : ''}` : '아직 받을 보상이 없습니다.'}</p>
           </div>
         </aside>
         <div className="arena-v2-board-wrap">
@@ -759,7 +927,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 <div key={`${item.rank}-${item.userId}`} className="arena-v2-action-order">
                   <span>#{item.rank}</span>
                   <span>{item.displayName || item.userId}</span>
-                  <span>{item.mmr} MMR</span>
+                  <span>{item.mmr}점</span>
                   <span>{item.tier}</span>
                   <span>{item.wins}승 {item.losses}패 {item.draws}무</span>
                 </div>
@@ -775,9 +943,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div>
-          <p className="arena-v2-kicker">WIKI · REPORTS · RIGHTS</p>
-          <h2>위키, 신고, 스트리머 권리 요청</h2>
-          <p>전투 판독성과 운영 증거 보존을 우선하는 v2 운영 흐름입니다.</p>
+          <p className="arena-v2-kicker">CARD STUDIO · HELP</p>
+          <h2>내 카드와 문의</h2>
+          <p>내 스트리머 카드를 꾸미고, 경기 중 불편했던 장면을 편하게 알려주세요.</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
@@ -786,21 +954,54 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       <section className="arena-v2-stage">
         <aside className="arena-v2-command-panel">
           <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">내 스트리머 카드 설정</span>
+            {myStreamerCard ? (
+              <>
+                <p>{myStreamerCard.streamer?.name || myStreamerCard.streamer?.channelId || '등록 스트리머'} · {myStreamerCard.canEdit ? '편집 가능' : '이번 시즌 수정 마감'}</p>
+                <input value={streamerCardForm.displayName} onChange={(event) => setStreamerCardForm((current) => ({ ...current, displayName: event.target.value }))} className="arena-v2-select" placeholder="카드 이름" disabled={!myStreamerCard.canEdit} />
+                <select value={streamerCardForm.cardClass} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cardClass: event.target.value }))} className="arena-v2-select" disabled={!myStreamerCard.canEdit}>
+                  {legalCardClasses.map((cardClass) => (
+                    <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
+                  ))}
+                </select>
+                <div className="arena-v2-action-order">
+                  <input type="number" min={1} max={9} value={streamerCardForm.cost} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cost: event.target.value }))} className="arena-v2-select" aria-label="코스트" disabled={!myStreamerCard.canEdit} />
+                  <input type="number" min={0} max={9} value={streamerCardForm.attack} onChange={(event) => setStreamerCardForm((current) => ({ ...current, attack: event.target.value }))} className="arena-v2-select" aria-label="공격력" disabled={!myStreamerCard.canEdit} />
+                  <input type="number" min={1} max={20} value={streamerCardForm.health} onChange={(event) => setStreamerCardForm((current) => ({ ...current, health: event.target.value }))} className="arena-v2-select" aria-label="체력" disabled={!myStreamerCard.canEdit} />
+                </div>
+                <input value={streamerCardForm.keywordsText} onChange={(event) => setStreamerCardForm((current) => ({ ...current, keywordsText: event.target.value }))} className="arena-v2-select" placeholder="효과 키워드: 도발:1, 보호:1" disabled={!myStreamerCard.canEdit} />
+                <input value={streamerCardForm.artAssetId} onChange={(event) => setStreamerCardForm((current) => ({ ...current, artAssetId: event.target.value }))} className="arena-v2-select" placeholder="카드 이미지 주소" disabled={!myStreamerCard.canEdit} />
+                {myStreamerCard.validation?.errors?.length ? (
+                  <div className="arena-v2-replay-list">
+                    {myStreamerCard.validation.errors.map((error, index) => <span key={`${error.code || 'error'}-${index}`}>{error.message || error.code}</span>)}
+                  </div>
+                ) : null}
+                <div className="arena-v2-queue-actions">
+                  <button type="button" onClick={saveMyStreamerCard} disabled={!myStreamerCard.canEdit}>저장</button>
+                  <button type="button" onClick={() => toggleMyStreamerCard(false)}>비활성화</button>
+                  <button type="button" onClick={() => toggleMyStreamerCard(true)}>활성화</button>
+                </div>
+              </>
+            ) : (
+              <p>내 계정으로 꾸밀 수 있는 스트리머 카드가 없습니다.</p>
+            )}
+          </div>
+          <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">신고 접수</span>
             <select value={reportForm.targetType} onChange={(event) => setReportForm((current) => ({ ...current, targetType: event.target.value }))} className="arena-v2-select">
               <option value="card">카드</option>
               <option value="match">매치</option>
-              <option value="replay">리플레이</option>
+              <option value="replay">전투 장면</option>
               <option value="user">유저</option>
               <option value="battle_royale">8인전</option>
             </select>
-            <input value={reportForm.targetId} onChange={(event) => setReportForm((current) => ({ ...current, targetId: event.target.value }))} className="arena-v2-select" placeholder="대상 ID" />
+            <input value={reportForm.targetId} onChange={(event) => setReportForm((current) => ({ ...current, targetId: event.target.value }))} className="arena-v2-select" placeholder="카드, 경기, 사용자 이름" />
             <input value={reportForm.reason} onChange={(event) => setReportForm((current) => ({ ...current, reason: event.target.value }))} className="arena-v2-select" placeholder="신고 사유" />
             <button type="button" onClick={submitReport} className="arena-v2-primary-button">신고 제출</button>
           </div>
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">권리 요청</span>
-            <input value={rightForm.streamerId} onChange={(event) => setRightForm((current) => ({ ...current, streamerId: event.target.value }))} className="arena-v2-select" placeholder="스트리머 ID" />
+            <span className="arena-v2-panel-label">카드 문의</span>
+            <input value={rightForm.streamerId} onChange={(event) => setRightForm((current) => ({ ...current, streamerId: event.target.value }))} className="arena-v2-select" placeholder="스트리머 이름" />
             <select value={rightForm.requestType} onChange={(event) => setRightForm((current) => ({ ...current, requestType: event.target.value }))} className="arena-v2-select">
               <option value="text_change">문구 변경</option>
               <option value="image_change">이미지 변경</option>
@@ -808,22 +1009,41 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <option value="disable_version">버전 비활성</option>
               <option value="opt_out">참여 제외</option>
             </select>
-            <input value={rightForm.payloadText} onChange={(event) => setRightForm((current) => ({ ...current, payloadText: event.target.value }))} className="arena-v2-select" placeholder="요청 내용 또는 JSON" />
-            <button type="button" onClick={submitRightRequest} className="arena-v2-primary-button">권리 요청</button>
+            <input value={rightForm.payloadText} onChange={(event) => setRightForm((current) => ({ ...current, payloadText: event.target.value }))} className="arena-v2-select" placeholder="요청 내용을 입력하세요" />
+            <button type="button" onClick={submitRightRequest} className="arena-v2-primary-button">문의 보내기</button>
           </div>
         </aside>
         <div className="arena-v2-board-wrap">
+          {myStreamerCard?.card ? (
+            <div className="arena-v2-panel-section">
+              <span className="arena-v2-panel-label">내 카드 미리보기</span>
+              <div className="arena-v2-card-row">
+                <ArenaV2CardView
+                  card={{
+                    ...myStreamerCard.card,
+                    displayName: streamerCardForm.displayName || myStreamerCard.card.displayName,
+                    cardClass: streamerCardForm.cardClass,
+                    cost: Number.isFinite(Number(streamerCardForm.cost)) ? Number(streamerCardForm.cost) : myStreamerCard.card.cost,
+                    attack: Number.isFinite(Number(streamerCardForm.attack)) ? Number(streamerCardForm.attack) : myStreamerCard.card.attack,
+                    health: Number.isFinite(Number(streamerCardForm.health)) ? Number(streamerCardForm.health) : myStreamerCard.card.health,
+                    keywords: parseKeywordEditorText(streamerCardForm.keywordsText).map((keyword: any) => String(keyword.type || '')).filter(Boolean),
+                    artAssetId: streamerCardForm.artAssetId || myStreamerCard.card.artAssetId
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">위키</span>
+            <span className="arena-v2-panel-label">가이드</span>
             <div className="arena-v2-replay-list">
-              {wikiEntries.length ? wikiEntries.map((entry) => <span key={entry.slug}>{entry.category} · {entry.title}</span>) : <p>위키 항목이 없습니다.</p>}
+              {wikiEntries.length ? wikiEntries.map((entry) => <span key={entry.slug}>{entry.category} · {entry.title}</span>) : <p>아직 준비된 가이드가 없습니다.</p>}
             </div>
           </div>
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">내 신고/권리 요청</span>
+            <span className="arena-v2-panel-label">내 문의 내역</span>
             <div className="arena-v2-replay-list">
-              {reports.map((report) => <span key={report.id}>신고 · {report.targetType}:{report.targetId} · {report.status}</span>)}
-              {rightRequests.map((request) => <span key={request.id}>권리 · {request.streamerId} · {request.requestType} · {request.status}</span>)}
+              {reports.map((report) => <span key={report.id}>신고 · {targetTypeLabel(report.targetType)} · {requestStatusLabel(report.status)}</span>)}
+              {rightRequests.map((request) => <span key={request.id}>문의 · {requestTypeLabel(request.requestType)} · {requestStatusLabel(request.status)}</span>)}
               {!reports.length && !rightRequests.length ? <p>접수된 내역이 없습니다.</p> : null}
             </div>
           </div>
@@ -836,9 +1056,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div>
-          <p className="arena-v2-kicker">ADMIN OPS</p>
+          <p className="arena-v2-kicker">ARENA CONTROL</p>
           <h2>시즌 운영과 정산</h2>
-          <p>{season ? `${season.name} · ${season.status}` : '생성된 활성 시즌 없음'}</p>
+          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '진행 중인 시즌 없음'}</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
@@ -848,7 +1068,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         <aside className="arena-v2-command-panel">
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">시즌 생성</span>
-            <input className="arena-v2-select" placeholder="seasonKey" value={adminSeasonForm.seasonKey} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, seasonKey: event.target.value }))} />
+            <input className="arena-v2-select" placeholder="시즌 코드" value={adminSeasonForm.seasonKey} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, seasonKey: event.target.value }))} />
             <input className="arena-v2-select" placeholder="시즌 이름" value={adminSeasonForm.name} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, name: event.target.value }))} />
             <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.startsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, startsAt: event.target.value }))} />
             <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.endsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, endsAt: event.target.value }))} />
@@ -860,23 +1080,23 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <span className="arena-v2-panel-label">상태 전환</span>
             <div className="arena-v2-queue-actions">
               {['scheduled', 'active', 'locked', 'settling', 'closed', 'cancelled'].map((status) => (
-                <button key={status} type="button" onClick={() => transitionSeason(status)} disabled={!season?.id}>{status}</button>
+                <button key={status} type="button" onClick={() => transitionSeason(status)} disabled={!season?.id}>{seasonStatusLabel(status)}</button>
               ))}
             </div>
           </div>
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">보상 정산</span>
             <div className="arena-v2-queue-actions">
-              <button type="button" onClick={() => grantRewards(true)} disabled={!season?.id}>미리보기</button>
-              <button type="button" onClick={() => grantRewards(false)} disabled={!season?.id}>Grant 생성</button>
+              <button type="button" onClick={() => grantRewards(true)} disabled={!season?.id}>대상 확인</button>
+              <button type="button" onClick={() => grantRewards(false)} disabled={!season?.id}>보상 준비</button>
             </div>
-            <p>보상 지급은 arena_v2_reward_grants에 멱등 key로 생성되며 실제 지급기는 pending grant를 소비합니다.</p>
+            <p>시즌 결과에 따라 받을 보상을 준비합니다.</p>
           </div>
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">큐 상태</span>
+            <span className="arena-v2-panel-label">대전 대기 상태</span>
             <div className="arena-v2-replay-list">
-              <span>빠른대전 · {queueStatus.quick?.status || 'none'} {queueStatus.quick?.matchId ? `· ${queueStatus.quick.matchId}` : ''}</span>
-              <span>8인전 · {queueStatus.battleRoyale?.status || 'none'} {queueStatus.battleRoyale?.participantCount != null ? `· ${queueStatus.battleRoyale.participantCount}/8` : ''}</span>
+              <span>빠른대전 · {requestStatusLabel(queueStatus.quick?.status)} {queueStatus.quick?.matchId ? '· 매칭 완료' : ''}</span>
+              <span>8인전 · {requestStatusLabel(queueStatus.battleRoyale?.status)} {queueStatus.battleRoyale?.participantCount != null ? `· ${queueStatus.battleRoyale.participantCount}/8` : ''}</span>
             </div>
           </div>
         </div>

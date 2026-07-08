@@ -39,6 +39,16 @@ export interface ArenaV2CardVersionDto {
   health: number;
   keywords: ArenaV2KeywordDto[];
   status: ArenaV2CardStatusDto;
+  artAssetId?: string | null;
+  balanceScore?: number;
+  validationResult?: ArenaV2ValidationResultDto | null;
+  streamer?: {
+    channelId: string;
+    name: string;
+    logoUrl?: string | null;
+    customImageUrl?: string | null;
+    isImageBanned?: boolean;
+  };
 }
 
 export interface ArenaV2DeckDto {

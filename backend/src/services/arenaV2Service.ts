@@ -1,10 +1,16 @@
 import crypto from 'crypto';
-import type { ArenaV2CardVersionDto, ArenaV2TurnActionDto } from '@chikapo/arena-contract';
+import type {
+  ArenaV2CardClassDto,
+  ArenaV2CardVersionDto,
+  ArenaV2TurnActionDto,
+  ArenaV2ValidationResultDto
+} from '@chikapo/arena-contract';
 import { getDbMode, getMysqlDb, getSqliteDb } from './db';
 import {
   createArenaV2BotTurnActions,
   getArenaV2AvailableCost,
   resolveArenaV2Turn,
+  validateArenaV2CardVersionDefinition,
   validateArenaV2Deck,
   validateArenaV2TurnAction,
   type ArenaV2RuntimeCardInstance,
@@ -47,6 +53,17 @@ export interface ArenaV2StreamerRightRequestInput {
   streamerId: string;
   requestType: 'opt_out' | 'image_change' | 'text_change' | 'card_config' | 'disable_version';
   payload: unknown;
+}
+
+export interface ArenaV2StreamerCardConfigInput {
+  requesterUserId: string;
+  displayName?: string;
+  cardClass: string;
+  cost: number;
+  attack: number;
+  health: number;
+  keywords: unknown[];
+  artAssetId?: string | null;
 }
 
 export interface ArenaV2AdminSeasonInput {
@@ -137,6 +154,99 @@ const stableHash = (value: string): string => crypto.createHash('sha256').update
 
 const stableShuffle = <T extends { id: string }>(items: T[], seed: string): T[] =>
   [...items].sort((a, b) => stableHash(`${seed}:${a.id}`).localeCompare(stableHash(`${seed}:${b.id}`)));
+
+const ARENA_V2_CARD_CLASSES: ArenaV2CardClassDto[] = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
+
+const defaultClassKeywords: Record<string, Array<{ type: string; value?: number; limit?: string }>> = {
+  charge: [{ type: 'pierce', value: 1 }],
+  guardian: [{ type: 'shield', value: 1 }],
+  sniper: [{ type: 'aim' }],
+  support: [{ type: 'guard_support', value: 1 }],
+  trick: [{ type: 'weaken', value: 1 }],
+  specter: [{ type: 'remnant', value: 1 }],
+  tech: [{ type: 'battle_draw', value: 1 }]
+};
+
+const normalizeArenaV2KeywordList = (value: unknown): Array<{ type: string; value?: number; limit?: string }> => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 3)
+    .map((item) => {
+      if (typeof item === 'string') return { type: item.trim() };
+      if (!item || typeof item !== 'object') return null;
+      const raw = item as Record<string, unknown>;
+      const type = String(raw.type || '').trim();
+      if (!type) return null;
+      const keyword: { type: string; value?: number; limit?: string } = { type };
+      const valueNumber = Number(raw.value);
+      if (Number.isInteger(valueNumber)) keyword.value = valueNumber;
+      if (typeof raw.limit === 'string' && raw.limit.trim()) keyword.limit = raw.limit.trim();
+      return keyword;
+    })
+    .filter((item): item is { type: string; value?: number; limit?: string } => Boolean(item));
+};
+
+const sanitizeCardDisplayName = (value: unknown, fallback: string): string => {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  return (normalized || fallback).slice(0, 40);
+};
+
+const normalizeArenaV2CardClass = (value: unknown, fallback: ArenaV2CardClassDto = 'charge'): ArenaV2CardClassDto => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ARENA_V2_CARD_CLASSES.includes(normalized as ArenaV2CardClassDto) ? normalized as ArenaV2CardClassDto : fallback;
+};
+
+const defaultArenaV2CardClassForStreamer = (streamerId: string): ArenaV2CardClassDto => {
+  const hash = crypto.createHash('sha256').update(`arena-v2-class:${streamerId}`).digest();
+  return ARENA_V2_CARD_CLASSES[hash[0] % ARENA_V2_CARD_CLASSES.length];
+};
+
+const defaultArenaV2CardStatsForStreamer = (streamer: any) => {
+  const baseValue = Math.max(0, Number(streamer.base_value || 0));
+  const followerCount = Math.max(0, Number(streamer.follower_count || 0));
+  const signal = baseValue + Math.floor(followerCount / 250);
+  const cost = Math.max(1, Math.min(9, 1 + Math.floor(Math.log10(Math.max(10, signal)) * 2)));
+  const attack = Math.max(0, Math.min(cost, Math.ceil(cost * 0.55)));
+  const health = Math.max(1, Math.min(cost * 2 + 2, cost + 2));
+  return { cost, attack, health };
+};
+
+const defaultArenaV2ArtAssetForStreamer = (streamer: any): string | null => {
+  const candidates = [
+    streamer.custom_image_url,
+    streamer.custom_image_url_1,
+    streamer.custom_image_url_2,
+    streamer.custom_image_url_3,
+    streamer.custom_image_url_4,
+    streamer.custom_image_url_5,
+    streamer.logo_url
+  ].filter(Boolean);
+  return candidates.length ? String(candidates[0]) : null;
+};
+
+const serializeArenaV2CardVersionRow = (row: any) => ({
+  id: row.id,
+  streamerId: row.streamer_id,
+  displayName: row.display_name,
+  seasonId: row.season_id,
+  version: Number(row.version),
+  cardClass: row.card_class,
+  cost: Number(row.cost),
+  attack: Number(row.attack),
+  health: Number(row.health),
+  keywords: jsonParse(row.keywords, []),
+  balanceScore: Number(row.balance_score || 0),
+  validationResult: jsonParse<ArenaV2ValidationResultDto | null>(row.validation_result, null),
+  artAssetId: row.art_asset_id || row.streamer_custom_image || row.streamer_logo || null,
+  status: row.status,
+  streamer: row.streamer_name ? {
+    channelId: row.streamer_id,
+    name: row.streamer_name,
+    logoUrl: row.streamer_logo || null,
+    customImageUrl: row.streamer_custom_image || null,
+    isImageBanned: Boolean(Number(row.streamer_is_image_banned || 0))
+  } : undefined
+});
 
 const getExecutor = (): SqlExecutor | null => {
   if (testExecutor) return testExecutor;
@@ -346,33 +456,161 @@ export const validateArenaV2DeckForSeason = async (seasonId: string, cardVersion
   return validateArenaV2Deck({ seasonId, cardVersionIds, cardsByVersionId });
 };
 
+const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: any) => {
+  const streamerId = String(streamer.channel_id || '').trim();
+  const cardClass = defaultArenaV2CardClassForStreamer(streamerId);
+  const stats = defaultArenaV2CardStatsForStreamer(streamer);
+  const keywords = stats.cost <= 1 ? [] : defaultClassKeywords[cardClass] || [];
+  const candidate = {
+    id: `arena_v2_card_${seasonId}_${streamerId}`,
+    streamerId,
+    seasonId,
+    status: 'active' as const,
+    cardClass,
+    cost: stats.cost,
+    attack: stats.attack,
+    health: stats.health,
+    keywords,
+    validationResult: null
+  };
+  const validation = validateArenaV2CardVersionDefinition(candidate);
+  if (!validation.valid) {
+    const fallback = {
+      ...candidate,
+      cardClass: 'charge' as ArenaV2CardClassDto,
+      cost: 2,
+      attack: 1,
+      health: 4,
+      keywords: [] as Array<{ type: string; value?: number; limit?: string }>
+    };
+    const fallbackValidation = validateArenaV2CardVersionDefinition(fallback);
+    return {
+      ...fallback,
+      displayName: sanitizeCardDisplayName(streamer.name, streamerId),
+      validation: fallbackValidation,
+      balanceScore: fallback.attack * 3 + fallback.health,
+      artAssetId: defaultArenaV2ArtAssetForStreamer(streamer)
+    };
+  }
+  return {
+    ...candidate,
+    displayName: sanitizeCardDisplayName(streamer.name, streamerId),
+    validation,
+    balanceScore: stats.attack * 3 + stats.health + keywords.length,
+    artAssetId: defaultArenaV2ArtAssetForStreamer(streamer)
+  };
+};
+
+export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
+  if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamers = await queryAll<any>(
+    db,
+    `
+      SELECT channel_id, name, logo_url, custom_image_url, custom_image_url_1, custom_image_url_2,
+             custom_image_url_3, custom_image_url_4, custom_image_url_5,
+             follower_count, base_value, is_active, is_image_banned
+        FROM streamers
+       WHERE COALESCE(is_image_banned, 0) = 0
+       ORDER BY base_value DESC, channel_id ASC
+       LIMIT 5000
+    `
+  );
+
+  let created = 0;
+  let skipped = 0;
+  for (const streamer of streamers) {
+    const streamerId = String(streamer.channel_id || '').trim();
+    if (!streamerId) {
+      skipped += 1;
+      continue;
+    }
+    const existing = await queryGet<{ id: string }>(
+      db,
+      `
+        SELECT id
+          FROM arena_v2_card_versions
+         WHERE season_id = ? AND streamer_id = ? AND status = 'active'
+         LIMIT 1
+      `,
+      [activeSeason.id, streamerId]
+    );
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const card = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
+    await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_card_versions
+          (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
+        VALUES
+          (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `,
+      [
+        card.id,
+        streamerId,
+        card.displayName,
+        activeSeason.id,
+        card.cardClass,
+        card.cost,
+        card.attack,
+        card.health,
+        JSON.stringify(card.keywords),
+        card.balanceScore,
+        JSON.stringify(card.validation),
+        card.artAssetId
+      ]
+    );
+    created += 1;
+  }
+
+  return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
+};
+
+const ensureArenaV2CardsForSeason = async (db: SqlExecutor, seasonId: string) => {
+  const existing = await queryGet<{ count: number }>(
+    db,
+    'SELECT COUNT(*) AS count FROM arena_v2_card_versions WHERE season_id = ? AND status = ?',
+    [seasonId, 'active']
+  );
+  if (Number(existing?.count || 0) > 0) return;
+  await syncArenaV2CardsFromRegisteredStreamers(seasonId);
+};
+
 export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => {
   const db = getExecutor();
   if (!db) return [];
   const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
+  await ensureArenaV2CardsForSeason(db, seasonId);
 
-  const where = ['season_id = ?', "status = 'active'"];
+  const where = ['cv.season_id = ?', "cv.status = 'active'"];
   const params: any[] = [seasonId];
   if (filters.class) {
-    where.push('card_class = ?');
+    where.push('cv.card_class = ?');
     params.push(filters.class);
   }
   if (Number.isFinite(filters.costMin)) {
-    where.push('cost >= ?');
+    where.push('cv.cost >= ?');
     params.push(filters.costMin);
   }
   if (Number.isFinite(filters.costMax)) {
-    where.push('cost <= ?');
+    where.push('cv.cost <= ?');
     params.push(filters.costMax);
   }
   if (filters.keyword) {
-    where.push('keywords LIKE ?');
+    where.push('cv.keywords LIKE ?');
     params.push(`%${filters.keyword}%`);
   }
   if (filters.streamerName) {
-    where.push('display_name LIKE ?');
+    where.push('(display_name LIKE ? OR s.name LIKE ? OR streamer_id LIKE ?)');
+    params.push(`%${filters.streamerName}%`);
+    params.push(`%${filters.streamerName}%`);
     params.push(`%${filters.streamerName}%`);
   }
   params.push(Math.min(Math.max(Number(filters.limit || 40), 1), 100));
@@ -380,31 +618,24 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
   const rows = await queryAll<any>(
     db,
     `
-      SELECT id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status
-        FROM arena_v2_card_versions
+      SELECT cv.id, cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost,
+             cv.attack, cv.health, cv.keywords, cv.balance_score, cv.validation_result,
+             COALESCE(cv.art_asset_id, s.custom_image_url, s.logo_url) AS art_asset_id,
+             cv.status,
+             s.name AS streamer_name,
+             s.logo_url AS streamer_logo,
+             s.custom_image_url AS streamer_custom_image,
+             s.is_image_banned AS streamer_is_image_banned
+        FROM arena_v2_card_versions cv
+        LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
        WHERE ${where.join(' AND ')}
-       ORDER BY cost ASC, display_name ASC, id ASC
+       ORDER BY cv.cost ASC, cv.display_name ASC, cv.id ASC
        LIMIT ?
     `,
     params
   );
 
-  return rows.map((row) => ({
-    id: row.id,
-    streamerId: row.streamer_id,
-    displayName: row.display_name,
-    seasonId: row.season_id,
-    version: Number(row.version),
-    cardClass: row.card_class,
-    cost: Number(row.cost),
-    attack: Number(row.attack),
-    health: Number(row.health),
-    keywords: jsonParse(row.keywords, []),
-    balanceScore: Number(row.balance_score || 0),
-    validationResult: jsonParse(row.validation_result, null),
-    artAssetId: row.art_asset_id,
-    status: row.status
-  }));
+  return rows.map(serializeArenaV2CardVersionRow);
 };
 
 export const getArenaV2CardVersion = async (cardVersionId: string) => {
@@ -413,30 +644,216 @@ export const getArenaV2CardVersion = async (cardVersionId: string) => {
   const row = await queryGet<any>(
     db,
     `
-      SELECT id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status
-        FROM arena_v2_card_versions
-       WHERE id = ?
+      SELECT cv.id, cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost,
+             cv.attack, cv.health, cv.keywords, cv.balance_score, cv.validation_result,
+             COALESCE(cv.art_asset_id, s.custom_image_url, s.logo_url) AS art_asset_id,
+             cv.status,
+             s.name AS streamer_name,
+             s.logo_url AS streamer_logo,
+             s.custom_image_url AS streamer_custom_image,
+             s.is_image_banned AS streamer_is_image_banned
+        FROM arena_v2_card_versions cv
+        LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
+       WHERE cv.id = ?
        LIMIT 1
     `,
     [cardVersionId]
   );
   if (!row) return null;
+  return serializeArenaV2CardVersionRow(row);
+};
+
+const findArenaV2OwnedStreamer = async (db: SqlExecutor, userId: string) => queryGet<any>(
+  db,
+  `
+    SELECT channel_id, name, logo_url, custom_image_url, custom_image_url_1, custom_image_url_2,
+           custom_image_url_3, custom_image_url_4, custom_image_url_5,
+           follower_count, base_value, is_active, is_image_banned, registered_by
+      FROM streamers
+     WHERE channel_id = ? OR registered_by = ?
+     ORDER BY CASE WHEN channel_id = ? THEN 0 ELSE 1 END
+     LIMIT 1
+  `,
+  [userId, userId, userId]
+);
+
+const getLatestArenaV2StreamerCardRow = async (db: SqlExecutor, seasonId: string, streamerId: string, includeDisabled = false) => queryGet<any>(
+  db,
+  `
+    SELECT cv.id, cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost,
+           cv.attack, cv.health, cv.keywords, cv.balance_score, cv.validation_result,
+           COALESCE(cv.art_asset_id, s.custom_image_url, s.logo_url) AS art_asset_id,
+           cv.status,
+           s.name AS streamer_name,
+           s.logo_url AS streamer_logo,
+           s.custom_image_url AS streamer_custom_image,
+           s.is_image_banned AS streamer_is_image_banned
+      FROM arena_v2_card_versions cv
+      LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
+     WHERE cv.season_id = ? AND cv.streamer_id = ?
+       ${includeDisabled ? '' : "AND cv.status = 'active'"}
+     ORDER BY cv.version DESC, cv.updated_at DESC
+     LIMIT 1
+  `,
+  [seasonId, streamerId]
+);
+
+export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const season = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
+  if (!season?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamer = await findArenaV2OwnedStreamer(db, userId);
+  if (!streamer) throw new Error('ArenaStreamerRightForbidden');
+
+  let row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
+  if (!row) {
+    await syncArenaV2CardsFromRegisteredStreamers(season.id);
+    row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
+  }
   return {
-    id: row.id,
-    streamerId: row.streamer_id,
-    displayName: row.display_name,
-    seasonId: row.season_id,
-    version: Number(row.version),
-    cardClass: row.card_class,
-    cost: Number(row.cost),
-    attack: Number(row.attack),
-    health: Number(row.health),
-    keywords: jsonParse(row.keywords, []),
-    balanceScore: Number(row.balance_score || 0),
-    validationResult: jsonParse(row.validation_result, null),
-    artAssetId: row.art_asset_id,
-    status: row.status
+    seasonId: season.id,
+    streamer: {
+      channelId: streamer.channel_id,
+      name: streamer.name,
+      logoUrl: streamer.logo_url,
+      customImageUrl: streamer.custom_image_url,
+      isImageBanned: Boolean(Number(streamer.is_image_banned || 0))
+    },
+    card: row ? serializeArenaV2CardVersionRow(row) : null,
+    canEdit: season.status === 'active' || season.status === 'scheduled' || season.status === 'draft'
   };
+};
+
+export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConfigInput) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const season = await getArenaV2CurrentSeason();
+  if (!season?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamer = await findArenaV2OwnedStreamer(db, input.requesterUserId);
+  if (!streamer) throw new Error('ArenaStreamerRightForbidden');
+  if (Boolean(Number(streamer.is_image_banned || 0))) throw new Error('ArenaV2StreamerCardImageBanned');
+
+  const cardClass = normalizeArenaV2CardClass(input.cardClass);
+  const cost = Math.max(1, Math.min(9, Math.floor(Number(input.cost || 1))));
+  const attack = Math.max(0, Math.floor(Number(input.attack || 0)));
+  const health = Math.max(1, Math.floor(Number(input.health || 1)));
+  const keywords = normalizeArenaV2KeywordList(input.keywords);
+  const candidate = {
+    id: 'pending',
+    streamerId: streamer.channel_id,
+    seasonId: season.id,
+    status: 'active' as const,
+    cardClass,
+    cost,
+    attack,
+    health,
+    keywords,
+    validationResult: null
+  };
+  const validation = validateArenaV2CardVersionDefinition(candidate);
+  if (!validation.valid) {
+    return { accepted: false as const, validation, card: null };
+  }
+
+  const versionRow = await queryGet<{ max_version: number }>(
+    db,
+    'SELECT COALESCE(MAX(version), 0) AS max_version FROM arena_v2_card_versions WHERE season_id = ? AND streamer_id = ?',
+    [season.id, streamer.channel_id]
+  );
+  const nextVersion = Number(versionRow?.max_version || 0) + 1;
+  const cardId = makeId('arena_v2_card');
+  const displayName = sanitizeCardDisplayName(input.displayName, streamer.name || streamer.channel_id);
+  const artAssetId = input.artAssetId === undefined ? defaultArenaV2ArtAssetForStreamer(streamer) : input.artAssetId;
+  const balanceScore = attack * 3 + health + keywords.length;
+
+  await runSql(
+    db,
+    `
+      UPDATE arena_v2_card_versions
+         SET status = 'disabled',
+             updated_at = CURRENT_TIMESTAMP
+       WHERE season_id = ? AND streamer_id = ? AND status = 'active'
+    `,
+    [season.id, streamer.channel_id]
+  );
+  await runSql(
+    db,
+    `
+      INSERT INTO arena_v2_card_versions
+        (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+    `,
+    [
+      cardId,
+      streamer.channel_id,
+      displayName,
+      season.id,
+      nextVersion,
+      cardClass,
+      cost,
+      attack,
+      health,
+      JSON.stringify(keywords),
+      balanceScore,
+      JSON.stringify(validation),
+      artAssetId || null
+    ]
+  );
+
+  return {
+    accepted: true as const,
+    validation,
+    card: await getArenaV2CardVersion(cardId)
+  };
+};
+
+export const disableMyArenaV2StreamerCard = async (userId: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const season = await getArenaV2CurrentSeason();
+  if (!season?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamer = await findArenaV2OwnedStreamer(db, userId);
+  if (!streamer) throw new Error('ArenaStreamerRightForbidden');
+  await runSql(
+    db,
+    `
+      UPDATE arena_v2_card_versions
+         SET status = 'disabled',
+             updated_at = CURRENT_TIMESTAMP
+       WHERE season_id = ? AND streamer_id = ? AND status = 'active'
+    `,
+    [season.id, streamer.channel_id]
+  );
+  return { disabled: true, seasonId: season.id, streamerId: streamer.channel_id };
+};
+
+export const enableMyArenaV2StreamerCard = async (userId: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const season = await getArenaV2CurrentSeason();
+  if (!season?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamer = await findArenaV2OwnedStreamer(db, userId);
+  if (!streamer) throw new Error('ArenaStreamerRightForbidden');
+  const active = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id);
+  if (active) return { enabled: true, card: serializeArenaV2CardVersionRow(active) };
+  const latest = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
+  if (latest) {
+    await runSql(
+      db,
+      `
+        UPDATE arena_v2_card_versions
+           SET status = 'active',
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?
+      `,
+      [latest.id]
+    );
+    return { enabled: true, card: await getArenaV2CardVersion(latest.id) };
+  }
+  await syncArenaV2CardsFromRegisteredStreamers(season.id);
+  return { enabled: true, card: await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id).then((row) => row ? serializeArenaV2CardVersionRow(row) : null) };
 };
 
 export const listArenaV2DecksForUser = async (userId: string, seasonId?: string) => {
@@ -2537,8 +2954,42 @@ export const listArenaV2StreamerRightRequestsAdmin = async (status?: string, lim
 export const reviewArenaV2StreamerRightRequestAdmin = async (requestId: string, reviewerUserId: string, status: 'approved' | 'rejected', reviewNote: string) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
-  const existing = await queryGet<any>(db, 'SELECT id FROM arena_v2_streamer_right_requests WHERE id = ? LIMIT 1', [requestId]);
+  const existing = await queryGet<any>(
+    db,
+    'SELECT id, requester_user_id, request_type, payload FROM arena_v2_streamer_right_requests WHERE id = ? LIMIT 1',
+    [requestId]
+  );
   if (!existing) throw new Error('ArenaV2StreamerRightRequestNotFound');
+  let appliedCard: unknown = null;
+  if (status === 'approved' && existing.request_type === 'card_config') {
+    const payload = jsonParse<Record<string, unknown>>(existing.payload, {});
+    const result = await updateMyArenaV2StreamerCard({
+      requesterUserId: existing.requester_user_id,
+      displayName: typeof payload.displayName === 'string' ? payload.displayName : undefined,
+      cardClass: String(payload.cardClass || ''),
+      cost: Number(payload.cost),
+      attack: Number(payload.attack),
+      health: Number(payload.health),
+      keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
+      artAssetId: typeof payload.artAssetId === 'string' ? payload.artAssetId : undefined
+    });
+    if (!result.accepted) {
+      await runSql(
+        db,
+        `
+          UPDATE arena_v2_streamer_right_requests
+             SET status = 'rejected',
+                 reviewed_by = ?,
+                 review_note = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
+        `,
+        [reviewerUserId, reviewNote || JSON.stringify(result.validation), requestId]
+      );
+      return { id: requestId, status: 'rejected' as const, validation: result.validation };
+    }
+    appliedCard = result.card;
+  }
   await runSql(
     db,
     `
@@ -2551,7 +3002,7 @@ export const reviewArenaV2StreamerRightRequestAdmin = async (requestId: string, 
     `,
     [status, reviewerUserId, reviewNote, requestId]
   );
-  return { id: requestId, status };
+  return { id: requestId, status, appliedCard };
 };
 
 export const holdArenaV2RewardGrantAdmin = async (grantId: string, reason: string) => {

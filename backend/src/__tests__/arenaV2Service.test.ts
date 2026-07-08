@@ -13,6 +13,7 @@ import {
   getArenaV2MatchForUser,
   getArenaV2QuickQueueStatus,
   getArenaV2Replay,
+  getMyArenaV2StreamerCard,
   grantArenaV2SeasonRewardsAdmin,
   joinArenaV2BattleRoyaleQueue,
   joinArenaV2QuickQueue,
@@ -24,6 +25,8 @@ import {
   saveArenaV2Deck,
   submitArenaV2Mulligan,
   submitArenaV2TurnActions,
+  syncArenaV2CardsFromRegisteredStreamers,
+  updateMyArenaV2StreamerCard,
   validateArenaV2DeckForSeason
 } from '../services/arenaV2Service';
 
@@ -32,6 +35,7 @@ type Row = Record<string, any>;
 const rows = {
   seasons: [] as Row[],
   cards: [] as Row[],
+  streamers: [] as Row[],
   users: [] as Row[],
   reports: [] as Row[],
   rewardGrants: [] as Row[],
@@ -52,6 +56,18 @@ const resetRows = () => {
   for (const key of Object.keys(rows) as Array<keyof typeof rows>) rows[key] = [];
 };
 
+const cardWithStreamerFields = (card: Row) => {
+  const streamer = rows.streamers.find((item) => item.channel_id === card.streamer_id);
+  return {
+    ...card,
+    art_asset_id: card.art_asset_id || streamer?.custom_image_url || streamer?.logo_url || null,
+    streamer_name: streamer?.name,
+    streamer_logo: streamer?.logo_url || null,
+    streamer_custom_image: streamer?.custom_image_url || null,
+    streamer_is_image_banned: streamer?.is_image_banned || 0
+  };
+};
+
 const makeExecutor = () => ({
   all: (sql: string, params: any[] = []) => {
     if (sql.includes('FROM arena_v2_card_versions')) {
@@ -63,7 +79,14 @@ const makeExecutor = () => ({
       return rows.cards
         .filter((card) => card.season_id === seasonId && card.status === 'active')
         .sort((a, b) => a.cost - b.cost || String(a.display_name).localeCompare(String(b.display_name)))
+        .map(cardWithStreamerFields)
         .slice(0, Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 40);
+    }
+    if (sql.includes('FROM streamers')) {
+      return rows.streamers
+        .filter((streamer) => Number(streamer.is_image_banned || 0) === 0)
+        .sort((a, b) => Number(b.base_value || 0) - Number(a.base_value || 0) || String(a.channel_id).localeCompare(String(b.channel_id)))
+        .slice(0, 5000);
     }
     if (sql.includes('FROM arena_v2_decks')) {
       return rows.decks.filter((deck) => deck.user_id === params[0] && (!params[1] || deck.season_id === params[1]));
@@ -144,10 +167,31 @@ const makeExecutor = () => ({
     if (sql.includes('FROM arena_v2_ratings')) {
       return rows.ratings.find((rating) => rating.season_id === params[0] && rating.user_id === params[1]);
     }
+    if (sql.includes('COUNT(*) AS count') && sql.includes('FROM arena_v2_card_versions')) {
+      return {
+        count: rows.cards.filter((card) => card.season_id === params[0] && card.status === params[1]).length
+      };
+    }
+    if (sql.includes('COALESCE(MAX(version), 0) AS max_version')) {
+      const maxVersion = rows.cards
+        .filter((card) => card.season_id === params[0] && card.streamer_id === params[1])
+        .reduce((max, card) => Math.max(max, Number(card.version || 0)), 0);
+      return { max_version: maxVersion };
+    }
     if (sql.includes('FROM arena_v2_card_versions')) {
+      if (sql.includes('cv.season_id = ? AND cv.streamer_id = ?')) {
+        const activeOnly = sql.includes("cv.status = 'active'");
+        const card = rows.cards
+          .filter((item) => item.season_id === params[0] && item.streamer_id === params[1] && (!activeOnly || item.status === 'active'))
+          .sort((a, b) => Number(b.version || 0) - Number(a.version || 0))[0];
+        return card ? cardWithStreamerFields(card) : undefined;
+      }
+      if (sql.includes('season_id = ? AND streamer_id = ?')) {
+        return rows.cards.find((item) => item.season_id === params[0] && item.streamer_id === params[1] && item.status === 'active');
+      }
       const card = rows.cards.find((item) => item.id === params[0]);
       if (!card) return undefined;
-      return sql.includes('SELECT id, streamer_id') ? card : { ok: 1 };
+      return sql.includes('SELECT id, streamer_id') || sql.includes('SELECT cv.id') ? cardWithStreamerFields(card) : { ok: 1 };
     }
     if (sql.includes('FROM arena_v2_decks')) {
       const deck = rows.decks.find((item) => item.id === params[0]);
@@ -212,6 +256,9 @@ const makeExecutor = () => ({
     if (sql.includes('FROM users')) {
       return rows.users.find((user) => user.id === params[0]) ? { ok: 1 } : undefined;
     }
+    if (sql.includes('FROM streamers')) {
+      return rows.streamers.find((streamer) => streamer.channel_id === params[0] || streamer.registered_by === params[1]);
+    }
     if (sql.includes('FROM arena_v2_battle_royales')) {
       return rows.battleRoyales.find((battleRoyale) => battleRoyale.id === params[0]) ? { ok: 1 } : undefined;
     }
@@ -230,6 +277,26 @@ const makeExecutor = () => ({
     return undefined;
   },
   run: (sql: string, params: any[] = []) => {
+    if (sql.includes('INSERT INTO arena_v2_card_versions')) {
+      const hasLiteralVersion = params.length === 12;
+      rows.cards.push({
+        id: params[0],
+        streamer_id: params[1],
+        display_name: params[2],
+        season_id: params[3],
+        version: hasLiteralVersion ? 1 : params[4],
+        card_class: hasLiteralVersion ? params[4] : params[5],
+        cost: hasLiteralVersion ? params[5] : params[6],
+        attack: hasLiteralVersion ? params[6] : params[7],
+        health: hasLiteralVersion ? params[7] : params[8],
+        keywords: hasLiteralVersion ? params[8] : params[9],
+        balance_score: hasLiteralVersion ? params[9] : params[10],
+        validation_result: hasLiteralVersion ? params[10] : params[11],
+        art_asset_id: hasLiteralVersion ? params[11] : params[12],
+        status: 'active',
+        updated_at: 'now'
+      });
+    }
     if (sql.includes('INSERT INTO arena_v2_reports')) {
       rows.reports.push({
         id: params[0],
@@ -521,6 +588,21 @@ const makeExecutor = () => ({
         rating.last_match_id = params[7];
       }
     }
+    if (sql.includes('UPDATE arena_v2_card_versions') && sql.includes("SET status = 'disabled'")) {
+      rows.cards
+        .filter((card) => card.season_id === params[0] && card.streamer_id === params[1] && card.status === 'active')
+        .forEach((card) => {
+          card.status = 'disabled';
+          card.updated_at = 'now';
+        });
+    }
+    if (sql.includes('UPDATE arena_v2_card_versions') && sql.includes("SET status = 'active'")) {
+      const card = rows.cards.find((item) => item.id === params[0]);
+      if (card) {
+        card.status = 'active';
+        card.updated_at = 'now';
+      }
+    }
     if (sql.includes('UPDATE arena_v2_match_queue')) {
       if (sql.includes("status = 'expired'")) {
         const before = rows.quickQueue.filter((ticket) => ticket.status === 'waiting').length;
@@ -656,6 +738,91 @@ describe('arena v2 service', () => {
 
     expect(cards.map((card) => card.id)).toEqual(['card-1', 'card-3']);
     expect(cards[0].keywords).toEqual([]);
+  });
+
+  it('syncs active arena cards from registered chikapo streamers instead of mock data', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'streamer-real-1',
+      name: '실제 스트리머',
+      logo_url: 'https://img.example/logo.png',
+      custom_image_url: 'https://img.example/card.png',
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: 'streamer-real-1'
+    });
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const cards = await listArenaV2Cards({ seasonId: 'season-v2' });
+
+    expect(sync.created).toBe(1);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].streamerId).toBe('streamer-real-1');
+    expect(cards[0].displayName).toBe('실제 스트리머');
+    expect(cards[0].artAssetId).toBe('https://img.example/card.png');
+    expect(cards[0].validationResult?.valid).toBe(true);
+  });
+
+  it('lets a registered streamer customize their own card within the GDD cost budget', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'streamer-owner',
+      name: '오너 스트리머',
+      logo_url: 'https://img.example/owner-logo.png',
+      custom_image_url: 'https://img.example/owner-card.png',
+      follower_count: 1200,
+      base_value: 500,
+      is_image_banned: 0,
+      registered_by: 'streamer-owner'
+    });
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    const result = await updateMyArenaV2StreamerCard({
+      requesterUserId: 'streamer-owner',
+      displayName: '오너 커스텀',
+      cardClass: 'guardian',
+      cost: 4,
+      attack: 1,
+      health: 5,
+      keywords: [{ type: 'taunt', value: 1 }]
+    });
+    const mine = await getMyArenaV2StreamerCard('streamer-owner');
+
+    expect(result.accepted).toBe(true);
+    expect(result.card?.displayName).toBe('오너 커스텀');
+    expect(result.card?.cardClass).toBe('guardian');
+    expect(mine.card?.id).toBe(result.card?.id);
+    expect(rows.cards.filter((card) => card.streamer_id === 'streamer-owner' && card.status === 'active')).toHaveLength(1);
+    expect(rows.cards.filter((card) => card.streamer_id === 'streamer-owner' && card.status === 'disabled')).toHaveLength(1);
+  });
+
+  it('rejects streamer card customization that exceeds the GDD cost budget', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'streamer-owner',
+      name: '오너 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 0,
+      base_value: 0,
+      is_image_banned: 0,
+      registered_by: 'streamer-owner'
+    });
+
+    const result = await updateMyArenaV2StreamerCard({
+      requesterUserId: 'streamer-owner',
+      displayName: '예산 초과',
+      cardClass: 'charge',
+      cost: 1,
+      attack: 9,
+      health: 9,
+      keywords: [{ type: 'direct_pressure', value: 9 }]
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.validation.valid).toBe(false);
+    expect(rows.cards).toHaveLength(0);
   });
 
   it('saves and lists a GDD-valid deck', async () => {

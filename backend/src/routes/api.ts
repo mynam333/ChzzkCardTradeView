@@ -213,6 +213,7 @@ import {
   getArenaV2BattleRoyaleController,
   getArenaV2CurrentRewardsController,
   getArenaV2WikiEntryController,
+  getMyArenaV2StreamerCardController,
   getMyArenaV2BattleRoyaleQueueStatusController,
   getMyArenaV2QuickQueueStatusController,
   joinArenaV2BattleRoyaleQueueController,
@@ -237,9 +238,12 @@ import {
   submitArenaV2MulliganController,
   submitArenaV2TurnActionsController,
   transitionArenaV2SeasonAdminController,
+  updateMyArenaV2StreamerCardController,
   updateArenaV2DeckController,
   updateArenaV2SeasonAdminController,
-  validateArenaV2DeckController
+  validateArenaV2DeckController,
+  disableMyArenaV2StreamerCardController,
+  enableMyArenaV2StreamerCardController
 } from '../controllers/arenaV2Controller';
 import { streamerRepository, titleRepository } from '../repositories';
 
@@ -588,10 +592,10 @@ router.get('/arena/profile/me', authMiddleware, banCheckMiddleware, arenaReadLim
 router.get('/arena/profile/:user_id', arenaReadLimiter, arenaV2LegacyEndpointRemoved);
 router.get('/arena/rankings', arenaReadLimiter, listArenaV2RankingsController);
 router.get('/arena/rewards/current', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2CurrentRewardsController);
-router.get('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
-router.patch('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaStreamerConfigLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/streamer-card/me/disable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, arenaV2LegacyEndpointRemoved);
-router.post('/arena/streamer-card/me/enable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, arenaV2LegacyEndpointRemoved);
+router.get('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaReadLimiter, getMyArenaV2StreamerCardController);
+router.patch('/arena/streamer-card/me', authMiddleware, banCheckMiddleware, arenaStreamerConfigLimiter, updateMyArenaV2StreamerCardController);
+router.post('/arena/streamer-card/me/disable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, disableMyArenaV2StreamerCardController);
+router.post('/arena/streamer-card/me/enable', authMiddleware, banCheckMiddleware, arenaStreamerToggleLimiter, enableMyArenaV2StreamerCardController);
 
 // ==========================================
 

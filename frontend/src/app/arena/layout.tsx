@@ -3,7 +3,7 @@ import React from 'react';
 
 export const metadata: Metadata = {
   title: '아레나 | 치카포 : 치지직 카드 포럼',
-  description: '스트리머 카드 14~20장으로 2x3 보드를 운영하는 치카포 아레나 v2입니다.',
+  description: '응원하는 스트리머 카드로 2x3 보드를 장악하는 치카포 아레나입니다.',
   icons: {
     icon: '/arena-icon.png',
     apple: '/arena-icon.png'
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: '아레나 | 치카포',
-    description: '14~20장 덱과 2x3 보드로 즐기는 치카포 아레나 v2입니다.',
+    description: '14~20장 덱과 2x3 보드로 즐기는 치카포 아레나입니다.',
   },
   alternates: {
     canonical: 'https://chikapo.yuaru.com/arena',

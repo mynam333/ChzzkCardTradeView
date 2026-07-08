@@ -19,6 +19,7 @@ import {
   getArenaV2MatchForUser,
   getArenaV2QuickQueueStatus,
   getArenaV2Replay,
+  getMyArenaV2StreamerCard,
   getArenaV2WikiEntry,
   joinArenaV2BattleRoyaleQueue,
   joinArenaV2QuickQueue,
@@ -31,6 +32,8 @@ import {
   listArenaV2StreamerRightRequestsAdmin,
   listArenaV2StreamerRightRequestsForUser,
   deleteArenaV2DeckForUser,
+  disableMyArenaV2StreamerCard,
+  enableMyArenaV2StreamerCard,
   holdArenaV2RewardGrantAdmin,
   previewArenaV2SeasonRewardsAdmin,
   recordArenaV2OpsFlagAdmin,
@@ -42,6 +45,7 @@ import {
   submitArenaV2Mulligan,
   submitArenaV2TurnActions,
   transitionArenaV2SeasonAdmin,
+  updateMyArenaV2StreamerCard,
   updateArenaV2SeasonAdmin,
   validateArenaV2DeckForSeason
 } from '../services/arenaV2Service';
@@ -728,4 +732,70 @@ export const listMyArenaV2StreamerRightRequestsController = async (req: Authenti
   const streamerId = typeof req.query.streamerId === 'string' ? req.query.streamerId : undefined;
   const requests = await listArenaV2StreamerRightRequestsForUser(user.id, streamerId);
   return res.status(200).json({ requests });
+};
+
+export const getMyArenaV2StreamerCardController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const result = await getMyArenaV2StreamerCard(user.id, typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2SeasonNotFound') return res.status(404).json({ error: message, message: '현재 아레나 시즌을 찾을 수 없습니다.' });
+    if (message === 'ArenaStreamerRightForbidden') return res.status(403).json({ error: message, message: '등록된 스트리머 카드가 없거나 수정 권한이 없습니다.' });
+    throw err;
+  }
+};
+
+export const updateMyArenaV2StreamerCardController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const result = await updateMyArenaV2StreamerCard({
+      requesterUserId: user.id,
+      displayName: assertBodyString(req.body?.displayName) || undefined,
+      cardClass: assertBodyString(req.body?.cardClass),
+      cost: Number(req.body?.cost),
+      attack: Number(req.body?.attack),
+      health: Number(req.body?.health),
+      keywords: Array.isArray(req.body?.keywords) ? req.body.keywords : [],
+      artAssetId: typeof req.body?.artAssetId === 'string' ? req.body.artAssetId : undefined
+    });
+    return res.status(result.accepted ? 200 : 422).json(result);
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2SeasonNotFound') return res.status(404).json({ error: message, message: '현재 아레나 시즌을 찾을 수 없습니다.' });
+    if (message === 'ArenaStreamerRightForbidden') return res.status(403).json({ error: message, message: '등록된 스트리머 카드가 없거나 수정 권한이 없습니다.' });
+    if (message === 'ArenaV2StreamerCardImageBanned') return res.status(403).json({ error: message, message: '카드 이미지 수정 권한이 제한된 스트리머입니다.' });
+    throw err;
+  }
+};
+
+export const disableMyArenaV2StreamerCardController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const result = await disableMyArenaV2StreamerCard(user.id);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2SeasonNotFound') return res.status(404).json({ error: message, message: '현재 아레나 시즌을 찾을 수 없습니다.' });
+    if (message === 'ArenaStreamerRightForbidden') return res.status(403).json({ error: message, message: '등록된 스트리머 카드가 없거나 수정 권한이 없습니다.' });
+    throw err;
+  }
+};
+
+export const enableMyArenaV2StreamerCardController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const result = await enableMyArenaV2StreamerCard(user.id);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2SeasonNotFound') return res.status(404).json({ error: message, message: '현재 아레나 시즌을 찾을 수 없습니다.' });
+    if (message === 'ArenaStreamerRightForbidden') return res.status(403).json({ error: message, message: '등록된 스트리머 카드가 없거나 수정 권한이 없습니다.' });
+    throw err;
+  }
 };

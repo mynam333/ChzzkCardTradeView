@@ -83,105 +83,6 @@ const opponentBoardPositions: ArenaV2BoardPositionDto[] = [
   { row: 'front', column: 2 }
 ];
 
-const sampleMatch: ArenaV2MatchViewDto = {
-  id: 'preview',
-  seasonId: 'preview-season',
-  mode: 'bot',
-  status: 'turn_planning',
-  battleRoyaleId: null,
-  roundNo: 0,
-  turnNo: 1,
-  rulesVersion: 'arena-v2-gdd-1.0.0',
-  cardPoolVersion: 'preview',
-  startedAt: new Date().toISOString(),
-  finishedAt: null,
-  winnerUserId: null,
-  resultSummary: { preview: true },
-  selfSeatNo: 0,
-  players: [
-    { seatNo: 0, userId: 'me', deckId: 'preview-deck', playerHealth: 30, fatigueCount: 0, handCardInstanceIds: ['p-hand-1', 'p-hand-2'], handCount: 2, deckCount: 9, graveyardCardInstanceIds: [], boardState: [{ cardInstanceId: 'p-board-1', position: { row: 'front', column: 0 }, createdTurn: 0 }], mulliganState: {} },
-    { seatNo: 1, userId: null, deckId: null, playerHealth: 27, fatigueCount: 0, handCardInstanceIds: [], handCount: 5, deckCount: 9, graveyardCardInstanceIds: [], boardState: [{ cardInstanceId: 'o-board-1', position: { row: 'front', column: 1 }, createdTurn: 0 }], mulliganState: {} }
-  ],
-  cardInstances: [
-    makePreviewInstance('p-board-1', 0, 'board', { row: 'front', column: 0 }, '라이트 콜러', 2, 2, 4, 'tempo'),
-    makePreviewInstance('p-hand-1', 0, 'hand', null, '가드 디렉터', 4, 3, 7, 'guardian'),
-    makePreviewInstance('p-hand-2', 0, 'hand', null, '클러치 스나이퍼', 5, 6, 4, 'sniper'),
-    makePreviewInstance('o-board-1', 1, 'board', { row: 'front', column: 1 }, '스테이지 브레이커', 3, 5, 3, 'charge')
-  ]
-};
-
-const sampleReplayEvents: ReplayEvent[] = [
-  {
-    seq: 1,
-    turnNo: 1,
-    eventType: 'line_attack',
-    payload: {
-      row: 'front',
-      column: 1,
-      attackerSeatNo: 1,
-      targetSeatNo: 0,
-      cardInstanceId: 'o-board-1',
-      targetCardInstanceId: 'p-board-1',
-      damage: 5,
-      healthDamage: 5,
-      shieldDamage: 0
-    }
-  },
-  {
-    seq: 2,
-    turnNo: 1,
-    eventType: 'direct_attack',
-    payload: {
-      row: 'front',
-      column: 0,
-      attackerSeatNo: 0,
-      targetSeatNo: 1,
-      cardInstanceId: 'p-board-1',
-      damage: 2,
-      targetHealth: 27
-    }
-  },
-  {
-    seq: 3,
-    turnNo: 1,
-    eventType: 'shield_absorb',
-    payload: {
-      sourceCardInstanceId: 'p-board-1',
-      targetCardInstanceId: 'o-board-1',
-      damage: 1,
-      remainingShield: 0
-    }
-  }
-];
-
-function makePreviewInstance(id: string, ownerSeatNo: number, zone: string, position: ArenaV2BoardPositionDto | null, name: string, cost: number, attack: number, health: number, cardClass: string): CardInstance {
-  return {
-    id,
-    ownerSeatNo,
-    cardVersionId: `${id}-version`,
-    zone,
-    position,
-    currentAttack: attack,
-    currentHealth: health,
-    damageTaken: 0,
-    statusEffects: [],
-    createdTurn: 0,
-    card: {
-      id: `${id}-version`,
-      streamerId: `${id}-streamer`,
-      displayName: name,
-      seasonId: 'preview-season',
-      version: 1,
-      cardClass: cardClass as any,
-      cost,
-      attack,
-      health,
-      keywords: [{ type: 'preview' }],
-      status: 'active'
-    }
-  };
-}
-
 const moveArenaSection = (router: ReturnType<typeof useRouter>, tab: ArenaSiteTab) => {
   router.push(arenaTabHref[tab] || '/arena');
 };
@@ -334,6 +235,43 @@ const actionLabel = (action: ArenaV2TurnActionDto) => {
   if (action.type === 'move') return `이동 · ${positionLabel(action.from)} → ${positionLabel(action.to)}`;
   if (action.type === 'replace') return `교체 · ${positionLabel(action.target)}`;
   return '턴 종료';
+};
+
+const matchModeLabel = (mode?: string) => {
+  const labels: Record<string, string> = {
+    bot: '연습전',
+    quick: '빠른대전',
+    battle_royale_8: '8인전'
+  };
+  return labels[String(mode || '')] || '아레나';
+};
+
+const matchStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    created: '준비 중',
+    mulligan: '시작 손패 선택',
+    turn_planning: '행동 선택',
+    action_locked: '결정 완료',
+    combat_resolving: '전투 중',
+    turn_result: '결과 확인',
+    completed: '경기 종료',
+    cancelled: '경기 취소'
+  };
+  return labels[String(status || '')] || '대기 중';
+};
+
+const eventLabel = (eventType?: string) => {
+  const labels: Record<string, string> = {
+    line_attack: '라인 교전',
+    direct_attack: '직접 타격',
+    card_attack: '카드 공격',
+    shield_absorb: '보호막 흡수',
+    card_defeated: '카드 처치',
+    turn_start: '턴 시작',
+    turn_end: '턴 종료',
+    fatigue_damage: '피로 피해'
+  };
+  return labels[String(eventType || '')] || '전투 장면';
 };
 
 const MiniCard: React.FC<{
@@ -725,8 +663,8 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const searchParams = useSearchParams();
   const { toast } = useApp();
   const resolvedMatchId = matchId || searchParams.get('match_id') || searchParams.get('id') || '';
-  const [match, setMatch] = React.useState<ArenaV2MatchViewDto | null>(resolvedMatchId ? null : sampleMatch);
-  const [replayEvents, setReplayEvents] = React.useState<ReplayEvent[]>(resolvedMatchId ? [] : sampleReplayEvents);
+  const [match, setMatch] = React.useState<ArenaV2MatchViewDto | null>(null);
+  const [replayEvents, setReplayEvents] = React.useState<ReplayEvent[]>([]);
   const [loading, setLoading] = React.useState(Boolean(resolvedMatchId));
   const [selection, setSelection] = React.useState<Selection>(null);
   const [actions, setActions] = React.useState<ArenaV2TurnActionDto[]>([]);
@@ -738,7 +676,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const [notice, setNotice] = React.useState('');
 
   const loadReplay = React.useCallback(async (id: string) => {
-    if (!id || id === 'preview') return;
+    if (!id) return;
     const res = await apiFetch(`/arena/matches/${encodeURIComponent(id)}/replay`);
     if (!res.ok) return;
     const json = await res.json().catch(() => ({}));
@@ -747,9 +685,12 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
 
   const loadMatch = React.useCallback(async () => {
     if (!resolvedMatchId) {
-      setMatch(sampleMatch);
+      setMatch(null);
       setTurnLoadedAt(Date.now());
-      setReplayEvents(sampleReplayEvents);
+      setReplayEvents([]);
+      setActions([]);
+      setSelection(null);
+      setNotice('경기를 선택하면 전장이 표시됩니다.');
       return;
     }
     setLoading(true);
@@ -859,8 +800,8 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   };
 
   const submitMulligan = async () => {
-    if (!match || match.id === 'preview') {
-      setNotice('미리보기 매치는 서버 제출을 하지 않습니다.');
+    if (!match) {
+      setNotice('제출할 매치를 먼저 선택해야 합니다.');
       return;
     }
     try {
@@ -880,8 +821,8 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   };
 
   const submitActions = async () => {
-    if (!match || match.id === 'preview') {
-      setNotice('미리보기 매치는 서버 제출을 하지 않습니다.');
+    if (!match) {
+      setNotice('제출할 매치를 먼저 선택해야 합니다.');
       return;
     }
     const payloadActions = actions.length ? [...actions, { type: 'end' as const }] : [{ type: 'end' as const }];
@@ -898,7 +839,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
       if (json.match) setMatch(json.match);
       setTurnLoadedAt(Date.now());
       await loadReplay(match.id);
-      toast(json.match?.status === 'completed' ? '매치가 종료되었습니다.' : '이번 턴 행동을 서버에 제출했습니다.', 'success');
+      toast(json.match?.status === 'completed' ? '경기가 종료되었습니다.' : '이번 턴 행동을 제출했습니다.', 'success');
     } catch (error: any) {
       setNotice(error?.message || '행동 제출에 실패했습니다.');
     }
@@ -944,19 +885,19 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
 
   const handIds = canMulligan ? (self?.handCardInstanceIds || []) : virtualSelf.hand;
   const hand = handIds.map((id) => instanceById.get(id)).filter(Boolean) as CardInstance[];
-  const title = mode === 'spectate' ? '아레나 v2 관전' : mode === 'settings' ? '아레나 v2 운영 점검' : '아레나 v2 매치';
+  const title = mode === 'spectate' ? '아레나 관전' : mode === 'settings' ? '아레나 관리' : '아레나 매치';
   const subtitle = mode === 'spectate'
-    ? '서버 리플레이 이벤트와 같은 v2 스냅샷 형식으로 전장을 확인합니다.'
+    ? '진행된 전투 흐름을 한눈에 확인합니다.'
     : mode === 'settings'
-      ? '성능 점검, 신고, 리플레이 보존, 권리 요청 흐름을 v2 기준으로 분리합니다.'
-      : match ? `${match.mode} · ${match.status} · 턴 ${match.turnNo}` : loading ? '매치 로딩 중' : '매치 ID가 필요합니다.';
+      ? '시즌과 문의 상태를 확인합니다.'
+      : match ? `${matchModeLabel(match.mode)} · ${matchStatusLabel(match.status)} · 턴 ${match.turnNo}` : loading ? '경기를 불러오는 중' : '경기를 선택해 주세요.';
 
   return (
     <ArenaLayout activeTab="play" onTabChange={(tab) => moveArenaSection(router, tab)} immersive>
       <div className={`arena-v2-shell arena-v2-battle-shell ${styles.arenaV2Scope}`}>
         <section className="arena-v2-topbar arena-v2-battle-topbar">
           <div className="arena-v2-battle-brand min-w-0">
-            <p className="arena-v2-kicker">CHIKAPO ARENA V2</p>
+            <p className="arena-v2-kicker">CHIKAPO ARENA</p>
             <h2>{title}</h2>
             <p>{subtitle}</p>
           </div>
@@ -989,7 +930,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               </button>
             ) : (
               <button type="button" className="arena-v2-primary-button" onClick={() => router.push('/arena')}>
-                <Check className="h-4 w-4" /> v2 허브
+                <Check className="h-4 w-4" /> 아레나 홈
               </button>
             )}
           </div>
@@ -1011,7 +952,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               [Move, '이동', '1코스트 · 1회'],
               [Plus, '배치', '빈 칸 소환'],
               [RotateCcw, '교체', '기존 카드 대체'],
-              [FileClock, '리플레이', '7일 보존']
+              [FileClock, '전투 기록', '최근 장면']
             ].map(([Icon, label, hint], index) => (
               <div key={String(label)} className={`arena-v2-phase ${index === 1 && canPlan ? 'is-active' : ''}`}>
                 {React.createElement(Icon as typeof Move, { className: 'h-4 w-4' })}
@@ -1024,17 +965,17 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
           <div key={`combat-${combatCue.event?.seq || 'idle'}-${animationReplayKey}`} className={`arena-v2-board-wrap arena-v2-battlefield ${combatCue.event ? 'has-combat-cue' : ''}`}>
             <PixiBattleLayer activeColumn={selectedColumn} events={replayEvents} cardPositions={pixiCardPositions} selfSeatNo={selfSeat} />
             <div className="arena-v2-player-strip is-opponent">
-              <div><span>상대</span><strong>{match?.mode === 'bot' ? 'BOT' : `SEAT ${opponentSeat}`}</strong></div>
+              <div><span>상대</span><strong>{match?.mode === 'bot' ? '연습 상대' : `자리 ${opponentSeat + 1}`}</strong></div>
               <div className="arena-v2-resource"><Shield className="h-4 w-4" /> {opponent?.playerHealth ?? 30}</div>
               <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 손 {opponent?.handCount ?? 0}</div>
               <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {opponent?.deckCount ?? 0}</div>
               <div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {opponentNextFatigue}</div>
             </div>
             {match ? renderBoard(opponentSeat, false) : null}
-            <div className="arena-v2-lane-divider"><span>FRONT LINE · 전열 동시 공격 후 후열 동시 공격</span></div>
+            <div className="arena-v2-lane-divider"><span>전열이 먼저 맞붙고 후열이 뒤이어 압박합니다</span></div>
             {match ? renderBoard(selfSeat, canPlan) : null}
             <div className="arena-v2-player-strip">
-              <div><span>나</span><strong>SEAT {selfSeat}</strong></div>
+              <div><span>나</span><strong>자리 {selfSeat + 1}</strong></div>
               <div className="arena-v2-resource"><Shield className="h-4 w-4" /> {self?.playerHealth ?? 30}</div>
               <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {self?.deckCount ?? 0}</div>
               <div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {selfNextFatigue}</div>
@@ -1042,11 +983,11 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
           </div>
 
           <aside className="arena-v2-command-panel arena-v2-command-console">
-            <div className="arena-v2-stat arena-v2-accent-cyan"><Eye className="h-4 w-4" /><span>상태</span><strong>{match?.status || '-'}</strong></div>
+            <div className="arena-v2-stat arena-v2-accent-cyan"><Eye className="h-4 w-4" /><span>상태</span><strong>{matchStatusLabel(match?.status)}</strong></div>
             <div className="arena-v2-stat arena-v2-accent-gold"><Zap className="h-4 w-4" /><span>코스트</span><strong>{spentCost} / {costCap}</strong></div>
             <div className="arena-v2-stat arena-v2-accent-green"><Clock3 className="h-4 w-4" /><span>턴 제한</span><strong>{timeLeft}초</strong></div>
             <div className="arena-v2-panel-section">
-              <span className="arena-v2-panel-label">행동 큐</span>
+              <span className="arena-v2-panel-label">행동 순서</span>
               <div className="arena-v2-action-stack">
                 {actions.length ? actions.map((action, index) => (
                   <button type="button" key={`${action.type}-${index}`} onClick={() => setActions((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
@@ -1056,7 +997,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               </div>
             </div>
             <div className="arena-v2-panel-section">
-              <span className="arena-v2-panel-label">최근 리플레이</span>
+              <span className="arena-v2-panel-label">최근 장면</span>
               <div className="arena-v2-replay-list">
                 {replayEvents.length ? (
                   <button type="button" onClick={() => setAnimationReplayKey((value) => value + 1)}>
@@ -1064,7 +1005,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
                   </button>
                 ) : null}
                 {replayEvents.length ? replayEvents.map((event) => (
-                  <span key={`${event.seq}-${event.eventType}`}><Play className="h-3.5 w-3.5" />T{event.turnNo} · {event.eventType}</span>
+                  <span key={`${event.seq}-${event.eventType}`}><Play className="h-3.5 w-3.5" />T{event.turnNo} · {eventLabel(event.eventType)}</span>
                 )) : <p>아직 기록된 이벤트가 없습니다.</p>}
               </div>
             </div>
@@ -1079,7 +1020,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               <span>{canMulligan ? `${mulliganIds.length} / 3 선택` : `덱 ${self?.deckCount ?? 0}장 · 무덤 ${self?.graveyardCardInstanceIds.length ?? 0}장`}</span>
             </div>
             <button type="button" className="arena-v2-secondary-button" onClick={() => { setActions([]); setSelection(null); }}>
-              <Lock className="h-4 w-4" /> 큐 초기화
+              <Lock className="h-4 w-4" /> 선택 초기화
             </button>
           </div>
           <div className="arena-v2-card-row is-hand">
