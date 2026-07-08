@@ -526,7 +526,8 @@ export const getArenaV2WikiEntryController = async (req: Request, res: Response)
 };
 
 export const createArenaV2SeasonAdminController = async (req: AuthenticatedRequest, res: Response) => {
-  if (!requireUser(req, res)) return;
+  const user = requireUser(req, res);
+  if (!user) return;
   const seasonKey = assertBodyString(req.body?.seasonKey);
   const name = assertBodyString(req.body?.name);
   const startsAt = assertBodyString(req.body?.startsAt);
@@ -545,7 +546,8 @@ export const createArenaV2SeasonAdminController = async (req: AuthenticatedReque
     cardPoolVersion,
     balanceVersion,
     mmrTierTable: Array.isArray(req.body?.mmrTierTable) ? req.body.mmrTierTable : [],
-    rewardTable: Array.isArray(req.body?.rewardTable) ? req.body.rewardTable : []
+    rewardTable: Array.isArray(req.body?.rewardTable) ? req.body.rewardTable : [],
+    createdBy: user.id
   });
   return res.status(201).json({ season });
 };

@@ -5,7 +5,7 @@ import type {
   ArenaV2TurnActionDto,
   ArenaV2ValidationResultDto
 } from '@chikapo/arena-contract';
-import { getDbMode, getMysqlDb, getSqliteDb } from './db';
+import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
 import {
   createArenaV2BotTurnActions,
   getArenaV2AvailableCost,
@@ -76,6 +76,7 @@ export interface ArenaV2AdminSeasonInput {
   balanceVersion: string;
   mmrTierTable: unknown[];
   rewardTable: unknown[];
+  createdBy?: string;
 }
 
 export interface ArenaV2CardListFilters {
@@ -263,6 +264,12 @@ const getExecutor = (): SqlExecutor | null => {
   return null;
 };
 
+const arenaV2OwnedStarsAggregateSql = () => (
+  getSqlDialect() === 'postgres'
+    ? "STRING_AGG(DISTINCT COALESCE(star, 0)::text, ',')"
+    : 'GROUP_CONCAT(DISTINCT COALESCE(star, 0))'
+);
+
 export const __setArenaV2ExecutorForTest = (executor: SqlExecutor | null) => {
   testExecutor = executor;
 };
@@ -324,9 +331,9 @@ export const createArenaV2SeasonAdmin = async (input: ArenaV2AdminSeasonInput) =
     db,
     `
       INSERT INTO arena_v2_seasons
-        (id, season_key, name, status, starts_at, ends_at, modes_enabled, card_pool_version, balance_version, reward_table, mmr_tier_table, replay_retention_days)
+        (id, season_key, name, status, starts_at, ends_at, modes_enabled, card_pool_version, balance_version, reward_table, mmr_tier_table, replay_retention_days, created_by)
       VALUES
-        (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 7)
+        (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 7, ?)
     `,
     [
       id,
@@ -338,7 +345,8 @@ export const createArenaV2SeasonAdmin = async (input: ArenaV2AdminSeasonInput) =
       input.cardPoolVersion,
       input.balanceVersion,
       JSON.stringify(input.rewardTable || []),
-      JSON.stringify(input.mmrTierTable || [])
+      JSON.stringify(input.mmrTierTable || []),
+      input.createdBy || 'system'
     ]
   );
   return getArenaV2SeasonById(id);
@@ -722,6 +730,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
   await syncArenaV2CardsFromOwnedCards(userId, seasonId);
+  const ownedStarsAggregate = arenaV2OwnedStarsAggregateSql();
 
   const where = ['cv.season_id = ?', "cv.status = 'active'", 'owned.owned_count > 0'];
   const params: any[] = [userId, seasonId];
@@ -766,7 +775,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
         JOIN (
           SELECT channel_id,
                  COUNT(*) AS owned_count,
-                 GROUP_CONCAT(DISTINCT COALESCE(star, 0)) AS owned_stars
+                 ${ownedStarsAggregate} AS owned_stars
             FROM user_cards
            WHERE user_id = ?
            GROUP BY channel_id

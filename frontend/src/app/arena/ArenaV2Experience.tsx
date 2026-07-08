@@ -381,23 +381,34 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
 
   const loadArenaV2 = React.useCallback(async () => {
     setLoading(true);
-    setNotice('');
+      setNotice('');
     try {
       const seasonRes = await apiFetch('/arena/season/current');
-      const seasonJson = seasonRes.ok ? await seasonRes.json() : { season: null };
+      if (!seasonRes.ok) {
+        const errorJson = await seasonRes.json().catch(() => ({}));
+        throw new Error(errorJson?.message || '아레나 시즌 정보를 불러오지 못했습니다.');
+      }
+      const seasonJson = await seasonRes.json();
       const nextSeason: ArenaV2Season | null = seasonJson?.season || null;
       setSeason(nextSeason);
 
-      const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
-      const cardPath = nextSeason?.id
-        ? `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48`
-        : `${cardBasePath}?limit=48`;
-      const cardRes = await apiFetch(cardPath);
-      const cardJson = cardRes.ok ? await cardRes.json() : { cards: [] };
-      const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
-      setCards(normalized);
-      if (!normalized.length) {
-        setNotice(user ? '아레나에서 사용할 보유 카드가 없습니다.' : '아직 사용할 수 있는 아레나 카드가 없습니다.');
+      if (!nextSeason?.id) {
+        setCards([]);
+        setNotice('진행 중인 아레나 시즌이 없습니다.');
+      } else {
+        const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
+        const cardPath = `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48`;
+        const cardRes = await apiFetch(cardPath);
+        if (!cardRes.ok) {
+          const errorJson = await cardRes.json().catch(() => ({}));
+          throw new Error(errorJson?.message || '아레나 카드 목록을 불러오지 못했습니다.');
+        }
+        const cardJson = await cardRes.json();
+        const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
+        setCards(normalized);
+        if (!normalized.length) {
+          setNotice(user ? '아레나에서 사용할 보유 카드가 없습니다.' : '아직 사용할 수 있는 아레나 카드가 없습니다.');
+        }
       }
 
       if (user && nextSeason?.id) {
@@ -453,9 +464,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const wikiJson = wikiRes.ok ? await wikiRes.json().catch(() => ({})) : {};
       setRankings(Array.isArray(rankingsJson?.items) ? rankingsJson.items : []);
       setWikiEntries(Array.isArray(wikiJson?.entries) ? wikiJson.entries : []);
-    } catch {
+    } catch (err: any) {
       setCards([]);
-      setNotice('카드 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      setNotice(err?.message || '카드 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }

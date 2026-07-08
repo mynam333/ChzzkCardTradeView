@@ -6,6 +6,7 @@ import {
   cancelArenaV2QuickQueue,
   createArenaV2Match,
   createArenaV2Report,
+  createArenaV2SeasonAdmin,
   deleteArenaV2DeckForUser,
   getArenaV2BattleRoyaleQueueStatus,
   getArenaV2CardVersion,
@@ -310,6 +311,25 @@ const makeExecutor = () => ({
     return undefined;
   },
   run: (sql: string, params: any[] = []) => {
+    if (sql.includes('INSERT INTO arena_v2_seasons')) {
+      rows.seasons.push({
+        id: params[0],
+        season_key: params[1],
+        name: params[2],
+        status: 'draft',
+        starts_at: params[3],
+        ends_at: params[4],
+        modes_enabled: params[5],
+        card_pool_version: params[6],
+        balance_version: params[7],
+        reward_table: params[8],
+        mmr_tier_table: params[9],
+        replay_retention_days: 7,
+        created_by: params[10],
+        created_at: 'now',
+        updated_at: 'now'
+      });
+    }
     if (sql.includes('INSERT INTO arena_v2_card_versions')) {
       const hasLiteralVersion = params.length === 12;
       rows.cards.push({
@@ -738,6 +758,24 @@ describe('arena v2 service', () => {
 
     expect(season?.id).toBe('season-v2');
     expect(season?.modesEnabled).toEqual({ quick: true, bot: true, battle_royale_8: true });
+  });
+
+  it('creates seasons with the required admin creator for the SQL schema', async () => {
+    const season = await createArenaV2SeasonAdmin({
+      seasonKey: '2026_s2',
+      name: '시즌 2',
+      startsAt: '2026-08-01T00:00:00Z',
+      endsAt: '2026-09-01T00:00:00Z',
+      modesEnabled: { quick: true, bot: true, battle_royale_8: true },
+      cardPoolVersion: 'cards-v1',
+      balanceVersion: 'balance-v1',
+      rewardTable: [],
+      mmrTierTable: [],
+      createdBy: 'admin-user'
+    });
+
+    expect(season?.seasonKey).toBe('2026_s2');
+    expect(rows.seasons[0].created_by).toBe('admin-user');
   });
 
   it('validates a deck using card versions loaded from arena_v2_card_versions', async () => {
