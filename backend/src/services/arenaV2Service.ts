@@ -644,11 +644,12 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
   return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
 };
 
-export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string) => {
+export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string, options: { limit?: number } = {}) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
   const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
   if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const syncLimit = Math.min(Math.max(Math.floor(Number(options.limit || 500)), 1), 500);
   const streamers = await queryAll<any>(
     db,
     `
@@ -664,10 +665,28 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
                 s.custom_image_url_3, s.custom_image_url_4, s.custom_image_url_5,
                 s.follower_count, s.base_value, s.is_active, s.is_image_banned
        ORDER BY owned_count DESC, s.base_value DESC, s.channel_id ASC
-       LIMIT 5000
+       LIMIT ?
     `,
-    [userId]
+    [userId, syncLimit]
   );
+
+  const streamerIds = streamers
+    .map((streamer) => String(streamer.channel_id || '').trim())
+    .filter(Boolean);
+  if (streamerIds.length === 0) {
+    return { seasonId: activeSeason.id, scanned: 0, created: 0, skipped: 0 };
+  }
+  const placeholders = streamerIds.map(() => '?').join(', ');
+  const existingRows = await queryAll<{ streamer_id: string }>(
+    db,
+    `
+      SELECT streamer_id
+        FROM arena_v2_card_versions
+       WHERE season_id = ? AND status = 'active' AND streamer_id IN (${placeholders})
+    `,
+    [activeSeason.id, ...streamerIds]
+  );
+  const existingStreamerIds = new Set(existingRows.map((row) => String(row.streamer_id)));
 
   let created = 0;
   let skipped = 0;
@@ -677,17 +696,7 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
       skipped += 1;
       continue;
     }
-    const existing = await queryGet<{ id: string }>(
-      db,
-      `
-        SELECT id
-          FROM arena_v2_card_versions
-         WHERE season_id = ? AND streamer_id = ? AND status = 'active'
-         LIMIT 1
-      `,
-      [activeSeason.id, streamerId]
-    );
-    if (existing) {
+    if (existingStreamerIds.has(streamerId)) {
       skipped += 1;
       continue;
     }
@@ -794,7 +803,8 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
   const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
-  await syncArenaV2CardsFromOwnedCards(userId, seasonId);
+  const limit = Math.min(Math.max(Number(filters.limit || 40), 1), 100);
+  await syncArenaV2CardsFromOwnedCards(userId, seasonId, { limit: Math.max(limit, 100) });
   const ownedStarsAggregate = arenaV2OwnedStarsAggregateSql();
 
   const where = ['cv.season_id = ?', "cv.status = 'active'", 'owned.owned_count > 0'];
@@ -821,7 +831,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
     params.push(`%${filters.streamerName}%`);
     params.push(`%${filters.streamerName}%`);
   }
-  params.push(Math.min(Math.max(Number(filters.limit || 40), 1), 100));
+  params.push(limit);
 
   const rows = await queryAll<any>(
     db,

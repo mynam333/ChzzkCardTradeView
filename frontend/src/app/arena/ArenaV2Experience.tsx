@@ -167,6 +167,26 @@ const normalizeCard = (raw: any): ArenaV2Card | null => {
   };
 };
 
+const fetchArenaJson = async (path: string, timeoutMs = 15000) => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await apiFetch(path, { signal: controller.signal });
+    if (!response.ok) {
+      const errorJson = await response.json().catch(() => ({}));
+      throw new Error(errorJson?.message || '아레나 정보를 불러오지 못했습니다.');
+    }
+    return await response.json();
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('아레나 정보를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
 const formatMode = (mode: ArenaV2Deck['modeScope']) => {
   if (mode === 'battle_royale_8') return '8인전';
   if (mode === 'quick') return '빠른대전';
@@ -381,14 +401,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
 
   const loadArenaV2 = React.useCallback(async () => {
     setLoading(true);
-      setNotice('');
+    setNotice('');
     try {
-      const seasonRes = await apiFetch('/arena/season/current');
-      if (!seasonRes.ok) {
-        const errorJson = await seasonRes.json().catch(() => ({}));
-        throw new Error(errorJson?.message || '아레나 시즌 정보를 불러오지 못했습니다.');
-      }
-      const seasonJson = await seasonRes.json();
+      const seasonJson = await fetchArenaJson('/arena/season/current');
       const nextSeason: ArenaV2Season | null = seasonJson?.season || null;
       setSeason(nextSeason);
 
@@ -398,12 +413,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       } else {
         const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
         const cardPath = `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48`;
-        const cardRes = await apiFetch(cardPath);
-        if (!cardRes.ok) {
-          const errorJson = await cardRes.json().catch(() => ({}));
-          throw new Error(errorJson?.message || '아레나 카드 목록을 불러오지 못했습니다.');
-        }
-        const cardJson = await cardRes.json();
+        const cardJson = await fetchArenaJson(cardPath);
         const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
         setCards(normalized);
         if (!normalized.length) {
