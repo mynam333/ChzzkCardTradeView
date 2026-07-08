@@ -19,12 +19,14 @@ import {
   joinArenaV2QuickQueue,
   listArenaV2Cards,
   listArenaV2DecksForUser,
+  listArenaV2OwnedCardsForUser,
   pruneArenaV2ExpiredReplayEvents,
   processArenaV2ExpiredQueues,
   revalidateArenaV2DeckForUser,
   saveArenaV2Deck,
   submitArenaV2Mulligan,
   submitArenaV2TurnActions,
+  syncArenaV2CardsFromOwnedCards,
   syncArenaV2CardsFromRegisteredStreamers,
   updateMyArenaV2StreamerCard,
   validateArenaV2DeckForSeason
@@ -36,6 +38,7 @@ const rows = {
   seasons: [] as Row[],
   cards: [] as Row[],
   streamers: [] as Row[],
+  userCards: [] as Row[],
   users: [] as Row[],
   reports: [] as Row[],
   rewardGrants: [] as Row[],
@@ -71,6 +74,24 @@ const cardWithStreamerFields = (card: Row) => {
 const makeExecutor = () => ({
   all: (sql: string, params: any[] = []) => {
     if (sql.includes('FROM arena_v2_card_versions')) {
+      if (sql.includes('FROM user_cards')) {
+        const userId = params[0];
+        const seasonId = params[1];
+        return rows.cards
+          .filter((card) => card.season_id === seasonId && card.status === 'active')
+          .map((card) => {
+            const owned = rows.userCards.filter((userCard) => userCard.user_id === userId && userCard.channel_id === card.streamer_id);
+            if (!owned.length) return null;
+            return {
+              ...cardWithStreamerFields(card),
+              owned_count: owned.length,
+              owned_stars: Array.from(new Set(owned.map((userCard) => Number(userCard.star || 0)))).join(',')
+            };
+          })
+          .filter(Boolean)
+          .sort((a: any, b: any) => Number(b.owned_count || 0) - Number(a.owned_count || 0) || Number(a.cost) - Number(b.cost) || String(a.display_name).localeCompare(String(b.display_name)))
+          .slice(0, Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 40);
+      }
       if (sql.includes('WHERE id IN')) {
         const ids = new Set(params);
         return rows.cards.filter((card) => ids.has(card.id));
@@ -81,6 +102,18 @@ const makeExecutor = () => ({
         .sort((a, b) => a.cost - b.cost || String(a.display_name).localeCompare(String(b.display_name)))
         .map(cardWithStreamerFields)
         .slice(0, Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 40);
+    }
+    if (sql.includes('FROM user_cards uc')) {
+      const userId = params[0];
+      return rows.streamers
+        .reduce<Row[]>((acc, streamer) => {
+          const owned = rows.userCards.filter((userCard) => userCard.user_id === userId && userCard.channel_id === streamer.channel_id);
+          if (owned.length) acc.push({ ...streamer, owned_count: owned.length });
+          return acc;
+        }, [])
+        .filter((streamer) => Number(streamer.is_image_banned || 0) === 0)
+        .sort((a: any, b: any) => Number(b.owned_count || 0) - Number(a.owned_count || 0) || Number(b.base_value || 0) - Number(a.base_value || 0) || String(a.channel_id).localeCompare(String(b.channel_id)))
+        .slice(0, 5000);
     }
     if (sql.includes('FROM streamers')) {
       return rows.streamers
@@ -762,6 +795,47 @@ describe('arena v2 service', () => {
     expect(cards[0].displayName).toBe('실제 스트리머');
     expect(cards[0].artAssetId).toBe('https://img.example/card.png');
     expect(cards[0].validationResult?.valid).toBe(true);
+  });
+
+  it('syncs arena owned cards from the user chikapo inventory', async () => {
+    insertSeason();
+    rows.streamers.push(
+      {
+        channel_id: 'owned-streamer',
+        name: '보유 스트리머',
+        logo_url: 'https://img.example/owned-logo.png',
+        custom_image_url: 'https://img.example/owned-card.png',
+        follower_count: 3000,
+        base_value: 1200,
+        is_image_banned: 0,
+        registered_by: 'owned-streamer'
+      },
+      {
+        channel_id: 'unowned-streamer',
+        name: '미보유 스트리머',
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 3000,
+        base_value: 1200,
+        is_image_banned: 0,
+        registered_by: 'unowned-streamer'
+      }
+    );
+    rows.userCards.push(
+      { id: 1, user_id: 'user-1', channel_id: 'owned-streamer', serial_number: 1, star: 0 },
+      { id: 2, user_id: 'user-1', channel_id: 'owned-streamer', serial_number: 2, star: 2 },
+      { id: 3, user_id: 'user-2', channel_id: 'unowned-streamer', serial_number: 1, star: 0 }
+    );
+
+    const sync = await syncArenaV2CardsFromOwnedCards('user-1', 'season-v2');
+    const ownedCards = await listArenaV2OwnedCardsForUser('user-1', { seasonId: 'season-v2' });
+
+    expect(sync.scanned).toBe(1);
+    expect(sync.created).toBe(1);
+    expect(ownedCards).toHaveLength(1);
+    expect(ownedCards[0].streamerId).toBe('owned-streamer');
+    expect(ownedCards[0].ownedCount).toBe(2);
+    expect(ownedCards[0].ownedStars).toEqual([0, 2]);
   });
 
   it('lets a registered streamer customize their own card within the GDD cost budget', async () => {

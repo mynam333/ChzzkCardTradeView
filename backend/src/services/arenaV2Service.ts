@@ -571,6 +571,83 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
   return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
 };
 
+export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
+  if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const streamers = await queryAll<any>(
+    db,
+    `
+      SELECT s.channel_id, s.name, s.logo_url, s.custom_image_url, s.custom_image_url_1, s.custom_image_url_2,
+             s.custom_image_url_3, s.custom_image_url_4, s.custom_image_url_5,
+             s.follower_count, s.base_value, s.is_active, s.is_image_banned,
+             COUNT(uc.id) AS owned_count
+        FROM user_cards uc
+        JOIN streamers s ON s.channel_id = uc.channel_id
+       WHERE uc.user_id = ?
+         AND COALESCE(s.is_image_banned, 0) = 0
+       GROUP BY s.channel_id, s.name, s.logo_url, s.custom_image_url, s.custom_image_url_1, s.custom_image_url_2,
+                s.custom_image_url_3, s.custom_image_url_4, s.custom_image_url_5,
+                s.follower_count, s.base_value, s.is_active, s.is_image_banned
+       ORDER BY owned_count DESC, s.base_value DESC, s.channel_id ASC
+       LIMIT 5000
+    `,
+    [userId]
+  );
+
+  let created = 0;
+  let skipped = 0;
+  for (const streamer of streamers) {
+    const streamerId = String(streamer.channel_id || '').trim();
+    if (!streamerId) {
+      skipped += 1;
+      continue;
+    }
+    const existing = await queryGet<{ id: string }>(
+      db,
+      `
+        SELECT id
+          FROM arena_v2_card_versions
+         WHERE season_id = ? AND streamer_id = ? AND status = 'active'
+         LIMIT 1
+      `,
+      [activeSeason.id, streamerId]
+    );
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const card = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
+    await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_card_versions
+          (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
+        VALUES
+          (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `,
+      [
+        card.id,
+        streamerId,
+        card.displayName,
+        activeSeason.id,
+        card.cardClass,
+        card.cost,
+        card.attack,
+        card.health,
+        JSON.stringify(card.keywords),
+        card.balanceScore,
+        JSON.stringify(card.validation),
+        card.artAssetId
+      ]
+    );
+    created += 1;
+  }
+
+  return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
+};
+
 const ensureArenaV2CardsForSeason = async (db: SqlExecutor, seasonId: string) => {
   const existing = await queryGet<{ count: number }>(
     db,
@@ -636,6 +713,81 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
   );
 
   return rows.map(serializeArenaV2CardVersionRow);
+};
+
+export const listArenaV2OwnedCardsForUser = async (userId: string, filters: ArenaV2CardListFilters = {}) => {
+  const db = getExecutor();
+  if (!db) return [];
+  const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
+  const seasonId = filters.seasonId || activeSeason?.id;
+  if (!seasonId) return [];
+  await syncArenaV2CardsFromOwnedCards(userId, seasonId);
+
+  const where = ['cv.season_id = ?', "cv.status = 'active'", 'owned.owned_count > 0'];
+  const params: any[] = [userId, seasonId];
+  if (filters.class) {
+    where.push('cv.card_class = ?');
+    params.push(filters.class);
+  }
+  if (Number.isFinite(filters.costMin)) {
+    where.push('cv.cost >= ?');
+    params.push(filters.costMin);
+  }
+  if (Number.isFinite(filters.costMax)) {
+    where.push('cv.cost <= ?');
+    params.push(filters.costMax);
+  }
+  if (filters.keyword) {
+    where.push('cv.keywords LIKE ?');
+    params.push(`%${filters.keyword}%`);
+  }
+  if (filters.streamerName) {
+    where.push('(cv.display_name LIKE ? OR s.name LIKE ? OR cv.streamer_id LIKE ?)');
+    params.push(`%${filters.streamerName}%`);
+    params.push(`%${filters.streamerName}%`);
+    params.push(`%${filters.streamerName}%`);
+  }
+  params.push(Math.min(Math.max(Number(filters.limit || 40), 1), 100));
+
+  const rows = await queryAll<any>(
+    db,
+    `
+      SELECT cv.id, cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost,
+             cv.attack, cv.health, cv.keywords, cv.balance_score, cv.validation_result,
+             COALESCE(cv.art_asset_id, s.custom_image_url, s.logo_url) AS art_asset_id,
+             cv.status,
+             s.name AS streamer_name,
+             s.logo_url AS streamer_logo,
+             s.custom_image_url AS streamer_custom_image,
+             s.is_image_banned AS streamer_is_image_banned,
+             owned.owned_count AS owned_count,
+             owned.owned_stars AS owned_stars
+        FROM arena_v2_card_versions cv
+        JOIN (
+          SELECT channel_id,
+                 COUNT(*) AS owned_count,
+                 GROUP_CONCAT(DISTINCT COALESCE(star, 0)) AS owned_stars
+            FROM user_cards
+           WHERE user_id = ?
+           GROUP BY channel_id
+        ) owned ON owned.channel_id = cv.streamer_id
+        LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY owned.owned_count DESC, cv.cost ASC, cv.display_name ASC, cv.id ASC
+       LIMIT ?
+    `,
+    params
+  );
+
+  return rows.map((row) => ({
+    ...serializeArenaV2CardVersionRow(row),
+    ownedCount: Number(row.owned_count || 0),
+    ownedStars: String(row.owned_stars || '')
+      .split(',')
+      .map((star) => Number(star))
+      .filter((star) => Number.isFinite(star))
+      .sort((a, b) => a - b)
+  }));
 };
 
 export const getArenaV2CardVersion = async (cardVersionId: string) => {

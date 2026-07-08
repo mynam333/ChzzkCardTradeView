@@ -42,6 +42,8 @@ export interface ArenaV2CardVersionDto {
   artAssetId?: string | null;
   balanceScore?: number;
   validationResult?: ArenaV2ValidationResultDto | null;
+  ownedCount?: number;
+  ownedStars?: number[];
   streamer?: {
     channelId: string;
     name: string;

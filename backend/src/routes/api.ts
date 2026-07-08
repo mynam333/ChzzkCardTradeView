@@ -224,6 +224,7 @@ import {
   listArenaV2WikiController,
   listArenaV2ReportsAdminController,
   listArenaV2StreamerRightRequestsAdminController,
+  listMyArenaV2OwnedCardsController,
   listMyArenaV2ReportsController,
   listMyArenaV2StreamerRightRequestsController,
   holdArenaV2ReplayAdminController,
@@ -560,7 +561,7 @@ router.post('/arena/battle-royales/queue/join', authMiddleware, banCheckMiddlewa
 router.get('/arena/battle-royales/queue/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, getMyArenaV2BattleRoyaleQueueStatusController);
 router.post('/arena/battle-royales/queue/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2BattleRoyaleQueueController);
 router.get('/arena/battle-royales/:battle_royale_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2BattleRoyaleController);
-router.get('/arena/cards/owned', authMiddleware, banCheckMiddleware, arenaReadLimiter, listArenaV2CardsController);
+router.get('/arena/cards/owned', authMiddleware, banCheckMiddleware, arenaReadLimiter, listMyArenaV2OwnedCardsController);
 router.get('/arena/cards', arenaReadLimiter, listArenaV2CardsController);
 router.get('/arena/cards/:card_id', arenaReadLimiter, getArenaV2CardDetailController);
 router.get('/arena/decks', authMiddleware, banCheckMiddleware, arenaReadLimiter, listArenaV2DecksController);

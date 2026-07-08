@@ -50,6 +50,8 @@ type ArenaV2Card = {
   keywords: string[];
   artAssetId?: string | null;
   status?: string;
+  ownedCount?: number;
+  ownedStars?: number[];
 };
 
 type ArenaV2Deck = {
@@ -157,7 +159,11 @@ const normalizeCard = (raw: any): ArenaV2Card | null => {
     health: Number(raw.health ?? raw.hp ?? raw.stats?.hp ?? 1),
     keywords,
     artAssetId: typeof raw.artAssetId === 'string' ? raw.artAssetId : typeof raw.art_asset_id === 'string' ? raw.art_asset_id : typeof raw.image_url === 'string' ? raw.image_url : null,
-    status: typeof raw.status === 'string' ? raw.status : undefined
+    status: typeof raw.status === 'string' ? raw.status : undefined,
+    ownedCount: Number.isFinite(Number(raw.ownedCount ?? raw.owned_count)) ? Number(raw.ownedCount ?? raw.owned_count) : undefined,
+    ownedStars: Array.isArray(raw.ownedStars)
+      ? raw.ownedStars.map((star: any) => Number(star)).filter((star: number) => Number.isFinite(star))
+      : undefined
   };
 };
 
@@ -382,13 +388,16 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const nextSeason: ArenaV2Season | null = seasonJson?.season || null;
       setSeason(nextSeason);
 
-      const cardPath = nextSeason?.id ? `/arena/cards?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48` : '/arena/cards?limit=48';
+      const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
+      const cardPath = nextSeason?.id
+        ? `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=48`
+        : `${cardBasePath}?limit=48`;
       const cardRes = await apiFetch(cardPath);
       const cardJson = cardRes.ok ? await cardRes.json() : { cards: [] };
       const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
       setCards(normalized);
       if (!normalized.length) {
-        setNotice('아직 사용할 수 있는 아레나 카드가 없습니다.');
+        setNotice(user ? '아레나에서 사용할 보유 카드가 없습니다.' : '아직 사용할 수 있는 아레나 카드가 없습니다.');
       }
 
       if (user && nextSeason?.id) {

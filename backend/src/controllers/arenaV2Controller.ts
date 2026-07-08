@@ -26,6 +26,7 @@ import {
   listArenaV2Rankings,
   listArenaV2WikiEntries,
   listArenaV2Cards,
+  listArenaV2OwnedCardsForUser,
   listArenaV2DecksForUser,
   listArenaV2ReportsAdmin,
   listArenaV2ReportsForUser,
@@ -95,6 +96,24 @@ export const listArenaV2CardsController = async (req: Request, res: Response) =>
   const costMax = typeof req.query.costMax === 'string' ? Number(req.query.costMax) : undefined;
   const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
   const cards = await listArenaV2Cards({
+    seasonId: typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined,
+    class: typeof req.query.class === 'string' ? req.query.class : undefined,
+    costMin,
+    costMax,
+    keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined,
+    streamerName: typeof req.query.streamerName === 'string' ? req.query.streamerName : undefined,
+    limit
+  });
+  return res.status(200).json({ cards });
+};
+
+export const listMyArenaV2OwnedCardsController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const costMin = typeof req.query.costMin === 'string' ? Number(req.query.costMin) : undefined;
+  const costMax = typeof req.query.costMax === 'string' ? Number(req.query.costMax) : undefined;
+  const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const cards = await listArenaV2OwnedCardsForUser(user.id, {
     seasonId: typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined,
     class: typeof req.query.class === 'string' ? req.query.class : undefined,
     costMin,
