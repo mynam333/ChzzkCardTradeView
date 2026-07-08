@@ -91,7 +91,11 @@ const makeExecutor = () => ({
           })
           .filter(Boolean)
           .sort((a: any, b: any) => Number(b.owned_count || 0) - Number(a.owned_count || 0) || Number(a.cost) - Number(b.cost) || String(a.display_name).localeCompare(String(b.display_name)))
-          .slice(0, Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 40);
+          .slice(
+            Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 0,
+            (Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 0)
+              + (Number.isFinite(Number(params[params.length - 2])) ? Number(params[params.length - 2]) : 40)
+          );
       }
       if (sql.includes('WHERE id IN')) {
         const ids = new Set(params);
@@ -102,7 +106,11 @@ const makeExecutor = () => ({
         .filter((card) => card.season_id === seasonId && card.status === 'active')
         .sort((a, b) => a.cost - b.cost || String(a.display_name).localeCompare(String(b.display_name)))
         .map(cardWithStreamerFields)
-        .slice(0, Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 40);
+        .slice(
+          Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 0,
+          (Number.isFinite(Number(params[params.length - 1])) ? Number(params[params.length - 1]) : 0)
+            + (Number.isFinite(Number(params[params.length - 2])) ? Number(params[params.length - 2]) : 40)
+        );
     }
     if (sql.includes('FROM user_cards uc')) {
       const userId = params[0];
@@ -832,6 +840,17 @@ describe('arena v2 service', () => {
 
     expect(cards.map((card) => card.id)).toEqual(['card-1', 'card-3']);
     expect(cards[0].keywords).toEqual([]);
+  });
+
+  it('paginates active card lists with offset', async () => {
+    insertSeason();
+    insertCards(5);
+
+    const firstPage = await listArenaV2Cards({ seasonId: 'season-v2', limit: 2, offset: 0 });
+    const secondPage = await listArenaV2Cards({ seasonId: 'season-v2', limit: 2, offset: 2 });
+
+    expect(firstPage.map((card) => card.id)).toEqual(['card-1', 'card-2', 'card-3']);
+    expect(secondPage.map((card) => card.id)).toEqual(['card-3', 'card-4', 'card-5']);
   });
 
   it('syncs active arena cards from registered chikapo streamers instead of mock data', async () => {

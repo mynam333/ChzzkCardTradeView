@@ -88,6 +88,7 @@ export interface ArenaV2CardListFilters {
   keyword?: string;
   streamerName?: string;
   limit?: number;
+  offset?: number;
 }
 
 export interface ArenaV2SaveDeckInput {
@@ -276,6 +277,9 @@ const arenaV2OwnedStarsAggregateSql = () => (
 
 const normalizeArenaV2CardListLimit = (limit: unknown, fallback = 40) =>
   Math.min(Math.max(Number(limit || fallback), 1), 1000);
+
+const normalizeArenaV2CardListOffset = (offset: unknown) =>
+  Math.max(Math.floor(Number(offset || 0)), 0);
 
 export const __setArenaV2ExecutorForTest = (executor: SqlExecutor | null) => {
   testExecutor = executor;
@@ -779,7 +783,10 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
     params.push(`%${filters.streamerName}%`);
     params.push(`%${filters.streamerName}%`);
   }
-  params.push(normalizeArenaV2CardListLimit(filters.limit));
+  const limit = normalizeArenaV2CardListLimit(filters.limit);
+  const offset = normalizeArenaV2CardListOffset(filters.offset);
+  params.push(limit + 1);
+  params.push(offset);
 
   const rows = await queryAll<any>(
     db,
@@ -796,7 +803,7 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
         LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
        WHERE ${where.join(' AND ')}
        ORDER BY cv.cost ASC, cv.display_name ASC, cv.id ASC
-       LIMIT ?
+       LIMIT ? OFFSET ?
     `,
     params
   );
@@ -811,7 +818,8 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
   const limit = normalizeArenaV2CardListLimit(filters.limit);
-  await syncArenaV2CardsFromOwnedCards(userId, seasonId, { limit: Math.max(limit, 100) });
+  const offset = normalizeArenaV2CardListOffset(filters.offset);
+  await syncArenaV2CardsFromOwnedCards(userId, seasonId, { limit: Math.max(offset + limit + 1, 100) });
   const ownedStarsAggregate = arenaV2OwnedStarsAggregateSql();
 
   const where = ['cv.season_id = ?', "cv.status = 'active'", 'owned.owned_count > 0'];
@@ -838,7 +846,8 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
     params.push(`%${filters.streamerName}%`);
     params.push(`%${filters.streamerName}%`);
   }
-  params.push(limit);
+  params.push(limit + 1);
+  params.push(offset);
 
   const rows = await queryAll<any>(
     db,
@@ -865,7 +874,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
         LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
        WHERE ${where.join(' AND ')}
        ORDER BY owned.owned_count DESC, cv.cost ASC, cv.display_name ASC, cv.id ASC
-       LIMIT ?
+       LIMIT ? OFFSET ?
     `,
     params
   );

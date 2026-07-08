@@ -45,6 +45,33 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
   }
 
+  private buildAuctionResult(db: any, listingId: number, winningPrice: number): MarketListing['auction_result'] | undefined {
+    const bids = this.latestBidRows(db, listingId);
+    if (bids.length === 0) return undefined;
+    const bidderIds = Array.from(new Set(bids.map((bid) => String(bid.bidder_id || '')).filter(Boolean)));
+    const usernames = new Map<string, string | null>();
+    if (bidderIds.length > 0) {
+      const placeholders = bidderIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT id, username FROM users WHERE id IN (${placeholders})`).all(...bidderIds) as any[];
+      for (const row of rows) usernames.set(String(row.id), row.username ?? null);
+    }
+    const winnerId = String(bids[0]?.bidder_id || '');
+    return {
+      winning_bid: Number(bids[0]?.amount || 0),
+      winning_price: Math.max(0, Number(winningPrice || 0)),
+      second_bid: bids[1] ? Number(bids[1].amount || 0) : null,
+      bidders: bids.map((bid) => {
+        const userId = String(bid.bidder_id || '');
+        return {
+          user_id: userId,
+          username: usernames.get(userId) ?? null,
+          amount: Number(bid.amount || 0),
+          is_winner: userId === winnerId
+        };
+      })
+    };
+  }
+
   private attachMyBids(listings: MarketListing[], bidderId?: string): MarketListing[] {
     if (!bidderId || listings.length === 0) return listings;
     const listingIds = listings.map((listing) => Number(listing.id)).filter(Number.isFinite);
@@ -1006,6 +1033,9 @@ export class SqliteMarketRepository implements IMarketRepository {
         })();
         if (result === 'sold' || result === 'ended') {
           const item = await loadCompletedListing(row.id, result === 'sold' ? 'SOLD' : 'AUCTION_ENDED');
+          if (item && (result === 'sold' || result === 'ended')) {
+            item.auction_result = this.buildAuctionResult(db, row.id, Number(item.price || 0));
+          }
           if (item) completed.push(item);
         }
       } catch (err: any) {

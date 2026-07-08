@@ -94,7 +94,9 @@ export const validateArenaV2DeckController = async (req: AuthenticatedRequest, r
 export const listArenaV2CardsController = async (req: Request, res: Response) => {
   const costMin = typeof req.query.costMin === 'string' ? Number(req.query.costMin) : undefined;
   const costMax = typeof req.query.costMax === 'string' ? Number(req.query.costMax) : undefined;
-  const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const requestedLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const limit = Math.min(Math.max(Number(requestedLimit || 40), 1), 1000);
+  const offset = typeof req.query.offset === 'string' ? Math.max(Math.floor(Number(req.query.offset || 0)), 0) : 0;
   const cards = await listArenaV2Cards({
     seasonId: typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined,
     class: typeof req.query.class === 'string' ? req.query.class : undefined,
@@ -102,9 +104,13 @@ export const listArenaV2CardsController = async (req: Request, res: Response) =>
     costMax,
     keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined,
     streamerName: typeof req.query.streamerName === 'string' ? req.query.streamerName : undefined,
-    limit
+    limit,
+    offset
   });
-  return res.status(200).json({ cards });
+  return res.status(200).json({
+    cards: cards.slice(0, limit),
+    page: { limit, offset, nextOffset: offset + Math.min(cards.length, limit), hasMore: cards.length > limit }
+  });
 };
 
 export const listMyArenaV2OwnedCardsController = async (req: AuthenticatedRequest, res: Response) => {
@@ -112,7 +118,9 @@ export const listMyArenaV2OwnedCardsController = async (req: AuthenticatedReques
   if (!user) return;
   const costMin = typeof req.query.costMin === 'string' ? Number(req.query.costMin) : undefined;
   const costMax = typeof req.query.costMax === 'string' ? Number(req.query.costMax) : undefined;
-  const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const requestedLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+  const limit = Math.min(Math.max(Number(requestedLimit || 40), 1), 1000);
+  const offset = typeof req.query.offset === 'string' ? Math.max(Math.floor(Number(req.query.offset || 0)), 0) : 0;
   const cards = await listArenaV2OwnedCardsForUser(user.id, {
     seasonId: typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined,
     class: typeof req.query.class === 'string' ? req.query.class : undefined,
@@ -120,9 +128,13 @@ export const listMyArenaV2OwnedCardsController = async (req: AuthenticatedReques
     costMax,
     keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined,
     streamerName: typeof req.query.streamerName === 'string' ? req.query.streamerName : undefined,
-    limit
+    limit,
+    offset
   });
-  return res.status(200).json({ cards });
+  return res.status(200).json({
+    cards: cards.slice(0, limit),
+    page: { limit, offset, nextOffset: offset + Math.min(cards.length, limit), hasMore: cards.length > limit }
+  });
 };
 
 export const getArenaV2CardDetailController = async (req: Request, res: Response) => {

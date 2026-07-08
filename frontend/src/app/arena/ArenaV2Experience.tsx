@@ -134,6 +134,7 @@ const classTone: Record<string, { label: string; icon: typeof Swords; accent: st
 };
 
 const legalCardClasses = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
+const arenaCardPageSize = 100;
 
 const phases = [
   { id: 'move', label: '이동', icon: Move, hint: '시작 카드 1회' },
@@ -403,6 +404,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const { user, toast } = useApp();
   const [season, setSeason] = React.useState<ArenaV2Season | null>(null);
   const [cards, setCards] = React.useState<ArenaV2Card[]>([]);
+  const [cardPage, setCardPage] = React.useState({ nextOffset: 0, hasMore: false });
+  const [loadingMoreCards, setLoadingMoreCards] = React.useState(false);
   const [decks, setDecks] = React.useState<ArenaV2Deck[]>([]);
   const [selectedCardIds, setSelectedCardIds] = React.useState<string[]>([]);
   const [selectedDeckId, setSelectedDeckId] = React.useState<string>('');
@@ -432,6 +435,27 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const deckCount = selectedCardIds.length;
   const deckReady = deckCount >= 14 && deckCount <= 20;
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
+  const cardLoadSentinelRef = React.useRef<HTMLDivElement | null>(null);
+
+  const buildArenaCardPath = React.useCallback((seasonId: string, offset = 0) => {
+    const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
+    return `${cardBasePath}?seasonId=${encodeURIComponent(seasonId)}&limit=${arenaCardPageSize}&offset=${offset}`;
+  }, [user]);
+
+  const loadArenaCardsPage = React.useCallback(async (seasonId: string, offset = 0, mode: 'replace' | 'append' = 'replace') => {
+    const cardJson = await fetchArenaJson(buildArenaCardPath(seasonId, offset));
+    const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
+    setCards((current) => {
+      if (mode === 'replace') return normalized;
+      const seen = new Set(current.map((card) => card.id));
+      return [...current, ...normalized.filter((card) => !seen.has(card.id))];
+    });
+    setCardPage({
+      nextOffset: Number(cardJson?.page?.nextOffset ?? offset + normalized.length),
+      hasMore: Boolean(cardJson?.page?.hasMore)
+    });
+    return normalized;
+  }, [buildArenaCardPath]);
 
   const loadArenaV2 = React.useCallback(async () => {
     setLoading(true);
@@ -445,11 +469,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         setCards([]);
         setNotice('진행 중인 아레나 시즌이 없습니다.');
       } else {
-        const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
-        const cardPath = `${cardBasePath}?seasonId=${encodeURIComponent(nextSeason.id)}&limit=1000`;
-        const cardJson = await fetchArenaJson(cardPath);
-        const normalized = Array.isArray(cardJson?.cards) ? cardJson.cards.map(normalizeCard).filter(Boolean) as ArenaV2Card[] : [];
-        setCards(normalized);
+        const normalized = await loadArenaCardsPage(nextSeason.id, 0, 'replace');
         if (!normalized.length) {
           setNotice(user ? '아레나에서 사용할 보유 카드가 없습니다.' : '아직 사용할 수 있는 아레나 카드가 없습니다.');
         }
@@ -514,11 +534,28 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [loadArenaCardsPage, user]);
 
   React.useEffect(() => {
     void loadArenaV2();
   }, [loadArenaV2]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'inventory' || !season?.id || !cardPage.hasMore || loadingMoreCards) return;
+    const target = cardLoadSentinelRef.current;
+    if (!target || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setLoadingMoreCards(true);
+      void loadArenaCardsPage(season.id, cardPage.nextOffset, 'append')
+        .catch((err: any) => {
+          setNotice(err?.message || '카드를 더 불러오지 못했습니다.');
+        })
+        .finally(() => setLoadingMoreCards(false));
+    }, { rootMargin: '480px 0px' });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [activeTab, cardPage.hasMore, cardPage.nextOffset, loadArenaCardsPage, loadingMoreCards, season?.id]);
 
   const toggleCard = (card: ArenaV2Card) => {
     setSelectedCardIds((current) => {
@@ -961,6 +998,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               {cards.length ? cards.map((card) => (
                 <ArenaV2CardView key={card.id} card={card} selected={selectedCardIds.includes(card.id)} onClick={() => toggleCard(card)} />
               )) : <p>아레나에서 사용할 보유 카드가 없습니다.</p>}
+            </div>
+            <div ref={cardLoadSentinelRef} className="arena-v2-card-loader" aria-live="polite">
+              {loadingMoreCards ? '카드를 더 불러오는 중입니다.' : cardPage.hasMore ? '아래로 스크롤하면 카드를 더 불러옵니다.' : cards.length ? '모든 보유 카드를 불러왔습니다.' : ''}
             </div>
           </div>
           <div className="arena-v2-panel-section">

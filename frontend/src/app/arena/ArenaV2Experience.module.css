@@ -1305,6 +1305,16 @@
   justify-self: center;
 }
 
+.arenaV2Scope :global(.arena-v2-card-loader) {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--arena-v2-ink) 62%, transparent);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
 .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-readable) {
   padding: 0.32rem 1.92rem 0.42rem;
 }

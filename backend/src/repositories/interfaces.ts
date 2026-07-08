@@ -547,6 +547,17 @@ export interface MarketListing {
   seller_username?: string;
   buyer_username?: string;
   current_bidder_username?: string;
+  auction_result?: {
+    winning_bid: number;
+    winning_price: number;
+    second_bid: number | null;
+    bidders: Array<{
+      user_id: string;
+      username?: string | null;
+      amount: number;
+      is_winner: boolean;
+    }>;
+  };
   card?: UserCard & { streamer: Streamer };
 }
 

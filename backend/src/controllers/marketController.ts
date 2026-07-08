@@ -100,6 +100,21 @@ const notify = (
   createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
 };
 
+const notifySiteOnly = (
+  userId: string,
+  title: string,
+  body: string,
+  target: MarketNotificationTarget = 'shop:market',
+  groupKey?: string
+) => {
+  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
+};
+
+const displayAuctionUser = (username: string | null | undefined, userId: string) => {
+  const name = String(username || '').trim();
+  return name || `유저 ${userId.slice(0, 6)}`;
+};
+
 const realtimeListingPatch = (listing: MarketListing | null | undefined, viewerId?: string) => {
   if (!listing?.id) return null;
   const publicListing = marketListingForViewer(listing, viewerId);
@@ -718,6 +733,7 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
     lastMarketSettleAt = now;
     const settledAuctionListings = await marketRepository.finishExpiredAuctions(new Date().toISOString());
     const soldListings = settledAuctionListings.filter((listing) => listing.status === 'SOLD');
+    const endedListings = settledAuctionListings.filter((listing) => listing.status === 'AUCTION_ENDED');
     const staleCutoffIso = new Date(Date.now() - MARKET_STALE_LISTING_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const cancelledListings = await marketRepository.cancelStaleListings(staleCutoffIso, MARKET_STALE_CANCEL_BATCH);
     if (settledAuctionListings.length > 0 || cancelledListings.length > 0) {
@@ -727,9 +743,56 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
       const streamerName = listing.card?.streamer?.name || '스트리머';
       const star = listing.card?.star ?? 0;
       const price = listing.price;
-      notify(listing.seller_id, '[오픈마켓] 경매 낙찰 완료', `[${streamerName}] ${star}성 카드 경매가 ${price}P에 낙찰되었습니다.`);
+      const auctionResult = listing.auction_result;
+      const winner = auctionResult?.bidders.find((bidder) => bidder.is_winner);
+      const winnerName = winner
+        ? displayAuctionUser(winner.username, winner.user_id)
+        : displayAuctionUser(listing.current_bidder_username, listing.buyer_id || '');
+      const winningBid = auctionResult?.winning_bid ?? listing.current_bid ?? price;
+      const secondBid = auctionResult?.second_bid ?? null;
+      const winnerDetail = secondBid && secondBid > 0
+        ? `최고 입찰가 ${winningBid.toLocaleString()}P 중 2번째 높은 입찰가 ${secondBid.toLocaleString()}P 기준으로 ${price.toLocaleString()}P에 낙찰되었습니다.`
+        : `단독 입찰 또는 경쟁 입찰이 없어 시작가 기준 ${price.toLocaleString()}P에 낙찰되었습니다.`;
+      notify(
+        listing.seller_id,
+        '[오픈마켓] 경매 낙찰 완료',
+        `[${streamerName}] ${star}성 카드 경매가 ${winnerName}님에게 ${price.toLocaleString()}P에 낙찰되었습니다.`,
+        'shop:market',
+        `market-auction-seller:${listing.id}`
+      );
       if (listing.buyer_id) {
-        notify(listing.buyer_id, '[오픈마켓] 경매 낙찰', `[${streamerName}] ${star}성 카드 경매에 낙찰되어 카드가 보관함으로 이동했습니다.`);
+        notify(
+          listing.buyer_id,
+          '[오픈마켓] 경매 낙찰',
+          `[${streamerName}] ${star}성 카드 경매에 낙찰되었습니다. ${winnerDetail} 카드는 보관함으로 이동했습니다.`,
+          'inventory',
+          `market-auction-winner:${listing.id}`
+        );
+      }
+      for (const bidder of auctionResult?.bidders || []) {
+        if (bidder.is_winner) continue;
+        notifySiteOnly(
+          bidder.user_id,
+          '[오픈마켓] 경매 미낙찰',
+          `[${streamerName}] ${star}성 카드 경매는 낙찰되지 않았습니다. 내 입찰가 ${bidder.amount.toLocaleString()}P, 최고 입찰자는 ${winnerName}님(${winningBid.toLocaleString()}P 입찰)입니다. 예약된 포인트는 환불되었습니다.`,
+          'shop:market',
+          `market-auction-lost:${listing.id}:${bidder.user_id}`
+        );
+      }
+    }
+    for (const listing of endedListings) {
+      const bidders = listing.auction_result?.bidders || [];
+      if (bidders.length === 0) continue;
+      const streamerName = listing.card?.streamer?.name || '스트리머';
+      const star = listing.card?.star ?? 0;
+      for (const bidder of bidders) {
+        notifySiteOnly(
+          bidder.user_id,
+          '[오픈마켓] 경매 유찰',
+          `[${streamerName}] ${star}성 카드 경매가 낙찰 없이 종료되었습니다. 내 입찰가 ${bidder.amount.toLocaleString()}P는 환불되었습니다.`,
+          'shop:market',
+          `market-auction-ended:${listing.id}:${bidder.user_id}`
+        );
       }
     }
     for (const listing of cancelledListings) {

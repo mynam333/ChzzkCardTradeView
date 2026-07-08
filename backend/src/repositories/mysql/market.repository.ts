@@ -51,6 +51,33 @@ export class MysqlMarketRepository implements IMarketRepository {
     }
   }
 
+  private async buildAuctionResult(listingId: number, winningPrice: number): Promise<MarketListing['auction_result'] | undefined> {
+    const bids = await this.latestBidRows(this.getDb(), listingId);
+    if (bids.length === 0) return undefined;
+    const bidderIds = Array.from(new Set(bids.map((bid) => String(bid.bidder_id || '')).filter(Boolean)));
+    const usernames = new Map<string, string | null>();
+    if (bidderIds.length > 0) {
+      const placeholders = bidderIds.map(() => '?').join(',');
+      const rows = await this.getDb().all(`SELECT id, username FROM users WHERE id IN (${placeholders})`, ...bidderIds);
+      for (const row of rows) usernames.set(String(row.id), row.username ?? null);
+    }
+    const winnerId = String(bids[0]?.bidder_id || '');
+    return {
+      winning_bid: Number(bids[0]?.amount || 0),
+      winning_price: Math.max(0, Number(winningPrice || 0)),
+      second_bid: bids[1] ? Number(bids[1].amount || 0) : null,
+      bidders: bids.map((bid) => {
+        const userId = String(bid.bidder_id || '');
+        return {
+          user_id: userId,
+          username: usernames.get(userId) ?? null,
+          amount: Number(bid.amount || 0),
+          is_winner: userId === winnerId
+        };
+      })
+    };
+  }
+
   private async attachMyBids(listings: MarketListing[], bidderId?: string): Promise<MarketListing[]> {
     if (!bidderId || listings.length === 0) return listings;
     const listingIds = listings.map((listing) => Number(listing.id)).filter(Number.isFinite);
@@ -886,6 +913,9 @@ export class MysqlMarketRepository implements IMarketRepository {
         });
         if (result === 'sold' || result === 'ended') {
           const item = await loadCompletedListing(row.id, result === 'sold' ? 'SOLD' : 'AUCTION_ENDED');
+          if (item && (result === 'sold' || result === 'ended')) {
+            item.auction_result = await this.buildAuctionResult(row.id, Number(item.price || 0));
+          }
           if (item) completed.push(item);
         }
       } catch (err: any) {
