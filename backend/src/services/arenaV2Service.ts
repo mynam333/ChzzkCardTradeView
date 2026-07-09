@@ -64,7 +64,6 @@ export interface ArenaV2StreamerCardConfigInput {
   attack: number;
   health: number;
   keywords: unknown[];
-  artAssetId?: string | null;
 }
 
 export interface ArenaV2AdminSeasonInput {
@@ -217,17 +216,39 @@ const defaultArenaV2CardStatsForStreamer = (streamer: any) => {
   return { cost, attack, health };
 };
 
-const defaultArenaV2ArtAssetForStreamer = (streamer: any): string | null => {
-  const candidates = [
-    streamer.custom_image_url,
-    streamer.custom_image_url_1,
-    streamer.custom_image_url_2,
-    streamer.custom_image_url_3,
-    streamer.custom_image_url_4,
-    streamer.custom_image_url_5,
-    streamer.logo_url
-  ].filter(Boolean);
-  return candidates.length ? formatUploadUrl(String(candidates[0])) : null;
+const arenaV2ArtAssetForStreamerStar = (streamer: any, star = 0): string | null => {
+  const images = [
+    streamer.custom_image_url ?? streamer.streamer_custom_image,
+    streamer.custom_image_url_1 ?? streamer.streamer_custom_image_1,
+    streamer.custom_image_url_2 ?? streamer.streamer_custom_image_2,
+    streamer.custom_image_url_3 ?? streamer.streamer_custom_image_3,
+    streamer.custom_image_url_4 ?? streamer.streamer_custom_image_4,
+    streamer.custom_image_url_5 ?? streamer.streamer_custom_image_5
+  ];
+  const safeStar = Math.max(0, Math.min(5, Math.floor(Number(star || 0))));
+  for (let index = safeStar; index >= 0; index -= 1) {
+    if (images[index]) return formatUploadUrl(String(images[index]));
+  }
+  const logoUrl = streamer.logo_url ?? streamer.streamer_logo;
+  return logoUrl ? formatUploadUrl(String(logoUrl)) : null;
+};
+
+const defaultArenaV2ArtAssetForStreamer = (streamer: any): string | null => arenaV2ArtAssetForStreamerStar(streamer, 5);
+
+const getHighestOwnedArenaV2StreamerStar = async (db: SqlExecutor, userId: string, streamerId: string) => {
+  const row = await queryGet<{ highest_star: number | string | null }>(
+    db,
+    'SELECT MAX(COALESCE(star, 0)) AS highest_star FROM user_cards WHERE user_id = ? AND channel_id = ?',
+    [userId, streamerId]
+  );
+  const highestStar = Number(row?.highest_star ?? 0);
+  return Number.isFinite(highestStar) ? Math.max(0, Math.min(5, Math.floor(highestStar))) : 0;
+};
+
+const arenaV2ArtAssetForOwnedStreamer = async (db: SqlExecutor, userId: string, streamer: any) => {
+  const streamerId = String(streamer.channel_id || streamer.streamer_id || '').trim();
+  const highestStar = streamerId ? await getHighestOwnedArenaV2StreamerStar(db, userId, streamerId) : 0;
+  return arenaV2ArtAssetForStreamerStar(streamer, highestStar);
 };
 
 const serializeArenaV2CardVersionRow = (row: any) => ({
@@ -859,6 +880,11 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
              s.name AS streamer_name,
              s.logo_url AS streamer_logo,
              s.custom_image_url AS streamer_custom_image,
+             s.custom_image_url_1 AS streamer_custom_image_1,
+             s.custom_image_url_2 AS streamer_custom_image_2,
+             s.custom_image_url_3 AS streamer_custom_image_3,
+             s.custom_image_url_4 AS streamer_custom_image_4,
+             s.custom_image_url_5 AS streamer_custom_image_5,
              s.is_image_banned AS streamer_is_image_banned,
              owned.owned_count AS owned_count,
              owned.owned_stars AS owned_stars
@@ -879,15 +905,22 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
     params
   );
 
-  return rows.map((row) => ({
-    ...serializeArenaV2CardVersionRow(row),
-    ownedCount: Number(row.owned_count || 0),
-    ownedStars: String(row.owned_stars || '')
+  return rows.map((row) => {
+    const ownedStars = String(row.owned_stars || '')
       .split(',')
       .map((star) => Number(star))
       .filter((star) => Number.isFinite(star))
-      .sort((a, b) => a - b)
-  }));
+      .sort((a, b) => a - b);
+    const highestOwnedStar = ownedStars.length ? Math.max(...ownedStars) : 0;
+    return {
+      ...serializeArenaV2CardVersionRow({
+        ...row,
+        art_asset_id: arenaV2ArtAssetForStreamerStar(row, highestOwnedStar)
+      }),
+      ownedCount: Number(row.owned_count || 0),
+      ownedStars
+    };
+  });
 };
 
 export const getArenaV2CardVersion = async (cardVersionId: string) => {
@@ -963,6 +996,9 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
     await syncArenaV2CardsFromRegisteredStreamers(season.id);
     row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
   }
+  if (row) {
+    row.art_asset_id = await arenaV2ArtAssetForOwnedStreamer(db, userId, streamer);
+  }
   return {
     seasonId: season.id,
     streamer: {
@@ -1016,7 +1052,7 @@ export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConf
   const nextVersion = Number(versionRow?.max_version || 0) + 1;
   const cardId = makeId('arena_v2_card');
   const displayName = sanitizeCardDisplayName(input.displayName, streamer.name || streamer.channel_id);
-  const artAssetId = input.artAssetId === undefined ? defaultArenaV2ArtAssetForStreamer(streamer) : input.artAssetId;
+  const artAssetId = await arenaV2ArtAssetForOwnedStreamer(db, input.requesterUserId, streamer);
   const balanceScore = attack * 3 + health + keywords.length;
 
   await runSql(
@@ -1919,6 +1955,17 @@ export const getArenaV2MatchForUser = async (matchId: string, userId?: string | 
   );
   const self = userId ? players.find((player) => player.user_id === userId) : undefined;
   return serializeArenaV2MatchView(match, players, instances, self?.seat_no ?? null);
+};
+
+export const isArenaV2MatchParticipant = async (matchId: string, userId: string) => {
+  const db = getExecutor();
+  if (!db || !matchId || !userId) return false;
+  const row = await queryGet<{ id: string }>(
+    db,
+    'SELECT id FROM arena_v2_match_players WHERE match_id = ? AND user_id = ? LIMIT 1',
+    [matchId, userId]
+  );
+  return Boolean(row?.id);
 };
 
 const loadArenaV2RuntimeMatch = async (db: SqlExecutor, matchId: string): Promise<{
@@ -3222,8 +3269,7 @@ export const reviewArenaV2StreamerRightRequestAdmin = async (requestId: string, 
       cost: Number(payload.cost),
       attack: Number(payload.attack),
       health: Number(payload.health),
-      keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
-      artAssetId: typeof payload.artAssetId === 'string' ? payload.artAssetId : undefined
+      keywords: Array.isArray(payload.keywords) ? payload.keywords : []
     });
     if (!result.accepted) {
       await runSql(

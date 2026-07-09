@@ -292,6 +292,9 @@ DB_BACKUP_RETRIES="${DB_BACKUP_RETRIES:-3}"
 DB_BACKUP_RETRY_DELAY="${DB_BACKUP_RETRY_DELAY:-5}"
 DB_SCHEMA_RETRIES="${DB_SCHEMA_RETRIES:-3}"
 DB_SCHEMA_RETRY_DELAY="${DB_SCHEMA_RETRY_DELAY:-5}"
+DB_MODE_VALUE="$(env_value DB_MODE)"
+DB_CLIENT_VALUE="$(env_value DB_CLIENT "$(env_value DATABASE_CLIENT)")"
+POSTGRES_URL_VALUE="$(env_value POSTGRES_URL "$(env_value POSTGRESQL_URL "$(env_value DATABASE_URL)")")"
 USE_HTTPS_VALUE="$(env_value USE_HTTPS false)"
 PORT_VALUE="$(env_value PORT 5000)"
 CHAT_WORKER_PORT_VALUE="$(env_value CHAT_WORKER_PORT 5001)"
@@ -425,18 +428,88 @@ run_mysql_schema() {
   return 1
 }
 
+is_postgres_like_deploy() {
+  local mode="${DB_MODE_VALUE,,}"
+  local client="${DB_CLIENT_VALUE,,}"
+  if [ "${mode}" = "postgres" ] || [ "${mode}" = "postgresql" ] || [ "${mode}" = "pg" ] || [ "${mode}" = "supabase" ]; then
+    return 0
+  fi
+  if [ "${client}" = "postgres" ] || [ "${client}" = "postgresql" ] || [ "${client}" = "pg" ] || [ "${client}" = "supabase" ]; then
+    return 0
+  fi
+  if [ "${POSTGRES_REQUIRED:-false}" = "true" ] || [ "${POSTGRESQL_REQUIRED:-false}" = "true" ]; then
+    return 0
+  fi
+  if [ -n "${POSTGRES_URL_VALUE}" ] && [[ "${POSTGRES_URL_VALUE}" =~ ^postgres(ql)?:// ]]; then
+    return 0
+  fi
+  return 1
+}
+
+run_postgres_schema() {
+  local attempt=1
+  local err_file="backups/postgres-schema-${TIMESTAMP}.err"
+  local status=0
+
+  if [ -z "${POSTGRES_URL_VALUE}" ]; then
+    echo "[deploy] postgres schema skipped: POSTGRES_URL/POSTGRESQL_URL/DATABASE_URL is empty"
+    return 0
+  fi
+
+  while [ "${attempt}" -le "${DB_SCHEMA_RETRIES}" ]; do
+    status=0
+    if DEPLOY_POSTGRES_URL="${POSTGRES_URL_VALUE}" POSTGRES_SSL="${POSTGRES_SSL:-}" "${NODE_BIN}" <<'NODE' 2> "${err_file}"; then
+const fs = require('fs');
+const path = require('path');
+const postgres = require(path.resolve('backend/node_modules/postgres'));
+
+const url = process.env.DEPLOY_POSTGRES_URL;
+const ssl = process.env.POSTGRES_SSL === 'true' || /sslmode=require/i.test(url) || /supabase\.(co|com)/i.test(url)
+  ? 'require'
+  : false;
+const sql = postgres(url, { max: 1, ssl });
+
+(async () => {
+  try {
+    await sql.unsafe(fs.readFileSync('init-db-postgres.sql', 'utf8'));
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+})().catch((err) => {
+  console.error(err && err.message ? err.message : err);
+  process.exit(1);
+});
+NODE
+      rm -f "${err_file}"
+      return 0
+    else
+      status="$?"
+    fi
+
+    print_db_error "postgres schema" "${err_file}" "${status}"
+    if [ "${attempt}" -lt "${DB_SCHEMA_RETRIES}" ]; then
+      echo "[deploy] postgres schema apply failed; retry ${attempt}/${DB_SCHEMA_RETRIES} after ${DB_SCHEMA_RETRY_DELAY}s"
+      sleep "${DB_SCHEMA_RETRY_DELAY}"
+    fi
+    attempt="$((attempt + 1))"
+  done
+
+  rm -f "${err_file}"
+  return 1
+}
+
 echo "[deploy] extract release: ${RELEASE_ARCHIVE}"
 mkdir -p "${RELEASE_DIR}"
 tar -xzf "${RELEASE_ARCHIVE}" -C "${RELEASE_DIR}"
 
-for required in backend/dist backend/package.json package.json pnpm-workspace.yaml ecosystem.config.cjs init-db-mysql.sql; do
+for required in backend/dist backend/package.json package.json pnpm-workspace.yaml ecosystem.config.cjs init-db-mysql.sql init-db-postgres.sql; do
   if [ ! -e "${RELEASE_DIR}/${required}" ]; then
     echo "[deploy] invalid release archive. missing: ${required}"
     exit 1
   fi
 done
 
-for writable in package.json pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql deploy.sh backend/dist backend; do
+for writable in package.json pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql init-db-postgres.sql deploy.sh backend/dist backend; do
   assert_can_write_path "${writable}"
 done
 ensure_runtime_writable_dir "public/uploads"
@@ -481,6 +554,7 @@ cp "${RELEASE_DIR}/pnpm-workspace.yaml" pnpm-workspace.yaml
 cp "${RELEASE_DIR}/backend/package.json" backend/package.json
 cp "${RELEASE_DIR}/ecosystem.config.cjs" ecosystem.config.cjs
 cp "${RELEASE_DIR}/init-db-mysql.sql" init-db-mysql.sql
+cp "${RELEASE_DIR}/init-db-postgres.sql" init-db-postgres.sql
 cp "${RELEASE_DIR}/deploy.sh" deploy.sh
 chmod +x deploy.sh
 
@@ -553,6 +627,15 @@ if [ "${SKIP_SCHEMA:-false}" != "true" ] && command -v mysql >/dev/null 2>&1; th
     fi
   else
     echo "[deploy] schema skipped: MYSQL_* or DB_* env is incomplete"
+  fi
+fi
+
+if [ "${SKIP_SCHEMA:-false}" != "true" ] && is_postgres_like_deploy; then
+  echo "[deploy] apply postgres schema"
+  if ! run_postgres_schema; then
+    echo "[deploy] postgres schema apply failed after ${DB_SCHEMA_RETRIES} attempts."
+    echo "[deploy] check POSTGRES_URL/POSTGRESQL_URL/DATABASE_URL and DB connectivity before re-running deployment."
+    exit 2
   fi
 fi
 

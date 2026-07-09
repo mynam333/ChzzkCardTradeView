@@ -916,7 +916,7 @@ RETURNS VOID AS $$
 $$ LANGUAGE sql;
 
 -- 1:1 교환 2단계 원자적 체결(제안자 최종 승인): 카드/포인트/코스메틱을 단일 트랜잭션으로 정산
--- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE'
+-- 반환: 'OK' | 'NOT_FOUND' | 'NOT_CONFIRMED' | 'FORBIDDEN' | 'CARD_SHORTAGE' | 'CARD_MOVE_INCOMPLETE'
 --       | 'SENDER_POINT_SHORT' | 'RECEIVER_POINT_SHORT' | 'USER_NOT_FOUND' | 'FAILED:<msg>'
 CREATE OR REPLACE FUNCTION finalize_trade(p_trade_id INTEGER, p_actor TEXT)
 RETURNS TEXT AS $$
@@ -938,6 +938,7 @@ DECLARE
   receiver_delta        BIGINT;
   sender_with_cosmetics BOOLEAN;
   receiver_with_cosmetics BOOLEAN;
+  moved_count           INTEGER;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('finalize_trade:' || p_trade_id::TEXT));
 
@@ -973,6 +974,7 @@ BEGIN
          WHERE uc.user_id = t.sender_id
            AND uc.channel_id = cid
            AND COALESCE(uc.star, 0) = star_val
+           AND COALESCE(uc.is_locked, FALSE) = FALSE
            AND NOT EXISTS (
              SELECT 1 FROM market_listings ml
               WHERE ml.user_card_id = uc.id
@@ -1010,9 +1012,34 @@ BEGIN
        WHERE id = ANY(picked_ids);
     END IF;
 
+    INSERT INTO asset_event_logs
+      (user_id, counterparty_user_id, from_user_id, to_user_id, asset_type, action, quantity,
+       source_type, source_id, reason, description, card_id, channel_id, serial_number, star, metadata)
+    SELECT
+      t.sender_id,
+      t.receiver_id,
+      t.sender_id,
+      t.receiver_id,
+      'card',
+      'move',
+      1,
+      'trade',
+      p_trade_id::TEXT,
+      'trade_card_move',
+      '1:1 교환 #' || p_trade_id::TEXT || ' 카드 이동',
+      uc.id,
+      uc.channel_id,
+      uc.serial_number,
+      COALESCE(uc.star, 0),
+      jsonb_build_object('trade_id', p_trade_id, 'with_cosmetics', sender_with_cosmetics, 'requested_star', star_val)
+      FROM user_cards uc
+     WHERE uc.id = ANY(picked_ids);
+
     UPDATE user_cards
        SET user_id = t.receiver_id
      WHERE id = ANY(picked_ids);
+    GET DIAGNOSTICS moved_count = ROW_COUNT;
+    IF moved_count <> picked_count THEN RAISE EXCEPTION 'CARD_MOVE_INCOMPLETE'; END IF;
   END LOOP;
 
   -- 받는 사람 카드 → 보낸 사람. 마켓에 등록된 카드는 제외하고, 포함 미선택 시 코스메틱을 원소유자에게 반환한다.
@@ -1030,6 +1057,7 @@ BEGIN
          WHERE uc.user_id = t.receiver_id
            AND uc.channel_id = cid
            AND COALESCE(uc.star, 0) = star_val
+           AND COALESCE(uc.is_locked, FALSE) = FALSE
            AND NOT EXISTS (
              SELECT 1 FROM market_listings ml
               WHERE ml.user_card_id = uc.id
@@ -1067,9 +1095,34 @@ BEGIN
        WHERE id = ANY(picked_ids);
     END IF;
 
+    INSERT INTO asset_event_logs
+      (user_id, counterparty_user_id, from_user_id, to_user_id, asset_type, action, quantity,
+       source_type, source_id, reason, description, card_id, channel_id, serial_number, star, metadata)
+    SELECT
+      t.receiver_id,
+      t.sender_id,
+      t.receiver_id,
+      t.sender_id,
+      'card',
+      'move',
+      1,
+      'trade',
+      p_trade_id::TEXT,
+      'trade_card_move',
+      '1:1 교환 #' || p_trade_id::TEXT || ' 카드 이동',
+      uc.id,
+      uc.channel_id,
+      uc.serial_number,
+      COALESCE(uc.star, 0),
+      jsonb_build_object('trade_id', p_trade_id, 'with_cosmetics', receiver_with_cosmetics, 'requested_star', star_val)
+      FROM user_cards uc
+     WHERE uc.id = ANY(picked_ids);
+
     UPDATE user_cards
        SET user_id = t.sender_id
      WHERE id = ANY(picked_ids);
+    GET DIAGNOSTICS moved_count = ROW_COUNT;
+    IF moved_count <> picked_count THEN RAISE EXCEPTION 'CARD_MOVE_INCOMPLETE'; END IF;
   END LOOP;
 
   -- 포인트 정산 (양방향)
@@ -1123,6 +1176,7 @@ BEGIN
 EXCEPTION
   WHEN SQLSTATE 'P0001' THEN
     IF SQLERRM = 'CARD_SHORTAGE' THEN RETURN 'CARD_SHORTAGE'; END IF;
+    IF SQLERRM = 'CARD_MOVE_INCOMPLETE' THEN RETURN 'CARD_MOVE_INCOMPLETE'; END IF;
     RETURN 'FAILED:' || SQLERRM;
   WHEN OTHERS THEN
     RETURN 'FAILED:' || SQLERRM;

@@ -10,7 +10,9 @@ const arenaTabHref: Record<ArenaSiteTab, string> = {
   play: '/arena/play',
   inventory: '/arena/inventory',
   ranking: '/arena/ranking',
+  wiki: '/arena/wiki',
   style: '/arena/style',
+  'my-card': '/arena/my-card',
   admin: '/arena/admin'
 };
 

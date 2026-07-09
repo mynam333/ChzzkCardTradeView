@@ -2,10 +2,14 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import * as shop from '../services/shopService';
 import { minifyCss } from '../utils/css';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import { recordAchievementEvent } from '../services/achievementService';
+import { getUploadsDir } from '../services/storagePaths';
+import { isArenaV2MatchParticipant } from '../services/arenaV2Service';
 
 const fail = (res: Response, msg: string, err?: any) =>
   res.status(500).json({ error: 'InternalServerError', message: msg, details: IS_PRODUCTION ? undefined : err?.message });
@@ -140,8 +144,8 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
 
 export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Response) => {
   const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity } = req.body;
-  if (!['border', 'name_effect'].includes(type) || !name) {
-    return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect)와 이름이 필요합니다.' });
+  if (!['border', 'name_effect', 'emote'].includes(type) || !name) {
+    return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect|emote)와 이름이 필요합니다.' });
   }
   
   let processedStyleJson = style_json;
@@ -211,4 +215,120 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
     publishShopUpdated('item_updated', { itemId: id });
     return res.status(200).json({ message: '아이템이 수정되었습니다.' });
   } catch (err) { return fail(res, '아이템 수정 실패', err); }
+};
+
+export const uploadArenaEmoteAsset = async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'BadRequest', message: '업로드할 이미지 파일이 필요합니다.' });
+  try {
+    const extByMime: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/avif': 'avif'
+    };
+    const ext = extByMime[req.file.mimetype] || 'img';
+    const uploadDir = path.join(getUploadsDir(), 'arena-emotes');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const fileName = `arena_emote_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const filePath = path.join(uploadDir, fileName);
+    fs.writeFileSync(filePath, req.file.buffer);
+    const imageUrl = `/uploads/arena-emotes/${encodeURIComponent(fileName)}`;
+    return res.status(200).json({
+      message: '이모트 이미지가 업로드되었습니다.',
+      data: {
+        image_url: imageUrl,
+        mime_type: req.file.mimetype,
+        animated: req.file.mimetype === 'image/gif'
+      }
+    });
+  } catch (err) {
+    return fail(res, '이모트 이미지 업로드 실패', err);
+  }
+};
+
+export const getArenaCosmeticShopItems = async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    return res.status(200).json({ items: await shop.getArenaCosmeticShopItems() });
+  } catch (err) { return fail(res, '아레나 상점 조회 실패', err); }
+};
+
+export const getArenaCosmeticInventoryCounts = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    return res.status(200).json(await shop.getArenaUserCosmeticCounts(userId));
+  } catch (err) { return fail(res, '아레나 코스메틱 보유 수량 조회 실패', err); }
+};
+
+export const getArenaCosmeticPurchases = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    return res.status(200).json(await shop.getArenaUserPurchases(userId));
+  } catch (err) { return fail(res, '아레나 코스메틱 구매 내역 조회 실패', err); }
+};
+
+export const getArenaCosmeticLoadout = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    return res.status(200).json(await shop.getArenaCosmeticLoadout(userId));
+  } catch (err) { return fail(res, '아레나 코스메틱 장착 정보 조회 실패', err); }
+};
+
+export const updateArenaCosmeticLoadout = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  try {
+    const result = await shop.updateArenaCosmeticLoadout(userId, { emoteSlots: req.body?.emoteSlots });
+    if (!result.ok) {
+      return res.status(400).json({
+        error: 'ArenaCosmeticLoadoutInvalid',
+        reason: result.reason,
+        message: result.reason === 'NOT_OWNED' ? '보유하지 않은 이모트는 장착할 수 없습니다.' : '장착 정보를 저장하지 못했습니다.'
+      });
+    }
+    return res.status(200).json(result.loadout);
+  } catch (err) { return fail(res, '아레나 코스메틱 장착 정보 저장 실패', err); }
+};
+
+export const buyArenaCosmetic = async (req: AuthenticatedRequest, res: Response) => {
+  const itemId = Number(req.body.item_id);
+  if (!itemId) return res.status(400).json({ error: 'BadRequest', message: '구매할 아이템 ID가 필요합니다.' });
+  const item = await shop.getItem(itemId);
+  if (!item || item.type !== 'emote') {
+    return res.status(400).json({ error: 'ArenaCosmeticTypeInvalid', message: '아레나 상점에서는 아레나 이모트만 구매할 수 있습니다.' });
+  }
+  return buyShopItem(req, res);
+};
+
+export const sendArenaEmote = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const matchId = String(req.params?.match_id || req.body?.matchId || '').trim();
+  const itemId = Number(req.body?.itemId || req.body?.item_id);
+  const x = Math.max(0, Math.min(1, Number(req.body?.x)));
+  const y = Math.max(0, Math.min(1, Number(req.body?.y)));
+  if (!matchId || !itemId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return res.status(400).json({ error: 'ArenaEmoteInvalid', message: '매치, 이모트, 위치 정보가 필요합니다.' });
+  }
+  try {
+    const participant = await isArenaV2MatchParticipant(matchId, userId);
+    if (!participant) return res.status(403).json({ error: 'ArenaEmoteForbidden', message: '해당 매치 참가자만 이모트를 사용할 수 있습니다.' });
+    const item = await shop.getArenaEquippedEmote(userId, itemId);
+    if (!item) return res.status(400).json({ error: 'ArenaEmoteNotEquipped', message: '장착한 이모트만 사용할 수 있습니다.' });
+    const event = {
+      id: crypto.randomUUID(),
+      kind: 'arena_emote',
+      matchId,
+      userId,
+      item,
+      x,
+      y,
+      createdAt: new Date().toISOString()
+    };
+    publishRealtimeEvent('arena', event);
+    return res.status(200).json({ event });
+  } catch (err) { return fail(res, '아레나 이모트 사용 실패', err); }
 };

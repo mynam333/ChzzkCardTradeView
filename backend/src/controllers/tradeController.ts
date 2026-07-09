@@ -422,6 +422,7 @@ const REASON_MESSAGES: Record<string, string> = {
   NOT_CONFIRMED: '수신자 동의가 완료되지 않았거나 이미 처리된 거래입니다.',
   FORBIDDEN: '이 거래를 처리할 권한이 없습니다.',
   CARD_SHORTAGE: '거래 당사자 중 한쪽의 카드 보유 수량이 부족하여 체결할 수 없습니다.',
+  CARD_MOVE_INCOMPLETE: '카드 이전 검증에 실패하여 거래를 체결하지 않았습니다. 잠시 후 다시 시도해 주세요.',
   SENDER_POINT_SHORT: '제안자가 건네야 할 포인트가 부족하여 체결할 수 없습니다.',
   RECEIVER_POINT_SHORT: '수락자가 건네야 할 포인트가 부족하여 체결할 수 없습니다.',
   USER_NOT_FOUND: '거래 당사자 정보를 찾을 수 없습니다.'

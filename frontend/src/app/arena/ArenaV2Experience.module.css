@@ -21,8 +21,7 @@
 
 .arenaV2Scope :global(.arena-v2-topbar),
 .arenaV2Scope :global(.arena-v2-stage),
-.arenaV2Scope :global(.arena-v2-hand-rail),
-.arenaV2Scope :global(.arena-v2-empty-panel) {
+.arenaV2Scope :global(.arena-v2-hand-rail) {
   border: 1px solid var(--arena-v2-line);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.68)), var(--arena-v2-panel);
@@ -31,8 +30,7 @@
 
 :global(.dark) .arenaV2Scope :global(.arena-v2-topbar),
 :global(.dark) .arenaV2Scope :global(.arena-v2-stage),
-:global(.dark) .arenaV2Scope :global(.arena-v2-hand-rail),
-:global(.dark) .arenaV2Scope :global(.arena-v2-empty-panel) {
+:global(.dark) .arenaV2Scope :global(.arena-v2-hand-rail) {
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.82), rgba(15, 23, 42, 0.72)), var(--arena-v2-panel);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 }
@@ -54,8 +52,7 @@
 }
 
 .arenaV2Scope :global(.arena-v2-topbar h2),
-.arenaV2Scope :global(.arena-v2-hand-header h3),
-.arenaV2Scope :global(.arena-v2-empty-panel h2) {
+.arenaV2Scope :global(.arena-v2-hand-header h3) {
   margin: 0;
   color: var(--arena-v2-ink);
   font-size: clamp(1.35rem, 2.6vw, 2.2rem);
@@ -66,8 +63,7 @@
 
 .arenaV2Scope :global(.arena-v2-topbar p),
 .arenaV2Scope :global(.arena-v2-hand-header span),
-.arenaV2Scope :global(.arena-v2-panel-section p),
-.arenaV2Scope :global(.arena-v2-empty-panel p) {
+.arenaV2Scope :global(.arena-v2-panel-section p) {
   color: color-mix(in srgb, var(--arena-v2-ink) 68%, transparent);
   font-size: 0.82rem;
   font-weight: 700;
@@ -637,6 +633,275 @@
   color: var(--arena-v2-cyan);
 }
 
+.arenaV2Scope :global(.arena-v2-admin-stage) {
+  grid-template-columns: minmax(12rem, 0.72fr) minmax(0, 2.8fr);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button) {
+  display: flex;
+  min-height: 4.1rem;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 0.7rem;
+  color: var(--arena-v2-ink);
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-tabs button) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button:hover),
+.arenaV2Scope :global(.arena-v2-admin-tabs button.is-active) {
+  border-color: color-mix(in srgb, var(--arena-v2-cyan) 44%, var(--arena-v2-line));
+  background: linear-gradient(135deg, rgba(8, 145, 178, 0.14), rgba(244, 63, 94, 0.08)), rgba(255, 255, 255, 0.66);
+  box-shadow: inset 3px 0 0 var(--arena-v2-cyan), 0 12px 24px rgba(8, 145, 178, 0.11);
+  transform: translateY(-1px);
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-tabs button:hover),
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-tabs button.is-active) {
+  background: linear-gradient(135deg, rgba(8, 145, 178, 0.2), rgba(244, 63, 94, 0.12)), rgba(255, 255, 255, 0.08);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button > svg) {
+  flex: 0 0 auto;
+  color: var(--arena-v2-cyan);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button span) {
+  min-width: 0;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button strong) {
+  display: block;
+  color: var(--arena-v2-ink);
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-tabs button small) {
+  display: block;
+  margin-top: 0.12rem;
+  color: color-mix(in srgb, var(--arena-v2-ink) 62%, transparent);
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-grid) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-kpis) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-flag-list) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-flag) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.75fr);
+  gap: 0.65rem;
+  align-items: center;
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 0.72rem;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-flag) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-flag strong),
+.arenaV2Scope :global(.arena-v2-admin-flag span) {
+  display: block;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-flag strong) {
+  color: var(--arena-v2-ink);
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-flag span) {
+  margin-top: 0.18rem;
+  color: color-mix(in srgb, var(--arena-v2-ink) 58%, transparent);
+  font-size: 0.66rem;
+  font-weight: 800;
+  word-break: break-all;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-json) {
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.92);
+  padding: 0.85rem;
+  color: #d1fae5;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-form-grid) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-tools) {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.55fr) minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: end;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-tools label) {
+  display: inline-flex;
+  min-height: 2.65rem;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--arena-v2-cyan) 36%, var(--arena-v2-line));
+  border-radius: 8px;
+  background: rgba(8, 145, 178, 0.1);
+  color: var(--arena-v2-cyan);
+  font-size: 0.74rem;
+  font-weight: 950;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-tools input[type="file"]) {
+  display: none;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-textarea) {
+  min-height: 5.8rem;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  line-height: 1.45;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-check) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  color: color-mix(in srgb, var(--arena-v2-ink) 72%, transparent);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-emote-preview) {
+  display: grid;
+  min-height: 12rem;
+  place-items: center;
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(8, 145, 178, 0.13), transparent 34%),
+    rgba(255, 255, 255, 0.48);
+  padding: 1rem;
+  text-align: center;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-emote-preview) {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(8, 145, 178, 0.2), transparent 34%),
+    rgba(255, 255, 255, 0.06);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-emote-preview strong),
+.arenaV2Scope :global(.arena-v2-admin-emote-preview small) {
+  display: block;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-emote-preview strong) {
+  margin-top: 0.65rem;
+  color: var(--arena-v2-ink);
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-emote-preview small) {
+  margin-top: 0.18rem;
+  color: color-mix(in srgb, var(--arena-v2-ink) 62%, transparent);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-list) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-list > span),
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item) {
+  border: 1px solid var(--arena-v2-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 0.75rem;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-cosmetic-list > span),
+:global(.dark) .arenaV2Scope :global(.arena-v2-admin-cosmetic-item) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item .arena-v2-queue-actions) {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item strong),
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item small) {
+  display: block;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item strong) {
+  color: var(--arena-v2-ink);
+  font-size: 0.84rem;
+  font-weight: 950;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item small) {
+  margin-top: 0.16rem;
+  color: color-mix(in srgb, var(--arena-v2-ink) 62%, transparent);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
 .arenaV2Scope :global(.arena-v2-replay-list button),
 .arenaV2Scope :global(.arena-v2-replay-list span) {
   justify-content: flex-start;
@@ -686,27 +951,6 @@
   scroll-snap-type: x proximity;
 }
 
-.arenaV2Scope :global(.arena-v2-secondary-view) {
-  min-height: 55vh;
-  justify-content: center;
-}
-
-.arenaV2Scope :global(.arena-v2-empty-panel) {
-  margin: 0 auto;
-  max-width: 42rem;
-  padding: 2rem;
-  text-align: center;
-}
-
-.arenaV2Scope :global(.arena-v2-empty-panel svg) {
-  margin: 0 auto 0.8rem;
-  color: var(--arena-v2-cyan);
-}
-
-.arenaV2Scope :global(.arena-v2-empty-panel .arena-v2-secondary-button) {
-  margin-top: 1rem;
-}
-
 @keyframes arenaV2SlotPulseLocal {
   from { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arena-v2-cyan) 0%, transparent); }
   to { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arena-v2-cyan) 28%, transparent); }
@@ -725,6 +969,22 @@
   .arenaV2Scope :global(.arena-v2-command-panel) {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-tabs) {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-grid),
+  .arenaV2Scope :global(.arena-v2-admin-flag-list) {
+    grid-template-columns: 1fr;
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-form-grid),
+  .arenaV2Scope :global(.arena-v2-admin-cosmetic-tools) {
+    grid-template-columns: 1fr;
   }
 
   .arenaV2Scope :global(.arena-v2-panel-section) {
@@ -775,6 +1035,15 @@
   .arenaV2Scope :global(.arena-v2-phase-rail),
   .arenaV2Scope :global(.arena-v2-command-panel) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-tabs),
+  .arenaV2Scope :global(.arena-v2-admin-kpis) {
+    grid-template-columns: 1fr;
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-flag) {
+    grid-template-columns: 1fr;
   }
 
   .arenaV2Scope :global(.arena-v2-panel-section) {
@@ -1376,6 +1645,7 @@
     display: none;
   }
 }
+
 /* Last rule: combat damage must override the generic card tooltip pseudo-element. */
 .arenaV2Scope :global(.arena-v2-card.is-combat-target[data-combat-damage]::after) {
   content: attr(data-combat-damage);
@@ -3015,15 +3285,6 @@
   opacity: 0.32;
 }
 
-.arenaV2Scope :global(.arena-v2-card-topline) {
-  display: flex;
-  min-height: 2.18rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem;
-  padding: 0.36rem 0.42rem 0.18rem;
-}
-
 .arenaV2Scope :global(.arena-v2-card-cost) {
   position: static;
   width: 1.86rem;
@@ -3188,12 +3449,6 @@
 @media (max-width: 720px) {
   .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card.is-compact) {
     width: min(5.15rem, 94%);
-  }
-
-  .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-topline) {
-    min-height: 1.7rem;
-    justify-content: flex-start;
-    padding: 0.25rem 0.28rem 0.1rem;
   }
 
   .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-cost) {
@@ -3381,6 +3636,594 @@
   height: 100%;
 }
 
+.arenaV2Scope :global(.arena-v2-emote-burst-layer) {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-burst) {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  animation: arenaEmoteBurstLife 2.55s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-burst span) {
+  position: relative;
+  display: grid;
+  width: clamp(4.4rem, 9vw, 7rem);
+  height: clamp(4.4rem, 9vw, 7rem);
+  place-items: center;
+  border-radius: 1.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background:
+    radial-gradient(circle at 32% 18%, rgba(255, 255, 255, 0.94), transparent 34%),
+    linear-gradient(135deg, rgba(224, 249, 255, 0.88), rgba(255, 228, 240, 0.84));
+  box-shadow:
+    0 22px 56px rgba(14, 165, 233, 0.26),
+    0 0 0 8px rgba(255, 255, 255, 0.13),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+  animation: arenaEmoteBurstPop 760ms cubic-bezier(0.2, 1.3, 0.22, 1) both, arenaEmoteIdle 1.6s ease-in-out 650ms infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-burst span::after) {
+  content: "";
+  position: absolute;
+  inset: -0.8rem;
+  border-radius: inherit;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  animation: arenaEmoteShock 880ms ease-out both;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-burst img) {
+  width: 84%;
+  height: 84%;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 18px rgba(15, 23, 42, 0.26));
+}
+
+.arenaV2Scope :global(.arena-v2-emote-burst b) {
+  font-size: clamp(2.2rem, 6vw, 4.2rem);
+  line-height: 1;
+  filter: drop-shadow(0 12px 18px rgba(14, 165, 233, 0.28));
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel-backdrop) {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  border-radius: inherit;
+  background: radial-gradient(circle at var(--wheel-x, 50%) var(--wheel-y, 50%), rgba(15, 23, 42, 0.14), transparent 36%);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel) {
+  position: absolute;
+  width: 0;
+  height: 0;
+  animation: arenaEmoteWheelIn 170ms ease-out both;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel button) {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  width: 4.35rem;
+  height: 4.35rem;
+  place-items: center;
+  border-radius: 1.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  background:
+    radial-gradient(circle at 30% 16%, rgba(255, 255, 255, 0.96), transparent 35%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(224, 249, 255, 0.82));
+  box-shadow:
+    0 18px 44px rgba(15, 23, 42, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  transition: scale 130ms ease, box-shadow 130ms ease, filter 130ms ease;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel button.has-emote:hover) {
+  z-index: 2;
+  scale: 1.12;
+  box-shadow:
+    0 24px 56px rgba(14, 165, 233, 0.26),
+    0 0 0 6px rgba(14, 165, 233, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.82);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel button:disabled) {
+  opacity: 0.5;
+  filter: saturate(0.65);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel button img) {
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+  filter: drop-shadow(0 9px 15px rgba(15, 23, 42, 0.22));
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel button b) {
+  font-size: 2rem;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel-core) {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  width: 4.8rem;
+  height: 4.8rem;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: rgba(15, 23, 42, 0.86);
+  color: white;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel-core span) {
+  margin-top: -0.55rem;
+  font-size: 0.56rem;
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+}
+
+@keyframes arenaEmoteBurstLife {
+  0% { opacity: 0; translate: 0 8px; }
+  10%, 76% { opacity: 1; translate: 0 0; }
+  100% { opacity: 0; translate: 0 -24px; }
+}
+
+@keyframes arenaEmoteBurstPop {
+  0% { transform: scale(0.32) rotate(-8deg); filter: blur(4px); }
+  58% { transform: scale(1.16) rotate(2deg); filter: blur(0); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes arenaEmoteIdle {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-6px) rotate(1deg); }
+}
+
+@keyframes arenaEmoteShock {
+  from { transform: scale(0.55); opacity: 0.9; }
+  to { transform: scale(1.45); opacity: 0; }
+}
+
+@keyframes arenaEmoteWheelIn {
+  from { transform: scale(0.75); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.arenaV2Scope :global(.arena-v2-emote-badge) {
+  position: relative;
+  display: inline-flex;
+  width: 4.2rem;
+  height: 4.2rem;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 1.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  background:
+    radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.95), transparent 34%),
+    linear-gradient(135deg, rgba(224, 249, 255, 0.96), rgba(255, 228, 240, 0.92));
+  box-shadow:
+    0 18px 40px rgba(14, 165, 233, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-badge img) {
+  width: 84%;
+  height: 84%;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 16px rgba(15, 23, 42, 0.22));
+}
+
+.arenaV2Scope :global(.arena-v2-emote-badge b) {
+  font-size: 2.15rem;
+  line-height: 1;
+  filter: drop-shadow(0 8px 14px rgba(14, 165, 233, 0.28));
+}
+
+.arenaV2Scope :global(.arena-v2-emote-empty) {
+  display: inline-flex;
+  min-height: 3.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  border: 1px dashed rgba(100, 116, 139, 0.32);
+  padding: 0.35rem 0.65rem;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-slot-list) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-slot-list button) {
+  display: flex;
+  min-height: 5.2rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.66);
+  padding: 0.45rem;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-slot-list button:not(:disabled):hover) {
+  transform: translateY(-2px);
+  border-color: rgba(14, 165, 233, 0.48);
+  box-shadow: 0 16px 34px rgba(14, 165, 233, 0.14);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-slot-list button > span:first-child) {
+  font-size: 0.64rem;
+  font-weight: 1000;
+  color: #0e7490;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-slot-list .arena-v2-emote-badge) {
+  width: 3.1rem;
+  height: 3.1rem;
+  border-radius: 1rem;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.9rem;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-card) {
+  display: grid;
+  grid-template-rows: auto minmax(4.4rem, auto) auto auto;
+  gap: 0.75rem;
+  border-radius: 1.45rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.72)),
+    radial-gradient(circle at 14% 0%, rgba(14, 165, 233, 0.18), transparent 36%);
+  padding: 1rem;
+  box-shadow: 0 20px 54px rgba(15, 23, 42, 0.08);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-card.is-equipped) {
+  border-color: rgba(34, 197, 94, 0.48);
+  box-shadow: 0 22px 56px rgba(34, 197, 94, 0.16);
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-visual) {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.2rem;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-card strong) {
+  display: block;
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-card p) {
+  margin-top: 0.3rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-shop-meta) {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #0e7490;
+  font-size: 0.68rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card) {
+  overflow: hidden;
+  border-radius: 1.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 22px 62px rgba(15, 23, 42, 0.1);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card.is-legendary) {
+  border-color: rgba(250, 204, 21, 0.46);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card > div:not(.arena-v2-cosmetic-preview)) {
+  padding: 0.95rem 1rem 0.25rem;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card span) {
+  color: #0e7490;
+  font-size: 0.66rem;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card strong) {
+  display: block;
+  margin-top: 0.25rem;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card p) {
+  margin-top: 0.35rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preset-card > b) {
+  display: block;
+  padding: 0.2rem 1rem 1rem;
+  color: #e11d48;
+  font-size: 0.78rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preview) {
+  position: relative;
+  display: flex;
+  min-height: 11rem;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--ac-a) 30%, transparent), transparent 42%),
+    linear-gradient(135deg, #0f172a, #111827 46%, #172554);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-preview::before) {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(110deg, transparent 0 38%, rgba(255, 255, 255, 0.18) 45%, transparent 54%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 18px);
+  animation: arenaCosmeticSweep 2.8s ease-in-out infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo) {
+  position: relative;
+  z-index: 1;
+  width: 6.5rem;
+  aspect-ratio: 5 / 8;
+  border-radius: 1.05rem;
+  border: 2px solid var(--ac-c);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ac-a) 22%, white), white 52%, color-mix(in srgb, var(--ac-b) 16%, white));
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--ac-a) 24%, transparent),
+    0 0 34px color-mix(in srgb, var(--ac-b) 58%, transparent),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85);
+  animation: arenaCosmeticFloat 2.6s ease-in-out infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-cost),
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-atk),
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-hp) {
+  position: absolute;
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border-radius: 999px;
+  background: #0f172a;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-cost) { left: -0.45rem; top: -0.45rem; }
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-atk) { left: -0.35rem; bottom: -0.35rem; background: #e11d48; }
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-hp) { right: -0.35rem; bottom: -0.35rem; background: #16a34a; }
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-name) {
+  position: absolute;
+  inset-x: 0.75rem;
+  bottom: 2.1rem;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-align: center;
+}
+.arenaV2Scope :global(.arena-v2-cosmetic-card-demo .demo-art) {
+  position: absolute;
+  inset: 1.25rem 0.75rem 3.25rem;
+  border-radius: 0.7rem;
+  background: radial-gradient(circle at 50% 35%, var(--ac-c), var(--ac-a) 38%, var(--ac-b));
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-name-demo) {
+  z-index: 1;
+  background: linear-gradient(90deg, var(--ac-a), var(--ac-b), var(--ac-c), var(--ac-a));
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 2rem;
+  font-weight: 1000;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--ac-b) 44%, transparent);
+  animation: arenaCosmeticGradient 2.4s linear infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo) {
+  position: relative;
+  z-index: 1;
+  width: 8rem;
+  height: 5.4rem;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo span),
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo i) {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo span) {
+  width: 5rem;
+  height: 5rem;
+  border: 2px solid var(--ac-c);
+  box-shadow: 0 0 28px var(--ac-b);
+  animation: arenaCosmeticPulseRing 1.1s ease-out infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo i) {
+  width: 7rem;
+  height: 0.45rem;
+  background: linear-gradient(90deg, transparent, var(--ac-c), var(--ac-b), transparent);
+  rotate: -18deg;
+  filter: drop-shadow(0 0 16px var(--ac-b));
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-hit-demo b) {
+  position: absolute;
+  right: 1rem;
+  top: 0.7rem;
+  color: white;
+  font-size: 1.8rem;
+  font-weight: 1000;
+  text-shadow: 0 0 18px var(--ac-b);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-summon-demo) {
+  position: relative;
+  z-index: 1;
+  width: 7rem;
+  height: 7rem;
+  border-radius: 999px;
+  border: 2px solid var(--ac-a);
+  box-shadow: inset 0 0 26px color-mix(in srgb, var(--ac-a) 35%, transparent), 0 0 34px color-mix(in srgb, var(--ac-b) 45%, transparent);
+  animation: arenaCosmeticSpin 4s linear infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-summon-demo span),
+.arenaV2Scope :global(.arena-v2-cosmetic-summon-demo i) {
+  position: absolute;
+  inset: 1.15rem;
+  border-radius: inherit;
+  border: 1px dashed var(--ac-c);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-ready-demo),
+.arenaV2Scope :global(.arena-v2-cosmetic-ko-demo),
+.arenaV2Scope :global(.arena-v2-cosmetic-nameplate-demo) {
+  position: relative;
+  z-index: 1;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-ready-demo span) {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 2px solid var(--ac-c);
+  padding: 0.65rem 1.35rem;
+  color: white;
+  font-size: 1.35rem;
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--ac-a) 50%, transparent);
+  animation: arenaCosmeticReady 1.5s ease-in-out infinite;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-nameplate-demo) {
+  display: grid;
+  min-width: 12rem;
+  gap: 0.18rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--ac-c) 64%, white);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.78));
+  padding: 0.9rem 1.15rem;
+  box-shadow: 0 0 30px color-mix(in srgb, var(--ac-b) 34%, transparent);
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-nameplate-demo span) {
+  color: white;
+  font-size: 1rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-nameplate-demo b) {
+  color: var(--ac-c);
+  font-size: 0.7rem;
+  font-weight: 1000;
+}
+
+.arenaV2Scope :global(.arena-v2-cosmetic-ko-demo span) {
+  color: white;
+  font-size: 2rem;
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 6px var(--ac-c), 0 0 24px var(--ac-b);
+  animation: arenaCosmeticKo 1.4s cubic-bezier(0.2, 1, 0.2, 1) infinite;
+}
+
+@keyframes arenaCosmeticSweep {
+  0%, 100% { transform: translateX(-36%); opacity: 0.55; }
+  50% { transform: translateX(36%); opacity: 1; }
+}
+
+@keyframes arenaCosmeticFloat {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-5px) rotate(1deg); }
+}
+
+@keyframes arenaCosmeticGradient {
+  to { background-position: 260% 0; }
+}
+
+@keyframes arenaCosmeticPulseRing {
+  from { scale: 0.72; opacity: 1; }
+  to { scale: 1.16; opacity: 0; }
+}
+
+@keyframes arenaCosmeticSpin {
+  to { rotate: 360deg; }
+}
+
+@keyframes arenaCosmeticReady {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes arenaCosmeticKo {
+  0% { transform: scale(0.7) skewX(-10deg); opacity: 0; }
+  28%, 70% { transform: scale(1) skewX(-4deg); opacity: 1; }
+  100% { transform: translateY(-10px) scale(1.08); opacity: 0; }
+}
+
 .arenaV2Scope :global(.arena-v2-battlefield::before) {
   inset: 3.18rem 0.64rem 3.18rem;
   opacity: 0.5;
@@ -3460,11 +4303,6 @@
   box-shadow:
     0 16px 34px rgba(0, 167, 199, 0.2),
     inset 0 0 0 1px rgba(255, 255, 255, 0.92);
-}
-
-.arenaV2Scope :global(.arena-v2-card-topline) {
-  min-height: 2.02rem;
-  padding: 0.3rem 0.38rem 0.16rem;
 }
 
 .arenaV2Scope :global(.arena-v2-card-cost) {
@@ -3668,11 +4506,6 @@
 
   .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card.is-compact) {
     width: min(4.55rem, 96%);
-  }
-
-  .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-topline) {
-    min-height: 1.44rem;
-    padding: 0.2rem 0.22rem 0.08rem;
   }
 
   .arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-cost) {
@@ -4262,5 +5095,247 @@
 
   .arenaV2Scope :global(.arena-v2-card[data-card-tooltip]::after) {
     display: none;
+  }
+}
+
+/* Final stat-badge override: keep ATK/HP as polished icon medals, never polygons. */
+.arenaV2Scope :global(.arena-v2-card-stats) {
+  pointer-events: none;
+  position: absolute;
+  inset: auto 0.46rem 0.36rem;
+  z-index: 8;
+  display: flex;
+  justify-content: space-between;
+  gap: 0;
+  border: 0;
+  padding: 0;
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats > span) {
+  --stat-core: #ef4444;
+  --stat-mid: #b91c1c;
+  --stat-deep: #5f1111;
+  position: relative;
+  display: grid;
+  width: 2.72rem;
+  height: 2.72rem;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 999px;
+  padding: 0;
+  background:
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.94) 0 8%, rgba(255, 255, 255, 0.24) 9% 18%, transparent 19%),
+    radial-gradient(circle at 50% 60%, var(--stat-core) 0 43%, var(--stat-mid) 66%, var(--stat-deep) 100%);
+  box-shadow:
+    0 13px 18px rgba(0, 0, 0, 0.34),
+    inset 0 2px 4px rgba(255, 255, 255, 0.44),
+    inset 0 -7px 11px rgba(15, 23, 42, 0.38);
+  clip-path: none;
+  color: white;
+  filter: none;
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats > span::before) {
+  content: "";
+  position: absolute;
+  inset: 0.22rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.18);
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats > span::after) {
+  content: "";
+  position: absolute;
+  inset: auto 0.42rem 0.24rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.22);
+  filter: blur(3px);
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats .is-atk) {
+  --stat-core: #fb4b4b;
+  --stat-mid: #b91c1c;
+  --stat-deep: #5f1111;
+  clip-path: none;
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats .is-hp) {
+  --stat-core: #28c76f;
+  --stat-mid: #059669;
+  --stat-deep: #064e3b;
+  clip-path: none;
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats svg) {
+  grid-area: 1 / 1;
+  width: 1.62rem;
+  height: 1.62rem;
+  align-self: center;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.42);
+  opacity: 1;
+  stroke-width: 2.35;
+  filter: drop-shadow(0 2px 2px rgba(15, 23, 42, 0.26));
+}
+
+.arenaV2Scope :global(.arena-v2-card-stats b) {
+  position: relative;
+  grid-area: 1 / 1;
+  align-self: center;
+  margin: 0;
+  font-size: 1.42rem;
+  font-weight: 1000;
+  line-height: 1;
+  text-shadow:
+    0 2px 3px rgba(15, 23, 42, 0.68),
+    0 0 10px rgba(255, 255, 255, 0.22);
+}
+
+.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats) {
+  inset-inline: 0.3rem;
+  bottom: 0.26rem;
+}
+
+.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats > span) {
+  width: 2rem;
+  height: 2rem;
+}
+
+.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats svg) {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+}
+
+.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats b) {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-stats > span) {
+  width: 1.86rem;
+  height: 1.86rem;
+}
+
+.arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-stats svg) {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.arenaV2Scope :global(.arena-v2-battlefield .arena-v2-card-stats b) {
+  font-size: 0.94rem;
+}
+
+@media (max-width: 720px) {
+  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats > span) {
+    width: 1.78rem;
+    height: 1.78rem;
+  }
+
+  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats svg) {
+    width: 0.98rem;
+    height: 0.98rem;
+  }
+
+  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats b) {
+    font-size: 0.88rem;
+  }
+}
+
+.arenaV2Scope :global(.arena-v2-inventory-tools) {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.7fr) repeat(4, minmax(8.4rem, 1fr)) auto;
+  gap: 0.52rem;
+  align-items: stretch;
+  margin: 0.85rem 0 1rem;
+}
+
+.arenaV2Scope :global(.arena-v2-search-field),
+.arenaV2Scope :global(.arena-v2-filter-field),
+.arenaV2Scope :global(.arena-v2-filter-reset) {
+  display: inline-flex;
+  min-height: 2.72rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--arena-v2-line) 86%, var(--arena-v2-cyan));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.66)),
+    color-mix(in srgb, var(--arena-v2-cyan) 6%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  color: var(--arena-v2-ink);
+}
+
+.arenaV2Scope :global(.arena-v2-search-field),
+.arenaV2Scope :global(.arena-v2-filter-field) {
+  padding: 0 0.78rem;
+}
+
+.arenaV2Scope :global(.arena-v2-search-field svg),
+.arenaV2Scope :global(.arena-v2-filter-field svg) {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--arena-v2-cyan) 72%, var(--arena-v2-ink));
+}
+
+.arenaV2Scope :global(.arena-v2-search-field input),
+.arenaV2Scope :global(.arena-v2-filter-field select) {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--arena-v2-ink);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.arenaV2Scope :global(.arena-v2-search-field input::placeholder) {
+  color: color-mix(in srgb, var(--arena-v2-ink) 48%, transparent);
+}
+
+.arenaV2Scope :global(.arena-v2-filter-field select) {
+  cursor: pointer;
+}
+
+.arenaV2Scope :global(.arena-v2-filter-reset) {
+  justify-content: center;
+  padding: 0 0.9rem;
+  font-size: 0.72rem;
+  font-weight: 950;
+  white-space: nowrap;
+  transition: transform 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.arenaV2Scope :global(.arena-v2-filter-reset:not(:disabled):hover) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--arena-v2-coral) 46%, var(--arena-v2-line));
+}
+
+.arenaV2Scope :global(.arena-v2-filter-reset:disabled) {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+:global(.dark) .arenaV2Scope :global(.arena-v2-search-field),
+:global(.dark) .arenaV2Scope :global(.arena-v2-filter-field),
+:global(.dark) .arenaV2Scope :global(.arena-v2-filter-reset) {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.64)),
+    color-mix(in srgb, var(--arena-v2-cyan) 10%, transparent);
+}
+
+@media (max-width: 1280px) {
+  .arenaV2Scope :global(.arena-v2-inventory-tools) {
+    grid-template-columns: minmax(14rem, 1fr) repeat(2, minmax(8rem, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .arenaV2Scope :global(.arena-v2-inventory-tools) {
+    grid-template-columns: 1fr;
   }
 }

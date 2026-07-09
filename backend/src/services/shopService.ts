@@ -27,6 +27,14 @@ export interface ShopItem {
   created_at?: string | null;
 }
 
+export type ArenaEmoteSlot = ShopItem | null;
+
+export interface ArenaCosmeticLoadout {
+  emoteSlots: ArenaEmoteSlot[];
+}
+
+const ARENA_EMOTE_SLOT_COUNT = 8;
+
 const mapSqliteItem = (r: any): ShopItem => ({
   id: r.id, type: r.type, name: r.name, description: r.description,
   price: r.price, style_json: r.style_json, font_url: r.font_url,
@@ -362,6 +370,130 @@ export const getUserPurchases = async (userId: string): Promise<Record<number, n
   const rows = getSqliteDb().prepare('SELECT item_id, count FROM shop_purchases WHERE user_id = ?').all(userId) as any[];
   for (const r of rows) map[r.item_id] = (map[r.item_id] || 0) + (r.count || 0);
   return map;
+};
+
+const normalizeArenaEmoteSlots = (raw: unknown): Array<number | null> => {
+  const source = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: ARENA_EMOTE_SLOT_COUNT }, (_, index) => {
+    const value = source[index];
+    if (value === null || value === undefined || value === '') return null;
+    const id = Number(value);
+    return Number.isFinite(id) && id > 0 ? Math.floor(id) : null;
+  });
+};
+
+const itemMapById = (items: ShopItem[]) => new Map(items.map((item) => [Number(item.id), item]));
+
+export const getArenaCosmeticShopItems = async (): Promise<ShopItem[]> => {
+  const items = await getActiveItems();
+  return items.filter((item) => item.type === 'emote');
+};
+
+export const getArenaUserCosmeticCounts = async (userId: string): Promise<Record<number, number>> => {
+  const counts = await getUserCosmeticCounts(userId);
+  const emoteItems = await getArenaCosmeticShopItems();
+  const emoteIds = new Set(emoteItems.map((item) => Number(item.id)));
+  const filtered: Record<number, number> = {};
+  for (const [rawId, count] of Object.entries(counts)) {
+    const id = Number(rawId);
+    if (emoteIds.has(id)) filtered[id] = count;
+  }
+  return filtered;
+};
+
+export const getArenaUserPurchases = async (userId: string): Promise<Record<number, number>> => {
+  const purchases = await getUserPurchases(userId);
+  const emoteItems = await getArenaCosmeticShopItems();
+  const emoteIds = new Set(emoteItems.map((item) => Number(item.id)));
+  const filtered: Record<number, number> = {};
+  for (const [rawId, count] of Object.entries(purchases)) {
+    const id = Number(rawId);
+    if (emoteIds.has(id)) filtered[id] = count;
+  }
+  return filtered;
+};
+
+const getOwnedArenaEmoteItems = async (userId: string): Promise<ShopItem[]> => {
+  const items = await getUserCosmetics(userId);
+  return items.filter((item) => item.type === 'emote' && Number(item.quantity || 0) > 0);
+};
+
+const getRawArenaLoadoutRow = async (userId: string): Promise<any | null> => {
+  if (getDbMode() === 'SUPABASE') {
+    const { data } = await getSupabaseClient()
+      .from('arena_user_cosmetic_loadouts')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    return data || null;
+  }
+  if (getDbMode() === 'MYSQL') {
+    return await getMysqlDb().get('SELECT * FROM arena_user_cosmetic_loadouts WHERE user_id = ?', userId) as any || null;
+  }
+  return getSqliteDb().prepare('SELECT * FROM arena_user_cosmetic_loadouts WHERE user_id = ?').get(userId) as any || null;
+};
+
+export const getArenaCosmeticLoadout = async (userId: string): Promise<ArenaCosmeticLoadout> => {
+  const row = await getRawArenaLoadoutRow(userId);
+  const ownedItems = itemMapById(await getOwnedArenaEmoteItems(userId));
+  const emoteSlots = Array.from({ length: ARENA_EMOTE_SLOT_COUNT }, (_, index) => {
+    const id = Number(row?.[`emote_slot_${index + 1}_item_id`] || 0);
+    return id > 0 ? ownedItems.get(id) || null : null;
+  });
+  return { emoteSlots };
+};
+
+export const updateArenaCosmeticLoadout = async (userId: string, input: { emoteSlots?: unknown }): Promise<{ ok: boolean; reason: string; loadout?: ArenaCosmeticLoadout }> => {
+  const slots = normalizeArenaEmoteSlots(input.emoteSlots);
+  const ownedItems = itemMapById(await getOwnedArenaEmoteItems(userId));
+  for (const id of slots) {
+    if (id && !ownedItems.has(id)) return { ok: false, reason: 'NOT_OWNED' };
+  }
+
+  const params = [userId, ...slots];
+  if (getDbMode() === 'SUPABASE') {
+    const payload: any = { user_id: userId, updated_at: new Date().toISOString() };
+    slots.forEach((id, index) => { payload[`emote_slot_${index + 1}_item_id`] = id; });
+    await getSupabaseClient().from('arena_user_cosmetic_loadouts').upsert(payload, { onConflict: 'user_id' });
+  } else if (getDbMode() === 'MYSQL') {
+    await getMysqlDb().run(`
+      INSERT INTO arena_user_cosmetic_loadouts
+        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        emote_slot_1_item_id = VALUES(emote_slot_1_item_id),
+        emote_slot_2_item_id = VALUES(emote_slot_2_item_id),
+        emote_slot_3_item_id = VALUES(emote_slot_3_item_id),
+        emote_slot_4_item_id = VALUES(emote_slot_4_item_id),
+        emote_slot_5_item_id = VALUES(emote_slot_5_item_id),
+        emote_slot_6_item_id = VALUES(emote_slot_6_item_id),
+        emote_slot_7_item_id = VALUES(emote_slot_7_item_id),
+        emote_slot_8_item_id = VALUES(emote_slot_8_item_id),
+        updated_at = CURRENT_TIMESTAMP
+    `, params);
+  } else {
+    getSqliteDb().prepare(`
+      INSERT INTO arena_user_cosmetic_loadouts
+        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        emote_slot_1_item_id = excluded.emote_slot_1_item_id,
+        emote_slot_2_item_id = excluded.emote_slot_2_item_id,
+        emote_slot_3_item_id = excluded.emote_slot_3_item_id,
+        emote_slot_4_item_id = excluded.emote_slot_4_item_id,
+        emote_slot_5_item_id = excluded.emote_slot_5_item_id,
+        emote_slot_6_item_id = excluded.emote_slot_6_item_id,
+        emote_slot_7_item_id = excluded.emote_slot_7_item_id,
+        emote_slot_8_item_id = excluded.emote_slot_8_item_id,
+        updated_at = datetime('now')
+    `).run(...params);
+  }
+  return { ok: true, reason: 'OK', loadout: await getArenaCosmeticLoadout(userId) };
+};
+
+export const getArenaEquippedEmote = async (userId: string, itemId: number): Promise<ShopItem | null> => {
+  const loadout = await getArenaCosmeticLoadout(userId);
+  return loadout.emoteSlots.find((item) => Number(item?.id || 0) === itemId) || null;
 };
 
 /** 특정 아이템의 모든 구매 횟수 초기화 (관리자) */

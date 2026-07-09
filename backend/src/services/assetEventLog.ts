@@ -367,6 +367,10 @@ const ensureMysqlAssetEventTable = async (db: any) => {
   mysqlAssetEventTableReady = true;
 };
 
+export const ensureMysqlAssetEventLogReady = async (db = getMysqlDb()): Promise<void> => {
+  await ensureMysqlAssetEventTable(db);
+};
+
 export const recordSqliteAssetEvent = (db: any, event: AssetEventInput): void => {
   const normalized = normalizeEvent(event);
   if (!normalized.userId && !normalized.fromUserId && !normalized.toUserId) return;

@@ -792,8 +792,7 @@ export const updateMyArenaV2StreamerCardController = async (req: AuthenticatedRe
       cost: Number(req.body?.cost),
       attack: Number(req.body?.attack),
       health: Number(req.body?.health),
-      keywords: Array.isArray(req.body?.keywords) ? req.body.keywords : [],
-      artAssetId: typeof req.body?.artAssetId === 'string' ? req.body.artAssetId : undefined
+      keywords: Array.isArray(req.body?.keywords) ? req.body.keywords : []
     });
     return res.status(result.accepted ? 200 : 422).json(result);
   } catch (err: any) {

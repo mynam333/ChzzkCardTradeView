@@ -3,7 +3,7 @@
 import React from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, Layers, Coins, Home, Moon, ShieldCheck, Store, Sun, Swords, Trophy } from 'lucide-react';
+import { ArrowLeftRight, BadgeCheck, BookOpen, Layers, Coins, Home, Moon, ShieldCheck, Store, Sun, Swords, Trophy } from 'lucide-react';
 import { useApp } from './AppContext';
 import { NotificationBell } from './NotificationBell';
 import { UserTitleList } from './UserTitleBadge';
@@ -27,18 +27,39 @@ export const ArenaLayout: React.FC<{
 }> = ({ activeTab, onTabChange, children, immersive = false }) => {
   const router = useRouter();
   const { user, authLoading, theme, toggleTheme, toast } = useApp();
+  const [hasStreamerCardAccess, setHasStreamerCardAccess] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    setHasStreamerCardAccess(false);
+    if (!user || authLoading) return () => { alive = false; };
+    void apiFetch('/arena/streamer-card/me')
+      .then((response) => {
+        if (!alive) return;
+        setHasStreamerCardAccess(response.ok);
+      })
+      .catch(() => {
+        if (alive) setHasStreamerCardAccess(false);
+      });
+    return () => { alive = false; };
+  }, [authLoading, user?.id]);
+
   const navItems: ArenaNavItem[] = [
     { id: 'play', label: '플레이', icon: Swords },
     { id: 'inventory', label: '보관함', icon: Layers },
     { id: 'ranking', label: 'MMR 랭킹', icon: Trophy },
+    { id: 'wiki', label: '위키', icon: BookOpen },
     { id: 'style', label: '스타일 상점', icon: Store },
+    ...(hasStreamerCardAccess ? [{ id: 'my-card' as const, label: '내 카드', icon: BadgeCheck }] : []),
     ...(user?.role === 'ADMIN' ? [{ id: 'admin' as const, label: '관리자', icon: ShieldCheck }] : [])
   ];
   const mobileDockItems: MobileLoopDockItem<ArenaMobileDockId>[] = [
     { id: 'inventory', label: '보관함', icon: Layers },
+    { id: 'wiki', label: '위키', icon: BookOpen },
     { id: 'style', label: '스타일', icon: Store },
     { id: 'play', label: '플레이', icon: Swords },
     { id: 'ranking', label: '랭킹', icon: Trophy },
+    ...(hasStreamerCardAccess ? [{ id: 'my-card' as const, label: '내 카드', icon: BadgeCheck }] : []),
     ...(user?.role === 'ADMIN' ? [{ id: 'admin' as const, label: '관리자', icon: ShieldCheck }] : []),
     { id: 'chikapo', label: '치카포', icon: Home }
   ];

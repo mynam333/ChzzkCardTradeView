@@ -1,6 +1,6 @@
 import { Response } from 'express';
 
-export type RealtimeTopic = 'market' | 'ranking' | 'maintenance' | 'shop';
+export type RealtimeTopic = 'market' | 'ranking' | 'maintenance' | 'shop' | 'arena';
 
 type RealtimeClient = {
   id: number;
@@ -21,7 +21,7 @@ const recentEvents: StoredRealtimeEvent[] = [];
 const MAX_RECENT_EVENTS = 200;
 const MAX_REALTIME_CLIENTS = Math.max(100, Number(process.env.MAX_REALTIME_CLIENTS || 2000));
 
-const ALL_TOPICS: RealtimeTopic[] = ['market', 'ranking', 'maintenance', 'shop'];
+const ALL_TOPICS: RealtimeTopic[] = ['market', 'ranking', 'maintenance', 'shop', 'arena'];
 
 const writeEvent = (res: Response, event: string, data: unknown, id?: number): boolean => {
   try {

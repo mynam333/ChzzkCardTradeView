@@ -11,6 +11,7 @@ on:
     paths:
       - 'backend/**'
       - 'init-db-mysql.sql'
+      - 'init-db-postgres.sql'
       - 'ecosystem.config.cjs'
       - 'deploy.sh'
       - 'package.json'
@@ -59,6 +60,7 @@ jobs:
             pnpm-workspace.yaml \
             ecosystem.config.cjs \
             init-db-mysql.sql \
+            init-db-postgres.sql \
             deploy.sh
 
       - name: Configure SSH

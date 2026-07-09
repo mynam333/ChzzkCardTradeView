@@ -589,6 +589,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       topics.add('shop');
       topics.add('market');
     }
+    if (pathname.startsWith('/arena')) topics.add('arena');
     return Array.from(topics).join(',');
   }, [pathname]);
 
@@ -770,7 +771,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       }
     };
 
-    const relayEvent = (name: 'ranking' | 'market' | 'shop') => (event: MessageEvent<string>) => {
+    const relayEvent = (name: 'ranking' | 'market' | 'shop' | 'arena') => (event: MessageEvent<string>) => {
       let detail: unknown = null;
       try {
         detail = JSON.parse(event.data);
@@ -783,17 +784,20 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     const handleRanking = relayEvent('ranking');
     const handleMarket = relayEvent('market');
     const handleShop = relayEvent('shop');
+    const handleArena = relayEvent('arena');
 
     source.addEventListener('maintenance', handleMaintenance as EventListener);
     source.addEventListener('ranking', handleRanking as EventListener);
     source.addEventListener('market', handleMarket as EventListener);
     source.addEventListener('shop', handleShop as EventListener);
+    source.addEventListener('arena', handleArena as EventListener);
 
     return () => {
       source.removeEventListener('maintenance', handleMaintenance as EventListener);
       source.removeEventListener('ranking', handleRanking as EventListener);
       source.removeEventListener('market', handleMarket as EventListener);
       source.removeEventListener('shop', handleShop as EventListener);
+      source.removeEventListener('arena', handleArena as EventListener);
       source.close();
     };
   }, [realtimeTopics]);

@@ -243,7 +243,14 @@ export class SqliteTradeRepository implements ITradeRepository {
           }
           db.prepare(`UPDATE user_cards SET border_item_id = NULL, name_effect_item_id = NULL WHERE id IN (${placeholders})`).run(...ids);
         }
-        db.prepare(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`).run(toId, ...ids);
+        const moveResult = db.prepare(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`).run(toId, ...ids);
+        if (moveResult.changes !== ids.length) {
+          throw new Error('CARD_MOVE_INCOMPLETE');
+        }
+        const movedCheck = db.prepare(`SELECT COUNT(*) AS c FROM user_cards WHERE user_id = ? AND id IN (${placeholders})`).get(toId, ...ids) as { c: number };
+        if (Number(movedCheck?.c || 0) !== ids.length) {
+          throw new Error('CARD_MOVE_INCOMPLETE');
+        }
         recordSqliteAssetEvents(db, owned.map((row) => ({
           userId: fromId,
           counterpartyUserId: toId,

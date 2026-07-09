@@ -26,7 +26,8 @@ import {
   Trash2,
   Zap
 } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { API_BASE_URL, apiFetch } from '@/lib/api';
+import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
 import { useApp } from '../../AppContext';
 import { ArenaLayout } from '../../ArenaLayout';
 import type { ArenaSiteTab } from '../types';
@@ -57,11 +58,38 @@ type Selection =
   | { source: 'board'; id: string; position: ArenaV2BoardPositionDto }
   | null;
 
+type ArenaEmoteItem = {
+  id: number;
+  type: 'emote';
+  name: string;
+  style_json: string | null;
+};
+
+type ArenaEmoteEvent = {
+  id: string;
+  kind: 'arena_emote';
+  matchId: string;
+  userId?: string;
+  item: ArenaEmoteItem;
+  x: number;
+  y: number;
+  createdAt: string;
+};
+
+type ArenaEmoteWheel = {
+  x: number;
+  y: number;
+  ratioX: number;
+  ratioY: number;
+} | null;
+
 const arenaTabHref: Record<ArenaSiteTab, string> = {
   play: '/arena/play',
   inventory: '/arena/inventory',
   ranking: '/arena/ranking',
+  wiki: '/arena/wiki',
   style: '/arena/style',
+  'my-card': '/arena/my-card',
   admin: '/arena/admin'
 };
 
@@ -90,6 +118,37 @@ const moveArenaSection = (router: ReturnType<typeof useRouter>, tab: ArenaSiteTa
 const positionKey = (position: ArenaV2BoardPositionDto) => `${position.row}:${position.column}`;
 const positionLabel = (position: ArenaV2BoardPositionDto) => `${position.row === 'front' ? '전열' : '후열'} ${position.column + 1}`;
 const availableCost = (turnNo: number) => Math.min(9, Math.max(1, turnNo));
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const getBackendAssetOrigin = () => {
+  try {
+    if (/^https?:\/\//i.test(API_BASE_URL)) return new URL(API_BASE_URL).origin;
+    if (typeof window !== 'undefined') return new URL(API_BASE_URL, window.location.origin).origin;
+  } catch {
+    return '';
+  }
+  return '';
+};
+
+const resolveArenaEmoteImageUrl = (value?: string | null) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
+    const origin = getBackendAssetOrigin();
+    const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;
+    return origin ? `${origin}${cleanPath}` : cleanPath;
+  }
+  if (raw.startsWith('/')) return raw;
+  return '';
+};
+
+const getArenaEmoteVisual = (item?: ArenaEmoteItem | null) => {
+  const style = parseArenaCosmeticStyle(item?.style_json);
+  const imageUrl = resolveArenaEmoteImageUrl(typeof style.image_url === 'string' ? style.image_url : '');
+  const emoji = typeof style.emoji === 'string' && style.emoji.trim() ? style.emoji.trim() : '✦';
+  return { imageUrl, emoji };
+};
 
 const boardMotionRow = (seatNo: number, selfSeatNo: number, row: ArenaV2BoardPositionDto['row']) => {
   const isSelf = seatNo === selfSeatNo;
@@ -622,6 +681,69 @@ const PixiBattleLayer: React.FC<{
   return <div ref={hostRef} className="arena-v2-pixi-layer" aria-hidden="true" />;
 };
 
+const ArenaEmoteBurstLayer: React.FC<{ events: ArenaEmoteEvent[] }> = ({ events }) => (
+  <div className="arena-v2-emote-burst-layer" aria-hidden="true">
+    {events.map((event) => {
+      const visual = getArenaEmoteVisual(event.item);
+      return (
+        <div
+          key={event.id}
+          className="arena-v2-emote-burst"
+          style={{ left: `${event.x * 100}%`, top: `${event.y * 100}%` }}
+        >
+          <span>
+            {visual.imageUrl ? <img src={visual.imageUrl} alt="" /> : <b>{visual.emoji}</b>}
+          </span>
+        </div>
+      );
+    })}
+  </div>
+);
+
+const ArenaEmoteWheelMenu: React.FC<{
+  wheel: ArenaEmoteWheel;
+  slots: Array<ArenaEmoteItem | null>;
+  onPick: (item: ArenaEmoteItem) => void;
+  onClose: () => void;
+}> = ({ wheel, slots, onPick, onClose }) => {
+  if (!wheel) return null;
+  const radius = 82;
+  return (
+    <div className="arena-v2-emote-wheel-backdrop" onPointerDown={onClose}>
+      <div
+        className="arena-v2-emote-wheel"
+        style={{ left: wheel.x, top: wheel.y }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {Array.from({ length: 8 }, (_, index) => {
+          const item = slots[index] || null;
+          const angle = -90 + index * 45;
+          const x = Math.cos((angle * Math.PI) / 180) * radius;
+          const y = Math.sin((angle * Math.PI) / 180) * radius;
+          const visual = getArenaEmoteVisual(item);
+          return (
+            <button
+              key={index}
+              type="button"
+              className={item ? 'has-emote' : ''}
+              style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
+              disabled={!item}
+              onClick={() => item && onPick(item)}
+              aria-label={item ? `${item.name} 이모트 사용` : `빈 이모트 슬롯 ${index + 1}`}
+            >
+              {item ? (visual.imageUrl ? <img src={visual.imageUrl} alt="" /> : <b>{visual.emoji}</b>) : <span>{index + 1}</span>}
+            </button>
+          );
+        })}
+        <div className="arena-v2-emote-wheel-core">
+          <Sparkles className="h-4 w-4" />
+          <span>EMOTE</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const applyVirtualSelfState = (match: ArenaV2MatchViewDto, actions: ArenaV2TurnActionDto[]) => {
   const selfSeatNo = match.selfSeatNo ?? 0;
   const self = match.players.find((player) => player.seatNo === selfSeatNo);
@@ -674,6 +796,11 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const [turnLoadedAt, setTurnLoadedAt] = React.useState(Date.now());
   const [now, setNow] = React.useState(Date.now());
   const [notice, setNotice] = React.useState('');
+  const [emoteSlots, setEmoteSlots] = React.useState<Array<ArenaEmoteItem | null>>(Array(8).fill(null));
+  const [emoteWheel, setEmoteWheel] = React.useState<ArenaEmoteWheel>(null);
+  const [activeEmotes, setActiveEmotes] = React.useState<ArenaEmoteEvent[]>([]);
+  const emoteCooldownRef = React.useRef(0);
+  const battlefieldRef = React.useRef<HTMLDivElement | null>(null);
 
   const loadReplay = React.useCallback(async (id: string) => {
     if (!id) return;
@@ -719,6 +846,32 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  React.useEffect(() => {
+    if (mode !== 'match') return;
+    let alive = true;
+    void apiFetch('/arena/cosmetics/loadout')
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        if (!alive || !json) return;
+        setEmoteSlots(Array.from({ length: 8 }, (_, index) => json?.emoteSlots?.[index] || null));
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [mode]);
+
+  React.useEffect(() => {
+    const handleArenaEvent = (event: Event) => {
+      const detail = (event as CustomEvent).detail as ArenaEmoteEvent | null;
+      if (!detail || detail.kind !== 'arena_emote' || detail.matchId !== resolvedMatchId) return;
+      setActiveEmotes((current) => [...current.filter((item) => item.id !== detail.id), detail].slice(-12));
+      window.setTimeout(() => {
+        setActiveEmotes((current) => current.filter((item) => item.id !== detail.id));
+      }, 2600);
+    };
+    window.addEventListener('chikapo:arena-updated', handleArenaEvent as EventListener);
+    return () => window.removeEventListener('chikapo:arena-updated', handleArenaEvent as EventListener);
+  }, [resolvedMatchId]);
 
   const selfSeat = match?.selfSeatNo ?? 0;
   const opponentSeat = selfSeat === 0 ? 1 : 0;
@@ -845,6 +998,51 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
     }
   };
 
+  const openEmoteWheel = (event: React.MouseEvent<HTMLElement>) => {
+    if (mode !== 'match' || !match || !emoteSlots.some(Boolean)) return;
+    event.preventDefault();
+    const target = battlefieldRef.current;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const ratioX = clamp01((event.clientX - rect.left) / rect.width);
+    const ratioY = clamp01((event.clientY - rect.top) / rect.height);
+    setEmoteWheel({
+      x: Math.max(116, Math.min(rect.width - 116, event.clientX - rect.left)),
+      y: Math.max(116, Math.min(rect.height - 116, event.clientY - rect.top)),
+      ratioX,
+      ratioY
+    });
+  };
+
+  const sendEmote = async (item: ArenaEmoteItem) => {
+    if (!match || !emoteWheel) return;
+    const nowMs = Date.now();
+    if (nowMs - emoteCooldownRef.current < 1800) {
+      setNotice('이모트는 잠시 후 다시 사용할 수 있습니다.');
+      setEmoteWheel(null);
+      return;
+    }
+    emoteCooldownRef.current = nowMs;
+    const wheel = emoteWheel;
+    setEmoteWheel(null);
+    try {
+      const res = await apiFetch(`/arena/matches/${encodeURIComponent(match.id)}/emotes`, {
+        method: 'POST',
+        body: JSON.stringify({ itemId: item.id, x: wheel.ratioX, y: wheel.ratioY })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '이모트를 사용할 수 없습니다.');
+      if (json?.event) {
+        setActiveEmotes((current) => [...current.filter((emote) => emote.id !== json.event.id), json.event].slice(-12));
+        window.setTimeout(() => {
+          setActiveEmotes((current) => current.filter((emote) => emote.id !== json.event.id));
+        }, 2600);
+      }
+    } catch (error: any) {
+      setNotice(error?.message || '이모트를 사용할 수 없습니다.');
+    }
+  };
+
   const renderBoard = (seatNo: number, interactive: boolean) => {
     const player = seatNo === selfSeat
       ? { boardState: virtualSelf.board }
@@ -889,7 +1087,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const subtitle = mode === 'spectate'
     ? '진행된 전투 흐름을 한눈에 확인합니다.'
     : mode === 'settings'
-      ? '시즌과 문의 상태를 확인합니다.'
+      ? '시즌과 대전 상태를 확인합니다.'
       : match ? `${matchModeLabel(match.mode)} · ${matchStatusLabel(match.status)} · 턴 ${match.turnNo}` : loading ? '경기를 불러오는 중' : '경기를 선택해 주세요.';
 
   return (
@@ -962,8 +1160,15 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
             ))}
           </aside>
 
-          <div key={`combat-${combatCue.event?.seq || 'idle'}-${animationReplayKey}`} className={`arena-v2-board-wrap arena-v2-battlefield ${combatCue.event ? 'has-combat-cue' : ''}`}>
+          <div
+            ref={battlefieldRef}
+            key={`combat-${combatCue.event?.seq || 'idle'}-${animationReplayKey}`}
+            className={`arena-v2-board-wrap arena-v2-battlefield ${combatCue.event ? 'has-combat-cue' : ''}`}
+            onContextMenu={openEmoteWheel}
+          >
             <PixiBattleLayer activeColumn={selectedColumn} events={replayEvents} cardPositions={pixiCardPositions} selfSeatNo={selfSeat} />
+            <ArenaEmoteBurstLayer events={activeEmotes} />
+            <ArenaEmoteWheelMenu wheel={emoteWheel} slots={emoteSlots} onPick={sendEmote} onClose={() => setEmoteWheel(null)} />
             <div className="arena-v2-player-strip is-opponent">
               <div><span>상대</span><strong>{match?.mode === 'bot' ? '연습 상대' : `자리 ${opponentSeat + 1}`}</strong></div>
               <div className="arena-v2-resource"><Shield className="h-4 w-4" /> {opponent?.playerHealth ?? 30}</div>

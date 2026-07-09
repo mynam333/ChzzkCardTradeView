@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import {
   Activity,
   AlertTriangle,
+  ArrowDownAZ,
+  BookOpen,
   Bot,
   Check,
   Clock3,
@@ -17,15 +19,19 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Shield,
+  SlidersHorizontal,
   Sparkles,
   Swords,
   Target,
   Trophy,
   Users,
+  X,
   Zap
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
+import { arenaCosmeticPresets, arenaCosmeticTypeLabels, parseArenaCosmeticStyle, type ArenaCosmeticPreset } from '@/lib/arenaCosmetics';
 import { useApp } from '../AppContext';
 import type { ArenaSiteTab } from './types';
 import styles from './ArenaV2Experience.module.css';
@@ -77,32 +83,9 @@ type ArenaV2RankingItem = {
   draws: number;
 };
 
-type ArenaV2WikiEntry = {
-  slug: string;
-  title: string;
-  category: string;
-  status: string;
-  body?: string[];
-};
-
-type ArenaV2Report = {
-  id: string;
-  targetType: string;
-  targetId: string;
-  reason: string;
-  status: string;
-  adminNote?: string | null;
-  createdAt?: string;
-};
-
-type ArenaV2RightRequest = {
-  id: string;
-  streamerId: string;
-  requestType: string;
-  status: string;
-  reviewNote?: string | null;
-  createdAt?: string;
-};
+type InventorySelectionFilter = 'all' | 'selected' | 'unselected';
+type InventorySortKey = 'name_asc' | 'class_asc' | 'cost_asc' | 'cost_desc' | 'attack_desc' | 'health_desc' | 'selected_first';
+type ArenaAdminSubTab = 'overview' | 'season' | 'rewards' | 'matches' | 'safety' | 'cosmetics' | 'diagnostics';
 
 type ArenaV2MyStreamerCard = {
   streamer?: {
@@ -115,6 +98,39 @@ type ArenaV2MyStreamerCard = {
   card: ArenaV2Card | null;
   canEdit: boolean;
   validation?: { valid?: boolean; errors?: Array<{ code?: string; message?: string }> };
+};
+
+type ArenaCosmeticItem = {
+  id: number;
+  type: 'emote';
+  name: string;
+  description: string | null;
+  price: number;
+  style_json: string | null;
+  purchase_limit: number;
+  sale_start_at?: string | null;
+  sale_end_at?: string | null;
+  limited_total_quantity?: number;
+  sold_quantity?: number;
+  active?: boolean;
+};
+
+type ArenaCosmeticLoadout = {
+  emoteSlots: Array<ArenaCosmeticItem | null>;
+};
+
+type ArenaAdminCosmeticForm = {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  style_json: string;
+  active: boolean;
+  purchase_limit: number;
+  sale_start_at: string;
+  sale_end_at: string;
+  limited_total_quantity: number;
+  sold_quantity: number;
 };
 
 const classTone: Record<string, { label: string; icon: typeof Swords; accent: string; hint: string }> = {
@@ -141,6 +157,171 @@ const phases = [
   { id: 'place', label: '배치', icon: Plus, hint: '빈 칸에 소환' },
   { id: 'replace', label: '교체', icon: Hand, hint: '새 카드만 가능' },
   { id: 'end', label: '종료', icon: Check, hint: '선택 확정' }
+];
+
+const arenaAdminTabs: Array<{ id: ArenaAdminSubTab; label: string; description: string; icon: typeof Activity }> = [
+  { id: 'overview', label: '개요', description: '현재 시즌과 핵심 상태', icon: Activity },
+  { id: 'season', label: '시즌', description: '생성 및 상태 전환', icon: Gauge },
+  { id: 'rewards', label: '정산', description: '보상 확인과 지급 보류', icon: Trophy },
+  { id: 'matches', label: '대전', description: '큐와 리플레이 보류', icon: Swords },
+  { id: 'safety', label: '안전', description: '운영 플래그 기록', icon: Shield },
+  { id: 'cosmetics', label: '치장', description: '상점 등록과 판매 상태', icon: Sparkles },
+  { id: 'diagnostics', label: '진단', description: '시스템 응답과 데이터 점검', icon: BookOpen }
+];
+
+const arenaAdminOpsFlags = [
+  { flag: 'quick_match_enabled', label: '빠른대전' },
+  { flag: 'battle_royale_8_enabled', label: '8인전' },
+  { flag: 'bot_match_enabled', label: '연습전' },
+  { flag: 'reward_grant_enabled', label: '보상 지급' },
+  { flag: 'streamer_card_edit_enabled', label: '스트리머 카드 편집' },
+  { flag: 'arena_cosmetics_enabled', label: '치장 상점' },
+  { flag: 'arena_emotes_enabled', label: '인게임 이모트' }
+];
+
+const emptyArenaAdminCosmeticForm: ArenaAdminCosmeticForm = {
+  id: 0,
+  name: '',
+  description: '',
+  price: 1000,
+  style_json: '{"emoji":"✨"}',
+  active: true,
+  purchase_limit: 0,
+  sale_start_at: '',
+  sale_end_at: '',
+  limited_total_quantity: 0,
+  sold_quantity: 0
+};
+
+const wikiCoreRules = [
+  { label: '기본 체력', value: '30', detail: '봇전, 빠른대전, 8인전 모두 30 체력에서 시작합니다.' },
+  { label: '덱 크기', value: '14~20장', detail: '덱이 작을수록 원하는 카드를 빨리 뽑지만, 피로 피해 위험이 커집니다.' },
+  { label: '필드', value: '2 x 3', detail: '전열 3칸과 후열 3칸, 총 6칸을 사용합니다.' },
+  { label: '턴 제한', value: '40초', detail: '양쪽이 모두 완료하면 제한 시간을 기다리지 않고 바로 전투로 넘어갑니다.' },
+  { label: '코스트', value: '1~9', detail: '1턴 1코스트에서 시작해 매 턴 1씩 늘고, 9 이후에는 9로 고정됩니다.' },
+  { label: '승리 조건', value: '체력 0 또는 9턴 판정', detail: '상대 체력을 0 이하로 만들거나 9턴 종료 후 체력이 더 높으면 승리합니다. 동률은 서든데스로 이어집니다.' }
+];
+
+const wikiFlowSections = [
+  {
+    title: '대전 시작과 멀리건',
+    icon: Hand,
+    points: [
+      '대전 시작 시 각 플레이어는 덱에서 5장을 뽑습니다.',
+      '시작 손패 중 최대 3장을 한 번만 교체할 수 있습니다.',
+      '멀리건으로 고른 카드는 덱으로 돌아가고, 덱을 섞은 뒤 같은 수만큼 다시 뽑습니다.',
+      '1턴 시작에는 추가 드로우가 없고, 2턴부터 매 턴 시작 시 1장씩 뽑습니다.'
+    ]
+  },
+  {
+    title: '배치 단계',
+    icon: Plus,
+    points: [
+      '손패 카드는 내 필드의 빈 칸에 놓을 수 있고, 카드 코스트만큼 비용을 씁니다.',
+      '한 턴에 여러 장을 배치할 수 있지만, 제출 전 최종 행동만 실제로 처리됩니다.',
+      '상대 필드에는 직접 배치할 수 없습니다.',
+      '이미 카드가 있는 칸에는 일반 배치가 아니라 교체 행동으로만 새 카드를 놓을 수 있습니다.'
+    ]
+  },
+  {
+    title: '전술 이동',
+    icon: Move,
+    points: [
+      '전술 이동은 이전 턴부터 필드에 있던 내 카드 1장을 빈 칸으로 옮기는 행동입니다.',
+      '기본 비용은 1코스트이며, 턴당 1회만 사용할 수 있습니다.',
+      '이번 턴 새로 배치한 카드는 같은 턴에 전술 이동할 수 없습니다.',
+      '8인전에서 패배한 플레이어는 다음 라운드 첫 전술 이동 비용이 0이 됩니다.'
+    ]
+  },
+  {
+    title: '교체',
+    icon: RefreshCw,
+    points: [
+      '교체는 기존 필드 카드가 있는 칸에 손패의 새 카드를 놓는 행동입니다.',
+      '비용은 새 카드의 코스트만큼 사용합니다.',
+      '기존 카드는 묘지로 이동하며, 교체로 묘지에 간 카드는 전투불능 효과를 발동하지 않습니다.',
+      '교체는 필드를 다시 짜기 위한 손실 행동이므로, 핵심 카드를 버리게 되는지 확인해야 합니다.'
+    ]
+  },
+  {
+    title: '전투 판정',
+    icon: Swords,
+    points: [
+      '배치가 끝나면 양쪽 최종 행동이 동시에 적용되고 필드가 공개됩니다.',
+      '카드는 기본적으로 같은 라인만 공격합니다.',
+      '기본 타겟 우선순위는 상대 전열 카드, 상대 후열 카드, 상대 플레이어 순서입니다.',
+      '전열 카드들이 먼저 동시에 공격하고, 피해와 전투불능 처리가 끝난 뒤 후열 카드들이 공격합니다.'
+    ]
+  },
+  {
+    title: '피해와 묘지',
+    icon: HeartPulse,
+    points: [
+      '카드가 받은 체력 피해는 필드에 남아 있는 동안 계속 유지됩니다.',
+      '전열 카드가 기본 공격으로 쓰러지고 피해가 남으면, 같은 라인의 후열 카드에게 남은 피해의 절반이 전달됩니다.',
+      '관통이 있으면 후열에 전달되는 초과 피해가 절반이 아니라 전부 적용됩니다.',
+      '덱이 빈 상태에서 드로우를 시도하면 피로 피해를 받습니다.'
+    ]
+  }
+];
+
+const wikiKeywordGroups = [
+  {
+    title: '방어와 생존',
+    items: [
+      ['도발', '같은 라인에서 상대 공격을 끌어오는 핵심 방어 키워드입니다.'],
+      ['보호막', '전투 중 피해를 대신 흡수하고, 전투가 끝나면 사라집니다.'],
+      ['반격', '같은 라인에서 공격받았을 때 공격자에게 피해를 되돌립니다.'],
+      ['흡혈', '실제 체력 피해를 줬을 때 회복으로 이어지는 생존 키워드입니다.'],
+      ['부활', '전투마다 1회만 허용되는 고위험 생존 효과입니다.']
+    ]
+  },
+  {
+    title: '공격과 돌파',
+    items: [
+      ['관통', '전열을 쓰러뜨린 뒤 남은 피해를 같은 라인 후열까지 온전히 전달합니다.'],
+      ['추격', '상대 카드를 전투불능으로 만든 뒤 추가 압박을 이어갑니다.'],
+      ['직접 압박', '상대 플레이어를 직접 공격할 때 피해를 높입니다.'],
+      ['후열 압박', '후열 카드를 때릴 때 피해가 증가합니다.'],
+      ['광역 피해', '한 공격 단계에서 여러 대상에게 영향을 주는 강한 공격 효과입니다.']
+    ]
+  },
+  {
+    title: '제어와 방해',
+    items: [
+      ['조준', '같은 라인에서 후열을 우선 노리는 공격 규칙입니다.'],
+      ['침묵', '이번 전투 동안 상대 카드의 주요 효과를 막습니다.'],
+      ['기절', '이번 공격 단계의 행동을 끊는 강한 제어 효과입니다.'],
+      ['밀치기', '같은 라인 전열 카드를 후열로 밀어 위치를 흔듭니다.'],
+      ['끌어오기', '같은 라인 후열 카드를 전열로 끌어내 압박합니다.'],
+      ['약화', '이번 전투 동안 대상의 위력을 낮춥니다.']
+    ]
+  },
+  {
+    title: '지원과 자원',
+    items: [
+      ['전투 드로우', '전투 중 카드를 뽑습니다. 손패 8장 제한은 그대로 적용됩니다.'],
+      ['응급 회복', '필드 카드의 누적 피해를 일부 회복합니다.'],
+      ['보호 지원', '같은 라인 아군에게 보호막을 제공합니다.'],
+      ['공격 지원', '같은 라인 아군의 첫 피해를 높입니다.'],
+      ['묘지 회수', '묘지의 카드를 손패로 되돌립니다. 되돌아온 카드는 최대 체력 상태입니다.']
+    ]
+  },
+  {
+    title: '망령과 사망',
+    items: [
+      ['복수', '아군 손실 이후 반격 흐름을 만드는 키워드입니다.'],
+      ['원혼', '묘지와 전투불능 상황을 이용해 후반 압박을 만듭니다.'],
+      ['잔영', '카드가 사라진 뒤에도 일부 영향이 남는 계열입니다.'],
+      ['묘지 강화', '묘지 카드 수 조건으로 위력이 커지는 효과입니다.']
+    ]
+  }
+];
+
+const wikiModeSections = [
+  ['봇전', '알고리즘 기반 봇과 겨루는 연습 모드입니다. 기본 규칙은 빠른대전과 같고 MMR에는 반영되지 않습니다.'],
+  ['빠른대전', '1:1 온라인 대전입니다. MMR 기반으로 매칭되며 시즌 랭킹과 보상 기준이 됩니다.'],
+  ['8인전', '8명이 참가해 라운드마다 1:1 전투를 반복합니다. 체력이 0 이하가 되면 탈락하고 마지막 생존자가 승리합니다.']
 ];
 
 const normalizeCard = (raw: any): ArenaV2Card | null => {
@@ -187,6 +368,22 @@ const fetchArenaJson = async (path: string, timeoutMs = 15000) => {
     window.clearTimeout(timeout);
   }
 };
+
+const toArenaDateTimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (next: number) => String(next).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const arenaDateTimeInputToIso = (value: string) => value ? new Date(value).toISOString() : null;
+
+const minifyArenaCss = (css: string) => css
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\s+/g, ' ')
+  .replace(/\s*([{}:;,])\s*/g, '$1')
+  .trim();
 
 const formatMode = (mode: ArenaV2Deck['modeScope']) => {
   if (mode === 'battle_royale_8') return '8인전';
@@ -235,26 +432,86 @@ const requestStatusLabel = (status?: string) => {
   return labels[String(status || '')] || status || '확인 중';
 };
 
-const requestTypeLabel = (type?: string) => {
-  const labels: Record<string, string> = {
-    text_change: '문구 수정',
-    image_change: '이미지 수정',
-    card_config: '카드 설정',
-    disable_version: '카드 숨김',
-    opt_out: '참여 제외'
-  };
-  return labels[String(type || '')] || type || '요청';
+const arenaKeywordLabels: Record<string, string> = {
+  rush: '돌진',
+  taunt: '도발',
+  direct_pressure: '직격 압박',
+  heal: '회복',
+  draw: '드로우',
+  deathrattle: '유언',
+  silence: '침묵',
+  aim: '조준',
+  shield: '보호막',
+  guard: '수호',
+  stun: '기절',
+  weaken: '약화',
+  push: '밀치기',
+  pull: '끌어오기',
+  poison: '중독',
+  burn: '화상',
+  freeze: '빙결',
+  stealth: '은신',
+  lifesteal: '흡혈',
+  pierce: '관통',
+  splash: '광역',
+  cleave: '연격',
+  counter: '반격',
+  charge: '돌격',
+  support: '지원',
+  boost: '강화',
+  debuff: '약화',
+  buff: '버프',
+  summon: '소환',
+  revive: '부활',
+  vengeance: '복수',
+  grudge: '원혼',
+  remnant: '잔영',
+  grave_recover: '묘지 회수',
+  battle_draw: '전투 드로우',
+  emergency_heal: '응급 회복',
+  guard_support: '보호 지원',
+  attack_support: '공격 지원',
+  backline_pressure: '후열 압박',
+  pursuit: '추격',
+  weakpoint: '약점 공격',
+  aoe_damage: '광역 피해',
+  discard: '폐기',
+  copy: '복제',
+  discover: '발견'
 };
 
-const targetTypeLabel = (type?: string) => {
-  const labels: Record<string, string> = {
-    card: '카드',
-    match: '경기',
-    replay: '장면',
-    user: '사용자',
-    battle_royale: '8인전'
-  };
-  return labels[String(type || '')] || type || '대상';
+const arenaKeywordTokenLabels: Record<string, string> = {
+  direct: '직격',
+  pressure: '압박',
+  death: '사망',
+  rattle: '유언',
+  final: '최후',
+  strike: '타격',
+  double: '이중',
+  draw: '드로우',
+  heal: '회복',
+  power: '전력',
+  attack: '공격',
+  health: '체력',
+  random: '무작위',
+  enemy: '적',
+  ally: '아군',
+  card: '카드',
+  hand: '손패',
+  deck: '덱',
+  lane: '라인'
+};
+
+const formatArenaKeyword = (keyword?: string) => {
+  const raw = String(keyword || '').trim();
+  if (!raw) return '';
+  const normalized = raw.toLowerCase();
+  if (arenaKeywordLabels[normalized]) return arenaKeywordLabels[normalized];
+  return raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((token) => arenaKeywordTokenLabels[token.toLowerCase()] || token)
+    .join(' ');
 };
 
 const getBackendAssetOrigin = () => {
@@ -292,8 +549,14 @@ const resolveBackendImageUrl = (value?: string | null) => {
 };
 
 const isImageSource = (value?: string | null) => Boolean(resolveBackendImageUrl(value));
+const getArenaEmoteVisual = (item?: { style_json?: string | null; name?: string | null } | null) => {
+  const style = parseArenaCosmeticStyle(item?.style_json);
+  const imageUrl = resolveBackendImageUrl(typeof style.image_url === 'string' ? style.image_url : '');
+  const emoji = typeof style.emoji === 'string' && style.emoji.trim() ? style.emoji.trim() : '';
+  return { imageUrl, emoji: emoji || '✦' };
+};
 const cardTooltip = (card: ArenaV2Card, classLabel: string) => {
-  const keywordText = card.keywords.length ? card.keywords.join(', ') : '특수 효과 없음';
+  const keywordText = card.keywords.length ? card.keywords.map(formatArenaKeyword).filter(Boolean).join(', ') : '특수 효과 없음';
   return `${card.displayName}\n클래스: ${classLabel}\n효과: ${keywordText}\n공격력: ${card.attack}\n체력: ${card.health}`;
 };
 
@@ -303,8 +566,7 @@ const hydrateStreamerCardForm = (card: ArenaV2Card | null) => ({
   cost: String(card?.cost ?? 2),
   attack: String(card?.attack ?? 1),
   health: String(card?.health ?? 4),
-  keywordsText: card?.keywords?.join(', ') || '',
-  artAssetId: card?.artAssetId || ''
+  keywordsText: card?.keywords?.join(', ') || ''
 });
 
 const parseKeywordEditorText = (value: string) => {
@@ -350,7 +612,7 @@ const ArenaV2CardView: React.FC<{
 }> = ({ card, selected, compact, onClick }) => {
   const tone = classTone[card.cardClass] || classTone.tempo;
   const Icon = tone.icon;
-  const keywords = card.keywords.slice(0, compact ? 1 : 3);
+  const keywords = card.keywords.map(formatArenaKeyword).filter(Boolean).slice(0, compact ? 1 : 3);
   const tooltip = cardTooltip(card, tone.label);
   return (
     <button
@@ -369,7 +631,7 @@ const ArenaV2CardView: React.FC<{
       <span className="arena-v2-card-art">
         <CardArt card={card} compact={compact} />
         <span className="arena-v2-card-keywords">
-          {keywords.length ? keywords.map((keyword) => <span key={keyword} title={`효과 키워드: ${keyword}`}>{keyword}</span>) : <span title="특수 효과 없음">기본</span>}
+          {keywords.length ? keywords.map((keyword, index) => <span key={`${keyword}-${index}`} title={`효과 키워드: ${keyword}`}>{keyword}</span>) : <span title="특수 효과 없음">기본</span>}
         </span>
       </span>
       <span className="arena-v2-card-readable">
@@ -399,6 +661,44 @@ const StatTile: React.FC<{ icon: typeof Activity; label: string; value: string; 
   </div>
 );
 
+const ArenaEmoteBadge: React.FC<{ item?: ArenaCosmeticItem | null; emptyLabel?: string }> = ({ item, emptyLabel = '비어 있음' }) => {
+  if (!item) {
+    return <span className="arena-v2-emote-empty">{emptyLabel}</span>;
+  }
+  const visual = getArenaEmoteVisual(item);
+  return (
+    <span className="arena-v2-emote-badge" title={item.name}>
+      {visual.imageUrl ? <img src={visual.imageUrl} alt={item.name} /> : <b>{visual.emoji}</b>}
+    </span>
+  );
+};
+
+const ArenaCosmeticPresetPreview: React.FC<{ preset: ArenaCosmeticPreset }> = ({ preset }) => (
+  <div className={`arena-v2-cosmetic-preview ${preset.className}`} style={preset.styleVars as React.CSSProperties}>
+    {preset.type === 'card_frame' ? (
+      <div className="arena-v2-cosmetic-card-demo">
+        <span className="demo-cost">5</span>
+        <span className="demo-name">ARENA</span>
+        <span className="demo-art" />
+        <span className="demo-atk">4</span>
+        <span className="demo-hp">8</span>
+      </div>
+    ) : preset.type === 'name_flare' ? (
+      <strong className="arena-v2-cosmetic-name-demo">CHIKAPO</strong>
+    ) : preset.type === 'hit_vfx' ? (
+      <div className="arena-v2-cosmetic-hit-demo"><span /><i /><b>42</b></div>
+    ) : preset.type === 'summon_vfx' ? (
+      <div className="arena-v2-cosmetic-summon-demo"><span /><i /></div>
+    ) : preset.type === 'ready_stamp' ? (
+      <div className="arena-v2-cosmetic-ready-demo"><span>READY</span></div>
+    ) : preset.type === 'nameplate' ? (
+      <div className="arena-v2-cosmetic-nameplate-demo"><span>PLAYER</span><b>MMR 1320</b></div>
+    ) : (
+      <div className="arena-v2-cosmetic-ko-demo"><span>FINISH</span></div>
+    )}
+  </div>
+);
+
 export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activeTab }) => {
   const router = useRouter();
   const { user, toast } = useApp();
@@ -409,19 +709,37 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const [decks, setDecks] = React.useState<ArenaV2Deck[]>([]);
   const [selectedCardIds, setSelectedCardIds] = React.useState<string[]>([]);
   const [selectedDeckId, setSelectedDeckId] = React.useState<string>('');
+  const [inventorySearch, setInventorySearch] = React.useState('');
+  const [inventoryClassFilter, setInventoryClassFilter] = React.useState('all');
+  const [inventoryKeywordFilter, setInventoryKeywordFilter] = React.useState('all');
+  const [inventorySelectionFilter, setInventorySelectionFilter] = React.useState<InventorySelectionFilter>('all');
+  const [inventorySort, setInventorySort] = React.useState<InventorySortKey>('name_asc');
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [notice, setNotice] = React.useState<string>('');
   const [rankings, setRankings] = React.useState<ArenaV2RankingItem[]>([]);
   const [rewardState, setRewardState] = React.useState<any>(null);
-  const [wikiEntries, setWikiEntries] = React.useState<ArenaV2WikiEntry[]>([]);
-  const [reports, setReports] = React.useState<ArenaV2Report[]>([]);
-  const [rightRequests, setRightRequests] = React.useState<ArenaV2RightRequest[]>([]);
   const [myStreamerCard, setMyStreamerCard] = React.useState<ArenaV2MyStreamerCard | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<{ quick?: any; battleRoyale?: any }>({});
-  const [reportForm, setReportForm] = React.useState({ targetType: 'card', targetId: '', reason: '' });
-  const [rightForm, setRightForm] = React.useState({ streamerId: '', requestType: 'text_change', payloadText: '' });
+  const [arenaCosmetics, setArenaCosmetics] = React.useState<ArenaCosmeticItem[]>([]);
+  const [arenaAdminCosmeticItems, setArenaAdminCosmeticItems] = React.useState<ArenaCosmeticItem[]>([]);
+  const [arenaCosmeticCounts, setArenaCosmeticCounts] = React.useState<Record<number, number>>({});
+  const [arenaCosmeticPurchases, setArenaCosmeticPurchases] = React.useState<Record<number, number>>({});
+  const [arenaCosmeticLoadout, setArenaCosmeticLoadout] = React.useState<ArenaCosmeticLoadout>({ emoteSlots: Array(8).fill(null) });
+  const [savingArenaCosmetic, setSavingArenaCosmetic] = React.useState(false);
+  const [adminCosmeticUploading, setAdminCosmeticUploading] = React.useState(false);
+  const [adminCosmeticForm, setAdminCosmeticForm] = React.useState<ArenaAdminCosmeticForm>({ ...emptyArenaAdminCosmeticForm });
   const [streamerCardForm, setStreamerCardForm] = React.useState(hydrateStreamerCardForm(null));
+  const [adminSubTab, setAdminSubTab] = React.useState<ArenaAdminSubTab>('overview');
+  const [arenaAdminStatus, setArenaAdminStatus] = React.useState<any | null>(null);
+  const [adminRewardPreview, setAdminRewardPreview] = React.useState<any | null>(null);
+  const [adminRewardGrantId, setAdminRewardGrantId] = React.useState('');
+  const [adminRewardHoldReason, setAdminRewardHoldReason] = React.useState('');
+  const [adminReplayMatchId, setAdminReplayMatchId] = React.useState('');
+  const [adminReplayHoldReason, setAdminReplayHoldReason] = React.useState('');
+  const [adminReplayHoldUntil, setAdminReplayHoldUntil] = React.useState('');
+  const [adminOpsReason, setAdminOpsReason] = React.useState('');
+  const [adminActionLoading, setAdminActionLoading] = React.useState('');
   const [adminSeasonForm, setAdminSeasonForm] = React.useState({
     seasonKey: '',
     name: '',
@@ -436,6 +754,70 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const deckReady = deckCount >= 14 && deckCount <= 20;
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
   const cardLoadSentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const deferredInventorySearch = React.useDeferredValue(inventorySearch);
+  const selectedCardIdSet = React.useMemo(() => new Set(selectedCardIds), [selectedCardIds]);
+  const availableInventoryClasses = React.useMemo(() => {
+    const classSet = new Set([...legalCardClasses, ...cards.map((card) => card.cardClass).filter(Boolean)]);
+    return Array.from(classSet).sort((a, b) => {
+      const aIndex = legalCardClasses.indexOf(a);
+      const bIndex = legalCardClasses.indexOf(b);
+      if (aIndex >= 0 || bIndex >= 0) return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+      return (classTone[a]?.label || a).localeCompare(classTone[b]?.label || b, 'ko-KR');
+    });
+  }, [cards]);
+  const availableInventoryKeywords = React.useMemo(() => {
+    const keywordMap = new Map<string, string>();
+    for (const card of cards) {
+      for (const keyword of card.keywords) {
+        const raw = String(keyword || '').trim();
+        if (!raw) continue;
+        keywordMap.set(raw.toLowerCase(), formatArenaKeyword(raw));
+      }
+    }
+    return Array.from(keywordMap.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ko-KR'));
+  }, [cards]);
+  const filteredInventoryCards = React.useMemo(() => {
+    const query = deferredInventorySearch.trim().toLowerCase();
+    const nextCards = cards.filter((card) => {
+      const tone = classTone[card.cardClass] || classTone.tempo;
+      const keywordLabels = card.keywords.map(formatArenaKeyword).filter(Boolean);
+      const selected = selectedCardIdSet.has(card.id);
+      if (inventoryClassFilter !== 'all' && card.cardClass !== inventoryClassFilter) return false;
+      if (inventoryKeywordFilter !== 'all' && !card.keywords.some((keyword) => String(keyword || '').trim().toLowerCase() === inventoryKeywordFilter)) return false;
+      if (inventorySelectionFilter === 'selected' && !selected) return false;
+      if (inventorySelectionFilter === 'unselected' && selected) return false;
+      if (!query) return true;
+      const searchText = [
+        card.displayName,
+        card.streamerId,
+        tone.label,
+        tone.hint,
+        card.cardClass,
+        card.cost,
+        card.attack,
+        card.health,
+        ...card.keywords,
+        ...keywordLabels
+      ].join(' ').toLowerCase();
+      return searchText.includes(query);
+    });
+    const compareName = (a: ArenaV2Card, b: ArenaV2Card) => a.displayName.localeCompare(b.displayName, 'ko-KR');
+    return nextCards.sort((a, b) => {
+      if (inventorySort === 'selected_first') {
+        const selectedDelta = Number(selectedCardIdSet.has(b.id)) - Number(selectedCardIdSet.has(a.id));
+        return selectedDelta || compareName(a, b);
+      }
+      if (inventorySort === 'class_asc') {
+        const classDelta = (classTone[a.cardClass]?.label || a.cardClass).localeCompare(classTone[b.cardClass]?.label || b.cardClass, 'ko-KR');
+        return classDelta || compareName(a, b);
+      }
+      if (inventorySort === 'cost_asc') return (a.cost - b.cost) || compareName(a, b);
+      if (inventorySort === 'cost_desc') return (b.cost - a.cost) || compareName(a, b);
+      if (inventorySort === 'attack_desc') return (b.attack - a.attack) || compareName(a, b);
+      if (inventorySort === 'health_desc') return (b.health - a.health) || compareName(a, b);
+      return compareName(a, b);
+    });
+  }, [cards, deferredInventorySearch, inventoryClassFilter, inventoryKeywordFilter, inventorySelectionFilter, inventorySort, selectedCardIdSet]);
 
   const buildArenaCardPath = React.useCallback((seasonId: string, offset = 0) => {
     const cardBasePath = user ? '/arena/cards/owned' : '/arena/cards';
@@ -456,6 +838,41 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     });
     return normalized;
   }, [buildArenaCardPath]);
+
+  const loadArenaCosmetics = React.useCallback(async () => {
+    if (!user) {
+      setArenaCosmetics([]);
+      setArenaCosmeticCounts({});
+      setArenaCosmeticPurchases({});
+      setArenaCosmeticLoadout({ emoteSlots: Array(8).fill(null) });
+      return;
+    }
+    const [itemsRes, countsRes, purchasesRes, loadoutRes] = await Promise.all([
+      apiFetch('/arena/cosmetics/shop-items'),
+      apiFetch('/arena/cosmetics/inventory-counts'),
+      apiFetch('/arena/cosmetics/purchases'),
+      apiFetch('/arena/cosmetics/loadout')
+    ]);
+    const itemsJson = itemsRes.ok ? await itemsRes.json().catch(() => ({})) : {};
+    setArenaCosmetics(Array.isArray(itemsJson?.items) ? itemsJson.items : []);
+    setArenaCosmeticCounts(countsRes.ok ? await countsRes.json().catch(() => ({})) : {});
+    setArenaCosmeticPurchases(purchasesRes.ok ? await purchasesRes.json().catch(() => ({})) : {});
+    const loadoutJson = loadoutRes.ok ? await loadoutRes.json().catch(() => ({})) : {};
+    setArenaCosmeticLoadout({
+      emoteSlots: Array.from({ length: 8 }, (_, index) => loadoutJson?.emoteSlots?.[index] || null)
+    });
+  }, [user]);
+
+  const loadArenaAdminCosmetics = React.useCallback(async () => {
+    if (user?.role !== 'ADMIN') {
+      setArenaAdminCosmeticItems([]);
+      return;
+    }
+    const res = await apiFetch('/admin/shop/items');
+    const json = res.ok ? await res.json().catch(() => []) : [];
+    const items = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : [];
+    setArenaAdminCosmeticItems(items.filter((item: any) => item?.type === 'emote'));
+  }, [user?.role]);
 
   const loadArenaV2 = React.useCallback(async () => {
     setLoading(true);
@@ -481,12 +898,10 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         const nextDecks = Array.isArray(deckJson?.decks) ? deckJson.decks as ArenaV2Deck[] : [];
         setDecks(nextDecks);
         setSelectedDeckId((current) => current || nextDecks.find((deck) => deck.isValid)?.id || nextDecks[0]?.id || '');
-        const [rewardRes, quickRes, battleRoyaleRes, reportsRes, rightsRes, myCardRes] = await Promise.all([
+        const [rewardRes, quickRes, battleRoyaleRes, myCardRes] = await Promise.all([
           apiFetch(`/arena/rewards/current?seasonId=${encodeURIComponent(nextSeason.id)}`),
           apiFetch(`/arena/matchmaking/quick/status?seasonId=${encodeURIComponent(nextSeason.id)}`),
           apiFetch(`/arena/battle-royales/queue/status?seasonId=${encodeURIComponent(nextSeason.id)}`),
-          apiFetch('/arena/reports/mine'),
-          apiFetch('/arena/streamer-right-requests/mine'),
           apiFetch(`/arena/streamer-card/me?seasonId=${encodeURIComponent(nextSeason.id)}`)
         ]);
         setRewardState(rewardRes.ok ? await rewardRes.json().catch(() => null) : null);
@@ -494,8 +909,6 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           quick: quickRes.ok ? await quickRes.json().catch(() => null) : null,
           battleRoyale: battleRoyaleRes.ok ? await battleRoyaleRes.json().catch(() => null) : null
         });
-        setReports(reportsRes.ok ? ((await reportsRes.json().catch(() => ({})))?.reports || []) : []);
-        setRightRequests(rightsRes.ok ? ((await rightsRes.json().catch(() => ({})))?.requests || []) : []);
         if (myCardRes.ok) {
           const myCardJson = await myCardRes.json().catch(() => null);
           const card = normalizeCard(myCardJson?.card);
@@ -510,35 +923,46 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           setMyStreamerCard(null);
           setStreamerCardForm(hydrateStreamerCardForm(null));
         }
+        await loadArenaCosmetics().catch(() => undefined);
       } else {
         setDecks([]);
         setRewardState(null);
         setQueueStatus({});
-        setReports([]);
-        setRightRequests([]);
         setMyStreamerCard(null);
         setStreamerCardForm(hydrateStreamerCardForm(null));
+        await loadArenaCosmetics().catch(() => undefined);
       }
       const rankingsPath = nextSeason?.id ? `/arena/rankings?seasonId=${encodeURIComponent(nextSeason.id)}&limit=100` : '/arena/rankings?limit=100';
-      const [rankingsRes, wikiRes] = await Promise.all([
-        apiFetch(rankingsPath),
-        apiFetch('/arena/wiki')
-      ]);
+      const rankingsRes = await apiFetch(rankingsPath);
       const rankingsJson = rankingsRes.ok ? await rankingsRes.json().catch(() => ({})) : {};
-      const wikiJson = wikiRes.ok ? await wikiRes.json().catch(() => ({})) : {};
       setRankings(Array.isArray(rankingsJson?.items) ? rankingsJson.items : []);
-      setWikiEntries(Array.isArray(wikiJson?.entries) ? wikiJson.entries : []);
+
+      if (user?.role === 'ADMIN') {
+        const adminStatusRes = await apiFetch('/admin/arena/system');
+        const adminStatusJson = adminStatusRes.ok ? await adminStatusRes.json().catch(() => null) : null;
+        setArenaAdminStatus(adminStatusJson?.data || adminStatusJson);
+        await loadArenaAdminCosmetics().catch(() => undefined);
+      } else {
+        setArenaAdminStatus(null);
+        setArenaAdminCosmeticItems([]);
+      }
     } catch (err: any) {
       setCards([]);
       setNotice(err?.message || '카드 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }
-  }, [loadArenaCardsPage, user]);
+  }, [loadArenaAdminCosmetics, loadArenaCardsPage, loadArenaCosmetics, user]);
 
   React.useEffect(() => {
     void loadArenaV2();
   }, [loadArenaV2]);
+
+  React.useEffect(() => {
+    if (activeTab === 'my-card' && !loading && !myStreamerCard) {
+      router.replace('/arena/play');
+    }
+  }, [activeTab, loading, myStreamerCard, router]);
 
   React.useEffect(() => {
     if (activeTab !== 'inventory' || !season?.id || !cardPage.hasMore || loadingMoreCards) return;
@@ -563,6 +987,14 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       if (current.length >= 20) return current;
       return [...current, card.id];
     });
+  };
+
+  const resetInventoryFilters = () => {
+    setInventorySearch('');
+    setInventoryClassFilter('all');
+    setInventoryKeywordFilter('all');
+    setInventorySelectionFilter('all');
+    setInventorySort('name_asc');
   };
 
   const saveDeck = async () => {
@@ -689,52 +1121,6 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     }
   };
 
-  const submitReport = async () => {
-    if (!reportForm.targetId.trim() || !reportForm.reason.trim()) {
-      setNotice('신고 대상과 사유가 필요합니다.');
-      return;
-    }
-    try {
-      const res = await apiFetch('/arena/reports', {
-        method: 'POST',
-        body: JSON.stringify(reportForm)
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '신고 접수 실패');
-      toast('신고가 접수되었습니다.', 'success');
-      setReportForm({ targetType: 'card', targetId: '', reason: '' });
-      await loadArenaV2();
-    } catch (error: any) {
-      toast(error?.message || '신고 접수 중 문제가 발생했습니다.', 'error');
-    }
-  };
-
-  const submitRightRequest = async () => {
-    if (!rightForm.streamerId.trim()) {
-      setNotice('스트리머 이름이 필요합니다.');
-      return;
-    }
-    let payload: unknown = { note: rightForm.payloadText };
-    try {
-      if (rightForm.payloadText.trim().startsWith('{')) payload = JSON.parse(rightForm.payloadText);
-    } catch {
-      payload = { note: rightForm.payloadText };
-    }
-    try {
-      const res = await apiFetch('/arena/streamer-right-requests', {
-        method: 'POST',
-        body: JSON.stringify({ streamerId: rightForm.streamerId, requestType: rightForm.requestType, payload })
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '카드 문의 실패');
-      toast('카드 문의를 접수했습니다.', 'success');
-      setRightForm({ streamerId: '', requestType: 'text_change', payloadText: '' });
-      await loadArenaV2();
-    } catch (error: any) {
-      toast(error?.message || '카드 문의 중 문제가 발생했습니다.', 'error');
-    }
-  };
-
   const saveMyStreamerCard = async () => {
     if (!myStreamerCard?.canEdit) {
       setNotice('현재 시즌 상태에서는 스트리머 카드 설정을 변경할 수 없습니다.');
@@ -749,8 +1135,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           cost: Number(streamerCardForm.cost),
           attack: Number(streamerCardForm.attack),
           health: Number(streamerCardForm.health),
-          keywords: parseKeywordEditorText(streamerCardForm.keywordsText),
-          artAssetId: streamerCardForm.artAssetId || undefined
+          keywords: parseKeywordEditorText(streamerCardForm.keywordsText)
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -817,16 +1202,300 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const grantRewards = async (dryRun: boolean) => {
     if (!season?.id) return;
     try {
+      setAdminActionLoading(dryRun ? 'reward-dry-run' : 'reward-grant');
       const res = await apiFetch(`/admin/arena/seasons/${encodeURIComponent(season.id)}/grant-rewards`, {
         method: 'POST',
         body: JSON.stringify({ dryRun, reason: dryRun ? 'preview' : 'season-settlement' })
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '보상 작업 실패');
+      setAdminRewardPreview(json?.preview || json);
       toast(dryRun ? `보상 대상 ${json?.preview?.totalPlayers ?? 0}명 확인` : `보상 ${json?.granted ?? 0}건 준비 완료`, 'success');
     } catch (error: any) {
       toast(error?.message || '보상 작업 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
     }
+  };
+
+  const previewAdminRewards = async () => {
+    if (!season?.id) return;
+    try {
+      setAdminActionLoading('reward-preview');
+      const res = await apiFetch(`/admin/arena/seasons/${encodeURIComponent(season.id)}/reward-preview`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '보상 대상 확인 실패');
+      setAdminRewardPreview(json?.preview || json);
+      toast(`정산 대상 ${json?.totalPlayers ?? json?.preview?.totalPlayers ?? 0}명을 확인했습니다.`, 'success');
+    } catch (error: any) {
+      toast(error?.message || '보상 대상을 확인하지 못했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const recordAdminOpsFlag = async (flag: string, enabled: boolean) => {
+    try {
+      setAdminActionLoading(`${flag}:${enabled ? 'on' : 'off'}`);
+      const res = await apiFetch(`/admin/arena/system/flags/${encodeURIComponent(flag)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled, reason: adminOpsReason.trim() || 'arena-admin-panel' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '운영 플래그 변경 실패');
+      toast(`${flag} 상태를 ${enabled ? '활성' : '비활성'}으로 기록했습니다.`, 'success');
+      setArenaAdminStatus((current: any) => ({
+        ...(current || {}),
+        lastOpsFlag: json
+      }));
+    } catch (error: any) {
+      toast(error?.message || '운영 플래그 변경 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const holdAdminRewardGrant = async () => {
+    const grantId = adminRewardGrantId.trim();
+    if (!grantId) return;
+    try {
+      setAdminActionLoading('reward-hold');
+      const res = await apiFetch(`/admin/arena/rewards/${encodeURIComponent(grantId)}/hold`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: adminRewardHoldReason.trim() || 'admin-review' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '보상 보류 실패');
+      toast('보상 지급을 보류했습니다.', 'success');
+    } catch (error: any) {
+      toast(error?.message || '보상 보류 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const releaseAdminRewardGrant = async () => {
+    const grantId = adminRewardGrantId.trim();
+    if (!grantId) return;
+    try {
+      setAdminActionLoading('reward-release');
+      const res = await apiFetch(`/admin/arena/rewards/${encodeURIComponent(grantId)}/release`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '보상 보류 해제 실패');
+      toast('보상 보류를 해제했습니다.', 'success');
+    } catch (error: any) {
+      toast(error?.message || '보상 보류 해제 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const holdAdminReplay = async () => {
+    const matchId = adminReplayMatchId.trim();
+    if (!matchId) return;
+    try {
+      setAdminActionLoading('replay-hold');
+      const body: Record<string, string> = { reason: adminReplayHoldReason.trim() || 'admin-review' };
+      if (adminReplayHoldUntil) body.holdUntil = new Date(adminReplayHoldUntil).toISOString();
+      const res = await apiFetch(`/admin/arena/matches/${encodeURIComponent(matchId)}/replay-hold`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '리플레이 보류 실패');
+      toast('리플레이 보류를 등록했습니다.', 'success');
+    } catch (error: any) {
+      toast(error?.message || '리플레이 보류 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const mergeAdminCosmeticStyleJson = (patch: Record<string, unknown>) => {
+    const current = parseArenaCosmeticStyle(adminCosmeticForm.style_json);
+    setAdminCosmeticForm((form) => ({
+      ...form,
+      style_json: JSON.stringify({ ...current, ...patch })
+    }));
+  };
+
+  const uploadAdminArenaEmoteAsset = async (file: File | null | undefined) => {
+    if (!file || adminCosmeticUploading) return;
+    if (!file.type.startsWith('image/')) {
+      toast('이미지 파일만 업로드할 수 있습니다.', 'error');
+      return;
+    }
+    try {
+      setAdminCosmeticUploading(true);
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await apiFetch('/admin/arena/cosmetics/emote-assets', {
+        method: 'POST',
+        body: formData
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '이모트 이미지를 업로드하지 못했습니다.');
+      const imageUrl = json?.data?.image_url;
+      if (!imageUrl) throw new Error('업로드된 이미지 주소를 확인하지 못했습니다.');
+      mergeAdminCosmeticStyleJson({ image_url: imageUrl });
+      toast(json?.data?.animated ? '움짤 이모트 이미지를 업로드했습니다.' : '이모트 이미지를 업로드했습니다.', 'success');
+    } catch (error: any) {
+      toast(error?.message || '이모트 이미지를 업로드하지 못했습니다.', 'error');
+    } finally {
+      setAdminCosmeticUploading(false);
+    }
+  };
+
+  const saveAdminArenaCosmetic = async () => {
+    if (!adminCosmeticForm.name.trim()) {
+      toast('이모트 이름을 입력해 주세요.', 'error');
+      return;
+    }
+    let processedStyleJson: string | null = adminCosmeticForm.style_json || null;
+    if (adminCosmeticForm.style_json.trim()) {
+      try {
+        const parsed = JSON.parse(adminCosmeticForm.style_json);
+        if (parsed.css && typeof parsed.css === 'string') parsed.css = minifyArenaCss(parsed.css);
+        processedStyleJson = JSON.stringify(parsed);
+      } catch {
+        toast('스타일 JSON 형식이 올바르지 않습니다.', 'error');
+        return;
+      }
+    }
+    try {
+      setAdminActionLoading('cosmetic-save');
+      const payload = {
+        type: 'emote',
+        name: adminCosmeticForm.name.trim(),
+        description: adminCosmeticForm.description.trim() || null,
+        price: Math.max(0, Number(adminCosmeticForm.price) || 0),
+        style_json: processedStyleJson,
+        font_url: null,
+        font_family: null,
+        active: adminCosmeticForm.active,
+        purchase_limit: Math.max(0, Number(adminCosmeticForm.purchase_limit) || 0),
+        sale_start_at: arenaDateTimeInputToIso(adminCosmeticForm.sale_start_at),
+        sale_end_at: arenaDateTimeInputToIso(adminCosmeticForm.sale_end_at),
+        limited_total_quantity: Math.max(0, Number(adminCosmeticForm.limited_total_quantity) || 0)
+      };
+      const url = adminCosmeticForm.id ? `/admin/shop/items/${adminCosmeticForm.id}` : '/admin/shop/items';
+      const res = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '이모트 상품을 저장하지 못했습니다.');
+      toast(adminCosmeticForm.id ? '아레나 이모트를 수정했습니다.' : '아레나 이모트를 등록했습니다.', 'success');
+      setAdminCosmeticForm({ ...emptyArenaAdminCosmeticForm });
+      await Promise.all([
+        loadArenaAdminCosmetics().catch(() => undefined),
+        loadArenaCosmetics().catch(() => undefined)
+      ]);
+    } catch (error: any) {
+      toast(error?.message || '이모트 상품 저장 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const editAdminArenaCosmetic = (item: ArenaCosmeticItem) => {
+    setAdminSubTab('cosmetics');
+    setAdminCosmeticForm({
+      id: item.id,
+      name: item.name || '',
+      description: item.description || '',
+      price: Number(item.price || 0),
+      style_json: item.style_json || '{"emoji":"✨"}',
+      active: item.active !== false,
+      purchase_limit: Number(item.purchase_limit || 0),
+      sale_start_at: toArenaDateTimeInput(item.sale_start_at),
+      sale_end_at: toArenaDateTimeInput(item.sale_end_at),
+      limited_total_quantity: Number(item.limited_total_quantity || 0),
+      sold_quantity: Number(item.sold_quantity || 0)
+    });
+  };
+
+  const toggleAdminArenaCosmetic = async (item: ArenaCosmeticItem) => {
+    try {
+      setAdminActionLoading(`cosmetic-toggle-${item.id}`);
+      const res = await apiFetch(`/admin/shop/items/${item.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ active: item.active === false })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '이모트 판매 상태를 변경하지 못했습니다.');
+      toast(item.active === false ? '이모트 판매를 켰습니다.' : '이모트 판매를 껐습니다.', 'success');
+      await Promise.all([
+        loadArenaAdminCosmetics().catch(() => undefined),
+        loadArenaCosmetics().catch(() => undefined)
+      ]);
+    } catch (error: any) {
+      toast(error?.message || '이모트 판매 상태 변경 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setAdminActionLoading('');
+    }
+  };
+
+  const buyArenaCosmetic = async (item: ArenaCosmeticItem) => {
+    if (!user) {
+      toast('로그인 후 구매할 수 있습니다.', 'error');
+      return;
+    }
+    try {
+      setSavingArenaCosmetic(true);
+      const res = await apiFetch('/arena/cosmetics/buy', {
+        method: 'POST',
+        body: JSON.stringify({ item_id: item.id })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '구매하지 못했습니다.');
+      toast(json?.message || '구매가 완료되었습니다.', 'success');
+      await loadArenaCosmetics();
+    } catch (error: any) {
+      toast(error?.message || '구매하지 못했습니다.', 'error');
+    } finally {
+      setSavingArenaCosmetic(false);
+    }
+  };
+
+  const saveArenaEmoteSlots = async (slots: Array<ArenaCosmeticItem | null>) => {
+    try {
+      setSavingArenaCosmetic(true);
+      const res = await apiFetch('/arena/cosmetics/loadout', {
+        method: 'PATCH',
+        body: JSON.stringify({ emoteSlots: slots.map((item) => item?.id || null) })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '장착 정보를 저장하지 못했습니다.');
+      setArenaCosmeticLoadout({
+        emoteSlots: Array.from({ length: 8 }, (_, index) => json?.emoteSlots?.[index] || null)
+      });
+      toast('이모트 휠을 저장했습니다.', 'success');
+    } catch (error: any) {
+      toast(error?.message || '장착 정보를 저장하지 못했습니다.', 'error');
+    } finally {
+      setSavingArenaCosmetic(false);
+    }
+  };
+
+  const equipArenaEmote = async (item: ArenaCosmeticItem) => {
+    if (!arenaCosmeticCounts[item.id]) {
+      toast('보유한 이모트만 장착할 수 있습니다.', 'error');
+      return;
+    }
+    const currentSlots = Array.from({ length: 8 }, (_, index) => arenaCosmeticLoadout.emoteSlots[index] || null);
+    const existingIndex = currentSlots.findIndex((slot) => slot?.id === item.id);
+    if (existingIndex >= 0) {
+      currentSlots[existingIndex] = null;
+      await saveArenaEmoteSlots(currentSlots);
+      return;
+    }
+    const emptyIndex = currentSlots.findIndex((slot) => !slot);
+    currentSlots[emptyIndex >= 0 ? emptyIndex : 0] = item;
+    await saveArenaEmoteSlots(currentSlots);
+  };
+
+  const clearArenaEmoteSlot = async (index: number) => {
+    const currentSlots = Array.from({ length: 8 }, (_, slotIndex) => arenaCosmeticLoadout.emoteSlots[slotIndex] || null);
+    currentSlots[index] = null;
+    await saveArenaEmoteSlots(currentSlots);
   };
 
   const renderPlay = () => (
@@ -945,13 +1614,15 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const issueText = (issue: string | { code?: string; message?: string }) =>
     typeof issue === 'string' ? issue : issue.message || issue.code || '확인 필요';
 
+  const inventoryFilterActive = Boolean(inventorySearch.trim()) || inventoryClassFilter !== 'all' || inventoryKeywordFilter !== 'all' || inventorySelectionFilter !== 'all' || inventorySort !== 'name_asc';
+
   const renderInventory = () => (
     <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div>
           <p className="arena-v2-kicker">DECK VAULT</p>
           <h2>덱과 카드 보관함</h2>
-          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 저장 덱 {decks.length}개 · 카드 {cards.length}장</p>
+          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 저장 덱 {decks.length}개 · 카드 {filteredInventoryCards.length}/{cards.length}장</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
@@ -984,7 +1655,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <span className="arena-v2-panel-label">덱 구성</span>
             <div className="arena-v2-hand-header arena-v2-builder-header">
               <div>
-                <p>{cards.length}장 중 {deckCount}장 선택됨 · 한 스트리머는 한 장만 사용할 수 있습니다.</p>
+                <p>{filteredInventoryCards.length}장 표시 · 전체 {cards.length}장 중 {deckCount}장 선택됨 · 한 스트리머는 한 장만 사용할 수 있습니다.</p>
               </div>
               <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
                 <strong>{deckCount}</strong>
@@ -994,10 +1665,62 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 <Save className="h-4 w-4" /> 덱 저장
               </button>
             </div>
+            <div className="arena-v2-inventory-tools" aria-label="카드 보관함 검색과 필터">
+              <label className="arena-v2-search-field">
+                <Search className="h-4 w-4" />
+                <input
+                  value={inventorySearch}
+                  onChange={(event) => setInventorySearch(event.target.value)}
+                  placeholder="카드명, 클래스, 효과 검색"
+                  aria-label="카드 검색"
+                />
+              </label>
+              <label className="arena-v2-filter-field">
+                <SlidersHorizontal className="h-4 w-4" />
+                <select value={inventoryClassFilter} onChange={(event) => setInventoryClassFilter(event.target.value)} aria-label="클래스 필터">
+                  <option value="all">전체 클래스</option>
+                  {availableInventoryClasses.map((cardClass) => (
+                    <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="arena-v2-filter-field">
+                <Sparkles className="h-4 w-4" />
+                <select value={inventoryKeywordFilter} onChange={(event) => setInventoryKeywordFilter(event.target.value)} aria-label="효과 키워드 필터">
+                  <option value="all">전체 효과</option>
+                  {availableInventoryKeywords.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="arena-v2-filter-field">
+                <Check className="h-4 w-4" />
+                <select value={inventorySelectionFilter} onChange={(event) => setInventorySelectionFilter(event.target.value as InventorySelectionFilter)} aria-label="선택 상태 필터">
+                  <option value="all">전체 카드</option>
+                  <option value="selected">선택됨</option>
+                  <option value="unselected">미선택</option>
+                </select>
+              </label>
+              <label className="arena-v2-filter-field">
+                <ArrowDownAZ className="h-4 w-4" />
+                <select value={inventorySort} onChange={(event) => setInventorySort(event.target.value as InventorySortKey)} aria-label="카드 정렬">
+                  <option value="name_asc">이름순</option>
+                  <option value="class_asc">클래스순</option>
+                  <option value="cost_asc">비용 낮은순</option>
+                  <option value="cost_desc">비용 높은순</option>
+                  <option value="attack_desc">공격력 높은순</option>
+                  <option value="health_desc">체력 높은순</option>
+                  <option value="selected_first">선택 카드 먼저</option>
+                </select>
+              </label>
+              <button type="button" onClick={resetInventoryFilters} disabled={!inventoryFilterActive} className="arena-v2-filter-reset">
+                <X className="h-4 w-4" /> 초기화
+              </button>
+            </div>
             <div className="arena-v2-card-grid" aria-label="보유 아레나 카드 전체 목록">
-              {cards.length ? cards.map((card) => (
-                <ArenaV2CardView key={card.id} card={card} selected={selectedCardIds.includes(card.id)} onClick={() => toggleCard(card)} />
-              )) : <p>아레나에서 사용할 보유 카드가 없습니다.</p>}
+              {filteredInventoryCards.length ? filteredInventoryCards.map((card) => (
+                <ArenaV2CardView key={card.id} card={card} selected={selectedCardIdSet.has(card.id)} onClick={() => toggleCard(card)} />
+              )) : <p>{cards.length ? '조건에 맞는 카드가 없습니다.' : '아레나에서 사용할 보유 카드가 없습니다.'}</p>}
             </div>
             <div ref={cardLoadSentinelRef} className="arena-v2-card-loader" aria-live="polite">
               {loadingMoreCards ? '카드를 더 불러오는 중입니다.' : cardPage.hasMore ? '아래로 스크롤하면 카드를 더 불러옵니다.' : cards.length ? '모든 보유 카드를 불러왔습니다.' : ''}
@@ -1010,6 +1733,140 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 <span key={`${deck.id}-error-${index}`}><AlertTriangle className="h-3.5 w-3.5" />{deck.name} · {issueText(issue)}</span>
               ))).slice(0, 12)}
               {!decks.some((deck) => (deck.validationResult?.errors || []).length) ? <p>모든 덱이 대전 준비를 마쳤습니다.</p> : null}
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  );
+
+  const renderWiki = () => (
+    <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
+      <section className="arena-v2-topbar">
+        <div>
+          <p className="arena-v2-kicker">ARENA WIKI</p>
+          <h2>게임 플레이 위키</h2>
+          <p>덱 구성부터 전투 판정까지, 실제 플레이 중 알아야 하는 규칙을 한 화면에서 확인합니다.</p>
+        </div>
+        <div className="arena-v2-top-actions">
+          <button type="button" onClick={() => router.push('/arena/play')} className="arena-v2-secondary-button">
+            <Swords className="h-4 w-4" /> 플레이로 이동
+          </button>
+          <button type="button" onClick={() => router.push('/arena/inventory')} className="arena-v2-secondary-button">
+            <Layers3 className="h-4 w-4" /> 덱 구성
+          </button>
+        </div>
+      </section>
+
+      <section className="arena-v2-stage">
+        <aside className="arena-v2-command-panel" aria-label="아레나 핵심 규칙 요약">
+          <StatTile icon={HeartPulse} label="기본 체력" value="30" tone="green" />
+          <StatTile icon={Layers3} label="덱 크기" value="14~20" tone="cyan" />
+          <StatTile icon={Clock3} label="턴 제한" value="40초" tone="gold" />
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">처음 읽는 순서</span>
+            <div className="arena-v2-replay-list">
+              <span><BookOpen className="h-3.5 w-3.5" /> 덱은 14~20장으로 만들고, 한 스트리머 카드는 덱에 1장만 넣습니다.</span>
+              <span><Move className="h-3.5 w-3.5" /> 전술 이동은 이전 턴부터 있던 카드만 빈 칸으로 옮길 수 있습니다.</span>
+              <span><Swords className="h-3.5 w-3.5" /> 전투는 같은 라인의 전열, 후열, 플레이어 순서로 진행됩니다.</span>
+            </div>
+          </div>
+        </aside>
+
+        <div className="arena-v2-board-wrap">
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">핵심 규칙</span>
+            <div className="arena-v2-action-stack">
+              {wikiCoreRules.map((rule) => (
+                <div key={rule.label} className="arena-v2-action-order">
+                  <span>{rule.label}</span>
+                  <span>{rule.value}</span>
+                  <span>{rule.detail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">모드</span>
+            <div className="arena-v2-action-stack">
+              {wikiModeSections.map(([title, detail]) => (
+                <div key={title} className="arena-v2-action-order">
+                  <span>{title}</span>
+                  <span>{detail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">턴 흐름과 행동</span>
+            <p>아레나 한 턴은 드로우, 코스트 지급, 배치 제출, 동시 공개, 자동 전투, 승패 처리 순서로 진행됩니다.</p>
+          </div>
+
+          {wikiFlowSections.map((section) => {
+            const Icon = section.icon;
+            return (
+              <article key={section.title} className="arena-v2-panel-section">
+                <span className="arena-v2-panel-label"><Icon className="h-3.5 w-3.5" /> {section.title}</span>
+                <div className="arena-v2-replay-list">
+                  {section.points.map((point) => <span key={point}>{point}</span>)}
+                </div>
+              </article>
+            );
+          })}
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">필드와 라인</span>
+            <div className="arena-v2-board" aria-label="위키용 2행 3열 필드 예시">
+              {['전열 좌', '전열 중', '전열 우', '후열 좌', '후열 중', '후열 우'].map((slot, index) => (
+                <div key={slot} className={`arena-v2-slot ${index < 3 ? 'is-player' : 'is-opponent'}`}>
+                  <div className="arena-v2-slot-label">{slot}</div>
+                  <span className="arena-v2-empty-slot">{index % 3 === 0 ? '좌 라인' : index % 3 === 1 ? '중 라인' : '우 라인'}</span>
+                </div>
+              ))}
+            </div>
+            <p>각 세로 줄이 하나의 라인입니다. 도발, 조준, 밀치기, 끌어오기처럼 위치를 따지는 효과는 다른 라인에 영향을 주지 않습니다.</p>
+          </div>
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">카드 클래스</span>
+            <div className="arena-v2-action-stack">
+              {legalCardClasses.map((cardClass) => {
+                const tone = classTone[cardClass] || classTone.tempo;
+                const Icon = tone.icon;
+                return (
+                  <div key={cardClass} className="arena-v2-action-order">
+                    <span><Icon className="h-3.5 w-3.5" /> {tone.label}</span>
+                    <span>{tone.hint}</span>
+                    <span>{cardClass === 'charge' ? '전열 첫 카드 피해 +1' : cardClass === 'guardian' ? '전열 첫 체력 피해 1 감소' : cardClass === 'sniper' ? '후열에서 상대 후열 우선 공격' : cardClass === 'support' ? '같은 라인 아군 첫 피해 1 대신 받음' : cardClass === 'trick' ? '처음 피해 준 카드에게 약화 1' : cardClass === 'specter' ? '전열 사망 시 일반 초과 피해 차단' : '처음 받는 키워드 효과 1개 무효화'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">효과 키워드</span>
+            <p>키워드는 카드의 특수 효과입니다. 같은 라인 제한이 있는 효과는 다른 라인의 카드나 플레이어에게 영향을 주지 않습니다.</p>
+          </div>
+
+          {wikiKeywordGroups.map((group) => (
+            <article key={group.title} className="arena-v2-panel-section">
+              <span className="arena-v2-panel-label">{group.title}</span>
+              <div className="arena-v2-replay-list">
+                {group.items.map(([keyword, detail]) => <span key={keyword}><Sparkles className="h-3.5 w-3.5" /> {keyword} · {detail}</span>)}
+              </div>
+            </article>
+          ))}
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">덱 구성 팁</span>
+            <div className="arena-v2-replay-list">
+              <span>14장 덱은 핵심 카드 접근성이 높지만, 장기전에서 피로 피해가 빨리 옵니다.</span>
+              <span>20장 덱은 안정적이지만 원하는 조합을 늦게 찾을 수 있습니다.</span>
+              <span>전열을 버틸 카드, 후열 압박 카드, 직접 공격 대응 카드가 모두 있어야 라인 싸움이 안정적입니다.</span>
+              <span>8~9코스트 카드는 강하지만 초반 손패에 잡히면 행동이 막힐 수 있으니 저코스트 카드와 함께 구성하세요.</span>
             </div>
           </div>
         </div>
@@ -1063,74 +1920,145 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
       <section className="arena-v2-topbar">
         <div>
-          <p className="arena-v2-kicker">CARD STUDIO · HELP</p>
-          <h2>내 카드와 문의</h2>
-          <p>내 스트리머 카드를 꾸미고, 경기 중 불편했던 장면을 편하게 알려주세요.</p>
+          <p className="arena-v2-kicker">ARENA COSMETIC SHOP</p>
+          <h2>아레나 치장 상점</h2>
+          <p>전투 성능은 그대로 유지하고, 인게임에서 확실히 체감되는 연출만 판매합니다.</p>
+        </div>
+        <div className="arena-v2-top-actions">
+          <button type="button" onClick={loadArenaCosmetics} className="arena-v2-secondary-button">
+            <RefreshCw className={`h-4 w-4 ${savingArenaCosmetic ? 'animate-spin' : ''}`} /> 상점 새로고침
+          </button>
+        </div>
+      </section>
+      <section className="arena-v2-stage">
+        <aside className="arena-v2-command-panel">
+          <StatTile icon={Sparkles} label="판매 이모트" value={`${arenaCosmetics.length}`} tone="violet" />
+          <StatTile icon={Check} label="보유 이모트" value={`${Object.values(arenaCosmeticCounts).filter((count) => count > 0).length}`} tone="green" />
+          <StatTile icon={Zap} label="장착 슬롯" value={`${arenaCosmeticLoadout.emoteSlots.filter(Boolean).length}/8`} tone="cyan" />
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">이모트 휠</span>
+            <p>매치 화면에서 우클릭하면 8칸 파이 메뉴가 열리고, 선택한 이모트가 해당 위치에 모든 참가자에게 표시됩니다.</p>
+            <div className="arena-v2-emote-slot-list">
+              {Array.from({ length: 8 }, (_, index) => {
+                const item = arenaCosmeticLoadout.emoteSlots[index] || null;
+                return (
+                  <button key={index} type="button" onClick={() => item ? clearArenaEmoteSlot(index) : undefined} disabled={!item || savingArenaCosmetic}>
+                    <span>{index + 1}</span>
+                    <ArenaEmoteBadge item={item} emptyLabel="빈 슬롯" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+        <div className="arena-v2-board-wrap">
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">이모트 상점</span>
+            <div className="arena-v2-emote-shop-grid">
+              {arenaCosmetics.length ? arenaCosmetics.map((item) => {
+                const owned = Number(arenaCosmeticCounts[item.id] || 0);
+                const purchased = Number(arenaCosmeticPurchases[item.id] || 0);
+                const purchaseLimit = Math.max(0, Number(item.purchase_limit || 0));
+                const limitReached = purchaseLimit > 0 && purchased >= purchaseLimit;
+                const equipped = arenaCosmeticLoadout.emoteSlots.some((slot) => slot?.id === item.id);
+                return (
+                  <article key={item.id} className={`arena-v2-emote-shop-card ${equipped ? 'is-equipped' : ''}`}>
+                    <div className="arena-v2-emote-shop-visual">
+                      <ArenaEmoteBadge item={item} />
+                    </div>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <p>{item.description || '아레나 매치에서 사용할 수 있는 이모트입니다.'}</p>
+                    </div>
+                    <div className="arena-v2-emote-shop-meta">
+                      <span>{item.price.toLocaleString()} P</span>
+                      <span>{owned ? `보유 ${owned}` : '미보유'}</span>
+                    </div>
+                    <div className="arena-v2-queue-actions">
+                      <button type="button" onClick={() => buyArenaCosmetic(item)} disabled={savingArenaCosmetic || limitReached}>
+                        {limitReached ? '구매 제한' : '구매'}
+                      </button>
+                      <button type="button" onClick={() => equipArenaEmote(item)} disabled={savingArenaCosmetic || !owned}>
+                        {equipped ? '해제' : '장착'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              }) : <p>판매 중인 아레나 이모트가 없습니다. 아레나 관리자 페이지에서 이모트 아이템을 등록하면 여기에 표시됩니다.</p>}
+            </div>
+          </div>
+
+          <div className="arena-v2-panel-section">
+            <span className="arena-v2-panel-label">코드 기반 프리미엄 치장 예시</span>
+            <p>이미지 제작 부담 없이 CSS와 DOM 연출만으로 판매 가능한 고차별 아이템입니다. 아래 항목은 실제 구현 가능한 소프트코딩 프리셋입니다.</p>
+            <div className="arena-v2-cosmetic-preset-grid">
+              {arenaCosmeticPresets.map((preset) => (
+                <article key={preset.id} className={`arena-v2-cosmetic-preset-card is-${preset.rarity}`}>
+                  <ArenaCosmeticPresetPreview preset={preset} />
+                  <div>
+                    <span>{arenaCosmeticTypeLabels[preset.type]} · {preset.rarity}</span>
+                    <strong>{preset.name}</strong>
+                    <p>{preset.summary}</p>
+                  </div>
+                  <b>{preset.priceHint.toLocaleString()} P</b>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  );
+
+  const renderMyCard = () => (
+    <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
+      <section className="arena-v2-topbar">
+        <div>
+          <p className="arena-v2-kicker">CARD STUDIO</p>
+          <h2>내 카드</h2>
+          <p>등록된 스트리머가 자신의 아레나 카드 능력치와 효과를 시즌 비용 안에서 조정합니다.</p>
         </div>
         <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
         </button>
       </section>
+      {!myStreamerCard ? (
+        <section className="arena-v2-stage">
+          <div className="arena-v2-board-wrap">
+            <div className="arena-v2-panel-section">
+              <span className="arena-v2-panel-label">접근 권한</span>
+              <p>등록된 스트리머만 내 카드를 설정할 수 있습니다.</p>
+            </div>
+          </div>
+        </section>
+      ) : (
       <section className="arena-v2-stage">
         <aside className="arena-v2-command-panel">
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">내 스트리머 카드 설정</span>
-            {myStreamerCard ? (
-              <>
-                <p>{myStreamerCard.streamer?.name || myStreamerCard.streamer?.channelId || '등록 스트리머'} · {myStreamerCard.canEdit ? '편집 가능' : '이번 시즌 수정 마감'}</p>
-                <input value={streamerCardForm.displayName} onChange={(event) => setStreamerCardForm((current) => ({ ...current, displayName: event.target.value }))} className="arena-v2-select" placeholder="카드 이름" disabled={!myStreamerCard.canEdit} />
-                <select value={streamerCardForm.cardClass} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cardClass: event.target.value }))} className="arena-v2-select" disabled={!myStreamerCard.canEdit}>
-                  {legalCardClasses.map((cardClass) => (
-                    <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
-                  ))}
-                </select>
-                <div className="arena-v2-action-order">
-                  <input type="number" min={1} max={9} value={streamerCardForm.cost} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cost: event.target.value }))} className="arena-v2-select" aria-label="코스트" disabled={!myStreamerCard.canEdit} />
-                  <input type="number" min={0} max={9} value={streamerCardForm.attack} onChange={(event) => setStreamerCardForm((current) => ({ ...current, attack: event.target.value }))} className="arena-v2-select" aria-label="공격력" disabled={!myStreamerCard.canEdit} />
-                  <input type="number" min={1} max={20} value={streamerCardForm.health} onChange={(event) => setStreamerCardForm((current) => ({ ...current, health: event.target.value }))} className="arena-v2-select" aria-label="체력" disabled={!myStreamerCard.canEdit} />
-                </div>
-                <input value={streamerCardForm.keywordsText} onChange={(event) => setStreamerCardForm((current) => ({ ...current, keywordsText: event.target.value }))} className="arena-v2-select" placeholder="효과 키워드: 도발:1, 보호:1" disabled={!myStreamerCard.canEdit} />
-                <input value={streamerCardForm.artAssetId} onChange={(event) => setStreamerCardForm((current) => ({ ...current, artAssetId: event.target.value }))} className="arena-v2-select" placeholder="카드 이미지 주소" disabled={!myStreamerCard.canEdit} />
-                {myStreamerCard.validation?.errors?.length ? (
-                  <div className="arena-v2-replay-list">
-                    {myStreamerCard.validation.errors.map((error, index) => <span key={`${error.code || 'error'}-${index}`}>{error.message || error.code}</span>)}
-                  </div>
-                ) : null}
-                <div className="arena-v2-queue-actions">
-                  <button type="button" onClick={saveMyStreamerCard} disabled={!myStreamerCard.canEdit}>저장</button>
-                  <button type="button" onClick={() => toggleMyStreamerCard(false)}>비활성화</button>
-                  <button type="button" onClick={() => toggleMyStreamerCard(true)}>활성화</button>
-                </div>
-              </>
-            ) : (
-              <p>내 계정으로 꾸밀 수 있는 스트리머 카드가 없습니다.</p>
-            )}
-          </div>
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">신고 접수</span>
-            <select value={reportForm.targetType} onChange={(event) => setReportForm((current) => ({ ...current, targetType: event.target.value }))} className="arena-v2-select">
-              <option value="card">카드</option>
-              <option value="match">매치</option>
-              <option value="replay">전투 장면</option>
-              <option value="user">유저</option>
-              <option value="battle_royale">8인전</option>
+            <span className="arena-v2-panel-label">카드 설정</span>
+            <p>{myStreamerCard.streamer?.name || myStreamerCard.streamer?.channelId || '등록 스트리머'} · {myStreamerCard.canEdit ? '편집 가능' : '이번 시즌 수정 마감'}</p>
+            <input value={streamerCardForm.displayName} onChange={(event) => setStreamerCardForm((current) => ({ ...current, displayName: event.target.value }))} className="arena-v2-select" placeholder="카드 이름" disabled={!myStreamerCard.canEdit} />
+            <select value={streamerCardForm.cardClass} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cardClass: event.target.value }))} className="arena-v2-select" disabled={!myStreamerCard.canEdit}>
+              {legalCardClasses.map((cardClass) => (
+                <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
+              ))}
             </select>
-            <input value={reportForm.targetId} onChange={(event) => setReportForm((current) => ({ ...current, targetId: event.target.value }))} className="arena-v2-select" placeholder="카드, 경기, 사용자 이름" />
-            <input value={reportForm.reason} onChange={(event) => setReportForm((current) => ({ ...current, reason: event.target.value }))} className="arena-v2-select" placeholder="신고 사유" />
-            <button type="button" onClick={submitReport} className="arena-v2-primary-button">신고 제출</button>
-          </div>
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">카드 문의</span>
-            <input value={rightForm.streamerId} onChange={(event) => setRightForm((current) => ({ ...current, streamerId: event.target.value }))} className="arena-v2-select" placeholder="스트리머 이름" />
-            <select value={rightForm.requestType} onChange={(event) => setRightForm((current) => ({ ...current, requestType: event.target.value }))} className="arena-v2-select">
-              <option value="text_change">문구 변경</option>
-              <option value="image_change">이미지 변경</option>
-              <option value="card_config">카드 설정</option>
-              <option value="disable_version">버전 비활성</option>
-              <option value="opt_out">참여 제외</option>
-            </select>
-            <input value={rightForm.payloadText} onChange={(event) => setRightForm((current) => ({ ...current, payloadText: event.target.value }))} className="arena-v2-select" placeholder="요청 내용을 입력하세요" />
-            <button type="button" onClick={submitRightRequest} className="arena-v2-primary-button">문의 보내기</button>
+            <div className="arena-v2-action-order">
+              <input type="number" min={1} max={9} value={streamerCardForm.cost} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cost: event.target.value }))} className="arena-v2-select" aria-label="코스트" disabled={!myStreamerCard.canEdit} />
+              <input type="number" min={0} max={9} value={streamerCardForm.attack} onChange={(event) => setStreamerCardForm((current) => ({ ...current, attack: event.target.value }))} className="arena-v2-select" aria-label="공격력" disabled={!myStreamerCard.canEdit} />
+              <input type="number" min={1} max={20} value={streamerCardForm.health} onChange={(event) => setStreamerCardForm((current) => ({ ...current, health: event.target.value }))} className="arena-v2-select" aria-label="체력" disabled={!myStreamerCard.canEdit} />
+            </div>
+            <input value={streamerCardForm.keywordsText} onChange={(event) => setStreamerCardForm((current) => ({ ...current, keywordsText: event.target.value }))} className="arena-v2-select" placeholder="효과 키워드: 도발:1, 보호:1" disabled={!myStreamerCard.canEdit} />
+            {myStreamerCard.validation?.errors?.length ? (
+              <div className="arena-v2-replay-list">
+                {myStreamerCard.validation.errors.map((error, index) => <span key={`${error.code || 'error'}-${index}`}>{error.message || error.code}</span>)}
+              </div>
+            ) : null}
+            <div className="arena-v2-queue-actions">
+              <button type="button" onClick={saveMyStreamerCard} disabled={!myStreamerCard.canEdit}>저장</button>
+              <button type="button" onClick={() => toggleMyStreamerCard(false)}>비활성화</button>
+              <button type="button" onClick={() => toggleMyStreamerCard(true)}>활성화</button>
+            </div>
           </div>
         </aside>
         <div className="arena-v2-board-wrap">
@@ -1147,86 +2075,344 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                     attack: Number.isFinite(Number(streamerCardForm.attack)) ? Number(streamerCardForm.attack) : myStreamerCard.card.attack,
                     health: Number.isFinite(Number(streamerCardForm.health)) ? Number(streamerCardForm.health) : myStreamerCard.card.health,
                     keywords: parseKeywordEditorText(streamerCardForm.keywordsText).map((keyword: any) => String(keyword.type || '')).filter(Boolean),
-                    artAssetId: streamerCardForm.artAssetId || myStreamerCard.card.artAssetId
+                    artAssetId: myStreamerCard.card.artAssetId
                   }}
                 />
               </div>
             </div>
           ) : null}
           <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">가이드</span>
+            <span className="arena-v2-panel-label">카드 이미지</span>
             <div className="arena-v2-replay-list">
-              {wikiEntries.length ? wikiEntries.map((entry) => <span key={entry.slug}>{entry.category} · {entry.title}</span>) : <p>아직 준비된 가이드가 없습니다.</p>}
-            </div>
-          </div>
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">내 문의 내역</span>
-            <div className="arena-v2-replay-list">
-              {reports.map((report) => <span key={report.id}>신고 · {targetTypeLabel(report.targetType)} · {requestStatusLabel(report.status)}</span>)}
-              {rightRequests.map((request) => <span key={request.id}>문의 · {requestTypeLabel(request.requestType)} · {requestStatusLabel(request.status)}</span>)}
-              {!reports.length && !rightRequests.length ? <p>접수된 내역이 없습니다.</p> : null}
+              <span>아레나 카드 이미지는 직접 URL을 입력하지 않습니다. 내 치카포 카드 중 해당 스트리머 최고 성급 카드에 적용되는 이미지가 자동으로 사용됩니다.</span>
+              <span>이미지를 바꾸려면 치카포의 내 정보에서 스트리머 카드 이미지를 변경하세요.</span>
             </div>
           </div>
         </div>
       </section>
+      )}
     </section>
   );
 
-  const renderAdmin = () => (
-    <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
-      <section className="arena-v2-topbar">
-        <div>
-          <p className="arena-v2-kicker">ARENA CONTROL</p>
-          <h2>시즌 운영과 정산</h2>
-          <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '진행 중인 시즌 없음'}</p>
-        </div>
-        <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
-        </button>
+  const renderAdmin = () => {
+    const rewardPreviewPlayers = adminRewardPreview?.totalPlayers ?? adminRewardPreview?.players?.length ?? 0;
+    const rewardPreviewItems = Array.isArray(adminRewardPreview?.items) ? adminRewardPreview.items.length : Array.isArray(adminRewardPreview?.rewardItems) ? adminRewardPreview.rewardItems.length : 0;
+    const equippedEmotes = arenaCosmeticLoadout.emoteSlots.filter(Boolean).length;
+    const shopEmotes = arenaCosmetics.length;
+    return (
+      <section className={`arena-v2-shell ${styles.arenaV2Scope}`}>
+        <section className="arena-v2-topbar">
+          <div>
+            <p className="arena-v2-kicker">ARENA CONTROL</p>
+            <h2>아레나 관리자 콘솔</h2>
+            <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '시즌 없이도 카드, 덱, 상점 상태를 점검할 수 있습니다.'}</p>
+          </div>
+          <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+          </button>
+        </section>
+
+        <section className="arena-v2-stage arena-v2-admin-stage">
+          <aside className="arena-v2-command-panel">
+            <div className="arena-v2-admin-tabs">
+              {arenaAdminTabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={adminSubTab === tab.id ? 'is-active' : ''}
+                    onClick={() => setAdminSubTab(tab.id)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>
+                      <strong>{tab.label}</strong>
+                      <small>{tab.description}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <div className="arena-v2-board-wrap">
+            {adminSubTab === 'overview' && (
+              <>
+                <div className="arena-v2-admin-kpis">
+                  {[
+                    ['시즌', season ? seasonStatusLabel(season.status) : '없음'],
+                    ['보유 카드', `${cards.length.toLocaleString()}장`],
+                    ['덱', `${decks.length.toLocaleString()}개`],
+                    ['치장 상품', `${shopEmotes.toLocaleString()}개`]
+                  ].map(([label, value]) => (
+                    <div key={label} className="arena-v2-stat">
+                      <span>{label}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">운영 상태</span>
+                  <div className="arena-v2-replay-list">
+                    <span>API · {arenaAdminStatus?.status || '확인 대기'} {arenaAdminStatus?.arenaVersion ? `· ${arenaAdminStatus.arenaVersion}` : ''}</span>
+                    <span>규칙 · {arenaAdminStatus?.rulesVersion || 'arena-v2-gdd'}</span>
+                    <span>빠른대전 · {requestStatusLabel(queueStatus.quick?.status)} {queueStatus.quick?.matchId ? '· 매칭 완료' : ''}</span>
+                    <span>8인전 · {requestStatusLabel(queueStatus.battleRoyale?.status)} {queueStatus.battleRoyale?.participantCount != null ? `· ${queueStatus.battleRoyale.participantCount}/8` : ''}</span>
+                  </div>
+                </div>
+                <div className="arena-v2-admin-grid">
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">바로가기</span>
+                    <div className="arena-v2-queue-actions">
+                      <button type="button" onClick={() => setAdminSubTab('season')}>시즌 관리</button>
+                      <button type="button" onClick={() => setAdminSubTab('rewards')}>정산 관리</button>
+                      <button type="button" onClick={() => setAdminSubTab('safety')}>운영 플래그</button>
+                      <button type="button" onClick={() => setAdminSubTab('cosmetics')}>치장 상점</button>
+                    </div>
+                  </div>
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">현재 관리자 기준</span>
+                    <div className="arena-v2-replay-list">
+                      <span>계정 · {user?.username || user?.id || '-'}</span>
+                      <span>권한 · {user?.role || '-'}</span>
+                      <span>장착 이모트 · {equippedEmotes}/8</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {adminSubTab === 'season' && (
+              <div className="arena-v2-admin-grid">
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">시즌 생성</span>
+                  <input className="arena-v2-select" placeholder="시즌 코드" value={adminSeasonForm.seasonKey} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, seasonKey: event.target.value }))} />
+                  <input className="arena-v2-select" placeholder="시즌 이름" value={adminSeasonForm.name} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, name: event.target.value }))} />
+                  <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.startsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, startsAt: event.target.value }))} />
+                  <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.endsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, endsAt: event.target.value }))} />
+                  <button type="button" className="arena-v2-primary-button" onClick={createAdminSeason}>시즌 생성</button>
+                </div>
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">상태 전환</span>
+                  <div className="arena-v2-queue-actions">
+                    {['scheduled', 'active', 'locked', 'settling', 'closed', 'cancelled'].map((status) => (
+                      <button key={status} type="button" onClick={() => transitionSeason(status)} disabled={!season?.id}>{seasonStatusLabel(status)}</button>
+                    ))}
+                  </div>
+                  <p>현재 시즌: {season?.name || '-'} · {season ? seasonStatusLabel(season.status) : '없음'}</p>
+                </div>
+              </div>
+            )}
+
+            {adminSubTab === 'rewards' && (
+              <>
+                <div className="arena-v2-admin-kpis">
+                  <div className="arena-v2-stat"><span>정산 대상</span><strong>{rewardPreviewPlayers.toLocaleString()}명</strong></div>
+                  <div className="arena-v2-stat"><span>보상 항목</span><strong>{rewardPreviewItems.toLocaleString()}개</strong></div>
+                  <div className="arena-v2-stat"><span>내 보상</span><strong>{rewardState?.claimable ? '수령 가능' : '대기'}</strong></div>
+                </div>
+                <div className="arena-v2-admin-grid">
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">시즌 보상 정산</span>
+                    <div className="arena-v2-queue-actions">
+                      <button type="button" onClick={previewAdminRewards} disabled={!season?.id || Boolean(adminActionLoading)}>{adminActionLoading === 'reward-preview' ? '확인 중' : '대상 확인'}</button>
+                      <button type="button" onClick={() => grantRewards(true)} disabled={!season?.id || Boolean(adminActionLoading)}>{adminActionLoading === 'reward-dry-run' ? '검산 중' : '검산 실행'}</button>
+                      <button type="button" onClick={() => grantRewards(false)} disabled={!season?.id || Boolean(adminActionLoading)}>보상 준비</button>
+                    </div>
+                    <p>보상 확정 전 대상 확인과 검산을 먼저 실행하세요.</p>
+                  </div>
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">개별 보상 보류</span>
+                    <input className="arena-v2-select" placeholder="grant ID" value={adminRewardGrantId} onChange={(event) => setAdminRewardGrantId(event.target.value)} />
+                    <input className="arena-v2-select" placeholder="보류 사유" value={adminRewardHoldReason} onChange={(event) => setAdminRewardHoldReason(event.target.value)} />
+                    <div className="arena-v2-queue-actions">
+                      <button type="button" onClick={holdAdminRewardGrant} disabled={!adminRewardGrantId.trim() || Boolean(adminActionLoading)}>보류</button>
+                      <button type="button" onClick={releaseAdminRewardGrant} disabled={!adminRewardGrantId.trim() || Boolean(adminActionLoading)}>해제</button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {adminSubTab === 'matches' && (
+              <div className="arena-v2-admin-grid">
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">대전 대기 상태</span>
+                  <div className="arena-v2-replay-list">
+                    <span>빠른대전 · {requestStatusLabel(queueStatus.quick?.status)} {queueStatus.quick?.matchId ? `· ${queueStatus.quick.matchId}` : ''}</span>
+                    <span>8인전 · {requestStatusLabel(queueStatus.battleRoyale?.status)} {queueStatus.battleRoyale?.participantCount != null ? `· ${queueStatus.battleRoyale.participantCount}/8` : ''}</span>
+                    <span>공식 덱 · {decks.filter((deck) => deck.isValid).length.toLocaleString()}개 사용 가능</span>
+                  </div>
+                </div>
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">리플레이 보류</span>
+                  <input className="arena-v2-select" placeholder="match ID" value={adminReplayMatchId} onChange={(event) => setAdminReplayMatchId(event.target.value)} />
+                  <input className="arena-v2-select" placeholder="보류 사유" value={adminReplayHoldReason} onChange={(event) => setAdminReplayHoldReason(event.target.value)} />
+                  <input className="arena-v2-select" type="datetime-local" value={adminReplayHoldUntil} onChange={(event) => setAdminReplayHoldUntil(event.target.value)} />
+                  <button type="button" className="arena-v2-primary-button" onClick={holdAdminReplay} disabled={!adminReplayMatchId.trim() || Boolean(adminActionLoading)}>리플레이 보류</button>
+                </div>
+              </div>
+            )}
+
+            {adminSubTab === 'safety' && (
+              <div className="arena-v2-panel-section">
+                <span className="arena-v2-panel-label">운영 플래그</span>
+                <input className="arena-v2-select" placeholder="변경 사유" value={adminOpsReason} onChange={(event) => setAdminOpsReason(event.target.value)} />
+                <div className="arena-v2-admin-flag-list">
+                  {arenaAdminOpsFlags.map((item) => (
+                    <div key={item.flag} className="arena-v2-admin-flag">
+                      <div>
+                        <strong>{item.label}</strong>
+                        <span>{item.flag}</span>
+                      </div>
+                      <div className="arena-v2-queue-actions">
+                        <button type="button" onClick={() => recordAdminOpsFlag(item.flag, true)} disabled={Boolean(adminActionLoading)}>활성</button>
+                        <button type="button" onClick={() => recordAdminOpsFlag(item.flag, false)} disabled={Boolean(adminActionLoading)}>비활성</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {adminSubTab === 'cosmetics' && (
+              <>
+                <div className="arena-v2-admin-kpis">
+                  <div className="arena-v2-stat"><span>등록 이모트</span><strong>{arenaAdminCosmeticItems.length.toLocaleString()}개</strong></div>
+                  <div className="arena-v2-stat"><span>판매 중</span><strong>{arenaAdminCosmeticItems.filter((item) => item.active !== false).length.toLocaleString()}개</strong></div>
+                  <div className="arena-v2-stat"><span>내 장착 슬롯</span><strong>{equippedEmotes}/8</strong></div>
+                </div>
+                <div className="arena-v2-admin-grid">
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">{adminCosmeticForm.id ? `이모트 수정 #${adminCosmeticForm.id}` : '아레나 이모트 등록'}</span>
+                    <input className="arena-v2-select" placeholder="이모트 이름" value={adminCosmeticForm.name} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, name: event.target.value }))} />
+                    <input className="arena-v2-select" placeholder="설명" value={adminCosmeticForm.description} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, description: event.target.value }))} />
+                    <div className="arena-v2-admin-form-grid">
+                      <input className="arena-v2-select" type="number" min={0} value={adminCosmeticForm.price} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, price: Math.max(0, Number(event.target.value) || 0) }))} aria-label="가격" />
+                      <input className="arena-v2-select" type="number" min={0} value={adminCosmeticForm.purchase_limit} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, purchase_limit: Math.max(0, Number(event.target.value) || 0) }))} aria-label="계정별 구매 제한" />
+                      <input className="arena-v2-select" type="number" min={0} value={adminCosmeticForm.limited_total_quantity} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, limited_total_quantity: Math.max(0, Number(event.target.value) || 0) }))} aria-label="총 판매 제한" />
+                    </div>
+                    <div className="arena-v2-admin-form-grid">
+                      <input className="arena-v2-select" type="datetime-local" value={adminCosmeticForm.sale_start_at} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, sale_start_at: event.target.value }))} aria-label="판매 시작" />
+                      <input className="arena-v2-select" type="datetime-local" value={adminCosmeticForm.sale_end_at} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, sale_end_at: event.target.value }))} aria-label="판매 종료" />
+                    </div>
+                    <div className="arena-v2-admin-cosmetic-tools">
+                      <label>
+                        {adminCosmeticUploading ? '업로드 중' : '이미지 업로드'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                          onChange={(event) => {
+                            void uploadAdminArenaEmoteAsset(event.target.files?.[0]);
+                            event.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                      <input
+                        className="arena-v2-select"
+                        placeholder="이모지 대체 표시"
+                        value={String(parseArenaCosmeticStyle(adminCosmeticForm.style_json).emoji || '')}
+                        onChange={(event) => mergeAdminCosmeticStyleJson({ emoji: event.target.value })}
+                      />
+                    </div>
+                    <textarea
+                      className="arena-v2-select arena-v2-admin-textarea"
+                      value={adminCosmeticForm.style_json}
+                      onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, style_json: event.target.value }))}
+                      placeholder='{"emoji":"✨","image_url":"https://..."}'
+                    />
+                    <label className="arena-v2-admin-check">
+                      <input type="checkbox" checked={adminCosmeticForm.active} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, active: event.target.checked }))} />
+                      판매 활성화
+                    </label>
+                    <div className="arena-v2-queue-actions">
+                      <button type="button" onClick={saveAdminArenaCosmetic} disabled={adminActionLoading === 'cosmetic-save'}>{adminActionLoading === 'cosmetic-save' ? '저장 중' : adminCosmeticForm.id ? '수정 저장' : '이모트 등록'}</button>
+                      <button type="button" onClick={() => setAdminCosmeticForm({ ...emptyArenaAdminCosmeticForm })}>초기화</button>
+                    </div>
+                  </div>
+
+                  <div className="arena-v2-panel-section">
+                    <span className="arena-v2-panel-label">등록 미리보기</span>
+                    {(() => {
+                      const style = parseArenaCosmeticStyle(adminCosmeticForm.style_json);
+                      const imageUrl = typeof style.image_url === 'string' ? style.image_url : '';
+                      const emoji = typeof style.emoji === 'string' ? style.emoji : '';
+                      return (
+                        <div className="arena-v2-admin-emote-preview">
+                          <span className="arena-v2-emote-badge">
+                            {imageUrl ? <img src={imageUrl} alt={adminCosmeticForm.name || 'emote'} /> : <b>{emoji || '♪'}</b>}
+                          </span>
+                          <strong>{adminCosmeticForm.name || '이모트 이름'}</strong>
+                          <small>{adminCosmeticForm.price.toLocaleString()} P · {adminCosmeticForm.active ? '판매 중' : '비활성'}</small>
+                        </div>
+                      );
+                    })()}
+                    <div className="arena-v2-replay-list">
+                      {arenaCosmeticPresets.map((preset) => (
+                        <span key={preset.id}>{arenaCosmeticTypeLabels[preset.type]} · {preset.name}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">아레나 이모트 목록</span>
+                  <div className="arena-v2-admin-cosmetic-list">
+                    {arenaAdminCosmeticItems.length === 0 ? (
+                      <span>등록된 아레나 이모트가 없습니다.</span>
+                    ) : arenaAdminCosmeticItems.map((item) => {
+                      const style = parseArenaCosmeticStyle(item.style_json);
+                      const imageUrl = typeof style.image_url === 'string' ? style.image_url : '';
+                      const emoji = typeof style.emoji === 'string' ? style.emoji : '';
+                      return (
+                        <article key={item.id} className="arena-v2-admin-cosmetic-item">
+                          <span className="arena-v2-emote-badge">
+                            {imageUrl ? <img src={imageUrl} alt={item.name} /> : <b>{emoji || '♪'}</b>}
+                          </span>
+                          <div>
+                            <strong>{item.name}</strong>
+                            <small>{Number(item.price || 0).toLocaleString()} P · 판매 {Number(item.sold_quantity || 0).toLocaleString()}{item.limited_total_quantity ? `/${Number(item.limited_total_quantity).toLocaleString()}` : ''}</small>
+                          </div>
+                          <div className="arena-v2-queue-actions">
+                            <button type="button" onClick={() => editAdminArenaCosmetic(item)}>수정</button>
+                            <button type="button" onClick={() => toggleAdminArenaCosmetic(item)} disabled={adminActionLoading === `cosmetic-toggle-${item.id}`}>{item.active === false ? '활성' : '비활성'}</button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {adminSubTab === 'diagnostics' && (
+              <div className="arena-v2-admin-grid">
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">데이터 점검</span>
+                  <div className="arena-v2-replay-list">
+                    <span>카드 로드 · {cards.length.toLocaleString()}장</span>
+                    <span>카드 추가 페이지 · {cardPage.hasMore ? `offset ${cardPage.nextOffset}` : '완료'}</span>
+                    <span>랭킹 샘플 · {rankings.length.toLocaleString()}명</span>
+                    <span>공지 · {notice || '없음'}</span>
+                  </div>
+                </div>
+                <div className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label">시스템 응답</span>
+                  <pre className="arena-v2-admin-json">{JSON.stringify(arenaAdminStatus || {}, null, 2)}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
       </section>
-      <section className="arena-v2-stage">
-        <aside className="arena-v2-command-panel">
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">시즌 생성</span>
-            <input className="arena-v2-select" placeholder="시즌 코드" value={adminSeasonForm.seasonKey} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, seasonKey: event.target.value }))} />
-            <input className="arena-v2-select" placeholder="시즌 이름" value={adminSeasonForm.name} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, name: event.target.value }))} />
-            <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.startsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, startsAt: event.target.value }))} />
-            <input className="arena-v2-select" type="datetime-local" value={adminSeasonForm.endsAt} onChange={(event) => setAdminSeasonForm((current) => ({ ...current, endsAt: event.target.value }))} />
-            <button type="button" className="arena-v2-primary-button" onClick={createAdminSeason}>시즌 생성</button>
-          </div>
-        </aside>
-        <div className="arena-v2-board-wrap">
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">상태 전환</span>
-            <div className="arena-v2-queue-actions">
-              {['scheduled', 'active', 'locked', 'settling', 'closed', 'cancelled'].map((status) => (
-                <button key={status} type="button" onClick={() => transitionSeason(status)} disabled={!season?.id}>{seasonStatusLabel(status)}</button>
-              ))}
-            </div>
-          </div>
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">보상 정산</span>
-            <div className="arena-v2-queue-actions">
-              <button type="button" onClick={() => grantRewards(true)} disabled={!season?.id}>대상 확인</button>
-              <button type="button" onClick={() => grantRewards(false)} disabled={!season?.id}>보상 준비</button>
-            </div>
-            <p>시즌 결과에 따라 받을 보상을 준비합니다.</p>
-          </div>
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">대전 대기 상태</span>
-            <div className="arena-v2-replay-list">
-              <span>빠른대전 · {requestStatusLabel(queueStatus.quick?.status)} {queueStatus.quick?.matchId ? '· 매칭 완료' : ''}</span>
-              <span>8인전 · {requestStatusLabel(queueStatus.battleRoyale?.status)} {queueStatus.battleRoyale?.participantCount != null ? `· ${queueStatus.battleRoyale.participantCount}/8` : ''}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-    </section>
-  );
+    );
+  };
 
   if (activeTab === 'inventory') return renderInventory();
+  if (activeTab === 'wiki') return renderWiki();
   if (activeTab === 'ranking') return renderRanking();
   if (activeTab === 'style') return renderStyle();
+  if (activeTab === 'my-card') return renderMyCard();
   if (activeTab === 'admin') return renderAdmin();
   return renderPlay();
 };

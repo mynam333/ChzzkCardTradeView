@@ -21,6 +21,7 @@ export const ARENA_V2_TABLES = [
   'arena_v2_replay_holds',
   'arena_v2_reports',
   'arena_v2_streamer_right_requests',
+  'arena_user_cosmetic_loadouts',
   'arena_v2_admin_audit_logs'
 ] as const;
 
@@ -331,6 +332,22 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
   `);
 
   await db.run(`
+    CREATE TABLE IF NOT EXISTS arena_user_cosmetic_loadouts (
+      user_id VARCHAR(191) PRIMARY KEY,
+      emote_slot_1_item_id BIGINT NULL,
+      emote_slot_2_item_id BIGINT NULL,
+      emote_slot_3_item_id BIGINT NULL,
+      emote_slot_4_item_id BIGINT NULL,
+      emote_slot_5_item_id BIGINT NULL,
+      emote_slot_6_item_id BIGINT NULL,
+      emote_slot_7_item_id BIGINT NULL,
+      emote_slot_8_item_id BIGINT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_arena_cosmetic_loadouts_updated (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.run(`
     CREATE TABLE IF NOT EXISTS arena_v2_admin_audit_logs (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       admin_user_id VARCHAR(191) NOT NULL,
@@ -350,6 +367,13 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
     await db.run('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INT NOT NULL DEFAULT 0');
   } catch {
     // Existing v2 databases may already have this column.
+  }
+  for (let slot = 1; slot <= 8; slot += 1) {
+    try {
+      await db.run(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN emote_slot_${slot}_item_id BIGINT NULL`);
+    } catch {
+      // Existing v2 databases may already have this column.
+    }
   }
   try {
     if (db instanceof PostgresDb) {
@@ -637,6 +661,20 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
     CREATE INDEX IF NOT EXISTS idx_arena_v2_rights_streamer ON arena_v2_streamer_right_requests(streamer_id, status);
     CREATE INDEX IF NOT EXISTS idx_arena_v2_rights_requester ON arena_v2_streamer_right_requests(requester_user_id, created_at);
 
+    CREATE TABLE IF NOT EXISTS arena_user_cosmetic_loadouts (
+      user_id TEXT PRIMARY KEY,
+      emote_slot_1_item_id INTEGER,
+      emote_slot_2_item_id INTEGER,
+      emote_slot_3_item_id INTEGER,
+      emote_slot_4_item_id INTEGER,
+      emote_slot_5_item_id INTEGER,
+      emote_slot_6_item_id INTEGER,
+      emote_slot_7_item_id INTEGER,
+      emote_slot_8_item_id INTEGER,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_arena_cosmetic_loadouts_updated ON arena_user_cosmetic_loadouts(updated_at);
+
     CREATE TABLE IF NOT EXISTS arena_v2_admin_audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       admin_user_id TEXT NOT NULL,
@@ -656,6 +694,13 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
     const matchPlayerColumns = db.prepare('PRAGMA table_info(arena_v2_match_players)').all() as Array<{ name: string }>;
     if (!matchPlayerColumns.some((column) => column.name === 'fatigue_count')) {
       db.exec('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INTEGER NOT NULL DEFAULT 0;');
+    }
+    const loadoutColumns = db.prepare('PRAGMA table_info(arena_user_cosmetic_loadouts)').all() as Array<{ name: string }>;
+    for (let slot = 1; slot <= 8; slot += 1) {
+      const columnName = `emote_slot_${slot}_item_id`;
+      if (!loadoutColumns.some((column) => column.name === columnName)) {
+        db.exec(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN ${columnName} INTEGER;`);
+      }
     }
   }
 };

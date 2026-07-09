@@ -1,6 +1,6 @@
-import { getMysqlDb } from '../../services/db';
+import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
-import { recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
+import { ensureMysqlAssetEventLogReady, recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
 import { AdminTradeListOptions, AdminTradeListResult, ITradeRepository, Trade } from '../interfaces';
 
 export class MysqlTradeRepository implements ITradeRepository {
@@ -166,6 +166,7 @@ export class MysqlTradeRepository implements ITradeRepository {
 
   async finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {
     try {
+      await ensureMysqlAssetEventLogReady(this.getDb());
       await this.getDb().transaction(async (tx) => {
         const row = await tx.get('SELECT * FROM trades WHERE id = ? FOR UPDATE', id);
         if (!row) throw new Error('NOT_FOUND');
@@ -184,17 +185,20 @@ export class MysqlTradeRepository implements ITradeRepository {
         if (Number(receiver.point || 0) < receiverOut) throw new Error('RECEIVER_POINT_SHORT');
 
         const moveCards = async (fromId: string, toId: string, cards: { channel_id: string; star?: number; count: number }[], withCosmetics: boolean) => {
+          const unlockedCondition = getSqlDialect() === 'postgres'
+            ? 'COALESCE(uc.is_locked, FALSE) = FALSE'
+            : 'COALESCE(uc.is_locked, 0) = 0';
           for (const c of cards) {
             if (!c.channel_id || !c.count || c.count <= 0) continue;
             const hasStar = c.star !== undefined && c.star !== null;
             const owned = hasStar
               ? await tx.all<{ id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }>(
                   `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
-                     FROM user_cards uc
+                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
                       AND uc.star = ?
-                      AND COALESCE(uc.is_locked, 0) = 0
+                      AND ${unlockedCondition}
                       AND NOT EXISTS (
                         SELECT 1 FROM market_listings ml
                          WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
@@ -205,10 +209,10 @@ export class MysqlTradeRepository implements ITradeRepository {
                 )
               : await tx.all<{ id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }>(
                   `SELECT id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id
-                     FROM user_cards uc
+                      FROM user_cards uc
                     WHERE uc.user_id = ?
                       AND uc.channel_id = ?
-                      AND COALESCE(uc.is_locked, 0) = 0
+                      AND ${unlockedCondition}
                       AND NOT EXISTS (
                         SELECT 1 FROM market_listings ml
                          WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
@@ -251,7 +255,18 @@ export class MysqlTradeRepository implements ITradeRepository {
                 ...ids
               );
             }
-            await tx.run(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`, toId, ...ids);
+            const moveResult = await tx.run(`UPDATE user_cards SET user_id = ? WHERE id IN (${placeholders})`, toId, ...ids);
+            if (moveResult.affectedRows !== ids.length) {
+              throw new Error('CARD_MOVE_INCOMPLETE');
+            }
+            const movedCheck = await tx.get<{ c: number }>(
+              `SELECT COUNT(*) AS c FROM user_cards WHERE user_id = ? AND id IN (${placeholders})`,
+              toId,
+              ...ids
+            );
+            if (Number(movedCheck?.c || 0) !== ids.length) {
+              throw new Error('CARD_MOVE_INCOMPLETE');
+            }
             await recordMysqlAssetEvents(tx, owned.map((row) => ({
               userId: fromId,
               counterpartyUserId: toId,

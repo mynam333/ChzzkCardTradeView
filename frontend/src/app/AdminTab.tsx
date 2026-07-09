@@ -60,7 +60,7 @@ import { AdminTitlesTab } from './AdminTitlesTab';
 import { AdminAchievementsTab } from './AdminAchievementsTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
 
-type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'achievements' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'arena' | 'maintenance';
+type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'achievements' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
 type InsightsRange = '24h' | '7d' | '30d' | 'all';
 type InsightsGranularity = 'hour' | 'day' | 'month';
@@ -202,7 +202,6 @@ export const AdminTab: React.FC = () => {
     tabParam === 'asset-events' ||
     tabParam === 'streamers' ||
     tabParam === 'shop' ||
-    tabParam === 'arena' ||
     tabParam === 'maintenance'
   ) ? tabParam : 'dashboard';
 
@@ -213,7 +212,7 @@ export const AdminTab: React.FC = () => {
     const param = searchParams.get('tab') as AdminSubTab | null;
     if (param && [
       'dashboard', 'insights', 'users', 'titles', 'achievements', 'coupons', 'announcements',
-      'push', 'reports', 'trades', 'asset-events', 'streamers', 'shop', 'arena', 'maintenance'
+      'push', 'reports', 'trades', 'asset-events', 'streamers', 'shop', 'maintenance'
     ].includes(param)) {
       setSubTab(param);
     }
@@ -234,14 +233,6 @@ export const AdminTab: React.FC = () => {
   const [insights, setInsights] = useState<AdminInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState('');
-  const [arenaOps, setArenaOps] = useState<any | null>(null);
-  const [arenaStats, setArenaStats] = useState<any | null>(null);
-  const [arenaQuick, setArenaQuick] = useState<any | null>(null);
-  const [arenaCups, setArenaCups] = useState<any | null>(null);
-  const [arenaJobs, setArenaJobs] = useState<any[]>([]);
-  const [arenaLoading, setArenaLoading] = useState(false);
-  const [arenaActionLoading, setArenaActionLoading] = useState('');
-
   // 스트리머 이미지 검색/페이지네이션
   const [streamerSearch, setStreamerSearch] = useState('');
   const [streamerPage, setStreamerPage] = useState(1);
@@ -268,7 +259,6 @@ export const AdminTab: React.FC = () => {
   const [shopItems, setShopItems] = useState<ShopItem[]>([]);
   const emptyShopForm = { id: 0, type: 'border' as ShopItem['type'], name: '', description: '', price: 1000, style_json: '', font_url: '', font_family: '', active: true, purchase_limit: 0, sale_start_at: '', sale_end_at: '', limited_total_quantity: 0, sold_quantity: 0 };
   const [shopForm, setShopForm] = useState({ ...emptyShopForm });
-  const [shopEmoteUploading, setShopEmoteUploading] = useState(false);
   const [freeDrawInterval, setFreeDrawInterval] = useState('24');
   const [freeDrawMaxStack, setFreeDrawMaxStack] = useState('1');
   const [isSavingInterval, setIsSavingInterval] = useState(false);
@@ -394,9 +384,6 @@ export const AdminTab: React.FC = () => {
       fetchMinigameTicketChargeInterval();
       fetchDrawCost();
     }
-    if (subTab === 'arena') {
-      fetchArenaAdminData();
-    }
     if (subTab === 'push') {
       fetchScheduledPushes();
       fetchSentPushes(sentPushesPage);
@@ -494,71 +481,6 @@ export const AdminTab: React.FC = () => {
     }
   };
 
-  const fetchArenaAdminData = async () => {
-    setArenaLoading(true);
-    try {
-      const [opsRes, statsRes, quickRes, cupsRes, jobsRes] = await Promise.all([
-        apiFetch('/admin/arena/system'),
-        apiFetch('/admin/arena/stats?limit=300'),
-        apiFetch('/admin/arena/quick-match'),
-        apiFetch('/admin/arena/cups'),
-        apiFetch('/admin/arena/jobs?limit=8')
-      ]);
-      if (opsRes.ok) {
-        const opsData = await opsRes.json();
-        setArenaOps(opsData.data || opsData);
-      }
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setArenaStats(statsData.data || statsData);
-      }
-      if (quickRes.ok) {
-        const quickData = await quickRes.json();
-        setArenaQuick(quickData.data || quickData);
-      }
-      if (jobsRes.ok) {
-        const jobsData = await jobsRes.json();
-        setArenaJobs(jobsData.data?.items || jobsData.items || []);
-      }
-      if (cupsRes.ok) {
-        const cupsData = await cupsRes.json();
-        setArenaCups(cupsData.data || cupsData);
-      }
-    } catch {
-      toast('아레나 관리자 정보를 불러오지 못했습니다.', 'error');
-    } finally {
-      setArenaLoading(false);
-    }
-  };
-
-  const runArenaAdminAction = async (kind: 'stats' | 'rankings' | 'prune' | 'recoverCup' | 'recoverQuick') => {
-    setArenaActionLoading(kind);
-    try {
-      const endpoint = kind === 'stats'
-        ? '/admin/arena/stats/rebuild'
-        : kind === 'rankings'
-          ? '/admin/arena/rankings/rebuild'
-          : kind === 'recoverCup'
-            ? '/admin/arena/cups/recover-queue'
-            : kind === 'recoverQuick'
-              ? '/admin/arena/quick-match/recover-queue'
-            : '/admin/arena/matches/prune-logs';
-      const body = kind === 'prune'
-        ? { retention_days: 7, limit: 200 }
-        : kind === 'recoverCup' || kind === 'recoverQuick'
-          ? {}
-          : { limit: 1000 };
-      const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || 'Arena admin action failed');
-      toast(kind === 'stats' ? '아레나 통계 스냅샷 재생성 작업을 등록했습니다.' : kind === 'rankings' ? '아레나 랭킹 스냅샷 재생성 작업을 등록했습니다.' : kind === 'recoverCup' ? '아레나 컵 큐를 복구했습니다.' : kind === 'recoverQuick' ? '아레나 빠른대전 큐를 복구했습니다.' : '아레나 리플레이 정리 작업을 등록했습니다.', 'success');
-      await fetchArenaAdminData();
-    } catch (err: any) {
-      toast(err?.message || '아레나 관리자 작업에 실패했습니다.', 'error');
-    } finally {
-      setArenaActionLoading('');
-    }
-  };
   const fetchCoupons = async () => {
     try {
       const res = await apiFetch('/admin/coupons');
@@ -1179,7 +1101,10 @@ export const AdminTab: React.FC = () => {
   const fetchShopItems = async () => {
     try {
       const res = await apiFetch('/admin/shop/items');
-      if (res.ok) setShopItems(await res.json());
+      if (res.ok) {
+        const items = await res.json();
+        setShopItems(Array.isArray(items) ? items.filter((item) => item?.type !== 'emote') : items);
+      }
     } catch { /* noop */ }
   };
 
@@ -1321,45 +1246,6 @@ export const AdminTab: React.FC = () => {
     });
 
     return minified;
-  };
-
-  const mergeShopStyleJson = (patch: Record<string, unknown>) => {
-    let parsed: Record<string, unknown> = {};
-    if (shopForm.style_json.trim()) {
-      try {
-        parsed = JSON.parse(shopForm.style_json);
-      } catch {
-        parsed = {};
-      }
-    }
-    setShopForm({ ...shopForm, style_json: JSON.stringify({ ...parsed, ...patch }) });
-  };
-
-  const uploadArenaEmoteAsset = async (file: File | null | undefined) => {
-    if (!file || shopEmoteUploading) return;
-    if (!file.type.startsWith('image/')) {
-      toast('이미지 파일만 업로드할 수 있습니다.', 'error');
-      return;
-    }
-    setShopEmoteUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('image', file);
-      const res = await apiFetch('/admin/arena/cosmetics/emote-assets', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || '이모트 이미지를 업로드하지 못했습니다.');
-      const imageUrl = data?.data?.image_url;
-      if (!imageUrl) throw new Error('업로드 URL을 확인하지 못했습니다.');
-      mergeShopStyleJson({ image_url: imageUrl });
-      toast(data?.data?.animated ? '움짤 이모트 이미지를 업로드했습니다.' : '이모트 이미지를 업로드했습니다.', 'success');
-    } catch (err: any) {
-      toast(err?.message || '이모트 이미지를 업로드하지 못했습니다.', 'error');
-    } finally {
-      setShopEmoteUploading(false);
-    }
   };
 
   const submitShopItem = async () => {
@@ -1782,7 +1668,6 @@ export const AdminTab: React.FC = () => {
     { id: 'asset-events', label: '자산 기록', icon: Activity },
     { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
     { id: 'shop', label: '상점 관리', icon: Store },
-    { id: 'arena', label: '아레나', icon: Gamepad2 },
     { id: 'maintenance', label: 'DB 초기화', icon: Database }
   ];
 
@@ -3769,7 +3654,6 @@ export const AdminTab: React.FC = () => {
                       className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs">
                       <option value="border">테두리</option>
                       <option value="name_effect">이름 이펙트</option>
-                      <option value="emote">아레나 이모트</option>
                     </select>
                   </div>
                   <div>
@@ -3841,7 +3725,6 @@ export const AdminTab: React.FC = () => {
                 {/* 커스텀 CSS (테두리/이름 이펙트 공통 · 클래스명 + CSS 코드 전문) */}
                 {(() => {
                   const isBorder = shopForm.type === 'border';
-                  const isEmote = shopForm.type === 'emote';
                   const parsed = (() => { try { return JSON.parse(shopForm.style_json || '{}'); } catch { return {}; } })();
                   const curClass = typeof parsed?.class === 'string' ? parsed.class : '';
                   const curCss = typeof parsed?.css === 'string' ? parsed.css : '';
@@ -3850,7 +3733,7 @@ export const AdminTab: React.FC = () => {
                   const setCustom = (cls: string, css: string, fallbackActive = curFallbackActive, fallbackCss = curFallbackCss) => {
                     const c = cls.trim();
                     if (!c && !css.trim() && !fallbackActive && !fallbackCss.trim()) { setShopForm({ ...shopForm, style_json: '' }); return; }
-                    const obj: any = { class: c || (isBorder ? 'cb-custom' : isEmote ? 'ae-custom' : 'ne-custom') };
+                    const obj: any = { class: c || (isBorder ? 'cb-custom' : 'ne-custom') };
                     if (css.trim()) obj.css = css;
                     if (fallbackActive) obj.fallback_ks_active = true;
                     if (fallbackCss.trim()) obj.fallback_ks_css = fallbackCss;
@@ -3858,10 +3741,10 @@ export const AdminTab: React.FC = () => {
                   };
                   return (
                     <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 p-3 space-y-2">
-                      <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS {isBorder ? '테두리' : isEmote ? '아레나 이모트' : '이름 이펙트'} (직접 작성)</p>
+                      <p className="text-[11px] font-bold text-muted-foreground">커스텀 CSS {isBorder ? '테두리' : '이름 이펙트'} (직접 작성)</p>
                       <input
                         type="text"
-                        placeholder={isBorder ? '적용 클래스명 (예: cb-mydragon)' : isEmote ? '적용 클래스명 (예: ae-pop)' : '적용 클래스명 (예: ne-rainbow)'}
+                        placeholder={isBorder ? '적용 클래스명 (예: cb-mydragon)' : '적용 클래스명 (예: ne-rainbow)'}
                         value={curClass}
                         onChange={(e) => setCustom(e.target.value, curCss)}
                         className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
@@ -3870,8 +3753,6 @@ export const AdminTab: React.FC = () => {
                         rows={6}
                         placeholder={isBorder
                           ? '.cb-mydragon { background-image: url("data:image/svg+xml,..."); box-shadow: 0 0 12px gold; }\n.cb-mydragon::after { /* 애니메이션 등 */ }\n@keyframes ... { }'
-                          : isEmote
-                            ? '.ae-pop { filter: drop-shadow(0 8px 18px rgba(14,165,233,.28)); animation: ae-pop .9s ease both; }\n@keyframes ae-pop { 0% { transform: scale(.45); opacity:0; } 100% { transform: scale(1); opacity:1; } }'
                           : '.ne-rainbow { background: linear-gradient(90deg,#f0f,#0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }\n@keyframes ... { }'}
                         value={curCss}
                         onChange={(e) => setCustom(curClass, e.target.value)}
@@ -3880,12 +3761,11 @@ export const AdminTab: React.FC = () => {
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {isBorder
                           ? <>입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.</>
-                          : isEmote ? <>입력한 CSS가 그대로 주입되어 아레나 이모트 이미지 또는 텍스트에 적용됩니다. <code>{'{"image_url":"https://..."}'}</code> 형태를 함께 사용할 수 있습니다.</>
                           : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
                         <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
                       </p>
 
-                      {!isBorder && !isEmote && (
+                      {!isBorder && (
                         <div className="pt-2 border-t border-border/40 space-y-2">
                           <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground cursor-pointer">
                             <input
@@ -3915,7 +3795,7 @@ export const AdminTab: React.FC = () => {
 
                 <div>
                   <label className="text-[11px] font-bold text-muted-foreground block mb-1">
-                    스타일 (CSS JSON · 고급) <span className="font-normal">이모트 예: {`{"image_url":"https://...","emoji":"✨"}`}</span>
+                    스타일 (CSS JSON · 고급)
                   </label>
                   <textarea rows={2} placeholder='{"borderColor":"#ff0000"}' value={shopForm.style_json}
                     onChange={(e) => setShopForm({ ...shopForm, style_json: e.target.value })}
@@ -3936,46 +3816,6 @@ export const AdminTab: React.FC = () => {
                   </div>
                 )}
 
-                {shopForm.type === 'emote' && (
-                  <div className="rounded-2xl border border-sky-200/70 bg-sky-50/70 p-3 dark:border-sky-300/20 dark:bg-sky-300/10">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-[11px] font-black text-sky-700 dark:text-sky-100">이모트 이미지 업로드</p>
-                        <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">GIF 움짤을 포함한 이미지 파일을 사용할 수 있습니다.</p>
-                      </div>
-                      <label className="cute-wiggle-hover inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-sky-500 px-3 py-2 text-[11px] font-black text-white shadow-sm transition hover:bg-sky-600">
-                        <ImageIcon className="h-3.5 w-3.5" />
-                        {shopEmoteUploading ? '업로드 중' : '이미지 선택'}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-                          className="hidden"
-                          disabled={shopEmoteUploading}
-                          onChange={(event) => {
-                            void uploadArenaEmoteAsset(event.target.files?.[0]);
-                            event.currentTarget.value = '';
-                          }}
-                        />
-                      </label>
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
-                      <input
-                        type="text"
-                        placeholder="이모지 대체 표시 예: ✨"
-                        value={(() => { try { return String(JSON.parse(shopForm.style_json || '{}')?.emoji || ''); } catch { return ''; } })()}
-                        onChange={(event) => mergeShopStyleJson({ emoji: event.target.value })}
-                        className="rounded-xl border border-sky-200 bg-white/80 px-3 py-2 text-xs font-bold outline-none focus:border-sky-400 dark:border-sky-300/20 dark:bg-white/10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => mergeShopStyleJson({ image_url: '', emoji: '' })}
-                        className="rounded-xl border border-sky-200 bg-white/80 px-3 py-2 text-[10px] font-black text-sky-700 hover:bg-sky-100 dark:border-sky-300/20 dark:bg-white/10 dark:text-sky-100"
-                      >
-                        이미지 비우기
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* 미리보기 */}
@@ -3983,7 +3823,7 @@ export const AdminTab: React.FC = () => {
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <span className="text-[11px] font-black text-foreground">큰 미리보기</span>
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                    {shopForm.type === 'border' ? '테두리' : shopForm.type === 'emote' ? '이모트' : '이름 효과'}
+                    {shopForm.type === 'border' ? '테두리' : '이름 효과'}
                   </span>
                 </div>
                 {shopForm.type === 'border' ? (
@@ -4002,20 +3842,6 @@ export const AdminTab: React.FC = () => {
                       </div>
                       <CosmeticFrame border={{ style_json: shopForm.style_json }} />
                     </div>
-                  </div>
-                ) : shopForm.type === 'emote' ? (
-                  <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border/70 bg-background/60 px-4 text-center">
-                    {(() => {
-                      let parsed: any = {};
-                      try { parsed = JSON.parse(shopForm.style_json || '{}'); } catch { parsed = {}; }
-                      const imageUrl = typeof parsed.image_url === 'string' ? parsed.image_url : '';
-                      const emoji = typeof parsed.emoji === 'string' ? parsed.emoji : '';
-                      return (
-                        <div className="flex h-24 w-24 items-center justify-center rounded-[2rem] border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-pink-50 text-4xl font-black shadow-lg">
-                          {imageUrl ? <img src={imageUrl} alt={shopForm.name || 'emote'} className="h-20 w-20 object-contain" /> : emoji || '♪'}
-                        </div>
-                      );
-                    })()}
                   </div>
                 ) : (
                   <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-border/70 bg-background/60 px-4 text-center">
@@ -4074,23 +3900,13 @@ export const AdminTab: React.FC = () => {
                           <CosmeticFrame border={item} />
                         </div>
                       </div>
-                    ) : item.type === 'emote' ? (
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-lg font-black text-sky-600">
-                        {(() => {
-                          let parsed: any = {};
-                          try { parsed = JSON.parse(item.style_json || '{}'); } catch { parsed = {}; }
-                          const imageUrl = typeof parsed.image_url === 'string' ? parsed.image_url : '';
-                          const emoji = typeof parsed.emoji === 'string' ? parsed.emoji : '';
-                          return imageUrl ? <img src={imageUrl} alt={item.name} className="h-8 w-8 object-contain" /> : emoji || '♪';
-                        })()}
-                      </div>
                     ) : (
                       <CosmeticName effect={item} className="shrink-0 text-base font-black px-1">{item.name}</CosmeticName>
                     )}
                     <div className="min-w-0">
                       <p className="text-xs font-bold truncate flex items-center gap-1.5">
                         {item.name}
-                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">{item.type === 'border' ? '테두리' : item.type === 'emote' ? '이모트' : '이름 이펙트'}</span>
+                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">{item.type === 'border' ? '테두리' : '이름 이펙트'}</span>
                         {!item.active && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">비활성</span>}
                         {(item.sale_start_at || item.sale_end_at || (item.limited_total_quantity || 0) > 0) && (
                           <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-600">한정</span>
@@ -4123,211 +3939,6 @@ export const AdminTab: React.FC = () => {
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {subTab === 'arena' && (
-        <section className="space-y-5">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h3 className="text-sm font-bold flex items-center gap-1.5">
-                  <Gamepad2 className="h-4 w-4 text-primary" /> 치카포 아레나 운영
-                </h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  매치는 라운드 단위로 확정하고, 화면 조회는 스냅샷과 단건 리플레이를 사용합니다.
-                </p>
-              </div>
-              <button
-                onClick={fetchArenaAdminData}
-                disabled={arenaLoading}
-                className="flex items-center justify-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${arenaLoading ? 'animate-spin' : ''}`} /> 새로고침
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              {[
-                { label: '빠른대전', value: arenaOps?.quick_match_enabled ? '활성' : '비활성' },
-                { label: '8인 컵', value: arenaCups?.enabled ? '활성' : '비활성' },
-                { label: '전투 전송', value: arenaOps?.transport_policy?.battle_transport || 'http_result_with_client_replay' },
-                { label: '리플레이 보관', value: `${arenaOps?.replay_policy?.prune_retention_days || 7}일` }
-              ].map((item) => (
-                <div key={item.label} className="rounded-2xl border border-border bg-secondary/30 p-4">
-                  <p className="text-[10px] font-black text-muted-foreground">{item.label}</p>
-                  <p className="mt-1 break-all text-sm font-black text-foreground">{item.value}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid gap-2 md:grid-cols-5">
-              <button
-                onClick={() => runArenaAdminAction('stats')}
-                disabled={Boolean(arenaActionLoading)}
-                className="rounded-xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground disabled:opacity-50"
-              >
-                {arenaActionLoading === 'stats' ? '재생성 중...' : '통계 스냅샷 재생성'}
-              </button>
-              <button
-                onClick={() => runArenaAdminAction('rankings')}
-                disabled={Boolean(arenaActionLoading)}
-                className="rounded-xl border border-border bg-secondary px-3 py-2.5 text-xs font-black text-foreground disabled:opacity-50"
-              >
-                {arenaActionLoading === 'rankings' ? '재생성 중...' : '랭킹 스냅샷 재생성'}
-              </button>
-              <button
-                onClick={() => runArenaAdminAction('prune')}
-                disabled={Boolean(arenaActionLoading)}
-                className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs font-black text-amber-600 disabled:opacity-50"
-              >
-                {arenaActionLoading === 'prune' ? '정리 중...' : '오래된 리플레이 정리'}
-              </button>
-              <button
-                onClick={() => runArenaAdminAction('recoverCup')}
-                disabled={Boolean(arenaActionLoading)}
-                className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-xs font-black text-sky-600 disabled:opacity-50"
-              >
-                {arenaActionLoading === 'recoverCup' ? '복구 중...' : '컵 큐 복구'}
-              </button>
-              <button
-                onClick={() => runArenaAdminAction('recoverQuick')}
-                disabled={Boolean(arenaActionLoading)}
-                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs font-black text-emerald-600 disabled:opacity-50"
-              >
-                {arenaActionLoading === 'recoverQuick' ? '복구 중...' : '빠른대전 큐 복구'}
-              </button>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-border bg-secondary/20 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h4 className="text-xs font-black text-foreground">빠른대전 큐 현황</h4>
-                <span className="text-[10px] font-bold text-muted-foreground">{arenaQuick?.enabled ? '활성' : '비활성'}</span>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-5">
-                {[
-                  ['대기', arenaQuick?.queue?.waiting],
-                  ['매칭중', arenaQuick?.queue?.matching],
-                  ['완료', arenaQuick?.queue?.matched],
-                  ['취소', arenaQuick?.queue?.cancelled],
-                  ['만료', arenaQuick?.queue?.expired]
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-xl bg-card/80 px-3 py-2 text-center">
-                    <p className="text-[10px] font-bold text-muted-foreground">{label}</p>
-                    <p className="mt-1 text-sm font-black text-foreground">{Number(value || 0).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-border bg-secondary/20 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h4 className="text-xs font-black text-foreground">8인 컵 운영 현황</h4>
-                <span className="text-[10px] font-bold text-muted-foreground">총 {arenaCups?.cups_total || 0}회</span>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-5">
-                {[
-                  ['대기', arenaCups?.queue?.waiting],
-                  ['매칭중', arenaCups?.queue?.matching],
-                  ['완료', arenaCups?.queue?.matched],
-                  ['취소', arenaCups?.queue?.cancelled],
-                  ['만료', arenaCups?.queue?.expired]
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-xl bg-card/80 px-3 py-2 text-center">
-                    <p className="text-[10px] font-bold text-muted-foreground">{label}</p>
-                    <p className="mt-1 text-sm font-black text-foreground">{Number(value || 0).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 space-y-1.5">
-                {(arenaCups?.latest_cups || []).length === 0 ? (
-                  <p className="py-3 text-center text-[11px] font-bold text-muted-foreground">최근 완료된 컵이 없습니다.</p>
-                ) : (arenaCups?.latest_cups || []).map((cup: any) => (
-                  <div key={cup.id} className="flex items-center justify-between gap-2 rounded-xl bg-card/80 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-[11px] font-black text-foreground">컵 #{cup.id} · {cup.status}</p>
-                      <p className="text-[10px] font-bold text-muted-foreground">참가 {cup.participant_count || 8}명 · 우승 {cup.champion_user_id || '-'}</p>
-                    </div>
-                    <span className="shrink-0 text-[10px] font-bold text-muted-foreground">{cup.completed_at ? formatLocalDateTime(cup.completed_at) : '-'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-border bg-secondary/20 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h4 className="text-xs font-black text-foreground">최근 관리자 작업</h4>
-                <span className="text-[10px] font-bold text-muted-foreground">{arenaJobs.length}개</span>
-              </div>
-              <div className="mt-3 space-y-1.5">
-                {arenaJobs.length === 0 ? (
-                  <p className="py-3 text-center text-[11px] font-bold text-muted-foreground">등록된 작업이 없습니다.</p>
-                ) : arenaJobs.map((job: any) => (
-                  <div key={job.id} className="flex items-center justify-between gap-2 rounded-xl bg-card/80 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-[11px] font-black text-foreground">#{job.id} · {job.job_type}</p>
-                      <p className="text-[10px] font-bold text-muted-foreground">{job.error_message || (job.finished_at ? formatLocalDateTime(job.finished_at) : '대기/실행 중')}</p>
-                    </div>
-                    <span className="shrink-0 rounded bg-secondary px-2 py-1 text-[10px] font-black text-muted-foreground">{job.status}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
-              <div>
-                <h3 className="text-sm font-bold flex items-center gap-1.5">
-                  <BarChart3 className="h-4 w-4 text-primary" /> 아레나 밸런스 통계
-                </h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  요청 시 집계하지 않고 저장된 관리자 스냅샷만 표시합니다.
-                </p>
-              </div>
-              <span className="rounded bg-secondary px-2 py-1 text-[10px] font-bold text-muted-foreground">
-                {arenaStats?.source || 'snapshot'}
-              </span>
-            </div>
-
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              {(['user_record', 'class_combo', 'class_single', 'skill_single', 'stat_focus', 'deck_size'] as const).map((type) => {
-                const labels: Record<string, string> = {
-                  user_record: '유저 승패',
-                  class_combo: '클래스 조합',
-                  class_single: '클래스 단일',
-                  skill_single: '스킬',
-                  stat_focus: '스탯 성향',
-                  deck_size: '덱 크기'
-                };
-                const items = (arenaStats?.items || []).filter((item: any) => item.snapshot_type === type).slice(0, 8);
-                return (
-                  <div key={type} className="rounded-2xl border border-border bg-secondary/20 p-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-black text-foreground">{labels[type]}</h4>
-                      <span className="text-[10px] font-bold text-muted-foreground">{items.length}개</span>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {items.length === 0 ? (
-                        <p className="py-4 text-center text-[11px] font-bold text-muted-foreground">스냅샷 데이터가 없습니다.</p>
-                      ) : items.map((item: any) => (
-                        <div key={`${item.snapshot_type}-${item.metric_key}`} className="rounded-xl bg-card/80 px-3 py-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="min-w-0 truncate text-[11px] font-black text-foreground">{item.label || item.metric_key}</p>
-                            <span className="shrink-0 text-[10px] font-black text-primary">{Math.round((item.win_rate || 0) * 100)}%</span>
-                          </div>
-                          <div className="mt-1 flex items-center justify-between text-[10px] font-bold text-muted-foreground">
-                            <span>표본 {item.sample_count || 0}</span>
-                            <span>{item.wins || 0}승 {item.losses || 0}패 {item.draws || 0}무</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
         </section>
