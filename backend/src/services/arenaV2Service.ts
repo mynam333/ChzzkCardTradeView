@@ -986,10 +986,24 @@ const getLatestArenaV2StreamerCardRow = async (db: SqlExecutor, seasonId: string
 export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
-  const season = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
-  if (!season?.id) throw new Error('ArenaV2SeasonNotFound');
   const streamer = await findArenaV2OwnedStreamer(db, userId);
   if (!streamer) throw new Error('ArenaStreamerRightForbidden');
+  const season = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
+  if (!season?.id) {
+    if (seasonId) throw new Error('ArenaV2SeasonNotFound');
+    return {
+      seasonId: null,
+      streamer: {
+        channelId: streamer.channel_id,
+        name: streamer.name,
+        logoUrl: streamer.logo_url,
+        customImageUrl: streamer.custom_image_url,
+        isImageBanned: Boolean(Number(streamer.is_image_banned || 0))
+      },
+      card: null,
+      canEdit: false
+    };
+  }
 
   let row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
   if (!row) {

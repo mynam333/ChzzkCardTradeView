@@ -928,8 +928,26 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         setDecks([]);
         setRewardState(null);
         setQueueStatus({});
-        setMyStreamerCard(null);
-        setStreamerCardForm(hydrateStreamerCardForm(null));
+        if (user) {
+          const myCardRes = await apiFetch('/arena/streamer-card/me');
+          if (myCardRes.ok) {
+            const myCardJson = await myCardRes.json().catch(() => null);
+            const card = normalizeCard(myCardJson?.card);
+            const nextMyCard = {
+              streamer: myCardJson?.streamer,
+              card,
+              canEdit: myCardJson?.canEdit === true
+            };
+            setMyStreamerCard(nextMyCard);
+            setStreamerCardForm(hydrateStreamerCardForm(card));
+          } else {
+            setMyStreamerCard(null);
+            setStreamerCardForm(hydrateStreamerCardForm(null));
+          }
+        } else {
+          setMyStreamerCard(null);
+          setStreamerCardForm(hydrateStreamerCardForm(null));
+        }
         await loadArenaCosmetics().catch(() => undefined);
       }
       const rankingsPath = nextSeason?.id ? `/arena/rankings?seasonId=${encodeURIComponent(nextSeason.id)}&limit=100` : '/arena/rankings?limit=100';

@@ -35,8 +35,16 @@ export const ArenaLayout: React.FC<{
     if (!user || authLoading) return () => { alive = false; };
     void apiFetch('/arena/streamer-card/me')
       .then((response) => {
-        if (!alive) return;
-        setHasStreamerCardAccess(response.ok);
+        if (!alive) return null;
+        if (!response.ok) {
+          setHasStreamerCardAccess(false);
+          return null;
+        }
+        return response.json().catch(() => null);
+      })
+      .then((json) => {
+        if (!alive || !json) return;
+        setHasStreamerCardAccess(Boolean(json?.streamer?.channelId));
       })
       .catch(() => {
         if (alive) setHasStreamerCardAccess(false);
