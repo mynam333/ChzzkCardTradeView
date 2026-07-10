@@ -5,7 +5,6 @@ export type ArenaCardKeywordSelection = {
 };
 
 export type ArenaCardEditorForm = {
-  displayName: string;
   cardClass: string;
   cost: number;
   attack: number;
@@ -56,37 +55,44 @@ export const arenaCardClassDefinitions = {
   charge: {
     label: '돌격',
     description: '전열을 빠르게 돌파하고 직접 피해로 압박합니다. 높은 공격력과 관통·추격 계열에 잘 어울립니다.',
-    playstyle: '공격적인 전열 압박'
+    playstyle: '공격적인 전열 압박',
+    passive: '전열에 배치되면 카드에게 주는 첫 번째 피해가 1 증가합니다.'
   },
   guardian: {
     label: '수호',
     description: '도발과 보호막으로 아군을 지키며 전열을 오래 유지합니다. 체력과 방어 효과의 효율이 좋습니다.',
-    playstyle: '단단한 전열 유지'
+    playstyle: '단단한 전열 유지',
+    passive: '전열에 배치되면 처음 받는 체력 피해를 1 줄입니다. 보호막 피해에는 적용되지 않습니다.'
   },
   sniper: {
     label: '저격',
     description: '조준과 후열 압박으로 중요한 적을 먼저 노립니다. 공격력과 제어 효과 조합에 유의해야 합니다.',
-    playstyle: '정밀한 후열 제거'
+    playstyle: '정밀한 후열 제거',
+    passive: '후열에 배치되면 같은 열의 상대 후열 카드를 먼저 공격합니다. 후열이 비어 있으면 전열을 공격합니다.'
   },
   support: {
     label: '지원',
     description: '회복·보호·공격 보조로 같은 라인의 아군을 강화합니다. 팀 전체의 안정성을 높입니다.',
-    playstyle: '회복과 전투 보조'
+    playstyle: '회복과 전투 보조',
+    passive: '같은 열의 아군이 처음 받는 피해 1을 대신 받습니다.'
   },
   trick: {
     label: '기만',
     description: '침묵·기절·밀치기 같은 제어로 상대의 배치를 흔듭니다. 강한 제어 조합에는 추가 비용이 붙습니다.',
-    playstyle: '제어와 위치 교란'
+    playstyle: '제어와 위치 교란',
+    passive: '자신에게 처음 피해를 준 적 카드에게 약화 1을 부여해 공격력을 1 낮춥니다.'
   },
   specter: {
     label: '망령',
     description: '묘지와 아군 손실을 활용해 후반 영향력을 만듭니다. 부활·원혼 조합은 비용과 제한을 확인하세요.',
-    playstyle: '묘지 활용과 후반 압박'
+    playstyle: '묘지 활용과 후반 압박',
+    passive: '전열에서 전투불능이 되면 관통이 없는 일반 공격의 초과 피해가 같은 열 후열로 전달되지 않습니다.'
   },
   tech: {
     label: '기술',
     description: '전투 드로우와 전술 지원으로 손패 순환을 돕습니다. 유연한 운영과 조합 설계에 적합합니다.',
-    playstyle: '카드 순환과 유틸리티'
+    playstyle: '카드 순환과 유틸리티',
+    passive: '전투마다 이 카드에 처음 적용될 적 키워드 효과 1개를 무효화합니다.'
   }
 } as const;
 

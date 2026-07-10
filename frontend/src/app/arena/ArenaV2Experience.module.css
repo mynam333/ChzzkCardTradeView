@@ -1792,6 +1792,23 @@
 .arenaV2Scope :global(.arena-v2-card-field > span) { display: flex; justify-content: space-between; }
 .arenaV2Scope :global(.arena-v2-card-field small) { color: var(--arena-muted); font-size: 0.62rem; font-weight: 750; }
 
+.arenaV2Scope :global(.arena-v2-card-locked-name) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--arena-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--arena-surface) 82%, var(--arena-cyan-soft));
+}
+
+.arenaV2Scope :global(.arena-v2-card-locked-name > svg) { width: 20px; height: 20px; color: var(--arena-cyan-deep); }
+.arenaV2Scope :global(.arena-v2-card-locked-name > div) { display: grid; min-width: 0; gap: 2px; }
+.arenaV2Scope :global(.arena-v2-card-locked-name span) { color: var(--arena-muted); font-size: 0.61rem; font-weight: 850; }
+.arenaV2Scope :global(.arena-v2-card-locked-name strong) { overflow: hidden; color: var(--arena-text); font-size: 0.86rem; text-overflow: ellipsis; white-space: nowrap; }
+.arenaV2Scope :global(.arena-v2-card-locked-name small) { color: var(--arena-muted); font-size: 0.6rem; line-height: 1.45; }
+
 .arenaV2Scope :global(.arena-v2-card-field input),
 .arenaV2Scope :global(.arena-v2-card-field select),
 .arenaV2Scope :global(.arena-v2-card-keyword-row select) {
@@ -1832,6 +1849,14 @@
 .arenaV2Scope :global(.arena-v2-card-class-explainer > div) { display: grid; gap: 3px; }
 .arenaV2Scope :global(.arena-v2-card-class-explainer strong) { color: var(--arena-text); font-size: 0.7rem; }
 .arenaV2Scope :global(.arena-v2-card-class-explainer span) { color: var(--arena-muted); font-size: 0.63rem; line-height: 1.5; }
+.arenaV2Scope :global(.arena-v2-card-class-passive) {
+  display: grid;
+  gap: 2px;
+  margin-top: 5px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--arena-coral) 18%, transparent);
+}
+.arenaV2Scope :global(.arena-v2-card-class-passive b) { color: var(--arena-coral); font-size: 0.61rem; }
 
 .arenaV2Scope :global(.arena-v2-card-budget-cap) {
   flex: 0 0 auto;

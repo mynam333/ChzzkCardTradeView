@@ -979,7 +979,7 @@ describe('arena v2 service', () => {
     expect(ownedCards[0].artAssetId).toMatch(/^\/uploads\/long-card-art-path-/);
   });
 
-  it('lets a registered streamer customize their own card within the GDD cost budget', async () => {
+  it('lets a registered streamer customize combat settings while keeping the registered streamer name', async () => {
     insertSeason();
     rows.streamers.push({
       channel_id: 'streamer-owner',
@@ -1001,11 +1001,11 @@ describe('arena v2 service', () => {
       attack: 1,
       health: 5,
       keywords: [{ type: 'taunt', value: 1 }]
-    });
+    } as Parameters<typeof updateMyArenaV2StreamerCard>[0] & { displayName: string });
     const mine = await getMyArenaV2StreamerCard('streamer-owner');
 
     expect(result.accepted).toBe(true);
-    expect(result.card?.displayName).toBe('오너 커스텀');
+    expect(result.card?.displayName).toBe('오너 스트리머');
     expect(result.card?.cardClass).toBe('guardian');
     expect(mine.card?.id).toBe(result.card?.id);
     expect(rows.cards.filter((card) => card.streamer_id === 'streamer-owner' && card.status === 'active')).toHaveLength(1);
@@ -1027,7 +1027,6 @@ describe('arena v2 service', () => {
 
     const result = await updateMyArenaV2StreamerCard({
       requesterUserId: 'streamer-owner',
-      displayName: '예산 초과',
       cardClass: 'charge',
       cost: 1,
       attack: 9,

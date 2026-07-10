@@ -7,6 +7,7 @@ import {
   Gauge,
   HeartPulse,
   Info,
+  LockKeyhole,
   Minus,
   Plus,
   RotateCcw,
@@ -30,6 +31,7 @@ import {
 type ArenaStreamerCardEditorProps = {
   form: ArenaCardEditorForm;
   savedForm: ArenaCardEditorForm;
+  displayName: string;
   canEdit: boolean;
   active: boolean;
   saving: boolean;
@@ -86,6 +88,7 @@ const StatStepper: React.FC<StatStepperProps> = ({
 export const ArenaStreamerCardEditor: React.FC<ArenaStreamerCardEditorProps> = ({
   form,
   savedForm,
+  displayName,
   canEdit,
   active,
   saving,
@@ -132,19 +135,17 @@ export const ArenaStreamerCardEditor: React.FC<ArenaStreamerCardEditorProps> = (
           <header className="arena-v2-card-section-heading">
             <div>
               <strong>기본 정보</strong>
-              <span>카드 이름과 전투 스타일을 정합니다.</span>
+              <span>카드 이름은 스트리머 정보에서 자동 반영되며, 전투 스타일만 직접 선택합니다.</span>
             </div>
           </header>
-          <label className="arena-v2-card-field">
-            <span>카드 이름 <small>{form.displayName.length}/40</small></span>
-            <input
-              value={form.displayName}
-              maxLength={40}
-              onChange={(event) => patchForm({ displayName: event.target.value })}
-              placeholder="카드에 표시할 이름"
-              disabled={!canEdit}
-            />
-          </label>
+          <div className="arena-v2-card-locked-name" aria-label={`카드 이름 ${displayName}, 수정할 수 없음`}>
+            <LockKeyhole aria-hidden="true" />
+            <div>
+              <span>카드 이름 · 수정 불가</span>
+              <strong>{displayName}</strong>
+              <small>등록된 스트리머 이름이 자동으로 사용됩니다.</small>
+            </div>
+          </div>
           <div className="arena-v2-card-class-row">
             <label className="arena-v2-card-field">
               <span>클래스</span>
@@ -159,6 +160,10 @@ export const ArenaStreamerCardEditor: React.FC<ArenaStreamerCardEditorProps> = (
               <div>
                 <strong>{selectedClass.label} · {selectedClass.playstyle}</strong>
                 <span>{selectedClass.description}</span>
+                <div className="arena-v2-card-class-passive">
+                  <b>클래스 패시브</b>
+                  <span>{selectedClass.passive}</span>
+                </div>
               </div>
             </div>
           </div>

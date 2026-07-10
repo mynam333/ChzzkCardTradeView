@@ -787,7 +787,6 @@ export const updateMyArenaV2StreamerCardController = async (req: AuthenticatedRe
   try {
     const result = await updateMyArenaV2StreamerCard({
       requesterUserId: user.id,
-      displayName: assertBodyString(req.body?.displayName) || undefined,
       cardClass: assertBodyString(req.body?.cardClass),
       cost: Number(req.body?.cost),
       attack: Number(req.body?.attack),

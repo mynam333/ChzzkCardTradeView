@@ -501,7 +501,6 @@ const getArenaEmoteVisual = (item?: { style_json?: string | null; name?: string 
   return { imageUrl, emoji: emoji || '✦' };
 };
 const hydrateStreamerCardForm = (card: ArenaV2Card | null): ArenaCardEditorForm => ({
-  displayName: card?.displayName || '',
   cardClass: legalCardClasses.includes(card?.cardClass || '') ? card?.cardClass || 'charge' : 'charge',
   cost: card?.cost ?? 2,
   attack: card?.attack ?? 1,
@@ -1070,7 +1069,6 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const res = await apiFetch('/arena/streamer-card/me', {
         method: 'PATCH',
         body: JSON.stringify({
-          displayName: streamerCardForm.displayName,
           cardClass: streamerCardForm.cardClass,
           cost: streamerCardForm.cost,
           attack: streamerCardForm.attack,
@@ -1717,7 +1715,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const filteredWikiFlows = wikiFlowSections.filter((section) => wikiMatches(section.title, ...section.points));
   const filteredWikiClasses = legalCardClasses.filter((cardClass) => {
     const tone = classTone[cardClass] || classTone.tempo;
-    return wikiMatches(cardClass, tone.label, tone.hint);
+    return wikiMatches(cardClass, tone.label, tone.hint, tone.passive);
   });
   const filteredWikiKeywordGroups = wikiKeywordGroups
     .map((group) => ({ ...group, items: group.items.filter(([keyword, detail]) => wikiMatches(group.title, keyword, detail)) }))
@@ -1861,7 +1859,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   <div key={cardClass} className="arena-v2-action-order">
                     <span><Icon className="h-3.5 w-3.5" /> {tone.label}</span>
                     <span>{tone.hint}</span>
-                    <span>{cardClass === 'charge' ? '전열 첫 카드 피해 +1' : cardClass === 'guardian' ? '전열 첫 체력 피해 1 감소' : cardClass === 'sniper' ? '후열에서 상대 후열 우선 공격' : cardClass === 'support' ? '같은 라인 아군 첫 피해 1 대신 받음' : cardClass === 'trick' ? '처음 피해 준 카드에게 약화 1' : cardClass === 'specter' ? '전열 사망 시 일반 초과 피해 차단' : '처음 받는 키워드 효과 1개 무효화'}</span>
+                    <span>클래스 패시브 · {tone.passive}</span>
                   </div>
                 );
               })}
@@ -2161,6 +2159,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <ArenaStreamerCardEditor
             form={streamerCardForm}
             savedForm={savedStreamerCardForm}
+            displayName={myStreamerCard.streamer?.name || myStreamerCard.card?.displayName || '이름 없는 카드'}
             canEdit={myStreamerCard.canEdit}
             active={Boolean(myStreamerCard.card && myStreamerCard.card.status !== 'disabled')}
             saving={savingStreamerCard}
@@ -2179,7 +2178,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <ArenaV2CardView
                 card={{
                   ...myStreamerCard.card,
-                  displayName: streamerCardForm.displayName.trim() || myStreamerCard.streamer?.name || myStreamerCard.card.displayName,
+                  displayName: myStreamerCard.streamer?.name || myStreamerCard.card.displayName,
                   cardClass: streamerCardForm.cardClass,
                   cost: streamerCardForm.cost,
                   attack: streamerCardForm.attack,

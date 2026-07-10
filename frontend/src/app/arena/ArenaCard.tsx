@@ -28,6 +28,7 @@ export type ArenaCardClassMeta = {
   icon: LucideIcon;
   accent: ArenaCardAccent;
   hint: string;
+  passive: string;
 };
 
 const canonicalClassByAlias: Record<string, keyof typeof arenaCardClassDefinitions> = {
@@ -65,7 +66,8 @@ export const arenaCardClassMeta = Object.fromEntries(
       shortLabel: definition.label,
       icon: visual.icon,
       accent: visual.accent,
-      hint: definition.description
+      hint: definition.description,
+      passive: definition.passive
     } satisfies ArenaCardClassMeta];
   })
 ) as Record<string, ArenaCardClassMeta>;

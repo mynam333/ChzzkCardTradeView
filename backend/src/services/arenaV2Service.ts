@@ -59,7 +59,6 @@ export interface ArenaV2StreamerRightRequestInput {
 
 export interface ArenaV2StreamerCardConfigInput {
   requesterUserId: string;
-  displayName?: string;
   cardClass: string;
   cost: number;
   attack: number;
@@ -1069,7 +1068,7 @@ export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConf
   );
   const nextVersion = Number(versionRow?.max_version || 0) + 1;
   const cardId = makeId('arena_v2_card');
-  const displayName = sanitizeCardDisplayName(input.displayName, streamer.name || streamer.channel_id);
+  const displayName = sanitizeCardDisplayName(streamer.name, streamer.channel_id);
   const artAssetId = await arenaV2ArtAssetForOwnedStreamer(db, input.requesterUserId, streamer);
   const balanceScore = budget.totalCost;
 
@@ -3283,7 +3282,6 @@ export const reviewArenaV2StreamerRightRequestAdmin = async (requestId: string, 
     const payload = jsonParse<Record<string, unknown>>(existing.payload, {});
     const result = await updateMyArenaV2StreamerCard({
       requesterUserId: existing.requester_user_id,
-      displayName: typeof payload.displayName === 'string' ? payload.displayName : undefined,
       cardClass: String(payload.cardClass || ''),
       cost: Number(payload.cost),
       attack: Number(payload.attack),
