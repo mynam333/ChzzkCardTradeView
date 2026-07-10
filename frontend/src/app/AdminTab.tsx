@@ -1103,7 +1103,7 @@ export const AdminTab: React.FC = () => {
       const res = await apiFetch('/admin/shop/items');
       if (res.ok) {
         const items = await res.json();
-        setShopItems(Array.isArray(items) ? items.filter((item) => item?.type !== 'emote') : items);
+        setShopItems(Array.isArray(items) ? items.filter((item) => item?.type === 'border' || item?.type === 'name_effect') : items);
       }
     } catch { /* noop */ }
   };

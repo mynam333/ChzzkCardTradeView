@@ -26,4 +26,24 @@ describe('arena v2 schema migration', () => {
     expect(schemaSql).toContain('arena_v2_replay_holds');
     expect(schemaSql).toContain('idx_arena_v2_replay_holds_match');
   });
+
+  it('defines every persisted arena cosmetic loadout slot', () => {
+    let schemaSql = '';
+    ensureArenaV2SqliteSchema({ exec: (sql: string) => { schemaSql += sql; } } as any);
+
+    for (let slot = 1; slot <= 8; slot += 1) {
+      expect(schemaSql).toContain(`emote_slot_${slot}_item_id`);
+    }
+    for (const column of [
+      'card_frame_item_id',
+      'name_flare_item_id',
+      'hit_vfx_item_id',
+      'summon_vfx_item_id',
+      'ready_stamp_item_id',
+      'nameplate_item_id',
+      'ko_text_item_id'
+    ]) {
+      expect(schemaSql).toContain(column);
+    }
+  });
 });

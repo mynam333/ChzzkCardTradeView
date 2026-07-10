@@ -1,16 +1,35 @@
 /**
  * shopService.ts - 상점(코스메틱) 데이터 액세스. SQLite/Supabase 양 모드를 인라인 처리합니다.
- * 코스메틱: 'border'(테두리) | 'name_effect'(이름 이펙트) | 'emote'(아레나 이모트).
- * 카드 장착은 border/name_effect만 허용하며 emote는 아레나 전용 로드아웃에서만 사용합니다.
+ * 카드 코스메틱과 아레나 전용 치장 상품을 같은 카탈로그에서 관리합니다.
+ * 카드 장착은 border/name_effect만 허용하며 아레나 치장은 아레나 전용 로드아웃에서만 사용합니다.
  */
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb, getSupabaseClient } from './db';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 import { toSqlDateTime } from '../repositories/mysql/dateUtils';
 
+export const ARENA_COSMETIC_TYPES = [
+  'emote',
+  'card_frame',
+  'name_flare',
+  'hit_vfx',
+  'summon_vfx',
+  'ready_stamp',
+  'nameplate',
+  'ko_text'
+] as const;
+
+export type ArenaCosmeticType = (typeof ARENA_COSMETIC_TYPES)[number];
+export type ArenaLoadoutCosmeticType = Exclude<ArenaCosmeticType, 'emote'>;
+export type CosmeticType = 'border' | 'name_effect' | ArenaCosmeticType;
+
+export const isArenaCosmeticType = (value: unknown): value is ArenaCosmeticType => (
+  typeof value === 'string' && (ARENA_COSMETIC_TYPES as readonly string[]).includes(value)
+);
+
 export interface ShopItem {
   id: number;
-  type: 'border' | 'name_effect' | 'emote';
+  type: CosmeticType;
   name: string;
   description: string | null;
   price: number;
@@ -31,9 +50,22 @@ export type ArenaEmoteSlot = ShopItem | null;
 
 export interface ArenaCosmeticLoadout {
   emoteSlots: ArenaEmoteSlot[];
+  equipped: Record<ArenaLoadoutCosmeticType, ShopItem | null>;
 }
 
 const ARENA_EMOTE_SLOT_COUNT = 8;
+const ARENA_LOADOUT_COSMETIC_TYPES = ARENA_COSMETIC_TYPES.filter(
+  (type): type is ArenaLoadoutCosmeticType => type !== 'emote'
+);
+const ARENA_LOADOUT_COLUMN_BY_TYPE: Record<ArenaLoadoutCosmeticType, string> = {
+  card_frame: 'card_frame_item_id',
+  name_flare: 'name_flare_item_id',
+  hit_vfx: 'hit_vfx_item_id',
+  summon_vfx: 'summon_vfx_item_id',
+  ready_stamp: 'ready_stamp_item_id',
+  nameplate: 'nameplate_item_id',
+  ko_text: 'ko_text_item_id'
+};
 
 const mapSqliteItem = (r: any): ShopItem => ({
   id: r.id, type: r.type, name: r.name, description: r.description,
@@ -386,36 +418,36 @@ const itemMapById = (items: ShopItem[]) => new Map(items.map((item) => [Number(i
 
 export const getArenaCosmeticShopItems = async (): Promise<ShopItem[]> => {
   const items = await getActiveItems();
-  return items.filter((item) => item.type === 'emote');
+  return items.filter((item) => isArenaCosmeticType(item.type));
 };
 
 export const getArenaUserCosmeticCounts = async (userId: string): Promise<Record<number, number>> => {
   const counts = await getUserCosmeticCounts(userId);
-  const emoteItems = await getArenaCosmeticShopItems();
-  const emoteIds = new Set(emoteItems.map((item) => Number(item.id)));
+  const arenaItems = await getArenaCosmeticShopItems();
+  const arenaItemIds = new Set(arenaItems.map((item) => Number(item.id)));
   const filtered: Record<number, number> = {};
   for (const [rawId, count] of Object.entries(counts)) {
     const id = Number(rawId);
-    if (emoteIds.has(id)) filtered[id] = count;
+    if (arenaItemIds.has(id)) filtered[id] = count;
   }
   return filtered;
 };
 
 export const getArenaUserPurchases = async (userId: string): Promise<Record<number, number>> => {
   const purchases = await getUserPurchases(userId);
-  const emoteItems = await getArenaCosmeticShopItems();
-  const emoteIds = new Set(emoteItems.map((item) => Number(item.id)));
+  const arenaItems = await getArenaCosmeticShopItems();
+  const arenaItemIds = new Set(arenaItems.map((item) => Number(item.id)));
   const filtered: Record<number, number> = {};
   for (const [rawId, count] of Object.entries(purchases)) {
     const id = Number(rawId);
-    if (emoteIds.has(id)) filtered[id] = count;
+    if (arenaItemIds.has(id)) filtered[id] = count;
   }
   return filtered;
 };
 
-const getOwnedArenaEmoteItems = async (userId: string): Promise<ShopItem[]> => {
+const getOwnedArenaCosmeticItems = async (userId: string): Promise<ShopItem[]> => {
   const items = await getUserCosmetics(userId);
-  return items.filter((item) => item.type === 'emote' && Number(item.quantity || 0) > 0);
+  return items.filter((item) => isArenaCosmeticType(item.type) && Number(item.quantity || 0) > 0);
 };
 
 const getRawArenaLoadoutRow = async (userId: string): Promise<any | null> => {
@@ -435,31 +467,71 @@ const getRawArenaLoadoutRow = async (userId: string): Promise<any | null> => {
 
 export const getArenaCosmeticLoadout = async (userId: string): Promise<ArenaCosmeticLoadout> => {
   const row = await getRawArenaLoadoutRow(userId);
-  const ownedItems = itemMapById(await getOwnedArenaEmoteItems(userId));
+  const ownedItems = itemMapById(await getOwnedArenaCosmeticItems(userId));
   const emoteSlots = Array.from({ length: ARENA_EMOTE_SLOT_COUNT }, (_, index) => {
     const id = Number(row?.[`emote_slot_${index + 1}_item_id`] || 0);
-    return id > 0 ? ownedItems.get(id) || null : null;
+    const item = id > 0 ? ownedItems.get(id) || null : null;
+    return item?.type === 'emote' ? item : null;
   });
-  return { emoteSlots };
+  const equipped = Object.fromEntries(ARENA_LOADOUT_COSMETIC_TYPES.map((type) => {
+    const id = Number(row?.[ARENA_LOADOUT_COLUMN_BY_TYPE[type]] || 0);
+    const item = id > 0 ? ownedItems.get(id) || null : null;
+    return [type, item?.type === type ? item : null];
+  })) as Record<ArenaLoadoutCosmeticType, ShopItem | null>;
+  return { emoteSlots, equipped };
 };
 
-export const updateArenaCosmeticLoadout = async (userId: string, input: { emoteSlots?: unknown }): Promise<{ ok: boolean; reason: string; loadout?: ArenaCosmeticLoadout }> => {
-  const slots = normalizeArenaEmoteSlots(input.emoteSlots);
-  const ownedItems = itemMapById(await getOwnedArenaEmoteItems(userId));
+const normalizeArenaLoadoutItemId = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? Math.floor(id) : null;
+};
+
+export const updateArenaCosmeticLoadout = async (
+  userId: string,
+  input: { emoteSlots?: unknown; equipped?: unknown }
+): Promise<{ ok: boolean; reason: string; loadout?: ArenaCosmeticLoadout }> => {
+  const currentRow = await getRawArenaLoadoutRow(userId);
+  const slots = input.emoteSlots === undefined
+    ? Array.from({ length: ARENA_EMOTE_SLOT_COUNT }, (_, index) => normalizeArenaLoadoutItemId(currentRow?.[`emote_slot_${index + 1}_item_id`]))
+    : normalizeArenaEmoteSlots(input.emoteSlots);
+  const rawEquipped = input.equipped && typeof input.equipped === 'object' && !Array.isArray(input.equipped)
+    ? input.equipped as Record<string, unknown>
+    : {};
+  const equippedIds = Object.fromEntries(ARENA_LOADOUT_COSMETIC_TYPES.map((type) => {
+    const hasInput = Object.prototype.hasOwnProperty.call(rawEquipped, type);
+    const value = hasInput ? rawEquipped[type] : currentRow?.[ARENA_LOADOUT_COLUMN_BY_TYPE[type]];
+    return [type, normalizeArenaLoadoutItemId(value)];
+  })) as Record<ArenaLoadoutCosmeticType, number | null>;
+  const ownedItems = itemMapById(await getOwnedArenaCosmeticItems(userId));
+  const equippedEmoteIds = slots.filter((id): id is number => Boolean(id));
+  if (new Set(equippedEmoteIds).size !== equippedEmoteIds.length) return { ok: false, reason: 'DUPLICATE_EMOTE' };
   for (const id of slots) {
-    if (id && !ownedItems.has(id)) return { ok: false, reason: 'NOT_OWNED' };
+    if (!id) continue;
+    const item = ownedItems.get(id);
+    if (!item) return { ok: false, reason: 'NOT_OWNED' };
+    if (item.type !== 'emote') return { ok: false, reason: 'WRONG_TYPE' };
+  }
+  for (const type of ARENA_LOADOUT_COSMETIC_TYPES) {
+    const id = equippedIds[type];
+    if (!id) continue;
+    const item = ownedItems.get(id);
+    if (!item) return { ok: false, reason: 'NOT_OWNED' };
+    if (item.type !== type) return { ok: false, reason: 'WRONG_TYPE' };
   }
 
-  const params = [userId, ...slots];
+  const loadoutTypeIds = ARENA_LOADOUT_COSMETIC_TYPES.map((type) => equippedIds[type]);
+  const params = [userId, ...slots, ...loadoutTypeIds];
   if (getDbMode() === 'SUPABASE') {
     const payload: any = { user_id: userId, updated_at: new Date().toISOString() };
     slots.forEach((id, index) => { payload[`emote_slot_${index + 1}_item_id`] = id; });
+    ARENA_LOADOUT_COSMETIC_TYPES.forEach((type) => { payload[ARENA_LOADOUT_COLUMN_BY_TYPE[type]] = equippedIds[type]; });
     await getSupabaseClient().from('arena_user_cosmetic_loadouts').upsert(payload, { onConflict: 'user_id' });
   } else if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(`
       INSERT INTO arena_user_cosmetic_loadouts
-        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id, card_frame_item_id, name_flare_item_id, hit_vfx_item_id, summon_vfx_item_id, ready_stamp_item_id, nameplate_item_id, ko_text_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         emote_slot_1_item_id = VALUES(emote_slot_1_item_id),
         emote_slot_2_item_id = VALUES(emote_slot_2_item_id),
@@ -469,13 +541,20 @@ export const updateArenaCosmeticLoadout = async (userId: string, input: { emoteS
         emote_slot_6_item_id = VALUES(emote_slot_6_item_id),
         emote_slot_7_item_id = VALUES(emote_slot_7_item_id),
         emote_slot_8_item_id = VALUES(emote_slot_8_item_id),
+        card_frame_item_id = VALUES(card_frame_item_id),
+        name_flare_item_id = VALUES(name_flare_item_id),
+        hit_vfx_item_id = VALUES(hit_vfx_item_id),
+        summon_vfx_item_id = VALUES(summon_vfx_item_id),
+        ready_stamp_item_id = VALUES(ready_stamp_item_id),
+        nameplate_item_id = VALUES(nameplate_item_id),
+        ko_text_item_id = VALUES(ko_text_item_id),
         updated_at = CURRENT_TIMESTAMP
     `, params);
   } else {
     getSqliteDb().prepare(`
       INSERT INTO arena_user_cosmetic_loadouts
-        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, emote_slot_1_item_id, emote_slot_2_item_id, emote_slot_3_item_id, emote_slot_4_item_id, emote_slot_5_item_id, emote_slot_6_item_id, emote_slot_7_item_id, emote_slot_8_item_id, card_frame_item_id, name_flare_item_id, hit_vfx_item_id, summon_vfx_item_id, ready_stamp_item_id, nameplate_item_id, ko_text_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         emote_slot_1_item_id = excluded.emote_slot_1_item_id,
         emote_slot_2_item_id = excluded.emote_slot_2_item_id,
@@ -485,6 +564,13 @@ export const updateArenaCosmeticLoadout = async (userId: string, input: { emoteS
         emote_slot_6_item_id = excluded.emote_slot_6_item_id,
         emote_slot_7_item_id = excluded.emote_slot_7_item_id,
         emote_slot_8_item_id = excluded.emote_slot_8_item_id,
+        card_frame_item_id = excluded.card_frame_item_id,
+        name_flare_item_id = excluded.name_flare_item_id,
+        hit_vfx_item_id = excluded.hit_vfx_item_id,
+        summon_vfx_item_id = excluded.summon_vfx_item_id,
+        ready_stamp_item_id = excluded.ready_stamp_item_id,
+        nameplate_item_id = excluded.nameplate_item_id,
+        ko_text_item_id = excluded.ko_text_item_id,
         updated_at = datetime('now')
     `).run(...params);
   }

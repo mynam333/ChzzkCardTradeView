@@ -21,7 +21,7 @@ const publishShopUpdated = (reason: string, extra: Record<string, unknown> = {})
 /** 상점 활성 아이템 목록 (유저) */
 export const getShopItems = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const items = await shop.getActiveItems();
+    const items = (await shop.getActiveItems()).filter((item) => item.type === 'border' || item.type === 'name_effect');
     const body = JSON.stringify(items);
     const etag = `"shop-items-${crypto.createHash('sha1').update(body).digest('hex')}"`;
     res.set('Cache-Control', 'private, no-cache');
@@ -144,8 +144,8 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
 
 export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Response) => {
   const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity } = req.body;
-  if (!['border', 'name_effect', 'emote'].includes(type) || !name) {
-    return res.status(400).json({ error: 'BadRequest', message: '종류(border|name_effect|emote)와 이름이 필요합니다.' });
+  if (!(['border', 'name_effect'].includes(type) || shop.isArenaCosmeticType(type)) || !name) {
+    return res.status(400).json({ error: 'BadRequest', message: '지원하는 코스메틱 종류와 이름이 필요합니다.' });
   }
   
   let processedStyleJson = style_json;
@@ -198,6 +198,9 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
   if (!id) return res.status(400).json({ error: 'BadRequest', message: '아이템 ID가 필요합니다.' });
   
   const updateData = { ...req.body };
+  if (updateData.type !== undefined && !(['border', 'name_effect'].includes(updateData.type) || shop.isArenaCosmeticType(updateData.type))) {
+    return res.status(400).json({ error: 'BadRequest', message: '지원하지 않는 코스메틱 종류입니다.' });
+  }
   if (updateData.style_json) {
     try {
       const parsed = JSON.parse(updateData.style_json);
@@ -281,12 +284,21 @@ export const updateArenaCosmeticLoadout = async (req: AuthenticatedRequest, res:
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
   try {
-    const result = await shop.updateArenaCosmeticLoadout(userId, { emoteSlots: req.body?.emoteSlots });
+    const result = await shop.updateArenaCosmeticLoadout(userId, {
+      emoteSlots: req.body?.emoteSlots,
+      equipped: req.body?.equipped
+    });
     if (!result.ok) {
       return res.status(400).json({
         error: 'ArenaCosmeticLoadoutInvalid',
         reason: result.reason,
-        message: result.reason === 'NOT_OWNED' ? '보유하지 않은 이모트는 장착할 수 없습니다.' : '장착 정보를 저장하지 못했습니다.'
+        message: result.reason === 'NOT_OWNED'
+          ? '보유하지 않은 치장은 장착할 수 없습니다.'
+          : result.reason === 'DUPLICATE_EMOTE'
+            ? '같은 이모트를 여러 슬롯에 장착할 수 없습니다.'
+            : result.reason === 'WRONG_TYPE'
+              ? '치장 종류와 장착 슬롯이 일치하지 않습니다.'
+              : '장착 정보를 저장하지 못했습니다.'
       });
     }
     return res.status(200).json(result.loadout);
@@ -297,8 +309,8 @@ export const buyArenaCosmetic = async (req: AuthenticatedRequest, res: Response)
   const itemId = Number(req.body.item_id);
   if (!itemId) return res.status(400).json({ error: 'BadRequest', message: '구매할 아이템 ID가 필요합니다.' });
   const item = await shop.getItem(itemId);
-  if (!item || item.type !== 'emote') {
-    return res.status(400).json({ error: 'ArenaCosmeticTypeInvalid', message: '아레나 상점에서는 아레나 이모트만 구매할 수 있습니다.' });
+  if (!item || !shop.isArenaCosmeticType(item.type)) {
+    return res.status(400).json({ error: 'ArenaCosmeticTypeInvalid', message: '아레나 전용 치장만 구매할 수 있습니다.' });
   }
   return buyShopItem(req, res);
 };

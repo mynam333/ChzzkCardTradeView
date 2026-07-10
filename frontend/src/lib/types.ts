@@ -3,7 +3,17 @@
  * 백엔드 응답 스키마와 1:1 대응합니다. (any 남용 제거용)
  */
 
-export type CosmeticType = 'border' | 'name_effect' | 'emote';
+export type CosmeticType =
+  | 'border'
+  | 'name_effect'
+  | 'emote'
+  | 'card_frame'
+  | 'name_flare'
+  | 'hit_vfx'
+  | 'summon_vfx'
+  | 'ready_stamp'
+  | 'nameplate'
+  | 'ko_text';
 
 export interface UserTitle {
   id: number;

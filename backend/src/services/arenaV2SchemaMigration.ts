@@ -342,6 +342,13 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
       emote_slot_6_item_id BIGINT NULL,
       emote_slot_7_item_id BIGINT NULL,
       emote_slot_8_item_id BIGINT NULL,
+      card_frame_item_id BIGINT NULL,
+      name_flare_item_id BIGINT NULL,
+      hit_vfx_item_id BIGINT NULL,
+      summon_vfx_item_id BIGINT NULL,
+      ready_stamp_item_id BIGINT NULL,
+      nameplate_item_id BIGINT NULL,
+      ko_text_item_id BIGINT NULL,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_arena_cosmetic_loadouts_updated (updated_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -371,6 +378,13 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
   for (let slot = 1; slot <= 8; slot += 1) {
     try {
       await db.run(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN emote_slot_${slot}_item_id BIGINT NULL`);
+    } catch {
+      // Existing v2 databases may already have this column.
+    }
+  }
+  for (const columnName of ['card_frame_item_id', 'name_flare_item_id', 'hit_vfx_item_id', 'summon_vfx_item_id', 'ready_stamp_item_id', 'nameplate_item_id', 'ko_text_item_id']) {
+    try {
+      await db.run(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN ${columnName} BIGINT NULL`);
     } catch {
       // Existing v2 databases may already have this column.
     }
@@ -671,6 +685,13 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
       emote_slot_6_item_id INTEGER,
       emote_slot_7_item_id INTEGER,
       emote_slot_8_item_id INTEGER,
+      card_frame_item_id INTEGER,
+      name_flare_item_id INTEGER,
+      hit_vfx_item_id INTEGER,
+      summon_vfx_item_id INTEGER,
+      ready_stamp_item_id INTEGER,
+      nameplate_item_id INTEGER,
+      ko_text_item_id INTEGER,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_arena_cosmetic_loadouts_updated ON arena_user_cosmetic_loadouts(updated_at);
@@ -698,6 +719,11 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
     const loadoutColumns = db.prepare('PRAGMA table_info(arena_user_cosmetic_loadouts)').all() as Array<{ name: string }>;
     for (let slot = 1; slot <= 8; slot += 1) {
       const columnName = `emote_slot_${slot}_item_id`;
+      if (!loadoutColumns.some((column) => column.name === columnName)) {
+        db.exec(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN ${columnName} INTEGER;`);
+      }
+    }
+    for (const columnName of ['card_frame_item_id', 'name_flare_item_id', 'hit_vfx_item_id', 'summon_vfx_item_id', 'ready_stamp_item_id', 'nameplate_item_id', 'ko_text_item_id']) {
       if (!loadoutColumns.some((column) => column.name === columnName)) {
         db.exec(`ALTER TABLE arena_user_cosmetic_loadouts ADD COLUMN ${columnName} INTEGER;`);
       }

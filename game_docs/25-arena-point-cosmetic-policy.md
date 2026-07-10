@@ -30,12 +30,21 @@
 
 ```text
 user_id
-border_item_id
-name_effect_item_id
 emote_slot_1_item_id
 emote_slot_2_item_id
 emote_slot_3_item_id
 emote_slot_4_item_id
+emote_slot_5_item_id
+emote_slot_6_item_id
+emote_slot_7_item_id
+emote_slot_8_item_id
+card_frame_item_id
+name_flare_item_id
+hit_vfx_item_id
+summon_vfx_item_id
+ready_stamp_item_id
+nameplate_item_id
+ko_text_item_id
 updated_at
 ```
 
@@ -43,8 +52,13 @@ updated_at
 
 구현 허용:
 
-- 프로필 프레임
+- 카드 프레임
 - 이름 연출
+- 타격 VFX
+- 소환 VFX
+- 준비 스탬프
+- 네임플레이트
+- KO 문구
 - 배틀 이모트
 
 확장 후보:
@@ -59,7 +73,7 @@ updated_at
 
 ## 4.1 배틀 이모트 상세
 
-배틀 이모트는 아레나에서 구매하고, 아레나 스타일 탭에서 4개 슬롯에 장착한다.
+배틀 이모트는 아레나에서 구매하고, 아레나 스타일 탭에서 8개 슬롯에 장착한다.
 
 상품 데이터:
 
@@ -78,8 +92,8 @@ updated_at
 표시 규칙:
 
 - 게임/리플레이 화면에서 우클릭하면 장착한 이모트 파이 메뉴를 연다.
-- 파이 메뉴는 X자 분할로 상/우/하/좌 4방향을 고정 제공한다.
-- `emote_slot_1_item_id`는 상, `emote_slot_2_item_id`는 우, `emote_slot_3_item_id`는 하, `emote_slot_4_item_id`는 좌 방향이다.
+- 파이 메뉴는 45도 간격의 8분할 부채꼴을 시계 방향으로 제공한다.
+- `emote_slot_1_item_id`는 상단이며 이후 슬롯은 시계 방향으로 이어진다.
 - 아레나 스타일 탭에는 실제 파이 메뉴 모양의 편집 미리보기를 제공해 어디에 장착되었는지 직관적으로 보여준다.
 - 이모트를 선택하면 같은 매치 화면에 접속 중인 사용자에게 즉시 표시한다.
 - 서버는 이미 확정된 라운드 결과와 리플레이를 바꾸지 않는다.
@@ -89,7 +103,7 @@ updated_at
 
 관리자 업로드:
 
-- 관리자는 아레나 관리자/상점 관리 화면에서 `emote` 타입 상품을 만들 수 있다.
+- 관리자는 아레나 관리자/상점 관리 화면에서 모든 아레나 치장 타입 상품을 만들 수 있다.
 - JPG, PNG, WebP, AVIF, GIF 이미지를 업로드할 수 있다.
 - GIF는 움짤 보존을 위해 원본 파일을 저장한다.
 - 업로드된 파일 URL은 상품 `style_json.image_url`에 연결한다.
@@ -105,7 +119,7 @@ updated_at
 - 보유 수량
 - 구매 횟수
 - 현재 장착 여부
-- 이모트 슬롯 1~4의 장착 상태
+- 이모트 슬롯 1~8과 종류별 치장 슬롯의 장착 상태
 - 구매 가능/불가 사유
 - 포인트 잔액
 - 장착 미리보기

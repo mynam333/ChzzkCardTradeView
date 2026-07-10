@@ -1,115 +1,90 @@
-export type ArenaCosmeticPresetType =
-  | 'card_frame'
-  | 'name_flare'
-  | 'hit_vfx'
-  | 'summon_vfx'
-  | 'ready_stamp'
-  | 'nameplate'
-  | 'ko_text';
+export const arenaCosmeticTypes = [
+  'emote',
+  'card_frame',
+  'name_flare',
+  'hit_vfx',
+  'summon_vfx',
+  'ready_stamp',
+  'nameplate',
+  'ko_text'
+] as const;
 
-export type ArenaCosmeticRarity = 'rare' | 'epic' | 'legendary';
+export type ArenaCosmeticType = (typeof arenaCosmeticTypes)[number];
+export type ArenaLoadoutCosmeticType = Exclude<ArenaCosmeticType, 'emote'>;
+export type ArenaCosmeticRarity = 'common' | 'rare' | 'epic' | 'legendary';
 
-export type ArenaCosmeticPreset = {
-  id: string;
-  type: ArenaCosmeticPresetType;
-  name: string;
-  rarity: ArenaCosmeticRarity;
-  priceHint: number;
-  summary: string;
-  className: string;
-  styleVars: Record<string, string>;
-};
+export const arenaLoadoutCosmeticTypes = arenaCosmeticTypes.filter(
+  (type): type is ArenaLoadoutCosmeticType => type !== 'emote'
+);
 
-export const arenaCosmeticTypeLabels: Record<ArenaCosmeticPresetType, string> = {
+export const arenaCosmeticTypeLabels: Record<ArenaCosmeticType, string> = {
+  emote: '이모트',
   card_frame: '카드 프레임',
-  name_flare: '이름 플레어',
-  hit_vfx: '타격 VFX',
-  summon_vfx: '소환 VFX',
-  ready_stamp: '준비 스탬프',
+  name_flare: '이름 연출',
+  hit_vfx: '타격',
+  summon_vfx: '소환',
+  ready_stamp: '준비',
   nameplate: '네임플레이트',
-  ko_text: 'KO 문구'
+  ko_text: 'KO'
 };
 
-export const arenaCosmeticPresets: ArenaCosmeticPreset[] = [
-  {
-    id: 'frame-prism-core',
-    type: 'card_frame',
-    name: '프리즘 코어',
-    rarity: 'legendary',
-    priceHint: 48000,
-    summary: '카드 외곽에 유리광, 네온 테두리, 사선 샤인이 순환합니다.',
-    className: 'arena-cosmetic-preview-frame-prism',
-    styleVars: { '--ac-a': '#67e8f9', '--ac-b': '#fb7185', '--ac-c': '#facc15' }
-  },
-  {
-    id: 'name-aurora-script',
-    type: 'name_flare',
-    name: '오로라 서명',
-    rarity: 'epic',
-    priceHint: 26000,
-    summary: '이름에 다층 그라데이션과 부드러운 잉크 광택이 흐릅니다.',
-    className: 'arena-cosmetic-preview-name-aurora',
-    styleVars: { '--ac-a': '#22d3ee', '--ac-b': '#f472b6', '--ac-c': '#a7f3d0' }
-  },
-  {
-    id: 'hit-vfx-starbreaker',
-    type: 'hit_vfx',
-    name: '스타브레이커',
-    rarity: 'legendary',
-    priceHint: 52000,
-    summary: '타격 순간 충격 링, 베기 궤적, 별 파편이 터집니다.',
-    className: 'arena-cosmetic-preview-hit-starbreaker',
-    styleVars: { '--ac-a': '#f97316', '--ac-b': '#f43f5e', '--ac-c': '#fde68a' }
-  },
-  {
-    id: 'summon-vfx-circuit-gate',
-    type: 'summon_vfx',
-    name: '서킷 게이트',
-    rarity: 'epic',
-    priceHint: 34000,
-    summary: '필드 위에 회전하는 회로 링과 수직 스캔 빔이 나타납니다.',
-    className: 'arena-cosmetic-preview-summon-circuit',
-    styleVars: { '--ac-a': '#38bdf8', '--ac-b': '#2dd4bf', '--ac-c': '#e0f2fe' }
-  },
-  {
-    id: 'ready-stamp-royal-lock',
-    type: 'ready_stamp',
-    name: '로열 락인',
-    rarity: 'rare',
-    priceHint: 18000,
-    summary: '턴 제출 시 금속 링과 READY 스탬프가 짧게 잠깁니다.',
-    className: 'arena-cosmetic-preview-ready-royal',
-    styleVars: { '--ac-a': '#fbbf24', '--ac-b': '#f97316', '--ac-c': '#fff7ed' }
-  },
-  {
-    id: 'nameplate-obsidian-crown',
-    type: 'nameplate',
-    name: '옵시디언 크라운',
-    rarity: 'legendary',
-    priceHint: 45000,
-    summary: '플레이어 이름 영역에 어두운 유리판, 왕관 광택, 하단 라이트가 붙습니다.',
-    className: 'arena-cosmetic-preview-nameplate-obsidian',
-    styleVars: { '--ac-a': '#0f172a', '--ac-b': '#38bdf8', '--ac-c': '#facc15' }
-  },
-  {
-    id: 'ko-text-crimson-finish',
-    type: 'ko_text',
-    name: '크림슨 피니시',
-    rarity: 'epic',
-    priceHint: 30000,
-    summary: '처치 순간 FINISH 텍스트가 충격파와 함께 절단되듯 등장합니다.',
-    className: 'arena-cosmetic-preview-ko-crimson',
-    styleVars: { '--ac-a': '#fb7185', '--ac-b': '#ef4444', '--ac-c': '#ffe4e6' }
-  }
-];
+export const arenaCosmeticTypeDescriptions: Record<ArenaCosmeticType, string> = {
+  emote: '매치의 8분할 파이 메뉴에서 사용하는 감정 표현',
+  card_frame: '전장 카드 외곽에 적용되는 프레임 연출',
+  name_flare: '카드와 플레이어 이름에 적용되는 문자 연출',
+  hit_vfx: '공격이 적중할 때 재생되는 시각 효과',
+  summon_vfx: '카드를 필드에 배치할 때 재생되는 시각 효과',
+  ready_stamp: '행동 제출 완료 상태에 적용되는 스탬프',
+  nameplate: '매치 상단 플레이어 정보 영역의 외형',
+  ko_text: '승부가 결정되는 순간 표시되는 마무리 문구'
+};
 
-export const parseArenaCosmeticStyle = (value?: string | null): Record<string, any> => {
+export type ArenaCosmeticStyle = {
+  schema_version?: number;
+  emoji?: string;
+  image_url?: string;
+  rarity?: ArenaCosmeticRarity;
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+  label?: string;
+  motion?: string;
+  css?: string;
+  [key: string]: unknown;
+};
+
+export const isArenaCosmeticType = (value: unknown): value is ArenaCosmeticType => (
+  typeof value === 'string' && (arenaCosmeticTypes as readonly string[]).includes(value)
+);
+
+export const parseArenaCosmeticStyle = (value?: string | null): ArenaCosmeticStyle => {
   if (!value) return {};
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as ArenaCosmeticStyle : {};
   } catch {
     return {};
   }
 };
 
+const safeColor = (value: unknown, fallback: string) => (
+  typeof value === 'string' && /^(#[\da-f]{3,8}|(?:rgb|hsl)a?\([\d\s.,%+-]+\))$/i.test(value.trim())
+    ? value.trim()
+    : fallback
+);
+
+export const getArenaCosmeticRarity = (item?: { style_json?: string | null } | null): ArenaCosmeticRarity => {
+  const rarity = parseArenaCosmeticStyle(item?.style_json).rarity;
+  return rarity === 'common' || rarity === 'rare' || rarity === 'epic' || rarity === 'legendary' ? rarity : 'common';
+};
+
+export const getArenaCosmeticStyleVars = (
+  item?: { style_json?: string | null } | null
+): Record<'--ac-a' | '--ac-b' | '--ac-c', string> => {
+  const style = parseArenaCosmeticStyle(item?.style_json);
+  return {
+    '--ac-a': safeColor(style.primary_color, '#f2556b'),
+    '--ac-b': safeColor(style.secondary_color, '#17adc0'),
+    '--ac-c': safeColor(style.accent_color, '#ffd166')
+  };
+};

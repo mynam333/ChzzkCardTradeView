@@ -4,6 +4,7 @@ import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
+  ArrowLeft,
   Bot,
   Check,
   Clock3,
@@ -30,6 +31,7 @@ import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
 import { useApp } from '../../AppContext';
 import { ArenaLayout } from '../../ArenaLayout';
+import { ArenaEmotePieMenu } from '../ArenaEmotePieMenu';
 import type { ArenaSiteTab } from '../types';
 import styles from '../ArenaV2Experience.module.css';
 import type { ArenaV2BoardPositionDto, ArenaV2MatchViewDto, ArenaV2TurnActionDto } from '@chikapo/arena-contract';
@@ -707,7 +709,6 @@ const ArenaEmoteWheelMenu: React.FC<{
   onClose: () => void;
 }> = ({ wheel, slots, onPick, onClose }) => {
   if (!wheel) return null;
-  const radius = 82;
   return (
     <div className="arena-v2-emote-wheel-backdrop" onPointerDown={onClose}>
       <div
@@ -715,30 +716,13 @@ const ArenaEmoteWheelMenu: React.FC<{
         style={{ left: wheel.x, top: wheel.y }}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        {Array.from({ length: 8 }, (_, index) => {
-          const item = slots[index] || null;
-          const angle = -90 + index * 45;
-          const x = Math.cos((angle * Math.PI) / 180) * radius;
-          const y = Math.sin((angle * Math.PI) / 180) * radius;
-          const visual = getArenaEmoteVisual(item);
-          return (
-            <button
-              key={index}
-              type="button"
-              className={item ? 'has-emote' : ''}
-              style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
-              disabled={!item}
-              onClick={() => item && onPick(item)}
-              aria-label={item ? `${item.name} 이모트 사용` : `빈 이모트 슬롯 ${index + 1}`}
-            >
-              {item ? (visual.imageUrl ? <img src={visual.imageUrl} alt="" /> : <b>{visual.emoji}</b>) : <span>{index + 1}</span>}
-            </button>
-          );
-        })}
-        <div className="arena-v2-emote-wheel-core">
-          <Sparkles className="h-4 w-4" />
-          <span>EMOTE</span>
-        </div>
+        <ArenaEmotePieMenu
+          slots={slots}
+          onPick={(item) => onPick(item as ArenaEmoteItem)}
+          centerLabel="사용"
+          ariaLabel="매치 이모트 파이 메뉴"
+          compact
+        />
       </div>
     </div>
   );
@@ -1007,10 +991,23 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
     const ratioX = clamp01((event.clientX - rect.left) / rect.width);
     const ratioY = clamp01((event.clientY - rect.top) / rect.height);
     setEmoteWheel({
-      x: Math.max(116, Math.min(rect.width - 116, event.clientX - rect.left)),
-      y: Math.max(116, Math.min(rect.height - 116, event.clientY - rect.top)),
+      x: Math.max(124, Math.min(window.innerWidth - 124, event.clientX)),
+      y: Math.max(124, Math.min(window.innerHeight - 124, event.clientY)),
       ratioX,
       ratioY
+    });
+  };
+
+  const openEmoteWheelAtCenter = () => {
+    if (mode !== 'match' || !match || !emoteSlots.some(Boolean)) return;
+    const target = battlefieldRef.current;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    setEmoteWheel({
+      x: Math.max(124, Math.min(window.innerWidth - 124, rect.left + rect.width / 2)),
+      y: Math.max(124, Math.min(window.innerHeight - 124, rect.top + Math.min(rect.height / 2, 300))),
+      ratioX: 0.5,
+      ratioY: 0.5
     });
   };
 
@@ -1092,12 +1089,16 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
 
   return (
     <ArenaLayout activeTab="play" onTabChange={(tab) => moveArenaSection(router, tab)} immersive>
-      <div className={`arena-v2-shell arena-v2-battle-shell ${styles.arenaV2Scope}`}>
+      <div className={`arena-v2-shell arena-v2-battle-shell arena-v2-page is-match ${styles.arenaV2Scope}`}>
         <section className="arena-v2-topbar arena-v2-battle-topbar">
           <div className="arena-v2-battle-brand min-w-0">
-            <p className="arena-v2-kicker">CHIKAPO ARENA</p>
-            <h2>{title}</h2>
-            <p>{subtitle}</p>
+            <button type="button" className="arena-v2-icon-button" onClick={() => router.push('/arena/play')} aria-label="아레나 플레이로 돌아가기">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="arena-v2-battle-brand-copy">
+              <h2>{title}</h2>
+              <p>{subtitle}</p>
+            </div>
           </div>
           <div className="arena-v2-scoreboard" aria-label="전투 점수판">
             <div className="arena-v2-score-card is-opponent">
@@ -1118,6 +1119,11 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
             <button type="button" className="arena-v2-icon-button" onClick={loadMatch} aria-label="매치 새로고침">
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
+            {mode === 'match' && emoteSlots.some(Boolean) ? (
+              <button type="button" className="arena-v2-secondary-button arena-v2-emote-trigger" onClick={openEmoteWheelAtCenter}>
+                <Sparkles className="h-4 w-4" /> 이모트
+              </button>
+            ) : null}
             {canMulligan ? (
               <button type="button" className="arena-v2-primary-button" onClick={submitMulligan}>
                 <Hand className="h-4 w-4" /> 멀리건 제출
@@ -1220,7 +1226,6 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
         <section className="arena-v2-hand-rail arena-v2-bottom-hand">
           <div className="arena-v2-hand-header">
             <div>
-              <p className="arena-v2-kicker">{canMulligan ? 'MULLIGAN' : 'HAND'}</p>
               <h3>{canMulligan ? '시작 손패 교체' : '손패와 제출 대기 행동'}</h3>
               <span>{canMulligan ? `${mulliganIds.length} / 3 선택` : `덱 ${self?.deckCount ?? 0}장 · 무덤 ${self?.graveyardCardInstanceIds.length ?? 0}장`}</span>
             </div>
