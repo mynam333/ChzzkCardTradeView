@@ -75,7 +75,7 @@ const CardShell: React.FC<CardPreviewProps> = ({
         <CosmeticName effect={nameEffect} className="block truncate text-sm font-bold tracking-tight drop-shadow">
           {name}
         </CosmeticName>
-        <p className="text-[8.5px] text-zinc-300 drop-shadow">{followerCount.toLocaleString()} 팔로워</p>
+        <p className="text-[8.5px] text-zinc-300 drop-shadow">{Number(followerCount || 0).toLocaleString('ko-KR')} 팔로워</p>
         <div className="flex items-center justify-between border-t border-white/10 pt-1">
           <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
           <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>

@@ -15,6 +15,7 @@ import {
   getArenaV2QuickQueueStatus,
   getArenaV2Replay,
   getMyArenaV2StreamerCard,
+  generateArenaV2DefaultCardCombatDefinition,
   grantArenaV2SeasonRewardsAdmin,
   joinArenaV2BattleRoyaleQueue,
   joinArenaV2QuickQueue,
@@ -32,6 +33,7 @@ import {
   updateMyArenaV2StreamerCard,
   validateArenaV2DeckForSeason
 } from '../services/arenaV2Service';
+import { evaluateArenaV2CardBudget, validateArenaV2CardVersionDefinition } from '../services/arenaV2Engine';
 
 type Row = Record<string, any>;
 
@@ -100,6 +102,11 @@ const makeExecutor = () => ({
       if (sql.includes('WHERE id IN')) {
         const ids = new Set(params);
         return rows.cards.filter((card) => ids.has(card.id));
+      }
+      if (sql.includes('ORDER BY streamer_id ASC')) {
+        return rows.cards
+          .filter((card) => card.season_id === params[0] && card.status === 'active')
+          .sort((a, b) => String(a.streamer_id).localeCompare(String(b.streamer_id)) || Number(b.version || 0) - Number(a.version || 0));
       }
       const seasonId = params[0];
       return rows.cards
@@ -670,6 +677,19 @@ const makeExecutor = () => ({
         card.updated_at = 'now';
       }
     }
+    if (sql.includes('UPDATE arena_v2_card_versions') && sql.includes('SET card_class = ?')) {
+      const card = rows.cards.find((item) => item.id === params[7] && item.season_id === params[8] && item.status === 'active');
+      if (card) {
+        card.card_class = params[0];
+        card.cost = params[1];
+        card.attack = params[2];
+        card.health = params[3];
+        card.keywords = params[4];
+        card.balance_score = params[5];
+        card.validation_result = params[6];
+        card.updated_at = 'now';
+      }
+    }
     if (sql.includes('UPDATE arena_v2_match_queue')) {
       if (sql.includes("status = 'expired'")) {
         const before = rows.quickQueue.filter((ticket) => ticket.status === 'waiting').length;
@@ -875,6 +895,129 @@ describe('arena v2 service', () => {
     expect(cards[0].displayName).toBe('실제 스트리머');
     expect(cards[0].artAssetId).toBe('https://img.example/card.png');
     expect(cards[0].validationResult?.valid).toBe(true);
+  });
+
+  it('rebuilds an existing active generated card in place with the current generation rules', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'existing-generated-streamer',
+      name: '기존 자동 생성 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: 'existing-generated-streamer'
+    });
+
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const existing = rows.cards[0];
+    const originalId = existing.id;
+    const originalVersion = existing.version;
+    existing.card_class = 'charge';
+    existing.cost = 2;
+    existing.attack = 1;
+    existing.health = 4;
+    existing.keywords = '[]';
+    existing.balance_score = 7;
+    existing.validation_result = JSON.stringify({ valid: true, issues: [] });
+
+    const cards = await listArenaV2Cards({ seasonId: 'season-v2' });
+    const generated = generateArenaV2DefaultCardCombatDefinition('existing-generated-streamer');
+
+    expect(cards).toHaveLength(1);
+    expect(existing.id).toBe(originalId);
+    expect(existing.version).toBe(originalVersion);
+    expect(existing.card_class).toBe(generated.cardClass);
+    expect(existing.cost).toBe(generated.cost);
+    expect(existing.attack).toBe(generated.attack);
+    expect(existing.health).toBe(generated.health);
+    expect(JSON.parse(existing.keywords)).toEqual(generated.keywords);
+  });
+
+  it('keeps a streamer-authored active version unchanged during generated-card refresh', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'authored-streamer',
+      name: '직접 설정 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: 'authored-streamer'
+    });
+    rows.cards.push({
+      id: 'arena_v2_card_manual-version',
+      streamer_id: 'authored-streamer',
+      display_name: '직접 설정 스트리머',
+      season_id: 'season-v2',
+      version: 2,
+      card_class: 'guardian',
+      cost: 4,
+      attack: 2,
+      health: 6,
+      keywords: JSON.stringify([{ type: 'taunt' }]),
+      balance_score: 20,
+      validation_result: JSON.stringify({ valid: true, issues: [] }),
+      art_asset_id: null,
+      status: 'active'
+    });
+
+    const before = { ...rows.cards[0] };
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    expect(sync).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+    expect(rows.cards[0]).toEqual(before);
+  });
+
+  it('generates deterministic and diverse 1~9 cost cards within every cost budget', () => {
+    const sampleSize = 5000;
+    const costCounts = new Map<number, number>();
+    const classes = new Set<string>();
+    const profiles = new Set<string>();
+    const keywordCounts = new Set<number>();
+    const signatures = new Set<string>();
+
+    for (let index = 0; index < sampleSize; index += 1) {
+      const streamerId = `generated-streamer-${index}`;
+      const generated = generateArenaV2DefaultCardCombatDefinition(streamerId);
+      const repeated = generateArenaV2DefaultCardCombatDefinition(streamerId);
+      expect(repeated).toEqual(generated);
+      const candidate = {
+        id: `generated-card-${index}`,
+        streamerId,
+        seasonId: 'generated-season',
+        status: 'active' as const,
+        cardClass: generated.cardClass,
+        cost: generated.cost,
+        attack: generated.attack,
+        health: generated.health,
+        keywords: generated.keywords,
+        validationResult: null
+      };
+      const validation = validateArenaV2CardVersionDefinition(candidate);
+      const budget = evaluateArenaV2CardBudget(candidate);
+
+      expect(validation.valid).toBe(true);
+      expect(budget.isOverBudget).toBe(false);
+      expect(budget.totalCost).toBeGreaterThanOrEqual(Math.ceil(Number(budget.budgetLimit) * 0.7));
+      costCounts.set(generated.cost, (costCounts.get(generated.cost) || 0) + 1);
+      classes.add(generated.cardClass);
+      profiles.add(generated.profile);
+      keywordCounts.add(generated.keywords.length);
+      signatures.add(`${generated.cardClass}:${generated.cost}:${generated.attack}:${generated.health}:${JSON.stringify(generated.keywords)}`);
+    }
+
+    const expectedPercentages: Record<number, number> = { 1: 9, 2: 13, 3: 15, 4: 15, 5: 14, 6: 12, 7: 10, 8: 7, 9: 5 };
+    for (const [costText, expectedPercentage] of Object.entries(expectedPercentages)) {
+      const percentage = ((costCounts.get(Number(costText)) || 0) / sampleSize) * 100;
+      expect(Math.abs(percentage - expectedPercentage)).toBeLessThanOrEqual(2);
+    }
+    expect(classes.size).toBe(7);
+    expect(profiles).toEqual(new Set(['aggressive', 'durable', 'tactical', 'balanced']));
+    expect(keywordCounts).toEqual(new Set([0, 1, 2, 3]));
+    expect(signatures.size).toBeGreaterThan(150);
   });
 
   it('syncs arena owned cards from the user chikapo inventory', async () => {

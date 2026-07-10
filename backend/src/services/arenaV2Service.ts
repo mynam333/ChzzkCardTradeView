@@ -7,6 +7,8 @@ import type {
 } from '@chikapo/arena-contract';
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
 import {
+  ARENA_V2_CARD_BUDGET_BY_COST,
+  ARENA_V2_CARD_STAT_LIMITS_BY_COST,
   createArenaV2BotTurnActions,
   evaluateArenaV2CardBudget,
   getArenaV2AvailableCost,
@@ -27,6 +29,8 @@ type SqlExecutor = {
 };
 
 let testExecutor: SqlExecutor | null = null;
+const arenaV2GeneratedCardSyncCompleted = new Set<string>();
+const arenaV2GeneratedCardSyncInFlight = new Map<string, Promise<void>>();
 
 export interface ArenaV2SeasonRow {
   id: string;
@@ -153,6 +157,7 @@ const jsonParse = <T>(value: unknown, fallback: T): T => {
 const makeId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 const stableHash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
+const stableNumber = (value: string, modulo: number): number => Number.parseInt(stableHash(value).slice(0, 8), 16) % modulo;
 
 const makeArenaV2DefaultCardId = (seasonId: string, streamerId: string): string =>
   `arena_v2_card_${stableHash(`${seasonId}:${streamerId}`).slice(0, 32)}`;
@@ -162,15 +167,123 @@ const stableShuffle = <T extends { id: string }>(items: T[], seed: string): T[] 
 
 const ARENA_V2_CARD_CLASSES: ArenaV2CardClassDto[] = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
 
-const defaultClassKeywords: Record<string, Array<{ type: string; value?: number; limit?: string }>> = {
-  charge: [{ type: 'pierce', value: 1 }],
-  guardian: [{ type: 'shield', value: 1 }],
-  sniper: [{ type: 'aim' }],
-  support: [{ type: 'guard_support', value: 1 }],
-  trick: [{ type: 'weaken', value: 1 }],
-  specter: [{ type: 'remnant', value: 1 }],
-  tech: [{ type: 'battle_draw', value: 1 }]
+type ArenaV2GeneratedKeyword = { type: string; value?: number; limit?: string };
+type ArenaV2GeneratedProfile = 'aggressive' | 'durable' | 'tactical' | 'balanced';
+type ArenaV2GeneratedCandidate = {
+  key: string;
+  cost: number;
+  attack: number;
+  health: number;
+  keywords: ArenaV2GeneratedKeyword[];
+  attackCost: number;
+  healthCost: number;
+  effectCost: number;
+  totalCost: number;
 };
+
+const generatedKeyword = (type: string, value?: number, limit?: string): ArenaV2GeneratedKeyword => ({
+  type,
+  ...(value == null ? {} : { value }),
+  ...(limit ? { limit } : {})
+});
+
+const commonGeneratedKeywordBundles: ArenaV2GeneratedKeyword[][] = [
+  [],
+  [generatedKeyword('shield', 1)],
+  [generatedKeyword('shield', 2)]
+];
+
+const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2GeneratedKeyword[][]> = {
+  charge: [
+    [generatedKeyword('pierce')], [generatedKeyword('pursuit', 1)], [generatedKeyword('pursuit', 2)],
+    [generatedKeyword('direct_pressure', 1)], [generatedKeyword('direct_pressure', 2)], [generatedKeyword('backline_pressure')],
+    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)], [generatedKeyword('lifesteal', 1)],
+    [generatedKeyword('pierce'), generatedKeyword('weakpoint')],
+    [generatedKeyword('pursuit', 1), generatedKeyword('weakpoint')],
+    [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
+    [generatedKeyword('lifesteal', 1), generatedKeyword('weakpoint')],
+    [generatedKeyword('pursuit', 1), generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
+    [generatedKeyword('pierce'), generatedKeyword('aoe_damage', 1), generatedKeyword('weakpoint')]
+  ],
+  guardian: [
+    [generatedKeyword('taunt')], [generatedKeyword('shield', 3)], [generatedKeyword('shield', 5)],
+    [generatedKeyword('damage_reduction', 1)], [generatedKeyword('damage_reduction', 2)],
+    [generatedKeyword('counter', 1)], [generatedKeyword('counter', 2)], [generatedKeyword('lifesteal', 1)],
+    [generatedKeyword('revive')], [generatedKeyword('taunt'), generatedKeyword('shield', 1)],
+    [generatedKeyword('damage_reduction', 1), generatedKeyword('counter', 1)],
+    [generatedKeyword('shield', 3), generatedKeyword('counter', 1)],
+    [generatedKeyword('shield', 3), generatedKeyword('counter', 1), generatedKeyword('damage_reduction', 1)]
+  ],
+  sniper: [
+    [generatedKeyword('aim')], [generatedKeyword('backline_pressure')], [generatedKeyword('weakpoint')],
+    [generatedKeyword('pursuit', 1)], [generatedKeyword('pursuit', 2)], [generatedKeyword('silence')],
+    [generatedKeyword('stun')], [generatedKeyword('direct_pressure', 1)], [generatedKeyword('aoe_damage', 1)],
+    [generatedKeyword('aim'), generatedKeyword('backline_pressure')],
+    [generatedKeyword('aim'), generatedKeyword('weakpoint')],
+    [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
+    [generatedKeyword('direct_pressure', 1), generatedKeyword('weakpoint')],
+    [generatedKeyword('aim'), generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
+    [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint'), generatedKeyword('pursuit', 1)]
+  ],
+  support: [
+    [generatedKeyword('guard_support')], [generatedKeyword('attack_support')], [generatedKeyword('emergency_heal', 1)],
+    [generatedKeyword('emergency_heal', 2)], [generatedKeyword('shield', 3)], [generatedKeyword('battle_draw')],
+    [generatedKeyword('grave_buff')], [generatedKeyword('guard_support'), generatedKeyword('attack_support')],
+    [generatedKeyword('emergency_heal', 1), generatedKeyword('shield', 2)],
+    [generatedKeyword('guard_support'), generatedKeyword('shield', 2)],
+    [generatedKeyword('battle_draw'), generatedKeyword('attack_support')],
+    [generatedKeyword('grave_buff'), generatedKeyword('emergency_heal', 1)],
+    [generatedKeyword('guard_support'), generatedKeyword('attack_support'), generatedKeyword('shield', 2)],
+    [generatedKeyword('emergency_heal', 1), generatedKeyword('guard_support'), generatedKeyword('shield', 2)]
+  ],
+  trick: [
+    [generatedKeyword('weaken', 1)], [generatedKeyword('weaken', 2)], [generatedKeyword('silence')],
+    [generatedKeyword('stun')], [generatedKeyword('push')], [generatedKeyword('pull')], [generatedKeyword('aim')],
+    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)],
+    [generatedKeyword('weaken', 1), generatedKeyword('push')],
+    [generatedKeyword('weaken', 1), generatedKeyword('pull')],
+    [generatedKeyword('silence'), generatedKeyword('push')],
+    [generatedKeyword('aim'), generatedKeyword('weaken', 1)],
+    [generatedKeyword('weaken', 1), generatedKeyword('push'), generatedKeyword('pull')],
+    [generatedKeyword('silence'), generatedKeyword('weaken', 1), generatedKeyword('push')]
+  ],
+  specter: [
+    [generatedKeyword('remnant', 1)], [generatedKeyword('remnant', 2)], [generatedKeyword('vengeance', 1)],
+    [generatedKeyword('vengeance', 2)], [generatedKeyword('grudge', 1)], [generatedKeyword('grudge', 2)],
+    [generatedKeyword('grave_buff')], [generatedKeyword('grave_recover', undefined, 'cost_2')],
+    [generatedKeyword('grave_recover', undefined, 'specter')], [generatedKeyword('revive')],
+    [generatedKeyword('remnant', 1), generatedKeyword('vengeance', 1)],
+    [generatedKeyword('remnant', 1), generatedKeyword('grave_buff')],
+    [generatedKeyword('vengeance', 1), generatedKeyword('grave_recover', undefined, 'cost_2')],
+    [generatedKeyword('remnant', 1), generatedKeyword('vengeance', 1), generatedKeyword('grave_buff')],
+    [generatedKeyword('remnant', 1), generatedKeyword('grudge', 1), generatedKeyword('shield', 2)]
+  ],
+  tech: [
+    [generatedKeyword('battle_draw')], [generatedKeyword('guard_support')], [generatedKeyword('attack_support')],
+    [generatedKeyword('push')], [generatedKeyword('pull')], [generatedKeyword('weakpoint')],
+    [generatedKeyword('shield', 3)], [generatedKeyword('damage_reduction', 1)], [generatedKeyword('grave_buff')],
+    [generatedKeyword('aoe_damage', 1)], [generatedKeyword('battle_draw'), generatedKeyword('attack_support')],
+    [generatedKeyword('guard_support'), generatedKeyword('attack_support')],
+    [generatedKeyword('push'), generatedKeyword('pull')],
+    [generatedKeyword('shield', 3), generatedKeyword('damage_reduction', 1)],
+    [generatedKeyword('battle_draw'), generatedKeyword('attack_support'), generatedKeyword('shield', 1)],
+    [generatedKeyword('guard_support'), generatedKeyword('push'), generatedKeyword('weakpoint')]
+  ]
+};
+
+const generatedCostBuckets = [
+  { upperExclusive: 9, cost: 1 },
+  { upperExclusive: 22, cost: 2 },
+  { upperExclusive: 37, cost: 3 },
+  { upperExclusive: 52, cost: 4 },
+  { upperExclusive: 66, cost: 5 },
+  { upperExclusive: 78, cost: 6 },
+  { upperExclusive: 88, cost: 7 },
+  { upperExclusive: 95, cost: 8 },
+  { upperExclusive: 100, cost: 9 }
+] as const;
+
+const generatedCandidateCache = new Map<string, ArenaV2GeneratedCandidate[]>();
 
 const normalizeArenaV2KeywordList = (value: unknown): Array<{ type: string; value?: number; limit?: string }> => {
   if (!Array.isArray(value)) return [];
@@ -206,14 +319,122 @@ const defaultArenaV2CardClassForStreamer = (streamerId: string): ArenaV2CardClas
   return ARENA_V2_CARD_CLASSES[hash[0] % ARENA_V2_CARD_CLASSES.length];
 };
 
-const defaultArenaV2CardStatsForStreamer = (streamer: any) => {
-  const baseValue = Math.max(0, Number(streamer.base_value || 0));
-  const followerCount = Math.max(0, Number(streamer.follower_count || 0));
-  const signal = baseValue + Math.floor(followerCount / 250);
-  const cost = Math.max(1, Math.min(9, 1 + Math.floor(Math.log10(Math.max(10, signal)) * 2)));
-  const attack = Math.max(0, Math.min(cost, Math.ceil(cost * 0.55)));
-  const health = Math.max(1, Math.min(cost * 2 + 2, cost + 2));
-  return { cost, attack, health };
+const defaultArenaV2CardCostForStreamer = (streamerId: string): number => {
+  const bucket = stableNumber(`arena-v2-cost:${streamerId}`, 100);
+  return generatedCostBuckets.find((item) => bucket < item.upperExclusive)?.cost || 9;
+};
+
+const generatedCandidateKey = (attack: number, health: number, keywords: ArenaV2GeneratedKeyword[]): string =>
+  `${attack}:${health}:${keywords.map((keyword) => `${keyword.type}:${keyword.value ?? ''}:${keyword.limit || ''}`).join('|')}`;
+
+const generatedCandidatesFor = (cost: number, cardClass: ArenaV2CardClassDto): ArenaV2GeneratedCandidate[] => {
+  const cacheKey = `${cost}:${cardClass}`;
+  const cached = generatedCandidateCache.get(cacheKey);
+  if (cached) return cached;
+
+  const limits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
+  const budgetLimit = ARENA_V2_CARD_BUDGET_BY_COST[cost];
+  const minimumSpend = Math.max(1, Math.ceil(budgetLimit * 0.7));
+  const bundles = [...commonGeneratedKeywordBundles, ...generatedKeywordBundlesByClass[cardClass]];
+  const uniqueCandidates = new Map<string, ArenaV2GeneratedCandidate>();
+
+  for (const bundle of bundles) {
+    for (let attack = 0; attack <= limits.attackMax; attack += 1) {
+      for (let health = 1; health <= limits.healthMax; health += 1) {
+        const keywords = bundle.map((keyword) => ({ ...keyword }));
+        const candidate = {
+          id: 'generated',
+          streamerId: 'generated',
+          seasonId: 'generated',
+          status: 'active' as const,
+          cardClass,
+          cost,
+          attack,
+          health,
+          keywords,
+          validationResult: null
+        };
+        const validation = validateArenaV2CardVersionDefinition(candidate);
+        if (!validation.valid) continue;
+        const budget = evaluateArenaV2CardBudget(candidate);
+        if (budget.totalCost < minimumSpend || budget.totalCost > budgetLimit) continue;
+        const key = generatedCandidateKey(attack, health, keywords);
+        uniqueCandidates.set(key, {
+          key,
+          cost,
+          attack,
+          health,
+          keywords,
+          attackCost: budget.attackCost,
+          healthCost: budget.healthCost,
+          effectCost: budget.keywordCost + budget.comboCost,
+          totalCost: budget.totalCost
+        });
+      }
+    }
+  }
+
+  const candidates = Array.from(uniqueCandidates.values()).sort((a, b) => a.key.localeCompare(b.key));
+  generatedCandidateCache.set(cacheKey, candidates);
+  return candidates;
+};
+
+const matchesGeneratedProfile = (candidate: ArenaV2GeneratedCandidate, profile: ArenaV2GeneratedProfile): boolean => {
+  if (profile === 'aggressive') {
+    return candidate.attack > 0 && candidate.attackCost >= candidate.healthCost && candidate.attackCost >= candidate.effectCost;
+  }
+  if (profile === 'durable') {
+    return candidate.healthCost >= candidate.attackCost && candidate.healthCost >= candidate.effectCost;
+  }
+  if (profile === 'tactical') {
+    return candidate.keywords.length > 0 && candidate.effectCost >= Math.min(4, candidate.attackCost + candidate.healthCost);
+  }
+  return candidate.attack > 0
+    && candidate.health >= 2
+    && Math.abs(candidate.attackCost - candidate.healthCost) <= Math.ceil(candidate.totalCost * 0.45);
+};
+
+export const generateArenaV2DefaultCardCombatDefinition = (streamerIdInput: string) => {
+  const streamerId = String(streamerIdInput || '').trim();
+  const cardClass = defaultArenaV2CardClassForStreamer(streamerId);
+  const cost = defaultArenaV2CardCostForStreamer(streamerId);
+  const profiles: ArenaV2GeneratedProfile[] = ['aggressive', 'durable', 'tactical', 'balanced'];
+  const profile = profiles[stableNumber(`arena-v2-profile:${streamerId}`, profiles.length)];
+  const maximumKeywordCount = cost <= 2 ? 1 : cost <= 6 ? 2 : 3;
+  const minimumKeywordCount = profile === 'tactical' ? 1 : 0;
+  const keywordCount = minimumKeywordCount
+    + stableNumber(`arena-v2-keyword-count:${streamerId}`, maximumKeywordCount - minimumKeywordCount + 1);
+  const allCandidates = generatedCandidatesFor(cost, cardClass);
+  const keywordCandidates = allCandidates.filter((candidate) => candidate.keywords.length === keywordCount);
+  const profileCandidates = (keywordCandidates.length ? keywordCandidates : allCandidates)
+    .filter((candidate) => matchesGeneratedProfile(candidate, profile));
+  const selectable = profileCandidates.length
+    ? profileCandidates
+    : keywordCandidates.length
+      ? keywordCandidates
+      : allCandidates;
+
+  if (!selectable.length) {
+    const limits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
+    return {
+      cardClass,
+      cost,
+      attack: 0,
+      health: Math.min(limits.healthMax, ARENA_V2_CARD_BUDGET_BY_COST[cost]),
+      keywords: [] as ArenaV2GeneratedKeyword[],
+      profile
+    };
+  }
+
+  const selected = selectable[stableNumber(`arena-v2-candidate:${streamerId}`, selectable.length)];
+  return {
+    cardClass,
+    cost: selected.cost,
+    attack: selected.attack,
+    health: selected.health,
+    keywords: selected.keywords.map((keyword) => ({ ...keyword })),
+    profile
+  };
 };
 
 const arenaV2ArtAssetForStreamerStar = (streamer: any, star = 0): string | null => {
@@ -304,6 +525,8 @@ const normalizeArenaV2CardListOffset = (offset: unknown) =>
 
 export const __setArenaV2ExecutorForTest = (executor: SqlExecutor | null) => {
   testExecutor = executor;
+  arenaV2GeneratedCardSyncCompleted.clear();
+  arenaV2GeneratedCardSyncInFlight.clear();
 };
 
 const queryAll = async <T>(db: SqlExecutor, sql: string, params: any[] = []): Promise<T[]> => {
@@ -563,19 +786,17 @@ export const validateArenaV2DeckForSeason = async (seasonId: string, cardVersion
 
 const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: any) => {
   const streamerId = String(streamer.channel_id || '').trim();
-  const cardClass = defaultArenaV2CardClassForStreamer(streamerId);
-  const stats = defaultArenaV2CardStatsForStreamer(streamer);
-  const keywords = stats.cost <= 1 ? [] : defaultClassKeywords[cardClass] || [];
+  const combat = generateArenaV2DefaultCardCombatDefinition(streamerId);
   const candidate = {
     id: makeArenaV2DefaultCardId(seasonId, streamerId),
     streamerId,
     seasonId,
     status: 'active' as const,
-    cardClass,
-    cost: stats.cost,
-    attack: stats.attack,
-    health: stats.health,
-    keywords,
+    cardClass: combat.cardClass,
+    cost: combat.cost,
+    attack: combat.attack,
+    health: combat.health,
+    keywords: combat.keywords,
     validationResult: null
   };
   const validation = validateArenaV2CardVersionDefinition(candidate);
@@ -597,14 +818,25 @@ const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: a
       artAssetId: defaultArenaV2ArtAssetForStreamer(streamer)
     };
   }
+  const budget = evaluateArenaV2CardBudget(candidate);
   return {
     ...candidate,
     displayName: sanitizeCardDisplayName(streamer.name, streamerId),
     validation,
-    balanceScore: stats.attack * 3 + stats.health + keywords.length,
+    balanceScore: budget.totalCost,
     artAssetId: defaultArenaV2ArtAssetForStreamer(streamer)
   };
 };
+
+const generatedArenaV2CombatMatches = (existing: any, generated: ReturnType<typeof buildDefaultArenaV2CardVersionForStreamer>) => (
+  String(existing.card_class || '') === generated.cardClass
+  && Number(existing.cost) === generated.cost
+  && Number(existing.attack) === generated.attack
+  && Number(existing.health) === generated.health
+  && JSON.stringify(jsonParse(existing.keywords, [])) === JSON.stringify(generated.keywords)
+  && Number(existing.balance_score || 0) === Number(generated.balanceScore || 0)
+  && JSON.stringify(jsonParse(existing.validation_result, null)) === JSON.stringify(generated.validation)
+);
 
 export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string) => {
   const db = getExecutor();
@@ -620,11 +852,27 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
         FROM streamers
        WHERE COALESCE(is_image_banned, 0) = 0
        ORDER BY base_value DESC, channel_id ASC
-       LIMIT 5000
+      LIMIT 5000
     `
   );
+  const existingRows = await queryAll<any>(
+    db,
+    `
+      SELECT id, streamer_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result
+        FROM arena_v2_card_versions
+       WHERE season_id = ? AND status = 'active'
+       ORDER BY streamer_id ASC, version DESC, updated_at DESC
+    `,
+    [activeSeason.id]
+  );
+  const existingByStreamerId = new Map<string, any>();
+  for (const row of existingRows) {
+    const streamerId = String(row.streamer_id || '').trim();
+    if (streamerId && !existingByStreamerId.has(streamerId)) existingByStreamerId.set(streamerId, row);
+  }
 
   let created = 0;
+  let updated = 0;
   let skipped = 0;
   for (const streamer of streamers) {
     const streamerId = String(streamer.channel_id || '').trim();
@@ -632,18 +880,41 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
       skipped += 1;
       continue;
     }
-    const existing = await queryGet<{ id: string }>(
-      db,
-      `
-        SELECT id
-          FROM arena_v2_card_versions
-         WHERE season_id = ? AND streamer_id = ? AND status = 'active'
-         LIMIT 1
-      `,
-      [activeSeason.id, streamerId]
-    );
+    const existing = existingByStreamerId.get(streamerId);
     if (existing) {
-      skipped += 1;
+      const generated = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
+      // 자동 생성 카드만 제자리 갱신합니다. 스트리머가 직접 만든 새 버전은 무작위 생성 규칙으로 덮어쓰지 않습니다.
+      if (String(existing.id) !== generated.id || generatedArenaV2CombatMatches(existing, generated)) {
+        skipped += 1;
+        continue;
+      }
+      await runSql(
+        db,
+        `
+          UPDATE arena_v2_card_versions
+             SET card_class = ?,
+                 cost = ?,
+                 attack = ?,
+                 health = ?,
+                 keywords = ?,
+                 balance_score = ?,
+                 validation_result = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND season_id = ? AND status = 'active'
+        `,
+        [
+          generated.cardClass,
+          generated.cost,
+          generated.attack,
+          generated.health,
+          JSON.stringify(generated.keywords),
+          generated.balanceScore,
+          JSON.stringify(generated.validation),
+          existing.id,
+          activeSeason.id
+        ]
+      );
+      updated += 1;
       continue;
     }
     const card = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
@@ -673,7 +944,7 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
     created += 1;
   }
 
-  return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
+  return { seasonId: activeSeason.id, scanned: streamers.length, created, updated, skipped };
 };
 
 export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string, options: { limit?: number } = {}) => {
@@ -762,14 +1033,22 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
   return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
 };
 
-const ensureArenaV2CardsForSeason = async (db: SqlExecutor, seasonId: string) => {
-  const existing = await queryGet<{ count: number }>(
-    db,
-    'SELECT COUNT(*) AS count FROM arena_v2_card_versions WHERE season_id = ? AND status = ?',
-    [seasonId, 'active']
-  );
-  if (Number(existing?.count || 0) > 0) return;
-  await syncArenaV2CardsFromRegisteredStreamers(seasonId);
+const ensureArenaV2CardsForSeason = async (_db: SqlExecutor, seasonId: string) => {
+  if (arenaV2GeneratedCardSyncCompleted.has(seasonId)) return;
+  const existingSync = arenaV2GeneratedCardSyncInFlight.get(seasonId);
+  if (existingSync) {
+    await existingSync;
+    return;
+  }
+  const sync = syncArenaV2CardsFromRegisteredStreamers(seasonId)
+    .then(() => {
+      arenaV2GeneratedCardSyncCompleted.add(seasonId);
+    })
+    .finally(() => {
+      arenaV2GeneratedCardSyncInFlight.delete(seasonId);
+    });
+  arenaV2GeneratedCardSyncInFlight.set(seasonId, sync);
+  await sync;
 };
 
 export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => {
@@ -838,6 +1117,7 @@ export const listArenaV2OwnedCardsForUser = async (userId: string, filters: Aren
   const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
+  await ensureArenaV2CardsForSeason(db, seasonId);
   const limit = normalizeArenaV2CardListLimit(filters.limit);
   const offset = normalizeArenaV2CardListOffset(filters.offset);
   await syncArenaV2CardsFromOwnedCards(userId, seasonId, { limit: Math.max(offset + limit + 1, 100) });
@@ -1005,6 +1285,7 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
     };
   }
 
+  await ensureArenaV2CardsForSeason(db, season.id);
   let row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
   if (!row) {
     await syncArenaV2CardsFromRegisteredStreamers(season.id);

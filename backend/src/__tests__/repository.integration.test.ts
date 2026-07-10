@@ -16,6 +16,7 @@ import {
   userRepository
 } from '../repositories';
 import { getUserProfile, getUserRankings } from '../controllers/playController';
+import { cancelListing, createListing, listMarketHistory } from '../controllers/marketController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
@@ -1176,6 +1177,95 @@ describe('MarketRepository 재등록 제약', () => {
         reason: 'auction_sale_settlement'
       }
     ]);
+  });
+
+  it('입찰이 시작된 경매는 판매자가 취소할 수 없고 최고 입찰가와 예약금이 유지된다', async () => {
+    seedUser(db, 'protected-auction-seller');
+    seedUser(db, 'protected-auction-bidder', 5000);
+    seedStreamer(db, 'protected-auction-channel', '취소 방지 경매');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('protected-auction-seller', 'protected-auction-channel', 1, 0)
+    `).run().lastInsertRowid);
+    const listing = await marketRepository.create({
+      seller_id: 'protected-auction-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    });
+
+    expect(await marketRepository.placeBid(listing.id as number, 'protected-auction-bidder', 1800)).toMatchObject({ ok: true });
+    const cancelRes = createJsonResponse();
+    await cancelListing({
+      user: { id: 'protected-auction-seller' },
+      params: { id: String(listing.id) }
+    } as any, cancelRes);
+    expect(cancelRes.statusCode).toBe(409);
+    expect(cancelRes.body).toMatchObject({ error: 'AuctionHasBids' });
+    expect(await marketRepository.getHighestBids([listing.id as number])).toEqual({ [listing.id as number]: 1800 });
+    expect(db.prepare('SELECT status FROM market_listings WHERE id = ?').get(listing.id)).toEqual({ status: 'PENDING' });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('protected-auction-bidder')).toEqual({ point: 3200 });
+    expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'protected-auction-seller' });
+  });
+
+  it('경매 가격 상세는 내 거래 이력에만 포함되고 전체 거래 이력 응답에서는 제거된다', async () => {
+    seedUser(db, 'private-history-seller');
+    seedUser(db, 'private-history-bidder-a', 5000);
+    seedUser(db, 'private-history-bidder-b', 5000);
+    seedStreamer(db, 'private-history-channel', '비공개 경매 이력');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('private-history-seller', 'private-history-channel', 1, 0)
+    `).run().lastInsertRowid);
+    const listing = await marketRepository.create({
+      seller_id: 'private-history-seller',
+      user_card_id: cardId,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+    await marketRepository.placeBid(listing.id as number, 'private-history-bidder-a', 1600);
+    await marketRepository.placeBid(listing.id as number, 'private-history-bidder-b', 2400);
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(listing.id);
+    await marketRepository.finishExpiredAuctions(new Date().toISOString());
+
+    const publicRes = createJsonResponse();
+    await listMarketHistory({ user: { id: 'private-history-seller' }, query: { scope: 'all' } } as any, publicRes);
+    expect(publicRes.body[0]).not.toHaveProperty('highest_bid');
+    expect(publicRes.body[0]).not.toHaveProperty('winning_price');
+    expect(publicRes.body[0]).not.toHaveProperty('auction_result');
+    expect(publicRes.body[0]).not.toHaveProperty('current_bid');
+
+    const privateRes = createJsonResponse();
+    await listMarketHistory({ user: { id: 'private-history-seller' }, query: { scope: 'mine' } } as any, privateRes);
+    expect(privateRes.body[0]).toMatchObject({
+      id: listing.id,
+      highest_bid: 2400,
+      winning_price: 1600
+    });
+    expect(privateRes.body[0]).not.toHaveProperty('auction_result');
+  });
+
+  it('오픈마켓 등록 API는 9자리를 넘는 판매가와 경매가를 저장 전에 거부한다', async () => {
+    const fixedRes = createJsonResponse();
+    await createListing({
+      user: { id: 'price-limit-user' },
+      body: { user_card_id: 1, listing_type: 'fixed', price: 1_000_000_000 }
+    } as any, fixedRes);
+    expect(fixedRes.statusCode).toBe(400);
+    expect(fixedRes.body).toMatchObject({ error: 'PriceTooHigh' });
+
+    const auctionRes = createJsonResponse();
+    await createListing({
+      user: { id: 'price-limit-user' },
+      body: { user_card_id: 1, listing_type: 'auction', starting_bid: 1_000_000_000, auction_hours: 24 }
+    } as any, auctionRes);
+    expect(auctionRes.statusCode).toBe(400);
+    expect(auctionRes.body).toMatchObject({ error: 'PriceTooHigh' });
   });
 
   it('같은 사용자가 재입찰하면 이전 예약금을 환불한 뒤 새 입찰금 전체를 다시 예약한다', async () => {

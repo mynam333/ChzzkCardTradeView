@@ -237,6 +237,40 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return !error && !!data;
   }
 
+  async cancelBySeller(listingId: number, sellerId: string): Promise<{ ok: boolean; reason: 'OK' | 'NOT_FOUND' | 'FORBIDDEN' | 'NOT_PENDING' | 'AUCTION_HAS_BIDS' }> {
+    const { data, error } = await this.getClient().rpc('cancel_market_listing_atomic', {
+      p_listing_id: listingId,
+      p_seller_id: sellerId
+    });
+    if (error) {
+      console.error('[SupabaseMarketRepository] cancel_market_listing_atomic RPC 에러:', error.message);
+      return { ok: false, reason: 'NOT_PENDING' };
+    }
+    let result: any = data;
+    if (typeof data === 'string') {
+      try { result = JSON.parse(data); } catch { result = { ok: false, reason: data }; }
+    }
+    const allowedReasons = new Set(['OK', 'NOT_FOUND', 'FORBIDDEN', 'NOT_PENDING', 'AUCTION_HAS_BIDS']);
+    const reason = allowedReasons.has(result?.reason) ? result.reason : 'NOT_PENDING';
+    return { ok: !!result?.ok, reason };
+  }
+
+  async getHighestBids(listingIds: number[]): Promise<Record<number, number>> {
+    const ids = Array.from(new Set(listingIds.filter(Number.isFinite)));
+    if (ids.length === 0) return {};
+    const { data, error } = await this.getClient()
+      .from('market_bids')
+      .select('listing_id, amount')
+      .in('listing_id', ids);
+    if (error) throw error;
+    const result: Record<number, number> = {};
+    for (const row of data || []) {
+      const listingId = Number(row.listing_id);
+      result[listingId] = Math.max(result[listingId] || 0, Number(row.amount || 0));
+    }
+    return result;
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const { data, error } = await this.getClient()
       .from('market_listings')

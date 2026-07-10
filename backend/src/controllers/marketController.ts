@@ -18,6 +18,7 @@ const MARKET_STALE_LISTING_DAYS = Math.max(1, Number(process.env.MARKET_STALE_LI
 const MARKET_STALE_CANCEL_BATCH = Math.max(1, Math.min(500, Number(process.env.MARKET_STALE_CANCEL_BATCH || 200)));
 const MARKET_HISTORY_DEFAULT_LIMIT = Math.max(100, Number(process.env.MARKET_HISTORY_DEFAULT_LIMIT || 1000));
 const MARKET_HISTORY_MAX_LIMIT = Math.max(MARKET_HISTORY_DEFAULT_LIMIT, Number(process.env.MARKET_HISTORY_MAX_LIMIT || 5000));
+export const MAX_MARKET_PRICE = 999_999_999;
 
 const marketListCache = new Map<string, { data: any; expiresAt: number }>();
 const marketListInFlight = new Map<string, Promise<any>>();
@@ -78,6 +79,34 @@ const marketListingForViewer = (listing: MarketListing, viewerId?: string): Mark
 
 const marketListingsForViewer = (listings: MarketListing[], viewerId?: string): MarketListing[] =>
   listings.map((listing) => marketListingForViewer(listing, viewerId));
+
+const publicHistoryListingForViewer = (listing: MarketListing, viewerId?: string): MarketListing => {
+  const sanitized: MarketListing = { ...marketListingForViewer(listing, viewerId) };
+  delete sanitized.highest_bid;
+  delete sanitized.winning_price;
+  delete sanitized.auction_result;
+  delete sanitized.my_bid;
+  delete sanitized.current_bid;
+  delete sanitized.current_bidder_id;
+  delete sanitized.current_bidder_username;
+  delete sanitized.bid_reserved;
+  return sanitized;
+};
+
+const privateAuctionListingsForViewer = async (listings: MarketListing[], viewerId: string): Promise<MarketListing[]> => {
+  const listingIds = listings
+    .filter((listing) => listing.listing_type === 'auction' && Number.isFinite(Number(listing.id)))
+    .map((listing) => Number(listing.id));
+  const highestBids = await marketRepository.getHighestBids(listingIds);
+  return listings.map((listing) => {
+    const privateListing: MarketListing = { ...marketListingForViewer(listing, viewerId) };
+    delete privateListing.auction_result;
+    if (listing.listing_type !== 'auction' || listing.id == null) return privateListing;
+    privateListing.highest_bid = highestBids[Number(listing.id)] || null;
+    privateListing.winning_price = listing.status === 'SOLD' ? Number(listing.price || 0) : null;
+    return privateListing;
+  });
+};
 
 const marketListResultForViewer = (
   result: { listings: MarketListing[]; total: number },
@@ -313,7 +342,7 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
       console.warn('[MarketController] 내 판매 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
     });
     const listings = await marketRepository.listByUser(user.id);
-    return res.json(marketListingsForViewer(listings, user.id));
+    return res.json(await privateAuctionListingsForViewer(listings, user.id));
   } catch (err: any) {
     console.error('[MarketController] listMyListings 에러:', err);
     return res.status(500).json({ error: 'ServerError', message: '내 판매 목록을 가져오는 중 오류가 발생했습니다.' });
@@ -335,8 +364,8 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
   const cardId = Number(user_card_id);
   const listingType = listing_type === 'auction' ? 'auction' : 'fixed';
   const rawBuyNowPrice = buy_now_price === '' || buy_now_price == null ? null : Number(buy_now_price);
-  const listingPrice = Number(listingType === 'auction' ? (rawBuyNowPrice ?? price ?? starting_bid) : price);
   const startBid = Number(starting_bid || price);
+  const listingPrice = Number(listingType === 'auction' ? (rawBuyNowPrice ?? startBid) : price);
 
   if (isNaN(cardId) || isNaN(listingPrice) || (listingType === 'auction' && isNaN(startBid))) {
     return res.status(400).json({ error: 'BadRequest', message: '올바른 카드 ID와 가격을 지정해 주세요.' });
@@ -344,6 +373,15 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
 
   if (listingPrice < 100 || (listingType === 'auction' && startBid < 100)) {
     return res.status(400).json({ error: 'BadRequest', message: '최소 판매 가격은 100P 이상이어야 합니다.' });
+  }
+  const submittedPrices = listingType === 'auction'
+    ? [startBid, ...(rawBuyNowPrice === null ? [] : [rawBuyNowPrice])]
+    : [listingPrice];
+  if (submittedPrices.some((value) => !Number.isInteger(value) || value > MAX_MARKET_PRICE)) {
+    return res.status(400).json({
+      error: 'PriceTooHigh',
+      message: `판매 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`
+    });
   }
   if (listingType === 'auction' && rawBuyNowPrice !== null && rawBuyNowPrice < startBid) {
     return res.status(400).json({ error: 'BadRequest', message: '즉시 구매가는 경매 시작가보다 낮을 수 없습니다.' });
@@ -442,27 +480,19 @@ export const cancelListing = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const listing = await marketRepository.findById(id);
-    if (!listing) {
-      return res.status(404).json({ error: 'NotFound', message: '존재하지 않는 매물입니다.' });
+    const result = await marketRepository.cancelBySeller(id, user.id);
+    if (!result.ok) {
+      const responses = {
+        NOT_FOUND: { status: 404, error: 'NotFound', message: '존재하지 않는 매물입니다.' },
+        FORBIDDEN: { status: 403, error: 'Forbidden', message: '본인의 매물만 취소할 수 있습니다.' },
+        NOT_PENDING: { status: 400, error: 'BadRequest', message: '판매 중인 매물만 취소할 수 있습니다.' },
+        AUCTION_HAS_BIDS: { status: 409, error: 'AuctionHasBids', message: '입찰이 시작된 경매는 등록자가 취소할 수 없습니다.' }
+      } as const;
+      const response = responses[result.reason as keyof typeof responses] || responses.NOT_PENDING;
+      return res.status(response.status).json({ error: response.error, message: response.message });
     }
 
-    if (listing.seller_id !== user.id) {
-      return res.status(403).json({ error: 'Forbidden', message: '본인의 매물만 취소할 수 있습니다.' });
-    }
-
-    if (listing.status !== 'PENDING') {
-      return res.status(400).json({ error: 'BadRequest', message: '판매 중인 매물만 취소할 수 있습니다.' });
-    }
-
-    if (listing.listing_type === 'auction' && await marketRepository.hasBids(id)) {
-      return res.status(400).json({
-        error: 'BadRequest',
-        message: '이미 입찰이 있는 경매는 등록자가 취소할 수 없습니다.'
-      });
-    }
-
-    await marketRepository.updateStatus(id, 'CANCELLED');
-    publishMarketUpdated('listing_cancelled', { ...listing, status: 'CANCELLED' });
+    publishMarketUpdated('listing_cancelled', listing ? { ...listing, status: 'CANCELLED' } : undefined);
     return res.json({ ok: true });
   } catch (err: any) {
     console.error('[MarketController] cancelListing 에러:', err);
@@ -601,6 +631,12 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
   if (!Number.isFinite(id) || !Number.isFinite(amount)) {
     return res.status(400).json({ error: 'BadRequest', message: '입찰 매물과 금액을 확인해 주세요.' });
   }
+  if (amount > MAX_MARKET_PRICE) {
+    return res.status(400).json({
+      error: 'PriceTooHigh',
+      message: `입찰 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`
+    });
+  }
   const result = await marketRepository.placeBid(id, user.id, amount);
   if (!result.ok) {
     if (result.reason === 'AUCTION_ENDED') {
@@ -717,7 +753,10 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
     const history = scope === 'all'
       ? await marketRepository.listAllHistory(historyLimit)
       : await marketRepository.listHistory(user.id);
-    return res.json(marketListingsForViewer(history, user.id));
+    if (scope === 'all') {
+      return res.json(history.map((listing) => publicHistoryListingForViewer(listing, user.id)));
+    }
+    return res.json(await privateAuctionListingsForViewer(history, user.id));
   } catch (err: any) {
     console.error('[MarketController] listMarketHistory 에러:', err);
     return res.status(500).json({ error: 'ServerError', message: '거래 내역을 가져오는 중 오류가 발생했습니다.' });

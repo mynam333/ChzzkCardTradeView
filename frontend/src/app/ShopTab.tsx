@@ -14,6 +14,7 @@ import { CardPreview } from './CardPreview';
 import { BlindableCardImage } from './BlindableCardImage';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel, Hourglass, BadgePercent } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
+import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 
 interface ShopItem {
   id: number;
@@ -85,7 +86,7 @@ const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
 // 동일 내용의 매물은 기존 객체 참조를 유지해 불필요한 카드 리렌더(및 입장 애니메이션 재생)를 막습니다.
 const MARKET_LISTING_VOLATILE_KEYS = [
   'price', 'status', 'current_bid', 'current_bidder_id', 'current_bidder_username',
-  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at', 'my_bid'
+  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at', 'my_bid', 'highest_bid', 'winning_price'
 ];
 const marketListingsEqual = (a: any, b: any): boolean =>
   MARKET_LISTING_VOLATILE_KEYS.every((key) => a?.[key] === b?.[key]);
@@ -1025,6 +1026,10 @@ export const ShopTab: React.FC = () => {
       toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
       return;
     }
+    if (amount > MAX_MARKET_PRICE) {
+      toast(`입찰 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`, 'warning');
+      return;
+    }
     if (Number(user.point || 0) + currentMyBid < amount) {
       toast('입찰 가능한 포인트가 부족합니다.', 'warning');
       return;
@@ -1482,7 +1487,7 @@ export const ShopTab: React.FC = () => {
                       </div>
                       <div className="relative z-20 space-y-1.5 text-white mt-auto">
                         <h3 className="text-base font-black tracking-tight text-white drop-shadow-md">{drawnCard.name}</h3>
-                        <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{(drawnCard.follower_count || 0).toLocaleString()} 팔로워</p>
+                        <p className="text-[9.5px] text-zinc-300 drop-shadow-md">{Number(drawnCard.follower_count || 0).toLocaleString('ko-KR')} 팔로워</p>
                         <div className="flex items-center justify-between border-t border-white/20 pt-2">
                           <span className="text-[9px] text-zinc-400">시세 가치</span>
                           <span className="cute-number-font text-sm font-black text-emerald-400">{(drawnCard.base_value || 0).toLocaleString()} P</span>
@@ -2016,10 +2021,11 @@ export const ShopTab: React.FC = () => {
                               {isAuction && !isEnded && (
                                 <div className="flex gap-1">
                                   <input
-                                    type="number"
-                                    min={minBid}
+                                    type="text"
+                                    inputMode="numeric"
+                                    maxLength={9}
                                     value={bidInputs[listing.id] || ''}
-                                    onChange={(event) => setBidInputs(prev => ({ ...prev, [listing.id]: event.target.value }))}
+                                    onChange={(event) => setBidInputs(prev => ({ ...prev, [listing.id]: sanitizeMarketPriceInput(event.target.value) }))}
                                     placeholder={`${minBid.toLocaleString()}P`}
                                     className="min-w-0 flex-1 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px] font-bold focus:border-primary focus:outline-none"
                                   />
@@ -2142,7 +2148,7 @@ export const ShopTab: React.FC = () => {
                     <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 내 등록 매물 관리 ({myListings.length}건)
                   </h3>
                   <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
-                    판매 중인 매물은 등록 취소할 수 있고, 취소/완료된 매물은 이 화면에서 삭제해 숨길 수 있습니다. DB 기록은 유지됩니다.
+                    입찰 전 경매와 고정가 매물은 취소할 수 있습니다. 입찰이 시작된 경매는 취소할 수 없으며, 취소/완료 매물은 이 화면에서 숨길 수 있습니다.
                   </p>
                 </div>
               </div>
@@ -2166,6 +2172,9 @@ export const ShopTab: React.FC = () => {
                         const star = l.card?.star ?? 0;
                         const isAuction = l.listing_type === 'auction';
                         const startBid = Number(l.starting_bid || l.price || 0);
+                        const highestBid = Math.max(0, Number(l.highest_bid || 0));
+                        const winningPrice = Math.max(0, Number(l.winning_price || 0));
+                        const auctionHasBids = isAuction && highestBid > 0;
                         const feeRate = Number(l.fee_rate ?? 5);
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
@@ -2186,8 +2195,16 @@ export const ShopTab: React.FC = () => {
                                 {isAuction ? `${startBid.toLocaleString()} P 시작` : `${l.price.toLocaleString()} P`}
                               </div>
                               {isAuction && (
-                                <div className="mt-0.5 text-[9px] font-bold text-muted-foreground">
-                                  {l.buy_now_price ? `즉시 ${Number(l.buy_now_price).toLocaleString()} P` : '입찰 전용'}
+                                <div className="mt-1 space-y-0.5 text-[9px] font-bold">
+                                  <div className="text-muted-foreground">
+                                    {l.buy_now_price ? `즉시 ${Number(l.buy_now_price).toLocaleString()} P` : '입찰 전용'}
+                                  </div>
+                                  <div className={highestBid > 0 ? 'text-violet-500' : 'text-muted-foreground'}>
+                                    최고 제시 {highestBid > 0 ? `${highestBid.toLocaleString()} P` : '입찰 없음'}
+                                  </div>
+                                  {l.status === 'SOLD' && winningPrice > 0 && (
+                                    <div className="text-emerald-500">실제 낙찰 {winningPrice.toLocaleString()} P</div>
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -2228,10 +2245,11 @@ export const ShopTab: React.FC = () => {
                                 <div className="flex flex-col items-end gap-1">
                                   <button
                                     onClick={() => handleCancelMarketItem(l.id)}
-                                    disabled={cancellingListingId === l.id}
+                                    disabled={cancellingListingId === l.id || auctionHasBids}
+                                    title={auctionHasBids ? '입찰이 시작된 경매는 취소할 수 없습니다.' : undefined}
                                     className="rounded-lg bg-rose-600/10 px-2.5 py-1 text-[10px] font-bold text-rose-500 transition hover:bg-rose-600/20 disabled:pointer-events-none disabled:opacity-45"
                                   >
-                                    {cancellingListingId === l.id ? '취소 중...' : '등록 취소'}
+                                    {cancellingListingId === l.id ? '취소 중...' : auctionHasBids ? '입찰 후 취소 불가' : '등록 취소'}
                                   </button>
                                 </div>
                               ) : (
@@ -2319,6 +2337,9 @@ export const ShopTab: React.FC = () => {
                           const isBuyer = l.buyer_id === user?.id;
                           const streamer = l.card?.streamer;
                           const star = l.card?.star ?? 0;
+                          const isAuction = l.listing_type === 'auction';
+                          const highestBid = Math.max(0, Number(l.highest_bid || 0));
+                          const winningPrice = Math.max(0, Number(l.winning_price || 0));
 
                           let typeLabel = '';
                           let typeColor = '';
@@ -2376,7 +2397,19 @@ export const ShopTab: React.FC = () => {
                                   </div>
                                 </div>
                               </td>
-                              <td className="py-3 font-bold text-yellow-500">{l.price.toLocaleString()} P</td>
+                              <td className="py-3">
+                                <div className="font-bold text-yellow-500">{l.price.toLocaleString()} P</div>
+                                {historyScope === 'mine' && isAuction && (
+                                  <div className="mt-1 space-y-0.5 text-[9px] font-bold">
+                                    <div className="text-violet-500">
+                                      최고 제시 {highestBid > 0 ? `${highestBid.toLocaleString()} P` : '입찰 없음'}
+                                    </div>
+                                    {winningPrice > 0 && (
+                                      <div className="text-emerald-500">실제 낙찰 {winningPrice.toLocaleString()} P</div>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
                               <td className="py-3 font-semibold text-[11px]">
                                 {historyScope === 'all' ? (
                                   <span className="text-muted-foreground">

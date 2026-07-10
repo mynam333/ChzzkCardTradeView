@@ -1963,6 +1963,50 @@ ALTER TABLE market_bids ALTER COLUMN amount TYPE BIGINT USING amount::BIGINT;
 CREATE INDEX IF NOT EXISTS idx_market_bids_listing ON market_bids(listing_id, amount DESC);
 CREATE INDEX IF NOT EXISTS idx_market_bids_bidder_listing ON market_bids(bidder_id, listing_id);
 
+DROP FUNCTION IF EXISTS cancel_market_listing_atomic(INTEGER, TEXT);
+CREATE OR REPLACE FUNCTION cancel_market_listing_atomic(p_listing_id INTEGER, p_seller_id TEXT)
+RETURNS JSONB AS $$
+DECLARE
+  listing market_listings%ROWTYPE;
+BEGIN
+  -- 입찰 RPC와 같은 경매별 잠금을 사용해 입찰과 취소가 동시에 통과하지 못하게 합니다.
+  PERFORM pg_advisory_xact_lock(hashtext('market_bid:' || p_listing_id::TEXT));
+
+  SELECT * INTO listing
+    FROM market_listings
+   WHERE id = p_listing_id
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'NOT_FOUND');
+  END IF;
+  IF listing.seller_id <> p_seller_id THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'FORBIDDEN');
+  END IF;
+  IF listing.status <> 'PENDING' THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'NOT_PENDING');
+  END IF;
+  IF listing.listing_type = 'auction'
+     AND EXISTS (SELECT 1 FROM market_bids WHERE listing_id = p_listing_id) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'AUCTION_HAS_BIDS');
+  END IF;
+
+  UPDATE market_listings
+     SET status = 'CANCELLED',
+         pending_user_card_id = NULL,
+         current_bidder_id = NULL,
+         bid_reserved = 0,
+         updated_at = NOW()
+   WHERE id = p_listing_id
+     AND seller_id = p_seller_id
+     AND status = 'PENDING';
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'NOT_PENDING');
+  END IF;
+  RETURN jsonb_build_object('ok', true, 'reason', 'OK');
+END;
+$$ LANGUAGE plpgsql;
+
 DROP FUNCTION IF EXISTS place_market_bid_atomic(INTEGER, TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION place_market_bid_atomic(p_listing_id INTEGER, p_bidder_id TEXT, p_amount BIGINT)
 RETURNS JSONB AS $$

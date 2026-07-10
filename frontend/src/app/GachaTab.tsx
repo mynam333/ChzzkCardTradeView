@@ -31,6 +31,7 @@ import { ReportCardModal } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
+import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 
 interface Streamer {
   channel_id: string;
@@ -590,6 +591,10 @@ export const GachaTab: React.FC = () => {
     }
     if (marketListingType === 'auction' && buyNowPrice > 0 && buyNowPrice < startingBid) {
       showAlert('등록 실패', '즉시 구매가는 경매 시작가보다 낮을 수 없습니다.', 'warning');
+      return;
+    }
+    if (buyNowPrice > MAX_MARKET_PRICE || startingBid > MAX_MARKET_PRICE) {
+      showAlert('등록 실패', `판매 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`, 'warning');
       return;
     }
 
@@ -2222,7 +2227,7 @@ export const GachaTab: React.FC = () => {
                             </div>
                           )}
                           <CosmeticName effect={card.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{streamer.name}</CosmeticName>
-                          <p className="text-[8.5px] text-zinc-300 drop-shadow">{(streamer.follower_count || 0).toLocaleString()} 팔로워</p>
+                          <p className="text-[8.5px] text-zinc-300 drop-shadow">{Number(streamer.follower_count || 0).toLocaleString('ko-KR')} 팔로워</p>
 
                           <div className="flex items-center justify-between border-t border-white/10 pt-1">
                             <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
@@ -2527,7 +2532,7 @@ export const GachaTab: React.FC = () => {
                         </div>
                       )}
                       <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{s.name}</CosmeticName>
-                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{(s.follower_count || 0).toLocaleString()} 팔로워</p>
+                      <p className="text-[8.5px] text-zinc-300 drop-shadow">{Number(s.follower_count || 0).toLocaleString('ko-KR')} 팔로워</p>
                       <div className="flex items-center justify-between border-t border-white/10 pt-1">
                         <span className="text-[8.5px] text-zinc-400">{star > 0 ? `${star}성 가치` : '시세 가치'}</span>
                         <span className="text-xs font-black text-emerald-400">{value.toLocaleString()} P</span>
@@ -2969,7 +2974,7 @@ export const GachaTab: React.FC = () => {
                           </div>
                         )}
                         <CosmeticName effect={live.name_effect} className="block text-sm font-bold tracking-tight truncate drop-shadow">{live.streamer?.name}</CosmeticName>
-                        <p className="text-[8.5px] text-zinc-300 drop-shadow">{(live.streamer?.follower_count || 0).toLocaleString()} 팔로워</p>
+                        <p className="text-[8.5px] text-zinc-300 drop-shadow">{Number(live.streamer?.follower_count || 0).toLocaleString('ko-KR')} 팔로워</p>
                         <div className="flex items-center justify-between border-t border-white/10 pt-1">
                           <span className="text-[8.5px] text-zinc-400">{(live.star || 0) > 0 ? `${live.star}성 가치` : '시세 가치'}</span>
                           <span className="text-xs font-black text-emerald-400">{Math.round((live.streamer?.base_value || 0) * starMult(live.star || 0)).toLocaleString()} P</span>
@@ -3329,13 +3334,14 @@ export const GachaTab: React.FC = () => {
                 {marketListingType === 'auction' && (
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground">경매 시작가 (최소 100 P)</label>
+                      <label className="text-[10px] font-bold text-muted-foreground">경매 시작가 (100 ~ 999,999,999 P)</label>
                       <div className="relative">
                         <input
-                          type="number"
-                          min="100"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={9}
                           value={marketStartingBidInput}
-                          onChange={(e) => setMarketStartingBidInput(e.target.value)}
+                          onChange={(e) => setMarketStartingBidInput(sanitizeMarketPriceInput(e.target.value))}
                           className="w-full rounded-lg border border-border bg-secondary/50 pl-3 pr-8 py-2 text-xs font-bold focus:border-primary focus:outline-none"
                           placeholder="시작가"
                           required
@@ -3360,14 +3366,15 @@ export const GachaTab: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground">
-                    {marketListingType === 'auction' ? '즉시 구매가 (선택, 비우면 입찰만 가능)' : '판매 희망 가격 (최소 100 P)'}
+                    {marketListingType === 'auction' ? '즉시 구매가 (선택, 최대 999,999,999 P)' : '판매 희망 가격 (100 ~ 999,999,999 P)'}
                   </label>
                   <div className="relative">
                     <input
-                      type="number"
-                      min={marketListingType === 'auction' ? 0 : 100}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={9}
                       value={marketPriceInput}
-                      onChange={(e) => setMarketPriceInput(e.target.value)}
+                      onChange={(e) => setMarketPriceInput(sanitizeMarketPriceInput(e.target.value))}
                       className="w-full rounded-lg border border-border bg-secondary/50 pl-3 pr-8 py-2 text-xs font-bold focus:border-primary focus:outline-none"
                       placeholder={marketListingType === 'auction' ? '즉시 구매가' : '가격을 입력하세요'}
                       required={marketListingType === 'fixed'}

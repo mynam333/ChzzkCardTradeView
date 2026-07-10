@@ -149,7 +149,7 @@ const result = (errors: ArenaV2ValidationIssueDto[], warnings: ArenaV2Validation
   warnings
 });
 
-const ARENA_V2_CARD_BUDGET_BY_COST: Record<number, number> = {
+export const ARENA_V2_CARD_BUDGET_BY_COST: Record<number, number> = {
   1: 5,
   2: 8,
   3: 12,
@@ -161,7 +161,7 @@ const ARENA_V2_CARD_BUDGET_BY_COST: Record<number, number> = {
   9: 51
 };
 
-const ARENA_V2_CARD_STAT_LIMITS_BY_COST: Record<number, { attackMax: number; healthMax: number }> = {
+export const ARENA_V2_CARD_STAT_LIMITS_BY_COST: Record<number, { attackMax: number; healthMax: number }> = {
   1: { attackMax: 1, healthMax: 4 },
   2: { attackMax: 2, healthMax: 6 },
   3: { attackMax: 3, healthMax: 8 },

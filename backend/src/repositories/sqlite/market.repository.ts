@@ -294,6 +294,46 @@ export class SqliteMarketRepository implements IMarketRepository {
     return !!row;
   }
 
+  async cancelBySeller(listingId: number, sellerId: string): Promise<{ ok: boolean; reason: 'OK' | 'NOT_FOUND' | 'FORBIDDEN' | 'NOT_PENDING' | 'AUCTION_HAS_BIDS' }> {
+    const db = this.getDb();
+    const cancel = db.transaction(() => {
+      const listing = db.prepare('SELECT id, seller_id, status, listing_type FROM market_listings WHERE id = ?').get(listingId) as any;
+      if (!listing) return { ok: false, reason: 'NOT_FOUND' as const };
+      if (listing.seller_id !== sellerId) return { ok: false, reason: 'FORBIDDEN' as const };
+      if (listing.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' as const };
+      if (listing.listing_type === 'auction' && db.prepare('SELECT 1 FROM market_bids WHERE listing_id = ? LIMIT 1').get(listingId)) {
+        return { ok: false, reason: 'AUCTION_HAS_BIDS' as const };
+      }
+
+      const result = db.prepare(`
+        UPDATE market_listings
+           SET status = 'CANCELLED',
+               pending_user_card_id = NULL,
+               current_bidder_id = NULL,
+               bid_reserved = 0,
+               updated_at = datetime('now')
+         WHERE id = ? AND seller_id = ? AND status = 'PENDING'
+      `).run(listingId, sellerId);
+      return result.changes > 0
+        ? { ok: true, reason: 'OK' as const }
+        : { ok: false, reason: 'NOT_PENDING' as const };
+    });
+    return cancel();
+  }
+
+  async getHighestBids(listingIds: number[]): Promise<Record<number, number>> {
+    const ids = Array.from(new Set(listingIds.filter(Number.isFinite)));
+    if (ids.length === 0) return {};
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.getDb().prepare(`
+      SELECT listing_id, MAX(amount) AS highest_bid
+        FROM market_bids
+       WHERE listing_id IN (${placeholders})
+       GROUP BY listing_id
+    `).all(...ids) as Array<{ listing_id: number; highest_bid: number }>;
+    return Object.fromEntries(rows.map((row) => [Number(row.listing_id), Number(row.highest_bid || 0)]));
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const rows = this.getDb().prepare(`
       SELECT user_card_id FROM market_listings
