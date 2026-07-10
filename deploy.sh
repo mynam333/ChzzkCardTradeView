@@ -512,11 +512,11 @@ done
 for writable in package.json pnpm-workspace.yaml backend/package.json ecosystem.config.cjs init-db-mysql.sql init-db-postgres.sql deploy.sh backend/dist backend; do
   assert_can_write_path "${writable}"
 done
+ensure_runtime_writable_dir "backups"
 ensure_runtime_writable_dir "public/uploads"
 
 if [ "${SKIP_DB_BACKUP:-false}" != "true" ] && command -v mysqldump >/dev/null 2>&1; then
   if [ -n "${DB_HOST_VALUE}" ] && [ -n "${DB_USER_VALUE}" ] && [ -n "${DB_NAME_VALUE}" ]; then
-    mkdir -p backups
     echo "[deploy] backup mysql"
     MYSQLDUMP_GTID_ARG=""
     if mysqldump --help 2>/dev/null | grep -q -- '--set-gtid-purged'; then
