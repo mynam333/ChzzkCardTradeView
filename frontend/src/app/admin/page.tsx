@@ -14,12 +14,12 @@ function AdminPageContent() {
   const router = useRouter();
 
   useEffect(() => {
-    // 세션 로딩이 완료된 후, 유저 정보가 없거나 역할이 ADMIN이 아닌 경우
-    if (!authLoading) {
-      if (!user || user.role !== 'ADMIN') {
-        router.replace('/');
-      }
-    }
+    if (authLoading || user?.role === 'ADMIN') return;
+
+    // 세션 갱신의 setUser/setAuthLoading 커밋 사이에 생길 수 있는 짧은 전환 상태를
+    // 비로그인으로 오인하지 않도록 한 프레임 이상의 유예를 둡니다.
+    const redirectTimer = window.setTimeout(() => router.replace('/'), 250);
+    return () => window.clearTimeout(redirectTimer);
   }, [user, authLoading, router]);
 
   // 로딩 중이거나 권한이 없는 경우 화면을 렌더링하지 않음

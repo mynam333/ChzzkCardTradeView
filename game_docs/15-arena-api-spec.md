@@ -1152,14 +1152,22 @@ created_at
 - 소켓 연결 실패는 match result, rating delta, replay 조회 가능 여부에 영향을 주지 않는다.
 - 전투는 이미 확정된 서버 결과를 클라이언트가 재생하고, 이모트는 그 위에 표시되는 외형 레이어다.
 
-### POST `/api/admin/arena/cosmetics/emote-assets`
+### 관리자 치장 V2 API
 
-관리자가 아레나 이모트 상품용 이미지를 업로드한다.
+```text
+GET   /api/admin/arena/cosmetics
+POST  /api/admin/arena/cosmetics
+PATCH /api/admin/arena/cosmetics/{id}
+POST  /api/admin/arena/cosmetics/assets
+```
+
+관리자가 아레나 치장 카탈로그를 조회·등록·수정하고 이미지 기반 치장 에셋을 업로드한다. 기존 `POST /api/admin/arena/cosmetics/emote-assets`는 이전 클라이언트 호환용으로 유지한다.
 
 요청:
 
 ```text
 multipart/form-data
+type: emote | card_frame | name_flare | hit_vfx | summon_vfx | ready_stamp | nameplate | ko_text
 image: JPG/PNG/WebP/AVIF/GIF
 ```
 
@@ -1167,16 +1175,19 @@ image: JPG/PNG/WebP/AVIF/GIF
 
 ```json
 {
-  "ok": true,
+  "message": "아레나 치장 이미지가 업로드되었습니다.",
   "data": {
-    "image_url": "/uploads/arena-emotes/arena_emote_....gif",
+    "image_url": "/uploads/arena-cosmetics/arena_card_frame_....gif",
     "mime_type": "image/gif",
-    "animated": true
+    "width": 1024,
+    "height": 1024,
+    "animated": true,
+    "cosmetic_type": "card_frame"
   }
 }
 ```
 
-업로드된 URL은 `shop_items.style_json.image_url`에 연결한다. GIF는 움짤 보존을 위해 원본 파일을 저장한다.
+서버는 MIME 선언뿐 아니라 실제 이미지 메타데이터와 픽셀 상한을 검증한다. 업로드된 URL은 `shop_items.style_json.image_url`에 연결하며, GIF 등 애니메이션 파일은 원본을 보존한다.
 
 ## 14. 비동기 처리 기준
 

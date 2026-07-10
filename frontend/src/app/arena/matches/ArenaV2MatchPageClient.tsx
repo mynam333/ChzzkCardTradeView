@@ -8,11 +8,9 @@ import {
   Bot,
   Check,
   Clock3,
-  Crown,
   Eye,
   FileClock,
   Hand,
-  HeartPulse,
   Lock,
   Move,
   Play,
@@ -22,8 +20,6 @@ import {
   Send,
   Shield,
   Sparkles,
-  Swords,
-  Target,
   Trash2,
   Zap
 } from 'lucide-react';
@@ -31,6 +27,7 @@ import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
 import { useApp } from '../../AppContext';
 import { ArenaLayout } from '../../ArenaLayout';
+import { ArenaCard } from '../ArenaCard';
 import { ArenaEmotePieMenu } from '../ArenaEmotePieMenu';
 import type { ArenaSiteTab } from '../types';
 import styles from '../ArenaV2Experience.module.css';
@@ -233,64 +230,6 @@ const buildCombatCue = (
   return { event: combatEvent, attackerId, targetId, damage, targetSeatNo, cardCues: cues };
 };
 
-const classTone = (cardClass?: string) => {
-  if (cardClass === 'attack' || cardClass === 'charge') return 'coral';
-  if (cardClass === 'guard' || cardClass === 'guardian' || cardClass === 'support') return 'green';
-  if (cardClass === 'control' || cardClass === 'trick' || cardClass === 'specter' || cardClass === 'sniper') return 'violet';
-  return 'cyan';
-};
-
-const classLabel = (cardClass?: string) => {
-  if (cardClass === 'attack' || cardClass === 'charge') return '돌파';
-  if (cardClass === 'guard' || cardClass === 'guardian') return '수비';
-  if (cardClass === 'support') return '지원';
-  if (cardClass === 'sniper') return '조준';
-  if (cardClass === 'control' || cardClass === 'trick') return '기만';
-  if (cardClass === 'specter') return '망령';
-  if (cardClass === 'tempo') return '템포';
-  return '전투';
-};
-
-const classIcon = (cardClass?: string) => {
-  if (cardClass === 'attack' || cardClass === 'charge') return Swords;
-  if (cardClass === 'guard' || cardClass === 'guardian') return Shield;
-  if (cardClass === 'support') return Sparkles;
-  if (cardClass === 'sniper') return Target;
-  if (cardClass === 'control' || cardClass === 'trick') return Target;
-  if (cardClass === 'specter') return Crown;
-  if (cardClass === 'tempo') return Zap;
-  return Zap;
-};
-
-const keywordLabel = (type?: string) => {
-  if (!type || type === 'preview') return null;
-  const labels: Record<string, string> = {
-    taunt: '도발',
-    pierce: '관통',
-    shield: '보호',
-    aim: '조준',
-    snipe: '조준',
-    push: '밀치기',
-    pull: '끌기',
-    silence: '침묵',
-    stun: '기절',
-    weaken: '약화',
-    drain: '흡혈',
-    lifesteal: '흡혈',
-    counter: '반격',
-    revive: '부활',
-    vengeance: '원한',
-    grudge: '원한',
-    spirit: '원혼',
-    haunt: '원혼',
-    residue: '잔재',
-    remnant: '잔재',
-    graveyard_recover: '묘지 회수',
-    graveyardRecover: '묘지 회수'
-  };
-  return labels[type] || type;
-};
-
 const actionLabel = (action: ArenaV2TurnActionDto) => {
   if (action.type === 'place') return `배치 · ${positionLabel(action.to)}`;
   if (action.type === 'move') return `이동 · ${positionLabel(action.from)} → ${positionLabel(action.to)}`;
@@ -344,18 +283,9 @@ const MiniCard: React.FC<{
 }> = ({ instance, selected, pending, combatCue, onClick }) => {
   if (!instance) return <span className="arena-v2-empty-slot">빈 칸</span>;
   const card = instance.card;
-  const tone = classTone(card?.cardClass);
-  const role = classLabel(card?.cardClass);
-  const RoleIcon = classIcon(card?.cardClass);
   const name = card?.displayName || instance.cardVersionId;
-  const keywordTags = (card?.keywords || [])
-    .map((keyword: any) => keywordLabel(keyword?.type))
-    .filter(Boolean)
-    .slice(0, 2) as string[];
-  const primaryKeyword = keywordTags[0] || role;
   const remainingHealth = Math.max(0, Number(instance.currentHealth || 0) - Number(instance.damageTaken || 0));
   const damageTaken = Math.max(0, Number(instance.damageTaken || 0));
-  const tooltip = `${name}\n클래스: ${role}\n효과: ${(keywordTags.length ? keywordTags : ['특수 효과 없음']).join(', ')}${damageTaken > 0 ? `\n받은 피해: ${damageTaken}` : ''}\n공격력: ${instance.currentAttack}\n체력: ${remainingHealth}`;
   const combatClass = combatCue?.role === 'attacker'
     ? `is-combat-attacker ${combatCue.eventType === 'direct_attack' ? 'is-direct-strike' : 'is-line-strike'}`
     : combatCue?.role === 'target'
@@ -376,46 +306,28 @@ const MiniCard: React.FC<{
       } as React.CSSProperties
     : undefined;
   return (
-    <button
-      type="button"
-      className={`arena-v2-card arena-v2-accent-${tone} is-compact ${selected ? 'is-selected' : ''} ${pending ? 'is-pending' : ''} ${combatClass}`}
+    <ArenaCard
+      displayName={name}
+      cardClass={card?.cardClass}
+      cost={card?.cost ?? 0}
+      attack={instance.currentAttack}
+      health={remainingHealth}
+      keywords={card?.keywords || []}
+      artAssetId={card?.artAssetId}
+      selected={selected}
+      compact
+      pending={pending}
+      damageTaken={damageTaken}
+      className={combatClass}
       style={combatStyle}
-      onClick={(event) => {
+      onClick={onClick ? (event) => {
         event.stopPropagation();
-        onClick?.();
-      }}
-      aria-pressed={selected}
-      aria-label={`${name}, 비용 ${card?.cost ?? 0}, 공격 ${instance.currentAttack}, 체력 ${remainingHealth}`}
-      data-card-tooltip={combatCue ? undefined : tooltip}
-      data-combat-damage={combatCue?.role === 'target' && combatCue.damage ? `-${combatCue.damage}` : undefined}
-      data-combat-seq={combatCue?.seq}
-    >
-      <span className="arena-v2-card-cost" aria-label={`비용 ${card?.cost ?? 0}`}>{card?.cost ?? 0}</span>
-      <span className="arena-v2-card-role" title={`클래스: ${role}`} aria-label={`클래스 ${role}`}>
-        <RoleIcon className="h-4 w-4" />
-        <span>{role}</span>
-      </span>
-      <span className="arena-v2-card-art" aria-hidden="true">
-        <span className={`arena-v2-art-fallback arena-v2-accent-${tone}`}><span>{role}</span></span>
-        <span className="arena-v2-card-keywords">
-          {(keywordTags.length ? keywordTags : [role]).map((tag) => <span key={tag} title={`효과 키워드: ${tag}`}>{tag}</span>)}
-          {damageTaken > 0 ? <span className="is-damaged" title={`받은 피해 ${damageTaken}`}>피해 {damageTaken}</span> : null}
-        </span>
-      </span>
-      <span className="arena-v2-card-readable">
-        <span className="arena-v2-card-name">{name}</span>
-        <span className="arena-v2-card-brand" aria-hidden="true">CHIKAPO ARENA</span>
-        <span className="arena-v2-card-mini-meta" aria-hidden="true">
-          <span>{role}</span>
-          <span>{primaryKeyword}</span>
-          {damageTaken > 0 ? <span className="is-damaged">피해 {damageTaken}</span> : null}
-        </span>
-      </span>
-      <span className="arena-v2-card-stats">
-        <span className="is-atk"><Swords className="h-3.5 w-3.5" /><b>{instance.currentAttack}</b><em>공</em></span>
-        <span className="is-hp"><HeartPulse className="h-3.5 w-3.5" /><b>{remainingHealth}</b><em>체</em></span>
-      </span>
-    </button>
+        onClick();
+      } : undefined}
+      disableTooltip={Boolean(combatCue)}
+      combatDamage={combatCue?.role === 'target' ? combatCue.damage : undefined}
+      combatSequence={combatCue?.seq}
+    />
   );
 };
 

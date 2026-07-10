@@ -27,6 +27,7 @@ jobs:
       NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || vars.NEXT_PUBLIC_API_URL || 'https://api.yuaru.com/api' }}
       NEXT_PUBLIC_CHAT_WS_URL: ${{ secrets.NEXT_PUBLIC_CHAT_WS_URL || vars.NEXT_PUBLIC_CHAT_WS_URL || 'wss://api.yuaru.com/chat' }}
       NEXT_PUBLIC_ANALYTICS_ENABLED: ${{ secrets.NEXT_PUBLIC_ANALYTICS_ENABLED || vars.NEXT_PUBLIC_ANALYTICS_ENABLED || 'true' }}
+      NEXT_PUBLIC_ANALYTICS_ALLOW_LOCALHOST: 'false'
       NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS: ${{ secrets.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || vars.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '60000' }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
 
@@ -45,11 +46,11 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: pnpm install --no-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Check site insights build env
         run: |
-          node -e "console.log('[site-insights]', { analyticsEnabled: process.env.NEXT_PUBLIC_ANALYTICS_ENABLED || '', heartbeatMs: process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '' })"
+          node -e "console.log('[site-insights]', { analyticsEnabled: process.env.NEXT_PUBLIC_ANALYTICS_ENABLED || '', allowLocalhost: process.env.NEXT_PUBLIC_ANALYTICS_ALLOW_LOCALHOST || '', heartbeatMs: process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '' })"
 
       - name: Build frontend
         run: pnpm --filter frontend build

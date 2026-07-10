@@ -16,9 +16,9 @@ describe('accountInteractionRestriction service', () => {
     expect(parseAccountInteractionRestrictionMs('bad-value')).toBe(DEFAULT_ACCOUNT_INTERACTION_RESTRICTION_MS);
   });
 
-  it('timezone 없는 DB datetime 문자열은 UTC 기준으로 해석한다', () => {
-    expect(parseDeletedAccountTime('2026-06-10 12:00:00')).toBe(Date.parse('2026-06-10T12:00:00Z'));
-    expect(parseDeletedAccountTime('2026-06-10T12:00:00')).toBe(Date.parse('2026-06-10T12:00:00Z'));
+  it('timezone 없는 DB datetime 문자열은 서비스 기준 시간대인 KST로 해석한다', () => {
+    expect(parseDeletedAccountTime('2026-06-10 12:00:00')).toBe(Date.parse('2026-06-10T12:00:00+09:00'));
+    expect(parseDeletedAccountTime('2026-06-10T12:00:00')).toBe(Date.parse('2026-06-10T12:00:00+09:00'));
   });
 
   it('잘못된 탈퇴 시간은 제한을 만들지 않는다', () => {

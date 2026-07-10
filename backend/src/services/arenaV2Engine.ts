@@ -362,12 +362,53 @@ const comboSurcharge = (card: ArenaV2DeckCardVersion, keywords: ArenaV2KeywordDt
   if (card.cardClass === 'support' && has('revive')) surcharge += 6;
   if (card.cardClass === 'support' && hasGraveRecover) surcharge += 4;
   if (has('battle_draw') && hasGraveRecover) surcharge += 5;
-  if (hasGraveRecover && has('revive')) surcharge += 10;
   if (hasGraveRecover && has('grudge')) surcharge += 6;
   if (has('grudge') && card.cost <= 2) surcharge += 4;
 
   return surcharge;
 };
+
+export interface ArenaV2CardBudgetBreakdown {
+  budgetLimit: number | null;
+  attackCost: number;
+  healthCost: number;
+  statCost: number;
+  keywordItems: Array<{ type: string; value?: number; limit?: string; cost: number | null }>;
+  keywordCost: number;
+  comboCost: number;
+  totalCost: number;
+  remaining: number | null;
+  isOverBudget: boolean;
+}
+
+export function evaluateArenaV2CardBudget(card: ArenaV2DeckCardVersion): ArenaV2CardBudgetBreakdown {
+  const attackCost = Math.max(0, Number(card.attack) || 0) * 3;
+  const healthCost = Math.max(0, Number(card.health) || 0);
+  const keywords = Array.isArray(card.keywords) ? card.keywords : [];
+  const keywordItems = keywords.map((keyword) => ({
+    type: normalizeKeywordType(keyword.type),
+    ...(keywordValue(keyword) != null ? { value: keywordValue(keyword) } : {}),
+    ...(keywordLimit(keyword) ? { limit: keywordLimit(keyword) } : {}),
+    cost: keywordCost(keyword)
+  }));
+  const keywordCostTotal = keywordItems.reduce((sum, item) => sum + (item.cost || 0), 0);
+  const comboCost = comboSurcharge(card, keywords);
+  const totalCost = attackCost + healthCost + keywordCostTotal + comboCost;
+  const budgetLimit = ARENA_V2_CARD_BUDGET_BY_COST[Number(card.cost)] ?? null;
+  const remaining = budgetLimit == null ? null : budgetLimit - totalCost;
+  return {
+    budgetLimit,
+    attackCost,
+    healthCost,
+    statCost: attackCost + healthCost,
+    keywordItems,
+    keywordCost: keywordCostTotal,
+    comboCost,
+    totalCost,
+    remaining,
+    isOverBudget: remaining != null && remaining < 0
+  };
+}
 
 export function validateArenaV2CardVersionDefinition(card: ArenaV2DeckCardVersion): ArenaV2ValidationResultDto {
   const errors: ArenaV2ValidationIssueDto[] = [];
@@ -398,6 +439,10 @@ export function validateArenaV2CardVersionDefinition(card: ArenaV2DeckCardVersio
   if (keywords.length > 3) {
     errors.push(issue('ArenaV2CardTooManyKeywords', '카드는 최대 3개의 키워드만 가질 수 있습니다.'));
   }
+  const normalizedKeywordTypes = keywords.map((keyword) => normalizeKeywordType(keyword.type));
+  if (new Set(normalizedKeywordTypes).size !== normalizedKeywordTypes.length) {
+    errors.push(issue('ArenaV2CardDuplicateKeyword', '같은 키워드는 한 번만 선택할 수 있습니다.'));
+  }
 
   const statLimits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
   if (statLimits) {
@@ -409,13 +454,10 @@ export function validateArenaV2CardVersionDefinition(card: ArenaV2DeckCardVersio
     }
   }
 
-  let keywordCostTotal = 0;
   for (const keyword of keywords) {
     const costForKeyword = keywordCost(keyword);
     if (costForKeyword == null) {
       errors.push(issue('ArenaV2CardInvalidKeyword', `지원하지 않거나 파라미터가 잘못된 키워드가 포함되어 있습니다: ${String(keyword.type || '')}`));
-    } else {
-      keywordCostTotal += costForKeyword;
     }
   }
 
@@ -432,11 +474,8 @@ export function validateArenaV2CardVersionDefinition(card: ArenaV2DeckCardVersio
   if (hasGraveRecover && has('battle_draw')) errors.push(issue('ArenaV2CardForbiddenCombo', '묘지 회수와 전투 드로우 조합은 금지됩니다.'));
   if (keywordHasValue(keywords, 'direct_pressure', 2) && attack >= 6) errors.push(issue('ArenaV2CardForbiddenCombo', '직접 압박 2와 공격력 6 이상 조합은 금지됩니다.'));
 
-  const statCost = attack * 3 + health;
-  const comboCost = comboSurcharge(card, keywords);
-  const totalCost = statCost + keywordCostTotal + comboCost;
-  const budgetLimit = ARENA_V2_CARD_BUDGET_BY_COST[cost];
-  if (budgetLimit != null && totalCost > budgetLimit) {
+  const budget = evaluateArenaV2CardBudget(card);
+  if (budget.isOverBudget) {
     errors.push(issue('ArenaV2CardBudgetExceeded', '카드 총 비용이 코스트별 총 예산을 넘었습니다.'));
   }
 

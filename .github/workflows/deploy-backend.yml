@@ -46,7 +46,10 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: pnpm install --no-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Test backend
+        run: pnpm --filter backend test
 
       - name: Build backend
         run: pnpm --filter backend build

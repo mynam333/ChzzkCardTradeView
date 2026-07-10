@@ -2,14 +2,60 @@
  * 웹 푸시 알림 수신/표시 및 클릭 처리, 기본 설치/활성화 라이프사이클을 담당합니다.
  */
 
-// 설치 즉시 활성화 대기 없이 새 워커로 전환
-self.addEventListener('install', () => {
-  self.skipWaiting();
+const CACHE_NAME = 'chikapo-shell-v2';
+const CORE_ASSETS = ['/', '/manifest.json', '/icon.png'];
+
+// 설치 즉시 활성화 대기 없이 새 워커로 전환하고 최소 앱 셸을 준비합니다.
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(CORE_ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
 
 // 활성화 시 즉시 모든 클라이언트 제어권 확보
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    Promise.all([
+      caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+      self.clients.claim()
+    ])
+  );
+});
+
+// 탐색은 네트워크 우선, 정적 리소스는 stale-while-revalidate로 제공합니다.
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+          return response;
+        })
+        .catch(async () => (await caches.match(request)) || (await caches.match('/')) || Response.error())
+    );
+    return;
+  }
+
+  if (['style', 'script', 'image', 'font'].includes(request.destination)) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        const refreshed = fetch(request)
+          .then((response) => {
+            if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+            return response;
+          })
+          .catch(() => cached || Response.error());
+        return cached || refreshed;
+      })
+    );
+  }
 });
 
 // 웹 푸시 수신: 백엔드(web-push)가 보낸 { title, body, url } 페이로드를 알림으로 표시

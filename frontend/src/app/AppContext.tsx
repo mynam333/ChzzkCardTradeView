@@ -593,7 +593,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     return Array.from(topics).join(',');
   }, [pathname]);
 
-  const setActiveTab = (tab: TabId) => {
+  const setActiveTab = React.useCallback((tab: TabId) => {
     const route = tab === 'main' ? '/' : `/${tab}`;
     trackFeatureEvent('chikapo_navigation_select', {
       from_tab: activeTab,
@@ -601,7 +601,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       surface: typeof window !== 'undefined' && window.innerWidth < 768 ? 'mobile' : 'desktop'
     }, userRef.current);
     router.push(route);
-  };
+  }, [activeTab, router]);
 
   const [user, setUser] = useState<AppContextType['user']>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
@@ -729,7 +729,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     onClose: () => {}
   });
 
-  const checkMaintenanceStatus = async () => {
+  const checkMaintenanceStatus = React.useCallback(async () => {
     try {
       const res = await apiFetchWithTimeout('/maintenance/status');
       if (res.ok) {
@@ -738,17 +738,13 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
         setMaintenanceStartAt(data.startAt || null);
         setMaintenanceEndAt(data.endAt || null);
       } else {
-        if (maintenanceActive === null) {
-          setMaintenanceActive(false);
-        }
+        setMaintenanceActive((current) => current === null ? false : current);
       }
     } catch (err) {
       console.warn('[AppContext] 점검 상태 조회 실패:', err);
-      if (maintenanceActive === null) {
-        setMaintenanceActive(false);
-      }
+      setMaintenanceActive((current) => current === null ? false : current);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
@@ -809,7 +805,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       if (document.visibilityState === 'visible') checkMaintenanceStatus();
     }, fallbackMs);
     return () => clearInterval(timer);
-  }, []);
+  }, [checkMaintenanceStatus]);
 
   useEffect(() => {
     if (authLoading || maintenanceActive === null) return;
@@ -833,6 +829,47 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   }, [maintenanceActive, user, authLoading, pathname, router]);
 
   const askedPushRef = useRef(false);
+
+  const refreshUserData = React.useCallback(async (showLoading = false) => {
+    if (showLoading || !userRef.current) {
+      setAuthLoading(true);
+    }
+    try {
+      const response = await apiFetchWithTimeout('/users/me');
+      if (response.ok) {
+        const data = await response.json();
+        setAuthFlag();
+        setUser({
+          id: data.id,
+          username: data.username,
+          avatarUrl: data.avatarUrl,
+          role: data.role,
+          statusMessage: data.statusMessage ?? null,
+          titles: data.titles || [],
+          ownedTitles: data.ownedTitles || data.titles || [],
+          point: data.point,
+          lastFreeDraw: data.lastFreeDraw,
+          freeDrawTickets: data.freeDrawTickets ?? 0,
+          bonusFreeDrawTickets: data.bonusFreeDrawTickets ?? 0,
+          freeDrawMaxStack: data.freeDrawMaxStack ?? 1,
+          representativeCardChannelId: data.representativeCardChannelId ?? null,
+          representativeCardStar: data.representativeCardStar ?? null,
+          drawCost: data.drawCost ?? 10000,
+          freeDrawInterval: data.freeDrawInterval ?? 24,
+          isFreeDrawEligible: !!data.isFreeDrawEligible,
+          nextFreeDrawAt: data.nextFreeDrawAt ?? null,
+          interactionRestrictedUntil: data.interactionRestrictedUntil ?? null
+        });
+      } else if (response.status === 401) {
+        clearAuthFlag();
+        setUser(null);
+      }
+    } catch (e) {
+      console.warn('[AppContext] 유저 세션 갱신 실패:', e);
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     askedPushRef.current = false;
@@ -871,7 +908,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
       window.removeEventListener('chikapo-user-banned', handleBanned);
       window.removeEventListener('chikapo-maintenance-triggered', handleMaintenance);
     };
-  }, [router]);
+  }, [refreshUserData, router]);
 
   useEffect(() => {
     if (!user || askedPushRef.current || !isPushSupported() || Notification.permission === 'denied') return;
@@ -894,7 +931,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     };
   }, [user?.id]);
 
-  const logout = () => {
+  const logout = React.useCallback(() => {
     trackFeatureEvent('chikapo_logout', {
       source_tab: activeTab
     }, userRef.current);
@@ -903,55 +940,14 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     setUser(null);
     setActiveTab('main');
     toast('로그아웃되었습니다.', 'info');
-  };
+  }, [activeTab, setActiveTab, toast]);
 
-  const refreshUserData = async (showLoading = false) => {
-    if (showLoading || !user) {
-      setAuthLoading(true);
-    }
-    try {
-      const response = await apiFetchWithTimeout('/users/me');
-      if (response.ok) {
-        const data = await response.json();
-        setAuthFlag();
-        setUser({
-          id: data.id,
-          username: data.username,
-          avatarUrl: data.avatarUrl,
-          role: data.role,
-          statusMessage: data.statusMessage ?? null,
-          titles: data.titles || [],
-          ownedTitles: data.ownedTitles || data.titles || [],
-          point: data.point,
-          lastFreeDraw: data.lastFreeDraw,
-          freeDrawTickets: data.freeDrawTickets ?? 0,
-          bonusFreeDrawTickets: data.bonusFreeDrawTickets ?? 0,
-          freeDrawMaxStack: data.freeDrawMaxStack ?? 1,
-          representativeCardChannelId: data.representativeCardChannelId ?? null,
-          representativeCardStar: data.representativeCardStar ?? null,
-          drawCost: data.drawCost ?? 10000,
-          freeDrawInterval: data.freeDrawInterval ?? 24,
-          isFreeDrawEligible: !!data.isFreeDrawEligible,
-          nextFreeDrawAt: data.nextFreeDrawAt ?? null,
-          interactionRestrictedUntil: data.interactionRestrictedUntil ?? null
-        });
-      } else if (response.status === 401) {
-        clearAuthFlag();
-        setUser(null);
-      }
-    } catch (e) {
-      console.warn('[AppContext] 유저 세션 갱신 실패:', e);
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const updatePoints = async (diff: number) => {
+  const updatePoints = React.useCallback(async (diff: number) => {
     setUser((prev) => prev
       ? { ...prev, point: Math.max(0, prev.point + diff) }
       : prev
     );
-  };
+  }, []);
 
   const refreshImageBlinds = React.useCallback(async () => {
     if (!isAuthed()) {
@@ -1071,30 +1067,53 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     authLoading ||
     isMaintenanceBlocked;
 
+  const appContextValue = React.useMemo<AppContextType>(() => ({
+    theme,
+    toggleTheme,
+    activeTab,
+    setActiveTab,
+    user,
+    authLoading,
+    setUser,
+    logout,
+    refreshUserData,
+    updatePoints,
+    toast,
+    imageBlindKeys,
+    imageBlindItems,
+    isImageBlinded,
+    blindImage,
+    unblindImage,
+    refreshImageBlinds,
+    maintenanceActive,
+    maintenanceStartAt,
+    maintenanceEndAt,
+    checkMaintenanceStatus
+  }), [
+    activeTab,
+    authLoading,
+    blindImage,
+    checkMaintenanceStatus,
+    imageBlindItems,
+    imageBlindKeys,
+    isImageBlinded,
+    logout,
+    maintenanceActive,
+    maintenanceEndAt,
+    maintenanceStartAt,
+    refreshImageBlinds,
+    refreshUserData,
+    setActiveTab,
+    theme,
+    toast,
+    toggleTheme,
+    unblindImage,
+    updatePoints,
+    user
+  ]);
+
   return (
-    <AppContext.Provider value={{
-      theme,
-      toggleTheme,
-      activeTab,
-      setActiveTab,
-      user,
-      authLoading,
-      setUser,
-      logout,
-      refreshUserData,
-      updatePoints,
-      toast,
-      imageBlindKeys,
-      imageBlindItems,
-      isImageBlinded,
-      blindImage,
-      unblindImage,
-      refreshImageBlinds,
-      maintenanceActive,
-      maintenanceStartAt,
-      maintenanceEndAt,
-      checkMaintenanceStatus
-    }}>
+    <AppContext.Provider value={appContextValue}>
       <NotificationProvider user={user} setActiveTab={setActiveTab}>
         <EasterEggProvider toast={toast}>
           {isInitializing ? (

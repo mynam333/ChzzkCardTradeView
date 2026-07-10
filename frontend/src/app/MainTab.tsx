@@ -2,15 +2,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import dynamic from 'next/dynamic';
 import { useApp } from './AppContext';
 import { Megaphone, RefreshCw, Flame, Award, ExternalLink, HelpCircle, ShieldAlert, Plus, Pin, ChevronRight, Users, Layers, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import type { Announcement } from '@/lib/types';
 import { formatAnnouncementDate, getAnnouncementPreview } from '@/lib/announcement';
 import { streamerProfileImage } from '@/lib/cosmetics';
-import { StreamerRegisterModal } from './StreamerRegisterModal';
-import { AnnouncementBoardModal } from './AnnouncementBoardModal';
-import { DraggableAnnouncementPopups } from './DraggableAnnouncementPopups';
+
+const StreamerRegisterModal = dynamic(
+  () => import('./StreamerRegisterModal').then((module) => module.StreamerRegisterModal),
+  { ssr: false }
+);
+const AnnouncementBoardModal = dynamic(
+  () => import('./AnnouncementBoardModal').then((module) => module.AnnouncementBoardModal),
+  { ssr: false }
+);
+const DraggableAnnouncementPopups = dynamic(
+  () => import('./DraggableAnnouncementPopups').then((module) => module.DraggableAnnouncementPopups),
+  { ssr: false }
+);
 
 const POPUP_DISMISSED_FOREVER = 'forever';
 
@@ -68,14 +79,15 @@ export const MainTab: React.FC = () => {
       // 게시판 목록 (전체 공지)
       const res = await apiFetch('/announcements');
       if (res.ok) {
-        const allNotices: Announcement[] = await res.json();
-        setNotices(allNotices);
+        const payload: unknown = await res.json();
+        setNotices(Array.isArray(payload) ? payload as Announcement[] : []);
       }
 
       // 팝업은 만료(popup_expires_at)가 반영된 전용 엔드포인트에서 활성 팝업만 가져옴
       const popupRes = await apiFetch('/announcements/popups');
       if (popupRes.ok) {
-        const popups: Announcement[] = await popupRes.json();
+        const payload: unknown = await popupRes.json();
+        const popups = Array.isArray(payload) ? payload as Announcement[] : [];
         const visiblePopups = popups.filter(
           (popup) => localStorage.getItem(`popup_dismissed_${popup.id}`) !== POPUP_DISMISSED_FOREVER
         );
@@ -93,8 +105,8 @@ export const MainTab: React.FC = () => {
     try {
       const res = await apiFetch('/streamers/ranking?mode=value&limit=3', { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
       if (res.ok) {
-        const data = await res.json();
-        setHotStreamers(data);
+        const data: unknown = await res.json();
+        setHotStreamers(Array.isArray(data) ? data : []);
       }
     } catch (e) {
       console.error('핫 스트리머 목록 로드 에러:', e);
@@ -106,7 +118,8 @@ export const MainTab: React.FC = () => {
     try {
       const res = await apiFetch('/public/stats');
       if (res.ok) {
-        setLandingStats(await res.json());
+        const data: unknown = await res.json();
+        if (data && typeof data === 'object' && !Array.isArray(data)) setLandingStats(data as LandingStats);
       }
     } catch (e) {
       console.error('랜딩 통계 로드 에러:', e);

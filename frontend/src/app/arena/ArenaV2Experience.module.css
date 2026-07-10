@@ -750,331 +750,6 @@
 }
 
 /* Arena card */
-.arenaV2Scope :global(.arena-v2-card) {
-  --arena-v2-card-accent: var(--arena-cyan);
-  position: relative;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
-  aspect-ratio: 3 / 4;
-  border: 1px solid color-mix(in srgb, var(--arena-v2-card-accent) 28%, var(--arena-line));
-  border-radius: 16px;
-  background: var(--arena-surface);
-  color: var(--arena-text);
-  box-shadow: 0 8px 20px rgb(23 32 51 / 0.08);
-  cursor: pointer;
-  text-align: left;
-  transform-origin: 50% 82%;
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-}
-
-.arenaV2Scope :global(.arena-v2-card:hover) {
-  border-color: var(--arena-v2-card-accent);
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--arena-v2-card-accent) 16%, transparent);
-  transform: translateY(-3px);
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-selected) {
-  border-color: var(--arena-coral);
-  box-shadow: 0 0 0 2px var(--arena-coral), 0 14px 28px rgb(242 70 97 / 0.16);
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-pending) {
-  opacity: 0.72;
-}
-
-.arenaV2Scope :global(.arena-v2-card-cost) {
-  position: absolute;
-  z-index: 5;
-  top: 7px;
-  left: 7px;
-  display: grid;
-  width: 30px;
-  height: 30px;
-  border: 2px solid white;
-  border-radius: 999px;
-  background: var(--arena-coral);
-  color: white;
-  box-shadow: 0 5px 14px rgb(23 32 51 / 0.18);
-  font-size: 0.88rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 950;
-  place-items: center;
-}
-
-.arenaV2Scope :global(.arena-v2-card-role) {
-  position: absolute;
-  z-index: 4;
-  top: 9px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: calc(100% - 52px);
-  min-height: 24px;
-  padding: 0 8px;
-  border: 1px solid rgb(255 255 255 / 0.65);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--arena-v2-card-accent) 82%, #172033);
-  color: white;
-  box-shadow: 0 4px 12px rgb(23 32 51 / 0.14);
-  font-size: 0.62rem;
-  font-weight: 900;
-}
-
-.arenaV2Scope :global(.arena-v2-card-role svg) {
-  width: 12px;
-  height: 12px;
-}
-
-.arenaV2Scope :global(.arena-v2-card-role span) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arenaV2Scope :global(.arena-v2-card-art) {
-  position: relative;
-  display: block;
-  min-height: 0;
-  overflow: hidden;
-  border-bottom: 1px solid var(--arena-line);
-  background: var(--arena-surface-soft);
-}
-
-.arenaV2Scope :global(.arena-v2-card-art > img),
-.arenaV2Scope :global(.arena-v2-card-art > .arena-v2-art-fallback) {
-  position: absolute;
-  inset: 0;
-}
-
-.arenaV2Scope :global(.arena-v2-card-art::after) {
-  position: absolute;
-  inset: auto 0 0;
-  height: 38%;
-  background: linear-gradient(transparent, rgb(11 18 31 / 0.62));
-  content: "";
-  pointer-events: none;
-}
-
-.arenaV2Scope :global(.arena-v2-art-fallback) {
-  display: grid;
-  background:
-    radial-gradient(circle at 62% 30%, color-mix(in srgb, var(--arena-v2-card-accent) 48%, white), transparent 26%),
-    linear-gradient(145deg, color-mix(in srgb, var(--arena-v2-card-accent) 70%, #0f172a), #172033 70%);
-  color: white;
-  place-items: center;
-}
-
-.arenaV2Scope :global(.arena-v2-art-fallback span) {
-  display: grid;
-  width: 48%;
-  aspect-ratio: 1;
-  border: 1px solid rgb(255 255 255 / 0.5);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.16);
-  font-size: clamp(1.2rem, 3vw, 2.4rem);
-  font-weight: 950;
-  place-items: center;
-  text-shadow: 0 3px 12px rgb(0 0 0 / 0.24);
-}
-
-.arenaV2Scope :global(.arena-v2-card-keywords) {
-  position: absolute;
-  z-index: 3;
-  right: 7px;
-  bottom: 7px;
-  left: 7px;
-  display: flex;
-  gap: 4px;
-  overflow: hidden;
-}
-
-.arenaV2Scope :global(.arena-v2-card-keywords span) {
-  overflow: hidden;
-  padding: 3px 6px;
-  border: 1px solid rgb(255 255 255 / 0.28);
-  border-radius: 6px;
-  background: rgb(17 24 39 / 0.72);
-  color: white;
-  font-size: 0.58rem;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arenaV2Scope :global(.arena-v2-card-keywords .is-damaged),
-.arenaV2Scope :global(.arena-v2-card-mini-meta .is-damaged) {
-  color: #ffd5db;
-}
-
-.arenaV2Scope :global(.arena-v2-card-readable) {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  padding: 9px 38px 12px;
-  background: var(--arena-surface);
-  text-align: center;
-}
-
-.arenaV2Scope :global(.arena-v2-card-name) {
-  overflow: hidden;
-  color: var(--arena-text);
-  font-size: 0.84rem;
-  font-weight: 950;
-  letter-spacing: -0.025em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arenaV2Scope :global(.arena-v2-card-brand) {
-  overflow: hidden;
-  color: var(--arena-muted);
-  font-size: 0.48rem;
-  font-weight: 850;
-  letter-spacing: 0.12em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arenaV2Scope :global(.arena-v2-card-mini-meta) {
-  display: none;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats) {
-  position: absolute;
-  z-index: 5;
-  right: 7px;
-  bottom: 7px;
-  left: 7px;
-  display: flex;
-  justify-content: space-between;
-  pointer-events: none;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats > span) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 29px;
-  height: 29px;
-  padding: 0 7px;
-  border: 2px solid white;
-  border-radius: 999px;
-  color: white;
-  box-shadow: 0 4px 12px rgb(23 32 51 / 0.2);
-  font-size: 0.75rem;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats .is-atk) {
-  background: var(--arena-coral);
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats .is-hp) {
-  background: #2878ce;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats svg) {
-  width: 11px;
-  height: 11px;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats b) {
-  font-variant-numeric: tabular-nums;
-  font-weight: 950;
-}
-
-.arenaV2Scope :global(.arena-v2-card-stats em) {
-  display: none;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact) {
-  width: 100%;
-  min-width: 0;
-  min-height: 96px;
-  aspect-ratio: auto;
-  border-radius: 12px;
-  pointer-events: auto;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-cost) {
-  top: 4px;
-  left: 4px;
-  width: 25px;
-  height: 25px;
-  font-size: 0.72rem;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-role) {
-  top: 5px;
-  right: 5px;
-  min-height: 20px;
-  padding-inline: 6px;
-  font-size: 0.53rem;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-readable) {
-  padding: 6px 31px 8px;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-name) {
-  font-size: 0.68rem;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-brand) {
-  display: none;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-keywords span:nth-child(n+2)) {
-  display: none;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats) {
-  right: 4px;
-  bottom: 4px;
-  left: 4px;
-}
-
-.arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-stats > span) {
-  min-width: 23px;
-  height: 23px;
-  padding-inline: 5px;
-  font-size: 0.64rem;
-}
-
-.arenaV2Scope :global(.arena-v2-card[data-card-tooltip]::after) {
-  position: absolute;
-  z-index: 20;
-  right: 5%;
-  bottom: calc(100% + 8px);
-  left: 5%;
-  padding: 8px 9px;
-  border: 1px solid var(--arena-line);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--arena-text) 94%, transparent);
-  color: var(--arena-surface);
-  box-shadow: var(--arena-shadow-sm);
-  content: attr(data-card-tooltip);
-  font-size: 0.66rem;
-  line-height: 1.45;
-  opacity: 0;
-  pointer-events: none;
-  text-align: left;
-  transform: translateY(4px);
-  transition: opacity 150ms ease, transform 150ms ease;
-  white-space: pre-line;
-}
-
-.arenaV2Scope :global(.arena-v2-card[data-card-tooltip]:hover::after),
-.arenaV2Scope :global(.arena-v2-card[data-card-tooltip]:focus-visible::after) {
-  opacity: 1;
-  transform: translateY(0);
-}
-
 /* Inventory */
 .arenaV2Scope:global(.is-inventory) :global(.arena-v2-stage),
 .arenaV2Scope:global(.is-style) :global(.arena-v2-stage),
@@ -1786,6 +1461,28 @@
 }
 
 .arenaV2Scope :global(.arena-v2-cosmetic-preview.is-compact > *) { transform: scale(0.34); }
+.arenaV2Scope :global(.arena-v2-cosmetic-asset-image) {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  transform: none !important;
+}
+.arenaV2Scope :global(.arena-v2-cosmetic-asset-image::after) {
+  position: absolute;
+  content: '';
+  inset: 0;
+  background: linear-gradient(180deg, transparent 48%, color-mix(in srgb, var(--arena-surface) 74%, transparent));
+}
+.arenaV2Scope :global(.arena-v2-cosmetic-asset-image img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.arenaV2Scope :global(.arena-v2-cosmetic-preview > :not(.arena-v2-cosmetic-asset-image)) {
+  position: relative;
+  z-index: 1;
+}
 
 .arenaV2Scope :global(.arena-v2-store-card-body) {
   display: grid;
@@ -1908,10 +1605,363 @@
 .arenaV2Scope :global(.arena-v2-cosmetic-nameplate-demo b) { color: var(--ac-c, #facc15); font-size: 0.7rem; }
 
 /* My card and admin */
-.arenaV2Scope:global(.is-my-card) :global(.arena-v2-stage) {
-  grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
-  align-items: start;
+.arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-topbar .arena-v2-primary-button),
+.arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-save-button) {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--arena-coral), #fb6f82);
+  color: white;
+  box-shadow: 0 12px 24px rgb(242 70 97 / 0.2);
 }
+
+.arenaV2Scope :global(.arena-v2-card-edit-status) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--arena-green) 24%, var(--arena-line));
+  border-radius: 11px;
+  background: var(--arena-green-soft);
+  color: var(--arena-green);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.arenaV2Scope :global(.arena-v2-card-edit-status.is-closed) {
+  border-color: color-mix(in srgb, var(--arena-muted) 24%, var(--arena-line));
+  background: var(--arena-surface-soft);
+  color: var(--arena-muted);
+}
+
+.arenaV2Scope :global(.arena-v2-card-edit-status svg) { width: 15px; height: 15px; }
+
+.arenaV2Scope :global(.arena-v2-card-access-empty) {
+  display: grid;
+  min-height: 360px;
+  padding: 48px 24px;
+  border: 1px dashed color-mix(in srgb, var(--arena-coral) 28%, var(--arena-line));
+  border-radius: var(--arena-radius-md);
+  background: color-mix(in srgb, var(--arena-coral-soft) 56%, var(--arena-surface));
+  color: var(--arena-muted);
+  text-align: center;
+  place-content: center;
+}
+
+.arenaV2Scope :global(.arena-v2-card-access-empty svg) { width: 32px; height: 32px; margin: 0 auto 12px; color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-access-empty strong) { color: var(--arena-text); font-size: 1rem; }
+.arenaV2Scope :global(.arena-v2-card-access-empty span) { margin-top: 5px; font-size: 0.78rem; }
+
+.arenaV2Scope :global(.arena-v2-card-studio) {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(470px, 1.5fr) minmax(220px, 0.62fr);
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.arenaV2Scope:global(.is-my-card) {
+  container-type: inline-size;
+}
+
+.arenaV2Scope :global(.arena-v2-card-preview-panel),
+.arenaV2Scope :global(.arena-v2-card-editor-panel),
+.arenaV2Scope :global(.arena-v2-card-budget-panel) {
+  min-width: 0;
+  border: 1px solid var(--arena-line);
+  border-radius: var(--arena-radius-md);
+  background: var(--arena-surface);
+  box-shadow: var(--arena-shadow-sm);
+}
+
+.arenaV2Scope :global(.arena-v2-card-preview-panel) {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.arenaV2Scope :global(.arena-v2-card-panel-heading),
+.arenaV2Scope :global(.arena-v2-card-section-heading),
+.arenaV2Scope :global(.arena-v2-card-budget-panel > header) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.arenaV2Scope :global(.arena-v2-card-panel-heading > div),
+.arenaV2Scope :global(.arena-v2-card-section-heading > div) { display: grid; gap: 2px; }
+.arenaV2Scope :global(.arena-v2-card-panel-heading strong),
+.arenaV2Scope :global(.arena-v2-card-section-heading strong),
+.arenaV2Scope :global(.arena-v2-card-budget-panel > header strong) { color: var(--arena-text); font-size: 0.82rem; font-weight: 950; }
+.arenaV2Scope :global(.arena-v2-card-panel-heading span),
+.arenaV2Scope :global(.arena-v2-card-section-heading span) { color: var(--arena-muted); font-size: 0.68rem; }
+
+.arenaV2Scope :global(.arena-v2-card-panel-heading > span) {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--arena-green-soft);
+  color: var(--arena-green);
+  font-size: 0.63rem;
+  font-weight: 900;
+}
+
+.arenaV2Scope :global(.arena-v2-card-panel-heading > span.is-inactive) { background: var(--arena-surface-soft); color: var(--arena-muted); }
+
+.arenaV2Scope :global(.arena-v2-card-preview-stage) {
+  display: grid;
+  width: min(100%, 280px);
+  margin-inline: auto;
+  place-items: center;
+}
+
+.arenaV2Scope :global(.arena-v2-card-preview-stage .arena-v2-card-shell) {
+  cursor: default;
+  box-shadow: 0 18px 38px rgb(94 39 55 / 0.13);
+}
+
+.arenaV2Scope :global(.arena-v2-card-preview-stage .arena-v2-card:hover .arena-v2-card-shell) { transform: none; }
+
+.arenaV2Scope :global(.arena-v2-card-preview-empty) {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 20px;
+  border: 1px dashed var(--arena-line-strong);
+  border-radius: 16px;
+  background: var(--arena-surface-soft);
+  color: var(--arena-muted);
+  text-align: center;
+  place-content: center;
+}
+
+.arenaV2Scope :global(.arena-v2-card-preview-empty svg) { width: 28px; height: 28px; margin: 0 auto 10px; color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-preview-empty span) { font-size: 0.72rem; }
+
+.arenaV2Scope :global(.arena-v2-card-activation) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--arena-green) 18%, var(--arena-line));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--arena-green-soft) 70%, var(--arena-surface));
+}
+
+.arenaV2Scope :global(.arena-v2-card-activation > div) { display: grid; min-width: 0; gap: 2px; }
+.arenaV2Scope :global(.arena-v2-card-activation strong) { color: var(--arena-text); font-size: 0.72rem; }
+.arenaV2Scope :global(.arena-v2-card-activation span) { color: var(--arena-muted); font-size: 0.6rem; }
+
+.arenaV2Scope :global(.arena-v2-card-activation > button) {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 66px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--arena-line-strong);
+  border-radius: 999px;
+  background: var(--arena-surface);
+  color: var(--arena-muted);
+  font-size: 0.62rem;
+}
+
+.arenaV2Scope :global(.arena-v2-card-activation > button > span) {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--arena-line-strong);
+  box-shadow: var(--arena-shadow-xs);
+}
+
+.arenaV2Scope :global(.arena-v2-card-activation > button.is-on) { border-color: var(--arena-green); background: var(--arena-green); color: white; }
+.arenaV2Scope :global(.arena-v2-card-activation > button.is-on > span) { background: white; }
+
+.arenaV2Scope :global(.arena-v2-card-editor-panel) { overflow: hidden; }
+.arenaV2Scope :global(.arena-v2-card-editor-section) { display: grid; gap: 14px; padding: 18px; border-bottom: 1px solid var(--arena-line); }
+
+.arenaV2Scope :global(.arena-v2-card-field) { display: grid; min-width: 0; gap: 6px; }
+.arenaV2Scope :global(.arena-v2-card-field > span),
+.arenaV2Scope :global(.arena-v2-card-keyword-row label > span),
+.arenaV2Scope :global(.arena-v2-card-field-heading) { color: var(--arena-text); font-size: 0.7rem; font-weight: 900; }
+.arenaV2Scope :global(.arena-v2-card-field > span) { display: flex; justify-content: space-between; }
+.arenaV2Scope :global(.arena-v2-card-field small) { color: var(--arena-muted); font-size: 0.62rem; font-weight: 750; }
+
+.arenaV2Scope :global(.arena-v2-card-field input),
+.arenaV2Scope :global(.arena-v2-card-field select),
+.arenaV2Scope :global(.arena-v2-card-keyword-row select) {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--arena-line-strong);
+  border-radius: 11px;
+  background: var(--arena-surface);
+  color: var(--arena-text);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.arenaV2Scope :global(.arena-v2-card-field input:focus),
+.arenaV2Scope :global(.arena-v2-card-field select:focus),
+.arenaV2Scope :global(.arena-v2-card-keyword-row select:focus) { border-color: var(--arena-coral); }
+
+.arenaV2Scope :global(.arena-v2-card-class-row) {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.52fr) minmax(0, 1.48fr);
+  align-items: end;
+  gap: 10px;
+}
+
+.arenaV2Scope :global(.arena-v2-card-class-explainer) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  min-height: 68px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--arena-coral) 16%, var(--arena-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--arena-coral-soft) 58%, var(--arena-surface));
+}
+
+.arenaV2Scope :global(.arena-v2-card-class-explainer > svg) { width: 20px; height: 20px; margin-top: 2px; color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-class-explainer > div) { display: grid; gap: 3px; }
+.arenaV2Scope :global(.arena-v2-card-class-explainer strong) { color: var(--arena-text); font-size: 0.7rem; }
+.arenaV2Scope :global(.arena-v2-card-class-explainer span) { color: var(--arena-muted); font-size: 0.63rem; line-height: 1.5; }
+
+.arenaV2Scope :global(.arena-v2-card-budget-cap) {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--arena-cyan-soft);
+  color: var(--arena-cyan-deep) !important;
+  font-weight: 900;
+}
+
+.arenaV2Scope :global(.arena-v2-card-cost-picker) {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.arenaV2Scope :global(.arena-v2-card-cost-picker button) {
+  display: grid;
+  min-width: 0;
+  min-height: 52px;
+  padding: 5px 2px;
+  border: 1px solid var(--arena-line-strong);
+  border-radius: 10px;
+  background: var(--arena-surface);
+  color: var(--arena-text);
+  place-content: center;
+}
+
+.arenaV2Scope :global(.arena-v2-card-cost-picker button b) { font-size: 0.82rem; }
+.arenaV2Scope :global(.arena-v2-card-cost-picker button span) { color: var(--arena-muted); font-size: 0.48rem; }
+.arenaV2Scope :global(.arena-v2-card-cost-picker button.is-selected) { border-color: var(--arena-coral); background: var(--arena-coral); color: white; box-shadow: 0 8px 18px rgb(242 70 97 / 0.2); }
+.arenaV2Scope :global(.arena-v2-card-cost-picker button.is-selected span) { color: rgb(255 255 255 / 0.84); }
+
+.arenaV2Scope :global(.arena-v2-card-cost-help) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--arena-surface-cyan);
+  color: var(--arena-cyan-deep);
+  font-size: 0.64rem;
+  font-weight: 750;
+}
+
+.arenaV2Scope :global(.arena-v2-card-cost-help svg) { flex: 0 0 auto; width: 15px; height: 15px; }
+
+.arenaV2Scope :global(.arena-v2-card-stat-grid) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.arenaV2Scope :global(.arena-v2-card-stat-editor) { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--arena-line); border-radius: 12px; background: var(--arena-surface-soft); }
+.arenaV2Scope :global(.arena-v2-card-stat-editor.is-invalid) { border-color: var(--arena-danger); background: var(--arena-coral-soft); }
+.arenaV2Scope :global(.arena-v2-card-field-heading) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.arenaV2Scope :global(.arena-v2-card-field-heading > span) { display: inline-flex; align-items: center; gap: 6px; }
+.arenaV2Scope :global(.arena-v2-card-field-heading svg) { width: 15px; height: 15px; color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-field-heading small) { color: var(--arena-muted); font-size: 0.58rem; }
+
+.arenaV2Scope :global(.arena-v2-card-stepper) { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; min-height: 42px; overflow: hidden; border: 1px solid var(--arena-line-strong); border-radius: 10px; background: var(--arena-surface); }
+.arenaV2Scope :global(.arena-v2-card-stepper button) { display: grid; height: 100%; border: 0; background: transparent; color: var(--arena-text); place-items: center; }
+.arenaV2Scope :global(.arena-v2-card-stepper button:first-child) { border-right: 1px solid var(--arena-line); }
+.arenaV2Scope :global(.arena-v2-card-stepper button:last-child) { border-left: 1px solid var(--arena-line); }
+.arenaV2Scope :global(.arena-v2-card-stepper button:hover:not(:disabled)) { background: var(--arena-coral-soft); color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-stepper svg) { width: 15px; height: 15px; }
+.arenaV2Scope :global(.arena-v2-card-stepper strong) { color: var(--arena-text); font-size: 1rem; text-align: center; }
+.arenaV2Scope :global(.arena-v2-card-stat-foot) { display: flex; justify-content: space-between; color: var(--arena-muted); font-size: 0.6rem; }
+.arenaV2Scope :global(.arena-v2-card-stat-foot b) { color: var(--arena-coral); }
+
+.arenaV2Scope :global(.arena-v2-card-keyword-editor) { display: grid; gap: 8px; }
+.arenaV2Scope :global(.arena-v2-card-keyword-row) {
+  display: grid;
+  grid-template-columns: 28px minmax(150px, 1fr) minmax(130px, 0.76fr) 36px;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--arena-line);
+  border-radius: 12px;
+  background: var(--arena-surface-soft);
+}
+
+.arenaV2Scope :global(.arena-v2-card-keyword-index) { display: grid; grid-column: 1; grid-row: 1; width: 28px; height: 28px; margin-bottom: 8px; border: 1px solid var(--arena-line-strong); border-radius: 8px; background: var(--arena-surface); color: var(--arena-muted); font-size: 0.65rem; font-weight: 900; place-items: center; }
+.arenaV2Scope :global(.arena-v2-card-keyword-row label) { display: grid; min-width: 0; gap: 5px; }
+.arenaV2Scope :global(.arena-v2-card-keyword-row label > span) { font-size: 0.58rem; }
+.arenaV2Scope :global(.arena-v2-card-keyword-select) { grid-column: 2; grid-row: 1; }
+.arenaV2Scope :global(.arena-v2-card-keyword-variant) { grid-column: 3; grid-row: 1; }
+.arenaV2Scope :global(.arena-v2-card-keyword-description) { display: grid; grid-column: 2 / 4; grid-row: 2; grid-template-columns: 1fr auto; align-items: center; gap: 8px; min-height: 44px; padding: 7px 10px; border: 1px solid var(--arena-line); border-radius: 10px; background: var(--arena-surface); }
+.arenaV2Scope :global(.arena-v2-card-keyword-description span) { color: var(--arena-muted); font-size: 0.59rem; line-height: 1.4; }
+.arenaV2Scope :global(.arena-v2-card-keyword-description b) { color: var(--arena-coral); font-size: 0.78rem; }
+.arenaV2Scope :global(.arena-v2-card-keyword-remove) { display: grid; grid-column: 4; grid-row: 1; width: 36px; height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--arena-muted); place-items: center; }
+.arenaV2Scope :global(.arena-v2-card-keyword-remove:hover:not(:disabled)) { background: var(--arena-coral-soft); color: var(--arena-danger); }
+.arenaV2Scope :global(.arena-v2-card-keyword-remove svg) { width: 16px; height: 16px; }
+.arenaV2Scope :global(.arena-v2-card-keyword-add) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; border: 1px dashed color-mix(in srgb, var(--arena-coral) 34%, var(--arena-line)); border-radius: 11px; background: var(--arena-surface); color: var(--arena-coral-deep); font-size: 0.7rem; font-weight: 900; }
+.arenaV2Scope :global(.arena-v2-card-keyword-add:hover:not(:disabled)) { background: var(--arena-coral-soft); }
+.arenaV2Scope :global(.arena-v2-card-keyword-add svg) { width: 15px; height: 15px; }
+
+.arenaV2Scope :global(.arena-v2-card-validation) { display: grid; grid-template-columns: auto 1fr; gap: 10px; margin: 14px 18px 0; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--arena-danger) 28%, var(--arena-line)); border-radius: 12px; background: var(--arena-coral-soft); color: var(--arena-danger); }
+.arenaV2Scope :global(.arena-v2-card-validation.is-valid) { border-color: color-mix(in srgb, var(--arena-green) 28%, var(--arena-line)); background: var(--arena-green-soft); color: var(--arena-green); }
+.arenaV2Scope :global(.arena-v2-card-validation > svg) { width: 18px; height: 18px; margin-top: 1px; }
+.arenaV2Scope :global(.arena-v2-card-validation > div) { display: grid; gap: 3px; }
+.arenaV2Scope :global(.arena-v2-card-validation strong) { font-size: 0.7rem; }
+.arenaV2Scope :global(.arena-v2-card-validation span) { font-size: 0.62rem; line-height: 1.45; }
+
+.arenaV2Scope :global(.arena-v2-card-editor-actions) { display: grid; grid-template-columns: auto minmax(180px, 1fr); gap: 10px; padding: 18px; }
+.arenaV2Scope :global(.arena-v2-card-editor-actions button) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; padding: 0 16px; border: 1px solid var(--arena-line-strong); border-radius: 11px; font-size: 0.72rem; font-weight: 900; }
+.arenaV2Scope :global(.arena-v2-card-editor-actions svg) { width: 16px; height: 16px; }
+.arenaV2Scope :global(.arena-v2-card-reset-button) { background: var(--arena-surface); color: var(--arena-text); }
+
+.arenaV2Scope :global(.arena-v2-card-budget-panel) { position: sticky; top: 12px; display: grid; gap: 14px; padding: 16px; }
+.arenaV2Scope :global(.arena-v2-card-budget-panel > header > div) { display: inline-flex; align-items: center; gap: 7px; }
+.arenaV2Scope :global(.arena-v2-card-budget-panel > header svg) { width: 17px; height: 17px; color: var(--arena-coral); }
+.arenaV2Scope :global(.arena-v2-card-budget-panel > header > svg) { color: var(--arena-muted); }
+.arenaV2Scope :global(.arena-v2-card-budget-total) { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.arenaV2Scope :global(.arena-v2-card-budget-total span) { color: var(--arena-text); font-size: 0.72rem; font-weight: 900; }
+.arenaV2Scope :global(.arena-v2-card-budget-total strong) { color: var(--arena-coral); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.arenaV2Scope :global(.arena-v2-card-budget-total small) { color: var(--arena-text); font-size: 0.68rem; }
+.arenaV2Scope :global(.arena-v2-card-budget-track) { height: 9px; overflow: hidden; border-radius: 999px; background: var(--arena-coral-soft); }
+.arenaV2Scope :global(.arena-v2-card-budget-track span) { display: block; height: 100%; border-radius: inherit; background: var(--arena-coral); transition: width 180ms ease; }
+.arenaV2Scope :global(.arena-v2-card-budget-panel.is-safe .arena-v2-card-budget-track span) { background: var(--arena-cyan); }
+.arenaV2Scope :global(.arena-v2-card-budget-panel.is-over .arena-v2-card-budget-track span) { background: var(--arena-danger); }
+.arenaV2Scope :global(.arena-v2-card-budget-remaining) { display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 10px; background: var(--arena-surface-cyan); color: var(--arena-cyan-deep); }
+.arenaV2Scope :global(.arena-v2-card-budget-panel.is-over .arena-v2-card-budget-remaining) { background: var(--arena-coral-soft); color: var(--arena-danger); }
+.arenaV2Scope :global(.arena-v2-card-budget-remaining span) { font-size: 0.66rem; font-weight: 850; }
+.arenaV2Scope :global(.arena-v2-card-budget-remaining strong) { font-size: 1rem; }
+.arenaV2Scope :global(.arena-v2-card-budget-list) { display: grid; gap: 2px; padding-top: 5px; border-top: 1px solid var(--arena-line); }
+.arenaV2Scope :global(.arena-v2-card-budget-list > div) { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; color: var(--arena-muted); font-size: 0.62rem; }
+.arenaV2Scope :global(.arena-v2-card-budget-list span) { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.arenaV2Scope :global(.arena-v2-card-budget-list svg) { flex: 0 0 auto; width: 13px; height: 13px; }
+.arenaV2Scope :global(.arena-v2-card-budget-list b) { color: var(--arena-text); font-size: 0.7rem; }
+.arenaV2Scope :global(.arena-v2-card-budget-list .is-surcharge) { color: var(--arena-gold); }
+.arenaV2Scope :global(.arena-v2-card-budget-list .is-surcharge b) { color: var(--arena-gold); }
+.arenaV2Scope :global(.arena-v2-card-budget-list .is-total) { margin-top: 5px; padding-top: 8px; border-top: 1px solid var(--arena-line); color: var(--arena-text); font-weight: 950; }
+.arenaV2Scope :global(.arena-v2-card-budget-list .is-total b) { color: var(--arena-coral); font-size: 1rem; }
+.arenaV2Scope :global(.arena-v2-card-budget-panel > p) { margin: 0; padding: 10px; border-radius: 10px; background: var(--arena-surface-soft); color: var(--arena-muted); font-size: 0.6rem; line-height: 1.55; }
 
 .arenaV2Scope:global(.is-my-card) :global(.arena-v2-command-panel),
 .arenaV2Scope:global(.is-admin) :global(.arena-v2-command-panel) {
@@ -1924,6 +1974,7 @@
   grid-template-columns: 220px minmax(0, 1fr);
   align-items: start;
   gap: 14px;
+  min-width: 0;
 }
 
 .arenaV2Scope :global(.arena-v2-admin-tabs) {
@@ -1953,6 +2004,22 @@
 
 .arenaV2Scope :global(.arena-v2-admin-panel) {
   min-width: 0;
+  max-width: 100%;
+  overflow: clip;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-panel > *),
+.arenaV2Scope :global(.arena-v2-admin-grid > *),
+.arenaV2Scope :global(.arena-v2-admin-form-grid > *) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-panel input),
+.arenaV2Scope :global(.arena-v2-admin-panel select),
+.arenaV2Scope :global(.arena-v2-admin-panel textarea),
+.arenaV2Scope :global(.arena-v2-admin-panel pre) {
+  max-width: 100%;
 }
 
 .arenaV2Scope :global(.arena-v2-admin-grid),
@@ -2017,6 +2084,7 @@
 .arenaV2Scope :global(.arena-v2-admin-cosmetic-tools) {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -2033,6 +2101,26 @@
 }
 
 .arenaV2Scope :global(.arena-v2-admin-cosmetic-tools input[type="file"]) { display: none; }
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-tools button) {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--arena-line-strong);
+  border-radius: 10px;
+  background: var(--arena-surface);
+  color: var(--arena-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.arenaV2Scope :global(.arena-v2-admin-asset-status) {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--arena-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .arenaV2Scope :global(.arena-v2-admin-check) { display: flex; align-items: center; gap: 8px; color: var(--arena-muted); font-size: 0.75rem; }
 .arenaV2Scope :global(.arena-v2-admin-emote-preview) { display: grid; justify-items: center; gap: 7px; min-height: 180px; padding: 22px; border: 1px dashed var(--arena-line-strong); border-radius: 13px; }
 
@@ -2267,7 +2355,7 @@
 
 .arenaV2Scope :global(.arena-v2-bottom-hand .arena-v2-card) {
   flex: 0 0 108px;
-  min-height: 136px;
+  min-height: 0;
 }
 
 .arenaV2Scope :global(.arena-v2-card.is-combat-attacker) {
@@ -2295,7 +2383,28 @@
   transform: translateX(-50%);
 }
 
+@media (max-width: 1350px) {
+  .arenaV2Scope :global(.arena-v2-card-studio) {
+    grid-template-columns: minmax(230px, 0.68fr) minmax(460px, 1.32fr);
+  }
+
+  .arenaV2Scope :global(.arena-v2-card-budget-panel) {
+    position: static;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1fr) minmax(320px, 1.5fr);
+    align-items: center;
+  }
+
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > header),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > p) { grid-column: 1; }
+  .arenaV2Scope :global(.arena-v2-card-budget-total),
+  .arenaV2Scope :global(.arena-v2-card-budget-track),
+  .arenaV2Scope :global(.arena-v2-card-budget-remaining) { grid-column: 2; }
+  .arenaV2Scope :global(.arena-v2-card-budget-list) { grid-column: 3; grid-row: 1 / span 4; }
+}
+
 @media (max-width: 1180px) {
+
   .arenaV2Scope :global(.arena-v2-style-studio) {
     grid-template-columns: 1fr;
   }
@@ -2333,6 +2442,24 @@
 }
 
 @media (max-width: 860px) {
+  .arenaV2Scope :global(.arena-v2-card-studio) { grid-template-columns: 1fr; }
+  .arenaV2Scope :global(.arena-v2-card-preview-panel),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel) { position: static; }
+  .arenaV2Scope :global(.arena-v2-card-budget-panel) {
+    grid-column: auto;
+    grid-template-columns: 1fr 1fr;
+    order: -1;
+  }
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > header) { grid-column: 1 / -1; }
+  .arenaV2Scope :global(.arena-v2-card-budget-total),
+  .arenaV2Scope :global(.arena-v2-card-budget-track),
+  .arenaV2Scope :global(.arena-v2-card-budget-remaining),
+  .arenaV2Scope :global(.arena-v2-card-budget-list),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > p) { grid-column: auto; grid-row: auto; }
+  .arenaV2Scope :global(.arena-v2-card-budget-track),
+  .arenaV2Scope :global(.arena-v2-card-budget-list),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > p) { grid-column: 1 / -1; }
+
   .arenaV2Scope :global(.arena-v2-pie-editor-body) {
     grid-template-columns: 1fr;
   }
@@ -2421,6 +2548,50 @@
     min-width: 44px;
     padding-inline: 12px;
   }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-topbar) { display: grid; }
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-topbar > .arena-v2-top-actions) {
+    display: grid;
+    grid-template-columns: auto 44px minmax(0, 1fr);
+    width: 100%;
+  }
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-topbar .arena-v2-secondary-button) {
+    overflow: hidden;
+    width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+  .arenaV2Scope :global(.arena-v2-card-edit-status) { justify-content: center; min-height: 44px; }
+  .arenaV2Scope :global(.arena-v2-card-studio) { gap: 10px; }
+  .arenaV2Scope :global(.arena-v2-card-preview-panel),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel) { padding: 14px; border-radius: 16px; }
+  .arenaV2Scope :global(.arena-v2-card-preview-stage) { width: min(78vw, 280px); }
+  .arenaV2Scope :global(.arena-v2-card-editor-panel) { border-radius: 16px; }
+  .arenaV2Scope :global(.arena-v2-card-editor-section) { padding: 15px 14px; }
+  .arenaV2Scope :global(.arena-v2-card-class-row),
+  .arenaV2Scope :global(.arena-v2-card-stat-grid) { grid-template-columns: 1fr; }
+  .arenaV2Scope :global(.arena-v2-card-cost-picker) { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; }
+  .arenaV2Scope :global(.arena-v2-card-cost-picker button) { min-height: 44px; border-radius: 9px; }
+  .arenaV2Scope :global(.arena-v2-card-cost-picker button span) { display: none; }
+  .arenaV2Scope :global(.arena-v2-card-keyword-row) {
+    grid-template-columns: 28px minmax(0, 1fr) 36px;
+    align-items: end;
+  }
+  .arenaV2Scope :global(.arena-v2-card-keyword-index) { grid-column: 1; grid-row: 1; }
+  .arenaV2Scope :global(.arena-v2-card-keyword-select) { grid-column: 2; grid-row: 1; }
+  .arenaV2Scope :global(.arena-v2-card-keyword-variant) { grid-column: 2; grid-row: 2; }
+  .arenaV2Scope :global(.arena-v2-card-keyword-description) { grid-column: 1 / -1; grid-row: 3; }
+  .arenaV2Scope :global(.arena-v2-card-keyword-remove) { grid-column: 3; grid-row: 1; }
+  .arenaV2Scope :global(.arena-v2-card-validation) { margin: 12px 14px 0; }
+  .arenaV2Scope :global(.arena-v2-card-editor-actions) { grid-template-columns: 1fr; padding: 14px; }
+  .arenaV2Scope :global(.arena-v2-card-save-button) { grid-row: 1; }
+  .arenaV2Scope :global(.arena-v2-card-budget-panel) { grid-template-columns: 1fr auto; }
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > header),
+  .arenaV2Scope :global(.arena-v2-card-budget-track),
+  .arenaV2Scope :global(.arena-v2-card-budget-list),
+  .arenaV2Scope :global(.arena-v2-card-budget-panel > p) { grid-column: 1 / -1; }
+  .arenaV2Scope :global(.arena-v2-card-budget-total) { grid-column: 1; }
+  .arenaV2Scope :global(.arena-v2-card-budget-remaining) { grid-column: 2; grid-row: 2; min-width: 92px; gap: 12px; }
 
   .arenaV2Scope :global(.arena-v2-phase) {
     display: flex;
@@ -2540,31 +2711,6 @@
 
   .arenaV2Scope :global(.arena-v2-deck-meter strong) {
     font-size: 1.35rem;
-  }
-
-  .arenaV2Scope :global(.arena-v2-card.is-compact) {
-    min-height: 76px;
-  }
-
-  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-role) {
-    max-width: calc(100% - 34px);
-  }
-
-  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-role svg),
-  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-role span) {
-    display: none;
-  }
-
-  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-keywords) {
-    display: none;
-  }
-
-  .arenaV2Scope :global(.arena-v2-card.is-compact .arena-v2-card-readable) {
-    padding-inline: 27px;
-  }
-
-  .arenaV2Scope :global(.arena-v2-card[data-card-tooltip]::after) {
-    display: none;
   }
 
   .arenaV2Scope:global(.is-inventory) :global(.arena-v2-command-panel),
@@ -2726,6 +2872,15 @@
     flex: 0 0 145px;
   }
 
+  .arenaV2Scope :global(.arena-v2-admin-cosmetic-item) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .arenaV2Scope :global(.arena-v2-admin-cosmetic-item > .arena-v2-queue-actions) {
+    width: 100%;
+  }
+
   .arenaV2Scope :global(.arena-v2-admin-grid),
   .arenaV2Scope :global(.arena-v2-admin-kpis),
   .arenaV2Scope :global(.arena-v2-admin-form-grid) {
@@ -2816,6 +2971,76 @@
 
   .arenaV2Scope :global(.arena-v2-bottom-hand .arena-v2-card) {
     flex-basis: 92px;
+  }
+}
+
+@container (max-width: 1080px) {
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-studio) {
+    grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.5fr);
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel) {
+    position: static;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1fr) minmax(300px, 1.5fr);
+    align-items: center;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel > header),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel > p) { grid-column: 1; }
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-total),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-track),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-remaining) { grid-column: 2; }
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-list) { grid-column: 3; grid-row: 1 / span 4; }
+}
+
+@container (max-width: 780px) {
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-studio) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-preview-panel),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel) {
+    position: static;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-preview-panel) {
+    order: 1;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-editor-panel) {
+    order: 2;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel) {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    order: 0;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel > header),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-track),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-list),
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-panel > p) {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-total) { grid-column: 1; }
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-budget-remaining) { grid-column: 2; grid-row: 2; }
+}
+
+@container (max-width: 520px) {
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-preview-stage) {
+    width: min(82cqi, 280px);
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-cost-picker) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .arenaV2Scope:global(.is-my-card) :global(.arena-v2-card-cost-picker button span) {
+    display: block;
   }
 }
 

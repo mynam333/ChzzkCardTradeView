@@ -12,6 +12,7 @@ type PageVisit = {
 
 const SESSION_ID_KEY = 'chikapo_analytics_session_id';
 const ANALYTICS_ENV_ENABLED = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED !== 'false';
+const ANALYTICS_ALLOW_LOCALHOST = process.env.NEXT_PUBLIC_ANALYTICS_ALLOW_LOCALHOST === 'true';
 const HEARTBEAT_INTERVAL_MS = Math.max(
   30_000,
   Number(process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || 60_000)
@@ -29,6 +30,7 @@ const isLocalHost = () => {
 
 export const analyticsSettings = {
   enabled: ANALYTICS_ENV_ENABLED,
+  allowLocalhost: ANALYTICS_ALLOW_LOCALHOST,
   heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS
 };
 
@@ -131,7 +133,8 @@ const sendAnalyticsEvent = (payload: Record<string, unknown>) => {
 };
 
 export const initAnalytics = () => {
-  if (!isBrowser() || initialized || !analyticsSettings.enabled || isLocalHost()) return;
+  if (!isBrowser() || initialized || !analyticsSettings.enabled) return;
+  if (isLocalHost() && !analyticsSettings.allowLocalhost) return;
   initialized = true;
 };
 

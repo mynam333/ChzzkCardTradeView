@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppProvider } from "./AppContext";
-import { TutorialGuide } from "./TutorialGuide";
+import { LazyTutorialGuide } from "./LazyTutorialGuide";
 import { WebsiteJsonLd, WebAppJsonLd } from "./JsonLd";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://chikapo.yuaru.com";
@@ -66,8 +66,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({
@@ -89,7 +87,7 @@ export default function RootLayout({
         <AppProvider>
           {children}
           {/* 튜토리얼은 라우트(탭) 전환 시에도 유지되도록 루트 레이아웃에 마운트 */}
-          <TutorialGuide />
+          <LazyTutorialGuide />
         </AppProvider>
       </body>
     </html>

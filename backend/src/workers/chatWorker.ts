@@ -58,8 +58,6 @@ const start = async () => {
         res.end(JSON.stringify({
           status: 'ok',
           role: 'chat-worker',
-          path: PATH,
-          runtime: getRuntimeStats(),
           timestamp: new Date().toISOString()
         }));
         return;

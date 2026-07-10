@@ -138,7 +138,11 @@ GET   /api/admin/arena/stats/overview
 GET   /api/admin/arena/stats/balance
 PATCH /api/admin/arena/restrictions/{type}/{id}
 GET   /api/admin/arena/audit-logs
-POST  /api/admin/arena/cosmetics/emote-assets
+GET   /api/admin/arena/cosmetics
+POST  /api/admin/arena/cosmetics
+PATCH /api/admin/arena/cosmetics/{id}
+POST  /api/admin/arena/cosmetics/assets
+POST  /api/admin/arena/cosmetics/emote-assets  # 이전 클라이언트 호환
 POST  /api/admin/arena/stats/rebuild
 POST  /api/admin/arena/rankings/rebuild
 POST  /api/admin/arena/matches/prune-logs

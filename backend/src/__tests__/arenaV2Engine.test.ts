@@ -2,10 +2,81 @@ import { describe, expect, it } from 'vitest';
 import {
   ARENA_V2_DECK_MAX_CARD_COUNT,
   ARENA_V2_DECK_MIN_CARD_COUNT,
+  evaluateArenaV2CardBudget,
   resolveArenaV2Turn,
+  validateArenaV2CardVersionDefinition,
   validateArenaV2Deck,
   validateArenaV2TurnAction
 } from '../services/arenaV2Engine';
+
+describe('arena v2 card editor budget', () => {
+  const makeCard = (overrides: Record<string, unknown> = {}) => ({
+    id: 'card-editor-preview',
+    streamerId: 'streamer-editor',
+    seasonId: 'season-v2',
+    status: 'active' as const,
+    cardClass: 'tech' as const,
+    cost: 7,
+    attack: 3,
+    health: 6,
+    keywords: [{ type: 'battle_draw' }],
+    validationResult: null,
+    ...overrides
+  });
+
+  it('returns the same itemized total used by card validation', () => {
+    const card = makeCard({
+      cardClass: 'charge',
+      attack: 4,
+      health: 6,
+      keywords: [{ type: 'pierce' }, { type: 'pursuit', value: 1 }]
+    });
+    const budget = evaluateArenaV2CardBudget(card);
+
+    expect(budget).toMatchObject({
+      budgetLimit: 34,
+      attackCost: 12,
+      healthCost: 6,
+      keywordCost: 11,
+      comboCost: 5,
+      totalCost: 34,
+      remaining: 0,
+      isOverBudget: false
+    });
+    expect(validateArenaV2CardVersionDefinition(card).valid).toBe(true);
+  });
+
+  it('rejects duplicate keyword selections', () => {
+    const validation = validateArenaV2CardVersionDefinition(makeCard({
+      keywords: [{ type: 'battle_draw' }, { type: 'battle_draw' }]
+    }));
+
+    expect(validation.errors.map((error) => error.code)).toContain('ArenaV2CardDuplicateKeyword');
+  });
+
+  it('charges revive and grave recovery synergy exactly once', () => {
+    const card = makeCard({
+      cardClass: 'specter',
+      cost: 9,
+      attack: 0,
+      health: 12,
+      keywords: [{ type: 'revive' }, { type: 'grave_recover', limit: 'cost_2' }]
+    });
+    const budget = evaluateArenaV2CardBudget(card);
+
+    expect(budget).toMatchObject({
+      budgetLimit: 51,
+      attackCost: 0,
+      healthCost: 12,
+      keywordCost: 26,
+      comboCost: 10,
+      totalCost: 48,
+      remaining: 3,
+      isOverBudget: false
+    });
+    expect(validateArenaV2CardVersionDefinition(card).valid).toBe(true);
+  });
+});
 
 const makeCards = (count: number, seasonId = 'season-v2') => {
   const cardsByVersionId: Record<string, any> = {};

@@ -165,6 +165,18 @@ export function MobileLoopDock<T extends string>({
       onPointerCancel={finishDockPointer}
       style={{ touchAction: 'pan-y' }}
     >
+      <label className="sr-only" htmlFor={`mobile-loop-dock-${dataAttribute || 'navigation'}`}>{ariaLabel}</label>
+      <select
+        id={`mobile-loop-dock-${dataAttribute || 'navigation'}`}
+        className="sr-only focus:not-sr-only focus:absolute focus:bottom-full focus:left-4 focus:z-[60] focus:mb-2 focus:h-10 focus:w-auto focus:rounded-lg focus:border focus:border-border focus:bg-card focus:px-3 focus:text-sm focus:text-foreground"
+        value={activeId}
+        onChange={(event) => {
+          const nextItem = items.find((item) => item.id === event.target.value);
+          if (nextItem) onSelect(nextItem.id, nextItem);
+        }}
+      >
+        {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select>
       <div
         className="relative mx-auto w-full overflow-visible"
         style={{
@@ -194,7 +206,6 @@ export function MobileLoopDock<T extends string>({
           const iconSize = 40 + centerWeight * 18;
           const iconColorMix = Math.round(centerWeight * 100);
           const iconBgMix = Math.round(18 + centerWeight * 82);
-          const isCentered = centerWeight > 0.72;
           const pressScale = dockPressedId === item.id ? 0.94 : 1;
 
           return (
@@ -222,7 +233,8 @@ export function MobileLoopDock<T extends string>({
                 pointerEvents: visibleWeight < 0.15 ? 'none' : 'auto',
                 zIndex: Math.round(20 - distance * 4)
               }}
-              aria-current={isCentered ? 'page' : undefined}
+              aria-hidden="true"
+              tabIndex={-1}
             >
               <span
                 className="relative flex items-center justify-center rounded-full transition-[width,height,background,color,box-shadow,ring-color] duration-200"

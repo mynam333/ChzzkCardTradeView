@@ -1328,7 +1328,7 @@ describe('MarketRepository 재등록 제약', () => {
     });
   });
 
-  it('최신순 오픈마켓 목록은 입찰로 갱신된 경매를 앞으로 올린다', async () => {
+  it('최신순 오픈마켓 목록은 입찰 활동과 무관하게 등록 시각(created_at)을 유지한다', async () => {
     seedUser(db, 'activity-seller-a');
     seedUser(db, 'activity-seller-b');
     seedUser(db, 'activity-bidder', 10000);
@@ -1366,7 +1366,7 @@ describe('MarketRepository 재등록 제약', () => {
 
     expect(await marketRepository.placeBid(older.id as number, 'activity-bidder', 1200)).toMatchObject({ ok: true });
 
-    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(older.id);
+    expect((await marketRepository.listActive({ page: 1, limit: 2, sort: 'latest', type: 'all' })).listings[0].id).toBe(newer.id);
   });
 
   it('오픈마켓 활성 목록은 만료 경매를 제외하고 경매 시작가 기준으로 가격 정렬한다', async () => {

@@ -4,6 +4,7 @@ import { IS_PRODUCTION } from '../config';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import * as shop from '../services/shopService';
 import { minifyCss } from '../utils/css';
 import { publishRealtimeEvent } from '../services/realtimeStream';
@@ -142,6 +143,14 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
   } catch (err) { return fail(res, '상점 관리 목록 조회 실패', err); }
 };
 
+/** 아레나 V2 관리자 전용 치장 카탈로그 */
+export const adminGetArenaCosmetics = async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const items = (await shop.getAllItems()).filter((item) => shop.isArenaCosmeticType(item.type));
+    return res.status(200).json(items);
+  } catch (err) { return fail(res, '아레나 치장 관리 목록 조회 실패', err); }
+};
+
 export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Response) => {
   const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity } = req.body;
   if (!(['border', 'name_effect'].includes(type) || shop.isArenaCosmeticType(type)) || !name) {
@@ -182,6 +191,13 @@ export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Respon
   } catch (err) { return fail(res, '아이템 추가 실패', err); }
 };
 
+export const adminCreateArenaCosmetic = async (req: AuthenticatedRequest, res: Response) => {
+  if (!shop.isArenaCosmeticType(req.body?.type)) {
+    return res.status(400).json({ error: 'BadRequest', message: '지원하지 않는 아레나 치장 종류입니다.' });
+  }
+  return adminCreateShopItem(req, res);
+};
+
 /** 특정 아이템의 1인 구매 횟수 전체 초기화 */
 export const adminResetPurchases = async (req: AuthenticatedRequest, res: Response) => {
   const id = Number(req.params.id);
@@ -220,35 +236,72 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
   } catch (err) { return fail(res, '아이템 수정 실패', err); }
 };
 
-export const uploadArenaEmoteAsset = async (req: AuthenticatedRequest, res: Response) => {
+export const adminUpdateArenaCosmetic = async (req: AuthenticatedRequest, res: Response) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'BadRequest', message: '치장 ID가 필요합니다.' });
+  try {
+    const item = await shop.getItem(id);
+    if (!item || !shop.isArenaCosmeticType(item.type)) {
+      return res.status(404).json({ error: 'NotFound', message: '아레나 치장을 찾을 수 없습니다.' });
+    }
+    if (req.body?.type !== undefined && !shop.isArenaCosmeticType(req.body.type)) {
+      return res.status(400).json({ error: 'BadRequest', message: '지원하지 않는 아레나 치장 종류입니다.' });
+    }
+    return adminUpdateShopItem(req, res);
+  } catch (err) { return fail(res, '아레나 치장 수정 실패', err); }
+};
+
+const storeArenaCosmeticAsset = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  forcedType?: shop.ArenaCosmeticType
+) => {
   if (!req.file) return res.status(400).json({ error: 'BadRequest', message: '업로드할 이미지 파일이 필요합니다.' });
   try {
-    const extByMime: Record<string, string> = {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'image/gif': 'gif',
-      'image/avif': 'avif'
+    const extByFormat: Record<string, string> = {
+      jpeg: 'jpg',
+      png: 'png',
+      webp: 'webp',
+      gif: 'gif',
+      avif: 'avif'
     };
-    const ext = extByMime[req.file.mimetype] || 'img';
-    const uploadDir = path.join(getUploadsDir(), 'arena-emotes');
+    const metadata = await sharp(req.file.buffer, { animated: true, limitInputPixels: 40_000_000 })
+      .metadata()
+      .catch(() => null);
+    const ext = metadata?.format ? extByFormat[metadata.format] : null;
+    if (!metadata || !ext || !metadata.width || !metadata.height) {
+      return res.status(400).json({ error: 'BadRequest', message: '손상되었거나 지원하지 않는 이미지입니다.' });
+    }
+    const cosmeticType = forcedType || (shop.isArenaCosmeticType(req.body?.type) ? req.body.type : null);
+    if (!cosmeticType) {
+      return res.status(400).json({ error: 'BadRequest', message: '업로드할 아레나 치장 종류가 필요합니다.' });
+    }
+    const uploadDir = path.join(getUploadsDir(), 'arena-cosmetics');
     fs.mkdirSync(uploadDir, { recursive: true });
-    const fileName = `arena_emote_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const fileName = `arena_${cosmeticType}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
     const filePath = path.join(uploadDir, fileName);
     fs.writeFileSync(filePath, req.file.buffer);
-    const imageUrl = `/uploads/arena-emotes/${encodeURIComponent(fileName)}`;
+    const imageUrl = `/uploads/arena-cosmetics/${encodeURIComponent(fileName)}`;
     return res.status(200).json({
-      message: '이모트 이미지가 업로드되었습니다.',
+      message: '아레나 치장 이미지가 업로드되었습니다.',
       data: {
         image_url: imageUrl,
         mime_type: req.file.mimetype,
-        animated: req.file.mimetype === 'image/gif'
+        width: metadata.width,
+        height: metadata.height,
+        animated: Number(metadata.pages || 1) > 1,
+        cosmetic_type: cosmeticType
       }
     });
   } catch (err) {
-    return fail(res, '이모트 이미지 업로드 실패', err);
+    return fail(res, '아레나 치장 이미지 업로드 실패', err);
   }
 };
+
+export const uploadArenaCosmeticAsset = async (req: AuthenticatedRequest, res: Response) => storeArenaCosmeticAsset(req, res);
+
+/** 기존 이모트 업로드 URL 호환용 */
+export const uploadArenaEmoteAsset = async (req: AuthenticatedRequest, res: Response) => storeArenaCosmeticAsset(req, res, 'emote');
 
 export const getArenaCosmeticShopItems = async (_req: AuthenticatedRequest, res: Response) => {
   try {

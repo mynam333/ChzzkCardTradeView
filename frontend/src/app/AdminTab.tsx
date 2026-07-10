@@ -59,6 +59,7 @@ import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { AdminAchievementsTab } from './AdminAchievementsTab';
 import { formatLocalDateTime, formatLocalDateTimeInput, localDateTimeInputToIso } from '@/lib/time';
+import styles from './AdminTab.module.css';
 
 type AdminSubTab = 'dashboard' | 'insights' | 'users' | 'titles' | 'achievements' | 'coupons' | 'announcements' | 'push' | 'reports' | 'trades' | 'asset-events' | 'streamers' | 'shop' | 'maintenance';
 type PushTargetType = 'default' | 'coupon';
@@ -72,6 +73,12 @@ interface AdminInsights {
   generated_at: string;
   cached_until: string | null;
   retention_days: number;
+  collection: {
+    configured: boolean;
+    storage_mode: string;
+    dialect: string | null;
+    queue_depth: number;
+  };
   summary: {
     page_views: number;
     sessions: number;
@@ -1654,21 +1661,49 @@ export const AdminTab: React.FC = () => {
     return 'bg-secondary text-muted-foreground border-border';
   };
 
-  const subTabs: { id: AdminSubTab; label: string; icon: typeof Tag }[] = [
-    { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
-    { id: 'insights', label: '인사이트', icon: BarChart3 },
-    { id: 'users', label: '유저', icon: Users },
-    { id: 'titles', label: '칭호', icon: Award },
-    { id: 'achievements', label: '업적', icon: Trophy },
-    { id: 'coupons', label: '쿠폰', icon: Tag },
-    { id: 'announcements', label: '공지', icon: Megaphone },
-    { id: 'push', label: '푸시', icon: BellRing },
-    { id: 'reports', label: '신고·밴', icon: AlertTriangle },
-    { id: 'trades', label: '1:1 거래', icon: ArrowRightLeft },
-    { id: 'asset-events', label: '자산 기록', icon: Activity },
-    { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon },
-    { id: 'shop', label: '상점 관리', icon: Store },
-    { id: 'maintenance', label: 'DB 초기화', icon: Database }
+  const navigationGroups: Array<{
+    label: string;
+    items: Array<{ id: AdminSubTab; label: string; icon: typeof Tag }>;
+  }> = [
+    {
+      label: '운영 현황',
+      items: [
+        { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
+        { id: 'insights', label: '인사이트', icon: BarChart3 }
+      ]
+    },
+    {
+      label: '사용자·콘텐츠',
+      items: [
+        { id: 'users', label: '유저', icon: Users },
+        { id: 'titles', label: '칭호', icon: Award },
+        { id: 'achievements', label: '업적', icon: Trophy },
+        { id: 'streamers', label: '스트리머 이미지', icon: ImageIcon }
+      ]
+    },
+    {
+      label: '소통',
+      items: [
+        { id: 'coupons', label: '쿠폰', icon: Tag },
+        { id: 'announcements', label: '공지', icon: Megaphone },
+        { id: 'push', label: '푸시', icon: BellRing }
+      ]
+    },
+    {
+      label: '안전·경제',
+      items: [
+        { id: 'reports', label: '신고·밴', icon: AlertTriangle },
+        { id: 'trades', label: '1:1 거래', icon: ArrowRightLeft },
+        { id: 'asset-events', label: '자산 기록', icon: Activity }
+      ]
+    },
+    {
+      label: '시스템',
+      items: [
+        { id: 'shop', label: '상점 관리', icon: Store },
+        { id: 'maintenance', label: 'DB 초기화', icon: Database }
+      ]
+    }
   ];
 
   const maxHourlyViews = Math.max(1, ...(insights?.timeline || insights?.hourly || []).map((item) => item.views));
@@ -1677,28 +1712,48 @@ export const AdminTab: React.FC = () => {
   const maxRouteViews = Math.max(1, ...(insights?.route_groups || []).map((item) => item.views));
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex items-center gap-2 text-red-500">
-        <ShieldAlert className="h-6 w-6" />
-        <h2 className="text-xl font-black text-foreground">치카포 관리자 통제 센터</h2>
-      </div>
+    <div className={`${styles.page} animate-in fade-in duration-300`}>
+      <header className={styles.pageHeader}>
+        <div className={styles.pageTitle}>
+          <span className={styles.titleIcon}><ShieldAlert aria-hidden="true" /></span>
+          <div>
+            <p>ADMIN CONSOLE</p>
+            <h2>치카포 관리자 통제 센터</h2>
+          </div>
+        </div>
+        <span className={styles.activeSection}>
+          {navigationGroups.flatMap((group) => group.items).find((item) => item.id === subTab)?.label}
+        </span>
+      </header>
 
-      {/* 하위 탭 네비 */}
-      <div className="flex flex-wrap gap-1.5 rounded-xl bg-secondary/40 p-1.5">
-        {subTabs.map((t) => {
-          const Icon = t.icon;
-          const active = subTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => handleSubTabChange(t.id)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition ${active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <Icon className="h-3.5 w-3.5" /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      <div className={styles.shell}>
+        <aside className={styles.sidebar} aria-label="관리자 기능">
+          {navigationGroups.map((group) => (
+            <div key={group.label} className={styles.navGroup}>
+              <p>{group.label}</p>
+              <div className={styles.navItems}>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = subTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleSubTabChange(item.id)}
+                      className={active ? styles.navItemActive : styles.navItem}
+                      aria-current={active ? 'page' : undefined}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </aside>
+
+        <main className={styles.workspace}>
 
       {/* 대시보드 */}
       {subTab === 'dashboard' && (
@@ -1735,7 +1790,7 @@ export const AdminTab: React.FC = () => {
 
       {subTab === 'insights' && (
         <section className="space-y-5">
-          <div className="overflow-hidden rounded-[2rem] border border-primary/15 bg-gradient-to-br from-primary/10 via-card to-sky-400/10 p-5 shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-primary">
@@ -1744,7 +1799,7 @@ export const AdminTab: React.FC = () => {
                 </div>
                 <p className="mt-2 max-w-2xl text-xs font-bold leading-relaxed text-muted-foreground">
                   치카포가 직접 기록한 방문 시간대, 페이지 체류 시간, 기기·브라우저 분포, 핵심 기능 이용 흐름을 보여줍니다.
-                  원시 이벤트는 짧게 보관하고 시간 단위 집계는 별도 테이블에 누적해 MySQL 부담을 낮춥니다.
+                   원시 이벤트는 제한된 기간만 보관하고 시간 단위 집계를 별도 테이블에 누적해 운영 DB 부담을 낮춥니다.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1793,7 +1848,7 @@ export const AdminTab: React.FC = () => {
 
           {insights && !insights.enabled && (
             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-xs font-bold leading-relaxed text-amber-700 dark:text-amber-200">
-              자체 인사이트 수집이 꺼져 있습니다. 백엔드 환경변수 SITE_INSIGHTS_ENABLED를 확인하면 됩니다.
+              자체 인사이트 수집이 비활성 상태입니다. SITE_INSIGHTS_ENABLED와 현재 DB 저장소 모드를 함께 확인해 주세요.
             </div>
           )}
 
@@ -2000,6 +2055,12 @@ export const AdminTab: React.FC = () => {
                 <div className="rounded-xl bg-secondary/35 px-3 py-2">
                   <span className="text-[10px] font-bold text-muted-foreground">집계 단위</span>
                   <p className="mt-0.5 truncate text-xs font-black text-foreground">{insights ? insightGranularityLabel[insights.granularity] : insightGranularityLabel[insightsGranularity]}</p>
+                </div>
+                <div className="rounded-xl bg-secondary/35 px-3 py-2 md:col-span-2">
+                  <span className="text-[10px] font-bold text-muted-foreground">저장소 진단</span>
+                  <p className="mt-0.5 truncate text-xs font-black text-foreground">
+                    {insights?.collection ? `${insights.collection.storage_mode}${insights.collection.dialect ? ` · ${insights.collection.dialect}` : ''} · 대기 ${insights.collection.queue_depth.toLocaleString()}건` : '진단 대기'}
+                  </p>
                 </div>
               </div>
               <p className="mt-4 rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2.5 text-[11px] font-bold leading-relaxed text-muted-foreground">
@@ -4092,6 +4153,9 @@ export const AdminTab: React.FC = () => {
           </div>
         </section>
       )}
+
+        </main>
+      </div>
 
       {/* DB 초기화 확인 모달 */}
       {resetConfirmOpen && (

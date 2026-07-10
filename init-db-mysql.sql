@@ -533,4 +533,66 @@ INSERT IGNORE INTO system_configs (`key`, value) VALUES ('maintenance_active', '
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('maintenance_start_at', '');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('maintenance_end_at', '');
 
+-- 사이트 인사이트: KST wall-clock 기준 원시 이벤트·세션·시간 롤업
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_type VARCHAR(32) NOT NULL,
+  session_id VARCHAR(96) NOT NULL,
+  user_id VARCHAR(191) NULL,
+  ip_hash VARCHAR(64) NULL,
+  path VARCHAR(384) NULL,
+  route_group VARCHAR(80) NULL,
+  device_type VARCHAR(32) NULL,
+  browser_name VARCHAR(64) NULL,
+  os_name VARCHAR(64) NULL,
+  viewport_width INT NULL,
+  viewport_height INT NULL,
+  timezone VARCHAR(80) NULL,
+  language VARCHAR(32) NULL,
+  is_authenticated TINYINT NOT NULL DEFAULT 0,
+  user_role VARCHAR(32) NULL,
+  duration_seconds INT NULL,
+  feature_name VARCHAR(96) NULL,
+  feature_props_json TEXT NULL,
+  referrer_host VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_analytics_events_created (created_at),
+  KEY idx_analytics_events_type_created (event_type, created_at),
+  KEY idx_analytics_events_path_created (path, created_at),
+  KEY idx_analytics_events_session_created (session_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS analytics_sessions (
+  session_id VARCHAR(96) PRIMARY KEY,
+  user_id VARCHAR(191) NULL,
+  ip_hash VARCHAR(64) NULL,
+  first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_path VARCHAR(384) NULL,
+  route_group VARCHAR(80) NULL,
+  device_type VARCHAR(32) NULL,
+  browser_name VARCHAR(64) NULL,
+  os_name VARCHAR(64) NULL,
+  timezone VARCHAR(80) NULL,
+  language VARCHAR(32) NULL,
+  is_authenticated TINYINT NOT NULL DEFAULT 0,
+  user_role VARCHAR(32) NULL,
+  KEY idx_analytics_sessions_last_seen (last_seen_at),
+  KEY idx_analytics_sessions_user_seen (user_id, last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS analytics_hourly_rollups (
+  bucket_at DATETIME NOT NULL,
+  dimension_type VARCHAR(32) NOT NULL,
+  dimension_key VARCHAR(384) NOT NULL,
+  page_views BIGINT NOT NULL DEFAULT 0,
+  duration_total_seconds BIGINT NOT NULL DEFAULT 0,
+  duration_samples BIGINT NOT NULL DEFAULT 0,
+  heartbeats BIGINT NOT NULL DEFAULT 0,
+  feature_events BIGINT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (bucket_at, dimension_type, dimension_key),
+  KEY idx_analytics_rollups_dimension_bucket (dimension_type, bucket_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

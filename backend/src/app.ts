@@ -17,7 +17,7 @@ import { rateLimit } from './middlewares/rateLimit';
 import { apiAccessGuard } from './middlewares/apiAccessGuard';
 import { softBanMiddleware } from './middlewares/softBan';
 import { getRuntimeStats } from './services/runtimeStats';
-import { getLogFilePath, setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
+import { setRuntimeStatsProvider, startRuntimeStatsLogging } from './services/fileLogger';
 import { ensureDirectory, getUploadsDir } from './services/storagePaths';
 import { readIntegerEnv } from './utils/env';
 import { startChatAttachmentCleanupScheduler } from './services/friendChatService';
@@ -296,13 +296,10 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 // 기본 헬스체크 API 라우트
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
-    message: '치카포 백엔드 서버가 정상 작동 중입니다.',
-    timestamp: new Date().toISOString(),
-    log_file: getLogFilePath(),
-    runtime: getRuntimeStats()
+    timestamp: new Date().toISOString()
   });
 });
 

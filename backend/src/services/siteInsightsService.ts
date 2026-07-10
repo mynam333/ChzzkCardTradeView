@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config';
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
 import { SESSION_COOKIE_NAMES } from './sessionCookie';
+import { toMysqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type InsightsRange = '24h' | '7d' | '30d' | 'all';
 export type InsightsGranularity = 'hour' | 'day' | 'month';
@@ -41,6 +42,12 @@ export type SiteInsightsResponse = {
   generated_at: string;
   cached_until: string | null;
   retention_days: number;
+  collection: {
+    configured: boolean;
+    storage_mode: string;
+    dialect: string | null;
+    queue_depth: number;
+  };
   summary: {
     page_views: number;
     sessions: number;
@@ -77,13 +84,23 @@ let flushTimer: NodeJS.Timeout | null = null;
 let isFlushing = false;
 const cache = new Map<string, { expiresAt: number; data: SiteInsightsResponse }>();
 
-const nowSql = (date = new Date()) => date.toISOString().slice(0, 19).replace('T', ' ');
+const nowSql = (date = new Date()) => toMysqlDateTime(date) || date.toISOString().slice(0, 19).replace('T', ' ');
 const isoFromDb = (value: unknown) => {
+  if (value instanceof Date) return value.toISOString();
   const raw = String(value || '');
   if (!raw) return new Date().toISOString();
-  if (raw.includes('T')) return raw.endsWith('Z') ? raw : `${raw}Z`;
-  return `${raw.replace(' ', 'T')}Z`;
+  const normalized = raw.replace(' ', 'T');
+  const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+    ? normalized
+    : `${normalized}+09:00`;
+  const parsed = new Date(withTimezone);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 };
+
+export const isSiteInsightsStorageSupported = (
+  mode = getDbMode(),
+  _dialect = getSqlDialect()
+) => mode === 'MYSQL' || mode === 'LOCAL_SQL';
 
 const numberValue = (value: unknown) => {
   const n = Number(value ?? 0);
@@ -175,6 +192,12 @@ const buildDisabledInsights = (range: InsightsRange, granularity: InsightsGranul
   generated_at: new Date().toISOString(),
   cached_until: null,
   retention_days: EVENT_RETENTION_DAYS,
+  collection: {
+    configured: process.env.SITE_INSIGHTS_ENABLED !== 'false',
+    storage_mode: getDbMode(),
+    dialect: getSqlDialect(),
+    queue_depth: pendingEvents.length
+  },
   summary: { page_views: 0, sessions: 0, visitors: 0, active_sessions_5m: 0, avg_duration_seconds: 0, feature_events: 0, heartbeats: 0 },
   timeline: [],
   hourly: [],
@@ -527,10 +550,12 @@ const flushPendingEvents = async () => {
   try {
     await ensureSchema();
     while (pendingEvents.length > 0) {
-      const event = pendingEvents.shift();
+      const event = pendingEvents[0];
       if (!event) continue;
       if (getDbMode() === 'MYSQL') await recordMysqlEvent(event);
       else if (getDbMode() === 'LOCAL_SQL') recordSqliteEvent(event);
+      pendingEvents.shift();
+      cache.clear();
     }
     runCleanupIfNeeded().catch(() => undefined);
   } catch (err: any) {
@@ -677,8 +702,7 @@ const recordSqliteEvent = (event: SiteInsightEvent) => {
 
 export const recordSiteInsightEvent = async (payload: AnalyticsPayload, req: Request) => {
   if (process.env.SITE_INSIGHTS_ENABLED === 'false') return false;
-  if (getDbMode() === 'SUPABASE') return false;
-  if (getDbMode() === 'MYSQL' && getSqlDialect() === 'postgres') return false;
+  if (!isSiteInsightsStorageSupported()) return false;
   const event = buildEvent(payload, req);
   if (!event) return false;
   enqueueEvent(event);
@@ -720,8 +744,7 @@ const appendRange = (column: string, range: InsightsRange, params: any[]) => {
 export const getSiteInsights = async (range: InsightsRange, granularity: InsightsGranularity): Promise<SiteInsightsResponse> => {
   if (
     process.env.SITE_INSIGHTS_ENABLED === 'false' ||
-    getDbMode() === 'SUPABASE' ||
-    (getDbMode() === 'MYSQL' && getSqlDialect() === 'postgres')
+    !isSiteInsightsStorageSupported()
   ) {
     return buildDisabledInsights(range, granularity);
   }
@@ -753,7 +776,9 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
     pageRows,
     pageSessionRows,
     deviceRows,
+    deviceSessionRows,
     routeRows,
+    routeSessionRows,
     featureRows,
     navigationRows,
     notificationRows,
@@ -825,6 +850,13 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
        LIMIT 40
     `, rollupDimensionParams()),
     executeAll<any>(`
+      SELECT device_type, browser_name, os_name,
+             COUNT(DISTINCT session_id) AS sessions
+        FROM analytics_events
+       WHERE event_type = 'page_view' ${eventRangeSql}
+       GROUP BY device_type, browser_name, os_name
+    `, eventParams),
+    executeAll<any>(`
       SELECT dimension_key AS route_group,
              SUM(page_views) AS views
         FROM analytics_hourly_rollups
@@ -833,6 +865,13 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
        ORDER BY views DESC
        LIMIT 30
     `, rollupDimensionParams()),
+    executeAll<any>(`
+      SELECT route_group,
+             COUNT(DISTINCT session_id) AS sessions
+        FROM analytics_events
+       WHERE event_type = 'page_view' ${eventRangeSql}
+       GROUP BY route_group
+    `, eventParams),
     executeAll<any>(`
       SELECT dimension_key AS feature_name,
              SUM(feature_events) AS count
@@ -906,6 +945,10 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
     };
   });
 
+  const deviceSessions = new Map(deviceSessionRows.map((row) => [
+    `${stringValue(row.device_type)}|${stringValue(row.browser_name)}|${stringValue(row.os_name)}`,
+    numberValue(row.sessions)
+  ]));
   const devices = deviceRows.map((row) => {
     const [deviceType = 'unknown', browserName = 'unknown', osName = 'unknown'] = stringValue(row.dimension_key).split('|');
     return {
@@ -913,9 +956,10 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
       browser_name: browserName,
       os_name: osName,
       views: numberValue(row.views),
-      sessions: 0
+      sessions: deviceSessions.get(`${deviceType}|${browserName}|${osName}`) || 0
     };
   });
+  const routeSessions = new Map(routeSessionRows.map((row) => [stringValue(row.route_group, 'main'), numberValue(row.sessions)]));
 
   const durationSamples = numberValue(rollupSummary?.duration_samples);
   const generatedAt = new Date().toISOString();
@@ -926,6 +970,12 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
     generated_at: generatedAt,
     cached_until: new Date(Date.now() + CACHE_TTL_MS).toISOString(),
     retention_days: EVENT_RETENTION_DAYS,
+    collection: {
+      configured: process.env.SITE_INSIGHTS_ENABLED !== 'false',
+      storage_mode: getDbMode(),
+      dialect: getSqlDialect(),
+      queue_depth: pendingEvents.length
+    },
     summary: {
       page_views: numberValue(rollupSummary?.page_views),
       sessions: numberValue(sessionSummary?.sessions),
@@ -940,7 +990,10 @@ export const getSiteInsights = async (range: InsightsRange, granularity: Insight
     active_hourly: activeRows.map((row) => ({ bucket: isoFromDb(row.bucket), active_sessions: numberValue(row.active_sessions), heartbeats: 0 })),
     pages,
     devices,
-    route_groups: routeRows.map((row) => ({ route_group: stringValue(row.route_group, 'main'), views: numberValue(row.views), sessions: 0 })),
+    route_groups: routeRows.map((row) => {
+      const routeGroup = stringValue(row.route_group, 'main');
+      return { route_group: routeGroup, views: numberValue(row.views), sessions: routeSessions.get(routeGroup) || 0 };
+    }),
     features: featureRows.map((row) => ({ feature_name: stringValue(row.feature_name), count: numberValue(row.count) })),
     navigation: navigationRows.map((row) => ({
       from_tab: getFeatureProp(row.feature_props_json, 'from_tab'),

@@ -622,6 +622,67 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- 사이트 인사이트: KST wall-clock 기준 원시 이벤트·세션·시간 롤업
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id BIGSERIAL PRIMARY KEY,
+  event_type VARCHAR(32) NOT NULL,
+  session_id VARCHAR(96) NOT NULL,
+  user_id VARCHAR(191),
+  ip_hash VARCHAR(64),
+  path VARCHAR(384),
+  route_group VARCHAR(80),
+  device_type VARCHAR(32),
+  browser_name VARCHAR(64),
+  os_name VARCHAR(64),
+  viewport_width INT,
+  viewport_height INT,
+  timezone VARCHAR(80),
+  language VARCHAR(32),
+  is_authenticated SMALLINT NOT NULL DEFAULT 0,
+  user_role VARCHAR(32),
+  duration_seconds INT,
+  feature_name VARCHAR(96),
+  feature_props_json TEXT,
+  referrer_host VARCHAR(191),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS analytics_sessions (
+  session_id VARCHAR(96) PRIMARY KEY,
+  user_id VARCHAR(191),
+  ip_hash VARCHAR(64),
+  first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_path VARCHAR(384),
+  route_group VARCHAR(80),
+  device_type VARCHAR(32),
+  browser_name VARCHAR(64),
+  os_name VARCHAR(64),
+  timezone VARCHAR(80),
+  language VARCHAR(32),
+  is_authenticated SMALLINT NOT NULL DEFAULT 0,
+  user_role VARCHAR(32)
+);
+
+CREATE TABLE IF NOT EXISTS analytics_hourly_rollups (
+  bucket_at TIMESTAMP NOT NULL,
+  dimension_type VARCHAR(32) NOT NULL,
+  dimension_key VARCHAR(384) NOT NULL,
+  page_views BIGINT NOT NULL DEFAULT 0,
+  duration_total_seconds BIGINT NOT NULL DEFAULT 0,
+  duration_samples BIGINT NOT NULL DEFAULT 0,
+  heartbeats BIGINT NOT NULL DEFAULT 0,
+  feature_events BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (bucket_at, dimension_type, dimension_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created ON analytics_events (created_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_type_created ON analytics_events (event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_path_created ON analytics_events (path, created_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_sessions_last_seen ON analytics_sessions (last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_rollups_dimension_bucket ON analytics_hourly_rollups (dimension_type, bucket_at);
+
 -- 미니게임 보너스 티켓 지급: 기본 티켓은 5장으로 초기화하고, 보너스 티켓은 상한 없이 누적
 CREATE OR REPLACE FUNCTION add_minigame_bonus_tickets(p_user_id TEXT, p_amount INTEGER)
 RETURNS user_minigame_tickets AS $$

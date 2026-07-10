@@ -189,6 +189,10 @@ import {
   adminCreateShopItem,
   adminUpdateShopItem,
   adminResetPurchases,
+  adminGetArenaCosmetics,
+  adminCreateArenaCosmetic,
+  adminUpdateArenaCosmetic,
+  uploadArenaCosmeticAsset,
   uploadArenaEmoteAsset,
   getArenaCosmeticShopItems,
   getArenaCosmeticInventoryCounts,
@@ -525,6 +529,10 @@ router.post('/admin/arena/reports/:report_id/review', authMiddleware, adminMiddl
 router.get('/admin/arena/streamer-right-requests', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/admin/arena/streamer-right-requests/:request_id/review', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/admin/arena/cosmetics/emote-assets', authMiddleware, adminMiddleware, arenaAdminLimiter, uploadSingleImage, uploadArenaEmoteAsset);
+router.get('/admin/arena/cosmetics', authMiddleware, adminMiddleware, arenaAdminLimiter, adminGetArenaCosmetics);
+router.post('/admin/arena/cosmetics', authMiddleware, adminMiddleware, arenaAdminLimiter, adminCreateArenaCosmetic);
+router.patch('/admin/arena/cosmetics/:id', authMiddleware, adminMiddleware, arenaAdminLimiter, adminUpdateArenaCosmetic);
+router.post('/admin/arena/cosmetics/assets', authMiddleware, adminMiddleware, arenaAdminLimiter, uploadSingleImage, uploadArenaCosmeticAsset);
 router.get('/admin/arena/quick-match', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/admin/arena/quick-match/recover-queue', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);
 router.get('/admin/arena/cups', authMiddleware, adminMiddleware, arenaAdminLimiter, arenaV2LegacyEndpointRemoved);

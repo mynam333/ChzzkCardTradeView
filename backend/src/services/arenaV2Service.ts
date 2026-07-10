@@ -8,6 +8,7 @@ import type {
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
 import {
   createArenaV2BotTurnActions,
+  evaluateArenaV2CardBudget,
   getArenaV2AvailableCost,
   resolveArenaV2Turn,
   validateArenaV2CardVersionDefinition,
@@ -1013,6 +1014,7 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
   if (row) {
     row.art_asset_id = await arenaV2ArtAssetForOwnedStreamer(db, userId, streamer);
   }
+  const card = row ? serializeArenaV2CardVersionRow(row) : null;
   return {
     seasonId: season.id,
     streamer: {
@@ -1022,7 +1024,8 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
       customImageUrl: streamer.custom_image_url,
       isImageBanned: Boolean(Number(streamer.is_image_banned || 0))
     },
-    card: row ? serializeArenaV2CardVersionRow(row) : null,
+    card,
+    budget: card ? evaluateArenaV2CardBudget(card) : null,
     canEdit: season.status === 'active' || season.status === 'scheduled' || season.status === 'draft'
   };
 };
@@ -1054,8 +1057,9 @@ export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConf
     validationResult: null
   };
   const validation = validateArenaV2CardVersionDefinition(candidate);
+  const budget = evaluateArenaV2CardBudget(candidate);
   if (!validation.valid) {
-    return { accepted: false as const, validation, card: null };
+    return { accepted: false as const, validation, budget, card: null };
   }
 
   const versionRow = await queryGet<{ max_version: number }>(
@@ -1067,7 +1071,7 @@ export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConf
   const cardId = makeId('arena_v2_card');
   const displayName = sanitizeCardDisplayName(input.displayName, streamer.name || streamer.channel_id);
   const artAssetId = await arenaV2ArtAssetForOwnedStreamer(db, input.requesterUserId, streamer);
-  const balanceScore = attack * 3 + health + keywords.length;
+  const balanceScore = budget.totalCost;
 
   await runSql(
     db,
@@ -1107,6 +1111,7 @@ export const updateMyArenaV2StreamerCard = async (input: ArenaV2StreamerCardConf
   return {
     accepted: true as const,
     validation,
+    budget,
     card: await getArenaV2CardVersion(cardId)
   };
 };

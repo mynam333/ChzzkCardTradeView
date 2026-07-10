@@ -469,7 +469,10 @@ export const ShopTab: React.FC = () => {
     lastShopRefreshAtRef.current = Date.now();
     try {
       const res = await apiFetch('/shop/items');
-      if (res.ok) setItems(await res.json());
+      if (res.ok) {
+        const payload: unknown = await res.json();
+        setItems(Array.isArray(payload) ? payload as ShopItem[] : []);
+      }
     } catch { /* noop */ }
   };
   const fetchOwned = async () => {

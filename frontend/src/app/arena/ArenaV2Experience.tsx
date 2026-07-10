@@ -24,11 +24,9 @@ import {
   SlidersHorizontal,
   Sparkles,
   Swords,
-  Target,
   Trophy,
   Users,
   X,
-  Zap
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import {
@@ -43,8 +41,20 @@ import {
   type ArenaCosmeticType,
   type ArenaLoadoutCosmeticType
 } from '@/lib/arenaCosmetics';
+import {
+  evaluateArenaCardEditor,
+  normalizeArenaCardKeywords,
+  type ArenaCardEditorForm,
+  type ArenaCardKeywordSelection
+} from '@/lib/arenaCardEditor';
 import { useApp } from '../AppContext';
+import {
+  ArenaCard,
+  arenaCardClassMeta as classTone,
+  formatArenaCardKeyword as formatArenaKeyword
+} from './ArenaCard';
 import { ArenaEmotePieMenu } from './ArenaEmotePieMenu';
+import { ArenaStreamerCardEditor } from './ArenaStreamerCardEditor';
 import type { ArenaSiteTab } from './types';
 import styles from './ArenaV2Experience.module.css';
 
@@ -66,6 +76,7 @@ type ArenaV2Card = {
   attack: number;
   health: number;
   keywords: string[];
+  keywordDetails?: ArenaCardKeywordSelection[];
   artAssetId?: string | null;
   status?: string;
   ownedCount?: number;
@@ -145,22 +156,6 @@ type ArenaAdminCosmeticForm = {
   sale_end_at: string;
   limited_total_quantity: number;
   sold_quantity: number;
-};
-
-const classTone: Record<string, { label: string; icon: typeof Swords; accent: string; hint: string }> = {
-  charge: { label: '돌격', icon: Swords, accent: 'coral', hint: '라인 돌파와 직접 압박에 특화된 클래스' },
-  guardian: { label: '수호', icon: Shield, accent: 'green', hint: '보호막과 전열 유지에 특화된 클래스' },
-  sniper: { label: '저격', icon: Target, accent: 'violet', hint: '조준과 후열 압박에 특화된 클래스' },
-  support: { label: '지원', icon: Sparkles, accent: 'green', hint: '회복과 라인 보조에 특화된 클래스' },
-  trick: { label: '기만', icon: Zap, accent: 'violet', hint: '약화와 위치 교란에 특화된 클래스' },
-  specter: { label: '망령', icon: Crown, accent: 'violet', hint: '묘지와 손실 보상에 특화된 클래스' },
-  tech: { label: '기술', icon: Gauge, accent: 'cyan', hint: '카드 순환과 전술 보조에 특화된 클래스' },
-  attack: { label: '돌격', icon: Swords, accent: 'coral', hint: '라인 돌파와 직접 압박에 특화된 클래스' },
-  tempo: { label: '기술', icon: Gauge, accent: 'cyan', hint: '카드 순환과 전술 보조에 특화된 클래스' },
-  guard: { label: '수호', icon: Shield, accent: 'green', hint: '보호막과 전열 유지에 특화된 클래스' },
-  heal: { label: '지원', icon: Sparkles, accent: 'green', hint: '회복과 라인 보조에 특화된 클래스' },
-  control: { label: '기만', icon: Target, accent: 'violet', hint: '약화와 위치 교란에 특화된 클래스' },
-  ultimate: { label: '망령', icon: Crown, accent: 'violet', hint: '묘지와 손실 보상에 특화된 클래스' }
 };
 
 const legalCardClasses = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
@@ -358,6 +353,7 @@ const normalizeCard = (raw: any): ArenaV2Card | null => {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id || raw.cardVersionId || raw.card_id || '');
   if (!id) return null;
+  const keywordDetails = normalizeArenaCardKeywords(raw.keywords);
   const keywords = Array.isArray(raw.keywords)
     ? raw.keywords.map((keyword: any) => typeof keyword === 'string' ? keyword : String(keyword?.type || '')).filter(Boolean)
     : [];
@@ -370,6 +366,7 @@ const normalizeCard = (raw: any): ArenaV2Card | null => {
     attack: Number(raw.attack ?? raw.stats?.attack ?? 1),
     health: Number(raw.health ?? raw.hp ?? raw.stats?.hp ?? 1),
     keywords,
+    keywordDetails,
     artAssetId: typeof raw.artAssetId === 'string' ? raw.artAssetId : typeof raw.art_asset_id === 'string' ? raw.art_asset_id : typeof raw.image_url === 'string' ? raw.image_url : null,
     status: typeof raw.status === 'string' ? raw.status : undefined,
     ownedCount: Number.isFinite(Number(raw.ownedCount ?? raw.owned_count)) ? Number(raw.ownedCount ?? raw.owned_count) : undefined,
@@ -462,88 +459,6 @@ const requestStatusLabel = (status?: string) => {
   return labels[String(status || '')] || status || '확인 중';
 };
 
-const arenaKeywordLabels: Record<string, string> = {
-  rush: '돌진',
-  taunt: '도발',
-  direct_pressure: '직격 압박',
-  heal: '회복',
-  draw: '드로우',
-  deathrattle: '유언',
-  silence: '침묵',
-  aim: '조준',
-  shield: '보호막',
-  guard: '수호',
-  stun: '기절',
-  weaken: '약화',
-  push: '밀치기',
-  pull: '끌어오기',
-  poison: '중독',
-  burn: '화상',
-  freeze: '빙결',
-  stealth: '은신',
-  lifesteal: '흡혈',
-  pierce: '관통',
-  splash: '광역',
-  cleave: '연격',
-  counter: '반격',
-  charge: '돌격',
-  support: '지원',
-  boost: '강화',
-  debuff: '약화',
-  buff: '버프',
-  summon: '소환',
-  revive: '부활',
-  vengeance: '복수',
-  grudge: '원혼',
-  remnant: '잔영',
-  grave_recover: '묘지 회수',
-  battle_draw: '전투 드로우',
-  emergency_heal: '응급 회복',
-  guard_support: '보호 지원',
-  attack_support: '공격 지원',
-  backline_pressure: '후열 압박',
-  pursuit: '추격',
-  weakpoint: '약점 공격',
-  aoe_damage: '광역 피해',
-  discard: '폐기',
-  copy: '복제',
-  discover: '발견'
-};
-
-const arenaKeywordTokenLabels: Record<string, string> = {
-  direct: '직격',
-  pressure: '압박',
-  death: '사망',
-  rattle: '유언',
-  final: '최후',
-  strike: '타격',
-  double: '이중',
-  draw: '드로우',
-  heal: '회복',
-  power: '전력',
-  attack: '공격',
-  health: '체력',
-  random: '무작위',
-  enemy: '적',
-  ally: '아군',
-  card: '카드',
-  hand: '손패',
-  deck: '덱',
-  lane: '라인'
-};
-
-const formatArenaKeyword = (keyword?: string) => {
-  const raw = String(keyword || '').trim();
-  if (!raw) return '';
-  const normalized = raw.toLowerCase();
-  if (arenaKeywordLabels[normalized]) return arenaKeywordLabels[normalized];
-  return raw
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((token) => arenaKeywordTokenLabels[token.toLowerCase()] || token)
-    .join(' ');
-};
-
 const getBackendAssetOrigin = () => {
   try {
     if (/^https?:\/\//i.test(API_BASE_URL)) return new URL(API_BASE_URL).origin;
@@ -585,54 +500,14 @@ const getArenaEmoteVisual = (item?: { style_json?: string | null; name?: string 
   const emoji = typeof style.emoji === 'string' && style.emoji.trim() ? style.emoji.trim() : '';
   return { imageUrl, emoji: emoji || '✦' };
 };
-const cardTooltip = (card: ArenaV2Card, classLabel: string) => {
-  const keywordText = card.keywords.length ? card.keywords.map(formatArenaKeyword).filter(Boolean).join(', ') : '특수 효과 없음';
-  return `${card.displayName}\n클래스: ${classLabel}\n효과: ${keywordText}\n공격력: ${card.attack}\n체력: ${card.health}`;
-};
-
-const hydrateStreamerCardForm = (card: ArenaV2Card | null) => ({
+const hydrateStreamerCardForm = (card: ArenaV2Card | null): ArenaCardEditorForm => ({
   displayName: card?.displayName || '',
   cardClass: legalCardClasses.includes(card?.cardClass || '') ? card?.cardClass || 'charge' : 'charge',
-  cost: String(card?.cost ?? 2),
-  attack: String(card?.attack ?? 1),
-  health: String(card?.health ?? 4),
-  keywordsText: card?.keywords?.join(', ') || ''
+  cost: card?.cost ?? 2,
+  attack: card?.attack ?? 1,
+  health: card?.health ?? 4,
+  keywords: card?.keywordDetails || normalizeArenaCardKeywords(card?.keywords || [])
 });
-
-const parseKeywordEditorText = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return trimmed
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      const [type, rawValue] = item.split(':').map((part) => part.trim());
-      const valueNumber = Number(rawValue);
-      return Number.isInteger(valueNumber) ? { type, value: valueNumber } : { type };
-    });
-};
-
-const CardArt: React.FC<{ card: ArenaV2Card; compact?: boolean }> = ({ card, compact }) => {
-  const initial = card.displayName.trim().slice(0, 1) || 'A';
-  const imageUrl = resolveBackendImageUrl(card.artAssetId);
-  if (imageUrl) {
-    return <img src={imageUrl} alt={card.displayName} className="h-full w-full object-cover" loading="lazy" />;
-  }
-  return (
-    <div className={`arena-v2-art-fallback arena-v2-accent-${classTone[card.cardClass]?.accent || 'cyan'} ${compact ? 'is-compact' : ''}`}>
-      <span>{initial}</span>
-    </div>
-  );
-};
 
 const ArenaV2CardView: React.FC<{
   card: ArenaV2Card;
@@ -640,39 +515,19 @@ const ArenaV2CardView: React.FC<{
   compact?: boolean;
   onClick?: () => void;
 }> = ({ card, selected, compact, onClick }) => {
-  const tone = classTone[card.cardClass] || classTone.tempo;
-  const Icon = tone.icon;
-  const keywords = card.keywords.map(formatArenaKeyword).filter(Boolean).slice(0, compact ? 1 : 3);
-  const tooltip = cardTooltip(card, tone.label);
   return (
-    <button
-      type="button"
+    <ArenaCard
+      displayName={card.displayName}
+      cardClass={card.cardClass}
+      cost={card.cost}
+      attack={card.attack}
+      health={card.health}
+      keywords={card.keywordDetails?.length ? card.keywordDetails : card.keywords}
+      artAssetId={card.artAssetId}
+      selected={selected}
+      compact={compact}
       onClick={onClick}
-      className={`arena-v2-card arena-v2-accent-${tone.accent} ${selected ? 'is-selected' : ''} ${compact ? 'is-compact' : ''}`}
-      aria-pressed={selected}
-      aria-label={`${card.displayName}, 비용 ${card.cost}, 공격 ${card.attack}, 체력 ${card.health}`}
-      data-card-tooltip={tooltip}
-    >
-      <span className="arena-v2-card-cost" aria-label={`비용 ${card.cost}`}>{card.cost}</span>
-      <span className="arena-v2-card-role" title={`클래스: ${tone.label} - ${tone.hint}`} aria-label={`클래스 ${tone.label}`}>
-        <Icon className="h-4 w-4" />
-        <span>{tone.label}</span>
-      </span>
-      <span className="arena-v2-card-art">
-        <CardArt card={card} compact={compact} />
-        <span className="arena-v2-card-keywords">
-          {keywords.length ? keywords.map((keyword, index) => <span key={`${keyword}-${index}`} title={`효과 키워드: ${keyword}`}>{keyword}</span>) : <span title="특수 효과 없음">기본</span>}
-        </span>
-      </span>
-      <span className="arena-v2-card-readable">
-        <span className="arena-v2-card-name">{card.displayName}</span>
-        <span className="arena-v2-card-brand" aria-hidden="true">CHIKAPO ARENA</span>
-      </span>
-      <span className="arena-v2-card-stats">
-        <span className="is-atk" title={`공격력 ${card.attack}`} aria-label={`공격력 ${card.attack}`}><Swords className="h-4 w-4" /><b>{card.attack}</b></span>
-        <span className="is-hp" title={`체력 ${card.health}`} aria-label={`체력 ${card.health}`}><HeartPulse className="h-4 w-4" /><b>{card.health}</b></span>
-      </span>
-    </button>
+    />
   );
 };
 
@@ -712,6 +567,11 @@ const ArenaCosmeticPreview: React.FC<{ item: ArenaCosmeticItem; compact?: boolea
     className={`arena-v2-cosmetic-preview is-${item.type} ${compact ? 'is-compact' : ''}`}
     style={getArenaCosmeticStyleVars(item) as React.CSSProperties}
   >
+    {item.type !== 'emote' && visual.imageUrl && (
+      <span className="arena-v2-cosmetic-asset-image" aria-hidden="true">
+        <img src={visual.imageUrl} alt="" />
+      </span>
+    )}
     {item.type === 'emote' ? (
       <span className="arena-v2-emote-badge is-preview">
         {visual.imageUrl ? <img src={visual.imageUrl} alt={item.name} /> : <b>{visual.emoji}</b>}
@@ -776,6 +636,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const [adminCosmeticUploading, setAdminCosmeticUploading] = React.useState(false);
   const [adminCosmeticForm, setAdminCosmeticForm] = React.useState<ArenaAdminCosmeticForm>({ ...emptyArenaAdminCosmeticForm });
   const [streamerCardForm, setStreamerCardForm] = React.useState(hydrateStreamerCardForm(null));
+  const [savedStreamerCardForm, setSavedStreamerCardForm] = React.useState(hydrateStreamerCardForm(null));
+  const [savingStreamerCard, setSavingStreamerCard] = React.useState(false);
   const [adminSubTab, setAdminSubTab] = React.useState<ArenaAdminSubTab>('overview');
   const [arenaAdminStatus, setArenaAdminStatus] = React.useState<any | null>(null);
   const [adminRewardPreview, setAdminRewardPreview] = React.useState<any | null>(null);
@@ -918,7 +780,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setArenaAdminCosmeticItems([]);
       return;
     }
-    const res = await apiFetch('/admin/shop/items');
+    const res = await apiFetch('/admin/arena/cosmetics');
     const json = res.ok ? await res.json().catch(() => []) : [];
     const items = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : [];
     setArenaAdminCosmeticItems(items.filter((item: { type?: unknown }) => isArenaCosmeticType(item?.type)));
@@ -968,10 +830,14 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             canEdit: myCardJson?.canEdit !== false
           };
           setMyStreamerCard(nextMyCard);
-          setStreamerCardForm(hydrateStreamerCardForm(card));
+          const nextForm = hydrateStreamerCardForm(card);
+          setStreamerCardForm(nextForm);
+          setSavedStreamerCardForm(nextForm);
         } else {
           setMyStreamerCard(null);
-          setStreamerCardForm(hydrateStreamerCardForm(null));
+          const nextForm = hydrateStreamerCardForm(null);
+          setStreamerCardForm(nextForm);
+          setSavedStreamerCardForm(nextForm);
         }
         await loadArenaCosmetics().catch(() => undefined);
       } else {
@@ -989,14 +855,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               canEdit: myCardJson?.canEdit === true
             };
             setMyStreamerCard(nextMyCard);
-            setStreamerCardForm(hydrateStreamerCardForm(card));
+            const nextForm = hydrateStreamerCardForm(card);
+            setStreamerCardForm(nextForm);
+            setSavedStreamerCardForm(nextForm);
           } else {
             setMyStreamerCard(null);
-            setStreamerCardForm(hydrateStreamerCardForm(null));
+            const nextForm = hydrateStreamerCardForm(null);
+            setStreamerCardForm(nextForm);
+            setSavedStreamerCardForm(nextForm);
           }
         } else {
           setMyStreamerCard(null);
-          setStreamerCardForm(hydrateStreamerCardForm(null));
+          const nextForm = hydrateStreamerCardForm(null);
+          setStreamerCardForm(nextForm);
+          setSavedStreamerCardForm(nextForm);
         }
         await loadArenaCosmetics().catch(() => undefined);
       }
@@ -1025,12 +897,6 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   React.useEffect(() => {
     void loadArenaV2();
   }, [loadArenaV2]);
-
-  React.useEffect(() => {
-    if (activeTab === 'my-card' && !loading && !myStreamerCard) {
-      router.replace('/arena/play');
-    }
-  }, [activeTab, loading, myStreamerCard, router]);
 
   React.useEffect(() => {
     if (activeTab !== 'inventory' || !season?.id || !cardPage.hasMore || loadingMoreCards) return;
@@ -1194,16 +1060,22 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setNotice('현재 시즌 상태에서는 스트리머 카드 설정을 변경할 수 없습니다.');
       return;
     }
+    const assessment = evaluateArenaCardEditor(streamerCardForm);
+    if (!assessment.valid) {
+      toast(assessment.errors[0] || '카드 구성을 다시 확인해주세요.', 'error');
+      return;
+    }
+    setSavingStreamerCard(true);
     try {
       const res = await apiFetch('/arena/streamer-card/me', {
         method: 'PATCH',
         body: JSON.stringify({
           displayName: streamerCardForm.displayName,
           cardClass: streamerCardForm.cardClass,
-          cost: Number(streamerCardForm.cost),
-          attack: Number(streamerCardForm.attack),
-          health: Number(streamerCardForm.health),
-          keywords: parseKeywordEditorText(streamerCardForm.keywordsText)
+          cost: streamerCardForm.cost,
+          attack: streamerCardForm.attack,
+          health: streamerCardForm.health,
+          keywords: streamerCardForm.keywords
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -1216,10 +1088,13 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       await loadArenaV2();
     } catch (error: any) {
       toast(error?.message || '스트리머 카드 저장 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setSavingStreamerCard(false);
     }
   };
 
   const toggleMyStreamerCard = async (enabled: boolean) => {
+    setSavingStreamerCard(true);
     try {
       const res = await apiFetch(enabled ? '/arena/streamer-card/me/enable' : '/arena/streamer-card/me/disable', { method: 'POST' });
       const json = await res.json().catch(() => ({}));
@@ -1228,6 +1103,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       await loadArenaV2();
     } catch (error: any) {
       toast(error?.message || '스트리머 카드 상태 변경 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setSavingStreamerCard(false);
     }
   };
 
@@ -1387,7 +1264,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     }));
   };
 
-  const uploadAdminArenaEmoteAsset = async (file: File | null | undefined) => {
+  const uploadAdminArenaCosmeticAsset = async (file: File | null | undefined) => {
     if (!file || adminCosmeticUploading) return;
     if (!file.type.startsWith('image/')) {
       toast('이미지 파일만 업로드할 수 있습니다.', 'error');
@@ -1396,19 +1273,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     try {
       setAdminCosmeticUploading(true);
       const formData = new FormData();
+      formData.append('type', adminCosmeticForm.type);
       formData.append('image', file);
-      const res = await apiFetch('/admin/arena/cosmetics/emote-assets', {
+      const res = await apiFetch('/admin/arena/cosmetics/assets', {
         method: 'POST',
         body: formData
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || '이모트 이미지를 업로드하지 못했습니다.');
+      if (!res.ok) throw new Error(json?.message || '치장 이미지를 업로드하지 못했습니다.');
       const imageUrl = json?.data?.image_url;
       if (!imageUrl) throw new Error('업로드된 이미지 주소를 확인하지 못했습니다.');
       mergeAdminCosmeticStyleJson({ image_url: imageUrl });
-      toast(json?.data?.animated ? '움짤 이모트 이미지를 업로드했습니다.' : '이모트 이미지를 업로드했습니다.', 'success');
+      toast(json?.data?.animated ? '움직이는 치장 이미지를 업로드했습니다.' : '치장 이미지를 업로드했습니다.', 'success');
     } catch (error: any) {
-      toast(error?.message || '이모트 이미지를 업로드하지 못했습니다.', 'error');
+      toast(error?.message || '치장 이미지를 업로드하지 못했습니다.', 'error');
     } finally {
       setAdminCosmeticUploading(false);
     }
@@ -1446,8 +1324,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
         sale_end_at: arenaDateTimeInputToIso(adminCosmeticForm.sale_end_at),
         limited_total_quantity: Math.max(0, Number(adminCosmeticForm.limited_total_quantity) || 0)
       };
-      const url = adminCosmeticForm.id ? `/admin/shop/items/${adminCosmeticForm.id}` : '/admin/shop/items';
-      const res = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+      const url = adminCosmeticForm.id ? `/admin/arena/cosmetics/${adminCosmeticForm.id}` : '/admin/arena/cosmetics';
+      const res = await apiFetch(url, { method: adminCosmeticForm.id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '치장 상품을 저장하지 못했습니다.');
       toast(adminCosmeticForm.id ? '아레나 치장을 수정했습니다.' : '아레나 치장을 등록했습니다.', 'success');
@@ -1484,8 +1362,8 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const toggleAdminArenaCosmetic = async (item: ArenaCosmeticItem) => {
     try {
       setAdminActionLoading(`cosmetic-toggle-${item.id}`);
-      const res = await apiFetch(`/admin/shop/items/${item.id}`, {
-        method: 'POST',
+      const res = await apiFetch(`/admin/arena/cosmetics/${item.id}`, {
+        method: 'PATCH',
         body: JSON.stringify({ active: item.active === false })
       });
       const json = await res.json().catch(() => ({}));
@@ -2240,81 +2118,85 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     );
   };
 
-  const renderMyCard = () => (
-    <section className={`arena-v2-shell arena-v2-page is-my-card ${styles.arenaV2Scope}`}>
-      <section className="arena-v2-topbar">
-        <div>
-          <h2>내 카드</h2>
-          <p>등록된 스트리머가 자신의 아레나 카드 능력치와 효과를 시즌 비용 안에서 조정합니다.</p>
-        </div>
-        <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
-        </button>
-      </section>
-      {!myStreamerCard ? (
-        <section className="arena-v2-stage">
-          <div className="arena-v2-board-wrap">
-            <div className="arena-v2-panel-section">
-              <span className="arena-v2-panel-label">접근 권한</span>
-              <p>등록된 스트리머만 내 카드를 설정할 수 있습니다.</p>
-            </div>
+  const renderMyCard = () => {
+    const assessment = evaluateArenaCardEditor(streamerCardForm);
+    const dirty = JSON.stringify(streamerCardForm) !== JSON.stringify(savedStreamerCardForm);
+    const serverErrors = (myStreamerCard?.validation?.errors || []).map((error) => error.message || error.code || '').filter(Boolean);
+    return (
+      <section className={`arena-v2-shell arena-v2-page is-my-card ${styles.arenaV2Scope}`}>
+        <section className="arena-v2-topbar arena-v2-card-topbar">
+          <div>
+            <h2>내 카드</h2>
+            <p>내 전투 스타일을 고르고, 코스트별 예산 안에서 능력치와 효과를 직접 구성하세요.</p>
+          </div>
+          <div className="arena-v2-top-actions">
+            {myStreamerCard ? (
+              <span className={`arena-v2-card-edit-status ${myStreamerCard.canEdit ? 'is-open' : 'is-closed'}`}>
+                {myStreamerCard.canEdit ? <Check /> : <Clock3 />}
+                {myStreamerCard.canEdit ? '편집 가능' : '수정 마감'}
+              </span>
+            ) : null}
+            <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+            </button>
+            {myStreamerCard ? (
+              <button
+                type="button"
+                onClick={saveMyStreamerCard}
+                className="arena-v2-primary-button"
+                disabled={!myStreamerCard.canEdit || !dirty || !assessment.valid || savingStreamerCard}
+              >
+                <Save className="h-4 w-4" /> {savingStreamerCard ? '저장 중…' : '변경사항 저장'}
+              </button>
+            ) : null}
           </div>
         </section>
-      ) : (
-      <section className="arena-v2-stage">
-        <aside className="arena-v2-command-panel">
-          <div className="arena-v2-panel-section">
-            <span className="arena-v2-panel-label">카드 설정</span>
-            <p>{myStreamerCard.streamer?.name || myStreamerCard.streamer?.channelId || '등록 스트리머'} · {myStreamerCard.canEdit ? '편집 가능' : '이번 시즌 수정 마감'}</p>
-            <input value={streamerCardForm.displayName} onChange={(event) => setStreamerCardForm((current) => ({ ...current, displayName: event.target.value }))} className="arena-v2-select" placeholder="카드 이름" disabled={!myStreamerCard.canEdit} />
-            <select value={streamerCardForm.cardClass} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cardClass: event.target.value }))} className="arena-v2-select" disabled={!myStreamerCard.canEdit}>
-              {legalCardClasses.map((cardClass) => (
-                <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
-              ))}
-            </select>
-            <div className="arena-v2-action-order">
-              <input type="number" min={1} max={9} value={streamerCardForm.cost} onChange={(event) => setStreamerCardForm((current) => ({ ...current, cost: event.target.value }))} className="arena-v2-select" aria-label="코스트" disabled={!myStreamerCard.canEdit} />
-              <input type="number" min={0} max={9} value={streamerCardForm.attack} onChange={(event) => setStreamerCardForm((current) => ({ ...current, attack: event.target.value }))} className="arena-v2-select" aria-label="공격력" disabled={!myStreamerCard.canEdit} />
-              <input type="number" min={1} max={20} value={streamerCardForm.health} onChange={(event) => setStreamerCardForm((current) => ({ ...current, health: event.target.value }))} className="arena-v2-select" aria-label="체력" disabled={!myStreamerCard.canEdit} />
-            </div>
-            <input value={streamerCardForm.keywordsText} onChange={(event) => setStreamerCardForm((current) => ({ ...current, keywordsText: event.target.value }))} className="arena-v2-select" placeholder="효과 키워드: 도발:1, 보호:1" disabled={!myStreamerCard.canEdit} />
-            {myStreamerCard.validation?.errors?.length ? (
-              <div className="arena-v2-replay-list">
-                {myStreamerCard.validation.errors.map((error, index) => <span key={`${error.code || 'error'}-${index}`}>{error.message || error.code}</span>)}
-              </div>
-            ) : null}
-            <div className="arena-v2-queue-actions">
-              <button type="button" onClick={saveMyStreamerCard} disabled={!myStreamerCard.canEdit}>저장</button>
-              <button type="button" onClick={() => toggleMyStreamerCard(false)}>비활성화</button>
-              <button type="button" onClick={() => toggleMyStreamerCard(true)}>활성화</button>
-            </div>
-          </div>
-        </aside>
-        <div className="arena-v2-board-wrap">
-          {myStreamerCard?.card ? (
-            <div className="arena-v2-panel-section">
-              <span className="arena-v2-panel-label">내 카드 미리보기</span>
-              <div className="arena-v2-card-row">
-                <ArenaV2CardView
-                  card={{
-                    ...myStreamerCard.card,
-                    displayName: streamerCardForm.displayName || myStreamerCard.card.displayName,
-                    cardClass: streamerCardForm.cardClass,
-                    cost: Number.isFinite(Number(streamerCardForm.cost)) ? Number(streamerCardForm.cost) : myStreamerCard.card.cost,
-                    attack: Number.isFinite(Number(streamerCardForm.attack)) ? Number(streamerCardForm.attack) : myStreamerCard.card.attack,
-                    health: Number.isFinite(Number(streamerCardForm.health)) ? Number(streamerCardForm.health) : myStreamerCard.card.health,
-                    keywords: parseKeywordEditorText(streamerCardForm.keywordsText).map((keyword: any) => String(keyword.type || '')).filter(Boolean),
-                    artAssetId: myStreamerCard.card.artAssetId
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-        </div>
+        {!myStreamerCard ? (
+          <section className="arena-v2-card-access-empty">
+            <Swords />
+            <strong>등록된 스트리머만 내 카드를 편집할 수 있습니다.</strong>
+            <span>현재 로그인한 계정에 연결된 스트리머 정보를 확인해주세요.</span>
+          </section>
+        ) : (
+          <ArenaStreamerCardEditor
+            form={streamerCardForm}
+            savedForm={savedStreamerCardForm}
+            canEdit={myStreamerCard.canEdit}
+            active={Boolean(myStreamerCard.card && myStreamerCard.card.status !== 'disabled')}
+            saving={savingStreamerCard}
+            serverErrors={serverErrors}
+            onChange={(nextForm) => {
+              setStreamerCardForm(nextForm);
+              setMyStreamerCard((current) => current ? { ...current, validation: undefined } : current);
+            }}
+            onSave={saveMyStreamerCard}
+            onReset={() => {
+              setStreamerCardForm(savedStreamerCardForm);
+              setMyStreamerCard((current) => current ? { ...current, validation: undefined } : current);
+            }}
+            onToggle={toggleMyStreamerCard}
+            preview={myStreamerCard.card ? (
+              <ArenaV2CardView
+                card={{
+                  ...myStreamerCard.card,
+                  displayName: streamerCardForm.displayName.trim() || myStreamerCard.streamer?.name || myStreamerCard.card.displayName,
+                  cardClass: streamerCardForm.cardClass,
+                  cost: streamerCardForm.cost,
+                  attack: streamerCardForm.attack,
+                  health: streamerCardForm.health,
+                  keywords: streamerCardForm.keywords.map((keyword) => keyword.type),
+                  keywordDetails: streamerCardForm.keywords,
+                  artAssetId: myStreamerCard.card.artAssetId
+                }}
+              />
+            ) : (
+              <div className="arena-v2-card-preview-empty"><Swords /><span>현재 시즌 카드가 생성되면 이곳에 미리보기가 표시됩니다.</span></div>
+            )}
+          />
+        )}
       </section>
-      )}
-    </section>
-  );
+    );
+  };
 
   const renderAdmin = () => {
     const rewardPreviewPlayers = adminRewardPreview?.totalPlayers ?? adminRewardPreview?.players?.length ?? 0;
@@ -2526,26 +2408,33 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                       <input className="arena-v2-select" type="datetime-local" value={adminCosmeticForm.sale_start_at} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, sale_start_at: event.target.value }))} aria-label="판매 시작" />
                       <input className="arena-v2-select" type="datetime-local" value={adminCosmeticForm.sale_end_at} onChange={(event) => setAdminCosmeticForm((form) => ({ ...form, sale_end_at: event.target.value }))} aria-label="판매 종료" />
                     </div>
+                    <div className="arena-v2-admin-cosmetic-tools">
+                      <label>
+                        {adminCosmeticUploading ? '업로드 중' : `${arenaCosmeticTypeLabels[adminCosmeticForm.type]} 이미지 업로드`}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                          disabled={adminCosmeticUploading}
+                          onChange={(event) => {
+                            void uploadAdminArenaCosmeticAsset(event.target.files?.[0]);
+                            event.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                      {parseArenaCosmeticStyle(adminCosmeticForm.style_json).image_url && (
+                        <button type="button" onClick={() => mergeAdminCosmeticStyleJson({ image_url: null })}>이미지 제거</button>
+                      )}
+                    </div>
+                    <span className="arena-v2-admin-asset-status">
+                      {String(parseArenaCosmeticStyle(adminCosmeticForm.style_json).image_url || 'PNG, WebP, GIF, AVIF 또는 JPEG · 최대 업로드 용량은 서버 설정을 따릅니다.')}
+                    </span>
                     {adminCosmeticForm.type === 'emote' ? (
-                      <div className="arena-v2-admin-cosmetic-tools">
-                        <label>
-                          {adminCosmeticUploading ? '업로드 중' : '이미지 업로드'}
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-                            onChange={(event) => {
-                              void uploadAdminArenaEmoteAsset(event.target.files?.[0]);
-                              event.currentTarget.value = '';
-                            }}
-                          />
-                        </label>
                         <input
                           className="arena-v2-select"
                           placeholder="이모지 대체 표시"
                           value={String(parseArenaCosmeticStyle(adminCosmeticForm.style_json).emoji || '')}
                           onChange={(event) => mergeAdminCosmeticStyleJson({ emoji: event.target.value })}
                         />
-                      </div>
                     ) : (
                       <div className="arena-v2-admin-form-grid">
                         <input className="arena-v2-select" placeholder="주 색상 #f2556b" value={String(parseArenaCosmeticStyle(adminCosmeticForm.style_json).primary_color || '')} onChange={(event) => mergeAdminCosmeticStyleJson({ primary_color: event.target.value })} />

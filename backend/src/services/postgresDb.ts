@@ -41,6 +41,7 @@ const autoIdTables = new Set([
   'achievement_events',
   'achievement_grant_logs',
   'achievement_evaluation_queue',
+  'analytics_events',
   'announcements',
   'arena_admin_audit_logs',
   'arena_admin_jobs',
@@ -79,6 +80,8 @@ const autoIdTables = new Set([
 const conflictTargets: Record<string, string> = {
   achievement_grant_logs: '(user_id, achievement_id, repeat_key)',
   achievements: '(code)',
+  analytics_hourly_rollups: '(bucket_at, dimension_type, dimension_key)',
+  analytics_sessions: '(session_id)',
   arena_cup_replays: '(cup_id)',
   arena_match_replays: '(match_id)',
   arena_player_ratings: '(season_id, user_id)',
