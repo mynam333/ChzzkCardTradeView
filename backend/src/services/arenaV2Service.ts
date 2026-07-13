@@ -838,6 +838,100 @@ const generatedArenaV2CombatMatches = (existing: any, generated: ReturnType<type
   && JSON.stringify(jsonParse(existing.validation_result, null)) === JSON.stringify(generated.validation)
 );
 
+type ArenaV2GeneratedCardSyncOutcome = 'created' | 'updated' | 'skipped';
+
+const syncGeneratedArenaV2CardForStreamer = async (
+  db: SqlExecutor,
+  seasonId: string,
+  streamer: any,
+  existing?: any
+): Promise<ArenaV2GeneratedCardSyncOutcome> => {
+  const streamerId = String(streamer.channel_id || '').trim();
+  if (!streamerId) return 'skipped';
+  const generated = buildDefaultArenaV2CardVersionForStreamer(seasonId, streamer);
+
+  if (existing) {
+    // 자동 생성 카드만 제자리 갱신합니다. 스트리머가 직접 만든 새 버전은 덮어쓰지 않습니다.
+    if (String(existing.id) !== generated.id || generatedArenaV2CombatMatches(existing, generated)) return 'skipped';
+    await runSql(
+      db,
+      `
+        UPDATE arena_v2_card_versions
+           SET card_class = ?,
+               cost = ?,
+               attack = ?,
+               health = ?,
+               keywords = ?,
+               balance_score = ?,
+               validation_result = ?,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND season_id = ? AND status = 'active'
+      `,
+      [
+        generated.cardClass,
+        generated.cost,
+        generated.attack,
+        generated.health,
+        JSON.stringify(generated.keywords),
+        generated.balanceScore,
+        JSON.stringify(generated.validation),
+        existing.id,
+        seasonId
+      ]
+    );
+    existing.card_class = generated.cardClass;
+    existing.cost = generated.cost;
+    existing.attack = generated.attack;
+    existing.health = generated.health;
+    existing.keywords = JSON.stringify(generated.keywords);
+    existing.balance_score = generated.balanceScore;
+    existing.validation_result = JSON.stringify(generated.validation);
+    return 'updated';
+  }
+
+  const conflictClause = getSqlDialect() === 'mysql'
+    ? 'ON DUPLICATE KEY UPDATE id = VALUES(id)'
+    : 'ON CONFLICT (id) DO NOTHING';
+  const result = await runSql(
+    db,
+    `
+      INSERT INTO arena_v2_card_versions
+        (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
+      VALUES
+        (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      ${conflictClause}
+    `,
+    [
+      generated.id,
+      streamerId,
+      generated.displayName,
+      seasonId,
+      generated.cardClass,
+      generated.cost,
+      generated.attack,
+      generated.health,
+      JSON.stringify(generated.keywords),
+      generated.balanceScore,
+      JSON.stringify(generated.validation),
+      generated.artAssetId
+    ]
+  );
+  const changedRows = Number(result?.changes ?? result?.rowCount ?? result?.affectedRows ?? 1);
+  return changedRows > 0 ? 'created' : 'skipped';
+};
+
+const runArenaV2GeneratedCardSyncBatch = async (
+  jobs: Array<() => Promise<ArenaV2GeneratedCardSyncOutcome>>,
+  concurrency = 16
+) => {
+  const totals = { created: 0, updated: 0, skipped: 0 };
+  for (let index = 0; index < jobs.length; index += concurrency) {
+    const outcomes = await Promise.all(jobs.slice(index, index + concurrency).map((job) => job()));
+    for (const outcome of outcomes) totals[outcome] += 1;
+  }
+  return totals;
+};
+
 export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
@@ -871,80 +965,12 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
     if (streamerId && !existingByStreamerId.has(streamerId)) existingByStreamerId.set(streamerId, row);
   }
 
-  let created = 0;
-  let updated = 0;
-  let skipped = 0;
-  for (const streamer of streamers) {
+  const totals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer) => () => {
     const streamerId = String(streamer.channel_id || '').trim();
-    if (!streamerId) {
-      skipped += 1;
-      continue;
-    }
-    const existing = existingByStreamerId.get(streamerId);
-    if (existing) {
-      const generated = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
-      // 자동 생성 카드만 제자리 갱신합니다. 스트리머가 직접 만든 새 버전은 무작위 생성 규칙으로 덮어쓰지 않습니다.
-      if (String(existing.id) !== generated.id || generatedArenaV2CombatMatches(existing, generated)) {
-        skipped += 1;
-        continue;
-      }
-      await runSql(
-        db,
-        `
-          UPDATE arena_v2_card_versions
-             SET card_class = ?,
-                 cost = ?,
-                 attack = ?,
-                 health = ?,
-                 keywords = ?,
-                 balance_score = ?,
-                 validation_result = ?,
-                 updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND season_id = ? AND status = 'active'
-        `,
-        [
-          generated.cardClass,
-          generated.cost,
-          generated.attack,
-          generated.health,
-          JSON.stringify(generated.keywords),
-          generated.balanceScore,
-          JSON.stringify(generated.validation),
-          existing.id,
-          activeSeason.id
-        ]
-      );
-      updated += 1;
-      continue;
-    }
-    const card = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
-    await runSql(
-      db,
-      `
-        INSERT INTO arena_v2_card_versions
-          (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
-        VALUES
-          (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-      `,
-      [
-        card.id,
-        streamerId,
-        card.displayName,
-        activeSeason.id,
-        card.cardClass,
-        card.cost,
-        card.attack,
-        card.health,
-        JSON.stringify(card.keywords),
-        card.balanceScore,
-        JSON.stringify(card.validation),
-        card.artAssetId
-      ]
-    );
-    created += 1;
-  }
+    return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
+  }));
 
-  return { seasonId: activeSeason.id, scanned: streamers.length, created, updated, skipped };
+  return { seasonId: activeSeason.id, scanned: streamers.length, ...totals };
 };
 
 export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string, options: { limit?: number } = {}) => {
@@ -977,78 +1003,53 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
     .map((streamer) => String(streamer.channel_id || '').trim())
     .filter(Boolean);
   if (streamerIds.length === 0) {
-    return { seasonId: activeSeason.id, scanned: 0, created: 0, skipped: 0 };
+    return { seasonId: activeSeason.id, scanned: 0, created: 0, updated: 0, skipped: 0 };
   }
   const placeholders = streamerIds.map(() => '?').join(', ');
-  const existingRows = await queryAll<{ streamer_id: string }>(
+  const existingRows = await queryAll<any>(
     db,
     `
-      SELECT streamer_id
+      SELECT id, streamer_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result
         FROM arena_v2_card_versions
        WHERE season_id = ? AND status = 'active' AND streamer_id IN (${placeholders})
     `,
     [activeSeason.id, ...streamerIds]
   );
-  const existingStreamerIds = new Set(existingRows.map((row) => String(row.streamer_id)));
-
-  let created = 0;
-  let skipped = 0;
-  for (const streamer of streamers) {
+  const existingByStreamerId = new Map(existingRows.map((row) => [String(row.streamer_id), row]));
+  const totals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer) => () => {
     const streamerId = String(streamer.channel_id || '').trim();
-    if (!streamerId) {
-      skipped += 1;
-      continue;
-    }
-    if (existingStreamerIds.has(streamerId)) {
-      skipped += 1;
-      continue;
-    }
-    const card = buildDefaultArenaV2CardVersionForStreamer(activeSeason.id, streamer);
-    await runSql(
-      db,
-      `
-        INSERT INTO arena_v2_card_versions
-          (id, streamer_id, display_name, season_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result, art_asset_id, status)
-        VALUES
-          (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-      `,
-      [
-        card.id,
-        streamerId,
-        card.displayName,
-        activeSeason.id,
-        card.cardClass,
-        card.cost,
-        card.attack,
-        card.health,
-        JSON.stringify(card.keywords),
-        card.balanceScore,
-        JSON.stringify(card.validation),
-        card.artAssetId
-      ]
-    );
-    created += 1;
-  }
+    return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
+  }));
 
-  return { seasonId: activeSeason.id, scanned: streamers.length, created, skipped };
+  return { seasonId: activeSeason.id, scanned: streamers.length, ...totals };
 };
 
 const ensureArenaV2CardsForSeason = async (_db: SqlExecutor, seasonId: string) => {
   if (arenaV2GeneratedCardSyncCompleted.has(seasonId)) return;
+  const activeCount = await queryGet<{ count: number }>(
+    _db,
+    'SELECT COUNT(*) AS count FROM arena_v2_card_versions WHERE season_id = ? AND status = ?',
+    [seasonId, 'active']
+  );
+  const mustWaitForInitialCards = Number(activeCount?.count || 0) === 0;
   const existingSync = arenaV2GeneratedCardSyncInFlight.get(seasonId);
   if (existingSync) {
-    await existingSync;
+    if (mustWaitForInitialCards || testExecutor) await existingSync;
     return;
   }
   const sync = syncArenaV2CardsFromRegisteredStreamers(seasonId)
     .then(() => {
       arenaV2GeneratedCardSyncCompleted.add(seasonId);
     })
+    .catch((error: any) => {
+      console.error('[ArenaV2] 자동 생성 카드 백그라운드 동기화 실패:', error?.message || error);
+    })
     .finally(() => {
       arenaV2GeneratedCardSyncInFlight.delete(seasonId);
     });
   arenaV2GeneratedCardSyncInFlight.set(seasonId, sync);
-  await sync;
+  // 기존 카드가 있으면 전체 갱신은 요청과 분리합니다. 빈 시즌의 최초 생성과 테스트만 완료를 기다립니다.
+  if (mustWaitForInitialCards || testExecutor) await sync;
 };
 
 export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => {
@@ -1107,6 +1108,18 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
     `,
     params
   );
+
+  await runArenaV2GeneratedCardSyncBatch(rows.map((row) => () => syncGeneratedArenaV2CardForStreamer(
+    db,
+    seasonId,
+    {
+      channel_id: row.streamer_id,
+      name: row.streamer_name || row.display_name,
+      logo_url: row.streamer_logo,
+      custom_image_url: row.streamer_custom_image
+    },
+    row
+  )));
 
   return rows.map(serializeArenaV2CardVersionRow);
 };
@@ -1288,8 +1301,10 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
   await ensureArenaV2CardsForSeason(db, season.id);
   let row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
   if (!row) {
-    await syncArenaV2CardsFromRegisteredStreamers(season.id);
+    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer);
     row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
+  } else if (row.status === 'active') {
+    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, row);
   }
   if (row) {
     row.art_asset_id = await arenaV2ArtAssetForOwnedStreamer(db, userId, streamer);

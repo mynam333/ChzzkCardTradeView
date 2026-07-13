@@ -352,6 +352,9 @@ const makeExecutor = () => ({
       });
     }
     if (sql.includes('INSERT INTO arena_v2_card_versions')) {
+      if (rows.cards.some((card) => card.id === params[0]) && (sql.includes('ON CONFLICT') || sql.includes('ON DUPLICATE KEY'))) {
+        return { changes: 0 };
+      }
       const hasLiteralVersion = params.length === 12;
       rows.cards.push({
         id: params[0],
@@ -895,6 +898,28 @@ describe('arena v2 service', () => {
     expect(cards[0].displayName).toBe('실제 스트리머');
     expect(cards[0].artAssetId).toBe('https://img.example/card.png');
     expect(cards[0].validationResult?.valid).toBe(true);
+  });
+
+  it('coalesces concurrent default-card inserts without creating duplicate primary keys', async () => {
+    insertSeason();
+    rows.streamers.push({
+      channel_id: 'concurrent-generated-streamer',
+      name: '동시 생성 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: 'concurrent-generated-streamer'
+    });
+
+    const results = await Promise.all([
+      syncArenaV2CardsFromRegisteredStreamers('season-v2'),
+      syncArenaV2CardsFromRegisteredStreamers('season-v2')
+    ]);
+
+    expect(rows.cards).toHaveLength(1);
+    expect(results.reduce((sum, result) => sum + result.created, 0)).toBe(1);
   });
 
   it('rebuilds an existing active generated card in place with the current generation rules', async () => {
