@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import React from 'react';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 export const metadata: Metadata = {
   title: '아레나 | 치카포 : 치지직 카드 포럼',
@@ -25,6 +26,6 @@ export const metadata: Metadata = {
 };
 
 export default function ArenaLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <TooltipProvider delay={180} closeDelay={80} timeout={320}>{children}</TooltipProvider>;
 }
 

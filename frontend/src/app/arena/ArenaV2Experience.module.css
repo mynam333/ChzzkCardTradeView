@@ -1965,6 +1965,19 @@
 .arenaV2Scope :global(.arena-v2-card-budget-panel > header > div) { display: inline-flex; align-items: center; gap: 7px; }
 .arenaV2Scope :global(.arena-v2-card-budget-panel > header svg) { width: 17px; height: 17px; color: var(--arena-coral); }
 .arenaV2Scope :global(.arena-v2-card-budget-panel > header > svg) { color: var(--arena-muted); }
+.arenaV2Scope :global(.arena-v2-card-budget-help) {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--arena-line);
+  border-radius: 9px;
+  background: var(--arena-surface-soft);
+  color: var(--arena-muted);
+  cursor: help;
+  place-items: center;
+}
+.arenaV2Scope :global(.arena-v2-card-budget-help svg) { width: 15px; height: 15px; }
+.arenaV2Scope :global([data-slot='tooltip-trigger']:not(button):not(select):not(input)) { cursor: help; }
 .arenaV2Scope :global(.arena-v2-card-budget-total) { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .arenaV2Scope :global(.arena-v2-card-budget-total span) { color: var(--arena-text); font-size: 0.72rem; font-weight: 900; }
 .arenaV2Scope :global(.arena-v2-card-budget-total strong) { color: var(--arena-coral); font-size: 1.35rem; font-variant-numeric: tabular-nums; }

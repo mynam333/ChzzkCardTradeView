@@ -42,11 +42,20 @@ import {
   type ArenaLoadoutCosmeticType
 } from '@/lib/arenaCosmetics';
 import {
+  arenaCardKeywordDefinitions,
   evaluateArenaCardEditor,
   normalizeArenaCardKeywords,
   type ArenaCardEditorForm,
   type ArenaCardKeywordSelection
 } from '@/lib/arenaCardEditor';
+import {
+  arenaCoreTooltips,
+  arenaKeywordCategoryLabels,
+  getArenaBoardSlotTooltip,
+  getArenaClassTooltip,
+  getArenaKeywordTooltip,
+  type ArenaTooltipData
+} from '@/lib/arenaTooltips';
 import { useApp } from '../AppContext';
 import {
   ArenaCard,
@@ -55,6 +64,7 @@ import {
 } from './ArenaCard';
 import { ArenaEmotePieMenu } from './ArenaEmotePieMenu';
 import { ArenaStreamerCardEditor } from './ArenaStreamerCardEditor';
+import { ArenaTooltip } from './ArenaTooltip';
 import type { ArenaSiteTab } from './types';
 import styles from './ArenaV2Experience.module.css';
 
@@ -167,6 +177,13 @@ const phases = [
   { id: 'replace', label: '교체', icon: Hand, hint: '새 카드만 가능' },
   { id: 'end', label: '종료', icon: Check, hint: '선택 확정' }
 ];
+
+const phaseTooltipById: Record<string, ArenaTooltipData> = {
+  move: arenaCoreTooltips.move,
+  place: arenaCoreTooltips.place,
+  replace: arenaCoreTooltips.replace,
+  end: arenaCoreTooltips.submit
+};
 
 const arenaAdminTabs: Array<{ id: ArenaAdminSubTab; label: string; description: string; icon: typeof Activity }> = [
   { id: 'overview', label: '개요', description: '현재 시즌과 핵심 상태', icon: Activity },
@@ -290,58 +307,11 @@ const wikiFlowSections = [
   }
 ];
 
-const wikiKeywordGroups = [
-  {
-    title: '방어와 생존',
-    items: [
-      ['도발', '같은 라인에서 상대 공격을 끌어오는 핵심 방어 키워드입니다.'],
-      ['보호막', '전투 중 피해를 대신 흡수하고, 전투가 끝나면 사라집니다.'],
-      ['반격', '같은 라인에서 공격받았을 때 공격자에게 피해를 되돌립니다.'],
-      ['흡혈', '실제 체력 피해를 줬을 때 회복으로 이어지는 생존 키워드입니다.'],
-      ['부활', '전투마다 1회만 허용되는 고위험 생존 효과입니다.']
-    ]
-  },
-  {
-    title: '공격과 돌파',
-    items: [
-      ['관통', '전열을 쓰러뜨린 뒤 남은 피해를 같은 라인 후열까지 온전히 전달합니다.'],
-      ['추격', '상대 카드를 전투불능으로 만든 뒤 추가 압박을 이어갑니다.'],
-      ['직접 압박', '상대 플레이어를 직접 공격할 때 피해를 높입니다.'],
-      ['후열 압박', '후열 카드를 때릴 때 피해가 증가합니다.'],
-      ['광역 피해', '한 공격 단계에서 여러 대상에게 영향을 주는 강한 공격 효과입니다.']
-    ]
-  },
-  {
-    title: '제어와 방해',
-    items: [
-      ['조준', '같은 라인에서 후열을 우선 노리는 공격 규칙입니다.'],
-      ['침묵', '이번 전투 동안 상대 카드의 주요 효과를 막습니다.'],
-      ['기절', '이번 공격 단계의 행동을 끊는 강한 제어 효과입니다.'],
-      ['밀치기', '같은 라인 전열 카드를 후열로 밀어 위치를 흔듭니다.'],
-      ['끌어오기', '같은 라인 후열 카드를 전열로 끌어내 압박합니다.'],
-      ['약화', '이번 전투 동안 대상의 위력을 낮춥니다.']
-    ]
-  },
-  {
-    title: '지원과 자원',
-    items: [
-      ['전투 드로우', '전투 중 카드를 뽑습니다. 손패 8장 제한은 그대로 적용됩니다.'],
-      ['응급 회복', '필드 카드의 누적 피해를 일부 회복합니다.'],
-      ['보호 지원', '같은 라인 아군에게 보호막을 제공합니다.'],
-      ['공격 지원', '같은 라인 아군의 첫 피해를 높입니다.'],
-      ['묘지 회수', '묘지의 카드를 손패로 되돌립니다. 되돌아온 카드는 최대 체력 상태입니다.']
-    ]
-  },
-  {
-    title: '망령과 사망',
-    items: [
-      ['복수', '아군 손실 이후 반격 흐름을 만드는 키워드입니다.'],
-      ['원혼', '묘지와 전투불능 상황을 이용해 후반 압박을 만듭니다.'],
-      ['잔영', '카드가 사라진 뒤에도 일부 영향이 남는 계열입니다.'],
-      ['묘지 강화', '묘지 카드 수 조건으로 위력이 커지는 효과입니다.']
-    ]
-  }
-];
+const wikiKeywordGroups = Object.entries(arenaKeywordCategoryLabels).map(([category, title]) => ({
+  category,
+  title,
+  items: arenaCardKeywordDefinitions.filter((definition) => definition.category === category)
+}));
 
 const wikiModeSections = [
   ['봇전', '알고리즘 기반 봇과 겨루는 연습 모드입니다. 기본 규칙은 빠른대전과 같고 MMR에는 반영되지 않습니다.'],
@@ -532,12 +502,26 @@ const ArenaV2CardView: React.FC<{
 
 const BoardSlot: React.FC<{ card?: ArenaV2Card; lane: string; index: number; side: 'opponent' | 'player' }> = ({ card, lane, index, side }) => (
   <div className={`arena-v2-slot ${card ? 'has-card' : ''} ${side === 'player' ? 'is-player' : 'is-opponent'}`}>
-    <div className="arena-v2-slot-label">{lane} {index + 1}</div>
-    {card ? <ArenaV2CardView card={card} compact /> : <span className="arena-v2-empty-slot">빈 칸</span>}
+    <ArenaTooltip data={getArenaBoardSlotTooltip(lane === '전열' ? 'front' : 'back', index, side === 'player' ? 'self' : 'opponent')} side="top" focusable>
+      <div className="arena-v2-slot-label">{lane} {index + 1}</div>
+    </ArenaTooltip>
+    {card ? <ArenaV2CardView card={card} compact /> : (
+      <ArenaTooltip data={getArenaBoardSlotTooltip(lane === '전열' ? 'front' : 'back', index, side === 'player' ? 'self' : 'opponent')} side="top" focusable>
+        <span className="arena-v2-empty-slot">빈 칸</span>
+      </ArenaTooltip>
+    )}
   </div>
 );
 
-const StatTile: React.FC<{ icon: typeof Activity; label: string; value: string; tone?: string }> = ({ icon: Icon, label, value, tone = 'cyan' }) => (
+const StatTile: React.FC<{ icon: typeof Activity; label: string; value: string; tone?: string; tooltip?: ArenaTooltipData }> = ({ icon: Icon, label, value, tone = 'cyan', tooltip }) => tooltip ? (
+  <ArenaTooltip data={tooltip} side="right" focusable>
+    <div className={`arena-v2-stat arena-v2-accent-${tone}`}>
+      <Icon className="h-4 w-4" />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  </ArenaTooltip>
+) : (
   <div className={`arena-v2-stat arena-v2-accent-${tone}`}>
     <Icon className="h-4 w-4" />
     <span>{label}</span>
@@ -551,9 +535,17 @@ const ArenaEmoteBadge: React.FC<{ item?: ArenaCosmeticItem | null; emptyLabel?: 
   }
   const visual = getArenaEmoteVisual(item);
   return (
-    <span className="arena-v2-emote-badge" title={item.name}>
-      {visual.imageUrl ? <img src={visual.imageUrl} alt={item.name} /> : <b>{visual.emoji}</b>}
-    </span>
+    <ArenaTooltip data={{
+      eyebrow: '장착 이모트',
+      title: item.name,
+      description: item.description || '이모트 휠에 장착해 대전 중 상대에게 보낼 수 있는 아레나 이모트입니다.',
+      details: [{ label: '슬롯', value: '이모트 휠 1칸' }, { label: '종류', value: '이모트' }],
+      tone: 'violet'
+    }} side="top" focusable>
+      <span className="arena-v2-emote-badge">
+        {visual.imageUrl ? <img src={visual.imageUrl} alt={item.name} /> : <b>{visual.emoji}</b>}
+      </span>
+    </ArenaTooltip>
   );
 };
 
@@ -1477,12 +1469,16 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 덱 14~20장 · 40초 승부</p>
         </div>
         <div className="arena-v2-top-actions">
-          <button type="button" onClick={loadArenaV2} className="arena-v2-icon-button" aria-label="아레나 새로고침">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <button type="button" onClick={startBotMatch} className="arena-v2-primary-button">
-            <Bot className="h-4 w-4" /> 연습전 시작
-          </button>
+          <ArenaTooltip data={arenaCoreTooltips.refresh} side="bottom">
+            <button type="button" onClick={loadArenaV2} className="arena-v2-icon-button" aria-label="아레나 새로고침">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </ArenaTooltip>
+          <ArenaTooltip data={arenaCoreTooltips.botMode} side="bottom">
+            <button type="button" onClick={startBotMatch} className="arena-v2-primary-button">
+              <Bot className="h-4 w-4" /> 연습전 시작
+            </button>
+          </ArenaTooltip>
         </div>
       </section>
 
@@ -1498,11 +1494,13 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           {phases.map((phase, index) => {
             const Icon = phase.icon;
             return (
-              <div key={phase.id} className={`arena-v2-phase ${index === 1 ? 'is-active' : ''}`}>
-                <Icon className="h-4 w-4" />
-                <strong>{phase.label}</strong>
-                <span>{phase.hint}</span>
-              </div>
+              <ArenaTooltip key={phase.id} data={phaseTooltipById[phase.id]} side="right" focusable>
+                <div className={`arena-v2-phase ${index === 1 ? 'is-active' : ''}`}>
+                  <Icon className="h-4 w-4" />
+                  <strong>{phase.label}</strong>
+                  <span>{phase.hint}</span>
+                </div>
+              </ArenaTooltip>
             );
           })}
         </aside>
@@ -1513,7 +1511,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <span>상대</span>
               <strong>연습 상대</strong>
             </div>
-            <div className="arena-v2-resource"><Gauge className="h-4 w-4" /> 6 / 9</div>
+            <ArenaTooltip data={arenaCoreTooltips.turnCost} side="bottom">
+              <div className="arena-v2-resource"><Gauge className="h-4 w-4" /> 6 / 9</div>
+            </ArenaTooltip>
           </div>
           <div className="arena-v2-board" aria-label="상대 2행 3열 보드">
             {Array.from({ length: 3 }, (_, index) => <BoardSlot key={`op-front-${index}`} card={boardCards[index]} lane="전열" index={index} side="opponent" />)}
@@ -1529,34 +1529,46 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <span>나</span>
               <strong>{user?.username || '게스트'}</strong>
             </div>
-            <div className="arena-v2-resource"><Clock3 className="h-4 w-4" /> 40초</div>
+            <ArenaTooltip data={arenaCoreTooltips.turnTimer} side="top">
+              <div className="arena-v2-resource"><Clock3 className="h-4 w-4" /> 40초</div>
+            </ArenaTooltip>
           </div>
         </div>
 
         <aside className="arena-v2-command-panel" aria-label="매치 상태">
-          <StatTile icon={Layers3} label="덱 규칙" value="14~20" tone="gold" />
-          <StatTile icon={Users} label="보드" value="2 x 3" tone="cyan" />
-          <StatTile icon={Activity} label="비용 상한" value="9" tone="green" />
+          <StatTile icon={Layers3} label="덱 규칙" value="14~20" tone="gold" tooltip={arenaCoreTooltips.deck} />
+          <StatTile icon={Users} label="보드" value="2 x 3" tone="cyan" tooltip={{ ...arenaCoreTooltips.frontLine, eyebrow: '필드 규칙', title: '2 × 3 보드', description: '각 플레이어는 전열 3칸과 후열 3칸, 총 6칸을 사용합니다. 세로로 마주 보는 전열과 후열이 하나의 라인입니다.' }} />
+          <StatTile icon={Activity} label="비용 상한" value="9" tone="green" tooltip={arenaCoreTooltips.turnCost} />
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">선택 덱</span>
-            <select value={selectedDeckId} onChange={(event) => setSelectedDeckId(event.target.value)} className="arena-v2-select" aria-label="봇전에 사용할 덱 선택">
-              <option value="">대전 가능한 덱 없음</option>
-              {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name} · {formatMode(deck.modeScope)}</option>)}
-            </select>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.deck, title: selectedDeck?.name || '대전에 사용할 덱 선택', description: selectedDeck ? `${selectedDeck.cardVersionIds.length}장으로 구성된 ${formatMode(selectedDeck.modeScope)}용 덱입니다.` : '저장되어 있고 현재 규칙 검사를 통과한 덱을 대전에 사용할 수 있습니다.' }} side="left">
+              <select value={selectedDeckId} onChange={(event) => setSelectedDeckId(event.target.value)} className="arena-v2-select" aria-label="봇전에 사용할 덱 선택">
+                <option value="">대전 가능한 덱 없음</option>
+                {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name} · {formatMode(deck.modeScope)}</option>)}
+              </select>
+            </ArenaTooltip>
             <p>{selectedDeck ? `${selectedDeck.cardVersionIds.length}장 · ${deckStateLabel(selectedDeck.isValid)}` : '덱을 저장하면 바로 선택할 수 있습니다.'}</p>
           </div>
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">현재 행동</span>
             <div className="arena-v2-action-order">
-              {phases.map((phase) => <span key={phase.id}>{phase.label}</span>)}
+              {phases.map((phase) => (
+                <ArenaTooltip key={phase.id} data={phaseTooltipById[phase.id]} side="left">
+                  <span>{phase.label}</span>
+                </ArenaTooltip>
+              ))}
             </div>
             <p>카드를 옮기고, 빈 칸에 배치하고, 결정적인 순간에 교체하세요.</p>
           </div>
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">대전 찾기</span>
             <div className="arena-v2-queue-actions">
-              <button type="button" onClick={() => joinQueue('quick')}><Swords className="h-4 w-4" /> 빠른대전</button>
-              <button type="button" onClick={() => joinQueue('battle_royale_8')}><Users className="h-4 w-4" /> 8인전</button>
+              <ArenaTooltip data={arenaCoreTooltips.quickMode} side="left">
+                <button type="button" onClick={() => joinQueue('quick')}><Swords className="h-4 w-4" /> 빠른대전</button>
+              </ArenaTooltip>
+              <ArenaTooltip data={arenaCoreTooltips.battleRoyaleMode} side="left">
+                <button type="button" onClick={() => joinQueue('battle_royale_8')}><Users className="h-4 w-4" /> 8인전</button>
+              </ArenaTooltip>
             </div>
           </div>
         </aside>
@@ -1568,10 +1580,12 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <h3>덱 구성은 보관함에서 진행합니다</h3>
             <span>보유 카드 전체를 확인하고 카드 정보를 비교하면서 덱을 저장하세요.</span>
           </div>
-          <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
-            <strong>{deckCount}</strong>
-            <span>/ 14~20</span>
-          </div>
+          <ArenaTooltip data={arenaCoreTooltips.deck} side="top">
+            <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
+              <strong>{deckCount}</strong>
+              <span>/ 14~20</span>
+            </div>
+          </ArenaTooltip>
           <button type="button" onClick={() => router.push('/arena/inventory')} className="arena-v2-secondary-button">
             <Layers3 className="h-4 w-4" /> 보관함 열기
           </button>
@@ -1592,15 +1606,17 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <h2>덱과 카드 보관함</h2>
           <p>{season ? `${season.name} · ${seasonStatusLabel(season.status)}` : '새 시즌 준비 중'} · 저장 덱 {decks.length}개 · 카드 {filteredInventoryCards.length}/{cards.length}장</p>
         </div>
-        <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
-        </button>
+        <ArenaTooltip data={arenaCoreTooltips.refresh} side="bottom">
+          <button type="button" onClick={loadArenaV2} className="arena-v2-secondary-button">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+          </button>
+        </ArenaTooltip>
       </section>
       <section className="arena-v2-stage">
         <aside className="arena-v2-command-panel">
-          <StatTile icon={Layers3} label="저장 덱" value={`${decks.length}`} tone="cyan" />
-          <StatTile icon={Check} label="대전 가능" value={`${decks.filter((deck) => deck.isValid).length}`} tone="green" />
-          <StatTile icon={AlertTriangle} label="수정 필요" value={`${decks.filter((deck) => !deck.isValid).length}`} tone="gold" />
+          <StatTile icon={Layers3} label="저장 덱" value={`${decks.length}`} tone="cyan" tooltip={arenaCoreTooltips.deck} />
+          <StatTile icon={Check} label="대전 가능" value={`${decks.filter((deck) => deck.isValid).length}`} tone="green" tooltip={{ ...arenaCoreTooltips.deck, title: '대전 가능한 덱', description: '현재 시즌의 14~20장 구성, 중복 제한, 모드 제한을 모두 통과한 저장 덱입니다.' }} />
+          <StatTile icon={AlertTriangle} label="수정 필요" value={`${decks.filter((deck) => !deck.isValid).length}`} tone="gold" tooltip={{ ...arenaCoreTooltips.deck, title: '수정이 필요한 덱', description: '현재 시즌 규칙 검사에서 오류가 발견되어 대전에 사용할 수 없는 저장 덱입니다.', tone: 'gold' }} />
         </aside>
         <div className="arena-v2-board-wrap">
           <div className="arena-v2-panel-section">
@@ -1625,13 +1641,17 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <div>
                 <p>{filteredInventoryCards.length}장 표시 · 전체 {cards.length}장 중 {deckCount}장 선택됨 · 한 스트리머는 한 장만 사용할 수 있습니다.</p>
               </div>
-              <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
-                <strong>{deckCount}</strong>
-                <span>/ 14~20</span>
-              </div>
-              <button type="button" onClick={saveDeck} disabled={saving || !deckReady} className="arena-v2-secondary-button">
-                <Save className="h-4 w-4" /> 덱 저장
-              </button>
+              <ArenaTooltip data={arenaCoreTooltips.deck} side="bottom">
+                <div className={`arena-v2-deck-meter ${deckReady ? 'is-ready' : ''}`}>
+                  <strong>{deckCount}</strong>
+                  <span>/ 14~20</span>
+                </div>
+              </ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.deck, title: deckReady ? '현재 덱 저장' : '덱 저장 조건 미충족', description: deckReady ? `${deckCount}장으로 구성한 현재 선택을 새 덱으로 저장합니다.` : '카드를 14~20장 선택하고 중복·모드 제한을 충족해야 저장할 수 있습니다.' }} side="bottom">
+                <button type="button" onClick={saveDeck} disabled={saving || !deckReady} className="arena-v2-secondary-button">
+                  <Save className="h-4 w-4" /> 덱 저장
+                </button>
+              </ArenaTooltip>
             </div>
             <div className="arena-v2-inventory-tools" aria-label="카드 보관함 검색과 필터">
               <label className="arena-v2-search-field">
@@ -1643,24 +1663,32 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   aria-label="카드 검색"
                 />
               </label>
-              <label className="arena-v2-filter-field">
-                <SlidersHorizontal className="h-4 w-4" />
-                <select value={inventoryClassFilter} onChange={(event) => setInventoryClassFilter(event.target.value)} aria-label="클래스 필터">
-                  <option value="all">전체 클래스</option>
-                  {availableInventoryClasses.map((cardClass) => (
-                    <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="arena-v2-filter-field">
-                <Sparkles className="h-4 w-4" />
-                <select value={inventoryKeywordFilter} onChange={(event) => setInventoryKeywordFilter(event.target.value)} aria-label="효과 키워드 필터">
-                  <option value="all">전체 효과</option>
-                  {availableInventoryKeywords.map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
+              <ArenaTooltip data={inventoryClassFilter === 'all' ? {
+                eyebrow: '보관함 필터', title: '전체 클래스', description: '클래스 제한 없이 보유 카드를 모두 표시합니다. 클래스를 선택하면 해당 패시브를 가진 카드만 남습니다.', tone: 'cyan'
+              } : getArenaClassTooltip(inventoryClassFilter)} side="bottom">
+                <label className="arena-v2-filter-field">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  <select value={inventoryClassFilter} onChange={(event) => setInventoryClassFilter(event.target.value)} aria-label="클래스 필터">
+                    <option value="all">전체 클래스</option>
+                    {availableInventoryClasses.map((cardClass) => (
+                      <option key={cardClass} value={cardClass}>{classTone[cardClass]?.label || cardClass}</option>
+                    ))}
+                  </select>
+                </label>
+              </ArenaTooltip>
+              <ArenaTooltip data={inventoryKeywordFilter === 'all' ? {
+                eyebrow: '보관함 필터', title: '전체 효과', description: '키워드 제한 없이 보유 카드를 표시합니다. 효과를 선택하면 해당 키워드를 가진 카드만 남습니다.', tone: 'cyan'
+              } : getArenaKeywordTooltip(inventoryKeywordFilter)} side="bottom">
+                <label className="arena-v2-filter-field">
+                  <Sparkles className="h-4 w-4" />
+                  <select value={inventoryKeywordFilter} onChange={(event) => setInventoryKeywordFilter(event.target.value)} aria-label="효과 키워드 필터">
+                    <option value="all">전체 효과</option>
+                    {availableInventoryKeywords.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+              </ArenaTooltip>
               <label className="arena-v2-filter-field">
                 <Check className="h-4 w-4" />
                 <select value={inventorySelectionFilter} onChange={(event) => setInventorySelectionFilter(event.target.value as InventorySelectionFilter)} aria-label="선택 상태 필터">
@@ -1718,7 +1746,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     return wikiMatches(cardClass, tone.label, tone.hint, tone.passive);
   });
   const filteredWikiKeywordGroups = wikiKeywordGroups
-    .map((group) => ({ ...group, items: group.items.filter(([keyword, detail]) => wikiMatches(group.title, keyword, detail)) }))
+    .map((group) => ({ ...group, items: group.items.filter((definition) => wikiMatches(group.title, definition.label, definition.description, definition.timing, definition.target)) }))
     .filter((group) => group.items.length > 0);
   const wikiShowField = wikiMatches('필드와 라인', '좌 라인 중 라인 우 라인 도발 조준 밀치기 끌어오기 위치');
   const wikiShowDeckTips = wikiMatches(
@@ -1780,9 +1808,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
 
       <section className="arena-v2-stage">
         <aside id="wiki-start" className="arena-v2-command-panel" aria-label="아레나 핵심 규칙 요약">
-          <StatTile icon={HeartPulse} label="기본 체력" value="30" tone="green" />
-          <StatTile icon={Layers3} label="덱 크기" value="14~20" tone="cyan" />
-          <StatTile icon={Clock3} label="턴 제한" value="40초" tone="gold" />
+          <StatTile icon={HeartPulse} label="기본 체력" value="30" tone="green" tooltip={arenaCoreTooltips.playerHealth} />
+          <StatTile icon={Layers3} label="덱 크기" value="14~20" tone="cyan" tooltip={arenaCoreTooltips.deck} />
+          <StatTile icon={Clock3} label="턴 제한" value="40초" tone="gold" tooltip={arenaCoreTooltips.turnTimer} />
           <div className="arena-v2-panel-section arena-v2-wiki-start">
             <span className="arena-v2-panel-label">처음 읽는 순서</span>
             <div className="arena-v2-replay-list">
@@ -1798,11 +1826,18 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <span className="arena-v2-panel-label">핵심 규칙</span>
             <div className="arena-v2-action-stack">
               {filteredWikiCoreRules.map((rule) => (
-                <div key={rule.label} className="arena-v2-action-order">
-                  <span>{rule.label}</span>
-                  <span>{rule.value}</span>
-                  <span>{rule.detail}</span>
-                </div>
+                <ArenaTooltip key={rule.label} data={{
+                  eyebrow: '핵심 규칙',
+                  title: `${rule.label} · ${rule.value}`,
+                  description: rule.detail,
+                  tone: rule.label === '기본 체력' ? 'green' : rule.label === '턴 제한' ? 'gold' : 'cyan'
+                }} side="bottom" align="start">
+                  <div className="arena-v2-action-order">
+                    <span>{rule.label}</span>
+                    <span>{rule.value}</span>
+                    <span>{rule.detail}</span>
+                  </div>
+                </ArenaTooltip>
               ))}
             </div>
           </div>
@@ -1811,10 +1846,12 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <span className="arena-v2-panel-label">모드</span>
             <div className="arena-v2-action-stack">
               {filteredWikiModes.map(([title, detail]) => (
-                <div key={title} className="arena-v2-action-order">
-                  <span>{title}</span>
-                  <span>{detail}</span>
-                </div>
+                <ArenaTooltip key={title} data={title === '봇전' ? arenaCoreTooltips.botMode : title === '빠른대전' ? arenaCoreTooltips.quickMode : arenaCoreTooltips.battleRoyaleMode} side="bottom" align="start">
+                  <div className="arena-v2-action-order">
+                    <span>{title}</span>
+                    <span>{detail}</span>
+                  </div>
+                </ArenaTooltip>
               ))}
             </div>
           </div>
@@ -1827,12 +1864,20 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           {filteredWikiFlows.map((section) => {
             const Icon = section.icon;
             return (
-              <article key={section.title} className="arena-v2-panel-section">
-                <span className="arena-v2-panel-label"><Icon className="h-3.5 w-3.5" /> {section.title}</span>
-                <div className="arena-v2-replay-list">
-                  {section.points.map((point) => <span key={point}>{point}</span>)}
-                </div>
-              </article>
+              <ArenaTooltip key={section.title} data={{
+                eyebrow: '턴 흐름',
+                title: section.title,
+                description: section.points[0],
+                details: section.points.slice(1).map((point, index) => ({ label: `${index + 2}`, value: point })),
+                tone: section.title.includes('피해') ? 'coral' : section.title.includes('이동') ? 'cyan' : 'violet'
+              }} side="bottom" align="start">
+                <article className="arena-v2-panel-section">
+                  <span className="arena-v2-panel-label"><Icon className="h-3.5 w-3.5" /> {section.title}</span>
+                  <div className="arena-v2-replay-list">
+                    {section.points.map((point) => <span key={point}>{point}</span>)}
+                  </div>
+                </article>
+              </ArenaTooltip>
             );
           })}
 
@@ -1840,10 +1885,12 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <span className="arena-v2-panel-label">필드와 라인</span>
             <div className="arena-v2-board" aria-label="위키용 2행 3열 필드 예시">
               {['전열 좌', '전열 중', '전열 우', '후열 좌', '후열 중', '후열 우'].map((slot, index) => (
-                <div key={slot} className={`arena-v2-slot ${index < 3 ? 'is-player' : 'is-opponent'}`}>
-                  <div className="arena-v2-slot-label">{slot}</div>
-                  <span className="arena-v2-empty-slot">{index % 3 === 0 ? '좌 라인' : index % 3 === 1 ? '중 라인' : '우 라인'}</span>
-                </div>
+                <ArenaTooltip key={slot} data={getArenaBoardSlotTooltip(index < 3 ? 'front' : 'back', index % 3, 'self')} side="top">
+                  <div className={`arena-v2-slot ${index < 3 ? 'is-player' : 'is-opponent'}`}>
+                    <div className="arena-v2-slot-label">{slot}</div>
+                    <span className="arena-v2-empty-slot">{index % 3 === 0 ? '좌 라인' : index % 3 === 1 ? '중 라인' : '우 라인'}</span>
+                  </div>
+                </ArenaTooltip>
               ))}
             </div>
             <p>각 세로 줄이 하나의 라인입니다. 도발, 조준, 밀치기, 끌어오기처럼 위치를 따지는 효과는 다른 라인에 영향을 주지 않습니다.</p>
@@ -1856,11 +1903,13 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 const tone = classTone[cardClass] || classTone.tempo;
                 const Icon = tone.icon;
                 return (
-                  <div key={cardClass} className="arena-v2-action-order">
-                    <span><Icon className="h-3.5 w-3.5" /> {tone.label}</span>
-                    <span>{tone.hint}</span>
-                    <span>클래스 패시브 · {tone.passive}</span>
-                  </div>
+                  <ArenaTooltip key={cardClass} data={getArenaClassTooltip(cardClass)} side="bottom" align="start" focusable>
+                    <div className="arena-v2-action-order">
+                      <span><Icon className="h-3.5 w-3.5" /> {tone.label}</span>
+                      <span>{tone.hint}</span>
+                      <span>클래스 패시브 · {tone.passive}</span>
+                    </div>
+                  </ArenaTooltip>
                 );
               })}
             </div>
@@ -1875,7 +1924,11 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <article key={group.title} className="arena-v2-panel-section">
               <span className="arena-v2-panel-label">{group.title}</span>
               <div className="arena-v2-replay-list">
-                {group.items.map(([keyword, detail]) => <span key={keyword}><Sparkles className="h-3.5 w-3.5" /> {keyword} · {detail}</span>)}
+                {group.items.map((definition) => (
+                  <ArenaTooltip key={definition.type} data={getArenaKeywordTooltip(definition.type)} side="bottom" align="start" focusable>
+                    <span><Sparkles className="h-3.5 w-3.5" /> {definition.label} · {definition.description}</span>
+                  </ArenaTooltip>
+                ))}
               </div>
             </article>
           ))}
@@ -1967,10 +2020,14 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             <p>전투 성능은 그대로 유지하고, 인게임에서 확실히 체감되는 연출만 판매합니다.</p>
           </div>
           <div className="arena-v2-top-actions">
-            <span className="arena-v2-point-balance"><Sparkles className="h-4 w-4" /> {Number(user?.point || 0).toLocaleString()} P</span>
-            <button type="button" onClick={loadArenaCosmetics} className="arena-v2-secondary-button">
-              <RefreshCw className={`h-4 w-4 ${savingArenaCosmetic ? 'animate-spin' : ''}`} /> 상점 새로고침
-            </button>
+            <ArenaTooltip data={arenaCoreTooltips.points} side="bottom">
+              <span className="arena-v2-point-balance"><Sparkles className="h-4 w-4" /> {Number(user?.point || 0).toLocaleString()} P</span>
+            </ArenaTooltip>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.refresh, title: '상점 새로고침', description: '판매 중인 치장, 보유 수량, 장착 상태와 이모트 휠 정보를 서버에서 다시 불러옵니다.' }} side="bottom">
+              <button type="button" onClick={loadArenaCosmetics} className="arena-v2-secondary-button">
+                <RefreshCw className={`h-4 w-4 ${savingArenaCosmetic ? 'animate-spin' : ''}`} /> 상점 새로고침
+              </button>
+            </ArenaTooltip>
           </div>
         </section>
 
@@ -2002,15 +2059,39 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                     <small>{selectedEmote ? '이모트' : '카탈로그의 보유 이모트를 선택하세요.'}</small>
                   </div>
                 </div>
-                <button type="button" className="arena-v2-primary-button" onClick={saveArenaEmoteSlots} disabled={!emoteDraftDirty || savingArenaCosmetic}>
-                  <Save className="h-4 w-4" /> {savingArenaCosmetic ? '저장 중' : '휠 저장'}
-                </button>
-                <button type="button" className="arena-v2-secondary-button" onClick={() => clearArenaEmoteSlot(selectedArenaEmoteSlot)} disabled={!selectedEmote || savingArenaCosmetic}>
-                  <X className="h-4 w-4" /> 선택 슬롯 비우기
-                </button>
-                <button type="button" className="arena-v2-text-button" onClick={() => setArenaEmoteSlotDraft(arenaCosmeticLoadout.emoteSlots)} disabled={!emoteDraftDirty || savingArenaCosmetic}>
-                  저장 상태로 되돌리기
-                </button>
+                <ArenaTooltip data={{
+                  eyebrow: '이모트 휠 편집',
+                  title: '휠 저장',
+                  description: '현재 1~8번 슬롯 배치를 서버에 저장해 실제 매치 파이 메뉴에 반영합니다.',
+                  note: savingArenaCosmetic ? '저장 요청을 처리하고 있습니다.' : emoteDraftDirty ? '변경한 슬롯만 저장되며 보유 이모트는 삭제되지 않습니다.' : '저장할 슬롯 변경사항이 없습니다.',
+                  tone: 'green'
+                }} side="left">
+                  <button type="button" className="arena-v2-primary-button" onClick={saveArenaEmoteSlots} disabled={!emoteDraftDirty || savingArenaCosmetic}>
+                    <Save className="h-4 w-4" /> {savingArenaCosmetic ? '저장 중' : '휠 저장'}
+                  </button>
+                </ArenaTooltip>
+                <ArenaTooltip data={{
+                  eyebrow: '이모트 휠 편집',
+                  title: `${selectedArenaEmoteSlot + 1}번 슬롯 비우기`,
+                  description: '선택한 슬롯에서 이모트 장착만 해제합니다. 구매한 이모트와 다른 슬롯은 유지됩니다.',
+                  note: selectedEmote ? `${selectedEmote.name} 이모트를 슬롯에서 제거합니다.` : '현재 선택한 슬롯은 이미 비어 있습니다.',
+                  tone: 'coral'
+                }} side="left">
+                  <button type="button" className="arena-v2-secondary-button" onClick={() => clearArenaEmoteSlot(selectedArenaEmoteSlot)} disabled={!selectedEmote || savingArenaCosmetic}>
+                    <X className="h-4 w-4" /> 선택 슬롯 비우기
+                  </button>
+                </ArenaTooltip>
+                <ArenaTooltip data={{
+                  eyebrow: '이모트 휠 편집',
+                  title: '저장 상태로 되돌리기',
+                  description: '저장하지 않은 슬롯 편집을 버리고 서버에서 마지막으로 불러온 휠 배치로 되돌립니다.',
+                  note: emoteDraftDirty ? '현재 화면에서 변경한 슬롯 배치가 사라집니다.' : '아직 되돌릴 변경사항이 없습니다.',
+                  tone: 'neutral'
+                }} side="left">
+                  <button type="button" className="arena-v2-text-button" onClick={() => setArenaEmoteSlotDraft(arenaCosmeticLoadout.emoteSlots)} disabled={!emoteDraftDirty || savingArenaCosmetic}>
+                    저장 상태로 되돌리기
+                  </button>
+                </ArenaTooltip>
               </aside>
             </div>
           </div>
@@ -2026,12 +2107,21 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               {arenaLoadoutCosmeticTypes.map((type) => {
                 const item = arenaCosmeticLoadout.equipped[type];
                 return (
-                  <div key={type} className={item ? 'has-item' : ''}>
-                    <span>{arenaCosmeticTypeLabels[type]}</span>
-                    {item ? <ArenaCosmeticPreview item={item} compact /> : <i aria-hidden="true" />}
-                    <strong>{item?.name || '미장착'}</strong>
-                    {item ? <button type="button" onClick={() => equipArenaLoadoutCosmetic(item)} disabled={savingArenaCosmetic}>해제</button> : null}
-                  </div>
+                  <ArenaTooltip key={type} data={{
+                    eyebrow: '장착 슬롯',
+                    title: arenaCosmeticTypeLabels[type],
+                    description: item?.description || arenaCosmeticTypeDescriptions[type],
+                    details: [{ label: '현재 상태', value: item ? item.name : '미장착' }],
+                    note: '이모트를 제외한 치장은 종류별로 하나만 장착할 수 있습니다.',
+                    tone: item ? 'violet' : 'neutral'
+                  }} side="bottom">
+                    <div className={item ? 'has-item' : ''}>
+                      <span>{arenaCosmeticTypeLabels[type]}</span>
+                      {item ? <ArenaCosmeticPreview item={item} compact /> : <i aria-hidden="true" />}
+                      <strong>{item?.name || '미장착'}</strong>
+                      {item ? <button type="button" onClick={() => equipArenaLoadoutCosmetic(item)} disabled={savingArenaCosmetic}>해제</button> : null}
+                    </div>
+                  </ArenaTooltip>
                 );
               })}
             </div>
@@ -2045,11 +2135,25 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <p>관리자가 등록하고 판매를 활성화한 치장만 표시됩니다.</p>
             </div>
             <nav aria-label="아레나 치장 종류">
-              <button type="button" aria-pressed={arenaCosmeticCategory === 'all'} className={arenaCosmeticCategory === 'all' ? 'is-active' : ''} onClick={() => setArenaCosmeticCategory('all')}>전체</button>
+              <ArenaTooltip data={{
+                eyebrow: '치장 종류',
+                title: '전체 아이템',
+                description: '이모트, 카드 프레임, 프로필 테두리, 칭호, 입장 효과 등 판매 중인 모든 치장을 함께 표시합니다.',
+                tone: 'cyan'
+              }} side="bottom">
+                <button type="button" aria-pressed={arenaCosmeticCategory === 'all'} className={arenaCosmeticCategory === 'all' ? 'is-active' : ''} onClick={() => setArenaCosmeticCategory('all')}>전체</button>
+              </ArenaTooltip>
               {arenaCosmeticTypes.map((type) => (
-                <button key={type} type="button" aria-pressed={arenaCosmeticCategory === type} className={arenaCosmeticCategory === type ? 'is-active' : ''} onClick={() => setArenaCosmeticCategory(type)}>
-                  {arenaCosmeticTypeLabels[type]}
-                </button>
+                <ArenaTooltip key={type} data={{
+                  eyebrow: '치장 종류',
+                  title: arenaCosmeticTypeLabels[type],
+                  description: arenaCosmeticTypeDescriptions[type],
+                  tone: type === 'emote' ? 'violet' : 'cyan'
+                }} side="bottom">
+                  <button type="button" aria-pressed={arenaCosmeticCategory === type} className={arenaCosmeticCategory === type ? 'is-active' : ''} onClick={() => setArenaCosmeticCategory(type)}>
+                    {arenaCosmeticTypeLabels[type]}
+                  </button>
+                </ArenaTooltip>
               ))}
             </nav>
           </div>
@@ -2069,9 +2173,30 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   : arenaCosmeticLoadout.equipped[item.type]?.id === item.id;
                 const rarity = getArenaCosmeticRarity(item);
                 return (
-                  <article key={item.id} className={`arena-v2-store-card is-${rarity} ${equipped ? 'is-equipped' : ''}`}>
-                    <ArenaCosmeticPreview item={item} />
-                    <div className="arena-v2-store-card-body">
+                  <ArenaTooltip key={item.id} data={{
+                    eyebrow: `${arenaCosmeticTypeLabels[item.type]} · ${rarityLabels[rarity]}`,
+                    title: item.name,
+                    description: item.description || arenaCosmeticTypeDescriptions[item.type],
+                    details: [
+                      { label: '가격', value: `${Number(item.price || 0).toLocaleString()} P` },
+                      { label: '보유', value: `${owned}개` },
+                      ...(purchaseLimit > 0 ? [{ label: '구매 제한', value: `계정당 ${purchaseLimit}개` }] : []),
+                      ...(totalQuantity > 0 ? [{ label: '남은 수량', value: `${Math.max(0, totalQuantity - soldQuantity).toLocaleString()}개` }] : [])
+                    ],
+                    note: soldOut
+                      ? '한정 판매 수량이 모두 소진되어 더 이상 구매할 수 없습니다.'
+                      : limitReached
+                        ? `계정당 구매 제한 ${purchaseLimit}개에 도달했습니다.`
+                        : owned
+                          ? item.type === 'emote'
+                            ? equipped ? `${selectedArenaEmoteSlot + 1}번 슬롯으로 옮길 수 있습니다.` : `${selectedArenaEmoteSlot + 1}번 이모트 휠 슬롯에 장착할 수 있습니다.`
+                            : equipped ? '현재 장착 중입니다. 버튼을 누르면 장착을 해제합니다.' : '버튼을 누르면 같은 종류의 기존 치장을 교체하고 이 아이템을 장착합니다.'
+                          : `${Number(item.price || 0).toLocaleString()} 포인트로 구매할 수 있습니다.`,
+                    tone: rarity === 'legendary' ? 'gold' : rarity === 'epic' ? 'violet' : rarity === 'rare' ? 'cyan' : 'neutral'
+                  }} side="top">
+                    <article className={`arena-v2-store-card is-${rarity} ${equipped ? 'is-equipped' : ''}`}>
+                      <ArenaCosmeticPreview item={item} />
+                      <div className="arena-v2-store-card-body">
                       <div className="arena-v2-store-card-labels">
                         <span>{arenaCosmeticTypeLabels[item.type]}</span>
                         <span>{rarityLabels[rarity]}</span>
@@ -2099,8 +2224,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                           {soldOut ? '품절' : limitReached ? '구매 제한 도달' : '구매'}
                         </button>
                       )}
-                    </div>
-                  </article>
+                      </div>
+                    </article>
+                  </ArenaTooltip>
                 );
               })}
             </div>

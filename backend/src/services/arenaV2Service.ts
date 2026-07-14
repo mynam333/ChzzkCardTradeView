@@ -162,6 +162,12 @@ const stableNumber = (value: string, modulo: number): number => Number.parseInt(
 const makeArenaV2DefaultCardId = (seasonId: string, streamerId: string): string =>
   `arena_v2_card_${stableHash(`${seasonId}:${streamerId}`).slice(0, 32)}`;
 
+const isArenaV2GeneratedCardId = (cardId: unknown, seasonId: string, streamerId: string): boolean => {
+  const normalizedId = String(cardId || '');
+  return normalizedId === makeArenaV2DefaultCardId(seasonId, streamerId)
+    || normalizedId === `arena_v2_card_${seasonId}_${streamerId}`;
+};
+
 const stableShuffle = <T extends { id: string }>(items: T[], seed: string): T[] =>
   [...items].sort((a, b) => stableHash(`${seed}:${a.id}`).localeCompare(stableHash(`${seed}:${b.id}`)));
 
@@ -334,7 +340,6 @@ const generatedCandidatesFor = (cost: number, cardClass: ArenaV2CardClassDto): A
 
   const limits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
   const budgetLimit = ARENA_V2_CARD_BUDGET_BY_COST[cost];
-  const minimumSpend = Math.max(1, Math.ceil(budgetLimit * 0.7));
   const bundles = [...commonGeneratedKeywordBundles, ...generatedKeywordBundlesByClass[cardClass]];
   const uniqueCandidates = new Map<string, ArenaV2GeneratedCandidate>();
 
@@ -357,7 +362,8 @@ const generatedCandidatesFor = (cost: number, cardClass: ArenaV2CardClassDto): A
         const validation = validateArenaV2CardVersionDefinition(candidate);
         if (!validation.valid) continue;
         const budget = evaluateArenaV2CardBudget(candidate);
-        if (budget.totalCost < minimumSpend || budget.totalCost > budgetLimit) continue;
+        // 자동 생성 카드는 코스트별 제작 예산을 남김없이 사용해야 합니다.
+        if (budget.totalCost !== budgetLimit) continue;
         const key = generatedCandidateKey(attack, health, keywords);
         uniqueCandidates.set(key, {
           key,
@@ -415,15 +421,7 @@ export const generateArenaV2DefaultCardCombatDefinition = (streamerIdInput: stri
       : allCandidates;
 
   if (!selectable.length) {
-    const limits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
-    return {
-      cardClass,
-      cost,
-      attack: 0,
-      health: Math.min(limits.healthMax, ARENA_V2_CARD_BUDGET_BY_COST[cost]),
-      keywords: [] as ArenaV2GeneratedKeyword[],
-      profile
-    };
+    throw new Error(`ArenaV2GeneratedCardExactBudgetCandidateMissing:${cost}:${cardClass}`);
   }
 
   const selected = selectable[stableNumber(`arena-v2-candidate:${streamerId}`, selectable.length)];
@@ -806,19 +804,26 @@ const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: a
       cardClass: 'charge' as ArenaV2CardClassDto,
       cost: 2,
       attack: 1,
-      health: 4,
+      health: 5,
       keywords: [] as Array<{ type: string; value?: number; limit?: string }>
     };
     const fallbackValidation = validateArenaV2CardVersionDefinition(fallback);
+    const fallbackBudget = evaluateArenaV2CardBudget(fallback);
+    if (!fallbackValidation.valid || fallbackBudget.remaining !== 0) {
+      throw new Error(`ArenaV2GeneratedCardFallbackInvalid:${streamerId}`);
+    }
     return {
       ...fallback,
       displayName: sanitizeCardDisplayName(streamer.name, streamerId),
       validation: fallbackValidation,
-      balanceScore: fallback.attack * 3 + fallback.health,
+      balanceScore: fallbackBudget.totalCost,
       artAssetId: defaultArenaV2ArtAssetForStreamer(streamer)
     };
   }
   const budget = evaluateArenaV2CardBudget(candidate);
+  if (budget.remaining !== 0) {
+    throw new Error(`ArenaV2GeneratedCardBudgetNotFullySpent:${streamerId}:${budget.totalCost}/${budget.budgetLimit}`);
+  }
   return {
     ...candidate,
     displayName: sanitizeCardDisplayName(streamer.name, streamerId),
@@ -852,7 +857,7 @@ const syncGeneratedArenaV2CardForStreamer = async (
 
   if (existing) {
     // 자동 생성 카드만 제자리 갱신합니다. 스트리머가 직접 만든 새 버전은 덮어쓰지 않습니다.
-    if (String(existing.id) !== generated.id || generatedArenaV2CombatMatches(existing, generated)) return 'skipped';
+    if (!isArenaV2GeneratedCardId(existing.id, seasonId, streamerId) || generatedArenaV2CombatMatches(existing, generated)) return 'skipped';
     await runSql(
       db,
       `
@@ -937,40 +942,68 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
   if (!db) throw new Error('ArenaV2SqlDbRequired');
   const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
   if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
-  const streamers = await queryAll<any>(
-    db,
-    `
-      SELECT channel_id, name, logo_url, custom_image_url, custom_image_url_1, custom_image_url_2,
-             custom_image_url_3, custom_image_url_4, custom_image_url_5,
-             follower_count, base_value, is_active, is_image_banned
-        FROM streamers
-       WHERE COALESCE(is_image_banned, 0) = 0
-       ORDER BY base_value DESC, channel_id ASC
-      LIMIT 5000
-    `
-  );
-  const existingRows = await queryAll<any>(
-    db,
-    `
-      SELECT id, streamer_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result
-        FROM arena_v2_card_versions
-       WHERE season_id = ? AND status = 'active'
-       ORDER BY streamer_id ASC, version DESC, updated_at DESC
-    `,
-    [activeSeason.id]
-  );
-  const existingByStreamerId = new Map<string, any>();
-  for (const row of existingRows) {
-    const streamerId = String(row.streamer_id || '').trim();
-    if (streamerId && !existingByStreamerId.has(streamerId)) existingByStreamerId.set(streamerId, row);
+  const pageSize = 500;
+  const totals = { scanned: 0, created: 0, updated: 0, skipped: 0 };
+  let cursorBaseValue: number | null = null;
+  let cursorChannelId = '';
+
+  while (true) {
+    const hasCursor: boolean = cursorBaseValue != null;
+    const streamers: any[] = await queryAll<any>(
+      db,
+      `
+        SELECT channel_id, name, logo_url, custom_image_url, custom_image_url_1, custom_image_url_2,
+               custom_image_url_3, custom_image_url_4, custom_image_url_5,
+               follower_count, base_value, is_active, is_image_banned
+          FROM streamers
+         WHERE COALESCE(is_image_banned, 0) = 0
+           ${hasCursor ? 'AND (COALESCE(base_value, 0) < ? OR (COALESCE(base_value, 0) = ? AND channel_id > ?))' : ''}
+         ORDER BY COALESCE(base_value, 0) DESC, channel_id ASC
+         LIMIT ?
+      `,
+      hasCursor ? [cursorBaseValue, cursorBaseValue, cursorChannelId, pageSize] : [pageSize]
+    );
+    if (streamers.length === 0) break;
+
+    const streamerIds = streamers
+      .map((streamer: any) => String(streamer.channel_id || '').trim())
+      .filter(Boolean);
+    const existingByStreamerId = new Map<string, any>();
+    if (streamerIds.length > 0) {
+      const placeholders = streamerIds.map(() => '?').join(', ');
+      const existingRows = await queryAll<any>(
+        db,
+        `
+          SELECT id, streamer_id, version, card_class, cost, attack, health, keywords, balance_score, validation_result
+            FROM arena_v2_card_versions
+           WHERE season_id = ? AND status = 'active' AND streamer_id IN (${placeholders})
+           ORDER BY streamer_id ASC, version DESC, updated_at DESC
+        `,
+        [activeSeason.id, ...streamerIds]
+      );
+      for (const row of existingRows) {
+        const streamerId = String(row.streamer_id || '').trim();
+        if (streamerId && !existingByStreamerId.has(streamerId)) existingByStreamerId.set(streamerId, row);
+      }
+    }
+
+    const pageTotals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer: any) => () => {
+      const streamerId = String(streamer.channel_id || '').trim();
+      return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
+    }));
+    totals.scanned += streamers.length;
+    totals.created += pageTotals.created;
+    totals.updated += pageTotals.updated;
+    totals.skipped += pageTotals.skipped;
+
+    if (streamers.length < pageSize) break;
+    const lastStreamer: any = streamers[streamers.length - 1];
+    cursorBaseValue = Number(lastStreamer.base_value || 0);
+    cursorChannelId = String(lastStreamer.channel_id || '');
+    if (!cursorChannelId) break;
   }
 
-  const totals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer) => () => {
-    const streamerId = String(streamer.channel_id || '').trim();
-    return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
-  }));
-
-  return { seasonId: activeSeason.id, scanned: streamers.length, ...totals };
+  return { seasonId: activeSeason.id, ...totals };
 };
 
 export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string, options: { limit?: number } = {}) => {
@@ -1452,6 +1485,8 @@ export const enableMyArenaV2StreamerCard = async (userId: string) => {
       `,
       [latest.id]
     );
+    latest.status = 'active';
+    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, latest);
     return { enabled: true, card: await getArenaV2CardVersion(latest.id) };
   }
   await syncArenaV2CardsFromRegisteredStreamers(season.id);

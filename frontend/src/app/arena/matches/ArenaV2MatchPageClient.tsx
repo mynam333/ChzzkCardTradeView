@@ -25,10 +25,12 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '@/lib/api';
 import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
+import { arenaCoreTooltips, getArenaBoardSlotTooltip, type ArenaTooltipData } from '@/lib/arenaTooltips';
 import { useApp } from '../../AppContext';
 import { ArenaLayout } from '../../ArenaLayout';
 import { ArenaCard } from '../ArenaCard';
 import { ArenaEmotePieMenu } from '../ArenaEmotePieMenu';
+import { ArenaTooltip } from '../ArenaTooltip';
 import type { ArenaSiteTab } from '../types';
 import styles from '../ArenaV2Experience.module.css';
 import type { ArenaV2BoardPositionDto, ArenaV2MatchViewDto, ArenaV2TurnActionDto } from '@chikapo/arena-contract';
@@ -109,6 +111,19 @@ const opponentBoardPositions: ArenaV2BoardPositionDto[] = [
   { row: 'front', column: 1 },
   { row: 'front', column: 2 }
 ];
+
+const battlePhaseTooltips: Record<string, ArenaTooltipData> = {
+  이동: arenaCoreTooltips.move,
+  배치: arenaCoreTooltips.place,
+  교체: arenaCoreTooltips.replace,
+  '전투 기록': {
+    eyebrow: '매치 기록',
+    title: '최근 전투 장면',
+    description: '서버가 확정한 공격, 피해, 보호막, 전투불능 이벤트를 시간 순서로 보여줍니다.',
+    note: '연출 재생을 누르면 저장된 이벤트 순서대로 전투 애니메이션을 다시 확인할 수 있습니다.',
+    tone: 'cyan'
+  }
+};
 
 const moveArenaSection = (router: ReturnType<typeof useRouter>, tab: ArenaSiteTab) => {
   router.push(arenaTabHref[tab] || '/arena');
@@ -981,7 +996,9 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               }}
               aria-label={`${seatNo === selfSeat ? '내' : '상대'} ${positionLabel(position)}`}
             >
-              <span className="arena-v2-slot-label">{positionLabel(position)}</span>
+              <ArenaTooltip data={getArenaBoardSlotTooltip(position.row, position.column, seatNo === selfSeat ? 'self' : 'opponent')} side="top">
+                <span className="arena-v2-slot-label">{positionLabel(position)}</span>
+              </ArenaTooltip>
               <MiniCard instance={instance} selected={selected} pending={pending} combatCue={instance ? combatCue.cardCues[instance.id] : undefined} onClick={() => interactive ? onSelfSlotClick(position, instance) : instance && setSelection({ source: 'board', id: instance.id, position })} />
             </div>
           );
@@ -1013,37 +1030,55 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
             </div>
           </div>
           <div className="arena-v2-scoreboard" aria-label="전투 점수판">
-            <div className="arena-v2-score-card is-opponent">
-              <span>상대 HP</span>
-              <strong>{opponent?.playerHealth ?? 30}</strong>
-            </div>
-            <div className="arena-v2-score-core">
-              <span>TURN {match?.turnNo ?? 1}</span>
-              <strong>{timeLeft}</strong>
-              <span>SECONDS</span>
-            </div>
-            <div className="arena-v2-score-card is-self">
-              <span>내 HP</span>
-              <strong>{self?.playerHealth ?? 30}</strong>
-            </div>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.playerHealth, title: '상대 플레이어 체력' }} side="bottom">
+              <div className="arena-v2-score-card is-opponent">
+                <span>상대 HP</span>
+                <strong>{opponent?.playerHealth ?? 30}</strong>
+              </div>
+            </ArenaTooltip>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.turnTimer, title: `${match?.turnNo ?? 1}턴 · ${timeLeft}초 남음` }} side="bottom">
+              <div className="arena-v2-score-core">
+                <span>TURN {match?.turnNo ?? 1}</span>
+                <strong>{timeLeft}</strong>
+                <span>SECONDS</span>
+              </div>
+            </ArenaTooltip>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.playerHealth, title: '내 플레이어 체력' }} side="bottom">
+              <div className="arena-v2-score-card is-self">
+                <span>내 HP</span>
+                <strong>{self?.playerHealth ?? 30}</strong>
+              </div>
+            </ArenaTooltip>
           </div>
           <div className="arena-v2-top-actions">
-            <button type="button" className="arena-v2-icon-button" onClick={loadMatch} aria-label="매치 새로고침">
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            {mode === 'match' && emoteSlots.some(Boolean) ? (
-              <button type="button" className="arena-v2-secondary-button arena-v2-emote-trigger" onClick={openEmoteWheelAtCenter}>
-                <Sparkles className="h-4 w-4" /> 이모트
+            <ArenaTooltip data={{ ...arenaCoreTooltips.refresh, title: '매치 새로고침', description: '서버에서 현재 턴, 보드, 손패, 행동과 전투 기록을 다시 불러옵니다.' }} side="bottom">
+              <button type="button" className="arena-v2-icon-button" onClick={loadMatch} aria-label="매치 새로고침">
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
+            </ArenaTooltip>
+            {mode === 'match' && emoteSlots.some(Boolean) ? (
+              <ArenaTooltip data={arenaCoreTooltips.emoteWheel} side="bottom">
+                <button type="button" className="arena-v2-secondary-button arena-v2-emote-trigger" onClick={openEmoteWheelAtCenter}>
+                  <Sparkles className="h-4 w-4" /> 이모트
+                </button>
+              </ArenaTooltip>
             ) : null}
             {canMulligan ? (
-              <button type="button" className="arena-v2-primary-button" onClick={submitMulligan}>
-                <Hand className="h-4 w-4" /> 멀리건 제출
-              </button>
+              <ArenaTooltip data={{
+                eyebrow: '대전 시작', title: '멀리건 제출', description: '시작 손패 5장 중 선택한 카드를 덱으로 되돌리고 섞은 뒤 같은 수만큼 다시 뽑습니다.',
+                details: [{ label: '교체 가능', value: '최대 3장' }, { label: '횟수', value: '대전 시작 시 1회' }],
+                note: '선택하지 않고 제출하면 현재 시작 손패를 그대로 사용합니다.', tone: 'cyan'
+              }} side="bottom">
+                <button type="button" className="arena-v2-primary-button" onClick={submitMulligan}>
+                  <Hand className="h-4 w-4" /> 멀리건 제출
+                </button>
+              </ArenaTooltip>
             ) : mode === 'match' ? (
-              <button type="button" className="arena-v2-primary-button" onClick={submitActions} disabled={!canPlan}>
-                <Send className="h-4 w-4" /> 행동 제출
-              </button>
+              <ArenaTooltip data={arenaCoreTooltips.submit} side="bottom">
+                <button type="button" className="arena-v2-primary-button" onClick={submitActions} disabled={!canPlan}>
+                  <Send className="h-4 w-4" /> 행동 제출
+                </button>
+              </ArenaTooltip>
             ) : (
               <button type="button" className="arena-v2-primary-button" onClick={() => router.push('/arena')}>
                 <Check className="h-4 w-4" /> 아레나 홈
@@ -1070,11 +1105,13 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
               [RotateCcw, '교체', '기존 카드 대체'],
               [FileClock, '전투 기록', '최근 장면']
             ].map(([Icon, label, hint], index) => (
-              <div key={String(label)} className={`arena-v2-phase ${index === 1 && canPlan ? 'is-active' : ''}`}>
-                {React.createElement(Icon as typeof Move, { className: 'h-4 w-4' })}
-                <strong>{String(label)}</strong>
-                <span>{String(hint)}</span>
-              </div>
+              <ArenaTooltip key={String(label)} data={battlePhaseTooltips[String(label)]} side="right" focusable>
+                <div className={`arena-v2-phase ${index === 1 && canPlan ? 'is-active' : ''}`}>
+                  {React.createElement(Icon as typeof Move, { className: 'h-4 w-4' })}
+                  <strong>{String(label)}</strong>
+                  <span>{String(hint)}</span>
+                </div>
+              </ArenaTooltip>
             ))}
           </aside>
 
@@ -1089,26 +1126,26 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
             <ArenaEmoteWheelMenu wheel={emoteWheel} slots={emoteSlots} onPick={sendEmote} onClose={() => setEmoteWheel(null)} />
             <div className="arena-v2-player-strip is-opponent">
               <div><span>상대</span><strong>{match?.mode === 'bot' ? '연습 상대' : `자리 ${opponentSeat + 1}`}</strong></div>
-              <div className="arena-v2-resource"><Shield className="h-4 w-4" /> {opponent?.playerHealth ?? 30}</div>
-              <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 손 {opponent?.handCount ?? 0}</div>
-              <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {opponent?.deckCount ?? 0}</div>
-              <div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {opponentNextFatigue}</div>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.playerHealth, title: '상대 체력' }} side="bottom" focusable><div className="arena-v2-resource"><Shield className="h-4 w-4" /> {opponent?.playerHealth ?? 30}</div></ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.hand, title: '상대 손패', description: '상대가 현재 보유한 손패 수입니다. 카드 내용은 공개되지 않습니다.' }} side="bottom" focusable><div className="arena-v2-resource"><Hand className="h-4 w-4" /> 손 {opponent?.handCount ?? 0}</div></ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.deck, title: '상대 남은 덱' }} side="bottom" focusable><div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {opponent?.deckCount ?? 0}</div></ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.fatigue, title: '상대 다음 피로 피해' }} side="bottom" focusable><div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {opponentNextFatigue}</div></ArenaTooltip>
             </div>
             {match ? renderBoard(opponentSeat, false) : null}
             <div className="arena-v2-lane-divider"><span>전열이 먼저 맞붙고 후열이 뒤이어 압박합니다</span></div>
             {match ? renderBoard(selfSeat, canPlan) : null}
             <div className="arena-v2-player-strip">
               <div><span>나</span><strong>자리 {selfSeat + 1}</strong></div>
-              <div className="arena-v2-resource"><Shield className="h-4 w-4" /> {self?.playerHealth ?? 30}</div>
-              <div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {self?.deckCount ?? 0}</div>
-              <div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {selfNextFatigue}</div>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.playerHealth, title: '내 체력' }} side="top" focusable><div className="arena-v2-resource"><Shield className="h-4 w-4" /> {self?.playerHealth ?? 30}</div></ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.deck, title: '내 남은 덱' }} side="top" focusable><div className="arena-v2-resource"><Hand className="h-4 w-4" /> 덱 {self?.deckCount ?? 0}</div></ArenaTooltip>
+              <ArenaTooltip data={{ ...arenaCoreTooltips.fatigue, title: '내 다음 피로 피해' }} side="top" focusable><div className="arena-v2-resource"><FileClock className="h-4 w-4" /> 피로 {selfNextFatigue}</div></ArenaTooltip>
             </div>
           </div>
 
           <aside className="arena-v2-command-panel arena-v2-command-console">
-            <div className="arena-v2-stat arena-v2-accent-cyan"><Eye className="h-4 w-4" /><span>상태</span><strong>{matchStatusLabel(match?.status)}</strong></div>
-            <div className="arena-v2-stat arena-v2-accent-gold"><Zap className="h-4 w-4" /><span>코스트</span><strong>{spentCost} / {costCap}</strong></div>
-            <div className="arena-v2-stat arena-v2-accent-green"><Clock3 className="h-4 w-4" /><span>턴 제한</span><strong>{timeLeft}초</strong></div>
+            <ArenaTooltip data={arenaCoreTooltips.matchStatus} side="left" focusable><div className="arena-v2-stat arena-v2-accent-cyan"><Eye className="h-4 w-4" /><span>상태</span><strong>{matchStatusLabel(match?.status)}</strong></div></ArenaTooltip>
+            <ArenaTooltip data={{ ...arenaCoreTooltips.turnCost, title: `코스트 ${spentCost} / ${costCap}`, description: `이번 턴 사용 예정 ${spentCost}, 사용 가능 상한 ${costCap}입니다.` }} side="left" focusable><div className="arena-v2-stat arena-v2-accent-gold"><Zap className="h-4 w-4" /><span>코스트</span><strong>{spentCost} / {costCap}</strong></div></ArenaTooltip>
+            <ArenaTooltip data={arenaCoreTooltips.turnTimer} side="left" focusable><div className="arena-v2-stat arena-v2-accent-green"><Clock3 className="h-4 w-4" /><span>턴 제한</span><strong>{timeLeft}초</strong></div></ArenaTooltip>
             <div className="arena-v2-panel-section">
               <span className="arena-v2-panel-label">행동 순서</span>
               <div className="arena-v2-action-stack">

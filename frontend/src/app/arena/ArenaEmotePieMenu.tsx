@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Sparkles } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/api';
 import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
+import { ArenaTooltip } from './ArenaTooltip';
 
 export type ArenaEmotePieItem = {
   id: number;
@@ -68,24 +69,34 @@ export const ArenaEmotePieMenu: React.FC<ArenaEmotePieMenuProps> = ({
       const emoji = typeof style.emoji === 'string' && style.emoji.trim() ? style.emoji.trim() : '＋';
       const selected = selectedIndex === index;
       return (
-        <button
-          key={index}
-          type="button"
-          className={`${item ? 'has-emote' : 'is-empty'} ${selected ? 'is-selected' : ''}`}
-          style={sectorStyle(index)}
-          disabled={disabled || (!item && Boolean(onPick) && !onSelect)}
-          aria-pressed={selected}
-          aria-label={item ? `${index + 1}번 슬롯 ${item.name}` : `${index + 1}번 빈 슬롯`}
-          onClick={() => {
-            onSelect?.(index);
-            if (item) onPick?.(item, index);
-          }}
-        >
-          <span className="arena-v2-pie-slot-number">{index + 1}</span>
-          <span className="arena-v2-pie-visual">
-            {imageUrl ? <Image src={imageUrl} alt="" width={52} height={52} unoptimized /> : <b>{emoji}</b>}
-          </span>
-        </button>
+        <ArenaTooltip key={index} data={{
+          eyebrow: '이모트 휠 슬롯',
+          title: item ? `${index + 1}번 · ${item.name}` : `${index + 1}번 · 빈 슬롯`,
+          description: item
+            ? '이 슬롯을 선택하면 장착 위치를 편집하거나 대전 중 해당 이모트를 바로 보냅니다.'
+            : '보유 이모트를 이 위치에 장착하면 상점 편집 화면과 실제 대전 파이 메뉴에 같은 위치로 반영됩니다.',
+          details: [{ label: '방향', value: `${index * 45}°` }, { label: '상태', value: selected ? '현재 선택됨' : item ? '장착됨' : '비어 있음' }],
+          note: onPick ? '대전 중 선택하면 즉시 전송됩니다.' : '슬롯을 고른 뒤 카탈로그에서 보유 이모트를 선택하세요.',
+          tone: item ? 'violet' : 'neutral'
+        }} side="top">
+          <button
+            type="button"
+            className={`${item ? 'has-emote' : 'is-empty'} ${selected ? 'is-selected' : ''}`}
+            style={sectorStyle(index)}
+            disabled={disabled || (!item && Boolean(onPick) && !onSelect)}
+            aria-pressed={selected}
+            aria-label={item ? `${index + 1}번 슬롯 ${item.name}` : `${index + 1}번 빈 슬롯`}
+            onClick={() => {
+              onSelect?.(index);
+              if (item) onPick?.(item, index);
+            }}
+          >
+            <span className="arena-v2-pie-slot-number">{index + 1}</span>
+            <span className="arena-v2-pie-visual">
+              {imageUrl ? <Image src={imageUrl} alt="" width={52} height={52} unoptimized /> : <b>{emoji}</b>}
+            </span>
+          </button>
+        </ArenaTooltip>
       );
     })}
     <div className="arena-v2-pie-core" aria-hidden="true">

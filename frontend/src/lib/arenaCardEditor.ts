@@ -24,6 +24,10 @@ export type ArenaCardKeywordDefinition = {
   type: string;
   label: string;
   description: string;
+  category: 'defense' | 'offense' | 'control' | 'support' | 'specter';
+  timing: string;
+  target: string;
+  duration: string;
   variants: ArenaCardKeywordVariant[];
 };
 
@@ -54,45 +58,66 @@ export const arenaCardStatLimitsByCost: Record<number, { attackMax: number; heal
 export const arenaCardClassDefinitions = {
   charge: {
     label: '돌격',
-    description: '전열을 빠르게 돌파하고 직접 피해로 압박합니다. 높은 공격력과 관통·추격 계열에 잘 어울립니다.',
+    description: '전열의 첫 기본 공격을 강화해 상대 카드를 빠르게 무너뜨리는 공격형 클래스입니다.',
     playstyle: '공격적인 전열 압박',
-    passive: '전열에 배치되면 카드에게 주는 첫 번째 피해가 1 증가합니다.'
+    passive: '전열에서 이번 전투 첫 기본 공격으로 카드에게 주는 피해가 1 증가합니다.',
+    trigger: '전투마다 첫 기본 공격 1회',
+    condition: '전열 배치 · 카드 대상 피해',
+    note: '후열과 플레이어 직접 공격에는 적용되지 않습니다.'
   },
   guardian: {
     label: '수호',
-    description: '도발과 보호막으로 아군을 지키며 전열을 오래 유지합니다. 체력과 방어 효과의 효율이 좋습니다.',
+    description: '전열에서 첫 체력 피해를 줄여 라인을 안정적으로 지키는 방어형 클래스입니다.',
     playstyle: '단단한 전열 유지',
-    passive: '전열에 배치되면 처음 받는 체력 피해를 1 줄입니다. 보호막 피해에는 적용되지 않습니다.'
+    passive: '전열에서 이번 전투 처음 받는 체력 피해를 1 줄입니다.',
+    trigger: '전투마다 첫 체력 피해 1회',
+    condition: '전열 배치 · 보호막 적용 후 체력 피해 발생',
+    note: '보호막이 피해를 모두 막았거나 후열에 있으면 발동하지 않습니다.'
   },
   sniper: {
     label: '저격',
-    description: '조준과 후열 압박으로 중요한 적을 먼저 노립니다. 공격력과 제어 효과 조합에 유의해야 합니다.',
+    description: '상대 전열이 비어 있는 라인에서 후열의 핵심 카드를 먼저 노리는 정밀 공격 클래스입니다.',
     playstyle: '정밀한 후열 제거',
-    passive: '후열에 배치되면 같은 열의 상대 후열 카드를 먼저 공격합니다. 후열이 비어 있으면 전열을 공격합니다.'
+    passive: '후열에 있고 같은 라인의 상대 전열이 비어 있으면 상대 후열 카드를 우선 공격합니다.',
+    trigger: '공격 대상 결정 시',
+    condition: '후열 배치 · 같은 라인의 상대 전열이 비어 있음',
+    note: '같은 라인 안에서만 작동하며 직접 공격 피해는 늘리지 않습니다.'
   },
   support: {
     label: '지원',
-    description: '회복·보호·공격 보조로 같은 라인의 아군을 강화합니다. 팀 전체의 안정성을 높입니다.',
+    description: '같은 라인 아군의 첫 체력 피해 일부를 대신 받아 전투 지속력을 높이는 보조 클래스입니다.',
     playstyle: '회복과 전투 보조',
-    passive: '같은 열의 아군이 처음 받는 피해 1을 대신 받습니다.'
+    passive: '같은 라인의 아군 카드가 이번 전투 처음 받는 체력 피해 중 1을 대신 받습니다.',
+    trigger: '전투마다 아군의 첫 체력 피해 1회',
+    condition: '같은 라인 · 지원 카드가 전투 가능 상태',
+    note: '대신 받은 피해로 지원 카드가 전투불능이 될 수 있습니다.'
   },
   trick: {
     label: '기만',
-    description: '침묵·기절·밀치기 같은 제어로 상대의 배치를 흔듭니다. 강한 제어 조합에는 추가 비용이 붙습니다.',
+    description: '첫 타격 대상의 공격력을 낮춰 상대의 다음 공격을 약화하는 교란 클래스입니다.',
     playstyle: '제어와 위치 교란',
-    passive: '자신에게 처음 피해를 준 적 카드에게 약화 1을 부여해 공격력을 1 낮춥니다.'
+    passive: '이번 전투 처음 피해를 준 같은 라인의 카드에게 약화 1을 부여합니다.',
+    trigger: '전투마다 처음 카드 피해를 준 직후 1회',
+    condition: '같은 라인의 카드 대상 피해',
+    note: '플레이어 직접 공격에는 발동하지 않으며 약화는 전투 종료 시 사라집니다.'
   },
   specter: {
     label: '망령',
-    description: '묘지와 아군 손실을 활용해 후반 영향력을 만듭니다. 부활·원혼 조합은 비용과 제한을 확인하세요.',
+    description: '전열에서 쓰러질 때 일반 초과 피해를 차단해 후열을 보호하는 묘지 연계 클래스입니다.',
     playstyle: '묘지 활용과 후반 압박',
-    passive: '전열에서 전투불능이 되면 관통이 없는 일반 공격의 초과 피해가 같은 열 후열로 전달되지 않습니다.'
+    passive: '전열에서 전투불능이 될 때 일반 초과 피해가 같은 라인 후열로 넘어가는 것을 막습니다.',
+    trigger: '전열에서 전투불능 확정 시',
+    condition: '기본 공격의 일반 초과 피해',
+    note: '관통 피해, 후열 전투불능, 교체와 손패 초과 버림에는 적용되지 않습니다.'
   },
   tech: {
     label: '기술',
-    description: '전투 드로우와 전술 지원으로 손패 순환을 돕습니다. 유연한 운영과 조합 설계에 적합합니다.',
+    description: '처음 들어오는 제어 키워드를 무효화해 핵심 역할을 안정적으로 수행하는 유틸리티 클래스입니다.',
     playstyle: '카드 순환과 유틸리티',
-    passive: '전투마다 이 카드에 처음 적용될 적 키워드 효과 1개를 무효화합니다.'
+    passive: '이번 전투 처음 받는 키워드 효과 1개를 무효화합니다.',
+    trigger: '전투마다 처음 받는 대상 키워드 1회',
+    condition: '침묵 · 기절 · 약화 · 밀치기 · 끌어오기 등 제어 효과',
+    note: '피해 자체와 관통·직접 압박·원혼처럼 이미 피해로 처리되는 효과는 막지 않습니다.'
   }
 } as const;
 
@@ -104,33 +129,37 @@ const levels = (costs: number[], unit: string): ArenaCardKeywordVariant[] => cos
 }));
 
 export const arenaCardKeywordDefinitions: ArenaCardKeywordDefinition[] = [
-  { type: 'taunt', label: '도발', description: '같은 라인의 적 공격을 자신에게 끌어와 아군을 보호합니다.', variants: fixed('기본', 4) },
-  { type: 'shield', label: '보호막', description: '전투 시작 시 지정한 수치만큼 피해를 먼저 흡수합니다.', variants: levels([1, 2, 3, 4, 5], ' 보호막') },
-  { type: 'damage_reduction', label: '피해 감소', description: '받는 피해를 줄여 전열 유지력을 높입니다.', variants: [{ label: '1 감소', value: 1, cost: 4 }, { label: '2 감소', value: 2, cost: 7 }] },
-  { type: 'counter', label: '반격', description: '공격받은 뒤 공격자에게 즉시 반격 피해를 줍니다.', variants: [{ label: '1 피해', value: 1, cost: 4 }, { label: '2 피해', value: 2, cost: 7 }] },
-  { type: 'lifesteal', label: '흡혈', description: '실제 체력 피해를 주면 자신의 누적 피해를 회복합니다.', variants: [{ label: '1 회복', value: 1, cost: 6 }, { label: '2 회복', value: 2, cost: 10 }] },
-  { type: 'revive', label: '부활', description: '처음 전투불능이 되었을 때 한 번 다시 전장에 복귀합니다.', variants: fixed('1회', 18) },
-  { type: 'pierce', label: '관통', description: '보호막이나 방어 효과를 일부 무시하고 피해를 전달합니다.', variants: fixed('기본', 6) },
-  { type: 'pursuit', label: '추격', description: '약해진 적을 우선 압박해 마무리 능력을 높입니다.', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 9 }] },
-  { type: 'direct_pressure', label: '직격 압박', description: '빈 라인을 통해 상대 플레이어에게 주는 직접 피해를 강화합니다.', variants: [{ label: '1단계', value: 1, cost: 7 }, { label: '2단계', value: 2, cost: 12 }] },
-  { type: 'backline_pressure', label: '후열 압박', description: '상대 후열의 핵심 카드를 우선적으로 위협합니다.', variants: fixed('기본', 5) },
-  { type: 'weakpoint', label: '약점 공격', description: '피해를 입거나 약화된 적을 공격할 때 효율이 높아집니다.', variants: fixed('기본', 5) },
-  { type: 'aoe_damage', label: '광역 피해', description: '주 대상과 함께 주변 카드에도 피해를 줍니다.', variants: [{ label: '1 피해', value: 1, cost: 8 }, { label: '2 피해', value: 2, cost: 14 }] },
-  { type: 'aim', label: '조준', description: '후열 또는 지정 우선순위의 적을 정밀하게 노립니다.', variants: fixed('기본', 8) },
-  { type: 'silence', label: '침묵', description: '대상의 키워드 효과를 일시적으로 사용할 수 없게 만듭니다.', variants: fixed('기본', 8) },
-  { type: 'stun', label: '기절', description: '대상의 다음 행동을 한 번 막습니다.', variants: fixed('1회', 10) },
-  { type: 'push', label: '밀치기', description: '적을 같은 라인의 다른 위치로 밀어 배치를 흐트러뜨립니다.', variants: fixed('기본', 6) },
-  { type: 'pull', label: '끌어오기', description: '후열의 적을 앞으로 끌어내 아군의 공격에 노출시킵니다.', variants: fixed('기본', 7) },
-  { type: 'weaken', label: '약화', description: '대상의 공격 능력을 낮춰 아군이 받는 피해를 줄입니다.', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 9 }] },
-  { type: 'battle_draw', label: '전투 드로우', description: '전투 중 덱에서 카드 1장을 뽑습니다. 손패 상한은 그대로 적용됩니다.', variants: fixed('카드 1장', 6) },
-  { type: 'emergency_heal', label: '응급 회복', description: '피해를 입은 아군의 누적 피해를 즉시 회복합니다.', variants: [{ label: '1 회복', value: 1, cost: 7 }, { label: '2 회복', value: 2, cost: 12 }] },
-  { type: 'guard_support', label: '보호 지원', description: '같은 라인의 아군에게 보호막을 제공해 생존을 돕습니다.', variants: fixed('기본', 4) },
-  { type: 'attack_support', label: '공격 지원', description: '같은 라인 아군의 첫 공격 피해를 높입니다.', variants: fixed('기본', 5) },
-  { type: 'grave_buff', label: '묘지 강화', description: '묘지에 쌓인 카드 수를 활용해 전투 능력을 강화합니다.', variants: fixed('기본', 6) },
+  { type: 'taunt', label: '도발', description: '공격 대상 결정 시 같은 라인의 적 공격 우선순위를 자신에게 끌어옵니다.', category: 'defense', timing: '공격 대상 결정', target: '같은 라인의 적 공격', duration: '이번 전투', variants: fixed('기본', 4) },
+  { type: 'shield', label: '보호막', description: '전투 시작 시 보호막 X를 얻어 체력보다 먼저 피해를 흡수합니다. 남은 보호막은 전투 종료 시 사라집니다.', category: 'defense', timing: '전투 시작 · 피해 적용 전', target: '이 카드', duration: '이번 전투', variants: levels([1, 2, 3, 4, 5], ' 보호막') },
+  { type: 'damage_reduction', label: '피해 감소', description: '보호막 적용 후 이 카드가 받는 체력 피해를 매번 1 줄입니다. 선택 단계에 따라 1회 또는 2회 발동합니다.', category: 'defense', timing: '체력 피해 적용 중', target: '이 카드', duration: '선택한 횟수만큼', variants: [{ label: '1회', value: 1, cost: 4 }, { label: '2회', value: 2, cost: 7 }] },
+  { type: 'counter', label: '반격', description: '같은 라인의 카드에게 공격받아 피해가 적용된 뒤 그 공격자에게 X 피해를 줍니다.', category: 'defense', timing: '피해 적용 후', target: '같은 라인의 공격자', duration: '발동 즉시', variants: [{ label: '1 피해', value: 1, cost: 4 }, { label: '2 피해', value: 2, cost: 7 }] },
+  { type: 'lifesteal', label: '흡혈', description: '카드에게 실제 체력 피해를 준 뒤 자신의 누적 피해를 X만큼 회복합니다. 피해를 주지 못하면 발동하지 않습니다.', category: 'defense', timing: '카드 체력 피해 적용 후', target: '이 카드', duration: '발동 즉시', variants: [{ label: '1 회복', value: 1, cost: 6 }, { label: '2 회복', value: 2, cost: 10 }] },
+  { type: 'revive', label: '부활', description: '전투불능이 되는 대신 체력 1로 생존합니다. 한 전투에서 한 번만 발동합니다.', category: 'defense', timing: '전투불능 대체', target: '이 카드', duration: '전투마다 1회', variants: fixed('1회', 18) },
+  { type: 'pierce', label: '관통', description: '기본 공격으로 전열을 쓰러뜨리면 남은 피해 전부를 같은 라인의 후열 카드까지 전달합니다. 플레이어에게는 넘어가지 않습니다.', category: 'offense', timing: '전열 전투불능 후', target: '같은 라인의 후열 카드', duration: '해당 공격', variants: fixed('기본', 6) },
+  { type: 'pursuit', label: '추격', description: '이 카드가 적 카드를 전투불능으로 만든 직후 선택한 단계의 후속 효과가 발동합니다.', category: 'offense', timing: '적 카드 전투불능 직후', target: '추격 조건으로 정해진 대상', duration: '발동 즉시', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 9 }] },
+  { type: 'direct_pressure', label: '직접 압박', description: '같은 라인의 상대 전열과 후열이 모두 비어 플레이어를 직접 공격할 때 피해가 X 증가합니다.', category: 'offense', timing: '플레이어 직접 공격 피해 전', target: '상대 플레이어', duration: '해당 직접 공격', variants: [{ label: '피해 +1', value: 1, cost: 7 }, { label: '피해 +2', value: 2, cost: 12 }] },
+  { type: 'backline_pressure', label: '후열 압박', description: '상대 후열 카드를 공격할 때 그 카드에게 주는 피해가 1 증가합니다.', category: 'offense', timing: '후열 카드 공격 피해 전', target: '상대 후열 카드', duration: '해당 공격', variants: fixed('피해 +1', 5) },
+  { type: 'weakpoint', label: '약점 공격', description: '이미 체력 피해를 받은 카드를 공격할 때 그 카드에게 주는 피해가 1 증가합니다.', category: 'offense', timing: '카드 공격 피해 전', target: '피해를 받은 카드', duration: '해당 공격', variants: fixed('피해 +1', 5) },
+  { type: 'aoe_damage', label: '광역 피해', description: '한 공격 단계에 한 번, 기본 공격과 함께 X의 광역 피해를 처리합니다.', category: 'offense', timing: '기본 공격 단계', target: '광역 피해 적용 대상', duration: '공격 단계마다 1회', variants: [{ label: '1 피해', value: 1, cost: 8 }, { label: '2 피해', value: 2, cost: 14 }] },
+  { type: 'aim', label: '조준', description: '공격 대상 결정 시 같은 라인의 상대 후열 카드를 우선 대상으로 선택합니다.', category: 'control', timing: '공격 대상 결정', target: '같은 라인의 상대 후열', duration: '해당 공격', variants: fixed('기본', 8) },
+  { type: 'silence', label: '침묵', description: '같은 라인 대상의 키워드 효과를 이번 전투 동안 사용할 수 없게 합니다.', category: 'control', timing: '제어 효과 적용 시', target: '같은 라인의 상대 카드', duration: '이번 전투', variants: fixed('기본', 8) },
+  { type: 'stun', label: '기절', description: '같은 라인 대상이 이번 공격 단계에서 행동하지 못하게 합니다.', category: 'control', timing: '공격 행동 전', target: '같은 라인의 상대 카드', duration: '이번 공격 단계', variants: fixed('1회', 10) },
+  { type: 'push', label: '밀치기', description: '같은 라인의 상대 전열 카드를 후열로 밉니다. 후열 칸이 차 있으면 실패합니다.', category: 'control', timing: '위치 제어 적용 시', target: '같은 라인의 상대 전열', duration: '배치가 바뀔 때까지', variants: fixed('기본', 6) },
+  { type: 'pull', label: '끌어오기', description: '같은 라인의 상대 후열 카드를 전열로 당깁니다. 전열 칸이 차 있으면 실패합니다.', category: 'control', timing: '위치 제어 적용 시', target: '같은 라인의 상대 후열', duration: '배치가 바뀔 때까지', variants: fixed('기본', 7) },
+  { type: 'weaken', label: '약화', description: '같은 라인 대상의 공격력을 이번 전투 동안 X 낮춥니다. 전투 종료 시 원래 수치로 돌아옵니다.', category: 'control', timing: '피해 적용 후 또는 효과 적용 시', target: '같은 라인의 상대 카드', duration: '이번 전투', variants: [{ label: '공격력 -1', value: 1, cost: 5 }, { label: '공격력 -2', value: 2, cost: 9 }] },
+  { type: 'battle_draw', label: '전투 드로우', description: '전투 중 덱에서 카드 1장을 뽑습니다. 손패 최대 8장 제한을 그대로 적용합니다.', category: 'support', timing: '전투 중 자원 효과 처리', target: '내 덱과 손패', duration: '발동 즉시', variants: fixed('카드 1장', 6) },
+  { type: 'emergency_heal', label: '응급 회복', description: '효과가 지정한 필드 카드의 누적 체력 피해를 X만큼 회복합니다. 최대 체력을 넘길 수 없습니다.', category: 'support', timing: '회복 효과 처리 시', target: '필드 카드', duration: '발동 즉시', variants: [{ label: '1 회복', value: 1, cost: 7 }, { label: '2 회복', value: 2, cost: 12 }] },
+  { type: 'guard_support', label: '보호 지원', description: '전투 시작 시 같은 라인의 아군 카드 1장에게 보호막 1을 부여합니다.', category: 'support', timing: '전투 시작', target: '같은 라인의 아군 카드', duration: '이번 전투', variants: fixed('보호막 1', 4) },
+  { type: 'attack_support', label: '공격 지원', description: '같은 라인 아군 카드가 이번 전투 처음 주는 카드 피해를 1 증가시킵니다.', category: 'support', timing: '전투 시작 · 아군 첫 피해 전', target: '같은 라인의 아군 카드', duration: '전투마다 1회', variants: fixed('피해 +1', 5) },
+  { type: 'grave_buff', label: '묘지 강화', description: '내 묘지 카드 수 조건을 만족하면 이 카드의 전투 능력이 강화됩니다.', category: 'support', timing: '묘지 수 조건 확인 시', target: '이 카드', duration: '조건을 만족한 전투', variants: fixed('기본', 6) },
   {
     type: 'grave_recover',
     label: '묘지 회수',
-    description: '묘지의 카드를 손패로 되돌립니다. 회수 범위가 넓을수록 비용이 커집니다.',
+    description: '선택한 조건에 맞는 묘지 카드 1장을 자동으로 골라 최대 체력 상태로 손패에 넣습니다.',
+    category: 'support',
+    timing: '전투불능 효과 처리 후',
+    target: '조건에 맞는 내 묘지 카드 1장',
+    duration: '발동 즉시',
     variants: [
       { label: '2코스트 이하', limit: 'cost_2', cost: 8 },
       { label: '망령 클래스', limit: 'specter', cost: 9 },
@@ -140,9 +169,9 @@ export const arenaCardKeywordDefinitions: ArenaCardKeywordDefinition[] = [
       { label: '제한 없음', limit: 'any', cost: 18 }
     ]
   },
-  { type: 'vengeance', label: '복수', description: '아군이 전투불능이 된 뒤 반격 흐름을 만듭니다.', variants: [{ label: '1단계', value: 1, cost: 4 }, { label: '2단계', value: 2, cost: 7 }] },
-  { type: 'grudge', label: '원혼', description: '아군 손실과 묘지를 이용해 강한 후반 압박을 만듭니다.', variants: [{ label: '1단계', value: 1, cost: 10 }, { label: '2단계', value: 2, cost: 18 }] },
-  { type: 'remnant', label: '잔영', description: '카드가 사라진 뒤에도 일부 전투 영향이 남습니다.', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 8 }] }
+  { type: 'vengeance', label: '원한', description: '이 카드가 전투불능이 되어 묘지로 간 뒤 같은 라인의 가장 앞 적 카드에게 X 피해를 줍니다.', category: 'specter', timing: '전투불능 확정과 묘지 이동 후', target: '같은 라인의 가장 앞 적 카드', duration: '발동 즉시', variants: [{ label: '1 피해', value: 1, cost: 4 }, { label: '2 피해', value: 2, cost: 7 }] },
+  { type: 'grudge', label: '원혼', description: '이 카드가 전투불능이 되어 묘지로 간 뒤 상대 플레이어에게 X 피해를 줍니다. 직접 공격으로 취급하지 않습니다.', category: 'specter', timing: '전투불능 확정과 묘지 이동 후', target: '상대 플레이어', duration: '발동 즉시', variants: [{ label: '1 피해', value: 1, cost: 10 }, { label: '2 피해', value: 2, cost: 18 }] },
+  { type: 'remnant', label: '잔재', description: '이 카드가 전투불능이 되어 묘지로 간 뒤 같은 라인의 아군 카드 1장에게 보호막 X를 부여합니다.', category: 'specter', timing: '전투불능 확정과 묘지 이동 후', target: '같은 라인의 아군 카드 1장', duration: '해당 전투 종료까지', variants: [{ label: '보호막 1', value: 1, cost: 5 }, { label: '보호막 2', value: 2, cost: 8 }] }
 ];
 
 const keywordDefinitionMap = new Map(arenaCardKeywordDefinitions.map((definition) => [definition.type, definition]));
@@ -219,11 +248,11 @@ const comboBudgetLines = (form: ArenaCardEditorForm): BudgetLine[] => {
   add(has('pierce') && form.attack >= 6, 'pierce_attack_6', '관통 + 공격력 6 이상', 3);
   add(has('pierce') && has('lifesteal'), 'pierce_lifesteal', '관통 + 흡혈', 5);
   add(has('pierce') && has('pursuit'), 'pierce_pursuit', '관통 + 추격', 3);
-  add(has('direct_pressure') && form.attack >= 4, 'pressure_attack_4', '직격 압박 + 공격력 4 이상', 3);
-  add(has('direct_pressure') && form.attack >= 6, 'pressure_attack_6', '직격 압박 + 공격력 6 이상', 4);
-  add(has('direct_pressure') && has('backline_pressure'), 'pressure_backline', '직격 압박 + 후열 압박', 3);
-  add(has('direct_pressure') && has('pierce'), 'pressure_pierce', '직격 압박 + 관통', 3);
-  add(has('direct_pressure') && form.cardClass === 'charge', 'pressure_charge', '돌격 클래스 + 직격 압박', 2);
+  add(has('direct_pressure') && form.attack >= 4, 'pressure_attack_4', '직접 압박 + 공격력 4 이상', 3);
+  add(has('direct_pressure') && form.attack >= 6, 'pressure_attack_6', '직접 압박 + 공격력 6 이상', 4);
+  add(has('direct_pressure') && has('backline_pressure'), 'pressure_backline', '직접 압박 + 후열 압박', 3);
+  add(has('direct_pressure') && has('pierce'), 'pressure_pierce', '직접 압박 + 관통', 3);
+  add(has('direct_pressure') && form.cardClass === 'charge', 'pressure_charge', '돌격 클래스 + 직접 압박', 2);
   add(has('aim') && form.attack >= 3, 'aim_attack_3', '조준 + 공격력 3 이상', 2);
   add(has('aim') && form.attack >= 5, 'aim_attack_5', '조준 + 공격력 5 이상', 3);
   add(has('aim') && has('silence'), 'aim_silence', '조준 + 침묵', 4);
@@ -242,10 +271,10 @@ const comboBudgetLines = (form: ArenaCardEditorForm): BudgetLine[] => {
   add(form.cardClass === 'guardian' && has('revive'), 'guardian_revive', '수호 클래스 + 부활', 6);
   add(has('revive') && has('damage_reduction'), 'revive_reduction', '부활 + 피해 감소', 6);
   add(has('revive') && has('lifesteal'), 'revive_lifesteal', '부활 + 흡혈', 7);
-  add(has('revive') && has('vengeance'), 'revive_vengeance', '부활 + 복수', 6);
+  add(has('revive') && has('vengeance'), 'revive_vengeance', '부활 + 원한', 6);
   add(has('revive') && has('grudge'), 'revive_grudge', '부활 + 원혼', 10);
   add(has('revive') && has('grave_recover'), 'revive_grave', '부활 + 묘지 회수', 10);
-  add(form.cardClass === 'support' && has('vengeance'), 'support_vengeance', '지원 클래스 + 복수', 3);
+  add(form.cardClass === 'support' && has('vengeance'), 'support_vengeance', '지원 클래스 + 원한', 3);
   add(form.cardClass === 'support' && has('grudge'), 'support_grudge', '지원 클래스 + 원혼', 5);
   add(form.cardClass === 'support' && has('revive'), 'support_revive', '지원 클래스 + 부활', 6);
   add(form.cardClass === 'support' && has('grave_recover'), 'support_grave', '지원 클래스 + 묘지 회수', 4);
@@ -259,7 +288,7 @@ const forbiddenComboMessages = (form: ArenaCardEditorForm) => {
   const has = (type: string) => form.keywords.some((keyword) => keyword.type === type);
   const hasValue = (type: string, value: number) => form.keywords.some((keyword) => keyword.type === type && keyword.value === value);
   const messages: string[] = [];
-  if (form.cost === 1 && has('direct_pressure')) messages.push('1코스트에서는 직격 압박을 선택할 수 없습니다. 코스트를 올리거나 키워드를 변경해주세요.');
+  if (form.cost === 1 && has('direct_pressure')) messages.push('1코스트에서는 직접 압박을 선택할 수 없습니다. 코스트를 올리거나 키워드를 변경해주세요.');
   if (form.cost === 1 && has('grudge')) messages.push('1코스트에서는 원혼을 선택할 수 없습니다. 코스트를 올리거나 키워드를 변경해주세요.');
   if (form.cost === 1 && has('grave_recover')) messages.push('1코스트에서는 묘지 회수를 선택할 수 없습니다. 코스트를 올리거나 키워드를 변경해주세요.');
   if (form.cost === 1 && has('battle_draw')) messages.push('1코스트에서는 전투 드로우를 선택할 수 없습니다. 코스트를 2 이상으로 올려주세요.');
@@ -268,7 +297,7 @@ const forbiddenComboMessages = (form: ArenaCardEditorForm) => {
   if (has('aim') && has('stun') && form.attack >= 5) messages.push('조준·기절 조합에서는 공격력을 4 이하로 낮춰야 합니다.');
   if (has('silence') && has('stun') && has('aoe_damage')) messages.push('침묵·기절·광역 피해 세 가지는 동시에 선택할 수 없습니다.');
   if (has('grave_recover') && has('battle_draw')) messages.push('묘지 회수와 전투 드로우는 함께 사용할 수 없습니다. 둘 중 하나를 변경해주세요.');
-  if (hasValue('direct_pressure', 2) && form.attack >= 6) messages.push('직격 압박 2단계에서는 공격력을 5 이하로 낮춰야 합니다.');
+  if (hasValue('direct_pressure', 2) && form.attack >= 6) messages.push('직접 압박 2단계에서는 공격력을 5 이하로 낮춰야 합니다.');
   return messages;
 };
 

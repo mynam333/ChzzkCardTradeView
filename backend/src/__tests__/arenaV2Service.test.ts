@@ -8,6 +8,7 @@ import {
   createArenaV2Report,
   createArenaV2SeasonAdmin,
   deleteArenaV2DeckForUser,
+  enableMyArenaV2StreamerCard,
   getArenaV2BattleRoyaleQueueStatus,
   getArenaV2CardVersion,
   getArenaV2CurrentSeason,
@@ -103,6 +104,12 @@ const makeExecutor = () => ({
         const ids = new Set(params);
         return rows.cards.filter((card) => ids.has(card.id));
       }
+      if (sql.includes('streamer_id IN')) {
+        const streamerIds = new Set(params.slice(1).map(String));
+        return rows.cards
+          .filter((card) => card.season_id === params[0] && card.status === 'active' && streamerIds.has(String(card.streamer_id)))
+          .sort((a, b) => String(a.streamer_id).localeCompare(String(b.streamer_id)) || Number(b.version || 0) - Number(a.version || 0));
+      }
       if (sql.includes('ORDER BY streamer_id ASC')) {
         return rows.cards
           .filter((card) => card.season_id === params[0] && card.status === 'active')
@@ -132,10 +139,17 @@ const makeExecutor = () => ({
         .slice(0, 5000);
     }
     if (sql.includes('FROM streamers')) {
+      const hasCursor = sql.includes('channel_id > ?');
+      const cursorBaseValue = hasCursor ? Number(params[0]) : null;
+      const cursorChannelId = hasCursor ? String(params[2]) : '';
+      const limit = Math.max(1, Number(params[params.length - 1] || 5000));
       return rows.streamers
         .filter((streamer) => Number(streamer.is_image_banned || 0) === 0)
+        .filter((streamer) => !hasCursor
+          || Number(streamer.base_value || 0) < Number(cursorBaseValue)
+          || (Number(streamer.base_value || 0) === Number(cursorBaseValue) && String(streamer.channel_id).localeCompare(cursorChannelId) > 0))
         .sort((a, b) => Number(b.base_value || 0) - Number(a.base_value || 0) || String(a.channel_id).localeCompare(String(b.channel_id)))
-        .slice(0, 5000);
+        .slice(0, limit);
     }
     if (sql.includes('FROM arena_v2_decks')) {
       return rows.decks.filter((deck) => deck.user_id === params[0] && (!params[1] || deck.season_id === params[1]));
@@ -922,6 +936,47 @@ describe('arena v2 service', () => {
     expect(results.reduce((sum, result) => sum + result.created, 0)).toBe(1);
   });
 
+  it('paginates through every registered streamer when synchronizing generated cards', async () => {
+    insertSeason();
+    rows.streamers.push(...Array.from({ length: 1001 }, (_, index) => {
+      const channelId = `paged-streamer-${String(index).padStart(4, '0')}`;
+      return {
+        channel_id: channelId,
+        name: `페이지 스트리머 ${index}`,
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 1000 + index,
+        base_value: 1000 - (index % 11),
+        is_image_banned: 0,
+        registered_by: channelId
+      };
+    }));
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    expect(sync).toMatchObject({ scanned: 1001, created: 1001, updated: 0, skipped: 0 });
+    expect(rows.cards).toHaveLength(1001);
+    for (const card of rows.cards) {
+      const budget = evaluateArenaV2CardBudget({
+        id: card.id,
+        streamerId: card.streamer_id,
+        seasonId: card.season_id,
+        status: card.status,
+        cardClass: card.card_class,
+        cost: card.cost,
+        attack: card.attack,
+        health: card.health,
+        keywords: JSON.parse(card.keywords),
+        validationResult: JSON.parse(card.validation_result)
+      });
+      expect(budget.remaining).toBe(0);
+      expect(card.balance_score).toBe(budget.budgetLimit);
+    }
+
+    const repeated = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    expect(repeated).toMatchObject({ scanned: 1001, created: 0, updated: 0, skipped: 1001 });
+  });
+
   it('rebuilds an existing active generated card in place with the current generation rules', async () => {
     insertSeason();
     rows.streamers.push({
@@ -958,6 +1013,74 @@ describe('arena v2 service', () => {
     expect(existing.attack).toBe(generated.attack);
     expect(existing.health).toBe(generated.health);
     expect(JSON.parse(existing.keywords)).toEqual(generated.keywords);
+    expect(evaluateArenaV2CardBudget({
+      id: existing.id,
+      streamerId: existing.streamer_id,
+      seasonId: existing.season_id,
+      status: existing.status,
+      cardClass: existing.card_class,
+      cost: existing.cost,
+      attack: existing.attack,
+      health: existing.health,
+      keywords: JSON.parse(existing.keywords),
+      validationResult: JSON.parse(existing.validation_result)
+    })).toMatchObject({
+      totalCost: existing.balance_score,
+      remaining: 0,
+      isOverBudget: false
+    });
+  });
+
+  it('rebuilds a legacy generated card in place without changing its referenced id', async () => {
+    insertSeason();
+    const streamerId = 'legacy-generated-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '구형 자동 카드 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+    const legacyId = `arena_v2_card_season-v2_${streamerId}`;
+    rows.cards.push({
+      id: legacyId,
+      streamer_id: streamerId,
+      display_name: '구형 자동 카드 스트리머',
+      season_id: 'season-v2',
+      version: 1,
+      card_class: 'charge',
+      cost: 2,
+      attack: 1,
+      health: 4,
+      keywords: '[]',
+      balance_score: 7,
+      validation_result: JSON.stringify({ valid: true, issues: [] }),
+      art_asset_id: null,
+      status: 'active'
+    });
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const existing = rows.cards[0];
+    const budget = evaluateArenaV2CardBudget({
+      id: existing.id,
+      streamerId: existing.streamer_id,
+      seasonId: existing.season_id,
+      status: existing.status,
+      cardClass: existing.card_class,
+      cost: existing.cost,
+      attack: existing.attack,
+      health: existing.health,
+      keywords: JSON.parse(existing.keywords),
+      validationResult: JSON.parse(existing.validation_result)
+    });
+
+    expect(sync).toMatchObject({ created: 0, updated: 1, skipped: 0 });
+    expect(existing.id).toBe(legacyId);
+    expect(existing.version).toBe(1);
+    expect(budget).toMatchObject({ totalCost: budget.budgetLimit, remaining: 0, isOverBudget: false });
   });
 
   it('keeps a streamer-authored active version unchanged during generated-card refresh', async () => {
@@ -996,6 +1119,72 @@ describe('arena v2 service', () => {
     expect(rows.cards[0]).toEqual(before);
   });
 
+  it('fully spends the budget before re-enabling a disabled generated card', async () => {
+    insertSeason();
+    const streamerId = 'disabled-generated-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '비활성 자동 카드 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const generated = rows.cards[0];
+    generated.status = 'disabled';
+    generated.health = Math.max(1, Number(generated.health) - 1);
+    generated.balance_score = Number(generated.balance_score) - 1;
+
+    const result = await enableMyArenaV2StreamerCard(streamerId);
+    const budget = evaluateArenaV2CardBudget(result.card!);
+
+    expect(result.enabled).toBe(true);
+    expect(result.card?.id).toBe(generated.id);
+    expect(result.card?.status).toBe('active');
+    expect(budget).toMatchObject({ totalCost: budget.budgetLimit, remaining: 0, isOverBudget: false });
+  });
+
+  it('does not rewrite a disabled streamer-authored card when re-enabling it', async () => {
+    insertSeason();
+    const streamerId = 'disabled-authored-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '비활성 수동 카드 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+    rows.cards.push({
+      id: 'arena_v2_card_manual-disabled-version',
+      streamer_id: streamerId,
+      display_name: '비활성 수동 카드 스트리머',
+      season_id: 'season-v2',
+      version: 2,
+      card_class: 'guardian',
+      cost: 4,
+      attack: 1,
+      health: 5,
+      keywords: JSON.stringify([{ type: 'taunt' }]),
+      balance_score: 12,
+      validation_result: JSON.stringify({ valid: true, issues: [] }),
+      art_asset_id: null,
+      status: 'disabled'
+    });
+    const before = { ...rows.cards[0] };
+
+    const result = await enableMyArenaV2StreamerCard(streamerId);
+
+    expect(result.enabled).toBe(true);
+    expect(result.card?.id).toBe(before.id);
+    expect(rows.cards[0]).toMatchObject({ ...before, status: 'active', updated_at: 'now' });
+  });
+
   it('generates deterministic and diverse 1~9 cost cards within every cost budget', () => {
     const sampleSize = 5000;
     const costCounts = new Map<number, number>();
@@ -1003,6 +1192,7 @@ describe('arena v2 service', () => {
     const profiles = new Set<string>();
     const keywordCounts = new Set<number>();
     const signatures = new Set<string>();
+    const costClassPairs = new Set<string>();
 
     for (let index = 0; index < sampleSize; index += 1) {
       const streamerId = `generated-streamer-${index}`;
@@ -1026,8 +1216,10 @@ describe('arena v2 service', () => {
 
       expect(validation.valid).toBe(true);
       expect(budget.isOverBudget).toBe(false);
-      expect(budget.totalCost).toBeGreaterThanOrEqual(Math.ceil(Number(budget.budgetLimit) * 0.7));
+      expect(budget.totalCost).toBe(budget.budgetLimit);
+      expect(budget.remaining).toBe(0);
       costCounts.set(generated.cost, (costCounts.get(generated.cost) || 0) + 1);
+      costClassPairs.add(`${generated.cost}:${generated.cardClass}`);
       classes.add(generated.cardClass);
       profiles.add(generated.profile);
       keywordCounts.add(generated.keywords.length);
@@ -1040,6 +1232,7 @@ describe('arena v2 service', () => {
       expect(Math.abs(percentage - expectedPercentage)).toBeLessThanOrEqual(2);
     }
     expect(classes.size).toBe(7);
+    expect(costClassPairs.size).toBe(63);
     expect(profiles).toEqual(new Set(['aggressive', 'durable', 'tactical', 'balanced']));
     expect(keywordCounts).toEqual(new Set([0, 1, 2, 3]));
     expect(signatures.size).toBeGreaterThan(150);

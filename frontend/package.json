@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@mdi/js": "^7.4.47",
     "@types/canvas-confetti": "^1.9.0",
     "canvas-confetti": "^1.9.4",
