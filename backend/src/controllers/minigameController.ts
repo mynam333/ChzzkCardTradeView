@@ -543,6 +543,12 @@ const getCropDetectiveBounds = (size: number, rotation: number) => {
   };
 };
 
+const isPastStartedSessionRecoveryCutoff = (session: Pick<MinigameSession, 'created_at'>) => {
+  const createdMs = parseDbKstTimeMs(session.created_at);
+  if (!Number.isFinite(createdMs)) return true;
+  return Date.now() - createdMs >= STARTED_SESSION_RECOVERY_MINUTES * 60_000;
+};
+
 const buildCrop = (roundIndex: number) => {
   const minSize = 0.05;
   const maxSize = 0.10;
@@ -558,6 +564,61 @@ const buildCrop = (roundIndex: number) => {
     y: pick(bounds.minY, bounds.maxY),
     size,
     rotation
+  };
+};
+
+const buildPublicCropDetectiveGameData = (session: MinigameSession) => {
+  if (session.game_type !== 'crop_detective') return null;
+  const target = parseDbJson<any>(session.target_data, {});
+  const validation = scoreCropDetectiveAnswers([], target);
+  if (!validation.valid || !Array.isArray(target.rounds)) return null;
+
+  const rounds = target.rounds.map((round: any, index: number) => {
+    const crop = round?.crop || {};
+    const rotation = normalizeRotation(crop.rotation ?? 0);
+    const x = Number(crop.x);
+    const y = Number(crop.y);
+    const size = Number(crop.size);
+    const sourceImageUrl = String(round?.source_image_url || '').trim();
+    const choices = Array.isArray(round?.choices) ? round.choices.map(stripCardValue) : [];
+    if (
+      Number(round?.round) !== index ||
+      !sourceImageUrl ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(size) ||
+      !Number.isFinite(rotation) ||
+      choices.length !== CROP_DETECTIVE_CHOICES
+    ) return null;
+    return {
+      round: index,
+      source_image_url: sourceImageUrl,
+      crop: { x, y, size, rotation },
+      choices
+    };
+  });
+
+  if (rounds.some((round: any) => !round)) return null;
+  return { rounds };
+};
+
+const buildCropDetectiveResumePayload = (session: MinigameSession) => {
+  // Repository cleanup expires STARTED sessions at this exact cutoff. Keep the
+  // resume window aligned so a session cannot be returned while cleanup expires it.
+  if (isPastStartedSessionRecoveryCutoff(session)) return null;
+  const timing = getSessionTiming(session);
+  if (timing.time_remaining_ms <= 0) return null;
+  const gameData = buildPublicCropDetectiveGameData(session);
+  if (!gameData) return null;
+  return {
+    session_id: session.id,
+    game_type: 'crop_detective' as const,
+    practice_mode: false,
+    game_data: gameData,
+    resumed_session: true,
+    interrupted_session_closed: false,
+    message: '진행 중이던 카드 확대 탐정 세션을 이어서 시작합니다.',
+    timing
   };
 };
 
@@ -629,6 +690,58 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
   }
 };
 
+// GET /api/minigames/active?game_type=crop_detective
+export const getActiveMinigameSession = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  const gameType = String(req.query?.game_type || 'crop_detective');
+  if (gameType !== 'crop_detective') {
+    return res.status(400).json({ error: 'BadRequest', message: '복구를 지원하지 않는 미니게임입니다.' });
+  }
+
+  try {
+    scheduleMinigameSessionExpiry();
+    const activeSession = await minigameRepository.findActiveStartedSession(userId, 'crop_detective');
+    if (!activeSession) return res.status(200).json({ active_session: null });
+    const activePayload = buildCropDetectiveResumePayload(activeSession);
+    if (activePayload) return res.status(200).json({ active_session: activePayload });
+
+    const timing = getSessionTiming(activeSession);
+    if (isPastStartedSessionRecoveryCutoff(activeSession) || timing.time_remaining_ms <= 0) {
+      await minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES, MINIGAME_SESSION_EXPIRE_BATCH_LIMIT);
+    }
+    return res.status(200).json({ active_session: null });
+  } catch (err: any) {
+    console.error('[MinigameController] active session error:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '진행 중인 미니게임을 확인하지 못했습니다.' });
+  }
+};
+
+// POST /api/minigames/abandon
+export const abandonMinigameSession = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  const sessionId = String(req.body?.session_id || '').trim();
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+  if (!sessionId) return res.status(400).json({ error: 'BadRequest', message: '미니게임 세션 정보가 필요합니다.' });
+
+  try {
+    const session = await minigameRepository.findSessionById(sessionId);
+    if (!session) return res.status(404).json({ error: 'NotFound', message: '미니게임 세션을 찾을 수 없습니다.' });
+    if (session.user_id !== userId) return res.status(403).json({ error: 'Forbidden', message: '잘못된 세션 소유권입니다.' });
+    if (session.status !== 'STARTED') {
+      return res.status(200).json({ abandoned: false, message: '이미 종료된 미니게임입니다.' });
+    }
+    const result = await minigameRepository.completeSession(sessionId, 0);
+    if (!result.ok) {
+      return res.status(409).json({ error: 'SessionCloseFailed', message: result.reason || '미니게임을 포기하지 못했습니다.' });
+    }
+    return res.status(200).json({ abandoned: true, message: '미니게임을 포기했습니다.' });
+  } catch (err: any) {
+    console.error('[MinigameController] abandon session error:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '미니게임 포기 처리에 실패했습니다.' });
+  }
+};
+
 // 2. POST /api/minigames/start
 export const startMinigame = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
@@ -676,15 +789,35 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
       const activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
       if (activeSession) {
-        const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
-        if (!closeResult.ok) {
-          console.warn('[MinigameController] interrupted active session close failed:', closeResult.reason);
-          return res.status(409).json({
-            error: 'ActiveSessionCloseFailed',
-            message: '이전 미니게임 세션을 정리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-          });
+        if (game_type === 'crop_detective') {
+          const resumePayload = buildCropDetectiveResumePayload(activeSession);
+          if (resumePayload) return res.status(200).json(resumePayload);
+
+          const timing = getSessionTiming(activeSession);
+          if (isPastStartedSessionRecoveryCutoff(activeSession) || timing.time_remaining_ms <= 0) {
+            await minigameRepository.expireSessions(STARTED_SESSION_RECOVERY_MINUTES, MINIGAME_SESSION_EXPIRE_BATCH_LIMIT);
+          } else {
+            const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+            if (!closeResult.ok) {
+              console.warn('[MinigameController] malformed active session close failed:', closeResult.reason);
+              return res.status(409).json({
+                error: 'ActiveSessionCloseFailed',
+                message: '이전 미니게임 세션을 정리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+              });
+            }
+            interruptedSessionClosed = true;
+          }
+        } else {
+          const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+          if (!closeResult.ok) {
+            console.warn('[MinigameController] interrupted active session close failed:', closeResult.reason);
+            return res.status(409).json({
+              error: 'ActiveSessionCloseFailed',
+              message: '이전 미니게임 세션을 정리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+            });
+          }
+          interruptedSessionClosed = true;
         }
-        interruptedSessionClosed = true;
       }
 
       // 일반 게임만 티켓 정보 조회 및 dynamic 충전을 반영합니다.

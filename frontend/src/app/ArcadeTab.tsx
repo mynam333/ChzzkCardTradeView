@@ -136,9 +136,11 @@ type TicketStatusResponse = {
 
 type StartGameResponse = {
   session_id: string;
+  game_type?: GameType;
   game_data: MinigameData;
   message?: string;
   practice_mode?: boolean;
+  resumed_session?: boolean;
   interrupted_session_closed?: boolean;
   timing?: {
     server_now: string;
@@ -930,6 +932,79 @@ const getCropDetectiveBounds = (size: number, rotation: number) => {
   };
 };
 
+type ActiveMinigameSessionResponse = {
+  active_session: StartGameResponse | null;
+};
+
+type CropDetectiveProgressSnapshot = {
+  version: 1;
+  userId: string;
+  sessionId: string;
+  roundIndex: number;
+  roundAnswers: Array<{ round: number; selected_channel_id: string }>;
+  roundCorrectCount: number;
+  roundFeedback: RoundFeedback | null;
+  roundTimeLeft?: number;
+  roundDeadlineAt?: number | null;
+  savedAt: number;
+};
+
+const CROP_PROGRESS_STORAGE_PREFIX = 'chikapo:crop-detective-progress:';
+const cropProgressStorageKey = (userId: string, sessionId: string) =>
+  `${CROP_PROGRESS_STORAGE_PREFIX}${userId}:${sessionId}`;
+
+const readCropDetectiveProgress = (userId: string, sessionId: string, totalRounds: number) => {
+  if (typeof window === 'undefined' || !userId || !sessionId) return null;
+  try {
+    const raw = window.sessionStorage.getItem(cropProgressStorageKey(userId, sessionId));
+    if (!raw) return null;
+    const snapshot = JSON.parse(raw) as CropDetectiveProgressSnapshot;
+    if (
+      snapshot.version !== 1 ||
+      snapshot.userId !== userId ||
+      snapshot.sessionId !== sessionId ||
+      !Number.isInteger(snapshot.roundIndex) ||
+      snapshot.roundIndex < 0 ||
+      snapshot.roundIndex >= totalRounds ||
+      !Array.isArray(snapshot.roundAnswers) ||
+      (snapshot.roundTimeLeft !== undefined && (
+        !Number.isFinite(snapshot.roundTimeLeft) ||
+        snapshot.roundTimeLeft < 0 ||
+        snapshot.roundTimeLeft > ROUND_GAME_ROUND_SECONDS
+      )) ||
+      (snapshot.roundDeadlineAt !== undefined && snapshot.roundDeadlineAt !== null && !Number.isFinite(snapshot.roundDeadlineAt)) ||
+      !Number.isFinite(snapshot.savedAt) ||
+      Date.now() - snapshot.savedAt > 4 * 60_000
+    ) return null;
+    return snapshot;
+  } catch {
+    return null;
+  }
+};
+
+const getRestoredCropDetectiveRoundTiming = (
+  snapshot: CropDetectiveProgressSnapshot | null,
+  hasFeedback: boolean
+) => {
+  const storedSeconds = snapshot?.roundTimeLeft === undefined
+    ? ROUND_GAME_ROUND_SECONDS
+    : Math.max(0, Math.min(ROUND_GAME_ROUND_SECONDS, Math.ceil(snapshot.roundTimeLeft)));
+  const storedDeadline = snapshot?.roundDeadlineAt;
+  if (hasFeedback || storedDeadline === undefined || storedDeadline === null || !Number.isFinite(storedDeadline)) {
+    return storedSeconds;
+  }
+  return Math.max(0, Math.min(ROUND_GAME_ROUND_SECONDS, Math.ceil((storedDeadline - Date.now()) / 1000)));
+};
+
+const clearCropDetectiveProgress = (userId?: string | null, sessionId?: string | null) => {
+  if (typeof window === 'undefined' || !userId || !sessionId) return;
+  try {
+    window.sessionStorage.removeItem(cropProgressStorageKey(userId, sessionId));
+  } catch {
+    // Storage can be unavailable in private or restricted browsing contexts.
+  }
+};
+
 const getCropDetectiveStillImage = (url?: string | null, width = CROP_DETECTIVE_STILL_CHOICE_WIDTH) => {
   if (!url) return '/icon.png';
   return proxiedImage(url, { width, quality: 82 }) || '/icon.png';
@@ -944,6 +1019,9 @@ const CROP_MIN_OPAQUE_RATIO = 0.82;
 const CROP_MIN_DETAIL_SCORE = 0.16;
 const CROP_GOOD_CONTENT_SCORE = 0.52;
 const CROP_ALPHA_CANDIDATE_COUNT = 64;
+const CROP_IMAGE_LOAD_TIMEOUT_MS = 8_000;
+const CROP_IMAGE_AUTO_RETRY_LIMIT = 2;
+const CROP_IMAGE_AUTO_RETRY_DELAY_MS = 650;
 
 const hashStringToSeed = (value: string) => {
   let hash = 2166136261;
@@ -991,8 +1069,10 @@ const buildCropCandidates = (
     }
   }
 
-  while (candidates.length < CROP_ALPHA_CANDIDATE_COUNT) {
+  let randomAttempts = 0;
+  while (candidates.length < CROP_ALPHA_CANDIDATE_COUNT && randomAttempts < CROP_ALPHA_CANDIDATE_COUNT * 8) {
     pushCandidate(bounds.minX + random() * rangeX, bounds.minY + random() * rangeY);
+    randomAttempts += 1;
   }
 
   pushCandidate(0.5, 0.5);
@@ -1167,7 +1247,7 @@ const getCropDetectiveRoundKey = (round: CropDetectiveRound) =>
 
 const withCropDetectiveRetryToken = (url: string, attempt: number) => {
   if (attempt <= 0 || !url || url.startsWith('data:') || url.startsWith('blob:')) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}crop_retry=${attempt}`;
+  return `${url}${url.includes('?') ? '&' : '?'}retry=${Math.min(CROP_IMAGE_AUTO_RETRY_LIMIT, attempt)}`;
 };
 
 const CardImageTile: React.FC<{
@@ -1182,6 +1262,7 @@ const CardImageTile: React.FC<{
   showStarLabel?: boolean;
   freezeImage?: boolean;
   hideImageUntilRevealed?: boolean;
+  imageLoadingFailed?: boolean;
   onImageReady?: () => void;
   onImageError?: () => void;
   onClick?: () => void;
@@ -1197,6 +1278,7 @@ const CardImageTile: React.FC<{
   showStarLabel = true,
   freezeImage = false,
   hideImageUntilRevealed = false,
+  imageLoadingFailed = false,
   onImageReady,
   onImageError,
   onClick
@@ -1206,8 +1288,21 @@ const CardImageTile: React.FC<{
       ? getCropDetectiveStillImage(card.image_url, CROP_DETECTIVE_STILL_CHOICE_WIDTH)
       : card.image_url || '/icon.png'
   );
+  const { isImageBlinded: isTileImageBlinded } = useApp();
+  const tileImageBlinded = isTileImageBlinded(imageUrl);
+  const onImageReadyRef = useRef(onImageReady);
   const nativeDisabled = disabled && !imageBlindEnabled;
   const shouldHideImage = hideImageUntilRevealed && !correct && !wrong;
+
+  useEffect(() => {
+    onImageReadyRef.current = onImageReady;
+  }, [onImageReady]);
+
+  useEffect(() => {
+    if (!tileImageBlinded || !onImageReadyRef.current || typeof window === 'undefined') return;
+    const readyId = window.setTimeout(() => onImageReadyRef.current?.(), 0);
+    return () => window.clearTimeout(readyId);
+  }, [tileImageBlinded]);
 
   return (
     <button
@@ -1250,7 +1345,9 @@ const CardImageTile: React.FC<{
                 if (element.isConnected) onImageReady();
               })
               .catch(() => {
-                if (element.isConnected) onImageError?.();
+                if (!element.isConnected) return;
+                if (element.complete && element.naturalWidth > 0) onImageReady();
+                else onImageError?.();
               });
           }}
           onError={(event) => {
@@ -1265,8 +1362,14 @@ const CardImageTile: React.FC<{
         />
         {shouldHideImage ? (
           <div className="absolute inset-0 flex h-full w-full flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_25%,rgba(232,121,249,0.22),rgba(24,24,27,0.96)_68%)] px-3 text-center text-white">
-            <RefreshCw className="h-6 w-6 animate-spin opacity-80" aria-hidden="true" />
-            <span className="text-[10px] font-black text-white/80">후보 이미지 로딩</span>
+            {imageLoadingFailed ? (
+              <X className="h-6 w-6 opacity-80" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-6 w-6 animate-spin opacity-80" aria-hidden="true" />
+            )}
+            <span className="text-[10px] font-black text-white/80">
+              {imageLoadingFailed ? '이미지 준비 실패' : '후보 이미지 로딩'}
+            </span>
           </div>
         ) : null}
       </div>
@@ -1283,10 +1386,11 @@ const CardImageTile: React.FC<{
 const CropPreview: React.FC<{
   round: CropDetectiveRound;
   revealed: boolean;
+  loadFailed: boolean;
   loadAttempt: number;
   onPrepared?: () => void;
   onLoadError?: () => void;
-}> = ({ round, revealed, loadAttempt, onPrepared, onLoadError }) => {
+}> = ({ round, revealed, loadFailed, loadAttempt, onPrepared, onLoadError }) => {
   const imageUrl = getCropDetectiveStillImage(round.source_image_url, CROP_DETECTIVE_STILL_PREVIEW_WIDTH);
   const sourceImageUrl = withCropDetectiveRetryToken(imageUrl, loadAttempt);
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
@@ -1380,7 +1484,7 @@ const CropPreview: React.FC<{
     <div
       role="img"
       aria-label="확대된 카드 이미지 조각"
-      aria-busy={!revealed || !previewUrl}
+      aria-busy={!loadFailed && (!revealed || !previewUrl)}
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => {
         event.preventDefault();
@@ -1406,7 +1510,15 @@ const CropPreview: React.FC<{
                 }
               })
               .catch(() => {
-                if (element.isConnected) onLoadError?.();
+                if (!element.isConnected) return;
+                if (element.complete && element.naturalWidth > 0) {
+                  if (preparedPreviewUrlRef.current !== loadedPreviewUrl) {
+                    preparedPreviewUrlRef.current = loadedPreviewUrl;
+                    onPrepared?.();
+                  }
+                } else {
+                  onLoadError?.();
+                }
               });
           }}
           onError={onLoadError}
@@ -1414,8 +1526,14 @@ const CropPreview: React.FC<{
       ) : null}
       {!revealed || !previewUrl ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] text-white">
-          <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
-          <span className="text-[10px] font-black tracking-wide text-white/75">확대 영역 분석 중</span>
+          {loadFailed ? (
+            <X className="h-7 w-7 text-rose-300" aria-hidden="true" />
+          ) : (
+            <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
+          )}
+          <span className="text-[10px] font-black tracking-wide text-white/75">
+            {loadFailed ? '확대 이미지 준비 실패' : '확대 영역 분석 중'}
+          </span>
         </div>
       ) : null}
       <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
@@ -1436,6 +1554,7 @@ const CropDetectiveChoices: React.FC<{
   isGameOver: boolean;
   countdownLeft: number | null;
   onRoundReady: (roundKey: string) => void;
+  onCancelLoading: () => void;
   onChoice: (channelId: string) => void;
 }> = ({
   round,
@@ -1445,6 +1564,7 @@ const CropDetectiveChoices: React.FC<{
   isGameOver,
   countdownLeft,
   onRoundReady,
+  onCancelLoading,
   onChoice
 }) => {
   const roundKey = getCropDetectiveRoundKey(round);
@@ -1490,13 +1610,25 @@ const CropDetectiveChoices: React.FC<{
     setLoadError((previousError) => previousError || 'failed');
   }, []);
 
+  const retryImages = useCallback(() => {
+    setReadyState({ roundKey, cropReady: false, readyChoiceIds: [] });
+    setLoadError(null);
+    setLoadAttempt((attempt) => attempt + 1);
+  }, [roundKey]);
+
   useEffect(() => {
     if (allImagesReady || loadError || roundFeedback || typeof window === 'undefined') return;
     const timeoutId = window.setTimeout(() => {
       setLoadError('timeout');
-    }, 12_000);
+    }, CROP_IMAGE_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
   }, [allImagesReady, loadAttempt, loadError, roundFeedback]);
+
+  useEffect(() => {
+    if (!loadError || loadAttempt >= CROP_IMAGE_AUTO_RETRY_LIMIT || roundFeedback || typeof window === 'undefined') return;
+    const retryId = window.setTimeout(retryImages, CROP_IMAGE_AUTO_RETRY_DELAY_MS);
+    return () => window.clearTimeout(retryId);
+  }, [loadAttempt, loadError, retryImages, roundFeedback]);
 
   useEffect(() => {
     if (allImagesReady) onRoundReady(roundKey);
@@ -1504,6 +1636,8 @@ const CropDetectiveChoices: React.FC<{
 
   const hideImages = !roundFeedback && !allImagesReady;
   const choiceDisabled = hideImages || Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0);
+  const autoRetryPending = Boolean(loadError && loadAttempt < CROP_IMAGE_AUTO_RETRY_LIMIT);
+  const terminalLoadFailure = Boolean(loadError && !autoRetryPending);
 
   return (
     <div className="contents" data-crop-detective-ready={allImagesReady ? 'true' : 'false'}>
@@ -1511,24 +1645,33 @@ const CropDetectiveChoices: React.FC<{
         key={`${roundKey}-${loadAttempt}`}
         round={round}
         revealed={allImagesReady || Boolean(roundFeedback)}
+        loadFailed={Boolean(loadError)}
         loadAttempt={loadAttempt}
         onPrepared={handleCropReady}
         onLoadError={handleLoadError}
       />
 
-      {loadError && !roundFeedback ? (
+      {autoRetryPending && !roundFeedback ? (
+        <div role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-center text-[10px] font-black text-amber-700 dark:text-amber-300">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          이미지 연결을 자동으로 다시 시도합니다. ({loadAttempt + 1}/{CROP_IMAGE_AUTO_RETRY_LIMIT})
+        </div>
+      ) : terminalLoadFailure && !roundFeedback ? (
         <div role="alert" className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-center text-[10px] font-black text-rose-700 dark:text-rose-300">
-          <span>{loadError === 'timeout' ? '이미지 준비 시간이 오래 걸리고 있습니다.' : '일부 이미지를 불러오지 못했습니다.'}</span>
+          <span>{loadError === 'timeout' ? '이미지 준비 시간이 초과되었습니다.' : '일부 이미지를 불러오지 못했습니다.'}</span>
           <button
             type="button"
-            onClick={() => {
-              setReadyState({ roundKey, cropReady: false, readyChoiceIds: [] });
-              setLoadError(null);
-              setLoadAttempt((attempt) => attempt + 1);
-            }}
+            onClick={retryImages}
             className="rounded-full border border-current/25 bg-background/70 px-3 py-1 text-[10px] font-black hover:bg-background"
           >
             이미지 다시 불러오기
+          </button>
+          <button
+            type="button"
+            onClick={onCancelLoading}
+            className="rounded-full border border-current/25 bg-background/70 px-3 py-1 text-[10px] font-black hover:bg-background"
+          >
+            로비로 돌아가기
           </button>
         </div>
       ) : !allImagesReady && !roundFeedback ? (
@@ -1559,6 +1702,7 @@ const CropDetectiveChoices: React.FC<{
               darkImageBackground
               freezeImage
               hideImageUntilRevealed={hideImages}
+              imageLoadingFailed={Boolean(loadError)}
               onImageReady={() => handleChoiceReady(choice.channel_id)}
               onImageError={handleLoadError}
               onClick={() => onChoice(choice.channel_id)}
@@ -1572,9 +1716,12 @@ const CropDetectiveChoices: React.FC<{
 
 export const ArcadeTab: React.FC = () => {
   const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
+  const currentUserId = user?.id || null;
   const searchParams = useSearchParams();
   const router = useRouter();
   const autoStartRef = useRef(false); // URL 파라미터 기반 연습 자동 시작 1회 가드
+  const activeResumeCheckedUserRef = useRef<string | null>(null);
+  const activeSessionRestoreAllowedRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState(0);
   const [baseTickets, setBaseTickets] = useState(0);
@@ -1669,6 +1816,35 @@ export const ArcadeTab: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const userId = user?.id;
+    if (
+      typeof window === 'undefined' ||
+      !userId ||
+      !sessionId ||
+      activeGame !== 'crop_detective' ||
+      isPracticeMode ||
+      gameResult
+    ) return;
+    const snapshot: CropDetectiveProgressSnapshot = {
+      version: 1,
+      userId,
+      sessionId,
+      roundIndex,
+      roundAnswers,
+      roundCorrectCount,
+      roundFeedback,
+      roundTimeLeft,
+      roundDeadlineAt: roundFeedback ? null : roundDeadlineRef.current,
+      savedAt: Date.now()
+    };
+    try {
+      window.sessionStorage.setItem(cropProgressStorageKey(userId, sessionId), JSON.stringify(snapshot));
+    } catch {
+      // Session recovery remains available from the server even when storage is unavailable.
+    }
+  }, [activeGame, gameResult, isPracticeMode, roundAnswers, roundCorrectCount, roundFeedback, roundIndex, roundTimeLeft, sessionId, user?.id]);
+
+  useEffect(() => {
     if (!imageBlindMenu) return;
     const close = () => setImageBlindMenu(null);
     window.addEventListener('click', close);
@@ -1691,7 +1867,7 @@ export const ArcadeTab: React.FC = () => {
   };
 
   // 티켓 상태 조회 API 호출
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (): Promise<TicketStatusResponse | null> => {
     try {
       const res = await apiFetch('/minigames/status');
       if (res.ok) {
@@ -1704,16 +1880,59 @@ export const ArcadeTab: React.FC = () => {
         setTodayKstDate(data.kst_date);
         setNextGameAt(data.next_game_at);
         setSecondsUntilGameChange(data.seconds_until_game_change);
+        return data;
       }
+      return null;
     } catch (err) {
       console.error('티켓 조회 실패:', err);
+      return null;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // 로비로 퇴장
-  const handleExitGame = useCallback(() => {
+  const fetchActiveCropDetectiveSession = useCallback(async (): Promise<StartGameResponse | null> => {
+    try {
+      const res = await apiFetch('/minigames/active?game_type=crop_detective');
+      if (!res.ok) return null;
+      const data = (await res.json()) as ActiveMinigameSessionResponse;
+      return data.active_session || null;
+    } catch (err) {
+      console.error('진행 중인 확대 탐정 조회 실패:', err);
+      return null;
+    }
+  }, []);
+
+  const restoreCropDetectiveSession = useCallback((data: StartGameResponse) => {
+    if (!data.session_id || !Array.isArray(data.game_data?.rounds)) return;
+    const progress = readCropDetectiveProgress(currentUserId || '', data.session_id, data.game_data.rounds.length);
+    const restoredRoundIndex = progress?.roundIndex ?? 0;
+    const restoredFeedback = progress?.roundFeedback?.round === restoredRoundIndex
+      ? progress.roundFeedback
+      : null;
+    const restoredTimeLeft = getRestoredCropDetectiveRoundTiming(progress, Boolean(restoredFeedback));
+    submitInFlightRef.current = false;
+    setSubmitRetry(null);
+    setSessionId(data.session_id);
+    setGameData(data.game_data);
+    setActiveGame('crop_detective');
+    setIsPracticeMode(false);
+    setGameResult(null);
+    setIsGameOver(false);
+    setRoundIndex(restoredRoundIndex);
+    setRoundAnswers(progress?.roundAnswers || []);
+    setRoundFeedback(restoredFeedback);
+    setRoundCorrectCount(Math.max(0, Math.min(data.game_data.rounds.length, progress?.roundCorrectCount || 0)));
+    setRoundChecking(false);
+    setRoundTimeLeft(restoredTimeLeft);
+    setCropDetectiveReadyKey('');
+    roundDeadlineRef.current = null;
+    // A resumed round remains paused until its enlarged clue and four choices finish loading.
+    setCountdownLeft(0);
+    toast(data.message || '진행 중이던 카드 확대 탐정을 복구했습니다.', 'info');
+  }, [currentUserId, toast]);
+
+  const resetGameView = useCallback(() => {
     submitInFlightRef.current = false;
     setSubmitRetry(null);
     setActiveGame(null);
@@ -1739,6 +1958,43 @@ export const ArcadeTab: React.FC = () => {
       puzzleHintTimeoutRef.current = null;
     }
   }, []);
+
+  // 완료·명시적 포기처럼 현재 진행도를 더 이상 복구하지 않을 때 사용합니다.
+  const handleExitGame = useCallback(() => {
+    clearCropDetectiveProgress(currentUserId, sessionId);
+    resetGameView();
+  }, [currentUserId, resetGameView, sessionId]);
+
+  // 이미지 로딩 실패로 로비에 돌아갈 때는 세션과 진행도를 보존합니다.
+  const handleRecoverableExitGame = useCallback(() => {
+    resetGameView();
+  }, [resetGameView]);
+
+  const handleAbandonGame = useCallback(async () => {
+    if (!sessionId || isPracticeMode) {
+      handleExitGame();
+      return;
+    }
+    setGameBusy(true);
+    try {
+      const res = await apiFetch('/minigames/abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.message || '미니게임 포기 처리에 실패했습니다.', 'error');
+        return;
+      }
+      handleExitGame();
+      fetchStatus();
+    } catch {
+      toast('연결 문제로 미니게임을 포기하지 못했습니다. 다시 시도해 주세요.', 'warning');
+    } finally {
+      setGameBusy(false);
+    }
+  }, [fetchStatus, handleExitGame, isPracticeMode, sessionId, toast]);
 
   const restoreActiveTimer = useCallback((remainingMs: number) => {
     const safeRemainingMs = Math.max(0, Math.floor(remainingMs));
@@ -1791,6 +2047,7 @@ export const ArcadeTab: React.FC = () => {
       if (res.ok) {
         setSubmitRetry(null);
         setGameResult(data as MinigameResult);
+        if (activeGame === 'crop_detective') clearCropDetectiveProgress(currentUserId, sessionId);
         if (!data.practice_mode) refreshUserData(); // 일반 게임에서만 보유 자산 갱신
       } else if (isTerminalSuccess && res.status >= 500) {
         setSubmitRetry(prev => ({ payload, attempt: (prev?.attempt || 0) + 1 }));
@@ -1812,7 +2069,7 @@ export const ArcadeTab: React.FC = () => {
       submitInFlightRef.current = false;
       setGameBusy(false);
     }
-  }, [activeGame, gameTimeLeft, handleExitGame, puzzleTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
+  }, [activeGame, currentUserId, gameTimeLeft, handleExitGame, puzzleTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
 
   useEffect(() => {
     if (!submitRetry || gameResult || !sessionId) return;
@@ -1824,13 +2081,33 @@ export const ArcadeTab: React.FC = () => {
   }, [gameResult, sessionId, submitResult, submitRetry]);
 
   useEffect(() => {
-    if (user) {
-      const timeout = window.setTimeout(() => {
-        fetchStatus();
-      }, 0);
-      return () => window.clearTimeout(timeout);
+    const userId = user?.id || null;
+    if (!userId) {
+      activeResumeCheckedUserRef.current = null;
+      activeSessionRestoreAllowedRef.current = true;
+      return;
     }
-  }, [user, fetchStatus]);
+    const shouldCheckActiveSession = activeResumeCheckedUserRef.current !== userId;
+    if (shouldCheckActiveSession) activeSessionRestoreAllowedRef.current = true;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      const activeSessionPromise = shouldCheckActiveSession
+        ? fetchActiveCropDetectiveSession()
+        : Promise.resolve(null);
+      Promise.all([fetchStatus(), activeSessionPromise]).then(([, activeSession]) => {
+        if (cancelled) return;
+        if (shouldCheckActiveSession) activeResumeCheckedUserRef.current = userId;
+        if (activeSession && activeSessionRestoreAllowedRef.current) {
+          activeSessionRestoreAllowedRef.current = false;
+          restoreCropDetectiveSession(activeSession);
+        }
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [fetchActiveCropDetectiveSession, fetchStatus, restoreCropDetectiveSession, user?.id]);
 
   // 다음 티켓 충전용 타이머 구동
   useEffect(() => {
@@ -2040,8 +2317,9 @@ export const ArcadeTab: React.FC = () => {
     }
 
     if (roundDeadlineRef.current === null) {
-      setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
-      roundDeadlineRef.current = Date.now() + ROUND_GAME_ROUND_SECONDS * 1000;
+      const startingSeconds = Math.max(0, Math.min(ROUND_GAME_ROUND_SECONDS, roundTimeLeft));
+      setRoundTimeLeft(startingSeconds);
+      roundDeadlineRef.current = Date.now() + startingSeconds * 1000;
     }
   }, [
     activeGame,
@@ -2051,7 +2329,8 @@ export const ArcadeTab: React.FC = () => {
     gameResult,
     isGameOver,
     roundChecking,
-    roundFeedback
+    roundFeedback,
+    roundTimeLeft
   ]);
 
   // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
@@ -2103,11 +2382,14 @@ export const ArcadeTab: React.FC = () => {
       return;
     }
 
-    if (!practiceMode && tickets <= 0) {
+    // A paid crop-detective session may already own the user's last ticket.
+    // Let the idempotent start endpoint resume it before deciding there is no ticket.
+    if (!practiceMode && tickets <= 0 && type !== 'crop_detective') {
       toast('사용 가능한 미니게임 티켓이 부족합니다.', 'warning');
       return;
     }
 
+    activeSessionRestoreAllowedRef.current = false;
     setGameBusy(true);
     submitInFlightRef.current = false;
     setSubmitRetry(null);
@@ -2158,7 +2440,9 @@ export const ArcadeTab: React.FC = () => {
       setGameData(data.game_data);
       setActiveGame(type);
       setIsPracticeMode(data.practice_mode === true);
-      if (data.interrupted_session_closed) {
+      if (data.resumed_session) {
+        toast(data.message || '진행 중이던 카드 확대 탐정을 이어서 시작합니다.', 'info');
+      } else if (data.interrupted_session_closed) {
         toast(data.message || '이전 미니게임은 실패 처리되었고 새 게임을 시작합니다.', 'warning');
       }
 
@@ -2207,18 +2491,24 @@ export const ArcadeTab: React.FC = () => {
           .sort(() => 0.5 - Math.random()); // 셔플
         setMatchCards(deck);
       } else if (isRoundGame(type)) {
-        setRoundIndex(0);
-        setRoundAnswers([]);
-        setRoundFeedback(null);
-        setRoundCorrectCount(0);
+        const progress = type === 'crop_detective' && data.resumed_session
+          ? readCropDetectiveProgress(user?.id || '', data.session_id, data.game_data.rounds?.length || 0)
+          : null;
+        const restoredRoundIndex = progress?.roundIndex ?? 0;
+        const restoredFeedback = progress?.roundFeedback?.round === restoredRoundIndex ? progress.roundFeedback : null;
+        const restoredTimeLeft = getRestoredCropDetectiveRoundTiming(progress, Boolean(restoredFeedback));
+        setRoundIndex(restoredRoundIndex);
+        setRoundAnswers(progress?.roundAnswers || []);
+        setRoundFeedback(restoredFeedback);
+        setRoundCorrectCount(Math.max(0, Math.min(data.game_data.rounds?.length || 0, progress?.roundCorrectCount || 0)));
         setRoundChecking(false);
-        setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+        setRoundTimeLeft(restoredTimeLeft);
         setCropDetectiveReadyKey('');
         roundDeadlineRef.current = null;
       }
 
-      // 3초 카운트다운 가동
-      setCountdownLeft(3);
+      // Resumed crop rounds stay paused until their images have been prepared again.
+      setCountdownLeft(data.resumed_session ? 0 : 3);
 
       if (!practiceMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
 
@@ -2859,10 +3149,10 @@ export const ArcadeTab: React.FC = () => {
               </div>
               <button
                 onClick={() => handleStartGame(todayGame)}
-                disabled={gameBusy || tickets <= 0}
+                disabled={gameBusy || (tickets <= 0 && todayGame !== 'crop_detective')}
                 className="cute-wiggle-hover flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary px-3 py-2.5 text-xs font-black text-primary-foreground transition active:scale-95 disabled:pointer-events-none disabled:opacity-40"
               >
-                🪙 1개 소모 · 도전
+                {tickets <= 0 && todayGame === 'crop_detective' ? '진행 중 게임 확인' : '🪙 1개 소모 · 도전'}
               </button>
             </div>
           </div>
@@ -2963,10 +3253,12 @@ export const ArcadeTab: React.FC = () => {
           {/* 게임 상단 제어 바 */}
           <div className="mb-5 flex shrink-0 items-center justify-between border-b border-border/60 pb-3">
             <button
-              onClick={handleExitGame}
-              className="text-xs font-bold text-muted-foreground hover:text-foreground flex items-center gap-1 transition"
+              type="button"
+              onClick={handleAbandonGame}
+              disabled={gameBusy}
+              className="flex items-center gap-1 text-xs font-bold text-muted-foreground transition hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
-              <ChevronLeft className="h-4 w-4" /> 포기하고 나가기
+              <ChevronLeft className="h-4 w-4" /> {gameBusy ? '처리 중' : '포기하고 나가기'}
             </button>
 
             {isPracticeMode ? (
@@ -3380,6 +3672,7 @@ export const ArcadeTab: React.FC = () => {
                   isGameOver={isGameOver}
                   countdownLeft={countdownLeft}
                   onRoundReady={handleCropDetectiveRoundReady}
+                  onCancelLoading={handleRecoverableExitGame}
                   onChoice={handleRoundChoice}
                 />
 

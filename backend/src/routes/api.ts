@@ -204,6 +204,8 @@ import {
 } from '../controllers/shopController';
 import {
   getMinigameStatus,
+  getActiveMinigameSession,
+  abandonMinigameSession,
   startMinigame,
   checkMinigameRoundAnswer,
   submitMinigameResult
@@ -496,6 +498,8 @@ router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, accountIntera
 // 미니게임 API (티켓 충전식 포인트 획득 기능)
 // ==========================================
 router.get('/minigames/status', authMiddleware, banCheckMiddleware, getMinigameStatus);
+router.get('/minigames/active', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, getActiveMinigameSession);
+router.post('/minigames/abandon', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, abandonMinigameSession);
 router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigame);
 router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);
 router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, submitMinigameResult);

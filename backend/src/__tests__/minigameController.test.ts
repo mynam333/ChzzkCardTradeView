@@ -51,7 +51,7 @@ vi.mock('../services/puzzleImageExclusionService', () => {
   };
 });
 
-import { checkMinigameRoundAnswer, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+import { abandonMinigameSession, checkMinigameRoundAnswer, getActiveMinigameSession, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { getPuzzleExcludedImageKeys } from '../services/puzzleImageExclusionService';
 
@@ -842,6 +842,147 @@ describe('daily minigame selection', () => {
       user_id: 'user-1',
       game_type: todayGame,
       status: 'STARTED'
+    }));
+  });
+
+  it('resumes a fresh paid crop detective session without closing it or spending another ticket', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
+    expect(getDailyMinigame().game_type).toBe('crop_detective');
+    findActiveStartedSession.mockResolvedValue({
+      id: 'crop-resume-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 30_000).toISOString()
+    });
+    const request = {
+      user: { id: 'user-1' },
+      body: { game_type: 'crop_detective' }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await startMinigame(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const body = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(body).toEqual(expect.objectContaining({
+      session_id: 'crop-resume-session',
+      game_type: 'crop_detective',
+      resumed_session: true,
+      interrupted_session_closed: false
+    }));
+    expect(body.game_data.rounds).toHaveLength(5);
+    expect(body.game_data.rounds[0]).not.toHaveProperty('answer_channel_id');
+    expect(body.game_data.rounds[0].choices[0]).not.toHaveProperty('base_value');
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(getTicketStatus).not.toHaveBeenCalled();
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('returns the same sanitized crop detective session from the active-session endpoint', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
+    findActiveStartedSession.mockResolvedValue({
+      id: 'crop-active-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 15_000).toISOString()
+    });
+    const request = {
+      user: { id: 'user-1' },
+      query: { game_type: 'crop_detective' }
+    } as unknown as AuthenticatedRequest;
+    const response = createResponse();
+
+    await getActiveMinigameSession(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const body = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(body.active_session).toEqual(expect.objectContaining({
+      session_id: 'crop-active-session',
+      resumed_session: true
+    }));
+    expect(body.active_session.game_data.rounds[0]).not.toHaveProperty('answer_channel_id');
+    expect(completeSession).not.toHaveBeenCalled();
+  });
+
+  it('does not resume an expired crop detective session', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
+    findActiveStartedSession.mockResolvedValue({
+      id: 'expired-crop-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 4 * 60_000).toISOString()
+    });
+    const request = {
+      user: { id: 'user-1' },
+      query: { game_type: 'crop_detective' }
+    } as unknown as AuthenticatedRequest;
+    const response = createResponse();
+
+    await getActiveMinigameSession(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({ active_session: null });
+    expect(expireSessions).toHaveBeenCalledWith(3, 50);
+  });
+
+  it('does not resume inside the cleanup boundary even when preplay timing still has milliseconds left', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
+    findActiveStartedSession.mockResolvedValue({
+      id: 'cleanup-boundary-crop-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date(Date.now() - 181_000).toISOString()
+    });
+    const request = {
+      user: { id: 'user-1' },
+      query: { game_type: 'crop_detective' }
+    } as unknown as AuthenticatedRequest;
+    const response = createResponse();
+
+    await getActiveMinigameSession(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({ active_session: null });
+    expect(expireSessions).toHaveBeenCalledWith(3, 50);
+  });
+
+  it('closes an explicitly abandoned session without starting or charging another game', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'crop-abandon-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      created_at: new Date().toISOString()
+    });
+    completeSession.mockResolvedValue({ ok: true, newPoints: 5000 });
+    const request = {
+      user: { id: 'user-1' },
+      body: { session_id: 'crop-abandon-session' }
+    } as AuthenticatedRequest;
+    const response = createResponse();
+
+    await abandonMinigameSession(request, response);
+
+    expect(completeSession).toHaveBeenCalledWith('crop-abandon-session', 0);
+    expect(startSession).not.toHaveBeenCalled();
+    expect(getTicketStatus).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      abandoned: true
     }));
   });
 

@@ -49,6 +49,10 @@ const readPositiveNumber = (name: string, fallback: number) => {
 const IMAGE_PROXY_TIMEOUT_MS = readPositiveNumber('IMAGE_PROXY_TIMEOUT_MS', 4_000);
 const IMAGE_PROXY_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_CACHE_TTL_MS', 24 * 60 * 60_000);
 const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS', 5 * 60_000);
+const IMAGE_PROXY_RETRY_NEGATIVE_CACHE_TTL_MS = Math.min(
+  IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS,
+  readPositiveNumber('IMAGE_PROXY_RETRY_NEGATIVE_CACHE_TTL_MS', 1_000)
+);
 const IMAGE_PROXY_MAX_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_BYTES', 4 * 1024 * 1024);
 const IMAGE_PROXY_MAX_CACHE_BYTES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_BYTES', 16 * 1024 * 1024);
 const IMAGE_PROXY_MAX_CACHE_ENTRIES = readPositiveNumber('IMAGE_PROXY_MAX_CACHE_ENTRIES', 150);
@@ -297,6 +301,9 @@ export const proxyImage = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'BadRequest', message: 'url 파라미터가 필요합니다.' });
   }
   const transform = parseTransform(req);
+  // A tiny bounded retry variant lets trusted clients escape a short-lived
+  // negative cache entry without turning the proxy into an unbounded cache-key fanout.
+  const retryVariant = Math.max(0, Math.min(2, Math.floor(readQueryNumber(req.query.retry) || 0)));
 
   // 1. 상대 경로(/uploads/...)인 경우 로컬 파일 시스템에서 직접 전송 (네트워크 미경유)
   if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
@@ -398,7 +405,7 @@ export const proxyImage = async (req: Request, res: Response) => {
   }
 
   const upstreamTarget = getUpstreamImageUrl(target, transform);
-  const cacheKey = `${upstreamTarget.toString()}${transformCacheSuffix(transform)}`;
+  const cacheKey = `${upstreamTarget.toString()}${transformCacheSuffix(transform)}|retry=${retryVariant}`;
   const cached = getCachedProxyImage(cacheKey);
   if (cached) {
     return sendProxyImage(res, cached, 'HIT');
@@ -419,7 +426,10 @@ export const proxyImage = async (req: Request, res: Response) => {
       })
       .catch((err) => {
         cleanupNegativeCache();
-        negativeCache.set(cacheKey, Date.now() + IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS);
+        negativeCache.set(
+          cacheKey,
+          Date.now() + (retryVariant > 0 ? IMAGE_PROXY_RETRY_NEGATIVE_CACHE_TTL_MS : IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS)
+        );
         throw err;
       })
       .finally(() => {
