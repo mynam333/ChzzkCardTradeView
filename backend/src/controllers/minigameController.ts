@@ -34,7 +34,7 @@ const CROP_DETECTIVE_ROUND_TIME_MS = 10_000;
 const CROP_DETECTIVE_MIN_CORRECT = 3;
 const CROP_DETECTIVE_CHOICES = 4;
 const CROP_DETECTIVE_EDGE_PADDING = 0.025;
-const CROP_DETECTIVE_CARD_ASPECT_RATIO = 4 / 5;
+const CROP_DETECTIVE_CARD_ASPECT_RATIO = 5 / 8;
 const STARTED_SESSION_RECOVERY_MINUTES = 3;
 const ROUND_GAME_SESSION_LIMIT_MS = STARTED_SESSION_RECOVERY_MINUTES * 60_000;
 const BONUS_CLIENT_TIMING_GRACE_MS = 500;
@@ -530,13 +530,16 @@ const getRotatedCropHalfExtent = (size: number, rotation: number) => {
 };
 
 const getCropDetectiveBounds = (size: number, rotation: number) => {
-  const halfExtent = getRotatedCropHalfExtent(size, rotation) + CROP_DETECTIVE_EDGE_PADDING;
-  const horizontalInset = (1 - CROP_DETECTIVE_CARD_ASPECT_RATIO) / 2;
+  // Crop coordinates are normalized against the same 5:8 card viewport shown to players.
+  // `size` is relative to the viewport width, so a square crop occupies less normalized
+  // height than width on the portrait canvas.
+  const horizontalHalfExtent = getRotatedCropHalfExtent(size, rotation);
+  const verticalHalfExtent = horizontalHalfExtent * CROP_DETECTIVE_CARD_ASPECT_RATIO;
   return {
-    minX: Math.min(0.5, horizontalInset + halfExtent),
-    maxX: Math.max(0.5, 1 - horizontalInset - halfExtent),
-    minY: Math.min(0.5, halfExtent),
-    maxY: Math.max(0.5, 1 - halfExtent)
+    minX: Math.min(0.5, horizontalHalfExtent + CROP_DETECTIVE_EDGE_PADDING),
+    maxX: Math.max(0.5, 1 - horizontalHalfExtent - CROP_DETECTIVE_EDGE_PADDING),
+    minY: Math.min(0.5, verticalHalfExtent + CROP_DETECTIVE_EDGE_PADDING),
+    maxY: Math.max(0.5, 1 - verticalHalfExtent - CROP_DETECTIVE_EDGE_PADDING)
   };
 };
 

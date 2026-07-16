@@ -123,9 +123,13 @@ const quizRounds = Array.from({ length: 5 }, (_, round) => ({
   ]
 }));
 
-const getTestRotatedCropSafeMargin = (size: number, rotation: number) => {
+const getTestRotatedCropSafeMargins = (size: number, rotation: number) => {
   const radians = (rotation * Math.PI) / 180;
-  return Math.min(0.48, (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2 + 0.025);
+  const horizontalHalfExtent = (size * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) / 2;
+  return {
+    x: Math.min(0.48, horizontalHalfExtent + 0.025),
+    y: Math.min(0.48, horizontalHalfExtent * (5 / 8) + 0.025)
+  };
 };
 
 const createPlayableStreamers = (count = 6) =>
@@ -946,7 +950,7 @@ describe('daily minigame selection', () => {
     expect(target.image_url).not.toBe(excludedImage);
   });
 
-  it('issues crop detective rounds with doubled zoom and random rotation data', async () => {
+  it('issues crop detective rounds inside the 5:8 card viewport with doubled zoom and rotation data', async () => {
     findAllStreamers.mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
         channel_id: `channel-${index}`,
@@ -970,11 +974,11 @@ describe('daily minigame selection', () => {
       expect(round.crop.size).toBeLessThanOrEqual(0.10);
       expect(round.crop.rotation).toBeGreaterThanOrEqual(0);
       expect(round.crop.rotation).toBeLessThan(360);
-      const safeMargin = getTestRotatedCropSafeMargin(round.crop.size, round.crop.rotation);
-      expect(round.crop.x).toBeGreaterThanOrEqual(safeMargin - 0.001);
-      expect(round.crop.x).toBeLessThanOrEqual(1 - safeMargin + 0.001);
-      expect(round.crop.y).toBeGreaterThanOrEqual(safeMargin - 0.001);
-      expect(round.crop.y).toBeLessThanOrEqual(1 - safeMargin + 0.001);
+      const safeMargins = getTestRotatedCropSafeMargins(round.crop.size, round.crop.rotation);
+      expect(round.crop.x).toBeGreaterThanOrEqual(safeMargins.x - 0.001);
+      expect(round.crop.x).toBeLessThanOrEqual(1 - safeMargins.x + 0.001);
+      expect(round.crop.y).toBeGreaterThanOrEqual(safeMargins.y - 0.001);
+      expect(round.crop.y).toBeLessThanOrEqual(1 - safeMargins.y + 0.001);
       expect(round.source_image_url).toMatch(/^https:\/\/example\.com\/\d+\.png$/);
       expect(round.choices).toHaveLength(4);
     }
