@@ -32,6 +32,7 @@ import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface Streamer {
   channel_id: string;
@@ -114,6 +115,7 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
+  const { isStreamerLive } = useStreamerLiveStatuses(Boolean(user));
   const router = useRouter();
   const searchParams = useSearchParams();
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
@@ -1248,8 +1250,8 @@ export const GachaTab: React.FC = () => {
       // 이름 검색 필터 (초성 매칭 및 띄어쓰기 무시 유사도 매칭 적용)
       const matchesSearch = fuzzySearch(streamer.name, searchQuery);
 
-      // 라이브 상태 필터 (DB 필드 또는 객체의 is_active 속성 매칭)
-      const isActive = streamer.is_active || (streamer as any).isLive;
+      // 공통 실시간 상태를 우선하고, 아직 불러오지 못한 경우 카드 스냅샷으로 폴백
+      const isActive = isStreamerLive(streamer);
       const matchesLive =
         liveFilter === 'all' ? true :
           liveFilter === 'live' ? isActive === true :
@@ -2189,7 +2191,7 @@ export const GachaTab: React.FC = () => {
                       <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
                         {/* 카드 상단 정보 */}
                         <div className="flex items-center justify-between w-full pointer-events-auto">
-                          {streamer.is_active || (streamer as any).isLive ? (
+                          {isStreamerLive(streamer) ? (
                             <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
                               <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
                             </span>
@@ -2510,7 +2512,7 @@ export const GachaTab: React.FC = () => {
                   <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
                     {/* 상단 정보 */}
                     <div className="flex items-center justify-between w-full pointer-events-auto">
-                      {s.is_active || (s as any).isLive ? (
+                      {isStreamerLive(s) ? (
                         <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
                           <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
                         </span>
@@ -2709,7 +2711,7 @@ export const GachaTab: React.FC = () => {
             <button
               onClick={() => {
                 if (displayCard.streamer) {
-                  const targetUrl = displayCard.streamer.is_active
+                  const targetUrl = isStreamerLive(displayCard.streamer)
                     ? `https://chzzk.naver.com/live/${displayCard.streamer.channel_id}`
                     : `https://chzzk.naver.com/${displayCard.streamer.channel_id}`;
                   window.open(targetUrl, '_blank');
@@ -2952,7 +2954,7 @@ export const GachaTab: React.FC = () => {
                     <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
                       {/* 카드 상단 정보 */}
                       <div className="flex items-center justify-between w-full pointer-events-auto">
-                        {live.streamer?.is_active || (live.streamer as any)?.isLive ? (
+                        {isStreamerLive(live.streamer) ? (
                           <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white flex items-center gap-0.5 animate-pulse">
                             <span className="h-1 w-1 rounded-full bg-white"></span> LIVE
                           </span>

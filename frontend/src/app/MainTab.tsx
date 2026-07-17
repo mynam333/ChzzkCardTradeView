@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api';
 import type { Announcement } from '@/lib/types';
 import { formatAnnouncementDate, getAnnouncementPreview } from '@/lib/announcement';
 import { streamerProfileImage } from '@/lib/cosmetics';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 const StreamerRegisterModal = dynamic(
   () => import('./StreamerRegisterModal').then((module) => module.StreamerRegisterModal),
@@ -33,6 +34,7 @@ type LandingStats = {
 
 export const MainTab: React.FC = () => {
   const { user, updatePoints } = useApp();
+  const { isStreamerLive } = useStreamerLiveStatuses(true);
   const [notices, setNotices] = useState<Announcement[]>([]);
   const [activePopups, setActivePopups] = useState<Announcement[]>([]);
   const [announcementBoardOpen, setAnnouncementBoardOpen] = useState(false);
@@ -356,7 +358,7 @@ export const MainTab: React.FC = () => {
                     <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-black text-primary-foreground shadow-sm">
                       {index + 1}
                     </span>
-                    {st.is_active && (
+                    {isStreamerLive(st) && (
                       <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                     )}
                   </div>

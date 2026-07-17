@@ -12,6 +12,7 @@ import {
   User,
   UserRanking,
   Streamer,
+  StreamerLiveStatus,
   StreamerScheduleResult,
   Coupon,
   CardReport,
@@ -67,6 +68,29 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
 
     if (error) throw error;
     return (data || []).map(withStarImages);
+  }
+
+  async findLiveStatuses(): Promise<StreamerLiveStatus[]> {
+    const statuses: StreamerLiveStatus[] = [];
+    const pageSize = 1000;
+
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await this.getClient()
+        .from('streamers')
+        .select('channel_id, is_active')
+        .order('channel_id', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+
+      const page = data || [];
+      statuses.push(...page.map((row: any) => ({
+        channel_id: row.channel_id,
+        is_active: row.is_active === true
+      })));
+      if (page.length < pageSize) break;
+    }
+
+    return statuses;
   }
 
   async findRankingBase(limit?: number): Promise<Streamer[]> {
@@ -375,7 +399,8 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
             patch.logo_url = r.logo_url;
           }
         }
-        await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
+        const { error: updateError } = await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
+        if (updateError) throw updateError;
         if (r.add_minutes > 0) {
           await client.rpc('increment_streamer_minutes', { p_channel_id: r.channel_id, p_minutes: r.add_minutes })
             .then(({ error: e }) => { if (e) console.warn('[Supabase] minutes 폴백 실패:', e.message); });

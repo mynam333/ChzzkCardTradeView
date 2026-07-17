@@ -17,6 +17,7 @@ import { fuzzyScore, fuzzySearch, normalizeSearchText } from '@/lib/search';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface Streamer {
   channel_id: string;
@@ -60,6 +61,7 @@ type RankingRealtimeDetail = {
 export const RankingTab: React.FC = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { isStreamerLive } = useStreamerLiveStatuses(true);
   const tabParam = searchParams.get('tab');
   const initialSubTab: SubTab = RANKING_SUB_TABS.includes(tabParam as SubTab) ? tabParam as SubTab : 'value';
   const pageParam = Number(searchParams.get('page') || '1');
@@ -530,7 +532,7 @@ export const RankingTab: React.FC = () => {
                   <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(ur.rank)}`}>{ur.rank}</span>
                   <div className="relative shrink-0">
                     <img src={ur.avatar_url} alt={ur.username} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
-                    {ur.is_live && (
+                    {isStreamerLive({ channel_id: ur.id, is_active: ur.is_live }) && (
                       <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black leading-none text-white ring-2 ring-card">
                         LIVE
                       </span>
@@ -595,7 +597,7 @@ export const RankingTab: React.FC = () => {
                     <span className={`cute-number-font w-6 text-center text-xs font-black ${rankColor(st.rank)}`}>{st.rank}</span>
                     <div className="relative shrink-0">
                       <img src={st.logo_url || '/icon.png'} alt={st.name} className="h-11 w-11 rounded-2xl border-2 border-white bg-card object-cover shadow-sm dark:border-white/10" />
-                      {st.is_active && (
+                      {isStreamerLive(st) && (
                         <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[7px] font-black text-white ring-2 ring-card leading-none">LIVE</span>
                       )}
                     </div>

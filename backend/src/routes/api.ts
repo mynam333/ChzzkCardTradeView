@@ -77,6 +77,7 @@ import {
   deleteMyAccount,
   getUserRankings,
   getStreamerRankings,
+  getStreamerLiveStatuses,
   getUserCards,
   getUserCardGroups,
   updateMyStatusMessage,
@@ -733,6 +734,7 @@ router.get('/streamers', streamerReadLimiter, async (req, res) => {
 });
 
 // 스트리머 포토카드 커스텀 이미지 지연 업로드 처리
+router.get('/streamers/live-status', streamerReadLimiter, getStreamerLiveStatuses);
 router.get('/streamers/ranking', streamerReadLimiter, getStreamerRankings);
 router.post('/streamers/me/image', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, uploadSingleImage, uploadCustomImage);
 // 스트리머 본인 별(0~5성) 커스텀 카드 이미지 삭제

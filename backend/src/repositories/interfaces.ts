@@ -273,9 +273,17 @@ export interface UserRanking extends User {
   rank?: number;
 }
 
+/** 카드/보관함 화면에서 방송 배지만 갱신할 때 사용하는 경량 상태 행입니다. */
+export interface StreamerLiveStatus {
+  channel_id: string;
+  is_active: boolean;
+}
+
 // 2. 스트리머 리포지토리 인터페이스
 export interface IStreamerRepository {
   findAll(): Promise<Streamer[]>;
+  /** 전체 프로필/이미지를 제외하고 채널별 방송 여부만 조회합니다. */
+  findLiveStatuses(): Promise<StreamerLiveStatus[]>;
   /** 랭킹·검색 목록용 최소 필드만 조회합니다(커스텀 별 이미지 등 무거운 필드 제외). */
   findRankingBase(limit?: number): Promise<Streamer[]>;
   findById(channelId: string): Promise<Streamer | null>;

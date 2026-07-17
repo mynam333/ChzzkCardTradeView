@@ -1,5 +1,5 @@
 import { getMysqlDb, getSqlDialect } from '../../services/db';
-import { IStreamerRepository, Streamer, StreamerScheduleResult } from '../interfaces';
+import { IStreamerRepository, Streamer, StreamerLiveStatus, StreamerScheduleResult } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, extractStarImages } from './shared';
 import { formatUploadUrl } from '../../services/imageService';
 
@@ -128,6 +128,16 @@ export class MysqlStreamerRepository implements IStreamerRepository {
   async findAll(): Promise<Streamer[]> {
     const rows = await this.getDb().all('SELECT * FROM streamers ORDER BY base_value DESC');
     return rows.map((row) => this.mapRow(row));
+  }
+
+  async findLiveStatuses(): Promise<StreamerLiveStatus[]> {
+    const rows = await this.getDb().all<{ channel_id: string; is_active: number | boolean }>(
+      'SELECT channel_id, is_active FROM streamers ORDER BY channel_id ASC'
+    );
+    return rows.map((row) => ({
+      channel_id: row.channel_id,
+      is_active: row.is_active === true || Number(row.is_active) === 1
+    }));
   }
 
   async findRankingBase(limit?: number): Promise<Streamer[]> {

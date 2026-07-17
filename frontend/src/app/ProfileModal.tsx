@@ -11,6 +11,7 @@ import { toPng } from 'html-to-image';
 import { X, Coins, Download, Share2, Star, Loader2 } from 'lucide-react';
 import type { UserTitle } from '@/lib/types';
 import { UserTitleList } from './UserTitleBadge';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface CosmeticRef { id: number; style_json?: string | null; font_url?: string | null; font_family?: string | null; }
 interface StreamerLite {
@@ -57,6 +58,7 @@ const starValueMultiplier = (star: number) => 1 + Math.max(0, Math.min(5, Number
 
 export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn?: boolean }> = ({ userId, onClose, isOwn = false }) => {
   const { toast } = useApp();
+  const { isStreamerLive } = useStreamerLiveStatuses(true);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -235,7 +237,7 @@ export const ProfileModal: React.FC<{ userId: string; onClose: () => void; isOwn
                     <div className="relative z-20 flex h-full w-full flex-col justify-between p-3 pointer-events-none">
                       {/* 상단 정보 */}
                       <div className="flex items-center justify-between w-full pointer-events-auto">
-                        {repStreamer.is_active ? (
+                        {isStreamerLive(repStreamer) ? (
                           <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold">LIVE</span>
                         ) : <span />}
                         <span className="rounded bg-black/50 px-2 py-0.5 text-[9px] font-black text-white/90">

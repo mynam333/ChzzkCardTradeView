@@ -7,6 +7,7 @@ import { streamerProfileImage } from '@/lib/cosmetics';
 import { formatLocal } from '@/lib/time';
 import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface HistoryPoint { value: number; recorded_at: string; }
 interface HistoryRange { start: string; end: string; }
@@ -30,12 +31,14 @@ interface StreamerDetail {
  */
 export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => void }> = ({ channelId, onClose }) => {
   const { toast } = useApp();
+  const { isStreamerLive } = useStreamerLiveStatuses(true);
   const [streamer, setStreamer] = useState<StreamerDetail | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyRange, setHistoryRange] = useState<HistoryRange | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<'24h' | '7d'>('7d');
   const [hover, setHover] = useState<number | null>(null);
+  const streamerIsLive = isStreamerLive(streamer);
 
   useEffect(() => {
     let alive = true;
@@ -104,9 +107,9 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
                       <span>{(streamer.follower_count || 0).toLocaleString()} 팔로워</span>
                       <span className="text-border">·</span>
-                      <span className={`inline-flex items-center gap-1 font-bold ${streamer.is_active ? 'text-emerald-500' : 'text-muted-foreground'}`}>
-                        <span className={`h-2 w-2 rounded-full ${streamer.is_active ? 'bg-emerald-500' : 'bg-zinc-700'}`} />
-                        {streamer.is_active ? '방송 중' : '오프라인'}
+                      <span className={`inline-flex items-center gap-1 font-bold ${streamerIsLive ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                        <span className={`h-2 w-2 rounded-full ${streamerIsLive ? 'bg-emerald-500' : 'bg-zinc-700'}`} />
+                        {streamerIsLive ? '방송 중' : '오프라인'}
                       </span>
                     </p>
                   </div>
@@ -276,7 +279,7 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
 
             {/* 치지직 방송국 바로가기 */}
             <a
-              href={streamer.is_active ? `https://chzzk.naver.com/live/${streamer.channel_id}` : `https://chzzk.naver.com/${streamer.channel_id}`}
+              href={streamerIsLive ? `https://chzzk.naver.com/live/${streamer.channel_id}` : `https://chzzk.naver.com/${streamer.channel_id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00ffa3] py-3 text-sm font-black text-black transition hover:brightness-95"

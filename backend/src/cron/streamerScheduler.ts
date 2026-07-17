@@ -2,11 +2,21 @@ import cron from 'node-cron';
 import { streamerRepository, userCardRepository } from '../repositories';
 import { sendPushToUser } from '../controllers/pushController';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
-import { fetchChzzkChannelProfile, ChzzkProfile, getValidUserAccessToken } from '../services/chzzkService';
+import {
+  fetchChzzkChannelProfile,
+  fetchChzzkLiveStatus,
+  ChzzkLiveStatus,
+  ChzzkProfile,
+  getValidUserAccessToken
+} from '../services/chzzkService';
 import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { publishRealtimeEvent } from '../services/realtimeStream';
-import { clearStreamerRankingCaches, scheduleUserRankingRefresh } from '../controllers/playController';
+import {
+  clearStreamerLiveStatusCache,
+  clearStreamerRankingCaches,
+  scheduleUserRankingRefresh
+} from '../controllers/playController';
 import {
   formatCardDeletionCompensationReward,
   formatCardDeletionCompensationSummary,
@@ -148,6 +158,8 @@ const readPositiveIntegerEnv = (name: string, fallback: number): number => {
 // 오프라인 스트리머는 매 주기 전부가 아니라 N개 샤드로 나눠 순회 폴링합니다.
 // (라이브 중인 스트리머는 항상 매 주기 폴링) → HTTP 호출량 대폭 절감.
 const OFFLINE_POLL_SHARDS = readPositiveIntegerEnv('OFFLINE_POLL_SHARDS', 10); // 기본 10주기(약 20분)에 걸쳐 오프라인 1회 폴링
+// 전체 프로필 폴링 사이에도 방송 시작은 빠르게 감지하도록, 훨씬 가벼운 live-status API만 별도 순회합니다.
+const OFFLINE_LIVE_PROBE_SHARDS = readPositiveIntegerEnv('OFFLINE_LIVE_PROBE_SHARDS', 2); // 기본 최대 약 4분 내 시작 감지
 const OFFLINE_COMPUTE_EVERY_CYCLES = readPositiveIntegerEnv(
   'OFFLINE_COMPUTE_EVERY_CYCLES',
   OFFLINE_POLL_SHARDS
@@ -349,24 +361,68 @@ export const syncAllStreamersLiveStatus = async () => {
     const historyPoints: { channel_id: string; value: number }[] = [];
     const pruneTargets: { streamer: Streamer; lastLiveAt: string; reason?: 'inactive' | 'not_found' }[] = [];
 
-    // 1) 폴링 대상(라이브 + 이번 샤드의 오프라인)과 계산 전용(나머지 오프라인) 분리
+    // 1) 전체 프로필 폴링 대상과 방송 상태 전용 probe 대상, 계산 전용 대상을 분리합니다.
     const pollTargets: Streamer[] = [];
-    const computeOnly: Streamer[] = [];
+    const probeTargets: Streamer[] = [];
+    const computeOnlyCandidates: Streamer[] = [];
     const activeShard = cycle % OFFLINE_POLL_SHARDS;
+    const activeProbeShard = cycle % OFFLINE_LIVE_PROBE_SHARDS;
     const shouldComputeOffline = cycle % OFFLINE_COMPUTE_EVERY_CYCLES === 0;
     const offlineComputeCycleFactor = cycle === 0 ? 1 : OFFLINE_COMPUTE_EVERY_CYCLES;
     let skippedOfflineCompute = 0;
+    let preservedActiveBackoff = 0;
     const nowMs = Date.now();
     for (const s of streamers) {
       const isActive = Boolean(s.is_active);
+      const isBackedOff = isPollingBackedOff(s.channel_id, nowMs);
       const shouldPoll = (isActive || shardOf(s.channel_id, OFFLINE_POLL_SHARDS) === activeShard)
-        && !isPollingBackedOff(s.channel_id, nowMs);
+        && !isBackedOff;
       if (shouldPoll) pollTargets.push(s);
-      else if (isActive || shouldComputeOffline) computeOnly.push(s);
-      else skippedOfflineCompute++;
+      else {
+        if (!isActive && !isBackedOff && shardOf(s.channel_id, OFFLINE_LIVE_PROBE_SHARDS) === activeProbeShard) {
+          probeTargets.push(s);
+        }
+        // 마지막 확인 상태가 LIVE인 채널은 외부 API backoff 중 OFFLINE으로 추측 갱신하지 않습니다.
+        // 정상 응답을 다시 받을 때까지 마지막 상태를 보존해야 일시 오류가 LIVE 배지를 끄지 않습니다.
+        if (isActive) preservedActiveBackoff++;
+        else if (shouldComputeOffline) computeOnlyCandidates.push(s);
+      }
+      if (!shouldPoll && !isActive && !shouldComputeOffline) skippedOfflineCompute++;
     }
 
-    // 2) 계산 전용 오프라인 스트리머: HTTP 없이 감가/드리프트 계산
+    // 2) 전체 프로필 대상이 아닌 오프라인 채널은 live-status만 조회합니다.
+    //    OPEN으로 확인된 채널은 같은 주기의 전체 프로필 폴링 대상으로 즉시 승격합니다.
+    const prefetchedLiveStatuses = new Map<string, ChzzkLiveStatus>();
+    const promotedChannelIds = new Set<string>();
+    let probeFailCount = 0;
+    const PROBE_CONCURRENCY = Math.min(16, Math.max(4, Math.ceil(probeTargets.length / 50)));
+    let probeCursor = 0;
+    const probeWorker = async () => {
+      while (probeCursor < probeTargets.length) {
+        const streamer = probeTargets[probeCursor++];
+        try {
+          const liveStatus = await fetchChzzkLiveStatus(streamer.channel_id, true);
+          clearPollingFailure(streamer.channel_id);
+          if (liveStatus.openLive) {
+            prefetchedLiveStatuses.set(streamer.channel_id, liveStatus);
+            promotedChannelIds.add(streamer.channel_id);
+            pollTargets.push(streamer);
+          }
+        } catch (err: any) {
+          registerPollingFailure(streamer.channel_id);
+          probeFailCount++;
+          console.warn(`[LiveStatusScheduler] 방송 상태 probe 실패 (ID: ${streamer.channel_id}):`, err?.message || err);
+        }
+        if (POLL_JITTER_MS > 0) await sleep(Math.random() * POLL_JITTER_MS);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PROBE_CONCURRENCY, probeTargets.length) }, () => probeWorker())
+    );
+
+    const computeOnly = computeOnlyCandidates.filter((s) => !promotedChannelIds.has(s.channel_id));
+
+    // 3) 계산 전용 오프라인 스트리머: HTTP 없이 감가/드리프트 계산
     //    대부분의 오프라인 카드는 다분 단위로 변해도 체감 차이가 작으므로 DB 쓰기와 이력 삽입을 절감합니다.
     for (const s of computeOnly) {
       const cycleFactor = s.is_active ? 1 : offlineComputeCycleFactor;
@@ -375,7 +431,7 @@ export const syncAllStreamersLiveStatus = async () => {
       historyPoints.push(r.history);
     }
 
-    // 3) 폴링 대상: 적응형 동시성 워커 풀로 HTTP 폴링 + 채팅 소켓 관리
+    // 4) 전체 프로필 폴링 대상: 적응형 동시성 워커 풀로 HTTP 폴링 + 채팅 소켓 관리
     let liveCount = 0;
     let failCount = 0;
     const CONCURRENCY = Math.min(16, Math.max(4, Math.ceil(pollTargets.length / 25)));
@@ -384,7 +440,12 @@ export const syncAllStreamersLiveStatus = async () => {
       while (cursor < pollTargets.length) {
         const streamer = pollTargets[cursor++];
         try {
-          const profile = await fetchChzzkChannelProfile(streamer.channel_id);
+          const profile = await fetchChzzkChannelProfile(
+            streamer.channel_id,
+            true,
+            prefetchedLiveStatuses.get(streamer.channel_id),
+            true
+          );
           clearPollingFailure(streamer.channel_id);
 
           // 채팅 수집 소켓 연결/해제 관리 (방송 켬 트랜지션은 결과의 add_broadcast_count로 일괄 반영)
@@ -421,8 +482,14 @@ export const syncAllStreamersLiveStatus = async () => {
       Array.from({ length: Math.min(CONCURRENCY, pollTargets.length) }, () => worker())
     );
 
-    // 4) DB 일괄 반영. Supabase에서는 내부적으로 작은 배치로 나눠 statement_timeout을 피합니다.
+    // 5) DB 일괄 반영. Supabase에서는 내부적으로 작은 배치로 나눠 statement_timeout을 피합니다.
     if (results.length > 0) {
+      const previousLiveStatuses = new Map(
+        streamers.map((streamer) => [streamer.channel_id, Boolean(streamer.is_active)] as const)
+      );
+      const changedLiveStatuses = results
+        .filter((result) => result.polled && previousLiveStatuses.get(result.channel_id) !== result.is_active)
+        .map((result) => ({ channel_id: result.channel_id, is_active: result.is_active }));
       const dbApplyStart = Date.now();
       await streamerRepository.bulkApplyScheduleResults(results);
       console.log(`[LiveStatusScheduler] DB 시세 반영 완료: ${results.length}건 (${Date.now() - dbApplyStart}ms)`);
@@ -440,6 +507,7 @@ export const syncAllStreamersLiveStatus = async () => {
         `[LiveStatusScheduler] 시세 이력 기록 확인: ${filteredHistoryPoints.length}/${historyPoints.length}건 ` +
         `(${Date.now() - historyStart}ms, 샘플링 ${VALUE_HISTORY_RECORD_EVERY_CYCLES}주기)`
       );
+      clearStreamerLiveStatusCache();
       clearStreamerRankingCaches();
       scheduleUserRankingRefresh('streamer_sync');
       publishRealtimeEvent('ranking', {
@@ -448,7 +516,8 @@ export const syncAllStreamersLiveStatus = async () => {
         affects: ['streamer_rankings', 'streamer_values', 'streamer_live', 'user_live'],
         streamers: streamers.length,
         polled: pollTargets.length,
-        live: liveCount
+        live: liveCount,
+        live_statuses: changedLiveStatuses
       });
     } else {
       console.log('[LiveStatusScheduler] 반영할 시세 변경이 없어 DB 쓰기와 랭킹 이벤트를 건너뜁니다.');
@@ -458,7 +527,7 @@ export const syncAllStreamersLiveStatus = async () => {
         console.error(`[LiveStatusScheduler] 장기 미방송 스트리머 정리 실패 (${target.streamer.channel_id}):`, err.message);
       });
     }
-    // 5) 주기적으로 오래된 시세 이력 정리 (7일 초과분)
+    // 6) 주기적으로 오래된 시세 이력 정리 (7일 초과분)
     if (cycle % PRUNE_EVERY_CYCLES === 0) {
       const pruneStart = Date.now();
       await streamerRepository.pruneValueHistory(VALUE_HISTORY_RETENTION_DAYS).catch((err: any) => {
@@ -469,7 +538,10 @@ export const syncAllStreamersLiveStatus = async () => {
 
     console.log(
       `[LiveStatusScheduler] 동기화 완료: 총 ${streamers.length}명 ` +
-      `(폴링 ${pollTargets.length} / 라이브 ${liveCount} / 계산전용 ${computeOnly.length} / 오프라인계산스킵 ${skippedOfflineCompute} / 삭제대상 ${pruneTargets.length} / 실패 ${failCount}, 동시성 ${CONCURRENCY})`
+      `(프로필폴링 ${pollTargets.length} / 상태probe ${probeTargets.length}(승격 ${promotedChannelIds.size}) / 라이브 ${liveCount} / ` +
+      `계산전용 ${computeOnly.length} / 오프라인계산스킵 ${skippedOfflineCompute} / LIVE상태보존 ${preservedActiveBackoff} / ` +
+      `삭제대상 ${pruneTargets.length} / ` +
+      `실패 ${failCount + probeFailCount}(프로필 ${failCount}, probe ${probeFailCount}), 동시성 ${CONCURRENCY})`
     );
   } catch (error: any) {
     console.error('[LiveStatusScheduler] 동기화 중 치명적인 에러 발생:', error?.message || error);

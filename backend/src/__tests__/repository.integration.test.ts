@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +15,12 @@ import {
   userCardRepository,
   userRepository
 } from '../repositories';
-import { getUserProfile, getUserRankings } from '../controllers/playController';
+import {
+  clearStreamerLiveStatusCache,
+  getStreamerLiveStatuses,
+  getUserProfile,
+  getUserRankings
+} from '../controllers/playController';
 import { cancelListing, createListing, listMarketHistory } from '../controllers/marketController';
 import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
@@ -44,11 +49,13 @@ const createJsonResponse = () => {
   const res: any = {
     statusCode: 0,
     body: undefined,
+    headers: {} as Record<string, string>,
     status(code: number) {
       this.statusCode = code;
       return this;
     },
-    set() {
+    set(name: string, value: string) {
+      this.headers[name] = value;
       return this;
     },
     json(body: unknown) {
@@ -67,6 +74,11 @@ beforeEach(() => {
   loadSchema(db);
   __setSqliteDbForTest(db);
   initRepositories();
+  clearStreamerLiveStatusCache();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('ReportRepository (신고 중복 방지 / 배치 조회)', () => {
@@ -116,6 +128,45 @@ describe('findByIds 배치 조회', () => {
     seedStreamer(db, 'c2', 'B');
     const streamers = await streamerRepository.findByIds(['c2', 'c1']);
     expect(streamers.map((s) => s.channel_id).sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('streamerRepository.findLiveStatuses는 이미지 없이 채널별 방송 여부만 반환한다', async () => {
+    seedStreamer(db, 'live-c1', '라이브 A');
+    seedStreamer(db, 'live-c2', '오프라인 B');
+    db.prepare("UPDATE streamers SET is_active = 1 WHERE channel_id = 'live-c1'").run();
+
+    await expect(streamerRepository.findLiveStatuses()).resolves.toEqual([
+      { channel_id: 'live-c1', is_active: true },
+      { channel_id: 'live-c2', is_active: false }
+    ]);
+  });
+});
+
+describe('streamer live-status API', () => {
+  it('동시 요청을 합쳐 경량 상태 맵을 반환하고 외부 캐시를 금지한다', async () => {
+    seedStreamer(db, 'api-live', '라이브');
+    seedStreamer(db, 'api-offline', '오프라인');
+    db.prepare("UPDATE streamers SET is_active = 1 WHERE channel_id = 'api-live'").run();
+    const findSpy = vi.spyOn(streamerRepository, 'findLiveStatuses');
+    const first = createJsonResponse();
+    const second = createJsonResponse();
+
+    await Promise.all([
+      getStreamerLiveStatuses({} as any, first as any),
+      getStreamerLiveStatuses({} as any, second as any)
+    ]);
+
+    expect(findSpy).toHaveBeenCalledTimes(1);
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['Cache-Control']).toBe('no-store');
+    expect(first.body).toEqual({
+      statuses: {
+        'api-live': true,
+        'api-offline': false
+      },
+      updated_at: expect.any(String)
+    });
+    expect(second.body).toEqual(first.body);
   });
 });
 

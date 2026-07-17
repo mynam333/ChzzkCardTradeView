@@ -15,6 +15,7 @@ import { BlindableCardImage } from './BlindableCardImage';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel, Hourglass, BadgePercent } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
 import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
+import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface ShopItem {
   id: number;
@@ -210,6 +211,7 @@ const getSortedStreamerOptionMatches = (streamers: any[], query: string, limit =
 
 export const ShopTab: React.FC = () => {
   const { user, updatePoints, refreshUserData, toast, setActiveTab, blindImage, unblindImage, isImageBlinded } = useApp();
+  const { isStreamerLive } = useStreamerLiveStatuses(true);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -1478,7 +1480,7 @@ export const ShopTab: React.FC = () => {
                         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/20 z-10"></div>
                       </div>
                       <div className="relative z-20 flex items-center justify-between w-full">
-                        {drawnCard.is_active ? (
+                        {isStreamerLive(drawnCard) ? (
                           <span className="rounded bg-red-600 px-1.5 py-0.5 text-[8px] font-bold text-white">LIVE</span>
                         ) : (
                           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-400">OFFLINE</span>
@@ -1937,7 +1939,7 @@ export const ShopTab: React.FC = () => {
 
                           <div className="relative z-20 flex h-full w-full flex-col justify-between p-2 pointer-events-none text-white">
                             <div className="flex justify-between items-center w-full">
-                              {streamer?.is_active ? (
+                              {isStreamerLive(streamer) ? (
                                 <span className="rounded bg-red-600 px-1 py-0.5 text-[7px] font-bold text-white flex items-center gap-0.5 animate-pulse">
                                   <span className="h-0.5 w-0.5 rounded-full bg-white"></span> LIVE
                                 </span>

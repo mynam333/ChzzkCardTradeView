@@ -24,6 +24,68 @@ const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
 const userCardGroupsInFlight = new Map<string, Promise<any[]>>();
 
+type StreamerLiveStatusesPayload = {
+  statuses: Record<string, boolean>;
+  updated_at: string;
+};
+
+const requestedLiveStatusCacheTtl = Number(process.env.LIVE_STATUS_CACHE_TTL_MS || 12_000);
+const LIVE_STATUS_CACHE_TTL_MS = Number.isFinite(requestedLiveStatusCacheTtl)
+  ? Math.min(15_000, Math.max(10_000, requestedLiveStatusCacheTtl))
+  : 12_000;
+let liveStatusCache: { data: StreamerLiveStatusesPayload; expiresAt: number } | null = null;
+let liveStatusInFlight: Promise<StreamerLiveStatusesPayload> | null = null;
+let liveStatusCacheRevision = 0;
+
+const loadStreamerLiveStatuses = (): Promise<StreamerLiveStatusesPayload> => {
+  const now = Date.now();
+  if (liveStatusCache && liveStatusCache.expiresAt > now) {
+    return Promise.resolve(liveStatusCache.data);
+  }
+  if (liveStatusInFlight) return liveStatusInFlight;
+
+  const requestRevision = liveStatusCacheRevision;
+  const request = streamerRepository.findLiveStatuses()
+    .then((rows) => {
+      const statuses = Object.fromEntries(
+        rows.map((row) => [row.channel_id, row.is_active] as const)
+      );
+      const data = { statuses, updated_at: new Date().toISOString() };
+      if (liveStatusCacheRevision === requestRevision) {
+        liveStatusCache = { data, expiresAt: Date.now() + LIVE_STATUS_CACHE_TTL_MS };
+      }
+      return data;
+    })
+    .finally(() => {
+      if (liveStatusInFlight === request) liveStatusInFlight = null;
+    });
+  liveStatusInFlight = request;
+  return request;
+};
+
+export const clearStreamerLiveStatusCache = () => {
+  liveStatusCacheRevision++;
+  liveStatusCache = null;
+  liveStatusInFlight = null;
+};
+
+/**
+ * 보관함·상점 등 이미 카드 데이터가 있는 화면에서 방송 배지만 덧씌우기 위한 경량 API입니다.
+ * 브라우저/프록시에는 저장하지 않고 프로세스 내부에서만 짧게 합쳐 DB 반복 조회를 막습니다.
+ */
+export const getStreamerLiveStatuses = async (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    return res.status(200).json(await loadStreamerLiveStatuses());
+  } catch (err: any) {
+    console.error('[PlayController] getStreamerLiveStatuses 에러:', err?.message || err);
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '방송 상태를 불러오지 못했습니다.'
+    });
+  }
+};
+
 // getUserMe는 /play/me 호출마다 치지직 외부 API로 프로필을 동기화해 왔습니다(외부 HTTP + DB write).
 // 닉네임/프로필 이미지는 실시간성이 낮으므로 유저당 일정 주기에 1회만 동기화해 외부 호출을 절감합니다.
 const PROFILE_SYNC_THROTTLE_MS = Math.max(60_000, Number(process.env.PROFILE_SYNC_THROTTLE_MS || 10 * 60_000));

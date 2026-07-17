@@ -12,6 +12,7 @@ import {
   User,
   UserRanking,
   Streamer,
+  StreamerLiveStatus,
   StreamerScheduleResult,
   Coupon,
   CardReport,
@@ -70,6 +71,16 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
       updated_at: row.updated_at
+    }));
+  }
+
+  async findLiveStatuses(): Promise<StreamerLiveStatus[]> {
+    const rows = this.getDb()
+      .prepare('SELECT channel_id, is_active FROM streamers ORDER BY channel_id ASC')
+      .all() as { channel_id: string; is_active: number }[];
+    return rows.map((row) => ({
+      channel_id: row.channel_id,
+      is_active: row.is_active === 1
     }));
   }
 

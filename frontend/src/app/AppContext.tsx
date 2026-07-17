@@ -583,8 +583,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
   })();
   const isArenaRoute = pathname.startsWith('/arena');
   const realtimeTopics = React.useMemo(() => {
-    const topics = new Set(['maintenance']);
-    if (pathname === '/' || pathname.startsWith('/ranking')) topics.add('ranking');
+    const topics = new Set(['maintenance', 'ranking']);
     if (pathname.startsWith('/shop')) {
       topics.add('shop');
       topics.add('market');
