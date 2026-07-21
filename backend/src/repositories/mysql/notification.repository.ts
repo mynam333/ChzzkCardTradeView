@@ -36,19 +36,20 @@ export class MysqlNotificationRepository implements INotificationRepository {
   async upsertByGroupKey(n: Pick<AppNotification, 'user_id' | 'title' | 'body' | 'link'> & { group_key: string }): Promise<AppNotification> {
     await this.getDb().run(
       `INSERT INTO notifications (user_id, title, body, link, group_key, is_read, deleted_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, NULL, UTC_TIMESTAMP())
+       VALUES (?, ?, ?, ?, ?, ?, NULL, UTC_TIMESTAMP())
        ON DUPLICATE KEY UPDATE
          title = VALUES(title),
          body = VALUES(body),
          link = VALUES(link),
-         is_read = 0,
+         is_read = VALUES(is_read),
          deleted_at = NULL,
          created_at = UTC_TIMESTAMP()`,
       n.user_id,
       n.title,
       n.body ?? null,
       n.link ?? null,
-      n.group_key
+      n.group_key,
+      false
     );
     const row = await this.getDb().get(
       'SELECT * FROM notifications WHERE user_id = ? AND group_key = ? LIMIT 1',

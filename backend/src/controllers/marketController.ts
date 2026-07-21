@@ -116,6 +116,14 @@ const marketListResultForViewer = (
   listings: marketListingsForViewer(result.listings || [], viewerId)
 });
 
+const logMarketNotificationError = (userId: string, groupKey: string | undefined, err: unknown) => {
+  console.error('[MarketNotification] 사이트 알림 저장 실패:', {
+    userId,
+    groupKey: groupKey || null,
+    error: err instanceof Error ? err.message : String(err)
+  });
+};
+
 // 푸시 + 인앱 알림 동시 전송 헬퍼
 const notify = (
   userId: string,
@@ -126,7 +134,8 @@ const notify = (
 ) => {
   const pushUrl = target === 'shop:market' ? '/shop?tab=market' : '/inventory';
   sendPushToUser(userId, title, body, pushUrl, groupKey);
-  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
+  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey })
+    .catch((err) => logMarketNotificationError(userId, groupKey, err));
 };
 
 const notifySiteOnly = (
@@ -136,7 +145,8 @@ const notifySiteOnly = (
   target: MarketNotificationTarget = 'shop:market',
   groupKey?: string
 ) => {
-  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey }).catch(() => { /* 무시 */ });
+  createRealtimeNotification({ user_id: userId, title, body, link: target, group_key: groupKey })
+    .catch((err) => logMarketNotificationError(userId, groupKey, err));
 };
 
 const displayAuctionUser = (username: string | null | undefined, userId: string) => {
