@@ -58,9 +58,11 @@ const rows = {
   replayHolds: [] as Row[],
   battleRoyales: [] as Row[]
 };
+let lastCardInstanceSelectSql = '';
 
 const resetRows = () => {
   for (const key of Object.keys(rows) as Array<keyof typeof rows>) rows[key] = [];
+  lastCardInstanceSelectSql = '';
 };
 
 const cardWithStreamerFields = (card: Row) => {
@@ -177,10 +179,15 @@ const makeExecutor = () => ({
         .sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
     }
     if (sql.includes('FROM arena_v2_card_instances')) {
+      lastCardInstanceSelectSql = sql;
       return rows.cardInstances
         .filter((instance) => instance.match_id === params[0])
         .map((instance) => {
           const card = rows.cards.find((item) => item.id === instance.card_version_id);
+          const streamer = rows.streamers.find((item) => item.channel_id === card?.streamer_id);
+          const artAssetId = Number(streamer?.is_image_banned || 0)
+            ? streamer?.logo_url || null
+            : card?.art_asset_id || streamer?.custom_image_url || streamer?.logo_url || null;
           return {
             ...instance,
             streamer_id: card?.streamer_id,
@@ -192,6 +199,7 @@ const makeExecutor = () => ({
             attack: card?.attack,
             health: card?.health,
             keywords: card?.keywords,
+            art_asset_id: artAssetId,
             card_status: card?.status
           };
         });
@@ -1518,6 +1526,21 @@ describe('arena v2 service', () => {
   it('reads a v2 match snapshot and resolves a valid bot turn after mulligan', async () => {
     insertSeason();
     insertCards(14);
+    rows.streamers.push({
+      channel_id: 'streamer-1',
+      name: '이미지 스트리머',
+      logo_url: '/uploads/streamers/streamer-1-logo.webp',
+      custom_image_url: '/uploads/streamers/streamer-1-custom.webp',
+      is_image_banned: 0
+    }, {
+      channel_id: 'streamer-2',
+      name: '이미지 차단 스트리머',
+      logo_url: '/uploads/streamers/streamer-2-logo.webp',
+      custom_image_url: '/uploads/streamers/streamer-2-hidden.webp',
+      is_image_banned: 1
+    });
+    rows.cards[0].art_asset_id = '';
+    rows.cards[1].art_asset_id = '/uploads/streamers/streamer-2-card-hidden.webp';
     const cardVersionIds = Array.from({ length: 14 }, (_, index) => `card-${index + 1}`);
     const deck = await saveArenaV2Deck({
       userId: 'user-1',
@@ -1550,6 +1573,14 @@ describe('arena v2 service', () => {
     expect(view?.id).toBe(created.matchId);
     expect(view?.players).toHaveLength(2);
     expect(view?.cardInstances).toHaveLength(14);
+    expect(
+      view?.cardInstances.find((instance) => instance.cardVersionId === 'card-1')?.card?.artAssetId
+    ).toMatch(/\/uploads\/streamers\/streamer-1-custom\.webp$/);
+    expect(
+      view?.cardInstances.find((instance) => instance.cardVersionId === 'card-2')?.card?.artAssetId
+    ).toMatch(/\/uploads\/streamers\/streamer-2-logo\.webp$/);
+    expect(lastCardInstanceSelectSql).toContain("NULLIF(cv.art_asset_id, '')");
+    expect(lastCardInstanceSelectSql).toContain('s.is_image_banned');
     expect(result.accepted).toBe(true);
     expect(result.match?.status).toBe('turn_planning');
     expect(result.match?.turnNo).toBe(2);

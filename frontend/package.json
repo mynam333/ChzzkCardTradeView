@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build && node scripts/copy-cloudflare-pages-files.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:arena-assets": "node --experimental-strip-types --test src/lib/arenaAssetUrl.test.mjs",
+    "test:arena-replay": "node --experimental-strip-types --test src/app/arena/matches/arenaReplay.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

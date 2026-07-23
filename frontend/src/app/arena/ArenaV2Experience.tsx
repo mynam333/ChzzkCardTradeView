@@ -28,7 +28,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { API_BASE_URL, apiFetch } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
+import { resolveArenaAssetUrl } from '@/lib/arenaAssets';
 import {
   arenaCosmeticTypeDescriptions,
   arenaCosmeticTypeLabels,
@@ -430,39 +431,7 @@ const requestStatusLabel = (status?: string) => {
   return labels[String(status || '')] || status || '확인 중';
 };
 
-const getBackendAssetOrigin = () => {
-  try {
-    if (/^https?:\/\//i.test(API_BASE_URL)) return new URL(API_BASE_URL).origin;
-    if (typeof window !== 'undefined') return new URL(API_BASE_URL, window.location.origin).origin;
-  } catch {
-    return '';
-  }
-  return '';
-};
-
-const resolveBackendImageUrl = (value?: string | null) => {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (/^https?:\/\//i.test(raw) && raw.includes('/uploads/')) {
-    const backendOrigin = getBackendAssetOrigin();
-    if (!backendOrigin) return raw;
-    try {
-      const parsed = new URL(raw);
-      const uploadsIndex = parsed.pathname.indexOf('/uploads/');
-      return uploadsIndex >= 0 ? `${backendOrigin}${parsed.pathname.slice(uploadsIndex)}${parsed.search}` : raw;
-    } catch {
-      return raw;
-    }
-  }
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
-    const backendOrigin = getBackendAssetOrigin();
-    const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;
-    return backendOrigin ? `${backendOrigin}${cleanPath}` : cleanPath;
-  }
-  if (raw.startsWith('/')) return raw;
-  return '';
-};
+const resolveBackendImageUrl = resolveArenaAssetUrl;
 
 const isImageSource = (value?: string | null) => Boolean(resolveBackendImageUrl(value));
 const getArenaEmoteVisual = (item?: { style_json?: string | null; name?: string | null } | null) => {

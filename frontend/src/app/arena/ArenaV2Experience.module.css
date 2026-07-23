@@ -2351,6 +2351,13 @@
   width: 240px;
   height: 240px;
   transform: translate(-50%, -50%);
+  border-radius: 50%;
+  outline: none;
+}
+
+.arenaV2Scope :global(.arena-v2-emote-wheel:focus-visible) {
+  outline: 3px solid color-mix(in srgb, var(--arena-cyan) 58%, white);
+  outline-offset: 6px;
 }
 
 .arenaV2Scope :global(.arena-v2-pie-menu.is-compact) {

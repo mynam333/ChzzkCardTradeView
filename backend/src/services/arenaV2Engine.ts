@@ -971,6 +971,8 @@ function resolveCombatPhase(
       const remainingTargetHealth = getRemainingHealth(plan.targetCard);
       const damageResult = applyCardDamage(plan.targetCard, plan.damage, combatContext, replayEvents, turnNo, {
         sourceCardInstanceId: plan.attacker.id,
+        sourceSeatNo: plan.attackerSeatNo,
+        sourcePosition: plan.attackerPosition,
         reason: 'line_attack'
       });
       replayEvents.push(event(turnNo, 'line_attack', {
@@ -979,6 +981,7 @@ function resolveCombatPhase(
         attackerSeatNo: plan.attackerSeatNo,
         targetSeatNo: plan.targetPlayer.seatNo,
         cardInstanceId: plan.attacker.id,
+        sourcePosition: plan.attackerPosition,
         targetCardInstanceId: plan.targetCard.id,
         targetPosition,
         damage: plan.damage,
@@ -1000,12 +1003,18 @@ function resolveCombatPhase(
           if (spillDamage > 0) {
             const spillResult = applyCardDamage(backTarget, spillDamage, combatContext, replayEvents, turnNo, {
               sourceCardInstanceId: plan.attacker.id,
+              sourceSeatNo: plan.attackerSeatNo,
+              sourcePosition: plan.attackerPosition,
               reason: 'overflow_damage'
             });
             replayEvents.push(event(turnNo, 'overflow_damage', {
               column: targetPosition.column,
+              sourceSeatNo: plan.attackerSeatNo,
+              targetSeatNo: plan.targetPlayer.seatNo,
               sourceCardInstanceId: plan.attacker.id,
+              sourcePosition: plan.attackerPosition,
               targetCardInstanceId: backTarget.id,
+              targetPosition: { row: 'back', column: targetPosition.column },
               damage: spillDamage,
               healthDamage: spillResult.healthDamage,
               shieldDamage: spillResult.shieldDamage
@@ -1029,6 +1038,7 @@ function resolveCombatPhase(
       attackerSeatNo: plan.attackerSeatNo,
       targetSeatNo: plan.targetPlayer.seatNo,
       cardInstanceId: plan.attacker.id,
+      sourcePosition: plan.attackerPosition,
       damage: plan.damage,
       targetHealth: plan.targetPlayer.playerHealth
     }));
@@ -1154,7 +1164,11 @@ function applyPhaseControlKeywords(
         combatContext.silencedInstanceIds.add(target.instance.id);
         replayEvents.push(event(turnNo, 'silence', {
           sourceCardInstanceId: attackerSlot.instance.id,
+          sourceSeatNo: attackerPlayer.seatNo,
+          sourcePosition: attackerSlot.position,
           targetCardInstanceId: target.instance.id,
+          targetSeatNo: targetPlayer.seatNo,
+          targetPosition: target.position,
           column
         }));
       }
@@ -1162,7 +1176,11 @@ function applyPhaseControlKeywords(
         combatContext.stunnedInstanceIds.add(target.instance.id);
         replayEvents.push(event(turnNo, 'stun', {
           sourceCardInstanceId: attackerSlot.instance.id,
+          sourceSeatNo: attackerPlayer.seatNo,
+          sourcePosition: attackerSlot.position,
           targetCardInstanceId: target.instance.id,
+          targetSeatNo: targetPlayer.seatNo,
+          targetPosition: target.position,
           column
         }));
       }
@@ -1197,7 +1215,12 @@ function applyCardDamage(
   combatContext: ArenaV2CombatContext,
   replayEvents: ArenaV2ReplayEvent[],
   turnNo: number,
-  input: { sourceCardInstanceId: string; reason: string }
+  input: {
+    sourceCardInstanceId: string;
+    sourceSeatNo?: number;
+    sourcePosition?: ArenaV2BoardPositionDto | null;
+    reason: string;
+  }
 ) {
   const damage = Math.max(0, Math.floor(Number(rawDamage || 0)));
   const shield = combatContext.shieldByInstanceId.get(target.id) || 0;
@@ -1209,7 +1232,11 @@ function applyCardDamage(
     else combatContext.shieldByInstanceId.delete(target.id);
     replayEvents.push(event(turnNo, 'shield_absorb', {
       sourceCardInstanceId: input.sourceCardInstanceId,
+      sourceSeatNo: input.sourceSeatNo,
+      sourcePosition: input.sourcePosition,
       targetCardInstanceId: target.id,
+      targetSeatNo: target.ownerSeatNo,
+      targetPosition: target.position,
       reason: input.reason,
       damage: shieldDamage,
       remainingShield: nextShield
@@ -1232,7 +1259,9 @@ function applyDrain(
   if (healed <= 0) return;
   attacker.damageTaken -= healed;
   replayEvents.push(event(turnNo, 'drain', {
+    seatNo: attacker.ownerSeatNo,
     cardInstanceId: attacker.id,
+    targetPosition: attacker.position,
     heal: healed,
     damageTaken: attacker.damageTaken
   }));
@@ -1251,11 +1280,17 @@ function applyCounter(
   if (targetPosition?.column !== attacker.position?.column) return;
   const result = applyCardDamage(attacker, counter, combatContext, replayEvents, turnNo, {
     sourceCardInstanceId: target.id,
+    sourceSeatNo: target.ownerSeatNo,
+    sourcePosition: target.position,
     reason: 'counter'
   });
   replayEvents.push(event(turnNo, 'counter', {
     sourceCardInstanceId: target.id,
+    sourceSeatNo: target.ownerSeatNo,
+    sourcePosition: target.position,
     targetCardInstanceId: attacker.id,
+    targetSeatNo: attacker.ownerSeatNo,
+    targetPosition: attacker.position,
     damage: counter,
     healthDamage: result.healthDamage,
     shieldDamage: result.shieldDamage
@@ -1283,7 +1318,11 @@ function applyMovementKeyword(
       plan.targetCard.position = { row: 'back', column };
       replayEvents.push(event(turnNo, 'push', {
         sourceCardInstanceId: plan.attacker.id,
+        sourceSeatNo: plan.attackerPlayer.seatNo,
+        sourcePosition: plan.attacker.position,
         targetCardInstanceId: plan.targetCard.id,
+        targetSeatNo: plan.targetPlayer.seatNo,
+        targetPosition: { row: 'back', column },
         to: { row: 'back', column }
       }));
       return { row: 'back', column } as ArenaV2BoardPositionDto;
@@ -1295,7 +1334,11 @@ function applyMovementKeyword(
       plan.targetCard.position = { row: 'front', column };
       replayEvents.push(event(turnNo, 'pull', {
         sourceCardInstanceId: plan.attacker.id,
+        sourceSeatNo: plan.attackerPlayer.seatNo,
+        sourcePosition: plan.attacker.position,
         targetCardInstanceId: plan.targetCard.id,
+        targetSeatNo: plan.targetPlayer.seatNo,
+        targetPosition: { row: 'front', column },
         to: { row: 'front', column }
       }));
       return { row: 'front', column } as ArenaV2BoardPositionDto;
@@ -1332,6 +1375,7 @@ function moveDefeatedCards(
             replayEvents.push(event(turnNo, 'revive', {
               seatNo: player.seatNo,
               cardInstanceId: instance.id,
+              targetPosition: boardCard.position,
               health: 1
             }));
             continue;
@@ -1344,7 +1388,8 @@ function moveDefeatedCards(
           defeatedRecords.push({ player, instance, position: defeatedPosition });
           replayEvents.push(event(turnNo, 'card_defeated', {
             seatNo: player.seatNo,
-            cardInstanceId: instance.id
+            cardInstanceId: instance.id,
+            targetPosition: defeatedPosition
           }));
         } else {
           survivors.push(boardCard);
@@ -1381,11 +1426,17 @@ function applyDefeatedCardEffects(
       if (target) {
         const result = applyCardDamage(target.instance, vengeance, combatContext, replayEvents, turnNo, {
           sourceCardInstanceId: record.instance.id,
+          sourceSeatNo: record.player.seatNo,
+          sourcePosition: record.position,
           reason: 'vengeance'
         });
         replayEvents.push(event(turnNo, 'vengeance', {
           sourceCardInstanceId: record.instance.id,
+          sourceSeatNo: record.player.seatNo,
+          sourcePosition: record.position,
           targetCardInstanceId: target.instance.id,
+          targetSeatNo: opponent.seatNo,
+          targetPosition: target.position,
           damage: vengeance,
           healthDamage: result.healthDamage,
           shieldDamage: result.shieldDamage
@@ -1403,7 +1454,11 @@ function applyDefeatedCardEffects(
         combatContext.shieldByInstanceId.set(ally.instance.id, (combatContext.shieldByInstanceId.get(ally.instance.id) || 0) + residue);
         replayEvents.push(event(turnNo, 'residue', {
           sourceCardInstanceId: record.instance.id,
+          sourceSeatNo: record.player.seatNo,
+          sourcePosition: record.position,
           targetCardInstanceId: ally.instance.id,
+          targetSeatNo: record.player.seatNo,
+          targetPosition: ally.position,
           shield: residue,
           totalShield: combatContext.shieldByInstanceId.get(ally.instance.id) || 0
         }));
@@ -1419,6 +1474,8 @@ function applyDefeatedCardEffects(
       opponent.playerHealth -= spirit;
       replayEvents.push(event(turnNo, 'spirit_damage', {
         sourceCardInstanceId: record.instance.id,
+        sourceSeatNo: record.player.seatNo,
+        sourcePosition: record.position,
         targetSeatNo: opponent.seatNo,
         damage: spirit,
         targetHealth: opponent.playerHealth

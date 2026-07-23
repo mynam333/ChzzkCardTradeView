@@ -2294,9 +2294,15 @@ export const getArenaV2MatchForUser = async (matchId: string, userId?: string | 
     `
       SELECT ci.id, ci.match_id, ci.owner_seat_no, ci.card_version_id, ci.zone, ci.position, ci.current_attack, ci.current_health,
              ci.damage_taken, ci.status_effects, ci.created_turn,
-             cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost, cv.attack, cv.health, cv.keywords, cv.status AS card_status
+             cv.streamer_id, cv.display_name, cv.season_id, cv.version, cv.card_class, cv.cost, cv.attack, cv.health, cv.keywords,
+             CASE
+               WHEN COALESCE(s.is_image_banned, 0) <> 0 THEN NULLIF(s.logo_url, '')
+               ELSE COALESCE(NULLIF(cv.art_asset_id, ''), NULLIF(s.custom_image_url, ''), NULLIF(s.logo_url, ''))
+             END AS art_asset_id,
+             cv.status AS card_status
         FROM arena_v2_card_instances ci
         LEFT JOIN arena_v2_card_versions cv ON cv.id = ci.card_version_id
+        LEFT JOIN streamers s ON s.channel_id = cv.streamer_id
        WHERE ci.match_id = ?
        ORDER BY ci.owner_seat_no ASC, ci.zone ASC, ci.created_turn ASC, ci.id ASC
     `,
@@ -3295,6 +3301,7 @@ const serializeArenaV2MatchView = (match: any, players: any[], instances: any[],
       attack: Number(instance.attack || instance.current_attack || 0),
       health: Number(instance.health || instance.current_health || 1),
       keywords: jsonParse(instance.keywords, []),
+      artAssetId: formatUploadUrl(instance.art_asset_id || null),
       status: instance.card_status || 'active'
     } : undefined,
     zone: instance.zone,

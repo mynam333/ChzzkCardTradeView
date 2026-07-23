@@ -371,6 +371,70 @@ describe('arena v2 turn resolution', () => {
     expect(result.players.find((player) => player.seatNo === 1)?.playerHealth).toBe(30);
     expect(rightBack?.damageTaken).toBe(3);
     expect(leftFront?.damageTaken).toBe(2);
+    const lineAttacks = result.replayEvents.filter((event) => event.eventType === 'line_attack');
+    expect(lineAttacks).toHaveLength(2);
+    expect(lineAttacks[0]?.payload).toMatchObject({
+      attackerSeatNo: 0,
+      targetSeatNo: 1,
+      cardInstanceId: 'left-front',
+      sourcePosition: { row: 'front', column: 0 },
+      targetCardInstanceId: 'right-back',
+      targetPosition: { row: 'back', column: 0 }
+    });
+    expect(lineAttacks[1]?.payload).toMatchObject({
+      attackerSeatNo: 1,
+      targetSeatNo: 0,
+      cardInstanceId: 'right-back',
+      sourcePosition: { row: 'back', column: 0 },
+      targetCardInstanceId: 'left-front',
+      targetPosition: { row: 'front', column: 0 }
+    });
+  });
+
+  it('removes a defeated back-row target before its attack phase', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-front-defeats-back-before-retaliation',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'left-front', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'right-back', position: { row: 'back', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('left-front', 0, 7, 6),
+        runtimeCard('right-back', 1, 2, 4),
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'left-front')?.damageTaken).toBe(0);
+    expect(result.players.find((player) => player.seatNo === 1)?.graveyardCardInstanceIds).toContain('right-back');
+    expect(result.replayEvents.filter((event) => event.eventType === 'line_attack')).toHaveLength(1);
+    expect(result.replayEvents.find((event) => event.eventType === 'card_defeated')?.payload).toMatchObject({
+      cardInstanceId: 'right-back',
+      targetPosition: { row: 'back', column: 0 }
+    });
   });
 
   it('makes back-row direct attacks deal attack minus one', () => {
@@ -723,6 +787,12 @@ describe('arena v2 turn resolution', () => {
 
     expect(result.cardInstances.find((card) => card.id === 'shield-target')?.damageTaken).toBe(1);
     expect(result.replayEvents.map((event) => event.eventType)).toContain('shield_absorb');
+    expect(result.replayEvents.find((event) => event.eventType === 'shield_absorb')?.payload).toMatchObject({
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 0 },
+      targetSeatNo: 1,
+      targetPosition: { row: 'front', column: 0 }
+    });
   });
 
   it('applies drain after health damage and counter after being damaged', () => {
@@ -768,6 +838,12 @@ describe('arena v2 turn resolution', () => {
     expect(result.cardInstances.find((card) => card.id === 'counter-target')?.damageTaken).toBe(3);
     expect(result.cardInstances.find((card) => card.id === 'drain-attacker')?.damageTaken).toBe(2);
     expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining(['drain', 'counter']));
+    expect(result.replayEvents.find((event) => event.eventType === 'counter')?.payload).toMatchObject({
+      sourceSeatNo: 1,
+      sourcePosition: { row: 'front', column: 1 },
+      targetSeatNo: 0,
+      targetPosition: { row: 'front', column: 1 }
+    });
   });
 
   it('prevents the targeted card attack step with stun', () => {
@@ -810,6 +886,12 @@ describe('arena v2 turn resolution', () => {
     expect(result.cardInstances.find((card) => card.id === 'stun-attacker')?.damageTaken).toBe(0);
     expect(result.cardInstances.find((card) => card.id === 'stunned-target')?.damageTaken).toBe(1);
     expect(result.replayEvents.map((event) => event.eventType)).toContain('stun_skip');
+    expect(result.replayEvents.find((event) => event.eventType === 'stun')?.payload).toMatchObject({
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 1 },
+      targetSeatNo: 1,
+      targetPosition: { row: 'front', column: 1 }
+    });
   });
 
   it('silences the target keyword effects for the current combat', () => {
@@ -902,6 +984,18 @@ describe('arena v2 turn resolution', () => {
     expect(rightBoard.find((card) => card.cardInstanceId === 'push-target')?.position).toEqual({ row: 'back', column: 0 });
     expect(rightBoard.find((card) => card.cardInstanceId === 'pull-target')?.position).toEqual({ row: 'front', column: 2 });
     expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining(['push', 'pull']));
+    expect(result.replayEvents.find((event) => event.eventType === 'push')?.payload).toMatchObject({
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 0 },
+      targetSeatNo: 1,
+      targetPosition: { row: 'back', column: 0 }
+    });
+    expect(result.replayEvents.find((event) => event.eventType === 'pull')?.payload).toMatchObject({
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 2 },
+      targetSeatNo: 1,
+      targetPosition: { row: 'front', column: 2 }
+    });
   });
 
   it('runs defeat effects for vengeance, spirit damage, residue shield, and graveyard recovery', () => {
@@ -958,6 +1052,18 @@ describe('arena v2 turn resolution', () => {
     expect(result.players.find((player) => player.seatNo === 0)?.playerHealth).toBe(29);
     expect(result.players.find((player) => player.seatNo === 1)?.handCardInstanceIds).toContain('old-grave');
     expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining(['vengeance', 'spirit_damage', 'residue', 'graveyard_recover']));
+    expect(result.replayEvents.find((event) => event.eventType === 'vengeance')?.payload).toMatchObject({
+      sourceSeatNo: 1,
+      sourcePosition: { row: 'front', column: 1 },
+      targetSeatNo: 0,
+      targetPosition: { row: 'front', column: 1 }
+    });
+    expect(result.replayEvents.find((event) => event.eventType === 'residue')?.payload).toMatchObject({
+      sourceSeatNo: 1,
+      sourcePosition: { row: 'front', column: 1 },
+      targetSeatNo: 1,
+      targetPosition: { row: 'back', column: 1 }
+    });
   });
 
   it('increments fatigue damage by each empty-deck draw attempt', () => {

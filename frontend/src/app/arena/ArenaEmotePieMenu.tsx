@@ -3,7 +3,7 @@
 import React from 'react';
 import Image from 'next/image';
 import { Sparkles } from 'lucide-react';
-import { API_BASE_URL } from '@/lib/api';
+import { resolveArenaAssetUrl } from '@/lib/arenaAssets';
 import { parseArenaCosmeticStyle } from '@/lib/arenaCosmetics';
 import { ArenaTooltip } from './ArenaTooltip';
 
@@ -21,15 +21,8 @@ type ArenaEmotePieMenuProps = {
   disabled?: boolean;
   compact?: boolean;
   centerLabel?: string;
+  centerHint?: string;
   ariaLabel?: string;
-};
-
-const resolveImageUrl = (value: unknown) => {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return '';
-  if (/^https?:\/\//i.test(raw) || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-  if (!raw.startsWith('/')) return '';
-  return API_BASE_URL ? `${API_BASE_URL.replace(/\/$/, '')}${raw}` : raw;
 };
 
 const sectorStyle = (index: number): React.CSSProperties => {
@@ -50,6 +43,7 @@ export const ArenaEmotePieMenu: React.FC<ArenaEmotePieMenuProps> = ({
   disabled = false,
   compact = false,
   centerLabel = '이모트',
+  centerHint = '선택',
   ariaLabel = '이모트 파이 메뉴'
 }) => (
   <div
@@ -65,7 +59,7 @@ export const ArenaEmotePieMenu: React.FC<ArenaEmotePieMenuProps> = ({
     {Array.from({ length: 8 }, (_, index) => {
       const item = slots[index] || null;
       const style = parseArenaCosmeticStyle(item?.style_json);
-      const imageUrl = resolveImageUrl(style.image_url);
+      const imageUrl = resolveArenaAssetUrl(style.image_url);
       const emoji = typeof style.emoji === 'string' && style.emoji.trim() ? style.emoji.trim() : '＋';
       const selected = selectedIndex === index;
       return (
@@ -102,7 +96,7 @@ export const ArenaEmotePieMenu: React.FC<ArenaEmotePieMenuProps> = ({
     <div className="arena-v2-pie-core" aria-hidden="true">
       <Sparkles />
       <strong>{selectedIndex === null ? centerLabel : `${selectedIndex + 1}번 슬롯`}</strong>
-      <span>{selectedIndex === null ? '선택' : '편집 중'}</span>
+      <span>{selectedIndex === null ? centerHint : '편집 중'}</span>
     </div>
   </div>
 );
