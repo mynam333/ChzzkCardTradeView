@@ -426,8 +426,8 @@ export const removeFriend = async (userId: string, friendId: string) => {
       `UPDATE chat_rooms
           SET closed_at = COALESCE(closed_at, UTC_TIMESTAMP()),
               closed_by_user_id = ?,
-              deleted_for_a = CASE WHEN user_a_id = ? THEN 1 ELSE deleted_for_a END,
-              deleted_for_b = CASE WHEN user_b_id = ? THEN 1 ELSE deleted_for_b END,
+              deleted_for_a = CASE WHEN user_a_id = ? THEN TRUE ELSE deleted_for_a END,
+              deleted_for_b = CASE WHEN user_b_id = ? THEN TRUE ELSE deleted_for_b END,
               hidden_after_a = CASE WHEN user_a_id = ? THEN UTC_TIMESTAMP() ELSE hidden_after_a END,
               hidden_after_b = CASE WHEN user_b_id = ? THEN UTC_TIMESTAMP() ELSE hidden_after_b END,
               updated_at = UTC_TIMESTAMP()

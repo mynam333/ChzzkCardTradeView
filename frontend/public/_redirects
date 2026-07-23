@@ -1,0 +1,1 @@
+/arena/matches/:match_id /arena/matches?match_id=:match_id 302

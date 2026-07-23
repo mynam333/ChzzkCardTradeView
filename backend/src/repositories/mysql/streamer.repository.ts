@@ -84,7 +84,9 @@ export class MysqlStreamerRepository implements IStreamerRepository {
     params.push(...consumedChatsExpr.params);
 
     if (polled) {
-      addCase('is_active', (row) => row.is_active ? 1 : 0);
+      // PostgreSQL은 CASE 결과를 BOOLEAN으로 추론한 뒤 드라이버의 boolean
+      // serializer를 사용하므로 0/1이 아니라 실제 boolean을 전달해야 합니다.
+      addCase('is_active', (row) => row.is_active);
       addCase('follower_count', (row) => row.follower_count);
       addCase('logo_url', (row) => row.logo_url ?? null);
       addCase('last_broadcast_at', (row) => row.last_broadcast_at ? this.normalizeUtcString(row.last_broadcast_at) : null);

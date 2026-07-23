@@ -56,6 +56,7 @@ import {
   getArenaKeywordTooltip,
   type ArenaTooltipData
 } from '@/lib/arenaTooltips';
+import { getArenaMatchHref } from '@/lib/arenaRoutes';
 import { useApp } from '../AppContext';
 import {
   ArenaCard,
@@ -969,7 +970,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const createdMatchId = json?.match?.matchId || json?.match?.id;
       toast('연습전이 시작되었습니다.', 'success');
       if (createdMatchId) {
-        router.push(`/arena/matches/${encodeURIComponent(createdMatchId)}`);
+        router.push(getArenaMatchHref(createdMatchId));
       } else {
         setNotice('시작 손패를 선택할 수 있습니다.');
       }
@@ -994,7 +995,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       const matchedMatchId = json?.ticket?.matchedMatchId;
       if (matchedMatchId) {
         toast('상대가 매칭되었습니다.', 'success');
-        router.push(`/arena/matches/${encodeURIComponent(matchedMatchId)}`);
+        router.push(getArenaMatchHref(matchedMatchId));
         return;
       }
       toast(queue === 'quick' ? '빠른대전 상대를 찾기 시작했습니다.' : '8인전 참가를 신청했습니다.', 'success');
@@ -1038,7 +1039,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '대기 취소 실패');
-      if (json?.matchId) router.push(`/arena/matches/${encodeURIComponent(json.matchId)}`);
+      if (json?.matchId) router.push(getArenaMatchHref(json.matchId));
       else toast(json?.cancelled ? '대기열을 취소했습니다.' : '이미 매칭된 대기열입니다.', json?.cancelled ? 'success' : 'info');
       await loadArenaV2();
     } catch (error: any) {
