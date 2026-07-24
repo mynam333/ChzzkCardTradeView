@@ -84,6 +84,36 @@ CREATE TABLE IF NOT EXISTS asset_event_logs (
     KEY idx_asset_event_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    audit_key VARCHAR(255) NOT NULL UNIQUE,
+    listing_id BIGINT,
+    event_type VARCHAR(64) NOT NULL,
+    related_user_id VARCHAR(191),
+    seller_id VARCHAR(191),
+    buyer_id VARCHAR(191),
+    current_bidder_id VARCHAR(191),
+    user_card_id BIGINT,
+    channel_id VARCHAR(191),
+    serial_number BIGINT,
+    star INT,
+    price BIGINT,
+    status VARCHAR(32),
+    listing_type VARCHAR(32),
+    current_bid BIGINT,
+    bid_reserved BIGINT,
+    fee BIGINT,
+    settled_amount BIGINT,
+    listing_created_at DATETIME,
+    listing_updated_at DATETIME,
+    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_market_audit_listing (listing_id, event_type),
+    KEY idx_market_audit_user (related_user_id, recorded_at),
+    KEY idx_market_audit_seller (seller_id, recorded_at),
+    KEY idx_market_audit_buyer (buyer_id, recorded_at),
+    KEY idx_market_audit_bidder (current_bidder_id, recorded_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id VARCHAR(191) NOT NULL,
     reward_key VARCHAR(191) NOT NULL,

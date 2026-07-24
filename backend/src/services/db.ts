@@ -862,7 +862,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   `);
 };
 
-const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
+export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   const ensureIndex = async (sql: string) => {
     try {
       await db.run(sql);
@@ -903,6 +903,71 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   } catch (err: any) {
     console.warn('[DB] pg_trgm 확장 보정 실패, trigram 검색 인덱스는 건너뜁니다:', err?.message || err);
   }
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS deleted_user_accounts (
+      user_id TEXT PRIMARY KEY,
+      deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      username_snapshot TEXT,
+      avatar_url_snapshot TEXT,
+      point_at_deletion BIGINT
+    )
+  `);
+  await db.run(`
+    ALTER TABLE deleted_user_accounts
+      ADD COLUMN IF NOT EXISTS username_snapshot TEXT,
+      ADD COLUMN IF NOT EXISTS avatar_url_snapshot TEXT,
+      ADD COLUMN IF NOT EXISTS point_at_deletion BIGINT
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+      id BIGSERIAL PRIMARY KEY,
+      audit_key TEXT NOT NULL,
+      listing_id BIGINT,
+      event_type TEXT NOT NULL,
+      related_user_id TEXT,
+      seller_id TEXT,
+      buyer_id TEXT,
+      current_bidder_id TEXT,
+      user_card_id BIGINT,
+      channel_id TEXT,
+      serial_number BIGINT,
+      star INTEGER,
+      price BIGINT,
+      status TEXT,
+      listing_type TEXT,
+      current_bid BIGINT,
+      bid_reserved BIGINT,
+      fee BIGINT,
+      settled_amount BIGINT,
+      listing_created_at TIMESTAMPTZ,
+      listing_updated_at TIMESTAMPTZ,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.run(`
+    ALTER TABLE market_transaction_audit_logs
+      ADD COLUMN IF NOT EXISTS audit_key TEXT,
+      ADD COLUMN IF NOT EXISTS listing_id BIGINT,
+      ADD COLUMN IF NOT EXISTS event_type TEXT,
+      ADD COLUMN IF NOT EXISTS related_user_id TEXT,
+      ADD COLUMN IF NOT EXISTS seller_id TEXT,
+      ADD COLUMN IF NOT EXISTS buyer_id TEXT,
+      ADD COLUMN IF NOT EXISTS current_bidder_id TEXT,
+      ADD COLUMN IF NOT EXISTS user_card_id BIGINT,
+      ADD COLUMN IF NOT EXISTS channel_id TEXT,
+      ADD COLUMN IF NOT EXISTS serial_number BIGINT,
+      ADD COLUMN IF NOT EXISTS star INTEGER,
+      ADD COLUMN IF NOT EXISTS price BIGINT,
+      ADD COLUMN IF NOT EXISTS status TEXT,
+      ADD COLUMN IF NOT EXISTS listing_type TEXT,
+      ADD COLUMN IF NOT EXISTS current_bid BIGINT,
+      ADD COLUMN IF NOT EXISTS bid_reserved BIGINT,
+      ADD COLUMN IF NOT EXISTS fee BIGINT,
+      ADD COLUMN IF NOT EXISTS settled_amount BIGINT,
+      ADD COLUMN IF NOT EXISTS listing_created_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS listing_updated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS market_listings (
       id BIGSERIAL PRIMARY KEY,
@@ -1102,6 +1167,11 @@ const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_notifications_group_key ON notifications (user_id, group_key) WHERE group_key IS NOT NULL');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_watches_user_channel_star ON market_watches (user_id, channel_id, star)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_audit_key ON market_transaction_audit_logs (audit_key)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs (listing_id, event_type)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs (related_user_id, recorded_at DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_audit_seller ON market_transaction_audit_logs (seller_id, recorded_at DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_audit_buyer ON market_transaction_audit_logs (buyer_id, recorded_at DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_audit_bidder ON market_transaction_audit_logs (current_bidder_id, recorded_at DESC)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_asset_event_logs_key ON asset_event_logs (event_key)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_tutorial_rewards_key ON tutorial_rewards (user_id, reward_key)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_coupon_logs_user ON coupon_logs (coupon_id, user_id)');

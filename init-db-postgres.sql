@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     avatar_url_snapshot TEXT,
     point_at_deletion BIGINT
 );
+ALTER TABLE deleted_user_accounts
+    ADD COLUMN IF NOT EXISTS username_snapshot TEXT,
+    ADD COLUMN IF NOT EXISTS avatar_url_snapshot TEXT,
+    ADD COLUMN IF NOT EXISTS point_at_deletion BIGINT;
 
 CREATE INDEX IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_users_id_trgm ON users USING GIN (id gin_trgm_ops);
@@ -122,6 +126,59 @@ CREATE INDEX IF NOT EXISTS idx_asset_event_source ON asset_event_logs(source_typ
 CREATE INDEX IF NOT EXISTS idx_asset_event_card ON asset_event_logs(card_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_asset_event_item ON asset_event_logs(item_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_asset_event_created ON asset_event_logs(created_at);
+
+CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    audit_key TEXT NOT NULL,
+    listing_id BIGINT,
+    event_type TEXT NOT NULL,
+    related_user_id TEXT,
+    seller_id TEXT,
+    buyer_id TEXT,
+    current_bidder_id TEXT,
+    user_card_id BIGINT,
+    channel_id TEXT,
+    serial_number BIGINT,
+    star INTEGER,
+    price BIGINT,
+    status TEXT,
+    listing_type TEXT,
+    current_bid BIGINT,
+    bid_reserved BIGINT,
+    fee BIGINT,
+    settled_amount BIGINT,
+    listing_created_at TIMESTAMPTZ,
+    listing_updated_at TIMESTAMPTZ,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE market_transaction_audit_logs
+    ADD COLUMN IF NOT EXISTS audit_key TEXT,
+    ADD COLUMN IF NOT EXISTS listing_id BIGINT,
+    ADD COLUMN IF NOT EXISTS event_type TEXT,
+    ADD COLUMN IF NOT EXISTS related_user_id TEXT,
+    ADD COLUMN IF NOT EXISTS seller_id TEXT,
+    ADD COLUMN IF NOT EXISTS buyer_id TEXT,
+    ADD COLUMN IF NOT EXISTS current_bidder_id TEXT,
+    ADD COLUMN IF NOT EXISTS user_card_id BIGINT,
+    ADD COLUMN IF NOT EXISTS channel_id TEXT,
+    ADD COLUMN IF NOT EXISTS serial_number BIGINT,
+    ADD COLUMN IF NOT EXISTS star INTEGER,
+    ADD COLUMN IF NOT EXISTS price BIGINT,
+    ADD COLUMN IF NOT EXISTS status TEXT,
+    ADD COLUMN IF NOT EXISTS listing_type TEXT,
+    ADD COLUMN IF NOT EXISTS current_bid BIGINT,
+    ADD COLUMN IF NOT EXISTS bid_reserved BIGINT,
+    ADD COLUMN IF NOT EXISTS fee BIGINT,
+    ADD COLUMN IF NOT EXISTS settled_amount BIGINT,
+    ADD COLUMN IF NOT EXISTS listing_created_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS listing_updated_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_market_audit_key ON market_transaction_audit_logs(audit_key);
+CREATE INDEX IF NOT EXISTS idx_market_audit_listing ON market_transaction_audit_logs(listing_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_market_audit_user ON market_transaction_audit_logs(related_user_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_audit_seller ON market_transaction_audit_logs(seller_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_audit_buyer ON market_transaction_audit_logs(buyer_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_audit_bidder ON market_transaction_audit_logs(current_bidder_id, recorded_at DESC);
 
 CREATE TABLE IF NOT EXISTS tutorial_rewards (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
