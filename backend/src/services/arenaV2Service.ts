@@ -1,9 +1,13 @@
 import crypto from 'crypto';
+import Database from 'better-sqlite3';
 import type {
   ArenaV2CardClassDto,
   ArenaV2CardVersionDto,
+  ArenaV2PhaseTimingDto,
   ArenaV2TurnActionDto,
-  ArenaV2ValidationResultDto
+  ArenaV2ValidationResultDto,
+  ArenaV2ViewerResultDto,
+  ArenaV2ViewerRoleDto
 } from '@chikapo/arena-contract';
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
 import {
@@ -12,6 +16,7 @@ import {
   createArenaV2BotTurnActions,
   evaluateArenaV2CardBudget,
   getArenaV2AvailableCost,
+  getArenaV2FreeTacticalMoveCount,
   resolveArenaV2Turn,
   validateArenaV2CardVersionDefinition,
   validateArenaV2Deck,
@@ -20,12 +25,21 @@ import {
   type ArenaV2RuntimePlayer,
   type ArenaV2TurnResolutionResult
 } from './arenaV2Engine';
+import {
+  applyArenaV2PendingByeDrawsForClone,
+  normalizeArenaV2BattleRoyaleParticipant,
+  resolveArenaV2BattleRoyaleRound,
+  scheduleArenaV2BattleRoyaleRound,
+  type ArenaV2BattleRoyaleParticipantState,
+  type ArenaV2BattleRoyaleRoundMatchResult
+} from './arenaV2BattleRoyale';
 import { formatUploadUrl } from './imageService';
 
 type SqlExecutor = {
   all<T = any>(sql: string, ...args: any[]): Promise<T[]> | T[];
   get<T = any>(sql: string, ...args: any[]): Promise<T | undefined> | T | undefined;
   run(sql: string, ...args: any[]): Promise<any> | any;
+  transaction?<T>(task: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 };
 
 let testExecutor: SqlExecutor | null = null;
@@ -154,7 +168,121 @@ const jsonParse = <T>(value: unknown, fallback: T): T => {
   }
 };
 
+
+type ArenaV2StoredSummary = Record<string, unknown> & {
+  phaseTiming?: Partial<ArenaV2PhaseTimingDto>;
+  viewerResultsByUser?: Record<string, Partial<ArenaV2ViewerResultDto>>;
+};
+
+type ArenaV2BattleRoyaleParticipant = Record<string, unknown> & {
+  userId?: string;
+  user_id?: string;
+  status?: string;
+  finalRank?: number | null;
+  final_rank?: number | null;
+  currentMatchId?: string | null;
+  current_match_id?: string | null;
+  nextMatchId?: string | null;
+  next_match_id?: string | null;
+};
+
+type ArenaV2BattleRoyaleViewerContext = {
+  placement: number | null;
+  sharedPlacement: boolean;
+  canSpectate: boolean;
+  nextMatchId: string | null;
+};
+
+const ARENA_V2_TURN_INTRO_MS = 1_400;
+const ARENA_V2_TURN_PLANNING_MS = 40_000;
+const ARENA_V2_REPLAY_BUFFER_MS = 2_400;
+const ARENA_V2_REPLAY_EVENT_DURATION_MS: Record<string, number> = {
+  line_attack: 820,
+  direct_attack: 820,
+  card_attack: 820,
+  card_defeated: 720,
+  revive: 720,
+  shield_absorb: 620,
+  overflow_damage: 620,
+  counter: 620,
+  silence: 620,
+  stun: 620,
+  push: 620,
+  pull: 620,
+  drain: 620,
+  vengeance: 620,
+  residue: 620,
+  spirit_damage: 620,
+  fatigue: 620
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const parseNullableRank = (value: unknown): number | null => {
+  if (value == null || value === '') return null;
+  const rank = Number(value);
+  return Number.isInteger(rank) && rank > 0 ? rank : null;
+};
+
+const getArenaV2ReplayDurationMs = (events: Array<{ eventType: string }>): number => {
+  const visualDurationMs = events.reduce(
+    (total, replayEvent) => total + (ARENA_V2_REPLAY_EVENT_DURATION_MS[replayEvent.eventType] || 0),
+    0
+  );
+  return visualDurationMs + ARENA_V2_REPLAY_BUFFER_MS;
+};
+
+const createArenaV2PhaseTiming = (
+  events: Array<{ eventType: string }>,
+  nowMs = Date.now()
+): ArenaV2PhaseTimingDto => {
+  const replayDurationMs = getArenaV2ReplayDurationMs(events);
+  const replayEndsAtMs = nowMs + replayDurationMs;
+  const planningStartsAtMs = replayEndsAtMs + ARENA_V2_TURN_INTRO_MS;
+  return {
+    replayDurationMs,
+    replayEndsAt: new Date(replayEndsAtMs).toISOString(),
+    introDurationMs: ARENA_V2_TURN_INTRO_MS,
+    planningStartsAt: new Date(planningStartsAtMs).toISOString(),
+    turnDeadlineAt: new Date(planningStartsAtMs + ARENA_V2_TURN_PLANNING_MS).toISOString(),
+    serverNow: new Date(nowMs).toISOString()
+  };
+};
+
+const parseArenaV2StoredSummary = (value: unknown): ArenaV2StoredSummary => {
+  const parsed = jsonParse<unknown>(value, {});
+  return isRecord(parsed) ? parsed as ArenaV2StoredSummary : {};
+};
+
+const serializeArenaV2PhaseTiming = (
+  summary: ArenaV2StoredSummary,
+  serverNow = new Date().toISOString()
+): ArenaV2PhaseTimingDto | null => {
+  const timing = summary.phaseTiming;
+  if (!isRecord(timing)) return null;
+  const replayDurationMs = Math.max(0, Number(timing.replayDurationMs || 0));
+  const introDurationMs = Math.max(0, Number(timing.introDurationMs || 0));
+  const replayEndsAt = typeof timing.replayEndsAt === 'string' ? timing.replayEndsAt : null;
+  const planningStartsAt = typeof timing.planningStartsAt === 'string' ? timing.planningStartsAt : null;
+  const turnDeadlineAt = typeof timing.turnDeadlineAt === 'string' ? timing.turnDeadlineAt : null;
+  return {
+    replayDurationMs,
+    replayEndsAt,
+    introDurationMs,
+    planningStartsAt,
+    turnDeadlineAt,
+    serverNow
+  };
+};
+
+const publicArenaV2ResultSummary = (summary: ArenaV2StoredSummary): ArenaV2StoredSummary => {
+  const { viewerResultsByUser: _privateViewerResults, ...publicSummary } = summary;
+  return publicSummary;
+};
+
 const makeId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+const makeDeterministicId = (prefix: string, value: string) => `${prefix}_${stableHash(value).slice(0, 32)}`;
 
 const stableHash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 const stableNumber = (value: string, modulo: number): number => Number.parseInt(stableHash(value).slice(0, 8), 16) % modulo;
@@ -542,6 +670,106 @@ const runSql = async (db: SqlExecutor, sql: string, params: any[] = []) => {
   return result instanceof Promise ? await result : result;
 };
 
+let arenaV2SqliteTransactionTail: Promise<void> = Promise.resolve();
+
+const withArenaV2Transaction = async <T>(task: (tx: SqlExecutor) => Promise<T>): Promise<T> => {
+  if (testExecutor) {
+    return testExecutor.transaction ? testExecutor.transaction(task) : task(testExecutor);
+  }
+  if (getDbMode() === 'MYSQL') {
+    const remoteDb = getMysqlDb();
+    return remoteDb.transaction(async (tx) => task(tx));
+  }
+  if (getDbMode() !== 'LOCAL_SQL') throw new Error('ArenaV2SqlDbRequired');
+
+  let releaseTransaction!: () => void;
+  const previousTransaction = arenaV2SqliteTransactionTail;
+  arenaV2SqliteTransactionTail = new Promise<void>((resolve) => {
+    releaseTransaction = resolve;
+  });
+  await previousTransaction;
+
+  let sqlite: Database.Database | null = null;
+  let began = false;
+  try {
+    const sqlitePath = getSqliteDb().name;
+    sqlite = new Database(sqlitePath);
+    sqlite.pragma('busy_timeout = 5000');
+    sqlite.pragma('foreign_keys = ON');
+    const sqliteExecutor: SqlExecutor = {
+      all: <TRow = any>(sql: string, params: any[] = []) => sqlite!.prepare(sql).all(...params) as TRow[],
+      get: <TRow = any>(sql: string, params: any[] = []) => sqlite!.prepare(sql).get(...params) as TRow | undefined,
+      run: (sql: string, params: any[] = []) => sqlite!.prepare(sql).run(...params)
+    };
+    sqlite.exec('BEGIN IMMEDIATE');
+    began = true;
+    const result = await task(sqliteExecutor);
+    sqlite.exec('COMMIT');
+    began = false;
+    return result;
+  } catch (error) {
+    if (sqlite && began) {
+      try {
+        sqlite.exec('ROLLBACK');
+      } catch {
+        // Preserve the original open, begin, task, or commit failure.
+      }
+    }
+    throw error;
+  } finally {
+    try {
+      sqlite?.close();
+    } catch {
+      // Releasing the serialized transaction tail is more important than a close error.
+    } finally {
+      releaseTransaction();
+    }
+  }
+};
+
+const arenaV2ForUpdateClause = () => (
+  getDbMode() === 'MYSQL' && !testExecutor ? 'FOR UPDATE' : ''
+);
+
+const affectedRows = (result: any) => Number(result?.changes ?? result?.affectedRows ?? 0);
+const isArenaV2DuplicateKeyError = (error: any) => (
+  ['ER_DUP_ENTRY', '23505', 'SQLITE_CONSTRAINT_UNIQUE'].includes(String(error?.code || ''))
+  || /duplicate key|unique constraint/i.test(String(error?.message || ''))
+);
+
+const promoteArenaV2TurnResultIfReady = async (
+  db: SqlExecutor,
+  match: any,
+  nowMs = Date.now()
+): Promise<any> => {
+  if (match?.status !== 'turn_result') return match;
+  const summary = parseArenaV2StoredSummary(match.result_summary);
+  const phaseTiming = serializeArenaV2PhaseTiming(summary, new Date(nowMs).toISOString());
+  const planningStartsAtMs = phaseTiming?.planningStartsAt ? Date.parse(phaseTiming.planningStartsAt) : Number.NaN;
+  if (Number.isFinite(planningStartsAtMs) && planningStartsAtMs > nowMs) return match;
+
+  const nextSummary: ArenaV2StoredSummary = { ...summary, status: 'turn_planning' };
+  const updated = await runSql(
+    db,
+    `
+      UPDATE arena_v2_matches
+         SET status = 'turn_planning',
+             result_summary = ?,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'turn_result'
+    `,
+    [JSON.stringify(nextSummary), match.id]
+  );
+  const affectedRows = Number(updated?.changes ?? updated?.affectedRows ?? 1);
+  if (affectedRows <= 0) return match;
+  return {
+    ...match,
+    status: 'turn_planning',
+    result_summary: JSON.stringify(nextSummary),
+    updated_at: new Date(nowMs).toISOString()
+  };
+};
+
 const defaultArenaV2PreparationSeasonInput = (): ArenaV2AdminSeasonInput => {
   const now = new Date();
   const endsAt = new Date(now.getTime());
@@ -743,15 +971,14 @@ export const transitionArenaV2SeasonAdmin = async (seasonId: string, toStatus: s
   return { season: await getArenaV2SeasonById(seasonId), transition: { fromStatus: existing.status, toStatus, reason } };
 };
 
-export const validateArenaV2DeckForSeason = async (seasonId: string, cardVersionIds: string[]) => {
-  const db = getExecutor();
-  if (!db) {
-    return validateArenaV2Deck({ seasonId, cardVersionIds, cardsByVersionId: {} });
-  }
+const validateArenaV2DeckForSeasonWithExecutor = async (
+  db: SqlExecutor,
+  seasonId: string,
+  cardVersionIds: string[]
+) => {
   if (cardVersionIds.length === 0) {
     return validateArenaV2Deck({ seasonId, cardVersionIds, cardsByVersionId: {} });
   }
-
   const placeholders = cardVersionIds.map(() => '?').join(', ');
   const rows = await queryAll<any>(
     db,
@@ -780,6 +1007,14 @@ export const validateArenaV2DeckForSeason = async (seasonId: string, cardVersion
   }
 
   return validateArenaV2Deck({ seasonId, cardVersionIds, cardsByVersionId });
+};
+
+export const validateArenaV2DeckForSeason = async (seasonId: string, cardVersionIds: string[]) => {
+  const db = getExecutor();
+  if (!db) {
+    return validateArenaV2Deck({ seasonId, cardVersionIds, cardsByVersionId: {} });
+  }
+  return validateArenaV2DeckForSeasonWithExecutor(db, seasonId, cardVersionIds);
 };
 
 const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: any) => {
@@ -1530,6 +1765,79 @@ export const listArenaV2DecksForUser = async (userId: string, seasonId?: string)
   }));
 };
 
+const lockArenaV2User = async (db: SqlExecutor, userId: string) => {
+  await queryGet(db, `SELECT id FROM users WHERE id = ? LIMIT 1 ${arenaV2ForUpdateClause()}`, [userId]);
+};
+
+const findArenaV2ActiveParticipationForUser = async (db: SqlExecutor, userId: string) => {
+  const now = new Date().toISOString();
+  return queryGet<any>(
+    db,
+    `SELECT activity_kind, reference_id
+       FROM (
+         SELECT 'quick_queue' AS activity_kind, q.id AS reference_id
+           FROM arena_v2_match_queue q
+           LEFT JOIN arena_v2_matches m ON m.id = q.matched_match_id
+          WHERE q.user_id = ?
+            AND ((q.status = 'waiting' AND q.expires_at >= ?)
+              OR q.status IN ('proposed', 'accepted', 'matching')
+              OR (q.status = 'matched' AND m.status NOT IN ('completed', 'cancelled')))
+         UNION ALL
+         SELECT 'battle_royale' AS activity_kind, q.id AS reference_id
+           FROM arena_v2_battle_royale_queue q
+           LEFT JOIN arena_v2_battle_royales br ON br.id = q.battle_royale_id
+          WHERE q.user_id = ?
+            AND ((q.status = 'waiting' AND q.expires_at >= ?)
+              OR (q.status = 'matched' AND br.status = 'active'))
+         UNION ALL
+         SELECT 'match' AS activity_kind, p.match_id AS reference_id
+           FROM arena_v2_match_players p
+           JOIN arena_v2_matches m ON m.id = p.match_id
+          WHERE p.user_id = ? AND m.status NOT IN ('completed', 'cancelled')
+       ) active_participation
+      LIMIT 1`,
+    [userId, now, userId, now, userId]
+  );
+};
+
+const assertArenaV2UserAvailable = async (db: SqlExecutor, userId: string) => {
+  if (await findArenaV2ActiveParticipationForUser(db, userId)) {
+    throw new Error('ArenaV2AlreadyActive');
+  }
+};
+
+const assertArenaV2DeckNotInUse = async (db: SqlExecutor, deckId: string) => {
+  const now = new Date().toISOString();
+  const active = await queryGet<any>(
+    db,
+    `SELECT activity_kind
+       FROM (
+         SELECT 'quick_queue' AS activity_kind
+           FROM arena_v2_match_queue q
+           LEFT JOIN arena_v2_matches m ON m.id = q.matched_match_id
+          WHERE q.deck_id = ?
+            AND ((q.status = 'waiting' AND q.expires_at >= ?)
+              OR q.status IN ('proposed', 'accepted', 'matching')
+              OR (q.status = 'matched' AND m.status NOT IN ('completed', 'cancelled')))
+         UNION ALL
+         SELECT 'battle_royale' AS activity_kind
+           FROM arena_v2_battle_royale_queue q
+           LEFT JOIN arena_v2_battle_royales br ON br.id = q.battle_royale_id
+          WHERE q.deck_id = ?
+            AND ((q.status = 'waiting' AND q.expires_at >= ?)
+              OR (q.status = 'matched' AND br.status = 'active'))
+         UNION ALL
+         SELECT 'match' AS activity_kind
+           FROM arena_v2_match_players p
+           JOIN arena_v2_matches m ON m.id = p.match_id
+          WHERE p.deck_id = ? AND m.status NOT IN ('completed', 'cancelled')
+       ) active_deck
+      LIMIT 1`,
+    [deckId, now, deckId, now, deckId]
+  );
+  if (active) throw new Error('ArenaV2DeckInUse');
+};
+
 export const saveArenaV2Deck = async (input: ArenaV2SaveDeckInput) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
@@ -1548,33 +1856,37 @@ export const saveArenaV2Deck = async (input: ArenaV2SaveDeckInput) => {
   const validationJson = JSON.stringify(validation);
 
   if (input.deckId) {
-    const existing = await queryGet<{ id: string; user_id: string }>(
-      db,
-      'SELECT id, user_id FROM arena_v2_decks WHERE id = ? LIMIT 1',
-      [input.deckId]
-    );
-    if (!existing) {
-      throw new Error('ArenaV2DeckNotFound');
-    }
-    if (existing.user_id !== input.userId) {
-      throw new Error('ArenaV2DeckForbidden');
-    }
-    await runSql(
-      db,
-      `
-        UPDATE arena_v2_decks
-           SET season_id = ?,
-               name = ?,
-               mode_scope = ?,
-               card_version_ids = ?,
-               validation_hash = ?,
-               is_valid = ?,
-               validation_result = ?,
-               updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND user_id = ?
-      `,
-      [input.seasonId, input.name, input.modeScope, cardVersionIdsJson, validationHash, validation.valid ? 1 : 0, validationJson, deckId, input.userId]
-    );
+    await withArenaV2Transaction(async (tx) => {
+      await lockArenaV2User(tx, input.userId);
+      const existing = await queryGet<{ id: string; user_id: string }>(
+        tx,
+        'SELECT id, user_id FROM arena_v2_decks WHERE id = ? LIMIT 1',
+        [input.deckId]
+      );
+      if (!existing) {
+        throw new Error('ArenaV2DeckNotFound');
+      }
+      if (existing.user_id !== input.userId) {
+        throw new Error('ArenaV2DeckForbidden');
+      }
+      await assertArenaV2DeckNotInUse(tx, input.deckId!);
+      await runSql(
+        tx,
+        `
+          UPDATE arena_v2_decks
+             SET season_id = ?,
+                 name = ?,
+                 mode_scope = ?,
+                 card_version_ids = ?,
+                 validation_hash = ?,
+                 is_valid = ?,
+                 validation_result = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND user_id = ?
+        `,
+        [input.seasonId, input.name, input.modeScope, cardVersionIdsJson, validationHash, validation.valid ? 1 : 0, validationJson, deckId, input.userId]
+      );
+    });
   } else {
     await runSql(
       db,
@@ -1601,19 +1913,21 @@ export const saveArenaV2Deck = async (input: ArenaV2SaveDeckInput) => {
   };
 };
 
-export const revalidateArenaV2DeckForUser = async (userId: string, deckId: string) => {
+export const revalidateArenaV2DeckForUser = async (userId: string, deckId: string) => withArenaV2Transaction(async (tx) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
+  await lockArenaV2User(tx, userId);
   const deck = await queryGet<any>(
-    db,
+    tx,
     'SELECT id, user_id, season_id, name, mode_scope, card_version_ids, validation_hash, is_valid, validation_result FROM arena_v2_decks WHERE id = ? LIMIT 1',
     [deckId]
   );
   if (!deck) throw new Error('ArenaV2DeckNotFound');
   if (deck.user_id !== userId) throw new Error('ArenaV2DeckForbidden');
+  await assertArenaV2DeckNotInUse(tx, deckId);
 
   const cardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
-  const validation = await validateArenaV2DeckForSeason(deck.season_id, cardVersionIds);
+  const validation = await validateArenaV2DeckForSeasonWithExecutor(tx, deck.season_id, cardVersionIds);
   const validationHash = crypto
     .createHash('sha256')
     .update(JSON.stringify({
@@ -1624,7 +1938,7 @@ export const revalidateArenaV2DeckForUser = async (userId: string, deckId: strin
     }))
     .digest('hex');
   await runSql(
-    db,
+    tx,
     `
       UPDATE arena_v2_decks
          SET validation_hash = ?,
@@ -1646,21 +1960,23 @@ export const revalidateArenaV2DeckForUser = async (userId: string, deckId: strin
     isValid: validation.valid,
     validationResult: validation
   };
-};
+});
 
-export const deleteArenaV2DeckForUser = async (userId: string, deckId: string) => {
+export const deleteArenaV2DeckForUser = async (userId: string, deckId: string) => withArenaV2Transaction(async (tx) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
+  await lockArenaV2User(tx, userId);
   const existing = await queryGet<{ id: string; user_id: string }>(
-    db,
+    tx,
     'SELECT id, user_id FROM arena_v2_decks WHERE id = ? LIMIT 1',
     [deckId]
   );
   if (!existing) throw new Error('ArenaV2DeckNotFound');
   if (existing.user_id !== userId) throw new Error('ArenaV2DeckForbidden');
-  await runSql(db, 'DELETE FROM arena_v2_decks WHERE id = ? AND user_id = ?', [deckId, userId]);
+  await assertArenaV2DeckNotInUse(tx, deckId);
+  await runSql(tx, 'DELETE FROM arena_v2_decks WHERE id = ? AND user_id = ?', [deckId, userId]);
   return { deleted: true };
-};
+});
 
 export const createArenaV2Match = async (input: ArenaV2CreateMatchInput) => {
   const db = getExecutor();
@@ -1668,6 +1984,10 @@ export const createArenaV2Match = async (input: ArenaV2CreateMatchInput) => {
   if (input.mode !== 'bot') {
     throw new Error(input.mode === 'quick' ? 'ArenaV2UseQuickQueue' : 'ArenaV2UseBattleRoyaleQueue');
   }
+  return withArenaV2Transaction(async (tx) => {
+    const db = tx;
+    await lockArenaV2User(tx, input.userId);
+    await assertArenaV2UserAvailable(tx, input.userId);
 
   const deck = await queryGet<any>(
     db,
@@ -1688,7 +2008,7 @@ export const createArenaV2Match = async (input: ArenaV2CreateMatchInput) => {
   if (!season) throw new Error('ArenaV2SeasonClosed');
 
   const playerCardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
-  const validation = await validateArenaV2DeckForSeason(seasonId, playerCardVersionIds);
+  const validation = await validateArenaV2DeckForSeasonWithExecutor(tx, seasonId, playerCardVersionIds);
   if (!validation.valid) throw new Error('ArenaV2DeckInvalid');
 
   const playerCards = await loadArenaV2CardVersionsByIds(db, playerCardVersionIds);
@@ -1724,7 +2044,14 @@ export const createArenaV2Match = async (input: ArenaV2CreateMatchInput) => {
       VALUES
         (?, ?, 'bot', 'mulligan', NULL, 0, 1, ?, 'arena-v2-gdd-1.0.0', ?, ?)
     `,
-    [matchId, seasonId, seed, season.card_pool_version, JSON.stringify({ status: 'mulligan', botDifficulty: input.botDifficulty || 'normal' })]
+    [
+      matchId,
+      seasonId,
+      seed,
+      season.card_pool_version,
+      JSON.stringify({ status: 'mulligan', botDifficulty: input.botDifficulty || 'normal',
+        mulliganDeadlineAt: new Date(Date.now() + ARENA_V2_TURN_PLANNING_MS).toISOString() })
+    ]
   );
 
   await insertArenaV2MatchPlayer(db, {
@@ -1785,291 +2112,961 @@ export const createArenaV2Match = async (input: ArenaV2CreateMatchInput) => {
       botDifficulty: input.botDifficulty || 'normal'
     }
   };
-};
-
-export const joinArenaV2QuickQueue = async (input: ArenaV2JoinQueueInput) => {
-  const db = getExecutor();
-  if (!db) throw new Error('ArenaV2SqlDbRequired');
-  const deck = await loadValidArenaV2DeckForUse(db, input.userId, input.deckId, input.seasonId);
-  await expireArenaV2QueueRows(db, deck.seasonId, input.userId);
-  const existing = await queryGet<any>(
-    db,
-    `
-      SELECT id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, matched_match_id, joined_at, updated_at, expires_at
-        FROM arena_v2_match_queue
-       WHERE season_id = ? AND user_id = ? AND status = 'waiting'
-       ORDER BY joined_at DESC
-       LIMIT 1
-    `,
-    [deck.seasonId, input.userId]
-  );
-  if (existing) return serializeArenaV2QuickQueue(existing);
-  const ticketId = makeId('arena_v2_queue');
-  const mmr = 1000;
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  const opponent = await queryGet<any>(
-    db,
-    `
-      SELECT id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, matched_match_id, joined_at, updated_at, expires_at
-        FROM arena_v2_match_queue
-       WHERE season_id = ?
-         AND status = 'waiting'
-         AND user_id <> ?
-         AND search_min_mmr <= ?
-         AND search_max_mmr >= ?
-       ORDER BY joined_at ASC
-       LIMIT 1
-    `,
-    [deck.seasonId, input.userId, mmr, mmr]
-  );
-  if (opponent) {
-    const matchId = await createArenaV2MatchFromDeckSeats(db, {
-      seasonId: deck.seasonId,
-      cardPoolVersion: deck.season.card_pool_version,
-      mode: 'quick',
-      battleRoyaleId: null,
-      roundNo: 0,
-      seats: [
-        { seatNo: 0, userId: opponent.user_id, deckId: opponent.deck_id },
-        { seatNo: 1, userId: input.userId, deckId: input.deckId }
-      ],
-      summary: { status: 'mulligan', queue: 'quick', matchedUsers: [opponent.user_id, input.userId] }
-    });
-    await runSql(
-      db,
-      `
-        UPDATE arena_v2_match_queue
-           SET status = 'matched',
-               matched_match_id = ?,
-               updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND status = 'waiting'
-      `,
-      [matchId, opponent.id]
-    );
-    await runSql(
-      db,
-      `
-        INSERT INTO arena_v2_match_queue
-          (id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, matched_match_id, expires_at)
-        VALUES
-          (?, ?, ?, ?, ?, 'matched', ?, ?, ?, ?)
-      `,
-      [ticketId, deck.seasonId, input.userId, input.deckId, mmr, mmr - 150, mmr + 150, matchId, expiresAt]
-    );
-    return serializeArenaV2QuickQueue({
-      id: ticketId,
-      season_id: deck.seasonId,
-      user_id: input.userId,
-      deck_id: input.deckId,
-      mmr,
-      status: 'matched',
-      search_min_mmr: mmr - 150,
-      search_max_mmr: mmr + 150,
-      matched_match_id: matchId,
-      joined_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      expires_at: expiresAt
-    });
-  }
-  await runSql(
-    db,
-    `
-      INSERT INTO arena_v2_match_queue
-        (id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, expires_at)
-      VALUES
-        (?, ?, ?, ?, ?, 'waiting', ?, ?, ?)
-    `,
-    [ticketId, deck.seasonId, input.userId, input.deckId, mmr, mmr - 150, mmr + 150, expiresAt]
-  );
-  return serializeArenaV2QuickQueue({
-    id: ticketId,
-    season_id: deck.seasonId,
-    user_id: input.userId,
-    deck_id: input.deckId,
-    mmr,
-    status: 'waiting',
-    search_min_mmr: mmr - 150,
-    search_max_mmr: mmr + 150,
-    matched_match_id: null,
-    joined_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    expires_at: expiresAt
   });
 };
 
-export const getArenaV2QuickQueueStatus = async (userId: string, seasonId?: string) => {
-  const db = getExecutor();
-  if (!db) return { status: 'none' as const, ticket: null };
-  const season = seasonId ? { id: seasonId } : await getArenaV2CurrentSeason();
-  if (!season?.id) return { status: 'none' as const, ticket: null };
-  await expireArenaV2QueueRows(db, season.id, userId);
+// Server-authoritative quick-match ready-check implementation.
+const ARENA_V2_QUICK_ACCEPT_WINDOW_MS = 10_000;
+const ARENA_V2_QUICK_QUEUE_TTL_MS = 10 * 60_000;
+const ARENA_V2_QUICK_INITIAL_RANGE = 100;
+const ARENA_V2_QUICK_RANGE_STEP = 50;
+const ARENA_V2_QUICK_RANGE_STEP_MS = 15_000;
+const ARENA_V2_QUICK_MAX_MMR_GAP = 500;
+const ARENA_V2_QUICK_PENALTY_DELAY_MS = 15_000;
+
+const arenaV2QuickRangeAt = (joinedAt: unknown, nowMs = Date.now()) => {
+  const joinedAtMs = Date.parse(String(joinedAt || ''));
+  const elapsedMs = Number.isFinite(joinedAtMs) ? Math.max(0, nowMs - joinedAtMs) : 0;
+  return Math.min(
+    ARENA_V2_QUICK_MAX_MMR_GAP,
+    ARENA_V2_QUICK_INITIAL_RANGE + Math.floor(elapsedMs / ARENA_V2_QUICK_RANGE_STEP_MS) * ARENA_V2_QUICK_RANGE_STEP
+  );
+};
+
+const arenaV2QuickTicketSelect = `
+  SELECT q.id, q.season_id, q.user_id, q.deck_id, q.mmr, q.status,
+         q.search_min_mmr, q.search_max_mmr, q.proposal_id, q.accept_deadline_at,
+         q.accepted_at, q.matched_match_id, q.last_transition_reason,
+         q.joined_at, q.updated_at, q.expires_at
+    FROM arena_v2_matchmaking_active_slots slot
+    JOIN arena_v2_match_queue q ON q.id = slot.ticket_id
+`;
+
+const readArenaV2QuickActiveTicket = async (
+  db: SqlExecutor,
+  seasonId: string,
+  userId: string,
+  lock = false
+) => {
   const row = await queryGet<any>(
     db,
-    `
-      SELECT id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, matched_match_id, joined_at, updated_at, expires_at
-        FROM arena_v2_match_queue
-       WHERE season_id = ? AND user_id = ? AND status IN ('waiting', 'matched')
-       ORDER BY joined_at DESC
-       LIMIT 1
-    `,
-    [season.id, userId]
+    `${arenaV2QuickTicketSelect}
+      WHERE slot.season_id = ? AND slot.user_id = ?
+        AND q.status IN ('waiting', 'proposed', 'accepted', 'matched')
+      LIMIT 1
+      ${lock ? arenaV2ForUpdateClause() : ''}`,
+    [seasonId, userId]
   );
-  if (!row) return { status: 'none' as const, ticket: null };
-  const ticket = serializeArenaV2QuickQueue(row);
+  if (!row) {
+    await runSql(db, 'DELETE FROM arena_v2_matchmaking_active_slots WHERE season_id = ? AND user_id = ?', [seasonId, userId]);
+    return undefined;
+  }
+  if (row.status === 'matched') {
+    const match = await queryGet<any>(db, 'SELECT status FROM arena_v2_matches WHERE id = ? LIMIT 1', [row.matched_match_id]);
+    if (!match || ['completed', 'cancelled'].includes(String(match.status))) {
+      await releaseArenaV2QuickSlot(db, row);
+      return undefined;
+    }
+  }
+  return row;
+};
+
+const getArenaV2QuickConduct = async (db: SqlExecutor, seasonId: string, userId: string) => (
+  await queryGet<any>(
+    db,
+    `SELECT timeout_strikes, priority_penalty, last_timeout_at
+       FROM arena_v2_matchmaking_conduct
+      WHERE season_id = ? AND user_id = ?
+      LIMIT 1`,
+    [seasonId, userId]
+  ) || { timeout_strikes: 0, priority_penalty: 0, last_timeout_at: null }
+);
+
+const recordArenaV2QuickConductEvent = async (
+  db: SqlExecutor,
+  input: { eventKey: string; seasonId: string; userId: string; eventType: 'timeout' | 'cancelled_proposal' | 'success' }
+) => {
+  const insertSql = getSqlDialect()
+    ? `INSERT IGNORE INTO arena_v2_matchmaking_conduct_events
+         (event_key, season_id, user_id, event_type)
+       VALUES (?, ?, ?, ?)`
+    : `INSERT OR IGNORE INTO arena_v2_matchmaking_conduct_events
+         (event_key, season_id, user_id, event_type)
+       VALUES (?, ?, ?, ?)`;
+  const inserted = await runSql(db, insertSql, [input.eventKey, input.seasonId, input.userId, input.eventType]);
+  if (affectedRows(inserted) <= 0) return false;
+
+  const existing = await queryGet<any>(
+    db,
+    `SELECT timeout_strikes, priority_penalty
+       FROM arena_v2_matchmaking_conduct
+      WHERE season_id = ? AND user_id = ?
+      LIMIT 1
+      ${arenaV2ForUpdateClause()}`,
+    [input.seasonId, input.userId]
+  );
+  const previousStrikes = Math.max(0, Number(existing?.timeout_strikes || 0));
+  const timeoutStrikes = input.eventType === 'success'
+    ? Math.max(0, previousStrikes - 1)
+    : Math.min(20, previousStrikes + 1);
+  const priorityPenalty = Math.min(10, timeoutStrikes);
+  if (existing) {
+    await runSql(
+      db,
+      `UPDATE arena_v2_matchmaking_conduct
+          SET timeout_strikes = ?, priority_penalty = ?,
+              last_timeout_at = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE season_id = ? AND user_id = ?`,
+      [
+        timeoutStrikes,
+        priorityPenalty,
+        input.eventType === 'success' ? null : new Date().toISOString(),
+        input.seasonId,
+        input.userId
+      ]
+    );
+  } else {
+    await runSql(
+      db,
+      `INSERT INTO arena_v2_matchmaking_conduct
+         (season_id, user_id, timeout_strikes, priority_penalty, last_timeout_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        input.seasonId,
+        input.userId,
+        timeoutStrikes,
+        priorityPenalty,
+        input.eventType === 'success' ? null : new Date().toISOString()
+      ]
+    );
+  }
+  return true;
+};
+
+const releaseArenaV2QuickSlot = async (db: SqlExecutor, ticket: any) => {
+  await runSql(
+    db,
+    'DELETE FROM arena_v2_matchmaking_active_slots WHERE season_id = ? AND user_id = ? AND ticket_id = ?',
+    [ticket.season_id, ticket.user_id, ticket.id]
+  );
+};
+
+const requeueArenaV2QuickTicket = async (
+  db: SqlExecutor,
+  ticket: any,
+  reason: 'opponent_timeout' | 'opponent_cancelled' | 'opponent_invalid_deck',
+  nowMs: number
+) => {
+  const range = arenaV2QuickRangeAt(ticket.joined_at, nowMs);
+  await runSql(
+    db,
+    `UPDATE arena_v2_match_queue
+        SET status = 'waiting', proposal_id = NULL, accept_deadline_at = NULL, accepted_at = NULL,
+            search_min_mmr = ?, search_max_mmr = ?, last_transition_reason = ?,
+            expires_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status IN ('proposed', 'accepted')`,
+    [
+      Number(ticket.mmr) - range,
+      Number(ticket.mmr) + range,
+      reason,
+      new Date(nowMs + ARENA_V2_QUICK_QUEUE_TTL_MS).toISOString(),
+      ticket.id
+    ]
+  );
+};
+
+const finalizeArenaV2QuickProposal = async (db: SqlExecutor, proposalId: string, rows: any[]) => {
+  if (rows.length !== 2 || rows.some((row) => row.status !== 'accepted')) return null;
+  const validRows: any[] = [];
+  for (const row of rows) {
+    const deck = await queryGet<any>(
+      db,
+      'SELECT id, user_id, season_id, card_version_ids, is_valid FROM arena_v2_decks WHERE id = ? LIMIT 1',
+      [row.deck_id]
+    );
+    const cardVersionIds = jsonParse<string[]>(deck?.card_version_ids, []);
+    const validation = deck
+      && deck.user_id === row.user_id
+      && deck.season_id === row.season_id
+      && Boolean(Number(deck.is_valid))
+      ? await validateArenaV2DeckForSeasonWithExecutor(db, row.season_id, cardVersionIds)
+      : { valid: false };
+    if (validation.valid) validRows.push(row);
+  }
+  if (validRows.length !== 2) {
+    for (const row of rows) {
+      if (validRows.includes(row)) {
+        await requeueArenaV2QuickTicket(db, row, 'opponent_invalid_deck', Date.now());
+      } else {
+        await runSql(
+          db,
+          `UPDATE arena_v2_match_queue
+              SET status = 'cancelled', last_transition_reason = 'invalid_deck', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND proposal_id = ? AND status = 'accepted'`,
+          [row.id, proposalId]
+        );
+        await releaseArenaV2QuickSlot(db, row);
+      }
+    }
+    return null;
+  }
+  const season = await queryGet<any>(
+    db,
+    `SELECT id, card_pool_version
+       FROM arena_v2_seasons
+      WHERE id = ? AND status = 'active'
+      LIMIT 1
+      ${arenaV2ForUpdateClause()}`,
+    [rows[0].season_id]
+  );
+  if (!season) throw new Error('ArenaV2SeasonClosed');
+  const matchId = makeDeterministicId('arena_v2_match', `quick:${proposalId}`);
+  let claimed = 0;
+  for (const row of rows) {
+    const result = await runSql(
+      db,
+      `UPDATE arena_v2_match_queue
+          SET status = 'matching', matched_match_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND proposal_id = ? AND status = 'accepted'`,
+      [matchId, row.id, proposalId]
+    );
+    claimed += affectedRows(result);
+  }
+  if (claimed !== 2) throw new Error('ArenaV2QuickMatchFinalizeConflict');
+  await createArenaV2MatchFromDeckSeats(db, {
+    matchId,
+    seasonId: season.id,
+    cardPoolVersion: season.card_pool_version,
+    mode: 'quick',
+    battleRoyaleId: null,
+    roundNo: 0,
+    seats: rows
+      .slice()
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+      .map((row, seatNo) => ({ seatNo, userId: row.user_id, deckId: row.deck_id })),
+    summary: { status: 'mulligan', queue: 'quick', proposalId }
+  });
+  for (const row of rows) {
+    await runSql(
+      db,
+      `UPDATE arena_v2_match_queue
+          SET status = 'matched', matched_match_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND proposal_id = ? AND status = 'matching'`,
+      [matchId, row.id, proposalId]
+    );
+    await recordArenaV2QuickConductEvent(db, {
+      eventKey: `quick:${proposalId}:success:${row.user_id}`,
+      seasonId: row.season_id,
+      userId: row.user_id,
+      eventType: 'success'
+    });
+  }
+  return matchId;
+};
+
+const recoverExpiredArenaV2QuickProposals = async (db: SqlExecutor, nowMs: number, limit = 64) => {
+  const now = new Date(nowMs).toISOString();
+  const proposals = await queryAll<any>(
+    db,
+    `SELECT DISTINCT proposal_id
+       FROM arena_v2_match_queue
+      WHERE status IN ('proposed', 'accepted')
+        AND proposal_id IS NOT NULL
+        AND accept_deadline_at <= ?
+      ORDER BY proposal_id ASC
+      LIMIT ?`,
+    [now, Math.max(1, Math.min(256, limit))]
+  );
+  let recovered = 0;
+  for (const proposal of proposals) {
+    const proposalId = String(proposal.proposal_id || '');
+    if (!proposalId) continue;
+    const rows = await queryAll<any>(
+      db,
+      `SELECT * FROM arena_v2_match_queue
+        WHERE proposal_id = ? AND status IN ('proposed', 'accepted')
+        ORDER BY id ASC
+        ${arenaV2ForUpdateClause()}`,
+      [proposalId]
+    );
+    if (rows.length === 2 && rows.every((row) => row.status === 'accepted')) {
+      await finalizeArenaV2QuickProposal(db, proposalId, rows);
+      recovered += 1;
+      continue;
+    }
+    for (const row of rows) {
+      if (row.status === 'accepted') {
+        await requeueArenaV2QuickTicket(db, row, 'opponent_timeout', nowMs);
+        continue;
+      }
+      await runSql(
+        db,
+        `UPDATE arena_v2_match_queue
+            SET status = 'accept_timeout', last_transition_reason = 'proposal_expired',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'proposed'`,
+        [row.id]
+      );
+      await releaseArenaV2QuickSlot(db, row);
+      await recordArenaV2QuickConductEvent(db, {
+        eventKey: `quick:${proposalId}:timeout:${row.user_id}`,
+        seasonId: row.season_id,
+        userId: row.user_id,
+        eventType: 'timeout'
+      });
+    }
+    recovered += 1;
+  }
+  return recovered;
+};
+
+const insertArenaV2QuickSlotIgnore = async (db: SqlExecutor, ticket: any) => {
+  const sql = getSqlDialect()
+    ? 'INSERT IGNORE INTO arena_v2_matchmaking_active_slots (season_id, user_id, ticket_id) VALUES (?, ?, ?)'
+    : 'INSERT OR IGNORE INTO arena_v2_matchmaking_active_slots (season_id, user_id, ticket_id) VALUES (?, ?, ?)';
+  await runSql(db, sql, [ticket.season_id, ticket.user_id, ticket.id]);
+};
+
+const findArenaV2QuickActiveMatchTicket = async (db: SqlExecutor, seasonId: string, userId: string, lock = false) => queryGet<any>(
+  db,
+  `SELECT q.*
+     FROM arena_v2_match_queue q
+     JOIN arena_v2_matches m ON m.id = q.matched_match_id
+    WHERE q.season_id = ? AND q.user_id = ? AND q.status = 'matched'
+      AND m.status NOT IN ('completed', 'cancelled')
+    ORDER BY q.updated_at DESC, q.id DESC
+    LIMIT 1 ${lock ? arenaV2ForUpdateClause() : ''}`,
+  [seasonId, userId]
+);
+
+const repairArenaV2QuickActiveSlots = async (db: SqlExecutor) => {
+  await runSql(
+    db,
+    `DELETE FROM arena_v2_matchmaking_active_slots
+      WHERE ticket_id IN (
+        SELECT q.id FROM arena_v2_match_queue q
+         WHERE q.status IN ('cancelled', 'expired', 'accept_timeout', 'declined')
+      )`
+  );
+  const rows = await queryAll<any>(
+    db,
+    `SELECT q.*
+       FROM arena_v2_match_queue q
+      WHERE (q.status IN ('waiting', 'proposed', 'accepted')
+         OR (q.status = 'matched' AND EXISTS (
+              SELECT 1 FROM arena_v2_matches m
+               WHERE m.id = q.matched_match_id AND m.status NOT IN ('completed', 'cancelled')
+            )))
+        AND NOT EXISTS (
+              SELECT 1
+                FROM arena_v2_matchmaking_active_slots slot
+                JOIN arena_v2_match_queue active_q ON active_q.id = slot.ticket_id
+               WHERE slot.season_id = q.season_id AND slot.user_id = q.user_id
+                 AND (active_q.status IN ('waiting', 'proposed', 'accepted')
+                   OR (active_q.status = 'matched' AND EXISTS (
+                        SELECT 1 FROM arena_v2_matches active_m
+                         WHERE active_m.id = active_q.matched_match_id
+                           AND active_m.status NOT IN ('completed', 'cancelled')
+                      )))
+            )
+      ORDER BY q.season_id ASC, q.user_id ASC,
+               CASE WHEN q.status = 'matched' THEN 0 ELSE 1 END ASC,
+               q.joined_at DESC, q.id DESC
+      LIMIT 512
+      ${arenaV2ForUpdateClause()}`
+  );
+  const byUser = new Map<string, any[]>();
+  for (const row of rows) {
+    const key = `${row.season_id}:${row.user_id}`;
+    const group = byUser.get(key) || [];
+    group.push(row);
+    byUser.set(key, group);
+  }
+  for (const group of byUser.values()) {
+    const keep = group[0];
+    for (const duplicate of group.slice(1)) {
+      if (duplicate.status === 'matched') continue;
+      await runSql(
+        db,
+        `UPDATE arena_v2_match_queue
+            SET status = 'cancelled', last_transition_reason = 'duplicate_active_ticket', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status IN ('waiting', 'proposed', 'accepted')`,
+        [duplicate.id]
+      );
+    }
+    await runSql(db, 'DELETE FROM arena_v2_matchmaking_active_slots WHERE season_id = ? AND user_id = ?', [keep.season_id, keep.user_id]);
+    await insertArenaV2QuickSlotIgnore(db, keep);
+  }
+  return byUser.size;
+};
+
+const readRepairArenaV2QuickUser = async (seasonId: string, userId: string, nowMs: number) => withArenaV2Transaction(async (tx) => {
+  const own = await readArenaV2QuickActiveTicket(tx, seasonId, userId, true);
+  const deadlineMs = Date.parse(String(own?.accept_deadline_at || ''));
+  if (!own?.proposal_id || !['proposed', 'accepted'].includes(own.status) || !Number.isFinite(deadlineMs) || deadlineMs > nowMs) return;
+  const rows = await queryAll<any>(tx, `SELECT * FROM arena_v2_match_queue WHERE proposal_id = ? AND status IN ('proposed', 'accepted') ORDER BY id ASC ${arenaV2ForUpdateClause()}`, [own.proposal_id]);
+  if (rows.length === 2 && rows.every((row) => row.status === 'accepted')) {
+    await finalizeArenaV2QuickProposal(tx, own.proposal_id, rows);
+    return;
+  }
+  for (const row of rows) {
+    if (row.status === 'accepted') {
+      await requeueArenaV2QuickTicket(tx, row, 'opponent_timeout', nowMs);
+    } else {
+      await runSql(tx, `UPDATE arena_v2_match_queue SET status = 'accept_timeout', last_transition_reason = 'proposal_expired', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'proposed'`, [row.id]);
+      await releaseArenaV2QuickSlot(tx, row);
+      await recordArenaV2QuickConductEvent(tx, {
+        eventKey: `quick:${own.proposal_id}:timeout:${row.user_id}`,
+        seasonId: row.season_id,
+        userId: row.user_id,
+        eventType: 'timeout'
+      });
+    }
+  }
+});
+
+export const processArenaV2QuickMatchmaking = async (limit = 32) => withArenaV2Transaction(async (tx) => {
+  const nowMs = Date.now();
+  const repairedSlots = await repairArenaV2QuickActiveSlots(tx);
+  const recovered = await recoverExpiredArenaV2QuickProposals(tx, nowMs, limit * 2);
+  const waiting = await queryAll<any>(
+    tx,
+    `SELECT q.*,
+            COALESCE((SELECT c.priority_penalty
+                        FROM arena_v2_matchmaking_conduct c
+                       WHERE c.season_id = q.season_id AND c.user_id = q.user_id), 0) AS priority_penalty
+       FROM arena_v2_matchmaking_active_slots slot
+       JOIN arena_v2_match_queue q ON q.id = slot.ticket_id
+      WHERE q.status = 'waiting' AND q.expires_at >= ?
+      ORDER BY priority_penalty ASC, q.joined_at ASC, q.id ASC
+      LIMIT 256
+      ${arenaV2ForUpdateClause()}`,
+    [new Date(nowMs).toISOString()]
+  );
+  for (const row of waiting) {
+    const range = arenaV2QuickRangeAt(row.joined_at, nowMs);
+    row.search_min_mmr = Number(row.mmr) - range;
+    row.search_max_mmr = Number(row.mmr) + range;
+    await runSql(
+      tx,
+      `UPDATE arena_v2_match_queue
+          SET search_min_mmr = ?, search_max_mmr = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'waiting'`,
+      [row.search_min_mmr, row.search_max_mmr, row.id]
+    );
+  }
+
+  let proposed = 0;
+  const claimed = new Set<string>();
+  for (let index = 0; index < waiting.length && proposed < limit; index += 1) {
+    const left = waiting[index];
+    if (claimed.has(left.id)) continue;
+    const leftEligibleAt = Date.parse(String(left.joined_at))
+      + Math.max(0, Number(left.priority_penalty || 0)) * ARENA_V2_QUICK_PENALTY_DELAY_MS;
+    if (Number.isFinite(leftEligibleAt) && leftEligibleAt > nowMs) continue;
+    const leftRange = arenaV2QuickRangeAt(left.joined_at, nowMs);
+    let opponent: any = null;
+    for (let candidateIndex = index + 1; candidateIndex < waiting.length; candidateIndex += 1) {
+      const candidate = waiting[candidateIndex];
+      if (claimed.has(candidate.id) || candidate.season_id !== left.season_id || candidate.user_id === left.user_id) continue;
+      const candidateEligibleAt = Date.parse(String(candidate.joined_at))
+        + Math.max(0, Number(candidate.priority_penalty || 0)) * ARENA_V2_QUICK_PENALTY_DELAY_MS;
+      if (Number.isFinite(candidateEligibleAt) && candidateEligibleAt > nowMs) continue;
+      const gap = Math.abs(Number(left.mmr) - Number(candidate.mmr));
+      const candidateRange = arenaV2QuickRangeAt(candidate.joined_at, nowMs);
+      if (gap <= ARENA_V2_QUICK_MAX_MMR_GAP && gap <= leftRange && gap <= candidateRange) {
+        opponent = candidate;
+        break;
+      }
+    }
+    if (!opponent) continue;
+    const proposalId = makeId('arena_v2_proposal');
+    const acceptDeadlineAt = new Date(nowMs + ARENA_V2_QUICK_ACCEPT_WINDOW_MS).toISOString();
+    for (const row of [left, opponent]) {
+      const result = await runSql(
+        tx,
+        `UPDATE arena_v2_match_queue
+            SET status = 'proposed', proposal_id = ?, accept_deadline_at = ?, accepted_at = NULL,
+                last_transition_reason = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'waiting'`,
+        [proposalId, acceptDeadlineAt, row.id]
+      );
+      if (affectedRows(result) <= 0) throw new Error('ArenaV2QuickProposalClaimConflict');
+      claimed.add(row.id);
+    }
+    proposed += 1;
+  }
+  return { recovered, proposed, scanned: waiting.length, repairedSlots, serverNow: new Date(nowMs).toISOString() };
+});
+
+const serializeArenaV2QuickReadyTicket = async (db: SqlExecutor, row: any, nowMs = Date.now()) => {
+  const conduct = await getArenaV2QuickConduct(db, row.season_id, row.user_id);
+  const currentSearchRange = arenaV2QuickRangeAt(row.joined_at, nowMs);
+  let opponentAccepted = false;
+  if (row.proposal_id && ['proposed', 'accepted'].includes(row.status)) {
+    const opponent = await queryGet<any>(
+      db,
+      `SELECT status FROM arena_v2_match_queue
+        WHERE proposal_id = ? AND id <> ? AND status IN ('proposed', 'accepted')
+        LIMIT 1`,
+      [row.proposal_id, row.id]
+    );
+    opponentAccepted = opponent?.status === 'accepted';
+  }
   return {
+    id: row.id,
+    seasonId: row.season_id,
+    userId: row.user_id,
+    deckId: row.deck_id,
+    mmr: Number(row.mmr || 1000),
     status: row.status,
+    searchMinMmr: Number(row.mmr) - currentSearchRange,
+    searchMaxMmr: Number(row.mmr) + currentSearchRange,
+    currentSearchRange,
+    currentMmrRange: { minMmr: Number(row.mmr) - currentSearchRange, maxMmr: Number(row.mmr) + currentSearchRange },
+    proposalId: row.proposal_id || null,
+    acceptDeadlineAt: row.accept_deadline_at || null,
+    acceptedAt: row.accepted_at || null,
+    acceptedBySelf: row.status === 'accepted',
+    opponentAccepted,
+    requiresAcceptance: row.status === 'proposed',
+    matchedMatchId: row.matched_match_id || null,
+    joinedAt: row.joined_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
+    priorityPenalty: Number(conduct.priority_penalty || 0),
+    timeoutStrikes: Number(conduct.timeout_strikes || 0),
+    transitionReason: row.last_transition_reason || null
+  };
+};
+
+const arenaV2QuickResponse = async (db: SqlExecutor, row: any | undefined, nowMs = Date.now()) => {
+  const serverNow = new Date(nowMs).toISOString();
+  if (!row) return { status: 'none' as const, serverNow, ticket: null };
+  const ticket = await serializeArenaV2QuickReadyTicket(db, row, nowMs);
+  return {
+    status: ticket.status,
+    serverNow,
     queueId: ticket.id,
     joinedAt: ticket.joinedAt,
+    acceptDeadlineAt: ticket.acceptDeadlineAt,
+    proposalId: ticket.proposalId,
+    acceptedBySelf: ticket.acceptedBySelf,
+    opponentAccepted: ticket.opponentAccepted,
+    requiresAcceptance: ticket.requiresAcceptance,
+    transitionReason: ticket.transitionReason,
     estimatedRange: { minMmr: ticket.searchMinMmr, maxMmr: ticket.searchMaxMmr },
     matchId: ticket.matchedMatchId,
     ticket
   };
 };
 
-export const cancelArenaV2QuickQueue = async (userId: string, seasonId?: string) => {
+const joinArenaV2QuickReadyQueue = async (input: ArenaV2JoinQueueInput) => {
   const db = getExecutor();
-  if (!db) return { cancelled: false };
-  const season = seasonId ? { id: seasonId } : await getArenaV2CurrentSeason();
-  if (!season?.id) return { cancelled: false };
-  await expireArenaV2QueueRows(db, season.id, userId);
-  const matched = await queryGet<any>(
-    db,
-    `
-      SELECT id, matched_match_id
-        FROM arena_v2_match_queue
-       WHERE season_id = ? AND user_id = ? AND status = 'matched'
-       ORDER BY updated_at DESC
-       LIMIT 1
-    `,
-    [season.id, userId]
-  );
-  if (matched) return { cancelled: false, status: 'matched' as const, matchId: matched.matched_match_id };
-  await runSql(
-    db,
-    `
-      UPDATE arena_v2_match_queue
-         SET status = 'cancelled',
-             updated_at = CURRENT_TIMESTAMP
-       WHERE season_id = ? AND user_id = ? AND status = 'waiting'
-    `,
-    [season.id, userId]
-  );
-  return { cancelled: true };
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const deck = await withArenaV2Transaction(async (tx) => {
+    await lockArenaV2User(tx, input.userId);
+    const lockedDeck = await loadValidArenaV2DeckForUse(tx, input.userId, input.deckId, input.seasonId);
+    await expireArenaV2QueueRows(tx, lockedDeck.seasonId, input.userId);
+    let existing = await readArenaV2QuickActiveTicket(tx, lockedDeck.seasonId, input.userId, true);
+    if (!existing) {
+      const activeMatchTicket = await findArenaV2QuickActiveMatchTicket(tx, lockedDeck.seasonId, input.userId, true);
+      if (activeMatchTicket) {
+        await insertArenaV2QuickSlotIgnore(tx, activeMatchTicket);
+        return lockedDeck;
+      }
+      existing = await queryGet<any>(
+        tx,
+        `SELECT * FROM arena_v2_match_queue
+          WHERE season_id = ? AND user_id = ? AND status IN ('waiting', 'proposed', 'accepted')
+          ORDER BY joined_at DESC LIMIT 1 ${arenaV2ForUpdateClause()}`,
+        [lockedDeck.seasonId, input.userId]
+      );
+      if (existing) {
+        const slotSql = getSqlDialect()
+          ? 'INSERT IGNORE INTO arena_v2_matchmaking_active_slots (season_id, user_id, ticket_id) VALUES (?, ?, ?)'
+          : 'INSERT OR IGNORE INTO arena_v2_matchmaking_active_slots (season_id, user_id, ticket_id) VALUES (?, ?, ?)';
+        await runSql(tx, slotSql, [lockedDeck.seasonId, input.userId, existing.id]);
+        return lockedDeck;
+      }
+      await assertArenaV2UserAvailable(tx, input.userId);
+      const rating = await queryGet<any>(
+        tx,
+        'SELECT mmr FROM arena_v2_ratings WHERE season_id = ? AND user_id = ? LIMIT 1',
+        [lockedDeck.seasonId, input.userId]
+      );
+      const mmr = Number.isFinite(Number(rating?.mmr)) ? Number(rating.mmr) : 1000;
+      const ticketId = makeId('arena_v2_queue');
+      const expiresAt = new Date(Date.now() + ARENA_V2_QUICK_QUEUE_TTL_MS).toISOString();
+      await runSql(
+        tx,
+        `INSERT INTO arena_v2_match_queue
+           (id, season_id, user_id, deck_id, mmr, status, search_min_mmr, search_max_mmr, expires_at)
+         VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?, ?)`,
+        [ticketId, lockedDeck.seasonId, input.userId, input.deckId, mmr, mmr - ARENA_V2_QUICK_INITIAL_RANGE, mmr + ARENA_V2_QUICK_INITIAL_RANGE, expiresAt]
+      );
+      await runSql(
+        tx,
+        'INSERT INTO arena_v2_matchmaking_active_slots (season_id, user_id, ticket_id) VALUES (?, ?, ?)',
+        [lockedDeck.seasonId, input.userId, ticketId]
+      );
+    }
+    return lockedDeck;
+  });
+  await processArenaV2QuickMatchmaking(32);
+  const nowMs = Date.now();
+  const row = await readArenaV2QuickActiveTicket(db, deck.seasonId, input.userId);
+  if (!row) throw new Error('ArenaV2QuickQueueStateLost');
+  return arenaV2QuickResponse(db, row, nowMs);
 };
+
+const getArenaV2QuickReadyStatus = async (userId: string, seasonId?: string) => {
+  const db = getExecutor();
+  const nowMs = Date.now();
+  if (!db) return { status: 'none' as const, serverNow: new Date(nowMs).toISOString(), ticket: null };
+  const season = seasonId ? { id: seasonId } : await getArenaV2CurrentSeason();
+  if (!season?.id) return { status: 'none' as const, serverNow: new Date(nowMs).toISOString(), ticket: null };
+  await readRepairArenaV2QuickUser(season.id, userId, nowMs);
+  let active = await readArenaV2QuickActiveTicket(db, season.id, userId);
+  if (!active) {
+    const activeMatchTicket = await findArenaV2QuickActiveMatchTicket(db, season.id, userId);
+    if (activeMatchTicket) {
+      await insertArenaV2QuickSlotIgnore(db, activeMatchTicket);
+      active = activeMatchTicket;
+    }
+  }
+  if (active) return arenaV2QuickResponse(db, active, nowMs);
+  const latest = await queryGet<any>(
+    db,
+    `SELECT * FROM arena_v2_match_queue
+      WHERE season_id = ? AND user_id = ?
+        AND (status IN ('accept_timeout', 'declined') OR (status = 'cancelled' AND last_transition_reason = 'invalid_deck'))
+      ORDER BY updated_at DESC LIMIT 1`,
+    [season.id, userId]
+  );
+  const updatedAtMs = Date.parse(String(latest?.updated_at || ''));
+  return latest && Number.isFinite(updatedAtMs) && nowMs - updatedAtMs <= 15_000
+    ? arenaV2QuickResponse(db, latest, nowMs)
+    : arenaV2QuickResponse(db, undefined, nowMs);
+};
+
+export const acceptArenaV2QuickQueue = async (userId: string, seasonId: string | undefined, proposalId: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  const season = seasonId ? { id: seasonId } : await getArenaV2CurrentSeason();
+  if (!season?.id) throw new Error('ArenaV2SeasonClosed');
+  return withArenaV2Transaction(async (tx) => {
+    const nowMs = Date.now();
+    await recoverExpiredArenaV2QuickProposals(tx, nowMs, 64);
+    let own = await readArenaV2QuickActiveTicket(tx, season.id, userId, true);
+    if (!own) {
+      const terminal = await queryGet<any>(
+        tx,
+        `SELECT * FROM arena_v2_match_queue
+          WHERE season_id = ? AND user_id = ? AND proposal_id = ?
+            AND status IN ('matched', 'accept_timeout', 'declined')
+          ORDER BY updated_at DESC LIMIT 1`,
+        [season.id, userId, proposalId]
+      );
+      if (terminal) return arenaV2QuickResponse(tx, terminal, nowMs);
+      throw new Error('ArenaV2QuickProposalStale');
+    }
+    if (!proposalId || own.proposal_id !== proposalId || !['proposed', 'accepted'].includes(own.status)) {
+      throw new Error('ArenaV2QuickProposalStale');
+    }
+    if (own.status === 'proposed') {
+      const deadlineMs = Date.parse(String(own.accept_deadline_at || ''));
+      if (!Number.isFinite(deadlineMs) || deadlineMs <= nowMs) {
+        await recoverExpiredArenaV2QuickProposals(tx, nowMs, 64);
+        own = await readArenaV2QuickActiveTicket(tx, season.id, userId, true);
+        return arenaV2QuickResponse(tx, own, nowMs);
+      }
+      await runSql(
+        tx,
+        `UPDATE arena_v2_match_queue SET status = 'accepted', accepted_at = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'proposed' AND accept_deadline_at > ?`,
+        [new Date(nowMs).toISOString(), own.id, new Date(nowMs).toISOString()]
+      );
+      own.status = 'accepted';
+      own.accepted_at = new Date(nowMs).toISOString();
+    }
+    if (own.status === 'accepted' && own.proposal_id) {
+      const rows = await queryAll<any>(
+        tx,
+        `SELECT * FROM arena_v2_match_queue WHERE proposal_id = ? AND status IN ('proposed', 'accepted') ORDER BY id ASC ${arenaV2ForUpdateClause()}`,
+        [own.proposal_id]
+      );
+      if (rows.length === 2 && rows.every((row) => row.status === 'accepted')) {
+        await finalizeArenaV2QuickProposal(tx, own.proposal_id, rows);
+        own = await queryGet<any>(tx, 'SELECT * FROM arena_v2_match_queue WHERE id = ? LIMIT 1', [own.id]);
+      }
+    }
+    return arenaV2QuickResponse(tx, own, nowMs);
+  });
+};
+
+const cancelArenaV2QuickReadyQueue = async (userId: string, seasonId?: string) => {
+  const db = getExecutor();
+  const nowMs = Date.now();
+  if (!db) return { cancelled: false, serverNow: new Date(nowMs).toISOString() };
+  const season = seasonId ? { id: seasonId } : await getArenaV2CurrentSeason();
+  if (!season?.id) return { cancelled: false, serverNow: new Date(nowMs).toISOString() };
+  return withArenaV2Transaction(async (tx) => {
+    await recoverExpiredArenaV2QuickProposals(tx, nowMs, 64);
+    const own = await readArenaV2QuickActiveTicket(tx, season.id, userId, true);
+    if (!own) return { cancelled: false, serverNow: new Date(nowMs).toISOString() };
+    if (own.status === 'matched') return { cancelled: false, status: 'matched' as const, matchId: own.matched_match_id, serverNow: new Date(nowMs).toISOString() };
+    if (['proposed', 'accepted'].includes(own.status) && own.proposal_id) {
+      const rows = await queryAll<any>(tx, `SELECT * FROM arena_v2_match_queue WHERE proposal_id = ? AND status IN ('proposed', 'accepted') ORDER BY id ASC ${arenaV2ForUpdateClause()}`, [own.proposal_id]);
+      for (const row of rows) {
+        if (row.id === own.id) continue;
+        await requeueArenaV2QuickTicket(tx, row, 'opponent_cancelled', nowMs);
+      }
+      await runSql(tx, `UPDATE arena_v2_match_queue SET status = 'declined', last_transition_reason = 'cancelled_proposal', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('proposed', 'accepted')`, [own.id]);
+      await recordArenaV2QuickConductEvent(tx, {
+        eventKey: `quick:${own.proposal_id}:cancel:${userId}`,
+        seasonId: season.id,
+        userId,
+        eventType: 'cancelled_proposal'
+      });
+    } else {
+      await runSql(tx, `UPDATE arena_v2_match_queue SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'waiting'`, [own.id]);
+    }
+    await releaseArenaV2QuickSlot(tx, own);
+    return { cancelled: true, status: own.status === 'waiting' ? 'cancelled' as const : 'declined' as const, serverNow: new Date(nowMs).toISOString() };
+  });
+};
+export const joinArenaV2QuickQueue = joinArenaV2QuickReadyQueue;
+export const getArenaV2QuickQueueStatus = getArenaV2QuickReadyStatus;
+export const cancelArenaV2QuickQueue = cancelArenaV2QuickReadyQueue;
+
+const tryFormArenaV2BattleRoyale = async (seasonId: string): Promise<string | null> => withArenaV2Transaction(async (tx) => {
+  const now = new Date().toISOString();
+  const waitingTickets = await queryAll<any>(
+    tx,
+    `
+      SELECT id, season_id, user_id, deck_id, status, battle_royale_id, joined_at, updated_at, expires_at
+        FROM arena_v2_battle_royale_queue
+       WHERE season_id = ? AND status = 'waiting' AND expires_at >= ?
+       ORDER BY joined_at ASC, id ASC
+       LIMIT 64
+       ${arenaV2ForUpdateClause()}
+    `,
+    [seasonId, now]
+  );
+  const entrants: any[] = [];
+  const entrantUserIds = new Set<string>();
+  for (const ticket of waitingTickets) {
+    const userId = String(ticket.user_id);
+    if (entrantUserIds.has(userId)) continue;
+    entrantUserIds.add(userId);
+    entrants.push(ticket);
+    if (entrants.length === 8) break;
+  }
+  if (entrants.length < 8) return null;
+  const entrantIds = entrants.map((ticket) => String(ticket.id));
+  const battleRoyaleId = makeDeterministicId('arena_v2_br', `${seasonId}:${entrantIds.join(':')}`);
+  const season = await queryGet<any>(
+    tx,
+    `SELECT id, card_pool_version FROM arena_v2_seasons WHERE id = ? AND status = 'active' LIMIT 1 ${arenaV2ForUpdateClause()}`,
+    [seasonId]
+  );
+  if (!season) throw new Error('ArenaV2SeasonClosed');
+
+  const deckIds = [...new Set(entrants.map((ticket) => String(ticket.deck_id)))].sort();
+  const deckPlaceholders = deckIds.map(() => '?').join(', ');
+  const deckRows = await queryAll<any>(
+    tx,
+    `
+      SELECT id, user_id, season_id, card_version_ids, is_valid
+        FROM arena_v2_decks
+       WHERE id IN (${deckPlaceholders})
+       ORDER BY id ASC
+       ${arenaV2ForUpdateClause()}
+    `,
+    deckIds
+  );
+  const deckById = new Map(deckRows.map((deck) => [String(deck.id), deck]));
+  const initialParticipants: ArenaV2BattleRoyaleParticipantState[] = [];
+  for (let index = 0; index < entrants.length; index += 1) {
+    const ticket = entrants[index];
+    const deck = deckById.get(String(ticket.deck_id));
+    if (!deck) throw new Error('ArenaV2DeckNotFound');
+    if (String(deck.user_id) !== String(ticket.user_id)) throw new Error('ArenaV2DeckForbidden');
+    if (String(deck.season_id) !== seasonId) throw new Error('ArenaV2DeckSeasonMismatch');
+    if (!Boolean(Number(deck.is_valid))) throw new Error('ArenaV2DeckInvalid');
+    const frozenCardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
+    const validation = await validateArenaV2DeckForSeasonWithExecutor(tx, seasonId, frozenCardVersionIds);
+    if (!validation.valid) throw new Error('ArenaV2DeckInvalid');
+    initialParticipants.push(normalizeArenaV2BattleRoyaleParticipant({
+      seedNo: index + 1,
+      userId: String(ticket.user_id),
+      deckId: String(ticket.deck_id),
+      status: 'active',
+      roundStatus: 'paired',
+      health: 30,
+      currentRoundNo: 0,
+      finalRank: null,
+      currentMatchId: null,
+      nextMatchId: null,
+      stateSourceMatchId: null,
+      lastOpponentUserId: null,
+      lastByeRoundNo: null,
+      byeCount: 0,
+      wins: 0,
+      lossStreak: 0,
+      directDamageDealt: 0,
+      freeTacticalMoveNextRound: false,
+      frozenCardVersionIds,
+      frozenCardPoolVersion: String(season.card_pool_version),
+      validationHash: stableHash(JSON.stringify({ seasonId, cardPoolVersion: season.card_pool_version, frozenCardVersionIds })),
+      tieBreaker: stableHash(`${battleRoyaleId}:${index + 1}:${ticket.user_id}`)
+    }, battleRoyaleId));
+  }
+
+  const schedule = scheduleArenaV2BattleRoyaleRound(initialParticipants, 1);
+  const participantByUserId = new Map(schedule.participants.map((participant) => [participant.userId, participant]));
+  const matches = schedule.pairings.map((pairing) => {
+    const users = [pairing.leftUserId, pairing.rightUserId].sort();
+    const matchId = makeDeterministicId('arena_v2_match', `${battleRoyaleId}:1:${users.join(':')}`);
+    for (const userId of users) {
+      const participant = participantByUserId.get(userId);
+      if (!participant) throw new Error('ArenaV2BattleRoyaleParticipantMissing');
+      participant.currentMatchId = matchId;
+      participant.nextMatchId = matchId;
+    }
+    return { matchId, users };
+  });
+  const matchIds = matches.map((match) => match.matchId);
+  const ticketPlaceholders = entrantIds.map(() => '?').join(', ');
+  const claimed = await runSql(
+    tx,
+    `
+      UPDATE arena_v2_battle_royale_queue
+         SET status = 'matched', battle_royale_id = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id IN (${ticketPlaceholders}) AND status = 'waiting'
+    `,
+    [battleRoyaleId, ...entrantIds]
+  );
+  if (affectedRows(claimed) !== 8) throw new Error('ArenaV2BattleRoyaleQueueClaimConflict');
+  await runSql(
+    tx,
+    `
+      INSERT INTO arena_v2_battle_royales
+        (id, season_id, status, current_round_no, participant_state, match_ids, winner_user_id)
+      VALUES
+        (?, ?, 'active', 1, ?, ?, NULL)
+    `,
+    [battleRoyaleId, seasonId, JSON.stringify(schedule.participants), JSON.stringify(matchIds)]
+  );
+  for (const match of matches) {
+    const seats = match.users.map((userId, seatNo) => {
+      const participant = participantByUserId.get(userId)!;
+      return {
+        seatNo,
+        userId,
+        deckId: participant.deckId,
+        playerHealth: participant.health,
+        frozenCardVersionIds: participant.frozenCardVersionIds
+      };
+    });
+    await createArenaV2MatchFromDeckSeats(tx, {
+      matchId: match.matchId,
+      seasonId,
+      cardPoolVersion: String(season.card_pool_version),
+      mode: 'battle_royale_8',
+      battleRoyaleId,
+      roundNo: 1,
+      seats,
+      summary: { status: 'mulligan', queue: 'battle_royale_8', battleRoyaleId, roundNo: 1 }
+    });
+  }
+  const sharedMulliganDeadlineAt = new Date(Date.now() + ARENA_V2_TURN_PLANNING_MS).toISOString();
+  for (const match of matches) {
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_matches
+           SET result_summary = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'mulligan'
+      `,
+      [
+        JSON.stringify({
+          status: 'mulligan', queue: 'battle_royale_8', battleRoyaleId, roundNo: 1,
+          mulliganDeadlineAt: sharedMulliganDeadlineAt
+        }),
+        match.matchId
+      ]
+    );
+  }
+  return battleRoyaleId;
+});
 
 export const joinArenaV2BattleRoyaleQueue = async (input: ArenaV2JoinQueueInput) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
-  const deck = await loadValidArenaV2DeckForUse(db, input.userId, input.deckId, input.seasonId);
-  await expireArenaV2QueueRows(db, deck.seasonId, input.userId);
-  const existing = await queryGet<any>(
-    db,
-    `
-      SELECT id, season_id, user_id, deck_id, status, battle_royale_id, joined_at, updated_at, expires_at
-        FROM arena_v2_battle_royale_queue
-       WHERE season_id = ? AND user_id = ? AND status = 'waiting'
-       ORDER BY joined_at DESC
-       LIMIT 1
-    `,
-    [deck.seasonId, input.userId]
-  );
-  if (existing) return serializeArenaV2BattleRoyaleQueue(existing);
-  const ticketId = makeId('arena_v2_br_queue');
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  await runSql(
-    db,
-    `
-      INSERT INTO arena_v2_battle_royale_queue
-        (id, season_id, user_id, deck_id, status, expires_at)
-      VALUES
-        (?, ?, ?, ?, 'waiting', ?)
-    `,
-    [ticketId, deck.seasonId, input.userId, input.deckId, expiresAt]
-  );
-  const waitingTickets = await queryAll<any>(
-    db,
-    `
-      SELECT id, season_id, user_id, deck_id, status, battle_royale_id, joined_at, updated_at, expires_at
-        FROM arena_v2_battle_royale_queue
-       WHERE season_id = ? AND status = 'waiting'
-       ORDER BY joined_at ASC
-       LIMIT 8
-    `,
-    [deck.seasonId]
-  );
-  if (waitingTickets.length >= 8) {
-    const battleRoyaleId = makeId('arena_v2_br');
-    const entrants = waitingTickets.slice(0, 8);
-    const matchIds: string[] = [];
-    for (let index = 0; index < entrants.length; index += 2) {
-      const pair = entrants.slice(index, index + 2);
-      const matchId = await createArenaV2MatchFromDeckSeats(db, {
-        seasonId: deck.seasonId,
-        cardPoolVersion: deck.season.card_pool_version,
-        mode: 'battle_royale_8',
-        battleRoyaleId,
-        roundNo: 1,
-        seats: [
-          { seatNo: 0, userId: pair[0].user_id, deckId: pair[0].deck_id },
-          { seatNo: 1, userId: pair[1].user_id, deckId: pair[1].deck_id }
-        ],
-        summary: { status: 'mulligan', queue: 'battle_royale_8', battleRoyaleId, roundNo: 1 }
-      });
-      matchIds.push(matchId);
-    }
-    const participantState = entrants.map((ticket, index) => ({
-      seedNo: index + 1,
-      userId: ticket.user_id,
-      deckId: ticket.deck_id,
-      status: 'active',
-      currentRoundNo: 1,
-      finalRank: null
-    }));
-    await runSql(
-      db,
+  const queued = await withArenaV2Transaction(async (tx) => {
+    // The user row is the cross-dialect mutex for the partial-unique waiting-ticket invariant.
+    await lockArenaV2User(tx, input.userId);
+    const deck = await loadValidArenaV2DeckForUse(tx, input.userId, input.deckId, input.seasonId);
+    await expireArenaV2QueueRows(tx, deck.seasonId, input.userId);
+    const existing = await queryGet<any>(
+      tx,
       `
-        INSERT INTO arena_v2_battle_royales
-          (id, season_id, status, current_round_no, participant_state, match_ids, winner_user_id)
+        SELECT q.id, q.season_id, q.user_id, q.deck_id, q.status, q.battle_royale_id, q.joined_at, q.updated_at, q.expires_at
+          FROM arena_v2_battle_royale_queue q
+         WHERE q.season_id = ? AND q.user_id = ?
+           AND (q.status = 'waiting' OR (q.status = 'matched' AND EXISTS (
+             SELECT 1 FROM arena_v2_battle_royales br
+              WHERE br.id = q.battle_royale_id AND br.status = 'active'
+           )))
+         ORDER BY q.joined_at DESC
+         LIMIT 1
+         ${arenaV2ForUpdateClause()}
+      `,
+      [deck.seasonId, input.userId]
+    );
+    if (existing) return { ticket: existing, seasonId: deck.seasonId };
+
+    await assertArenaV2UserAvailable(tx, input.userId);
+
+    const ticketId = makeId('arena_v2_br_queue');
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await runSql(
+      tx,
+      `
+        INSERT INTO arena_v2_battle_royale_queue
+          (id, season_id, user_id, deck_id, status, expires_at)
         VALUES
-          (?, ?, 'active', 1, ?, ?, NULL)
+          (?, ?, ?, ?, 'waiting', ?)
       `,
-      [battleRoyaleId, deck.seasonId, JSON.stringify(participantState), JSON.stringify(matchIds)]
+      [ticketId, deck.seasonId, input.userId, input.deckId, expiresAt]
     );
-    const placeholders = entrants.map(() => '?').join(', ');
-    await runSql(
-      db,
-      `
-        UPDATE arena_v2_battle_royale_queue
-           SET status = 'matched',
-               battle_royale_id = ?,
-               updated_at = CURRENT_TIMESTAMP
-         WHERE id IN (${placeholders}) AND status = 'waiting'
-      `,
-      [battleRoyaleId, ...entrants.map((ticket) => ticket.id)]
-    );
-    return serializeArenaV2BattleRoyaleQueue({
+    const now = new Date().toISOString();
+    return { seasonId: deck.seasonId, ticket: {
       id: ticketId,
       season_id: deck.seasonId,
       user_id: input.userId,
       deck_id: input.deckId,
-      status: 'matched',
-      battle_royale_id: battleRoyaleId,
-      joined_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      status: 'waiting',
+      battle_royale_id: null,
+      joined_at: now,
+      updated_at: now,
       expires_at: expiresAt
-    });
-  }
-  return serializeArenaV2BattleRoyaleQueue({
-    id: ticketId,
-    season_id: deck.seasonId,
-    user_id: input.userId,
-    deck_id: input.deckId,
-    status: 'waiting',
-    battle_royale_id: null,
-    joined_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    expires_at: expiresAt
+    } };
   });
+  await tryFormArenaV2BattleRoyale(queued.seasonId);
+  const storedTicket = await queryGet<any>(
+    db,
+    `
+      SELECT id, season_id, user_id, deck_id, status, battle_royale_id, joined_at, updated_at, expires_at
+        FROM arena_v2_battle_royale_queue
+       WHERE id = ?
+       LIMIT 1
+    `,
+    [queued.ticket.id]
+  );
+  return serializeArenaV2BattleRoyaleQueue(storedTicket || queued.ticket);
 };
 
 export const getArenaV2BattleRoyaleQueueStatus = async (userId: string, seasonId?: string) => {
@@ -2156,6 +3153,13 @@ const expireArenaV2QueueRows = async (db: SqlExecutor, seasonId?: string, userId
   );
   await runSql(
     db,
+    `DELETE FROM arena_v2_matchmaking_active_slots
+      WHERE ticket_id IN (
+        SELECT id FROM arena_v2_match_queue WHERE status IN ('cancelled', 'expired', 'accept_timeout', 'declined')
+      )`
+  );
+  await runSql(
+    db,
     `
       UPDATE arena_v2_battle_royale_queue
          SET status = 'expired',
@@ -2193,6 +3197,13 @@ export const processArenaV2ExpiredQueues = async () => {
     `,
     [now]
   );
+  await runSql(
+    db,
+    `DELETE FROM arena_v2_matchmaking_active_slots
+      WHERE ticket_id IN (
+        SELECT id FROM arena_v2_match_queue WHERE status IN ('cancelled', 'expired', 'accept_timeout', 'declined')
+      )`
+  );
   const battleRoyale = await runSql(
     db,
     `
@@ -2226,7 +3237,7 @@ const loadValidArenaV2DeckForUse = async (db: SqlExecutor, userId: string, deckI
   );
   if (!season) throw new Error('ArenaV2SeasonClosed');
   const cardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
-  const validation = await validateArenaV2DeckForSeason(deck.season_id, cardVersionIds);
+  const validation = await validateArenaV2DeckForSeasonWithExecutor(db, deck.season_id, cardVersionIds);
   if (!validation.valid) throw new Error('ArenaV2DeckInvalid');
   return { deck, season, seasonId: deck.season_id };
 };
@@ -2258,10 +3269,212 @@ const serializeArenaV2BattleRoyaleQueue = (row: any) => ({
   expiresAt: row.expires_at
 });
 
-export const getArenaV2MatchForUser = async (matchId: string, userId?: string | null) => {
+const battleRoyaleParticipantUserId = (participant: ArenaV2BattleRoyaleParticipant): string | null => {
+  const value = participant.userId ?? participant.user_id;
+  return typeof value === 'string' && value ? value : null;
+};
+
+const battleRoyaleParticipantMatchId = (
+  participant: ArenaV2BattleRoyaleParticipant,
+  key: 'current' | 'next'
+): string | null => {
+  const value = key === 'current'
+    ? participant.currentMatchId ?? participant.current_match_id
+    : participant.nextMatchId ?? participant.next_match_id;
+  return typeof value === 'string' && value ? value : null;
+};
+
+const loadArenaV2BattleRoyaleSnapshot = async (
+  db: SqlExecutor,
+  battleRoyaleId: string,
+  userId?: string | null
+) => {
+  const row = await queryGet<any>(
+    db,
+    `
+      SELECT id, season_id, status, current_round_no, participant_state, match_ids, winner_user_id, created_at, updated_at, finished_at
+        FROM arena_v2_battle_royales
+       WHERE id = ?
+       LIMIT 1
+    `,
+    [battleRoyaleId]
+  );
+  if (!row?.id) return null;
+
+  const participantState = jsonParse<ArenaV2BattleRoyaleParticipant[]>(row.participant_state, []);
+  const viewerParticipant = userId
+    ? participantState.find((participant) => battleRoyaleParticipantUserId(participant) === userId)
+    : undefined;
+  if (userId && !viewerParticipant) return null;
+
+  const matchRows = await queryAll<any>(
+    db,
+    `
+      SELECT id, status, round_no, turn_no, winner_user_id, finished_at, result_summary
+        FROM arena_v2_matches
+       WHERE battle_royale_id = ?
+       ORDER BY round_no ASC, created_at ASC, id ASC
+    `,
+    [battleRoyaleId]
+  );
+  const publicMatches: Array<Record<string, unknown> & { participantUserIds: string[] }> = [];
+  const finalRankByUserId = new Map<string, number>();
+  for (const match of matchRows) {
+    const matchPlayers = await queryAll<any>(
+      db,
+      `
+        SELECT seat_no, user_id, final_rank
+          FROM arena_v2_match_players
+         WHERE match_id = ?
+         ORDER BY seat_no ASC
+      `,
+      [match.id]
+    );
+    for (const player of matchPlayers) {
+      const finalRank = parseNullableRank(player.final_rank);
+      if (player.user_id && finalRank != null) finalRankByUserId.set(String(player.user_id), finalRank);
+    }
+    publicMatches.push({
+      id: match.id,
+      status: match.status,
+      roundNo: Number(match.round_no || 0),
+      turnNo: Number(match.turn_no || 1),
+      winnerUserId: match.winner_user_id || null,
+      finishedAt: match.finished_at || null,
+      participantUserIds: matchPlayers
+        .map((player) => typeof player.user_id === 'string' ? player.user_id : null)
+        .filter((value): value is string => Boolean(value)),
+      players: matchPlayers.map((player) => ({
+        seatNo: Number(player.seat_no),
+        userId: player.user_id || null,
+        finalRank: parseNullableRank(player.final_rank)
+      }))
+    });
+  }
+
+  const storedMatchIds = jsonParse<string[]>(row.match_ids, []);
+  const discoveredMatchIds = publicMatches.map((match) => String(match.id));
+  const matchIds = [...new Set([...storedMatchIds, ...discoveredMatchIds])];
+  const ongoingStatuses = new Set(['created', 'mulligan', 'turn_planning', 'action_locked', 'combat_resolving', 'turn_result']);
+  const spectatableMatchIds = publicMatches
+    .filter((match) => ongoingStatuses.has(String(match.status)))
+    .map((match) => String(match.id));
+
+  const publicParticipantState = participantState.map((participant) => {
+    const participantUserId = battleRoyaleParticipantUserId(participant);
+    const status = typeof participant.status === 'string' ? participant.status : 'active';
+    return {
+      seedNo: Number(participant.seedNo ?? participant.seed_no ?? 0),
+      userId: participantUserId,
+      status,
+      roundStatus: String(participant.roundStatus ?? participant.round_status ?? 'paired'),
+      health: Math.max(0, Number(participant.health ?? participant.playerHealth ?? participant.player_health ?? 30)),
+      alive: status !== 'eliminated',
+      currentRoundNo: Number(participant.currentRoundNo ?? participant.current_round_no ?? 0),
+      finalRank: parseNullableRank(participant.finalRank ?? participant.final_rank)
+        ?? (participantUserId ? finalRankByUserId.get(participantUserId) ?? null : null),
+      lastOpponentUserId: participant.lastOpponentUserId ?? participant.last_opponent_user_id ?? null,
+      lastByeRoundNo: parseNullableRank(participant.lastByeRoundNo ?? participant.last_bye_round_no),
+      byeCount: Math.max(0, Number(participant.byeCount ?? participant.bye_count ?? 0)),
+      currentMatchId: battleRoyaleParticipantMatchId(participant, 'current'),
+      nextMatchId: battleRoyaleParticipantMatchId(participant, 'next')
+    };
+  });
+
+  const viewerMatches = userId
+    ? publicMatches.filter((match) => match.participantUserIds.includes(userId))
+    : [];
+  const activeViewerMatch = [...viewerMatches]
+    .reverse()
+    .find((match) => ongoingStatuses.has(String(match.status)));
+  const latestViewerMatch = [...viewerMatches]
+    .sort((left, right) => Number(right.roundNo) - Number(left.roundNo))[0];
+  const viewerPlacement = viewerParticipant
+    ? parseNullableRank(viewerParticipant.finalRank ?? viewerParticipant.final_rank)
+      ?? (userId ? finalRankByUserId.get(userId) ?? null : null)
+    : null;
+  const placementCount = viewerPlacement == null
+    ? 0
+    : publicParticipantState.filter((participant) => participant.finalRank === viewerPlacement).length;
+  const configuredNextMatchId = viewerParticipant
+    ? battleRoyaleParticipantMatchId(viewerParticipant, 'next')
+    : null;
+  const configuredNextMatch = configuredNextMatchId
+    ? publicMatches.find((match) => String(match.id) === configuredNextMatchId)
+    : null;
+  const nextMatchId = configuredNextMatch && ongoingStatuses.has(String(configuredNextMatch.status)) ? configuredNextMatchId : null;
+  const configuredCurrentMatchId = viewerParticipant
+    ? battleRoyaleParticipantMatchId(viewerParticipant, 'current')
+    : null;
+  const currentMatchId = configuredCurrentMatchId && matchIds.includes(configuredCurrentMatchId)
+    ? configuredCurrentMatchId
+    : activeViewerMatch ? String(activeViewerMatch.id) : latestViewerMatch ? String(latestViewerMatch.id) : null;
+  const participantStatus = String(viewerParticipant?.status || '').toLowerCase();
+  const viewerFinishedCurrentMatch = latestViewerMatch?.status === 'completed'
+    || participantStatus === 'eliminated'
+    || participantStatus === 'completed';
+  const canSpectate = Boolean(userId && viewerFinishedCurrentMatch && spectatableMatchIds.some((matchId) => {
+    const candidate = publicMatches.find((match) => match.id === matchId);
+    return candidate && !candidate.participantUserIds.includes(userId);
+  }));
+
+  let outcome: ArenaV2ViewerResultDto['outcome'] | null = null;
+  if (viewerPlacement != null) {
+    outcome = viewerPlacement === 1 ? 'win' : 'loss';
+  } else if (userId && latestViewerMatch?.status === 'completed') {
+    const latestSummary = parseArenaV2StoredSummary(
+      matchRows.find((match) => match.id === latestViewerMatch.id)?.result_summary
+    );
+    outcome = latestSummary.result === 'draw'
+      ? 'draw'
+      : latestViewerMatch.winnerUserId === userId ? 'win' : 'loss';
+  } else if (userId && (row.status === 'completed' || row.status === 'finished')) {
+    outcome = row.winner_user_id === userId ? 'win' : 'loss';
+  }
+
+  const viewerResult: ArenaV2ViewerResultDto | null = outcome ? {
+    outcome,
+    mmrBefore: null,
+    mmrAfter: null,
+    mmrDelta: null,
+    tierBefore: null,
+    tierAfter: null,
+    unrated: true,
+    placement: viewerPlacement,
+    sharedPlacement: placementCount > 1,
+    canSpectate,
+    nextMatchId
+  } : null;
+
+  return {
+    row,
+    matchIds,
+    matches: publicMatches.map(({ participantUserIds: _participantUserIds, ...match }) => ({
+      ...match,
+      spectatable: spectatableMatchIds.includes(String(match.id))
+    })),
+    participantState: publicParticipantState,
+    spectatableMatchIds,
+    currentMatchId,
+    viewerContext: {
+      placement: viewerPlacement,
+      sharedPlacement: placementCount > 1,
+      canSpectate,
+      nextMatchId
+    } satisfies ArenaV2BattleRoyaleViewerContext,
+    viewerResult
+  };
+};
+
+
+export const getArenaV2MatchForUser = async (
+  matchId: string,
+  userId?: string | null,
+  battleRoyaleId?: string | null
+) => {
   const db = getExecutor();
   if (!db) return null;
-  const match = await queryGet<any>(
+  let match = await queryGet<any>(
     db,
     `
       SELECT id, season_id, mode, status, battle_royale_id, round_no, turn_no, rng_seed, rules_version, card_pool_version,
@@ -2285,9 +3498,17 @@ export const getArenaV2MatchForUser = async (matchId: string, userId?: string | 
     `,
     [matchId]
   );
-  if (userId && !players.some((player) => player.user_id === userId) && match.mode !== 'bot') {
-    return null;
+  const self = userId ? players.find((player) => player.user_id === userId) : undefined;
+  let battleRoyaleSnapshot: Awaited<ReturnType<typeof loadArenaV2BattleRoyaleSnapshot>> = null;
+  if (userId && !self) {
+    if (!battleRoyaleId || battleRoyaleId !== match.battle_royale_id) return null;
+    battleRoyaleSnapshot = await loadArenaV2BattleRoyaleSnapshot(db, battleRoyaleId, userId);
+    if (!battleRoyaleSnapshot) return null;
+  } else if (userId && match.battle_royale_id && match.status === 'completed') {
+    battleRoyaleSnapshot = await loadArenaV2BattleRoyaleSnapshot(db, match.battle_royale_id, userId);
   }
+  // 상태를 변경하는 read-repair는 참가자 또는 정확한 8인전 관전자 권한 확인 뒤에만 수행합니다.
+  match = await promoteArenaV2TurnResultIfReady(db, match);
 
   const instances = await queryAll<any>(
     db,
@@ -2308,8 +3529,13 @@ export const getArenaV2MatchForUser = async (matchId: string, userId?: string | 
     `,
     [matchId]
   );
-  const self = userId ? players.find((player) => player.user_id === userId) : undefined;
-  return serializeArenaV2MatchView(match, players, instances, self?.seat_no ?? null);
+  const viewerRole: ArenaV2ViewerRoleDto = self ? 'participant' : 'spectator';
+  return serializeArenaV2MatchView(match, players, instances, {
+    selfSeatNo: self?.seat_no ?? null,
+    viewerRole,
+    viewerUserId: userId || null,
+    battleRoyaleContext: battleRoyaleSnapshot?.viewerContext ?? null
+  });
 };
 
 export const isArenaV2MatchParticipant = async (matchId: string, userId: string) => {
@@ -2370,7 +3596,7 @@ const loadArenaV2RuntimeMatch = async (db: SqlExecutor, matchId: string): Promis
       seatNo: Number(player.seat_no),
       userId: player.user_id,
       deckId: player.deck_id,
-      playerHealth: Number(player.player_health || 30),
+      playerHealth: Number(player.player_health ?? 30),
       fatigueCount: Math.max(0, Number(player.fatigue_count || 0)),
       handCardInstanceIds: jsonParse<string[]>(player.hand_card_instance_ids, []),
       deckCardInstanceIds: jsonParse<string[]>(player.deck_card_instance_ids, []),
@@ -2444,6 +3670,255 @@ const collectArenaV2LatestValidActions = async (db: SqlExecutor, matchId: string
   return actionsBySeatNo;
 };
 
+const reconcileArenaV2BattleRoyale = async (
+  battleRoyaleId: string
+): Promise<'advanced' | 'finished' | 'waiting' | 'noop'> => withArenaV2Transaction(async (tx) => {
+  const battleRoyale = await queryGet<any>(
+    tx,
+    `
+      SELECT id, season_id, status, current_round_no, participant_state, match_ids, winner_user_id, finished_at
+        FROM arena_v2_battle_royales
+       WHERE id = ?
+       LIMIT 1
+       ${arenaV2ForUpdateClause()}
+    `,
+    [battleRoyaleId]
+  );
+  if (!battleRoyale || battleRoyale.status !== 'active') return 'noop';
+  const roundNo = Math.max(1, Number(battleRoyale.current_round_no || 1));
+
+  // Lock order is battle royale -> this round's matches -> their players.
+  const roundMatches = await queryAll<any>(
+    tx,
+    `
+      SELECT id, status, round_no, winner_user_id, result_summary, card_pool_version
+        FROM arena_v2_matches
+       WHERE battle_royale_id = ? AND round_no = ?
+       ORDER BY id ASC
+       ${arenaV2ForUpdateClause()}
+    `,
+    [battleRoyaleId, roundNo]
+  );
+  if (roundMatches.length === 0) return 'waiting';
+  const matchPlaceholders = roundMatches.map(() => '?').join(', ');
+  const roundPlayers = await queryAll<any>(
+    tx,
+    `
+      SELECT id, match_id, user_id, seat_no, player_health, final_rank
+        FROM arena_v2_match_players
+       WHERE match_id IN (${matchPlaceholders})
+       ORDER BY match_id ASC, seat_no ASC
+       ${arenaV2ForUpdateClause()}
+    `,
+    roundMatches.map((match) => match.id)
+  );
+
+  const participants = jsonParse<Record<string, unknown>[]>(battleRoyale.participant_state, [])
+    .map((participant) => normalizeArenaV2BattleRoyaleParticipant(participant, battleRoyaleId));
+  const participantByUserId = new Map(participants.map((participant) => [participant.userId, participant]));
+  const pairedParticipants = participants.filter((participant) => (
+    participant.status === 'active'
+    && participant.currentRoundNo === roundNo
+    && participant.roundStatus === 'paired'
+  ));
+  if (pairedParticipants.length !== roundMatches.length * 2 || roundPlayers.length !== roundMatches.length * 2) {
+    throw new Error('ArenaV2BattleRoyaleRoundShapeInvalid');
+  }
+  if (roundMatches.some((match) => match.status !== 'completed')) return 'waiting';
+
+  const currentRoundMatchByUserId = new Map<string, string>();
+  const matchResults: ArenaV2BattleRoyaleRoundMatchResult[] = [];
+  for (const match of roundMatches) {
+    const players = roundPlayers
+      .filter((player) => String(player.match_id) === String(match.id))
+      .sort((left, right) => Number(left.seat_no) - Number(right.seat_no));
+    if (players.length !== 2) throw new Error('ArenaV2BattleRoyaleMatchPlayerCountInvalid');
+    const summary = parseArenaV2StoredSummary(match.result_summary);
+    const battleRoyaleRound = isRecord(summary.battleRoyaleRound) ? summary.battleRoyaleRound : null;
+    const roundStats = battleRoyaleRound && Array.isArray(battleRoyaleRound.roundStats)
+      ? battleRoyaleRound.roundStats.filter(isRecord)
+      : [];
+    if (Number(battleRoyaleRound?.roundNo || 0) !== roundNo || roundStats.length !== 2) {
+      throw new Error('ArenaV2BattleRoyaleRoundAggregateMissing');
+    }
+    const resultPlayers = players.map((player) => {
+      const userId = String(player.user_id || '');
+      const participant = participantByUserId.get(userId);
+      if (!participant) throw new Error('ArenaV2BattleRoyaleMatchParticipantInvalid');
+      participant.currentMatchId = String(match.id);
+      participant.stateSourceMatchId = String(match.id);
+      currentRoundMatchByUserId.set(userId, String(match.id));
+      const stats = roundStats.find((item) => String(item.userId || '') === userId);
+      if (!stats) throw new Error('ArenaV2BattleRoyaleRoundAggregateMissing');
+      return {
+        userId,
+        health: Math.max(0, Number(player.player_health ?? 0)),
+        directDamageDealt: Math.max(0, Number(stats.directDamageDealt || 0))
+      };
+    });
+    matchResults.push({
+      matchId: String(match.id),
+      winnerUserId: match.winner_user_id ? String(match.winner_user_id) : null,
+      players: resultPlayers
+    });
+  }
+
+  const resolution = resolveArenaV2BattleRoyaleRound({
+    battleRoyaleId,
+    roundNo,
+    participants,
+    matches: matchResults
+  });
+  for (const participant of resolution.participants) {
+    if (participant.finalRank == null) continue;
+    const matchId = currentRoundMatchByUserId.get(participant.userId);
+    if (!matchId) continue;
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_match_players
+           SET final_rank = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE match_id = ? AND user_id = ?
+      `,
+      [participant.finalRank, matchId, participant.userId]
+    );
+  }
+
+  const storedMatchIds = jsonParse<string[]>(battleRoyale.match_ids, []);
+  if (resolution.finished) {
+    const updated = await runSql(
+      tx,
+      `
+        UPDATE arena_v2_battle_royales
+           SET status = 'finished',
+               participant_state = ?,
+               winner_user_id = ?,
+               finished_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'active' AND current_round_no = ?
+      `,
+      [JSON.stringify(resolution.participants), resolution.winnerUserId, battleRoyaleId, roundNo]
+    );
+    if (affectedRows(updated) !== 1) throw new Error('ArenaV2BattleRoyaleAdvanceConflict');
+    return 'finished';
+  }
+
+  const nextRoundNo = resolution.nextRoundNo;
+  const nextParticipantByUserId = new Map(resolution.participants.map((participant) => [participant.userId, participant]));
+  const nextMatches = resolution.pairings.map((pairing) => {
+    const users = [pairing.leftUserId, pairing.rightUserId].sort();
+    const matchId = makeDeterministicId('arena_v2_match', `${battleRoyaleId}:${nextRoundNo}:${users.join(':')}`);
+    for (const userId of users) {
+      const participant = nextParticipantByUserId.get(userId);
+      if (!participant) throw new Error('ArenaV2BattleRoyaleParticipantMissing');
+      participant.currentMatchId = matchId;
+      participant.nextMatchId = matchId;
+    }
+    return { matchId, users };
+  });
+  for (const match of nextMatches) {
+    const seats = match.users.map((userId, seatNo) => {
+      const participant = nextParticipantByUserId.get(userId)!;
+      if (!participant.stateSourceMatchId) throw new Error('ArenaV2BattleRoyaleStateSourceMissing');
+      return {
+        seatNo,
+        userId,
+        deckId: participant.deckId,
+        playerHealth: participant.health,
+        freeTacticalMoveNextRound: participant.freeTacticalMoveNextRound,
+        pendingByeDraws: participant.pendingByeDraws,
+        frozenCardVersionIds: participant.frozenCardVersionIds,
+        stateSourceMatchId: participant.stateSourceMatchId
+      };
+    });
+    await createArenaV2MatchFromDeckSeats(tx, {
+      matchId: match.matchId,
+      seasonId: String(battleRoyale.season_id),
+      cardPoolVersion: resolution.participants[0]?.frozenCardPoolVersion || String(roundMatches[0].card_pool_version),
+      mode: 'battle_royale_8',
+      battleRoyaleId,
+      roundNo: nextRoundNo,
+      initialStatus: 'turn_planning',
+      seats,
+      summary: {
+        status: 'turn_planning',
+        queue: 'battle_royale_8',
+        battleRoyaleId,
+        roundNo: nextRoundNo,
+        carriedState: true
+      }
+    });
+  }
+  const sharedRoundPhaseTiming = createArenaV2PhaseTiming([], Date.now());
+  for (const match of nextMatches) {
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_matches
+           SET result_summary = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'turn_planning'
+      `,
+      [
+        JSON.stringify({
+          status: 'turn_planning',
+          queue: 'battle_royale_8',
+          battleRoyaleId,
+          roundNo: nextRoundNo,
+          carriedState: true,
+          phaseTiming: sharedRoundPhaseTiming
+        }),
+        match.matchId
+      ]
+    );
+    for (const userId of match.users) nextParticipantByUserId.get(userId)!.pendingByeDraws = 0;
+  }
+  const allMatchIds = [...new Set([...storedMatchIds, ...nextMatches.map((match) => match.matchId)])];
+  const updated = await runSql(
+    tx,
+    `
+      UPDATE arena_v2_battle_royales
+         SET current_round_no = ?,
+             participant_state = ?,
+             match_ids = ?,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'active' AND current_round_no = ?
+    `,
+    [nextRoundNo, JSON.stringify(resolution.participants), JSON.stringify(allMatchIds), battleRoyaleId, roundNo]
+  );
+  if (affectedRows(updated) !== 1) throw new Error('ArenaV2BattleRoyaleAdvanceConflict');
+  return 'advanced';
+});
+
+export const processArenaV2BattleRoyaleProgressions = async (limit = 25) => {
+  const db = getExecutor();
+  if (!db) return { scanned: 0, advanced: 0, finished: 0, failed: 0 };
+  const rows = await queryAll<any>(
+    db,
+    `
+      SELECT id
+        FROM arena_v2_battle_royales
+       WHERE status = 'active'
+       ORDER BY updated_at ASC, id ASC
+       LIMIT ?
+    `,
+    [Math.min(Math.max(Number(limit || 25), 1), 100)]
+  );
+  let advanced = 0;
+  let finished = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      const outcome = await reconcileArenaV2BattleRoyale(String(row.id));
+      if (outcome === 'advanced') advanced += 1;
+      if (outcome === 'finished') finished += 1;
+    } catch (error: any) {
+      failed += 1;
+      console.error('[ArenaV2] 8인전 라운드 복구 실패:', row.id, error?.message || error);
+    }
+  }
+  return { scanned: rows.length, advanced, finished, failed };
+};
+
 const resolveArenaV2TurnFromActions = async (
   db: SqlExecutor,
   input: {
@@ -2452,28 +3927,46 @@ const resolveArenaV2TurnFromActions = async (
     actionsBySeatNo: Record<number, ArenaV2TurnActionDto[]>;
   }
 ) => {
-  const runtime = await loadArenaV2RuntimeMatch(db, input.matchId);
-  await runSql(
-    db,
-    `
-      UPDATE arena_v2_matches
-         SET status = 'combat_resolving',
-             updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND turn_no = ?
-    `,
-    [input.matchId, input.turnNo]
-  );
-  const resolution = resolveArenaV2Turn({
-    matchId: input.matchId,
-    mode: runtime.match.mode,
-    turnNo: input.turnNo,
-    seed: runtime.match.rng_seed,
-    players: runtime.players,
-    cardInstances: runtime.cardInstances,
-    actionsBySeatNo: input.actionsBySeatNo
+  void db;
+  const persisted = await withArenaV2Transaction(async (tx) => {
+    const runtime = await loadArenaV2RuntimeMatch(tx, input.matchId);
+    if (!['turn_planning', 'action_locked'].includes(String(runtime.match.status))) return null;
+    const claimed = await runSql(
+      tx,
+      `
+        UPDATE arena_v2_matches
+           SET status = 'combat_resolving',
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND turn_no = ? AND status IN ('turn_planning', 'action_locked')
+      `,
+      [input.matchId, input.turnNo]
+    );
+    if (affectedRows(claimed) !== 1) return null;
+    const resolution = resolveArenaV2Turn({
+      matchId: input.matchId,
+      mode: runtime.match.mode,
+      turnNo: input.turnNo,
+      seed: runtime.match.rng_seed,
+      players: runtime.players,
+      cardInstances: runtime.cardInstances,
+      actionsBySeatNo: input.actionsBySeatNo
+    });
+    await persistArenaV2TurnResolution(tx, runtime.match, resolution);
+    return {
+      resolution,
+      battleRoyaleId: runtime.match.mode === 'battle_royale_8' && resolution.nextStatus === 'completed'
+        ? String(runtime.match.battle_royale_id || '')
+        : ''
+    };
   });
-  await persistArenaV2TurnResolution(db, runtime.match, resolution);
-  return resolution;
+  if (persisted?.battleRoyaleId) {
+    try {
+      await reconcileArenaV2BattleRoyale(persisted.battleRoyaleId);
+    } catch (error: any) {
+      console.error('[ArenaV2] 완료된 8인전 매치 후 라운드 반영 실패:', persisted.battleRoyaleId, error?.message || error);
+    }
+  }
+  return persisted?.resolution || null;
 };
 
 const insertArenaV2ActionSubmission = async (
@@ -2511,6 +4004,27 @@ const insertArenaV2ActionSubmission = async (
 );
 
 const persistArenaV2TurnResolution = async (db: SqlExecutor, match: any, resolution: ArenaV2TurnResolutionResult) => {
+  const persistedAtMs = Date.now();
+  const expiresAt = new Date(persistedAtMs + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const lastSeq = await queryGet<{ max_seq: number }>(
+    db,
+    'SELECT COALESCE(MAX(seq), 0) AS max_seq FROM arena_v2_replay_events WHERE match_id = ?',
+    [match.id]
+  );
+  let seq = Number(lastSeq?.max_seq || 0);
+  for (const replayEvent of resolution.replayEvents) {
+    seq += 1;
+    await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_replay_events
+          (match_id, seq, turn_no, event_type, payload, expires_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?)
+      `,
+      [match.id, seq, replayEvent.turnNo, replayEvent.eventType, JSON.stringify(replayEvent.payload), expiresAt]
+    );
+  }
   for (const player of resolution.players) {
     await runSql(
       db,
@@ -2566,7 +4080,19 @@ const persistArenaV2TurnResolution = async (db: SqlExecutor, match: any, resolut
       ]
     );
   }
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const storedSummary: ArenaV2StoredSummary = { ...resolution.summary };
+  if (resolution.nextStatus !== 'completed') {
+    storedSummary.status = 'turn_result';
+    storedSummary.phaseTiming = createArenaV2PhaseTiming(resolution.replayEvents, persistedAtMs);
+  }
+  if (match.mode === 'quick' && resolution.nextStatus === 'completed') {
+    storedSummary.viewerResultsByUser = await updateArenaV2QuickRatings(
+      db,
+      match.season_id,
+      match.id,
+      resolution
+    );
+  }
   if (resolution.nextStatus === 'completed') {
     await runSql(
       db,
@@ -2585,9 +4111,9 @@ const persistArenaV2TurnResolution = async (db: SqlExecutor, match: any, resolut
         resolution.nextStatus,
         resolution.nextTurnNo,
         resolution.winnerUserId,
-        new Date().toISOString(),
+        new Date(persistedAtMs).toISOString(),
         expiresAt,
-        JSON.stringify(resolution.summary),
+        JSON.stringify(storedSummary),
         match.id
       ]
     );
@@ -2603,32 +4129,8 @@ const persistArenaV2TurnResolution = async (db: SqlExecutor, match: any, resolut
                updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
       `,
-      [resolution.nextStatus, resolution.nextTurnNo, JSON.stringify(resolution.summary), match.id]
+      ['turn_result', resolution.nextTurnNo, JSON.stringify(storedSummary), match.id]
     );
-  }
-
-  const lastSeq = await queryGet<{ max_seq: number }>(
-    db,
-    'SELECT COALESCE(MAX(seq), 0) AS max_seq FROM arena_v2_replay_events WHERE match_id = ?',
-    [match.id]
-  );
-  let seq = Number(lastSeq?.max_seq || 0);
-  for (const replayEvent of resolution.replayEvents) {
-    seq += 1;
-    await runSql(
-      db,
-      `
-        INSERT INTO arena_v2_replay_events
-          (match_id, seq, turn_no, event_type, payload, expires_at)
-        VALUES
-          (?, ?, ?, ?, ?, ?)
-      `,
-      [match.id, seq, replayEvent.turnNo, replayEvent.eventType, JSON.stringify(replayEvent.payload), expiresAt]
-    );
-  }
-
-  if (match.mode === 'quick' && resolution.nextStatus === 'completed') {
-    await updateArenaV2QuickRatings(db, match.season_id, match.id, resolution);
   }
 };
 
@@ -2646,12 +4148,13 @@ const updateArenaV2QuickRatings = async (
   matchId: string,
   resolution: ArenaV2TurnResolutionResult
 ) => {
-  const alreadyApplied = await queryGet<any>(
-    db,
-    'SELECT id FROM arena_v2_ratings WHERE season_id = ? AND last_match_id = ? LIMIT 1',
-    [seasonId, matchId]
-  );
-  if (alreadyApplied) return;
+  const viewerResultsByUser: Record<string, {
+    mmrBefore: number;
+    mmrAfter: number;
+    mmrDelta: number;
+    tierBefore: string;
+    tierAfter: string;
+  }> = {};
   for (const player of resolution.players) {
     if (!player.userId) continue;
     const existing = await queryGet<any>(
@@ -2659,12 +4162,24 @@ const updateArenaV2QuickRatings = async (
       'SELECT id, mmr, peak_mmr, wins, losses, draws, last_match_id FROM arena_v2_ratings WHERE season_id = ? AND user_id = ? LIMIT 1',
       [seasonId, player.userId]
     );
-    if (existing?.last_match_id === matchId) continue;
-    const oldMmr = Number(existing?.mmr || 1000);
     const isDraw = resolution.result === 'draw';
     const isWin = resolution.winnerUserId === player.userId;
-    const nextMmr = Math.max(0, oldMmr + (isDraw ? 0 : isWin ? 25 : -25));
-    const nextPeak = Math.max(Number(existing?.peak_mmr || 1000), nextMmr);
+    const nominalDelta = isDraw ? 0 : isWin ? 25 : -25;
+    if (existing?.last_match_id === matchId) {
+      const mmrAfter = Number(existing.mmr ?? 1000);
+      const mmrBefore = Math.max(0, mmrAfter - nominalDelta);
+      viewerResultsByUser[player.userId] = {
+        mmrBefore,
+        mmrAfter,
+        mmrDelta: mmrAfter - mmrBefore,
+        tierBefore: tierForArenaV2Mmr(mmrBefore),
+        tierAfter: tierForArenaV2Mmr(mmrAfter)
+      };
+      continue;
+    }
+    const oldMmr = Number(existing?.mmr ?? 1000);
+    const nextMmr = Math.max(0, oldMmr + nominalDelta);
+    const nextPeak = Math.max(Number(existing?.peak_mmr ?? 1000), nextMmr);
     const tier = tierForArenaV2Mmr(nextMmr);
     const peakTier = tierForArenaV2Mmr(nextPeak);
     if (existing) {
@@ -2709,7 +4224,15 @@ const updateArenaV2QuickRatings = async (
         ]
       );
     }
+    viewerResultsByUser[player.userId] = {
+      mmrBefore: oldMmr,
+      mmrAfter: nextMmr,
+      mmrDelta: nextMmr - oldMmr,
+      tierBefore: tierForArenaV2Mmr(oldMmr),
+      tierAfter: tier
+    };
   }
+  return viewerResultsByUser;
 };
 
 export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) => {
@@ -2719,6 +4242,10 @@ export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) =>
   if (!view) throw new Error('ArenaV2MatchNotFound');
   if (view.status !== 'turn_planning' && view.status !== 'action_locked') throw new Error('ArenaV2MatchNotPlanning');
   if (view.turnNo !== input.turnNo) throw new Error('ArenaV2TurnMismatch');
+  const turnDeadlineMs = view.phaseTiming?.turnDeadlineAt ? Date.parse(view.phaseTiming.turnDeadlineAt) : Number.NaN;
+  if (Number.isFinite(turnDeadlineMs) && Date.now() >= turnDeadlineMs) {
+    throw new Error('ArenaV2TurnDeadlineExpired');
+  }
   const selfSeatNo = view.selfSeatNo;
   if (selfSeatNo == null) throw new Error('ArenaV2MatchForbidden');
   const self = view.players.find((player) => player.seatNo === selfSeatNo);
@@ -2749,30 +4276,44 @@ export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) =>
     availableCost: getArenaV2AvailableCost(view.turnNo),
     handCardInstanceIds: self.handCardInstanceIds,
     boardCards: self.boardState,
+    freeTacticalMoveCount: getArenaV2FreeTacticalMoveCount(self.mulliganState),
     cardInstancesById,
     actions: input.actions
   });
   const submissionId = makeId('arena_v2_action');
-  await runSql(
-    db,
-    `
-      INSERT INTO arena_v2_action_submissions
-        (id, match_id, user_id, seat_no, turn_no, revision, action_payload, validation_result, is_final)
-      VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      submissionId,
-      input.matchId,
-      input.userId,
-      selfSeatNo,
-      input.turnNo,
-      input.revision,
-      JSON.stringify({ actions: input.actions }),
-      JSON.stringify(validation),
-      input.isFinal && validation.valid ? 1 : 0
-    ]
-  );
+  let submissionInserted: any;
+  try {
+    submissionInserted = await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_action_submissions
+          (id, match_id, user_id, seat_no, turn_no, revision, action_payload, validation_result, is_final)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1
+             FROM arena_v2_matches
+            WHERE id = ? AND turn_no = ? AND status IN ('turn_planning', 'action_locked')
+         )
+      `,
+      [
+        submissionId,
+        input.matchId,
+        input.userId,
+        selfSeatNo,
+        input.turnNo,
+        input.revision,
+        JSON.stringify({ actions: input.actions }),
+        JSON.stringify(validation),
+        input.isFinal && validation.valid ? 1 : 0,
+        input.matchId,
+        input.turnNo
+      ]
+    );
+  } catch (error: any) {
+    if (isArenaV2DuplicateKeyError(error)) throw new Error('ArenaV2RevisionNotIncreasing');
+    throw error;
+  }
+  if (affectedRows(submissionInserted) !== 1) throw new Error('ArenaV2MatchNotPlanning');
   if (input.isFinal && validation.valid) {
     const runtime = await loadArenaV2RuntimeMatch(db, input.matchId);
     const actionsBySeatNo = await collectArenaV2FinalActions(db, input.matchId, input.turnNo);
@@ -2800,6 +4341,7 @@ export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) =>
           availableCost: getArenaV2AvailableCost(input.turnNo),
           handCardInstanceIds: botPlayer.handCardInstanceIds,
           boardCards: botPlayer.boardState,
+          freeTacticalMoveCount: getArenaV2FreeTacticalMoveCount(botPlayer.mulliganState),
           cardInstancesById: botCardInstancesById,
           actions: botActions
         });
@@ -2838,7 +4380,16 @@ export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) =>
                  updated_at = CURRENT_TIMESTAMP
            WHERE id = ? AND turn_no = ?
         `,
-        [JSON.stringify({ status: 'action_locked', lockedSeats: [...finalSeatNos], waitingSeats: runtime.players.filter((player) => !finalSeatNos.has(player.seatNo)).map((player) => player.seatNo) }), input.matchId, input.turnNo]
+        [
+          JSON.stringify({
+            ...parseArenaV2StoredSummary(runtime.match.result_summary),
+            status: 'action_locked',
+            lockedSeats: [...finalSeatNos],
+            waitingSeats: runtime.players.filter((player) => !finalSeatNos.has(player.seatNo)).map((player) => player.seatNo)
+          }),
+          input.matchId,
+          input.turnNo
+        ]
       );
     }
   }
@@ -2850,55 +4401,267 @@ export const submitArenaV2TurnActions = async (input: ArenaV2SubmitTurnInput) =>
   };
 };
 
-export const processArenaV2ExpiredTurns = async (timeoutSeconds = 40, limit = 25) => {
+const autoConfirmExpiredArenaV2Mulligan = async (
+  matchId: string,
+  nowMs: number,
+  legacyCutoffMs: number
+): Promise<boolean> => withArenaV2Transaction(async (tx) => {
+  const match = await queryGet<any>(
+    tx,
+    `
+      SELECT id, status, result_summary, updated_at
+        FROM arena_v2_matches
+       WHERE id = ?
+       LIMIT 1
+       ${arenaV2ForUpdateClause()}
+    `,
+    [matchId]
+  );
+  if (!match || match.status !== 'mulligan') return false;
+  const summary = parseArenaV2StoredSummary(match.result_summary);
+  const deadlineMs = typeof summary.mulliganDeadlineAt === 'string'
+    ? Date.parse(summary.mulliganDeadlineAt)
+    : Number.NaN;
+  const updatedAtMs = match.updated_at ? Date.parse(match.updated_at) : 0;
+  if (Number.isFinite(deadlineMs) ? deadlineMs > nowMs : updatedAtMs > legacyCutoffMs) return false;
+
+  const players = await queryAll<any>(
+    tx,
+    `
+      SELECT seat_no, user_id, hand_card_instance_ids, mulligan_state
+        FROM arena_v2_match_players
+       WHERE match_id = ?
+       ORDER BY seat_no ASC
+       ${arenaV2ForUpdateClause()}
+    `,
+    [matchId]
+  );
+  if (players.length === 0) return false;
+  const autoConfirmedSeats: number[] = [];
+  const submittedAt = new Date(nowMs).toISOString();
+  for (const player of players) {
+    const state = jsonParse<Record<string, unknown>>(player.mulligan_state, {});
+    if (state.done) continue;
+    const seatNo = Number(player.seat_no);
+    const kept = jsonParse<string[]>(player.hand_card_instance_ids, []);
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_match_players
+           SET mulligan_state = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE match_id = ? AND seat_no = ?
+      `,
+      [JSON.stringify({ ...state, done: true, replaced: [], kept, submittedAt, autoConfirmed: true }), matchId, seatNo]
+    );
+    autoConfirmedSeats.push(seatNo);
+  }
+  const phaseTiming = createArenaV2PhaseTiming([], nowMs);
+  const updated = await runSql(
+    tx,
+    `
+      UPDATE arena_v2_matches
+         SET status = 'turn_result', result_summary = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'mulligan'
+    `,
+    [JSON.stringify({
+      ...summary,
+      status: 'turn_result',
+      readySeats: players.map((player) => Number(player.seat_no)),
+      waitingSeats: [],
+      autoConfirmedMulliganSeats: autoConfirmedSeats,
+      phaseTiming
+    }), matchId]
+  );
+  return affectedRows(updated) === 1;
+});
+
+type ArenaV2ExpiredMatchOutcome = 'noop' | 'promoted' | 'resolved';
+
+const processArenaV2ExpiredMatch = async (
+  matchId: string,
+  nowMs = Date.now(),
+  timeoutSeconds = 40
+): Promise<ArenaV2ExpiredMatchOutcome> => {
+  const legacyCutoffMs = nowMs - Math.max(5, Number(timeoutSeconds || 40)) * 1000;
+  let completedBattleRoyaleId = '';
+  const outcome = await withArenaV2Transaction(async (tx): Promise<ArenaV2ExpiredMatchOutcome> => {
+    const match = await queryGet<any>(
+      tx,
+      `
+        SELECT id, season_id, mode, status, battle_royale_id, round_no, turn_no, rng_seed, rules_version,
+               card_pool_version, result_summary, updated_at
+          FROM arena_v2_matches
+         WHERE id = ?
+         LIMIT 1
+         ${arenaV2ForUpdateClause()}
+      `,
+      [matchId]
+    );
+    if (!match) return 'noop';
+
+    const summary = parseArenaV2StoredSummary(match.result_summary);
+    if (match.status === 'turn_result') {
+      const phaseTiming = serializeArenaV2PhaseTiming(summary, new Date(nowMs).toISOString());
+      const planningStartsAtMs = phaseTiming?.planningStartsAt
+        ? Date.parse(phaseTiming.planningStartsAt)
+        : Number.NaN;
+      if (Number.isFinite(planningStartsAtMs) && planningStartsAtMs > nowMs) return 'noop';
+      const updated = await runSql(
+        tx,
+        `
+          UPDATE arena_v2_matches
+             SET status = 'turn_planning',
+                 result_summary = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND status = 'turn_result'
+        `,
+        [JSON.stringify({ ...summary, status: 'turn_planning' }), matchId]
+      );
+      return affectedRows(updated) === 1 ? 'promoted' : 'noop';
+    }
+    if (match.status !== 'turn_planning' && match.status !== 'action_locked') return 'noop';
+
+    const phaseTiming = serializeArenaV2PhaseTiming(summary, new Date(nowMs).toISOString());
+    const deadlineMs = phaseTiming?.turnDeadlineAt ? Date.parse(phaseTiming.turnDeadlineAt) : Number.NaN;
+    const updatedAtMs = match.updated_at ? Date.parse(match.updated_at) : 0;
+    if (Number.isFinite(deadlineMs) ? deadlineMs > nowMs : updatedAtMs > legacyCutoffMs) return 'noop';
+
+    const claimed = await runSql(
+      tx,
+      `
+        UPDATE arena_v2_matches
+           SET status = 'combat_resolving',
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND turn_no = ? AND status IN ('turn_planning', 'action_locked')
+      `,
+      [matchId, Number(match.turn_no)]
+    );
+    if (affectedRows(claimed) !== 1) return 'noop';
+
+    const runtime = await loadArenaV2RuntimeMatch(tx, matchId);
+    const turnNo = Number(match.turn_no);
+    const finalActions = await collectArenaV2FinalActions(tx, matchId, turnNo);
+    const latestValidActions = await collectArenaV2LatestValidActions(tx, matchId, turnNo);
+    const actionsBySeatNo: Record<number, ArenaV2TurnActionDto[]> = { ...finalActions };
+    for (const player of runtime.players) {
+      if (Object.prototype.hasOwnProperty.call(actionsBySeatNo, player.seatNo)) continue;
+      const timeoutActions = latestValidActions[player.seatNo] || [{ type: 'end' as const }];
+      actionsBySeatNo[player.seatNo] = timeoutActions;
+      await insertArenaV2ActionSubmission(tx, {
+        id: makeDeterministicId('arena_v2_action', `${matchId}:${turnNo}:${player.seatNo}:timeout`),
+        matchId,
+        userId: player.userId || `bot:${matchId}`,
+        seatNo: player.seatNo,
+        turnNo,
+        // API 사용자 revision은 0 이상만 허용하므로 timeout은 충돌할 수 없는 예약 음수 영역을 사용합니다.
+        revision: -1_000_000 - turnNo,
+        actions: timeoutActions,
+        validation: {
+          valid: true,
+          errors: [],
+          warnings: [{ code: 'ArenaV2TurnTimeout', message: '제한 시간 초과로 서버가 행동을 확정했습니다.' }]
+        },
+        isFinal: true
+      });
+    }
+
+    const resolution = resolveArenaV2Turn({
+      matchId,
+      mode: runtime.match.mode,
+      turnNo,
+      seed: runtime.match.rng_seed,
+      players: runtime.players,
+      cardInstances: runtime.cardInstances,
+      actionsBySeatNo
+    });
+    await persistArenaV2TurnResolution(tx, runtime.match, resolution);
+    if (runtime.match.mode === 'battle_royale_8' && resolution.nextStatus === 'completed') {
+      completedBattleRoyaleId = String(runtime.match.battle_royale_id || '');
+    }
+    return 'resolved';
+  });
+
+  if (completedBattleRoyaleId) {
+    try {
+      await reconcileArenaV2BattleRoyale(completedBattleRoyaleId);
+    } catch (error: any) {
+      console.error('[ArenaV2] 만료된 8인전 매치 후 라운드 반영 실패:', completedBattleRoyaleId, error?.message || error);
+    }
+  }
+  return outcome;
+};
+
+export const processArenaV2ExpiredTurns = async (
+  timeoutSeconds = 40,
+  limit = 25,
+  processBattleRoyales = true
+) => {
   const db = getExecutor();
-  if (!db) return { scanned: 0, resolved: 0 };
+  if (!db) return { scanned: 0, promoted: 0, resolved: 0, mulligansAutoConfirmed: 0 };
   const candidates = await queryAll<any>(
     db,
     `
-      SELECT id, turn_no, status, updated_at
+      SELECT id, turn_no, status, result_summary, updated_at
         FROM arena_v2_matches
-       WHERE status IN ('turn_planning', 'action_locked')
+       WHERE status IN ('mulligan', 'turn_result', 'turn_planning', 'action_locked')
        ORDER BY updated_at ASC
        LIMIT ?
     `,
     [Math.min(Math.max(Number(limit || 25), 1), 100)]
   );
+  let promoted = 0;
   let resolved = 0;
-  const cutoffMs = Date.now() - Math.max(5, Number(timeoutSeconds || 40)) * 1000;
+  let mulligansAutoConfirmed = 0;
+  let failed = 0;
+  const nowMs = Date.now();
+  const legacyCutoffMs = nowMs - Math.max(5, Number(timeoutSeconds || 40)) * 1000;
   for (const candidate of candidates) {
-    const updatedAtMs = candidate.updated_at ? Date.parse(candidate.updated_at) : 0;
-    if (updatedAtMs && updatedAtMs > cutoffMs) continue;
-    const runtime = await loadArenaV2RuntimeMatch(db, candidate.id);
-    if (runtime.match.status !== 'turn_planning' && runtime.match.status !== 'action_locked') continue;
-    const finalActions = await collectArenaV2FinalActions(db, candidate.id, Number(candidate.turn_no));
-    const latestValidActions = await collectArenaV2LatestValidActions(db, candidate.id, Number(candidate.turn_no));
-    const actionsBySeatNo: Record<number, ArenaV2TurnActionDto[]> = { ...finalActions };
-    for (const player of runtime.players) {
-      if (!actionsBySeatNo[player.seatNo]) {
-        const timeoutActions = latestValidActions[player.seatNo] || [{ type: 'end' as const }];
-        actionsBySeatNo[player.seatNo] = timeoutActions;
-        await insertArenaV2ActionSubmission(db, {
-          id: makeId('arena_v2_action'),
-          matchId: candidate.id,
-          userId: player.userId || `bot:${candidate.id}`,
-          seatNo: player.seatNo,
-          turnNo: Number(candidate.turn_no),
-          revision: 1_000_000 + Number(candidate.turn_no),
-          actions: timeoutActions,
-          validation: { valid: true, errors: [], warnings: [{ code: 'ArenaV2TurnTimeout', message: '제한 시간 초과로 서버가 행동을 확정했습니다.' }] },
-          isFinal: true
-        });
+    try {
+      if (candidate.status === 'mulligan') {
+        if (await autoConfirmExpiredArenaV2Mulligan(String(candidate.id), nowMs, legacyCutoffMs)) {
+          mulligansAutoConfirmed += 1;
+        }
+        continue;
       }
+      const outcome = await processArenaV2ExpiredMatch(String(candidate.id), nowMs, timeoutSeconds);
+      if (outcome === 'promoted') promoted += 1;
+      if (outcome === 'resolved') resolved += 1;
+    } catch (error: any) {
+      failed += 1;
+      console.error('[ArenaV2] 만료 경기 자동 진행 실패:', candidate.id, error?.message || error);
     }
-    await resolveArenaV2TurnFromActions(db, {
-      matchId: candidate.id,
-      turnNo: Number(candidate.turn_no),
-      actionsBySeatNo
-    });
-    resolved += 1;
   }
-  return { scanned: candidates.length, resolved };
+  const battleRoyaleProgression = processBattleRoyales
+    ? await processArenaV2BattleRoyaleProgressions(limit)
+    : { scanned: 0, advanced: 0, finished: 0, failed: 0 };
+  return { scanned: candidates.length, promoted, resolved, failed, mulligansAutoConfirmed, battleRoyaleProgression };
+};
+
+export const syncArenaV2MatchForUser = async (
+  matchId: string,
+  userId: string,
+  battleRoyaleId?: string | null
+) => {
+  const authorizedView = await getArenaV2MatchForUser(matchId, userId, battleRoyaleId);
+  if (!authorizedView) return null;
+  const nowMs = Date.now();
+  if (authorizedView.status === 'mulligan') {
+    const summary = isRecord(authorizedView.resultSummary) ? authorizedView.resultSummary : {};
+    const deadlineMs = typeof summary.mulliganDeadlineAt === 'string'
+      ? Date.parse(summary.mulliganDeadlineAt)
+      : Number.NaN;
+    if (Number.isFinite(deadlineMs) && deadlineMs > nowMs) return authorizedView;
+    await autoConfirmExpiredArenaV2Mulligan(matchId, nowMs, nowMs - 40_000);
+  } else if (authorizedView.status === 'turn_planning' || authorizedView.status === 'action_locked') {
+    const deadlineMs = authorizedView.phaseTiming?.turnDeadlineAt
+      ? Date.parse(authorizedView.phaseTiming.turnDeadlineAt)
+      : Number.NaN;
+    if (Number.isFinite(deadlineMs) && deadlineMs > nowMs) return authorizedView;
+    await processArenaV2ExpiredMatch(matchId, nowMs);
+  } else {
+    return authorizedView;
+  }
+  return getArenaV2MatchForUser(matchId, userId, battleRoyaleId);
 };
 
 export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) => {
@@ -2911,6 +4674,12 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
   if (selfSeatNo == null) throw new Error('ArenaV2MatchForbidden');
   const self = view.players.find((player) => player.seatNo === selfSeatNo);
   if (!self) throw new Error('ArenaV2MatchForbidden');
+  const existingSummary = isRecord(view.resultSummary) ? view.resultSummary : {};
+  const mulliganDeadlineMs = typeof existingSummary.mulliganDeadlineAt === 'string'
+    ? Date.parse(existingSummary.mulliganDeadlineAt) : Number.NaN;
+  if (Number.isFinite(mulliganDeadlineMs) && Date.now() >= mulliganDeadlineMs) {
+    throw new Error('ArenaV2MulliganDeadlineExpired');
+  }
 
   const replaceSet = new Set(input.replaceCardInstanceIds);
   if (replaceSet.size > 3) throw new Error('ArenaV2MulliganTooManyCards');
@@ -2947,10 +4716,13 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
     done: true,
     replaced: returned,
     kept,
-    submittedAt: new Date().toISOString()
+    submittedAt: new Date().toISOString(),
   };
 
-  await runSql(
+  if (Number.isFinite(mulliganDeadlineMs) && Date.now() >= mulliganDeadlineMs) {
+    throw new Error('ArenaV2MulliganDeadlineExpired');
+  }
+  const playerUpdated = await runSql(
     db,
     `
       UPDATE arena_v2_match_players
@@ -2959,9 +4731,14 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
              mulligan_state = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE match_id = ? AND seat_no = ?
+         AND EXISTS (
+           SELECT 1 FROM arena_v2_matches
+            WHERE id = ? AND status = 'mulligan'
+         )
     `,
-    [JSON.stringify(nextHand), JSON.stringify(remainingDeck), JSON.stringify(mulliganState), input.matchId, selfSeatNo]
+    [JSON.stringify(nextHand), JSON.stringify(remainingDeck), JSON.stringify(mulliganState), input.matchId, selfSeatNo, input.matchId]
   );
+  if (affectedRows(playerUpdated) !== 1) throw new Error('ArenaV2MatchNotMulligan');
   for (const cardInstanceId of drawn) {
     await runSql(
       db,
@@ -3000,16 +4777,27 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
   );
   const allMulligansDone = view.mode === 'bot' || allPlayers.every((player) => jsonParse<{ done?: boolean }>(player.mulligan_state, {}).done);
   if (allMulligansDone) {
+    const phaseTiming = createArenaV2PhaseTiming([]);
     await runSql(
       db,
       `
         UPDATE arena_v2_matches
-           SET status = 'turn_planning',
+           SET status = 'turn_result',
                result_summary = ?,
                updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND status = 'mulligan'
       `,
-      [JSON.stringify({ status: 'turn_planning', mulliganSeatNo: selfSeatNo, readySeats: allPlayers.map((player) => Number(player.seat_no)) }), input.matchId]
+      [
+        JSON.stringify({
+          ...existingSummary,
+          status: 'turn_result',
+          mulliganSeatNo: selfSeatNo,
+          readySeats: allPlayers.map((player) => Number(player.seat_no)),
+          waitingSeats: [],
+          phaseTiming
+        }),
+        input.matchId
+      ]
     );
   } else {
     const readySeats = allPlayers
@@ -3023,7 +4811,17 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
                updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND status = 'mulligan'
       `,
-      [JSON.stringify({ status: 'mulligan', readySeats, waitingSeats: allPlayers.filter((player) => !readySeats.includes(Number(player.seat_no))).map((player) => Number(player.seat_no)) }), input.matchId]
+      [
+        JSON.stringify({
+          ...existingSummary,
+          status: 'mulligan',
+          readySeats,
+          waitingSeats: allPlayers
+            .filter((player) => !readySeats.includes(Number(player.seat_no)))
+            .map((player) => Number(player.seat_no))
+        }),
+        input.matchId
+      ]
     );
   }
   return {
@@ -3033,10 +4831,16 @@ export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) =
   };
 };
 
-export const getArenaV2Replay = async (matchId: string, userId?: string | null) => {
+export const getArenaV2Replay = async (
+  matchId: string,
+  userId?: string | null,
+  battleRoyaleId?: string | null
+) => {
   const db = getExecutor();
   if (!db) return null;
-  const match = await getArenaV2MatchForUser(matchId, userId);
+  const match = userId
+    ? await syncArenaV2MatchForUser(matchId, userId, battleRoyaleId)
+    : await getArenaV2MatchForUser(matchId, userId, battleRoyaleId);
   if (!match) return null;
   const replayState = await queryGet<any>(
     db,
@@ -3205,29 +5009,20 @@ export const getArenaV2CurrentRewardsForUser = async (userId: string, seasonId?:
 export const getArenaV2BattleRoyale = async (battleRoyaleId: string, userId?: string | null) => {
   const db = getExecutor();
   if (!db) return null;
-  const row = await queryGet<any>(
-    db,
-    `
-      SELECT id, season_id, status, current_round_no, participant_state, match_ids, winner_user_id, created_at, updated_at, finished_at
-        FROM arena_v2_battle_royales
-       WHERE id = ?
-       LIMIT 1
-    `,
-    [battleRoyaleId]
-  );
-  if (!row) return null;
-  const participantState = jsonParse<any[]>(row.participant_state, []);
-  if (userId && Array.isArray(participantState) && participantState.length > 0) {
-    const isParticipant = participantState.some((participant) => participant?.userId === userId || participant?.user_id === userId);
-    if (!isParticipant) return null;
-  }
+  const snapshot = await loadArenaV2BattleRoyaleSnapshot(db, battleRoyaleId, userId);
+  if (!snapshot) return null;
+  const { row } = snapshot;
   return {
     id: row.id,
     seasonId: row.season_id,
     status: row.status,
     currentRoundNo: Number(row.current_round_no || 0),
-    participantState,
-    matchIds: jsonParse<string[]>(row.match_ids, []),
+    participantState: snapshot.participantState,
+    matchIds: snapshot.matchIds,
+    matches: snapshot.matches,
+    spectatableMatchIds: snapshot.spectatableMatchIds,
+    currentMatchId: snapshot.currentMatchId,
+    viewerResult: snapshot.viewerResult,
     winnerUserId: row.winner_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -3254,7 +5049,66 @@ export const getArenaV2WikiEntry = (slug: string) => {
   return { ...entry, body: bodyBySlug[slug] || [] };
 };
 
-const serializeArenaV2MatchView = (match: any, players: any[], instances: any[], selfSeatNo: number | null) => ({
+const serializeArenaV2MatchView = (
+  match: any,
+  players: any[],
+  instances: any[],
+  options: {
+    selfSeatNo: number | null;
+    viewerRole: ArenaV2ViewerRoleDto;
+    viewerUserId: string | null;
+    battleRoyaleContext: ArenaV2BattleRoyaleViewerContext | null;
+  }
+) => {
+  const selfSeatNo = options.selfSeatNo == null ? null : Number(options.selfSeatNo);
+  const summary = parseArenaV2StoredSummary(match.result_summary);
+  const phaseTiming = serializeArenaV2PhaseTiming(summary);
+  const resultSummary = publicArenaV2ResultSummary(summary);
+  if (phaseTiming) resultSummary.phaseTiming = phaseTiming;
+  const privateResultCandidate = options.viewerUserId
+    ? summary.viewerResultsByUser?.[options.viewerUserId]
+    : undefined;
+  const privateResult: Record<string, unknown> = isRecord(privateResultCandidate) ? privateResultCandidate : {};
+  const privateNumber = (key: string): number | null => {
+    const value = privateResult[key];
+    if (value == null || value === '') return null;
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  };
+  const privateString = (key: string): string | null => (
+    typeof privateResult[key] === 'string' && privateResult[key] ? String(privateResult[key]) : null
+  );
+  const selfPlayer = selfSeatNo == null
+    ? undefined
+    : players.find((player) => Number(player.seat_no) === selfSeatNo);
+  const placement = parseNullableRank(selfPlayer?.final_rank)
+    ?? options.battleRoyaleContext?.placement
+    ?? null;
+  const nextMatchId = options.battleRoyaleContext?.nextMatchId === String(match.id)
+    ? null
+    : options.battleRoyaleContext?.nextMatchId ?? null;
+  let viewerResult: ArenaV2ViewerResultDto | null = null;
+  if (match.status === 'completed' && options.viewerRole === 'participant' && options.viewerUserId) {
+    const outcome: ArenaV2ViewerResultDto['outcome'] = match.mode === 'battle_royale_8' && placement != null
+      ? placement === 1 ? 'win' : 'loss'
+      : summary.result === 'draw'
+        ? 'draw'
+        : match.winner_user_id === options.viewerUserId ? 'win' : 'loss';
+    viewerResult = {
+      outcome,
+      mmrBefore: privateNumber('mmrBefore'),
+      mmrAfter: privateNumber('mmrAfter'),
+      mmrDelta: privateNumber('mmrDelta'),
+      tierBefore: privateString('tierBefore'),
+      tierAfter: privateString('tierAfter'),
+      unrated: match.mode !== 'quick',
+      placement,
+      sharedPlacement: options.battleRoyaleContext?.sharedPlacement ?? false,
+      canSpectate: options.battleRoyaleContext?.canSpectate ?? false,
+      nextMatchId
+    };
+  }
+  return ({
   id: match.id,
   seasonId: match.season_id,
   mode: match.mode,
@@ -3267,7 +5121,10 @@ const serializeArenaV2MatchView = (match: any, players: any[], instances: any[],
   startedAt: match.started_at,
   finishedAt: match.finished_at,
   winnerUserId: match.winner_user_id,
-  resultSummary: jsonParse(match.result_summary, {}),
+  resultSummary,
+  viewerRole: options.viewerRole,
+  phaseTiming,
+  viewerResult,
   selfSeatNo,
   players: players.map((player) => {
     const seatNo = Number(player.seat_no);
@@ -3275,15 +5132,16 @@ const serializeArenaV2MatchView = (match: any, players: any[], instances: any[],
     return {
       seatNo,
       userId: player.user_id,
-      deckId: player.deck_id,
-      playerHealth: Number(player.player_health || 30),
+      deckId: seatNo === selfSeatNo ? player.deck_id : null,
+      playerHealth: Math.max(0, Number(player.player_health ?? 30)),
       fatigueCount: Math.max(0, Number(player.fatigue_count || 0)),
       handCardInstanceIds: seatNo === selfSeatNo ? handCardInstanceIds : [],
       handCount: handCardInstanceIds.length,
       deckCount: jsonParse<string[]>(player.deck_card_instance_ids, []).length,
       graveyardCardInstanceIds: jsonParse<string[]>(player.graveyard_card_instance_ids, []),
       boardState: jsonParse(player.board_state, []),
-      mulliganState: seatNo === selfSeatNo ? jsonParse(player.mulligan_state, {}) : {}
+      mulliganState: seatNo === selfSeatNo ? jsonParse(player.mulligan_state, {}) : {},
+      finalRank: parseNullableRank(player.final_rank)
     };
   }),
   cardInstances: instances.filter((instance) => isArenaV2CardInstanceVisibleToSeat(instance, selfSeatNo)).map((instance) => ({
@@ -3313,6 +5171,7 @@ const serializeArenaV2MatchView = (match: any, players: any[], instances: any[],
     createdTurn: Number(instance.created_turn || 0)
   }))
 });
+};
 
 function isArenaV2CardInstanceVisibleToSeat(instance: any, selfSeatNo: number | null): boolean {
   const ownerSeatNo = Number(instance.owner_seat_no);
@@ -3320,7 +5179,11 @@ function isArenaV2CardInstanceVisibleToSeat(instance: any, selfSeatNo: number | 
   return instance.zone === 'board' || instance.zone === 'graveyard' || instance.zone === 'banished';
 }
 
-const loadArenaV2CardVersionsByIds = async (db: SqlExecutor, ids: string[]) => {
+const loadArenaV2CardVersionsByIds = async (
+  db: SqlExecutor,
+  ids: string[],
+  includeInactive = false
+) => {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => '?').join(', ');
   const rows = await queryAll<any>(
@@ -3328,7 +5191,7 @@ const loadArenaV2CardVersionsByIds = async (db: SqlExecutor, ids: string[]) => {
     `
       SELECT id, cost, attack, health
         FROM arena_v2_card_versions
-       WHERE id IN (${placeholders}) AND status = 'active'
+       WHERE id IN (${placeholders}) ${includeInactive ? '' : "AND status = 'active'"}
     `,
     ids
   );
@@ -3339,53 +5202,94 @@ const loadArenaV2CardVersionsByIds = async (db: SqlExecutor, ids: string[]) => {
 const createArenaV2MatchFromDeckSeats = async (
   db: SqlExecutor,
   input: {
+    matchId?: string;
     seasonId: string;
     cardPoolVersion: string;
     mode: 'quick' | 'battle_royale_8';
     battleRoyaleId: string | null;
     roundNo: number;
-    seats: Array<{ seatNo: number; userId: string; deckId: string }>;
+    initialStatus?: 'mulligan' | 'turn_planning';
+    phaseTiming?: ArenaV2PhaseTimingDto;
+    seats: Array<{
+      seatNo: number;
+      userId: string;
+      deckId: string;
+      playerHealth?: number;
+      freeTacticalMoveNextRound?: boolean;
+      pendingByeDraws?: number;
+      frozenCardVersionIds?: string[];
+      stateSourceMatchId?: string | null;
+    }>;
     summary: Record<string, unknown>;
   }
 ) => {
-  const matchId = makeId('arena_v2_match');
-  const seed = stableHash(`chikapo-arena-v2:${matchId}:${input.mode}:${input.seats.map((seat) => seat.userId).join(':')}:${Date.now()}`);
+  const matchId = input.matchId || makeId('arena_v2_match');
+  const seed = stableHash(`chikapo-arena-v2:${matchId}:${input.mode}:${input.roundNo}:${input.seats.map((seat) => seat.userId).join(':')}`);
+  const initialStatus = input.initialStatus || 'mulligan';
+  const initialTurnNo = input.mode === 'battle_royale_8' ? Math.max(1, input.roundNo) : 1;
+  const sharedCreatedAtMs = Date.now();
+  const initialSummary: ArenaV2StoredSummary = { ...input.summary, status: initialStatus };
+  if (initialStatus === 'turn_planning') {
+    initialSummary.phaseTiming = input.phaseTiming || createArenaV2PhaseTiming([], sharedCreatedAtMs);
+  } else {
+    initialSummary.mulliganDeadlineAt = new Date(sharedCreatedAtMs + ARENA_V2_TURN_PLANNING_MS).toISOString();
+  }
   await runSql(
     db,
     `
       INSERT INTO arena_v2_matches
         (id, season_id, mode, status, battle_royale_id, round_no, turn_no, rng_seed, rules_version, card_pool_version, result_summary)
       VALUES
-        (?, ?, ?, 'mulligan', ?, ?, 1, ?, 'arena-v2-gdd-1.0.0', ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, 'arena-v2-gdd-1.0.0', ?, ?)
     `,
     [
       matchId,
       input.seasonId,
       input.mode,
+      initialStatus,
       input.battleRoyaleId,
       input.roundNo,
+      initialTurnNo,
       seed,
       input.cardPoolVersion,
-      JSON.stringify(input.summary)
+      JSON.stringify(initialSummary)
     ]
   );
 
   for (const seat of input.seats) {
-    const deck = await queryGet<any>(
-      db,
-      'SELECT id, user_id, season_id, card_version_ids, is_valid FROM arena_v2_decks WHERE id = ? LIMIT 1',
-      [seat.deckId]
-    );
-    if (!deck) throw new Error('ArenaV2DeckNotFound');
-    if (deck.user_id !== seat.userId) throw new Error('ArenaV2DeckForbidden');
-    if (deck.season_id !== input.seasonId) throw new Error('ArenaV2DeckSeasonMismatch');
-    if (!Boolean(Number(deck.is_valid))) throw new Error('ArenaV2DeckInvalid');
-    const cardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
-    const validation = await validateArenaV2DeckForSeason(input.seasonId, cardVersionIds);
-    if (!validation.valid) throw new Error('ArenaV2DeckInvalid');
-    const cards = await loadArenaV2CardVersionsByIds(db, cardVersionIds);
-    const ordered = stableShuffle(cards, `${seed}:seat:${seat.seatNo}`).map((card) => ({
-      instanceId: makeId('arena_v2_card'),
+    if (seat.stateSourceMatchId) {
+      await cloneArenaV2PersistentPlayerState(db, {
+        matchId,
+        sourceMatchId: seat.stateSourceMatchId,
+        userId: seat.userId,
+        seatNo: seat.seatNo,
+        deckId: seat.deckId,
+        playerHealth: seat.playerHealth,
+        freeTacticalMoveNextRound: Boolean(seat.freeTacticalMoveNextRound),
+        pendingByeDraws: Math.max(0, Number(seat.pendingByeDraws || 0))
+      });
+      continue;
+    }
+
+    let cardVersionIds = [...(seat.frozenCardVersionIds || [])];
+    if (cardVersionIds.length === 0) {
+      const deck = await queryGet<any>(
+        db,
+        'SELECT id, user_id, season_id, card_version_ids, is_valid FROM arena_v2_decks WHERE id = ? LIMIT 1',
+        [seat.deckId]
+      );
+      if (!deck) throw new Error('ArenaV2DeckNotFound');
+      if (deck.user_id !== seat.userId) throw new Error('ArenaV2DeckForbidden');
+      if (deck.season_id !== input.seasonId) throw new Error('ArenaV2DeckSeasonMismatch');
+      if (!Boolean(Number(deck.is_valid))) throw new Error('ArenaV2DeckInvalid');
+      cardVersionIds = jsonParse<string[]>(deck.card_version_ids, []);
+      const validation = await validateArenaV2DeckForSeasonWithExecutor(db, input.seasonId, cardVersionIds);
+      if (!validation.valid) throw new Error('ArenaV2DeckInvalid');
+    }
+    const cards = await loadArenaV2CardVersionsByIds(db, cardVersionIds, Boolean(seat.frozenCardVersionIds?.length));
+    if (cards.length !== cardVersionIds.length) throw new Error('ArenaV2FrozenCardVersionMissing');
+    const ordered = stableShuffle(cards, `${seed}:seat:${seat.seatNo}`).map((card, index) => ({
+      instanceId: makeDeterministicId('arena_v2_card', `${matchId}:${seat.seatNo}:${card.id}:${index}`),
       card
     }));
     await insertArenaV2MatchPlayer(db, {
@@ -3393,7 +5297,9 @@ const createArenaV2MatchFromDeckSeats = async (
       userId: seat.userId,
       seatNo: seat.seatNo,
       deckId: seat.deckId,
-      orderedInstances: ordered
+      orderedInstances: ordered,
+      playerHealth: seat.playerHealth,
+      freeTacticalMoveNextRound: Boolean(seat.freeTacticalMoveNextRound)
     });
     for (let index = 0; index < ordered.length; index += 1) {
       const item = ordered[index];
@@ -3429,6 +5335,9 @@ const insertArenaV2MatchPlayer = async (
     seatNo: number;
     deckId: string | null;
     orderedInstances: Array<{ instanceId: string; card: any }>;
+    playerHealth?: number;
+    fatigueCount?: number;
+    freeTacticalMoveNextRound?: boolean;
   }
 ) => {
   const hand = input.orderedInstances.slice(0, 5).map((item) => item.instanceId);
@@ -3439,22 +5348,142 @@ const insertArenaV2MatchPlayer = async (
       INSERT INTO arena_v2_match_players
         (id, match_id, user_id, seat_no, deck_id, player_health, fatigue_count, initial_deck_order, hand_card_instance_ids, deck_card_instance_ids, graveyard_card_instance_ids, board_state, mulligan_state)
       VALUES
-        (?, ?, ?, ?, ?, 30, 0, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
-      makeId('arena_v2_player'),
+      makeDeterministicId('arena_v2_player', `${input.matchId}:${input.seatNo}:${input.userId || 'bot'}`),
       input.matchId,
       input.userId,
       input.seatNo,
       input.deckId,
+      Math.max(0, Number(input.playerHealth ?? 30)),
+      Math.max(0, Number(input.fatigueCount || 0)),
       JSON.stringify(input.orderedInstances.map((item) => item.instanceId)),
       JSON.stringify(hand),
       JSON.stringify(deck),
       JSON.stringify([]),
       JSON.stringify([]),
-      JSON.stringify({ done: false, replaced: [] })
+      JSON.stringify({
+        done: false,
+        replaced: [],
+        freeTacticalMoveCount: input.freeTacticalMoveNextRound ? 1 : 0
+      })
     ]
   );
+};
+
+const cloneArenaV2PersistentPlayerState = async (
+  db: SqlExecutor,
+  input: {
+    matchId: string;
+    sourceMatchId: string;
+    userId: string;
+    seatNo: number;
+    deckId: string;
+    playerHealth?: number;
+    freeTacticalMoveNextRound: boolean;
+    pendingByeDraws: number;
+  }
+) => {
+  const sourcePlayer = await queryGet<any>(
+    db,
+    `
+      SELECT id, seat_no, player_health, fatigue_count, initial_deck_order, hand_card_instance_ids,
+             deck_card_instance_ids, graveyard_card_instance_ids, board_state, mulligan_state
+        FROM arena_v2_match_players
+       WHERE match_id = ? AND user_id = ?
+       LIMIT 1
+    `,
+    [input.sourceMatchId, input.userId]
+  );
+  if (!sourcePlayer) throw new Error('ArenaV2BattleRoyaleStateSourceMissing');
+  const sourceInstances = await queryAll<any>(
+    db,
+    `
+      SELECT id, card_version_id, zone, position, current_attack, current_health, damage_taken, created_turn
+        FROM arena_v2_card_instances
+       WHERE match_id = ? AND owner_seat_no = ?
+       ORDER BY id ASC
+    `,
+    [input.sourceMatchId, Number(sourcePlayer.seat_no)]
+  );
+  const idBySourceId = new Map(sourceInstances.map((instance) => [
+    String(instance.id),
+    makeDeterministicId('arena_v2_card', `${input.matchId}:${input.seatNo}:${instance.id}`)
+  ]));
+  const mapIds = (value: unknown) => jsonParse<string[]>(value, [])
+    .map((id) => idBySourceId.get(id))
+    .filter((id): id is string => Boolean(id));
+  const boardState = jsonParse<any[]>(sourcePlayer.board_state, [])
+    .map((card) => ({ ...card, cardInstanceId: idBySourceId.get(String(card.cardInstanceId || '')) }))
+    .filter((card) => Boolean(card.cardInstanceId));
+  const sourceMulliganState = jsonParse<Record<string, unknown>>(sourcePlayer.mulligan_state, {});
+  const initialDeckOrder = mapIds(sourcePlayer.initial_deck_order);
+  const pendingByeDraws = Math.max(0, Math.floor(Number(input.pendingByeDraws || 0)));
+  const pendingDrawState = applyArenaV2PendingByeDrawsForClone({
+    handCardInstanceIds: mapIds(sourcePlayer.hand_card_instance_ids),
+    deckCardInstanceIds: mapIds(sourcePlayer.deck_card_instance_ids),
+    graveyardCardInstanceIds: mapIds(sourcePlayer.graveyard_card_instance_ids),
+    pendingDraws: pendingByeDraws
+  });
+  const { handCardInstanceIds: hand, deckCardInstanceIds: deck, graveyardCardInstanceIds: graveyard } = pendingDrawState;
+
+  await runSql(
+    db,
+    `
+      INSERT INTO arena_v2_match_players
+        (id, match_id, user_id, seat_no, deck_id, player_health, fatigue_count, initial_deck_order, hand_card_instance_ids, deck_card_instance_ids, graveyard_card_instance_ids, board_state, mulligan_state)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      makeDeterministicId('arena_v2_player', `${input.matchId}:${input.seatNo}:${input.userId}`),
+      input.matchId,
+      input.userId,
+      input.seatNo,
+      input.deckId,
+      Math.max(0, Number(input.playerHealth ?? sourcePlayer.player_health ?? 30)),
+      Math.max(0, Number(sourcePlayer.fatigue_count || 0)),
+      JSON.stringify(initialDeckOrder),
+      JSON.stringify(hand),
+      JSON.stringify(deck),
+      JSON.stringify(graveyard),
+      JSON.stringify(boardState),
+      JSON.stringify({
+        ...sourceMulliganState,
+        done: true,
+        freeTacticalMoveCount: input.freeTacticalMoveNextRound ? 1 : 0,
+        byeDrawsApplied: pendingByeDraws
+      })
+    ]
+  );
+
+  for (const sourceInstance of sourceInstances) {
+    const instanceId = idBySourceId.get(String(sourceInstance.id));
+    const zoneOverride = instanceId ? pendingDrawState.zoneOverrideByInstanceId[instanceId] : undefined;
+    await runSql(
+      db,
+      `
+        INSERT INTO arena_v2_card_instances
+          (id, match_id, owner_seat_no, card_version_id, zone, position, current_attack, current_health, damage_taken, status_effects, created_turn)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        instanceId,
+        input.matchId,
+        input.seatNo,
+        sourceInstance.card_version_id,
+        zoneOverride || sourceInstance.zone,
+        zoneOverride || sourceInstance.position == null ? null : JSON.stringify(jsonParse(sourceInstance.position, null)),
+        Number(sourceInstance.current_attack || 0),
+        Number(sourceInstance.current_health ?? 1),
+        Math.max(0, Number(sourceInstance.damage_taken || 0)),
+        JSON.stringify([]),
+        Number(sourceInstance.created_turn || 0)
+      ]
+    );
+  }
 };
 
 export const arenaV2TargetExists = async (targetType: ArenaV2ReportInput['targetType'], targetId: string): Promise<boolean> => {

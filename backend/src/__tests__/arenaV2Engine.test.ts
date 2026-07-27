@@ -290,6 +290,32 @@ describe('arena v2 turn resolution', () => {
     expect(result.players.find((player) => player.seatNo === 1)?.playerHealth).toBe(28);
     expect(result.players.find((player) => player.seatNo === 0)?.handCardInstanceIds).toContain('p-draw');
     expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining(['place', 'direct_attack', 'draw']));
+    const turnStart = result.replayEvents[0];
+    expect(turnStart?.payload.replayVersion).toBe(2);
+    expect(turnStart?.payload.combatSnapshot).toEqual({
+      players: [
+        { seatNo: 0, playerHealth: 30, boardState: [{ cardInstanceId: 'p-hand', position: { row: 'front', column: 0 }, createdTurn: 1 }] },
+        { seatNo: 1, playerHealth: 30, boardState: [] }
+      ],
+      cardInstances: [{ id: 'p-hand', ownerSeatNo: 0, position: { row: 'front', column: 0 }, currentAttack: 2, currentHealth: 3, damageTaken: 0 }]
+    });
+    const snapshotJson = JSON.stringify(turnStart?.payload.combatSnapshot);
+    expect(snapshotJson).not.toContain('p-draw');
+    expect(snapshotJson).not.toContain('b-draw');
+    expect(snapshotJson).not.toContain('user-1');
+    expect(snapshotJson).not.toContain('deck-1');
+    expect(snapshotJson).not.toContain('handCardInstanceIds');
+    expect(snapshotJson).not.toContain('deckCardInstanceIds');
+    expect(snapshotJson).not.toContain('cardVersionId');
+    const directAttack = result.replayEvents.find((event) => event.eventType === 'direct_attack');
+    expect(directAttack?.payload).toMatchObject({
+      targetPosition: { row: 'back', column: 0 },
+      playerHealthBefore: 30,
+      playerHealthAfter: 28,
+      hp_before: 30,
+      hp_after: 28,
+      alive_after: true
+    });
   });
 
   it('resolves simultaneous line attacks and moves defeated cards to graveyard', () => {
@@ -327,6 +353,8 @@ describe('arena v2 turn resolution', () => {
     expect(result.players.find((player) => player.seatNo === 0)?.graveyardCardInstanceIds).toContain('left');
     expect(result.players.find((player) => player.seatNo === 1)?.graveyardCardInstanceIds).toContain('right');
     expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining(['line_attack', 'card_defeated']));
+    const lethalLineAttack = result.replayEvents.find((event) => event.eventType === 'line_attack');
+    expect(lethalLineAttack?.payload).toMatchObject({ hp_before: 3, hp_after: 0, alive_after: false });
   });
 
   it('uses GDD target priority: front, then back, then player in the same line', () => {
@@ -379,7 +407,10 @@ describe('arena v2 turn resolution', () => {
       cardInstanceId: 'left-front',
       sourcePosition: { row: 'front', column: 0 },
       targetCardInstanceId: 'right-back',
-      targetPosition: { row: 'back', column: 0 }
+      targetPosition: { row: 'back', column: 0 },
+      hp_before: 6,
+      hp_after: 3,
+      alive_after: true
     });
     expect(lineAttacks[1]?.payload).toMatchObject({
       attackerSeatNo: 1,
@@ -387,7 +418,10 @@ describe('arena v2 turn resolution', () => {
       cardInstanceId: 'right-back',
       sourcePosition: { row: 'back', column: 0 },
       targetCardInstanceId: 'left-front',
-      targetPosition: { row: 'front', column: 0 }
+      targetPosition: { row: 'front', column: 0 },
+      hp_before: 6,
+      hp_after: 4,
+      alive_after: true
     });
   });
 
@@ -471,7 +505,18 @@ describe('arena v2 turn resolution', () => {
 
     expect(result.players.find((player) => player.seatNo === 1)?.playerHealth).toBe(27);
     const directAttack = result.replayEvents.find((event) => event.eventType === 'direct_attack');
-    expect(directAttack?.payload).toMatchObject({ row: 'back', damage: 3 });
+    expect(directAttack?.payload).toMatchObject({
+      row: 'back',
+      column: 2,
+      damage: 3,
+      sourcePosition: { row: 'back', column: 2 },
+      targetPosition: { row: 'back', column: 2 },
+      playerHealthBefore: 30,
+      playerHealthAfter: 27,
+      hp_before: 30,
+      hp_after: 27,
+      alive_after: true
+    });
   });
 
   it('moves defeated front cards before back-row attacks', () => {
@@ -567,6 +612,14 @@ describe('arena v2 turn resolution', () => {
     expect(result.players.find((player) => player.seatNo === 1)?.graveyardCardInstanceIds).toContain('front-target');
     expect(result.cardInstances.find((card) => card.id === 'back-target')?.damageTaken).toBe(2);
     expect(result.replayEvents.map((event) => event.eventType)).toContain('overflow_damage');
+    const overflowDamage = result.replayEvents.find((event) => event.eventType === 'overflow_damage');
+    expect(overflowDamage?.payload).toMatchObject({
+      targetCardInstanceId: 'back-target',
+      targetPosition: { row: 'back', column: 2 },
+      hp_before: 8,
+      hp_after: 6,
+      alive_after: true
+    });
   });
 
   it('lets aim prioritize the same-line back row before the front row', () => {

@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   __setArenaV2ExecutorForTest,
+  acceptArenaV2QuickQueue,
   arenaV2TargetExists,
   cancelArenaV2BattleRoyaleQueue,
   cancelArenaV2QuickQueue,
@@ -10,6 +11,7 @@ import {
   deleteArenaV2DeckForUser,
   enableMyArenaV2StreamerCard,
   getArenaV2BattleRoyaleQueueStatus,
+  getArenaV2BattleRoyale,
   getArenaV2CardVersion,
   getArenaV2CurrentSeason,
   getArenaV2MatchForUser,
@@ -24,11 +26,14 @@ import {
   listArenaV2DecksForUser,
   listArenaV2OwnedCardsForUser,
   pruneArenaV2ExpiredReplayEvents,
+  processArenaV2QuickMatchmaking,
+  processArenaV2ExpiredTurns,
   processArenaV2ExpiredQueues,
   revalidateArenaV2DeckForUser,
   saveArenaV2Deck,
   submitArenaV2Mulligan,
   submitArenaV2TurnActions,
+  syncArenaV2MatchForUser,
   syncArenaV2CardsFromOwnedCards,
   syncArenaV2CardsFromRegisteredStreamers,
   updateMyArenaV2StreamerCard,
@@ -53,17 +58,35 @@ const rows = {
   cardInstances: [] as Row[],
   actionSubmissions: [] as Row[],
   quickQueue: [] as Row[],
+  quickSlots: [] as Row[],
+  quickConduct: [] as Row[],
+  quickConductEvents: [] as Row[],
   battleRoyaleQueue: [] as Row[],
   replayEvents: [] as Row[],
   replayHolds: [] as Row[],
   battleRoyales: [] as Row[]
 };
 let lastCardInstanceSelectSql = '';
+const timeoutReadFailures = new Set<string>();
 
 const resetRows = () => {
   for (const key of Object.keys(rows) as Array<keyof typeof rows>) rows[key] = [];
   lastCardInstanceSelectSql = '';
+  timeoutReadFailures.clear();
 };
+
+const finishTurnIntro = async (matchId: string, userId: string) => {
+  const match = rows.matches.find((item) => item.id === matchId);
+  if (!match) throw new Error('test match not found');
+  const summary = JSON.parse(match.result_summary || '{}');
+  if (!summary.phaseTiming) throw new Error('test phase timing not found');
+  const nowMs = Date.now();
+  summary.phaseTiming.planningStartsAt = new Date(nowMs - 1).toISOString();
+  summary.phaseTiming.turnDeadlineAt = new Date(nowMs + 40_000).toISOString();
+  match.result_summary = JSON.stringify(summary);
+  return getArenaV2MatchForUser(matchId, userId);
+};
+
 
 const cardWithStreamerFields = (card: Row) => {
   const streamer = rows.streamers.find((item) => item.channel_id === card.streamer_id);
@@ -79,6 +102,32 @@ const cardWithStreamerFields = (card: Row) => {
 
 const makeExecutor = () => ({
   all: (sql: string, params: any[] = []) => {
+    if (sql.includes('SELECT DISTINCT proposal_id') && sql.includes('FROM arena_v2_match_queue')) {
+      const deadline = String(params[0] || '');
+      return Array.from(new Set(rows.quickQueue
+        .filter((ticket) => ['proposed', 'accepted'].includes(ticket.status) && ticket.accept_deadline_at <= deadline)
+        .map((ticket) => ticket.proposal_id)))
+        .filter(Boolean)
+        .map((proposal_id) => ({ proposal_id }));
+    }
+    if (sql.includes('WHERE proposal_id = ?') && sql.includes('FROM arena_v2_match_queue')) {
+      return rows.quickQueue.filter((ticket) => ticket.proposal_id === params[0] && ['proposed', 'accepted'].includes(ticket.status));
+    }
+    if (sql.includes('FROM arena_v2_matchmaking_active_slots slot') && sql.includes('JOIN arena_v2_match_queue q')) {
+      return rows.quickSlots
+        .map((slot) => rows.quickQueue.find((ticket) => ticket.id === slot.ticket_id))
+        .filter((ticket): ticket is Row => Boolean(ticket))
+        .filter((ticket) => !sql.includes("q.status = 'waiting'") || ticket.status === 'waiting')
+        .map((ticket) => ({
+          ...ticket,
+          priority_penalty: rows.quickConduct.find((conduct) => conduct.season_id === ticket.season_id && conduct.user_id === ticket.user_id)?.priority_penalty || 0
+        }));
+    }
+    if (sql.includes('SELECT q.*') && sql.includes('FROM arena_v2_match_queue q') && sql.includes('NOT EXISTS')) {
+      return rows.quickQueue
+        .filter((ticket) => ['waiting', 'proposed', 'accepted'].includes(ticket.status))
+        .filter((ticket) => !rows.quickSlots.some((slot) => slot.season_id === ticket.season_id && slot.user_id === ticket.user_id));
+    }
     if (sql.includes('FROM arena_v2_card_versions')) {
       if (sql.includes('FROM user_cards')) {
         const userId = params[0];
@@ -173,6 +222,21 @@ const makeExecutor = () => ({
     if (sql.includes('FROM arena_v2_reward_grants')) {
       return rows.rewardGrants.filter((grant) => grant.season_id === params[0]);
     }
+    if (sql.includes('FROM arena_v2_matches')) {
+      if (sql.includes('battle_royale_id = ?')) {
+        return rows.matches
+          .filter((match) => match.battle_royale_id === params[0])
+          .sort((a, b) => Number(a.round_no || 0) - Number(b.round_no || 0) || String(a.id).localeCompare(String(b.id)));
+      }
+      if (sql.includes("status IN ('mulligan', 'turn_result', 'turn_planning', 'action_locked')")) {
+        const allowed = new Set(['mulligan', 'turn_result', 'turn_planning', 'action_locked']);
+        return rows.matches
+          .filter((match) => allowed.has(match.status))
+          .slice(0, Number(params[0] || 25));
+      }
+      return [];
+    }
+
     if (sql.includes('FROM arena_v2_match_players')) {
       return rows.matchPlayers
         .filter((player) => player.match_id === params[0])
@@ -205,9 +269,12 @@ const makeExecutor = () => ({
         });
     }
     if (sql.includes('FROM arena_v2_action_submissions')) {
+      const finalOnly = sql.includes('is_final = 1');
       return rows.actionSubmissions
-        .filter((submission) => submission.match_id === params[0] && submission.turn_no === params[1] && Number(submission.is_final) === 1)
-        .sort((a, b) => Number(a.seat_no) - Number(b.seat_no));
+        .filter((submission) => submission.match_id === params[0]
+          && submission.turn_no === params[1]
+          && (!finalOnly || Number(submission.is_final) === 1))
+        .sort((a, b) => Number(a.seat_no) - Number(b.seat_no) || Number(b.revision) - Number(a.revision));
     }
     if (sql.includes('FROM arena_v2_match_queue')) {
       return rows.quickQueue.filter((ticket) => ticket.season_id === params[0] && ticket.user_id === params[1]);
@@ -223,6 +290,54 @@ const makeExecutor = () => ({
     return [];
   },
   get: (sql: string, params: any[] = []) => {
+    if (sql.includes('active_participation')) {
+      const userId = params[0];
+      const now = String(params[1]);
+      const quick = rows.quickQueue.find((ticket) => ticket.user_id === userId
+        && ((ticket.status === 'waiting' && ticket.expires_at >= now)
+          || ['proposed', 'accepted', 'matching'].includes(ticket.status)
+          || (ticket.status === 'matched' && rows.matches.some((match) => match.id === ticket.matched_match_id && !['completed', 'cancelled'].includes(match.status)))));
+      if (quick) return { activity_kind: 'quick_queue', reference_id: quick.id };
+      const battleRoyale = rows.battleRoyaleQueue.find((ticket) => ticket.user_id === userId
+        && ((ticket.status === 'waiting' && ticket.expires_at >= String(params[3]))
+          || (ticket.status === 'matched' && rows.battleRoyales.some((battle) => battle.id === ticket.battle_royale_id && battle.status === 'active'))));
+      if (battleRoyale) return { activity_kind: 'battle_royale', reference_id: battleRoyale.id };
+      const player = rows.matchPlayers.find((candidate) => candidate.user_id === userId
+        && rows.matches.some((match) => match.id === candidate.match_id && !['completed', 'cancelled'].includes(match.status)));
+      return player ? { activity_kind: 'match', reference_id: player.match_id } : undefined;
+    }
+    if (sql.includes('active_deck')) {
+      const deckId = params[0];
+      const now = String(params[1]);
+      const quick = rows.quickQueue.find((ticket) => ticket.deck_id === deckId
+        && ((ticket.status === 'waiting' && ticket.expires_at >= now)
+          || ['proposed', 'accepted', 'matching'].includes(ticket.status)
+          || (ticket.status === 'matched' && rows.matches.some((match) => match.id === ticket.matched_match_id && !['completed', 'cancelled'].includes(match.status)))));
+      if (quick) return { activity_kind: 'quick_queue' };
+      const battleRoyale = rows.battleRoyaleQueue.find((ticket) => ticket.deck_id === deckId
+        && ((ticket.status === 'waiting' && ticket.expires_at >= String(params[3]))
+          || (ticket.status === 'matched' && rows.battleRoyales.some((battle) => battle.id === ticket.battle_royale_id && battle.status === 'active'))));
+      if (battleRoyale) return { activity_kind: 'battle_royale' };
+      const player = rows.matchPlayers.find((candidate) => candidate.deck_id === deckId
+        && rows.matches.some((match) => match.id === candidate.match_id && !['completed', 'cancelled'].includes(match.status)));
+      return player ? { activity_kind: 'match' } : undefined;
+    }
+    if (sql.includes('FROM arena_v2_matchmaking_active_slots slot') && sql.includes('JOIN arena_v2_match_queue q')) {
+      const slot = rows.quickSlots.find((item) => item.season_id === params[0] && item.user_id === params[1]);
+      return slot ? rows.quickQueue.find((ticket) => ticket.id === slot.ticket_id) : undefined;
+    }
+    if (sql.includes('FROM arena_v2_matchmaking_conduct')) {
+      return rows.quickConduct.find((conduct) => conduct.season_id === params[0] && conduct.user_id === params[1]);
+    }
+    if (sql.includes('SELECT status FROM arena_v2_match_queue') && sql.includes('id <> ?')) {
+      return rows.quickQueue.find((ticket) => ticket.proposal_id === params[0]
+        && ticket.id !== params[1]
+        && ['proposed', 'accepted'].includes(ticket.status));
+    }
+    if (sql.includes('proposal_id = ?') && sql.includes('FROM arena_v2_match_queue')) {
+      return rows.quickQueue.find((ticket) => ticket.season_id === params[0] && ticket.user_id === params[1]
+        && ticket.proposal_id === params[2] && ['matched', 'accept_timeout', 'declined'].includes(ticket.status));
+    }
     if (sql.includes('FROM arena_v2_seasons')) {
       if (sql.includes('WHERE id = ?')) {
         return rows.seasons.find((season) => season.id === params[0] && (!params[1] || season.status === params[1]));
@@ -280,15 +395,35 @@ const makeExecutor = () => ({
         is_valid: deck.is_valid
       } : undefined;
     }
+    if (sql.includes('FROM arena_v2_match_queue q') && sql.includes('JOIN arena_v2_matches m')) {
+      return rows.quickQueue.find((ticket) => ticket.season_id === params[0]
+        && ticket.user_id === params[1]
+        && ticket.status === 'matched'
+        && rows.matches.some((match) => match.id === ticket.matched_match_id && !['completed', 'cancelled'].includes(match.status)));
+    }
     if (sql.includes('FROM arena_v2_matches')) {
+      if (timeoutReadFailures.has(String(params[0])) && sql.includes('card_pool_version, result_summary, updated_at')) {
+        throw new Error('InjectedArenaV2TimeoutReadFailure');
+      }
       const match = rows.matches.find((item) => item.id === params[0]);
       if (!match) return undefined;
-      if (sql.includes('SELECT id, season_id')) return match;
+      if (sql.includes('SELECT status')) return { status: match.status };
+      if (sql.includes('SELECT id, season_id') || sql.includes('SELECT id, status, result_summary')) return match;
       if (sql.includes('replay_expires_at')) return { replay_expires_at: match.replay_expires_at, status: match.status };
       return { ok: 1 };
     }
     if (sql.includes('FROM arena_v2_match_players')) {
+      if (sql.includes('user_id = ?')) return rows.matchPlayers.find((player) => player.match_id === params[0] && player.user_id === params[1]);
       return rows.matchPlayers.find((player) => player.match_id === params[0] && player.seat_no === params[1]);
+    }
+    if (sql.includes('SELECT * FROM arena_v2_match_queue WHERE id = ?')) {
+      return rows.quickQueue.find((ticket) => ticket.id === params[0]);
+    }
+    if (sql.includes("last_transition_reason = 'invalid_deck'") && sql.includes('FROM arena_v2_match_queue')) {
+      return rows.quickQueue.find((ticket) => ticket.season_id === params[0]
+        && ticket.user_id === params[1]
+        && (['accept_timeout', 'declined'].includes(ticket.status)
+          || (ticket.status === 'cancelled' && ticket.last_transition_reason === 'invalid_deck')));
     }
     if (sql.includes('FROM arena_v2_match_queue')) {
       if (sql.includes("status = 'matched'")) {
@@ -312,6 +447,13 @@ const makeExecutor = () => ({
           && ticket.expires_at >= params[1]
         )).length
       };
+    }
+    if (sql.includes('FROM arena_v2_battle_royale_queue q') && sql.includes('EXISTS') && sql.includes('arena_v2_battle_royales br')) {
+      return rows.battleRoyaleQueue.find((ticket) => ticket.season_id === params[0]
+        && ticket.user_id === params[1]
+        && (ticket.status === 'waiting'
+          || (ticket.status === 'matched'
+            && rows.battleRoyales.some((battle) => battle.id === ticket.battle_royale_id && battle.status === 'active'))));
     }
     if (sql.includes('FROM arena_v2_battle_royale_queue')) {
       if (sql.includes("status = 'matched'")) {
@@ -337,7 +479,7 @@ const makeExecutor = () => ({
       return rows.streamers.find((streamer) => streamer.channel_id === params[0] || streamer.registered_by === params[1]);
     }
     if (sql.includes('FROM arena_v2_battle_royales')) {
-      return rows.battleRoyales.find((battleRoyale) => battleRoyale.id === params[0]) ? { ok: 1 } : undefined;
+      return rows.battleRoyales.find((battleRoyale) => battleRoyale.id === params[0]);
     }
     if (sql.includes('MAX(seq)')) {
       const maxSeq = rows.replayEvents
@@ -354,6 +496,56 @@ const makeExecutor = () => ({
     return undefined;
   },
   run: (sql: string, params: any[] = []) => {
+    if (sql.includes('INTO arena_v2_matchmaking_conduct_events')) {
+      if (rows.quickConductEvents.some((event) => event.event_key === params[0])) return { changes: 0 };
+      rows.quickConductEvents.push({
+        event_key: params[0],
+        season_id: params[1],
+        user_id: params[2],
+        event_type: params[3]
+      });
+      return { changes: 1 };
+    }
+    if (sql.includes('INSERT INTO arena_v2_matchmaking_conduct')) {
+      if (rows.quickConduct.some((conduct) => conduct.season_id === params[0] && conduct.user_id === params[1])) {
+        return { changes: 0 };
+      }
+      rows.quickConduct.push({
+        season_id: params[0],
+        user_id: params[1],
+        timeout_strikes: params[2],
+        priority_penalty: params[3],
+        last_timeout_at: params[4]
+      });
+      return { changes: 1 };
+    }
+    if (sql.includes('UPDATE arena_v2_matchmaking_conduct')) {
+      const conduct = rows.quickConduct.find((item) => item.season_id === params[3] && item.user_id === params[4]);
+      if (!conduct) return { changes: 0 };
+      conduct.timeout_strikes = params[0];
+      conduct.priority_penalty = params[1];
+      conduct.last_timeout_at = params[2];
+      return { changes: 1 };
+    }
+    if (sql.includes('INSERT') && sql.includes('INTO arena_v2_matchmaking_active_slots')) {
+      if (!rows.quickSlots.some((slot) => slot.season_id === params[0] && slot.user_id === params[1])) {
+        rows.quickSlots.push({ season_id: params[0], user_id: params[1], ticket_id: params[2] });
+        return { changes: 1 };
+      }
+      return { changes: 0 };
+    }
+    if (sql.includes('DELETE FROM arena_v2_matchmaking_active_slots')) {
+      const before = rows.quickSlots.length;
+      if (sql.includes('season_id = ? AND user_id = ? AND ticket_id = ?')) {
+        rows.quickSlots = rows.quickSlots.filter((slot) => !(slot.season_id === params[0] && slot.user_id === params[1] && slot.ticket_id === params[2]));
+      } else if (sql.includes('season_id = ? AND user_id = ?')) {
+        rows.quickSlots = rows.quickSlots.filter((slot) => !(slot.season_id === params[0] && slot.user_id === params[1]));
+      } else {
+        const terminalIds = new Set(rows.quickQueue.filter((ticket) => ['cancelled', 'expired', 'accept_timeout', 'declined'].includes(ticket.status)).map((ticket) => ticket.id));
+        rows.quickSlots = rows.quickSlots.filter((slot) => !terminalIds.has(slot.ticket_id));
+      }
+      return { changes: before - rows.quickSlots.length };
+    }
     if (sql.includes('INSERT INTO arena_v2_seasons')) {
       rows.seasons.push({
         id: params[0],
@@ -435,21 +627,40 @@ const makeExecutor = () => ({
       });
     }
     if (sql.includes('INSERT INTO arena_v2_matches')) {
+      if (sql.includes("'bot', 'mulligan'")) {
+        rows.matches.push({
+          id: params[0],
+          season_id: params[1],
+          rng_seed: params[2],
+          card_pool_version: params[3],
+          result_summary: params[4],
+          rules_version: 'arena-v2-gdd-1.0.0',
+          round_no: 0,
+          turn_no: 1,
+          battle_royale_id: null,
+          started_at: 'now',
+          finished_at: null,
+          winner_user_id: null,
+          mode: 'bot',
+          status: 'mulligan'
+        });
+        return { changes: 1 };
+      }
       rows.matches.push({
         id: params[0],
         season_id: params[1],
-        rng_seed: params[2],
-        card_pool_version: params[3],
-        result_summary: params[4],
+        mode: params[2],
+        status: params[3],
+        battle_royale_id: params[4],
+        round_no: params[5],
+        turn_no: params[6],
+        rng_seed: params[7],
+        card_pool_version: params[8],
+        result_summary: params[9],
         rules_version: 'arena-v2-gdd-1.0.0',
-        round_no: 0,
-        turn_no: 1,
-        battle_royale_id: null,
         started_at: 'now',
         finished_at: null,
-        winner_user_id: null,
-        mode: 'bot',
-        status: 'mulligan'
+        winner_user_id: null
       });
     }
     if (sql.includes('INSERT INTO arena_v2_match_players')) {
@@ -459,14 +670,14 @@ const makeExecutor = () => ({
         user_id: params[2],
         seat_no: params[3],
         deck_id: params[4],
-        player_health: 30,
-        fatigue_count: 0,
-        initial_deck_order: params[5],
-        hand_card_instance_ids: params[6],
-        deck_card_instance_ids: params[7],
-        graveyard_card_instance_ids: params[8],
-        board_state: params[9],
-        mulligan_state: params[10]
+        player_health: params[5],
+        fatigue_count: params[6],
+        initial_deck_order: params[7],
+        hand_card_instance_ids: params[8],
+        deck_card_instance_ids: params[9],
+        graveyard_card_instance_ids: params[10],
+        board_state: params[11],
+        mulligan_state: params[12]
       });
     }
     if (sql.includes('INSERT INTO arena_v2_card_instances')) {
@@ -485,6 +696,20 @@ const makeExecutor = () => ({
       });
     }
     if (sql.includes('INSERT INTO arena_v2_action_submissions')) {
+      if (sql.includes('WHERE EXISTS')) {
+        const match = rows.matches.find((item) => item.id === params[9] && item.turn_no === params[10]);
+        if (!match || !['turn_planning', 'action_locked'].includes(match.status)) return { changes: 0 };
+      }
+      const duplicate = rows.actionSubmissions.some((submission) => (
+        submission.match_id === params[1]
+        && submission.seat_no === params[3]
+        && submission.turn_no === params[4]
+        && submission.revision === params[5]
+      ));
+      if (duplicate) {
+        const error = Object.assign(new Error('unique constraint failed'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+        throw error;
+      }
       rows.actionSubmissions.push({
         id: params[0],
         match_id: params[1],
@@ -496,6 +721,7 @@ const makeExecutor = () => ({
         validation_result: params[7],
         is_final: params[8]
       });
+      return { changes: 1 };
     }
     if (sql.includes('INSERT INTO arena_v2_match_queue')) {
       rows.quickQueue.push({
@@ -507,11 +733,15 @@ const makeExecutor = () => ({
         status: 'waiting',
         search_min_mmr: params[5],
         search_max_mmr: params[6],
+        proposal_id: null,
+        accept_deadline_at: null,
+        accepted_at: null,
         matched_match_id: null,
-        joined_at: 'now',
-        updated_at: 'now',
+        joined_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
         expires_at: params[7]
       });
+      return { changes: 1 };
     }
     if (sql.includes('INSERT INTO arena_v2_battle_royale_queue')) {
       rows.battleRoyaleQueue.push({
@@ -587,7 +817,12 @@ const makeExecutor = () => ({
       if (index >= 0) rows.decks.splice(index, 1);
     }
     if (sql.includes('UPDATE arena_v2_match_players')) {
-      if (sql.includes('player_health')) {
+      if (sql.includes('SET mulligan_state = ?')) {
+        const player = rows.matchPlayers.find((item) => item.match_id === params[1] && item.seat_no === params[2]);
+        if (!player) return { changes: 0 };
+        player.mulligan_state = params[0];
+        return { changes: 1 };
+      } else if (sql.includes('player_health')) {
         const player = rows.matchPlayers.find((item) => item.match_id === params[7] && item.seat_no === params[8]);
         if (player) {
           player.player_health = params[0];
@@ -600,11 +835,12 @@ const makeExecutor = () => ({
         }
       } else {
         const player = rows.matchPlayers.find((item) => item.match_id === params[3] && item.seat_no === params[4]);
-        if (player) {
-          player.hand_card_instance_ids = params[0];
-          player.deck_card_instance_ids = params[1];
-          player.mulligan_state = params[2];
-        }
+        const match = rows.matches.find((item) => item.id === params[3]);
+        if (!player || (sql.includes('EXISTS') && match?.status !== 'mulligan')) return { changes: 0 };
+        player.hand_card_instance_ids = params[0];
+        player.deck_card_instance_ids = params[1];
+        player.mulligan_state = params[2];
+        return { changes: 1 };
       }
     }
     if (sql.includes('UPDATE arena_v2_card_instances')) {
@@ -635,14 +871,28 @@ const makeExecutor = () => ({
     }
     if (sql.includes('UPDATE arena_v2_matches')) {
       if (sql.includes("status = 'turn_planning'")) {
-        const match = rows.matches.find((item) => item.id === params[1] && item.status === 'mulligan');
+        const match = rows.matches.find((item) => item.id === params[1] && item.status === 'turn_result');
         if (match) {
           match.status = 'turn_planning';
           match.result_summary = params[0];
+          return { changes: 1 };
         }
+        return { changes: 0 };
+      } else if (sql.includes("status = 'turn_result'")) {
+        const match = rows.matches.find((item) => item.id === params[1] && item.status === 'mulligan');
+        if (match) {
+          match.status = 'turn_result';
+          match.result_summary = params[0];
+          return { changes: 1 };
+        }
+        return { changes: 0 };
       } else if (sql.includes("status = 'combat_resolving'")) {
-        const match = rows.matches.find((item) => item.id === params[0] && item.turn_no === params[1]);
-        if (match) match.status = 'combat_resolving';
+        const match = rows.matches.find((item) => item.id === params[0]
+          && item.turn_no === params[1]
+          && ['turn_planning', 'action_locked'].includes(item.status));
+        if (!match) return { changes: 0 };
+        match.status = 'combat_resolving';
+        return { changes: 1 };
       } else if (sql.includes("status = 'action_locked'")) {
         const match = rows.matches.find((item) => item.id === params[1] && item.turn_no === params[2]);
         if (match) {
@@ -716,6 +966,102 @@ const makeExecutor = () => ({
       }
     }
     if (sql.includes('UPDATE arena_v2_match_queue')) {
+      if (sql.includes("SET status = 'proposed'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[2] && item.status === 'waiting');
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'proposed';
+        ticket.proposal_id = params[0];
+        ticket.accept_deadline_at = params[1];
+        ticket.accepted_at = null;
+        ticket.last_transition_reason = null;
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'accepted'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[1]
+          && item.status === 'proposed'
+          && String(item.accept_deadline_at) > String(params[2]));
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'accepted';
+        ticket.accepted_at = params[0];
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'matching'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[1]
+          && item.proposal_id === params[2]
+          && item.status === 'accepted');
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'matching';
+        ticket.matched_match_id = params[0];
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'matched'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[1]
+          && item.proposal_id === params[2]
+          && item.status === 'matching');
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'matched';
+        ticket.matched_match_id = params[0];
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'waiting', proposal_id = NULL")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[4] && ['proposed', 'accepted'].includes(item.status));
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'waiting';
+        ticket.proposal_id = null;
+        ticket.accept_deadline_at = null;
+        ticket.accepted_at = null;
+        ticket.search_min_mmr = params[0];
+        ticket.search_max_mmr = params[1];
+        ticket.last_transition_reason = params[2];
+        ticket.expires_at = params[3];
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'accept_timeout'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[0] && item.status === 'proposed');
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'accept_timeout';
+        ticket.last_transition_reason = 'proposal_expired';
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'declined'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[0] && ['proposed', 'accepted'].includes(item.status));
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'declined';
+        ticket.last_transition_reason = 'cancelled_proposal';
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes("last_transition_reason = 'invalid_deck'")) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[0]
+          && item.proposal_id === params[1]
+          && item.status === 'accepted');
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'cancelled';
+        ticket.last_transition_reason = 'invalid_deck';
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
+      if (sql.includes('SET search_min_mmr = ?')) {
+        const ticket = rows.quickQueue.find((item) => item.id === params[2] && item.status === 'waiting');
+        if (!ticket) return { changes: 0 };
+        ticket.search_min_mmr = params[0];
+        ticket.search_max_mmr = params[1];
+        return { changes: 1 };
+      }
+      if (sql.includes("SET status = 'cancelled'") && sql.includes('WHERE id = ?')) {
+        const ticketId = params[params.length - 1];
+        const ticket = rows.quickQueue.find((item) => item.id === ticketId && ['waiting', 'proposed', 'accepted'].includes(item.status));
+        if (!ticket) return { changes: 0 };
+        ticket.status = 'cancelled';
+        ticket.updated_at = new Date().toISOString();
+        return { changes: 1 };
+      }
       if (sql.includes("status = 'expired'")) {
         const before = rows.quickQueue.filter((ticket) => ticket.status === 'waiting').length;
         rows.quickQueue
@@ -800,12 +1146,25 @@ const insertCards = (count: number) => {
   }
 };
 
+const insertQuickDeck = (userId: string) => saveArenaV2Deck({
+  userId,
+  seasonId: 'season-v2',
+  name: `${userId} 빠른 대전 덱`,
+  modeScope: 'quick',
+  cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+});
+
+const insertQuickRating = (userId: string, mmr: number) => {
+  rows.ratings.push({ season_id: 'season-v2', user_id: userId, mmr });
+};
+
 beforeEach(() => {
   resetRows();
   __setArenaV2ExecutorForTest(makeExecutor() as any);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   __setArenaV2ExecutorForTest(null);
 });
 
@@ -1465,10 +1824,338 @@ describe('arena v2 service', () => {
     const afterCancel = await getArenaV2QuickQueueStatus('user-1', 'season-v2');
 
     expect(joined.status).toBe('waiting');
-    expect(joined.searchMinMmr).toBe(850);
-    expect(status.ticket?.id).toBe(joined.id);
+    expect(joined.serverNow).toBeTruthy();
+    expect(joined.estimatedRange).toEqual({ minMmr: 900, maxMmr: 1100 });
+    expect(joined.ticket?.searchMinMmr).toBe(900);
+    expect(status.ticket?.id).toBe(joined.ticket?.id);
     expect(cancelled.cancelled).toBe(true);
     expect(afterCancel.status).toBe('none');
+  });
+
+  it('snapshots the persisted rating MMR when joining quick matchmaking', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await insertQuickDeck('rated-user');
+    insertQuickRating('rated-user', 1375);
+
+    const joined = await joinArenaV2QuickQueue({ userId: 'rated-user', deckId: deck.id });
+
+    expect(joined.ticket).toMatchObject({
+      mmr: 1375,
+      searchMinMmr: 1275,
+      searchMaxMmr: 1475
+    });
+    expect(joined.estimatedRange).toEqual({ minMmr: 1275, maxMmr: 1475 });
+  });
+
+  it('allows a proposal at the absolute 500 MMR boundary after both ranges expand', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('mmr-left');
+    const rightDeck = await insertQuickDeck('mmr-right');
+    insertQuickRating('mmr-left', 1000);
+    insertQuickRating('mmr-right', 1500);
+    await joinArenaV2QuickQueue({ userId: 'mmr-left', deckId: leftDeck.id });
+    await joinArenaV2QuickQueue({ userId: 'mmr-right', deckId: rightDeck.id });
+    const agedJoinedAt = new Date(Date.now() - 120_000).toISOString();
+    rows.quickQueue.forEach((ticket) => { ticket.joined_at = agedJoinedAt; });
+
+    const processed = await processArenaV2QuickMatchmaking(32);
+
+    expect(processed.proposed).toBe(1);
+    expect(rows.quickQueue.map((ticket) => ticket.status)).toEqual(['proposed', 'proposed']);
+    expect(rows.quickQueue[0].proposal_id).toBeTruthy();
+    expect(rows.quickQueue[1].proposal_id).toBe(rows.quickQueue[0].proposal_id);
+  });
+
+  it('never proposes opponents whose MMR differs by more than 500', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('mmr-left');
+    const rightDeck = await insertQuickDeck('mmr-right');
+    insertQuickRating('mmr-left', 1000);
+    insertQuickRating('mmr-right', 1501);
+    await joinArenaV2QuickQueue({ userId: 'mmr-left', deckId: leftDeck.id });
+    await joinArenaV2QuickQueue({ userId: 'mmr-right', deckId: rightDeck.id });
+    const agedJoinedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    rows.quickQueue.forEach((ticket) => { ticket.joined_at = agedJoinedAt; });
+
+    const processed = await processArenaV2QuickMatchmaking(32);
+
+    expect(processed.proposed).toBe(0);
+    expect(rows.quickQueue.map((ticket) => ticket.status)).toEqual(['waiting', 'waiting']);
+  });
+
+  it('creates exactly one match only after both users accept the same proposal', async () => {
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('accept-left');
+    const rightDeck = await insertQuickDeck('accept-right');
+    await joinArenaV2QuickQueue({ userId: 'accept-left', deckId: leftDeck.id });
+    const proposal = await joinArenaV2QuickQueue({ userId: 'accept-right', deckId: rightDeck.id });
+    const proposalId = proposal.proposalId!;
+    expect(proposalId).toBeTruthy();
+    expect(rows.matches).toHaveLength(0);
+
+    const leftAccepted = await acceptArenaV2QuickQueue('accept-left', 'season-v2', proposalId);
+    expect(leftAccepted.status).toBe('accepted');
+    expect(rows.matches).toHaveLength(0);
+
+    const matched = await acceptArenaV2QuickQueue('accept-right', 'season-v2', proposalId);
+    expect(matched.status).toBe('matched');
+    expect(matched.matchId).toBeTruthy();
+    expect(rows.matches).toHaveLength(1);
+
+    await processArenaV2QuickMatchmaking(32);
+    expect(rows.matches).toHaveLength(1);
+  });
+
+  it('rejects accepting a stale or unrelated proposal id without changing state', async () => {
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('stale-left');
+    const rightDeck = await insertQuickDeck('stale-right');
+    await joinArenaV2QuickQueue({ userId: 'stale-left', deckId: leftDeck.id });
+    await joinArenaV2QuickQueue({ userId: 'stale-right', deckId: rightDeck.id });
+
+    await expect(acceptArenaV2QuickQueue('stale-left', 'season-v2', 'stale-proposal'))
+      .rejects.toThrow('ArenaV2QuickProposalStale');
+    expect(rows.quickQueue.map((ticket) => ticket.status)).toEqual(['proposed', 'proposed']);
+    expect(rows.matches).toHaveLength(0);
+  });
+
+  it('requeues an accepter unchanged and records one strike for the non-accepter after timeout', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const accepterDeck = await insertQuickDeck('timeout-accepter');
+    const silentDeck = await insertQuickDeck('timeout-silent');
+    await joinArenaV2QuickQueue({ userId: 'timeout-accepter', deckId: accepterDeck.id });
+    const proposal = await joinArenaV2QuickQueue({ userId: 'timeout-silent', deckId: silentDeck.id });
+    const proposalId = proposal.proposalId!;
+    const before = rows.quickQueue.find((ticket) => ticket.user_id === 'timeout-accepter')!;
+    const snapshot = { id: before.id, joinedAt: before.joined_at, mmr: before.mmr };
+    await acceptArenaV2QuickQueue('timeout-accepter', 'season-v2', proposalId);
+
+    vi.advanceTimersByTime(10_001);
+    const recovered = await getArenaV2QuickQueueStatus('timeout-accepter', 'season-v2');
+
+    expect(recovered.status).toBe('waiting');
+    expect(recovered.transitionReason).toBe('opponent_timeout');
+    expect(recovered.ticket).toMatchObject({
+      id: snapshot.id,
+      joinedAt: snapshot.joinedAt,
+      mmr: snapshot.mmr,
+      timeoutStrikes: 0
+    });
+    expect(rows.quickQueue.find((ticket) => ticket.user_id === 'timeout-silent')?.status).toBe('accept_timeout');
+    expect(rows.quickConduct.find((conduct) => conduct.user_id === 'timeout-silent')).toMatchObject({
+      timeout_strikes: 1,
+      priority_penalty: 1
+    });
+    expect(rows.quickConductEvents.filter((event) => event.user_id === 'timeout-silent')).toHaveLength(1);
+  });
+
+  it('does not add a conduct strike when cancelling a waiting ticket', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await insertQuickDeck('waiting-cancel');
+    await joinArenaV2QuickQueue({ userId: 'waiting-cancel', deckId: deck.id });
+
+    const cancelled = await cancelArenaV2QuickQueue('waiting-cancel', 'season-v2');
+
+    expect(cancelled.cancelled).toBe(true);
+    expect(rows.quickConduct).toHaveLength(0);
+    expect(rows.quickConductEvents).toHaveLength(0);
+  });
+
+  it('delays matchmaking eligibility by 15 seconds per repeated ready-check timeout strike', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const penalizedDeck = await insertQuickDeck('penalized-user');
+    const firstOpponentDeck = await insertQuickDeck('first-opponent');
+    const secondOpponentDeck = await insertQuickDeck('second-opponent');
+    const finalOpponentDeck = await insertQuickDeck('final-opponent');
+
+    await joinArenaV2QuickQueue({ userId: 'penalized-user', deckId: penalizedDeck.id });
+    const firstProposal = await joinArenaV2QuickQueue({ userId: 'first-opponent', deckId: firstOpponentDeck.id });
+    await acceptArenaV2QuickQueue('first-opponent', 'season-v2', firstProposal.proposalId!);
+    vi.advanceTimersByTime(10_001);
+    await getArenaV2QuickQueueStatus('first-opponent', 'season-v2');
+    await cancelArenaV2QuickQueue('first-opponent', 'season-v2');
+    expect(rows.quickConduct.find((conduct) => conduct.user_id === 'penalized-user')).toMatchObject({
+      timeout_strikes: 1,
+      priority_penalty: 1
+    });
+
+    await joinArenaV2QuickQueue({ userId: 'penalized-user', deckId: penalizedDeck.id });
+    vi.advanceTimersByTime(1);
+    await joinArenaV2QuickQueue({ userId: 'second-opponent', deckId: secondOpponentDeck.id });
+    expect(rows.quickQueue.filter((ticket) => ['proposed', 'accepted'].includes(ticket.status))).toHaveLength(0);
+    vi.advanceTimersByTime(15_000);
+    await processArenaV2QuickMatchmaking(32);
+    const secondProposal = rows.quickQueue.find((ticket) => ticket.user_id === 'second-opponent' && ticket.status === 'proposed');
+    expect(secondProposal?.proposal_id).toBeTruthy();
+    await acceptArenaV2QuickQueue('second-opponent', 'season-v2', secondProposal!.proposal_id);
+    vi.advanceTimersByTime(10_001);
+    await getArenaV2QuickQueueStatus('second-opponent', 'season-v2');
+    await cancelArenaV2QuickQueue('second-opponent', 'season-v2');
+    expect(rows.quickConduct.find((conduct) => conduct.user_id === 'penalized-user')).toMatchObject({
+      timeout_strikes: 2,
+      priority_penalty: 2
+    });
+
+    await joinArenaV2QuickQueue({ userId: 'penalized-user', deckId: penalizedDeck.id });
+    vi.advanceTimersByTime(1);
+    await joinArenaV2QuickQueue({ userId: 'final-opponent', deckId: finalOpponentDeck.id });
+    vi.advanceTimersByTime(29_998);
+    const beforeEligible = await processArenaV2QuickMatchmaking(32);
+    expect(beforeEligible.proposed).toBe(0);
+    vi.advanceTimersByTime(1);
+    const atEligible = await processArenaV2QuickMatchmaking(32);
+    expect(atEligible.proposed).toBe(1);
+  });
+
+  it('accepts a ready check one millisecond before its deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('deadline-left');
+    const rightDeck = await insertQuickDeck('deadline-right');
+    await joinArenaV2QuickQueue({ userId: 'deadline-left', deckId: leftDeck.id });
+    const proposal = await joinArenaV2QuickQueue({ userId: 'deadline-right', deckId: rightDeck.id });
+
+    vi.advanceTimersByTime(9_999);
+    const accepted = await acceptArenaV2QuickQueue('deadline-left', 'season-v2', proposal.proposalId!);
+
+    expect(accepted.status).toBe('accepted');
+    expect(accepted.acceptedBySelf).toBe(true);
+    expect(rows.matches).toHaveLength(0);
+  });
+
+  it('treats an accept at the exact deadline as timed out', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const leftDeck = await insertQuickDeck('deadline-left');
+    const rightDeck = await insertQuickDeck('deadline-right');
+    await joinArenaV2QuickQueue({ userId: 'deadline-left', deckId: leftDeck.id });
+    const proposal = await joinArenaV2QuickQueue({ userId: 'deadline-right', deckId: rightDeck.id });
+
+    vi.advanceTimersByTime(10_000);
+    const timedOut = await acceptArenaV2QuickQueue('deadline-left', 'season-v2', proposal.proposalId!);
+
+    expect(timedOut.status).toBe('accept_timeout');
+    expect(timedOut.transitionReason).toBe('proposal_expired');
+    expect(rows.matches).toHaveLength(0);
+  });
+
+  it('serializes quick, battle royale, and bot participation for one user', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await insertQuickDeck('cross-mode-user');
+    await joinArenaV2QuickQueue({ userId: 'cross-mode-user', deckId: deck.id });
+
+    await expect(createArenaV2Match({
+      userId: 'cross-mode-user',
+      mode: 'bot',
+      deckId: deck.id,
+      seasonId: 'season-v2'
+    })).rejects.toThrow('ArenaV2AlreadyActive');
+    await expect(joinArenaV2BattleRoyaleQueue({
+      userId: 'cross-mode-user',
+      deckId: deck.id,
+      seasonId: 'season-v2'
+    })).rejects.toThrow('ArenaV2AlreadyActive');
+
+    await cancelArenaV2QuickQueue('cross-mode-user', 'season-v2');
+    const botMatch = await createArenaV2Match({
+      userId: 'cross-mode-user',
+      mode: 'bot',
+      deckId: deck.id,
+      seasonId: 'season-v2'
+    });
+    expect(botMatch.matchId).toBeTruthy();
+    await expect(joinArenaV2QuickQueue({
+      userId: 'cross-mode-user',
+      deckId: deck.id,
+      seasonId: 'season-v2'
+    })).rejects.toThrow('ArenaV2AlreadyActive');
+  });
+
+  it('blocks update, revalidation, and deletion of a queued or active deck', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await insertQuickDeck('deck-lock-user');
+    await joinArenaV2QuickQueue({ userId: 'deck-lock-user', deckId: deck.id });
+
+    await expect(saveArenaV2Deck({
+      userId: 'deck-lock-user',
+      deckId: deck.id,
+      seasonId: 'season-v2',
+      name: '변경 시도',
+      modeScope: 'quick',
+      cardVersionIds: deck.cardVersionIds
+    })).rejects.toThrow('ArenaV2DeckInUse');
+    await expect(revalidateArenaV2DeckForUser('deck-lock-user', deck.id)).rejects.toThrow('ArenaV2DeckInUse');
+    await expect(deleteArenaV2DeckForUser('deck-lock-user', deck.id)).rejects.toThrow('ArenaV2DeckInUse');
+
+    await cancelArenaV2QuickQueue('deck-lock-user', 'season-v2');
+    await expect(revalidateArenaV2DeckForUser('deck-lock-user', deck.id)).resolves.toMatchObject({ id: deck.id });
+    await expect(deleteArenaV2DeckForUser('deck-lock-user', deck.id)).resolves.toEqual({ deleted: true });
+  });
+
+  it('returns an active matched battle royale ticket idempotently and blocks other modes', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await insertQuickDeck('br-active-user');
+    const first = await joinArenaV2BattleRoyaleQueue({ userId: 'br-active-user', deckId: deck.id });
+    const ticket = rows.battleRoyaleQueue.find((item) => item.id === first.id)!;
+    ticket.status = 'matched';
+    ticket.battle_royale_id = 'battle-active';
+    rows.battleRoyales.push({ id: 'battle-active', season_id: 'season-v2', status: 'active' });
+
+    const repeated = await joinArenaV2BattleRoyaleQueue({ userId: 'br-active-user', deckId: deck.id });
+
+    expect(repeated.id).toBe(first.id);
+    expect(repeated.status).toBe('matched');
+    await expect(joinArenaV2QuickQueue({ userId: 'br-active-user', deckId: deck.id }))
+      .rejects.toThrow('ArenaV2AlreadyActive');
+  });
+
+  it('isolates an administratively invalidated ready-check deck without penalizing its owner', async () => {
+    insertSeason();
+    insertCards(14);
+    const validDeck = await insertQuickDeck('valid-opponent');
+    const invalidDeck = await insertQuickDeck('invalid-owner');
+    await joinArenaV2QuickQueue({ userId: 'valid-opponent', deckId: validDeck.id });
+    const proposal = await joinArenaV2QuickQueue({ userId: 'invalid-owner', deckId: invalidDeck.id });
+    const proposalId = proposal.proposalId!;
+    const validTicketBefore = rows.quickQueue.find((ticket) => ticket.user_id === 'valid-opponent')!;
+    const validSnapshot = { id: validTicketBefore.id, joinedAt: validTicketBefore.joined_at };
+    await acceptArenaV2QuickQueue('valid-opponent', 'season-v2', proposalId);
+    rows.decks.find((item) => item.id === invalidDeck.id)!.is_valid = 0;
+
+    const invalidResult = await acceptArenaV2QuickQueue('invalid-owner', 'season-v2', proposalId);
+    const validResult = await getArenaV2QuickQueueStatus('valid-opponent', 'season-v2');
+    const invalidPoll = await getArenaV2QuickQueueStatus('invalid-owner', 'season-v2');
+
+    expect(invalidResult.status).toBe('cancelled');
+    expect(invalidResult.transitionReason).toBe('invalid_deck');
+    expect(invalidPoll).toMatchObject({ status: 'cancelled', transitionReason: 'invalid_deck' });
+    expect(validResult).toMatchObject({ status: 'waiting', transitionReason: 'opponent_invalid_deck' });
+    expect(validResult.ticket).toMatchObject({ id: validSnapshot.id, joinedAt: validSnapshot.joinedAt });
+    expect(rows.quickConduct.filter((conduct) => ['valid-opponent', 'invalid-owner'].includes(conduct.user_id))).toHaveLength(0);
+    expect(rows.matches).toHaveLength(0);
   });
 
   it('joins, reads, and cancels a v2 battle royale queue ticket', async () => {
@@ -1561,6 +2248,15 @@ describe('arena v2 service', () => {
       matchId: created.matchId,
       replaceCardInstanceIds: []
     });
+    const introView = await getArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(introView?.status).toBe('turn_result');
+    expect(introView?.phaseTiming?.introDurationMs).toBe(1_400);
+    expect(introView?.phaseTiming?.replayDurationMs).toBe(2_400);
+    expect(Date.parse(introView?.phaseTiming?.planningStartsAt || '') - Date.parse(introView?.phaseTiming?.replayEndsAt || '')).toBe(1_400);
+    expect(Date.parse(introView?.phaseTiming?.turnDeadlineAt || '') - Date.parse(introView?.phaseTiming?.planningStartsAt || '')).toBe(40_000);
+    const planningView = await finishTurnIntro(created.matchId, 'user-1');
+    expect(planningView?.status).toBe('turn_planning');
+
     const result = await submitArenaV2TurnActions({
       userId: 'user-1',
       matchId: created.matchId,
@@ -1582,10 +2278,231 @@ describe('arena v2 service', () => {
     expect(lastCardInstanceSelectSql).toContain("NULLIF(cv.art_asset_id, '')");
     expect(lastCardInstanceSelectSql).toContain('s.is_image_banned');
     expect(result.accepted).toBe(true);
-    expect(result.match?.status).toBe('turn_planning');
+    expect(result.match?.status).toBe('turn_result');
     expect(result.match?.turnNo).toBe(2);
     expect(rows.actionSubmissions).toHaveLength(2);
     expect(rows.replayEvents.length).toBeGreaterThan(0);
+  });
+
+
+  it('promotes turn_result at planningStartsAt and expires actions only at turnDeadlineAt', async () => {
+    insertSeason();
+    insertCards(14);
+    const cardVersionIds = Array.from({ length: 14 }, (_, index) => `card-${index + 1}`);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '서버 타이밍 덱',
+      modeScope: 'bot',
+      cardVersionIds
+    });
+    const created = await createArenaV2Match({
+      userId: 'user-1',
+      mode: 'bot',
+      deckId: deck.id
+    });
+    await submitArenaV2Mulligan({
+      userId: 'user-1',
+      matchId: created.matchId,
+      replaceCardInstanceIds: []
+    });
+
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    const readySummary = JSON.parse(match.result_summary);
+    readySummary.phaseTiming.planningStartsAt = new Date(Date.now() - 1).toISOString();
+    readySummary.phaseTiming.turnDeadlineAt = new Date(Date.now() + 40_000).toISOString();
+    match.result_summary = JSON.stringify(readySummary);
+
+    const promoted = await processArenaV2ExpiredTurns();
+    expect(promoted).toMatchObject({ promoted: 1, resolved: 0 });
+    expect(match.status).toBe('turn_planning');
+
+    const expiredSummary = JSON.parse(match.result_summary);
+    expiredSummary.phaseTiming.turnDeadlineAt = new Date(Date.now() - 1).toISOString();
+    match.result_summary = JSON.stringify(expiredSummary);
+
+    const expired = await processArenaV2ExpiredTurns();
+    expect(expired.resolved).toBe(1);
+    expect(match.status).toBe('turn_result');
+    expect(rows.actionSubmissions).toHaveLength(2);
+  });
+
+  it('participant polling resolves an expired turn once and returns the next turn without a button submit', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '자동 진행 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    await submitArenaV2Mulligan({
+      userId: 'user-1',
+      matchId: created.matchId,
+      replaceCardInstanceIds: []
+    });
+    await finishTurnIntro(created.matchId, 'user-1');
+
+    const storedMatch = rows.matches.find((item) => item.id === created.matchId)!;
+    const beforeDeadlineSummary = JSON.parse(storedMatch.result_summary);
+    beforeDeadlineSummary.phaseTiming.turnDeadlineAt = new Date(Date.now() + 1_000).toISOString();
+    storedMatch.result_summary = JSON.stringify(beforeDeadlineSummary);
+    await submitArenaV2TurnActions({
+      userId: 'user-1',
+      matchId: created.matchId,
+      turnNo: 1,
+      revision: 1_000_001,
+      isFinal: false,
+      actions: [{ type: 'end' }]
+    });
+
+    const beforeDeadline = await syncArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(beforeDeadline?.status).toBe('turn_planning');
+    expect(beforeDeadline?.turnNo).toBe(1);
+    expect(rows.actionSubmissions).toHaveLength(1);
+
+    vi.advanceTimersByTime(1_001);
+    await Promise.all([
+      syncArenaV2MatchForUser(created.matchId, 'user-1'),
+      syncArenaV2MatchForUser(created.matchId, 'user-1')
+    ]);
+
+    const latest = await syncArenaV2MatchForUser(created.matchId, 'user-1');
+    const timeoutSubmissions = rows.actionSubmissions
+      .filter((submission) => submission.turn_no === 1 && Number(submission.is_final) === 1);
+    const latestSummary = JSON.parse(storedMatch.result_summary);
+    expect(latest?.status).toBe('turn_result');
+    expect(latest?.turnNo).toBe(2);
+    expect(storedMatch.status).toBe('turn_result');
+    expect(storedMatch.turn_no).toBe(2);
+    expect(timeoutSubmissions).toHaveLength(2);
+    expect(new Set(timeoutSubmissions.map((submission) => submission.seat_no))).toEqual(new Set([0, 1]));
+    expect(timeoutSubmissions.every((submission) => Number(submission.revision) < 0)).toBe(true);
+    expect(rows.replayEvents.length).toBeGreaterThan(0);
+    expect(latestSummary.phaseTiming.replayDurationMs).toBeGreaterThanOrEqual(2_400);
+  });
+
+  it('does not mutate a match when an unauthorized user attempts deadline read-repair', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '권한 검증 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    await submitArenaV2Mulligan({
+      userId: 'user-1',
+      matchId: created.matchId,
+      replaceCardInstanceIds: []
+    });
+
+    const storedMatch = rows.matches.find((item) => item.id === created.matchId)!;
+    const expiredSummary = JSON.parse(storedMatch.result_summary);
+    expiredSummary.phaseTiming.planningStartsAt = new Date(Date.now() - 2_000).toISOString();
+    expiredSummary.phaseTiming.turnDeadlineAt = new Date(Date.now() - 1_000).toISOString();
+    storedMatch.result_summary = JSON.stringify(expiredSummary);
+
+    const unauthorized = await syncArenaV2MatchForUser(created.matchId, 'not-a-participant');
+
+    expect(unauthorized).toBeNull();
+    expect(storedMatch.status).toBe('turn_result');
+    expect(storedMatch.turn_no).toBe(1);
+    expect(rows.actionSubmissions).toHaveLength(0);
+    expect(rows.replayEvents).toHaveLength(0);
+  });
+
+  it('uses updated_at fallback when legacy mulligan and turn deadlines are missing', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '레거시 마감 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    const storedMatch = rows.matches.find((item) => item.id === created.matchId)!;
+    const mulliganSummary = JSON.parse(storedMatch.result_summary);
+    delete mulliganSummary.mulliganDeadlineAt;
+    storedMatch.result_summary = JSON.stringify(mulliganSummary);
+    storedMatch.updated_at = new Date(Date.now() - 41_000).toISOString();
+
+    const afterMulligan = await syncArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(afterMulligan?.status).toBe('turn_result');
+
+    await finishTurnIntro(created.matchId, 'user-1');
+    const turnSummary = JSON.parse(storedMatch.result_summary);
+    delete turnSummary.phaseTiming.turnDeadlineAt;
+    storedMatch.result_summary = JSON.stringify(turnSummary);
+    storedMatch.updated_at = new Date(Date.now() - 41_000).toISOString();
+
+    const afterTurn = await syncArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(afterTurn?.status).toBe('turn_result');
+    expect(afterTurn?.turnNo).toBe(2);
+  });
+
+  it('isolates a failed timeout candidate so later matches still advance', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '오류 격리 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const secondDeck = await saveArenaV2Deck({
+      userId: 'user-2',
+      seasonId: 'season-v2',
+      name: '오류 격리 덱 2',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const createExpiredMatch = async (userId: string, deckId: string) => {
+      const created = await createArenaV2Match({ userId, mode: 'bot', deckId });
+      await submitArenaV2Mulligan({
+        userId,
+        matchId: created.matchId,
+        replaceCardInstanceIds: []
+      });
+      await finishTurnIntro(created.matchId, userId);
+      const stored = rows.matches.find((item) => item.id === created.matchId)!;
+      const summary = JSON.parse(stored.result_summary);
+      summary.phaseTiming.turnDeadlineAt = new Date(Date.now() - 1).toISOString();
+      stored.result_summary = JSON.stringify(summary);
+      return { created, stored };
+    };
+
+    const poison = await createExpiredMatch('user-1', deck.id);
+    const healthy = await createExpiredMatch('user-2', secondDeck.id);
+    timeoutReadFailures.add(poison.created.matchId);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let processed: Awaited<ReturnType<typeof processArenaV2ExpiredTurns>>;
+    try {
+      processed = await processArenaV2ExpiredTurns(40, 25, false);
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(processed!).toMatchObject({ failed: 1, resolved: 1 });
+    expect(poison.stored.status).toBe('turn_planning');
+    expect(poison.stored.turn_no).toBe(1);
+    expect(healthy.stored.status).toBe('turn_result');
+    expect(healthy.stored.turn_no).toBe(2);
   });
 
   it('hides opponent hand and deck card identities from match snapshots', async () => {
@@ -1617,6 +2534,174 @@ describe('arena v2 service', () => {
     expect(opponentPrivateInstances).toHaveLength(0);
   });
 
+
+  it('allows spectator snapshots only to participants of the exact battle royale and hides every private zone', async () => {
+    insertSeason();
+    insertCards(14);
+    const cardVersionIds = Array.from({ length: 14 }, (_, index) => `card-${index + 1}`);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '관전 보안 덱',
+      modeScope: 'bot',
+      cardVersionIds
+    });
+    const created = await createArenaV2Match({
+      userId: 'user-1',
+      mode: 'bot',
+      deckId: deck.id
+    });
+
+    expect(await getArenaV2MatchForUser(created.matchId, 'outsider')).toBeNull();
+
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    match.mode = 'battle_royale_8';
+    match.battle_royale_id = 'br-security';
+    const opponent = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    opponent.user_id = 'user-2';
+    rows.battleRoyales.push({
+      id: 'br-security',
+      season_id: 'season-v2',
+      status: 'active',
+      current_round_no: 1,
+      participant_state: JSON.stringify([
+        { seedNo: 1, userId: 'user-1', deckId: deck.id, status: 'active', finalRank: null },
+        { seedNo: 2, userId: 'user-2', deckId: deck.id, status: 'active', finalRank: null },
+        { seedNo: 3, userId: 'spectator-1', deckId: 'secret-deck', status: 'active', finalRank: null }
+      ]),
+      match_ids: JSON.stringify([created.matchId]),
+      winner_user_id: null,
+      created_at: 'now',
+      updated_at: 'now',
+      finished_at: null
+    });
+
+    expect(await getArenaV2MatchForUser(created.matchId, 'spectator-1')).toBeNull();
+    expect(await getArenaV2MatchForUser(created.matchId, 'spectator-1', 'wrong-br')).toBeNull();
+    expect(await getArenaV2MatchForUser(created.matchId, 'outsider', 'br-security')).toBeNull();
+
+    const spectatorView = await getArenaV2MatchForUser(created.matchId, 'spectator-1', 'br-security');
+    expect(spectatorView?.viewerRole).toBe('spectator');
+    expect(spectatorView?.selfSeatNo).toBeNull();
+    expect(spectatorView?.players.every((player) => player.deckId == null)).toBe(true);
+    expect(spectatorView?.players.every((player) => player.handCardInstanceIds.length === 0)).toBe(true);
+    expect(spectatorView?.players.every((player) => Object.keys(player.mulliganState as object).length === 0)).toBe(true);
+    expect(spectatorView?.cardInstances.every((instance) => !['deck', 'hand'].includes(instance.zone))).toBe(true);
+
+    const battleRoyale = await getArenaV2BattleRoyale('br-security', 'spectator-1');
+    expect(battleRoyale?.spectatableMatchIds).toContain(created.matchId);
+    expect(battleRoyale?.participantState.every((participant: Row) => !('deckId' in participant) && !('deck_id' in participant))).toBe(true);
+  });
+
+  it('exposes only the current participant rating result and preserves zero health', async () => {
+    insertSeason();
+    insertCards(14);
+    const cardVersionIds = Array.from({ length: 14 }, (_, index) => `card-${index + 1}`);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '결과 보안 덱',
+      modeScope: 'bot',
+      cardVersionIds
+    });
+    const created = await createArenaV2Match({
+      userId: 'user-1',
+      mode: 'bot',
+      deckId: deck.id
+    });
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    match.mode = 'quick';
+    match.status = 'completed';
+    match.winner_user_id = 'user-1';
+    match.finished_at = 'now';
+    match.result_summary = JSON.stringify({
+      status: 'completed',
+      result: 'win',
+      viewerResultsByUser: {
+        'user-1': { mmrBefore: 0, mmrAfter: 25, mmrDelta: 25, tierBefore: 'bronze', tierAfter: 'bronze' },
+        'user-2': { mmrBefore: 1000, mmrAfter: 975, mmrDelta: -25, tierBefore: 'bronze', tierAfter: 'bronze' }
+      }
+    });
+    const firstPlayer = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 0)!;
+    const secondPlayer = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    firstPlayer.player_health = 0;
+    firstPlayer.final_rank = 1;
+    secondPlayer.user_id = 'user-2';
+    secondPlayer.final_rank = 2;
+    secondPlayer.player_health = -3;
+
+    const winnerView = await getArenaV2MatchForUser(created.matchId, 'user-1');
+    const loserView = await getArenaV2MatchForUser(created.matchId, 'user-2');
+    secondPlayer.player_health = null;
+    const nullHealthView = await getArenaV2MatchForUser(created.matchId, 'user-2');
+
+
+    expect((winnerView?.resultSummary as Row).viewerResultsByUser).toBeUndefined();
+    expect((loserView?.resultSummary as Row).viewerResultsByUser).toBeUndefined();
+    expect(winnerView?.viewerResult).toMatchObject({ outcome: 'win', mmrBefore: 0, mmrAfter: 25, mmrDelta: 25 });
+    expect(loserView?.viewerResult).toMatchObject({ outcome: 'loss', mmrBefore: 1000, mmrAfter: 975, mmrDelta: -25 });
+    expect(winnerView?.players.find((player) => player.userId === 'user-1')?.playerHealth).toBe(0);
+    expect(loserView?.players.find((player) => player.userId === 'user-2')?.playerHealth).toBe(0);
+    expect(nullHealthView?.players.find((player) => player.userId === 'user-2')?.playerHealth).toBe(30);
+    expect(winnerView?.players.find((player) => player.userId === 'user-1')?.finalRank).toBe(1);
+    expect(winnerView?.players.find((player) => player.userId === 'user-2')?.deckId).toBeNull();
+  });
+
+
+  it('stores quick MMR before/after/delta per user and publishes only each viewer result', async () => {
+    insertSeason();
+    insertCards(14);
+    const cardVersionIds = Array.from({ length: 14 }, (_, index) => `card-${index + 1}`);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '퀵 결과 덱',
+      modeScope: 'bot',
+      cardVersionIds
+    });
+    const created = await createArenaV2Match({
+      userId: 'user-1',
+      mode: 'bot',
+      deckId: deck.id
+    });
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    match.mode = 'quick';
+    const opponent = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    opponent.user_id = 'user-2';
+
+    await submitArenaV2Mulligan({ userId: 'user-1', matchId: created.matchId, replaceCardInstanceIds: [] });
+    await submitArenaV2Mulligan({ userId: 'user-2', matchId: created.matchId, replaceCardInstanceIds: [] });
+    await finishTurnIntro(created.matchId, 'user-1');
+    opponent.player_health = 0;
+
+    await submitArenaV2TurnActions({
+      userId: 'user-1',
+      matchId: created.matchId,
+      turnNo: 1,
+      revision: 0,
+      isFinal: true,
+      actions: [{ type: 'end' }]
+    });
+    const completed = await submitArenaV2TurnActions({
+      userId: 'user-2',
+      matchId: created.matchId,
+      turnNo: 1,
+      revision: 0,
+      isFinal: true,
+      actions: [{ type: 'end' }]
+    });
+
+    const storedSummary = JSON.parse(match.result_summary);
+    expect(match.status).toBe('completed');
+    expect(storedSummary.viewerResultsByUser['user-1']).toMatchObject({ mmrBefore: 1000, mmrAfter: 1025, mmrDelta: 25 });
+    expect(storedSummary.viewerResultsByUser['user-2']).toMatchObject({ mmrBefore: 1000, mmrAfter: 975, mmrDelta: -25 });
+    expect(rows.ratings).toHaveLength(2);
+    expect((completed.match?.resultSummary as Row).viewerResultsByUser).toBeUndefined();
+    expect(completed.match?.viewerResult).toMatchObject({ outcome: 'loss', mmrBefore: 1000, mmrAfter: 975, mmrDelta: -25 });
+    const winnerView = await getArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(winnerView?.viewerResult).toMatchObject({ outcome: 'win', mmrBefore: 1000, mmrAfter: 1025, mmrDelta: 25 });
+  });
+
   it('rejects stale or duplicate turn action revisions before storing them', async () => {
     insertSeason();
     insertCards(14);
@@ -1638,6 +2723,7 @@ describe('arena v2 service', () => {
       matchId: created.matchId,
       replaceCardInstanceIds: []
     });
+    await finishTurnIntro(created.matchId, 'user-1');
 
     const first = await submitArenaV2TurnActions({
       userId: 'user-1',
@@ -1797,5 +2883,159 @@ describe('arena v2 service', () => {
     rows.replayEvents = rows.replayEvents.filter((event) => event.match_id !== created.matchId);
 
     await expect(getArenaV2Replay(created.matchId, 'user-1')).rejects.toThrow('ArenaReplayExpired');
+  });
+
+  it('keeps one waiting battle-royale ticket per user', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '중복 방지 덱',
+      modeScope: 'battle_royale_8',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+
+    const first = await joinArenaV2BattleRoyaleQueue({ userId: 'user-1', deckId: deck.id });
+    const second = await joinArenaV2BattleRoyaleQueue({ userId: 'user-1', deckId: deck.id });
+
+    expect(second.id).toBe(first.id);
+    expect(rows.battleRoyaleQueue.filter((ticket) => ticket.user_id === 'user-1' && ticket.status === 'waiting')).toHaveLength(1);
+  });
+
+  it('preserves the absolute mulligan deadline and auto-keeps only the missing player at expiry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '멀리건 타이머 덱',
+      modeScope: 'quick',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    match.mode = 'quick';
+    const opponent = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    opponent.user_id = 'user-2';
+    const originalDeadline = JSON.parse(match.result_summary).mulliganDeadlineAt;
+
+    await submitArenaV2Mulligan({ userId: 'user-1', matchId: created.matchId, replaceCardInstanceIds: [] });
+    expect(match.status).toBe('mulligan');
+    expect(JSON.parse(match.result_summary).mulliganDeadlineAt).toBe(originalDeadline);
+
+    vi.advanceTimersByTime(40_001);
+    const processed = await processArenaV2ExpiredTurns();
+    const selfState = JSON.parse(rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 0)!.mulligan_state);
+    const opponentState = JSON.parse(opponent.mulligan_state);
+
+    expect(processed).toMatchObject({ mulligansAutoConfirmed: 1 });
+    expect(match.status).toBe('turn_result');
+    expect(selfState.autoConfirmed).not.toBe(true);
+    expect(opponentState).toMatchObject({ done: true, replaced: [], autoConfirmed: true });
+    expect(opponentState.kept).toEqual(JSON.parse(opponent.hand_card_instance_ids));
+  });
+
+  it('rejects mulligan and turn submissions after their authoritative deadlines', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '마감 거절 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    const expiredMulliganSummary = JSON.parse(match.result_summary);
+    expiredMulliganSummary.mulliganDeadlineAt = new Date(Date.now() - 1).toISOString();
+    match.result_summary = JSON.stringify(expiredMulliganSummary);
+
+    await expect(submitArenaV2Mulligan({
+      userId: 'user-1', matchId: created.matchId, replaceCardInstanceIds: []
+    })).rejects.toThrow('ArenaV2MulliganDeadlineExpired');
+
+    match.status = 'turn_planning';
+    match.result_summary = JSON.stringify({
+      status: 'turn_planning',
+      phaseTiming: {
+        replayDurationMs: 0,
+        replayEndsAt: new Date(Date.now() - 5_000).toISOString(),
+        introDurationMs: 1_400,
+        planningStartsAt: new Date(Date.now() - 4_000).toISOString(),
+        turnDeadlineAt: new Date(Date.now() - 1).toISOString(),
+        serverNow: new Date().toISOString()
+      }
+    });
+    await expect(submitArenaV2TurnActions({
+      userId: 'user-1', matchId: created.matchId, turnNo: 1, revision: 0, isFinal: true, actions: [{ type: 'end' }]
+    })).rejects.toThrow('ArenaV2TurnDeadlineExpired');
+    expect(rows.actionSubmissions).toHaveLength(0);
+  });
+
+  it('uses final battle-royale placement for outcome and exposes only an ongoing next match', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'user-1',
+      seasonId: 'season-v2',
+      name: '최종 결과 덱',
+      modeScope: 'battle_royale_8',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'user-1', mode: 'bot', deckId: deck.id });
+    const match = rows.matches.find((item) => item.id === created.matchId)!;
+    const self = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 0)!;
+    const opponent = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    match.mode = 'battle_royale_8';
+    match.status = 'completed';
+    match.battle_royale_id = 'br-result';
+    match.winner_user_id = null;
+    match.result_summary = JSON.stringify({ status: 'completed', result: 'draw' });
+    self.final_rank = 1;
+    opponent.user_id = 'user-2';
+    opponent.final_rank = 2;
+    rows.battleRoyales.push({
+      id: 'br-result', season_id: 'season-v2', status: 'finished', current_round_no: 2,
+      participant_state: JSON.stringify([
+        { seedNo: 1, userId: 'user-1', status: 'winner', health: 0, finalRank: 1, currentMatchId: created.matchId, nextMatchId: null },
+        { seedNo: 2, userId: 'user-2', status: 'eliminated', health: 0, finalRank: 2, currentMatchId: created.matchId, nextMatchId: null }
+      ]),
+      match_ids: JSON.stringify([created.matchId]), winner_user_id: 'user-1', created_at: 'now', updated_at: 'now', finished_at: 'now'
+    });
+
+    const championView = await getArenaV2MatchForUser(created.matchId, 'user-1');
+    expect(championView?.viewerResult).toMatchObject({ outcome: 'win', placement: 1, nextMatchId: null });
+
+    const nextMatchId = 'br-result-round-2';
+    const battleRoyale = rows.battleRoyales[0];
+    battleRoyale.status = 'active';
+    battleRoyale.finished_at = null;
+    battleRoyale.participant_state = JSON.stringify([
+      { seedNo: 1, userId: 'user-1', status: 'active', health: 20, finalRank: null, currentMatchId: nextMatchId, nextMatchId },
+      { seedNo: 2, userId: 'user-2', status: 'active', health: 20, finalRank: null, currentMatchId: nextMatchId, nextMatchId }
+    ]);
+    battleRoyale.match_ids = JSON.stringify([created.matchId, nextMatchId]);
+    self.final_rank = null;
+    opponent.final_rank = null;
+    rows.matches.push({
+      id: nextMatchId, season_id: 'season-v2', mode: 'battle_royale_8', status: 'turn_planning', battle_royale_id: 'br-result',
+      round_no: 2, turn_no: 2, winner_user_id: null, finished_at: null, result_summary: '{}', created_at: 'later'
+    });
+    rows.matchPlayers.push(
+      { match_id: nextMatchId, seat_no: 0, user_id: 'user-1', final_rank: null },
+      { match_id: nextMatchId, seat_no: 1, user_id: 'user-2', final_rank: null }
+    );
+
+    const previousView = await getArenaV2MatchForUser(created.matchId, 'user-1');
+    const snapshot = await getArenaV2BattleRoyale('br-result', 'user-1');
+    expect(previousView?.viewerResult?.nextMatchId).toBe(nextMatchId);
+    expect(snapshot?.currentMatchId).toBe(nextMatchId);
+    expect(snapshot?.participantState.find((participant: Row) => participant.userId === 'user-1')).toMatchObject({
+      health: 20, alive: true, currentMatchId: nextMatchId, nextMatchId
+    });
   });
 });

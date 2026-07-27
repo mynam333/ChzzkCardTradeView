@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from '../middlewares/admin';
 import { streamerRepository } from '../repositories';
 import {
   arenaV2TargetExists,
+  acceptArenaV2QuickQueue,
   cancelArenaV2BattleRoyaleQueue,
   cancelArenaV2QuickQueue,
   createArenaV2ReplayHoldAdmin,
@@ -16,7 +17,7 @@ import {
   getArenaV2CardVersion,
   getArenaV2BattleRoyale,
   getArenaV2CurrentRewardsForUser,
-  getArenaV2MatchForUser,
+  syncArenaV2MatchForUser,
   getArenaV2QuickQueueStatus,
   getArenaV2Replay,
   getMyArenaV2StreamerCard,
@@ -68,6 +69,8 @@ const handleArenaV2DeckUseError = (res: Response, message: string) => {
   if (message === 'ArenaV2DeckNotFound') return res.status(404).json({ error: message, message: '덱을 찾을 수 없습니다.' });
   if (message === 'ArenaV2DeckForbidden') return res.status(403).json({ error: message, message: '다른 유저의 덱은 사용할 수 없습니다.' });
   if (message === 'ArenaV2DeckInvalid') return res.status(400).json({ error: message, message: '덱이 공식 규칙을 통과하지 못했습니다.' });
+  if (message === 'ArenaV2DeckInUse') return res.status(409).json({ error: message, message: '대기열 또는 진행 중인 대전에서 사용하는 덱은 변경하거나 삭제할 수 없습니다.' });
+  if (message === 'ArenaV2AlreadyActive') return res.status(409).json({ error: message, message: '이미 다른 아레나 대기열 또는 대전에 참여 중입니다.' });
   if (message === 'ArenaV2DeckSeasonMismatch') return res.status(409).json({ error: message, message: '덱과 시즌이 일치하지 않습니다.' });
   if (message === 'ArenaV2SeasonClosed') return res.status(409).json({ error: message, message: '대전 가능한 시즌이 아닙니다.' });
   return null;
@@ -179,12 +182,8 @@ export const saveArenaV2DeckController = async (req: AuthenticatedRequest, res: 
     });
     return res.status(deckId ? 200 : 201).json({ deck });
   } catch (err: any) {
-    if (err?.message === 'ArenaV2DeckNotFound') {
-      return res.status(404).json({ error: 'ArenaV2DeckNotFound', message: '덱을 찾을 수 없습니다.' });
-    }
-    if (err?.message === 'ArenaV2DeckForbidden') {
-      return res.status(403).json({ error: 'ArenaV2DeckForbidden', message: '다른 유저의 덱은 수정할 수 없습니다.' });
-    }
+    const handled = handleArenaV2DeckUseError(res, String(err?.message || ''));
+    if (handled) return handled;
     throw err;
   }
 };
@@ -291,10 +290,8 @@ export const createArenaV2MatchController = async (req: AuthenticatedRequest, re
     if (message === 'ArenaV2UseBattleRoyaleQueue') {
       return res.status(409).json({ error: message, message: '8인전은 /api/arena/battle-royales/join을 사용합니다.' });
     }
-    if (message === 'ArenaV2DeckNotFound') return res.status(404).json({ error: message, message: '덱을 찾을 수 없습니다.' });
-    if (message === 'ArenaV2DeckForbidden') return res.status(403).json({ error: message, message: '다른 유저의 덱은 사용할 수 없습니다.' });
-    if (message === 'ArenaV2DeckInvalid') return res.status(400).json({ error: message, message: '덱이 공식 규칙을 통과하지 못했습니다.' });
-    if (message === 'ArenaV2SeasonClosed') return res.status(409).json({ error: message, message: '대전 가능한 시즌이 아닙니다.' });
+    const handled = handleArenaV2DeckUseError(res, message);
+    if (handled) return handled;
     if (message === 'ArenaV2BotDeckUnavailable') return res.status(409).json({ error: message, message: '봇전을 만들 카드 풀이 부족합니다.' });
     throw err;
   }
@@ -345,8 +342,8 @@ export const joinArenaV2QuickQueueController = async (req: AuthenticatedRequest,
   }
 
   try {
-    const ticket = await joinArenaV2QuickQueue({ userId: user.id, deckId, seasonId });
-    return res.status(200).json({ status: ticket.status, ticket });
+    const result = await joinArenaV2QuickQueue({ userId: user.id, deckId, seasonId });
+    return res.status(200).json(result);
   } catch (err: any) {
     const handled = handleArenaV2DeckUseError(res, String(err?.message || ''));
     if (handled) return handled;
@@ -354,7 +351,27 @@ export const joinArenaV2QuickQueueController = async (req: AuthenticatedRequest,
   }
 };
 
+export const acceptMyArenaV2QuickQueueController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const seasonId = assertBodyString(req.body?.seasonId)
+    || (typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined);
+  const proposalId = assertBodyString(req.body?.proposalId);
+  if (!proposalId) {
+    return res.status(400).json({ error: 'ArenaV2QuickProposalRequired', message: '확인할 매칭 제안이 필요합니다.' });
+  }
+  try {
+    const result = await acceptArenaV2QuickQueue(user.id, seasonId, proposalId);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    if (String(err?.message || '') === 'ArenaV2SeasonClosed') return res.status(409).json({ error: 'ArenaV2SeasonClosed', message: '대전 가능한 시즌이 아닙니다.' });
+    if (String(err?.message || '') === 'ArenaV2QuickProposalStale') return res.status(409).json({ error: 'ArenaV2QuickProposalStale', message: '이미 종료되었거나 다른 매칭 제안입니다.' });
+    throw err;
+  }
+};
 export const getMyArenaV2QuickQueueStatusController = async (req: AuthenticatedRequest, res: Response) => {
+
+
   const user = requireUser(req, res);
   if (!user) return;
   const seasonId = typeof req.query.seasonId === 'string' ? req.query.seasonId : undefined;
@@ -410,7 +427,8 @@ export const getArenaV2MatchController = async (req: AuthenticatedRequest, res: 
   const user = requireUser(req, res);
   if (!user) return;
   const matchId = assertBodyString(req.params?.match_id);
-  const match = await getArenaV2MatchForUser(matchId, user.id);
+  const battleRoyaleId = assertBodyString(req.query?.battleRoyaleId || req.query?.battle_royale_id) || undefined;
+  const match = await syncArenaV2MatchForUser(matchId, user.id, battleRoyaleId);
   if (!match) {
     return res.status(404).json({ error: 'ArenaV2MatchNotFound', message: '아레나 v2 매치를 찾을 수 없습니다.' });
   }
@@ -447,6 +465,7 @@ export const submitArenaV2TurnActionsController = async (req: AuthenticatedReque
     if (message === 'ArenaV2MatchForbidden') return res.status(403).json({ error: message, message: '이 매치에 접근할 수 없습니다.' });
     if (message === 'ArenaV2MatchNotPlanning') return res.status(409).json({ error: message, message: '현재 턴 행동을 제출할 수 없는 상태입니다.' });
     if (message === 'ArenaV2TurnMismatch') return res.status(409).json({ error: message, message: '현재 턴 번호와 제출 턴이 다릅니다.' });
+    if (message === 'ArenaV2TurnDeadlineExpired') return res.status(409).json({ error: message, message: '턴 제한 시간이 지나 서버가 행동을 확정했습니다.' });
     if (message === 'ArenaV2RevisionNotIncreasing') return res.status(409).json({ error: message, message: '이전 제출보다 큰 revision이 필요합니다.' });
     throw err;
   }
@@ -470,6 +489,7 @@ export const submitArenaV2MulliganController = async (req: AuthenticatedRequest,
     if (message === 'ArenaV2MatchNotFound') return res.status(404).json({ error: message, message: '아레나 v2 매치를 찾을 수 없습니다.' });
     if (message === 'ArenaV2MatchForbidden') return res.status(403).json({ error: message, message: '이 매치에 접근할 수 없습니다.' });
     if (message === 'ArenaV2MatchNotMulligan') return res.status(409).json({ error: message, message: '멀리건을 제출할 수 있는 상태가 아닙니다.' });
+    if (message === 'ArenaV2MulliganDeadlineExpired') return res.status(409).json({ error: message, message: '멀리건 제한 시간이 지나 기본 유지로 확정되었습니다.' });
     if (message === 'ArenaV2MulliganCardInvalid') return res.status(400).json({ error: message, message: '손패에 없는 카드는 멀리건할 수 없습니다.' });
     if (message === 'ArenaV2MulliganTooManyCards') return res.status(400).json({ error: message, message: '멀리건은 최대 3장까지 가능합니다.' });
     if (message === 'ArenaV2MulliganAlreadyDone') return res.status(409).json({ error: message, message: '이미 멀리건을 제출했습니다.' });
@@ -481,8 +501,9 @@ export const getArenaV2ReplayController = async (req: AuthenticatedRequest, res:
   const user = requireUser(req, res);
   if (!user) return;
   const matchId = assertBodyString(req.params?.match_id);
+  const battleRoyaleId = assertBodyString(req.query?.battleRoyaleId || req.query?.battle_royale_id) || undefined;
   try {
-    const replay = await getArenaV2Replay(matchId, user.id);
+    const replay = await getArenaV2Replay(matchId, user.id, battleRoyaleId);
     if (!replay) {
       return res.status(404).json({ error: 'ArenaV2ReplayNotFound', message: '리플레이를 찾을 수 없습니다.' });
     }

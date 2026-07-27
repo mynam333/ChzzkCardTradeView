@@ -75,7 +75,7 @@ export const ArenaEmotePieMenu: React.FC<ArenaEmotePieMenuProps> = ({
         }} side="top">
           <button
             type="button"
-            className={`${item ? 'has-emote' : 'is-empty'} ${selected ? 'is-selected' : ''}`}
+            className={`arena-v2-pie-slot ${item ? 'has-emote' : 'is-empty'} ${selected ? 'is-selected' : ''}`}
             style={sectorStyle(index)}
             disabled={disabled || (!item && Boolean(onPick) && !onSelect)}
             aria-pressed={selected}

@@ -875,7 +875,9 @@ describe('daily minigame selection', () => {
     }));
     expect(body.game_data.rounds).toHaveLength(5);
     expect(body.game_data.rounds[0]).not.toHaveProperty('answer_channel_id');
+    expect(body.game_data.rounds[0].source_fallback_image_url).toBeNull();
     expect(body.game_data.rounds[0].choices[0]).not.toHaveProperty('base_value');
+    expect(body.game_data.rounds[0].choices[0].fallback_image_url).toBeNull();
     expect(completeSession).not.toHaveBeenCalled();
     expect(getTicketStatus).not.toHaveBeenCalled();
     expect(startSession).not.toHaveBeenCalled();
@@ -1092,11 +1094,13 @@ describe('daily minigame selection', () => {
   });
 
   it('issues crop detective rounds inside the 5:8 card viewport with doubled zoom and rotation data', async () => {
+    vi.setSystemTime(new Date('2030-07-01T03:00:00.000Z'));
     findAllStreamers.mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
         channel_id: `channel-${index}`,
         name: `streamer-${index}`,
-        logo_url: `https://example.com/${index}.png`
+        logo_url: `https://example.com/${index}-logo.png`,
+        custom_images: Array.from({ length: 6 }, (_, star) => `https://example.com/${index}-${star}.png`)
       })) as never
     );
     startSession.mockResolvedValue({ ok: true });
@@ -1120,7 +1124,8 @@ describe('daily minigame selection', () => {
       expect(round.crop.x).toBeLessThanOrEqual(1 - safeMargins.x + 0.001);
       expect(round.crop.y).toBeGreaterThanOrEqual(safeMargins.y - 0.001);
       expect(round.crop.y).toBeLessThanOrEqual(1 - safeMargins.y + 0.001);
-      expect(round.source_image_url).toMatch(/^https:\/\/example\.com\/\d+\.png$/);
+      expect(round.source_image_url).toMatch(/^https:\/\/example\.com\/\d+-\d\.png$/);
+      expect(round.source_fallback_image_url).toMatch(/^https:\/\/example\.com\/\d+-logo\.png$/);
       expect(round.choices).toHaveLength(4);
     }
 
@@ -1132,5 +1137,19 @@ describe('daily minigame selection', () => {
       size: expect.any(Number),
       rotation: expect.any(Number)
     }));
+    for (const targetRound of target.rounds) {
+      const publicRound = responseBody.game_data.rounds.find(
+        (round: any) => round.round === targetRound.round
+      );
+      const answerChoice = targetRound.choices.find(
+        (choice: any) => choice.channel_id === targetRound.answer_channel_id
+      );
+      expect(answerChoice).toBeDefined();
+      expect(targetRound.source_image_url).toBe(answerChoice.image_url);
+      expect(targetRound.source_fallback_image_url).toBe(answerChoice.fallback_image_url);
+      expect(publicRound.source_image_url).toBe(targetRound.source_image_url);
+      expect(publicRound.source_fallback_image_url).toBe(targetRound.source_fallback_image_url);
+      expect(publicRound.choices).toContainEqual(answerChoice);
+    }
   });
 });

@@ -9,6 +9,9 @@ export const ARENA_V2_TABLES = [
   'arena_v2_card_versions',
   'arena_v2_decks',
   'arena_v2_match_queue',
+  'arena_v2_matchmaking_active_slots',
+  'arena_v2_matchmaking_conduct',
+  'arena_v2_matchmaking_conduct_events',
   'arena_v2_battle_royale_queue',
   'arena_v2_matches',
   'arena_v2_match_players',
@@ -98,13 +101,54 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
       status VARCHAR(24) NOT NULL DEFAULT 'waiting',
       search_min_mmr INT NOT NULL DEFAULT 1000,
       search_max_mmr INT NOT NULL DEFAULT 1000,
+      proposal_id VARCHAR(64) NULL,
+      accept_deadline_at DATETIME NULL,
+      accepted_at DATETIME NULL,
+      last_transition_reason VARCHAR(32) NULL,
       matched_match_id VARCHAR(64) NULL,
       joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       expires_at DATETIME NOT NULL,
       INDEX idx_arena_v2_match_queue_search (season_id, status, mmr, joined_at),
       INDEX idx_arena_v2_match_queue_user (season_id, user_id, status),
-      INDEX idx_arena_v2_match_queue_expire (status, expires_at)
+      INDEX idx_arena_v2_match_queue_expire (status, expires_at),
+      INDEX idx_arena_v2_match_queue_accept_deadline (status, accept_deadline_at),
+      INDEX idx_arena_v2_match_queue_proposal (proposal_id, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_active_slots (
+      season_id VARCHAR(64) NOT NULL,
+      user_id VARCHAR(191) NOT NULL,
+      ticket_id VARCHAR(64) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (season_id, user_id),
+      UNIQUE KEY uniq_arena_v2_matchmaking_slot_ticket (ticket_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_conduct (
+      season_id VARCHAR(64) NOT NULL,
+      user_id VARCHAR(191) NOT NULL,
+      timeout_strikes INT NOT NULL DEFAULT 0,
+      priority_penalty INT NOT NULL DEFAULT 0,
+      last_timeout_at DATETIME NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (season_id, user_id),
+      INDEX idx_arena_v2_matchmaking_conduct_priority (season_id, priority_penalty, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_conduct_events (
+      event_key VARCHAR(191) PRIMARY KEY,
+      season_id VARCHAR(64) NOT NULL,
+      user_id VARCHAR(191) NOT NULL,
+      event_type VARCHAR(32) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_arena_v2_matchmaking_events_user (season_id, user_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
@@ -146,6 +190,7 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_arena_v2_matches_season_mode_status (season_id, mode, status),
       INDEX idx_arena_v2_matches_br_round (battle_royale_id, round_no),
+      INDEX idx_arena_v2_matches_timeout_scan (status, updated_at),
       INDEX idx_arena_v2_matches_replay_expire (replay_expires_at),
       INDEX idx_arena_v2_matches_finished (finished_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -371,9 +416,36 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
   `);
 
   try {
+    await db.run('ALTER TABLE arena_v2_matches ADD INDEX idx_arena_v2_matches_timeout_scan (status, updated_at)');
+  } catch {
+    // Existing v2 databases may already have this index.
+  }
+  try {
     await db.run('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INT NOT NULL DEFAULT 0');
   } catch {
     // Existing v2 databases may already have this column.
+  }
+  for (const statement of [
+    'ALTER TABLE arena_v2_match_queue ADD COLUMN proposal_id VARCHAR(64) NULL',
+    'ALTER TABLE arena_v2_match_queue ADD COLUMN accept_deadline_at DATETIME NULL',
+    'ALTER TABLE arena_v2_match_queue ADD COLUMN accepted_at DATETIME NULL',
+    'ALTER TABLE arena_v2_match_queue ADD COLUMN last_transition_reason VARCHAR(32) NULL'
+  ]) {
+    try {
+      await db.run(statement);
+    } catch {
+      // Existing databases may already have the ready-check column.
+    }
+  }
+  try {
+    await db.run('ALTER TABLE arena_v2_match_queue ADD INDEX idx_arena_v2_match_queue_accept_deadline (status, accept_deadline_at)');
+  } catch {
+    // Existing databases may already have the ready-check deadline index.
+  }
+  try {
+    await db.run('ALTER TABLE arena_v2_match_queue ADD INDEX idx_arena_v2_match_queue_proposal (proposal_id, status)');
+  } catch {
+    // Existing databases may already have the ready-check proposal index.
   }
   for (let slot = 1; slot <= 8; slot += 1) {
     try {
@@ -466,7 +538,11 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
       mmr INTEGER NOT NULL DEFAULT 1000,
       status TEXT NOT NULL DEFAULT 'waiting',
       search_min_mmr INTEGER NOT NULL DEFAULT 1000,
+      last_transition_reason TEXT,
       search_max_mmr INTEGER NOT NULL DEFAULT 1000,
+      proposal_id TEXT,
+      accept_deadline_at TEXT,
+      accepted_at TEXT,
       matched_match_id TEXT,
       joined_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -475,6 +551,34 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
     CREATE INDEX IF NOT EXISTS idx_arena_v2_match_queue_search ON arena_v2_match_queue(season_id, status, mmr, joined_at);
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_arena_v2_match_queue_waiting ON arena_v2_match_queue(season_id, user_id) WHERE status = 'waiting';
     CREATE INDEX IF NOT EXISTS idx_arena_v2_match_queue_expire ON arena_v2_match_queue(status, expires_at);
+
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_active_slots (
+      season_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      ticket_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (season_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_conduct (
+      season_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      timeout_strikes INTEGER NOT NULL DEFAULT 0,
+      priority_penalty INTEGER NOT NULL DEFAULT 0,
+      last_timeout_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (season_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arena_v2_matchmaking_conduct_priority ON arena_v2_matchmaking_conduct(season_id, priority_penalty, updated_at);
+
+    CREATE TABLE IF NOT EXISTS arena_v2_matchmaking_conduct_events (
+      event_key TEXT PRIMARY KEY,
+      season_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_arena_v2_matchmaking_events_user ON arena_v2_matchmaking_conduct_events(season_id, user_id, created_at);
 
     CREATE TABLE IF NOT EXISTS arena_v2_battle_royale_queue (
       id TEXT PRIMARY KEY,
@@ -512,6 +616,7 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
     );
     CREATE INDEX IF NOT EXISTS idx_arena_v2_matches_season_mode_status ON arena_v2_matches(season_id, mode, status);
     CREATE INDEX IF NOT EXISTS idx_arena_v2_matches_br_round ON arena_v2_matches(battle_royale_id, round_no);
+    CREATE INDEX IF NOT EXISTS idx_arena_v2_matches_timeout_scan ON arena_v2_matches(status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_arena_v2_matches_replay_expire ON arena_v2_matches(replay_expires_at);
     CREATE INDEX IF NOT EXISTS idx_arena_v2_matches_finished ON arena_v2_matches(finished_at);
 
@@ -712,6 +817,17 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
   `);
 
   if (typeof db.prepare === 'function') {
+    const quickQueueColumns = db.prepare('PRAGMA table_info(arena_v2_match_queue)').all() as Array<{ name: string }>;
+    for (const [columnName, columnType] of [
+      ['proposal_id', 'TEXT'],
+      ['accept_deadline_at', 'TEXT'],
+      ['accepted_at', 'TEXT'],
+      ['last_transition_reason', 'TEXT']
+    ] as const) {
+      if (!quickQueueColumns.some((column) => column.name === columnName)) db.exec(`ALTER TABLE arena_v2_match_queue ADD COLUMN ${columnName} ${columnType};`);
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_arena_v2_match_queue_accept_deadline ON arena_v2_match_queue(status, accept_deadline_at);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_arena_v2_match_queue_proposal ON arena_v2_match_queue(proposal_id, status);');
     const matchPlayerColumns = db.prepare('PRAGMA table_info(arena_v2_match_players)').all() as Array<{ name: string }>;
     if (!matchPlayerColumns.some((column) => column.name === 'fatigue_count')) {
       db.exec('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INTEGER NOT NULL DEFAULT 0;');

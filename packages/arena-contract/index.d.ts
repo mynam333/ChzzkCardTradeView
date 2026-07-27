@@ -9,7 +9,57 @@ export type ArenaV2MatchStatusDto =
   | 'turn_result'
   | 'completed'
   | 'cancelled';
-export type ArenaV2QueueStatusDto = 'waiting' | 'matched' | 'cancelled' | 'expired';
+export type ArenaV2QueueStatusDto =
+  | 'waiting'
+  | 'proposed'
+  | 'accepted'
+  | 'matched'
+  | 'cancelled'
+  | 'declined'
+  | 'accept_timeout'
+  | 'expired';
+
+export interface ArenaV2QuickQueueTicketDto {
+  id: string;
+  seasonId: string;
+  userId: string;
+  deckId: string;
+  mmr: number;
+  status: ArenaV2QueueStatusDto;
+  searchMinMmr: number;
+  searchMaxMmr: number;
+  currentSearchRange: number;
+  currentMmrRange: { minMmr: number; maxMmr: number };
+  proposalId: string | null;
+  acceptDeadlineAt: string | null;
+  acceptedAt: string | null;
+  acceptedBySelf: boolean;
+  opponentAccepted: boolean;
+  requiresAcceptance: boolean;
+  matchedMatchId: string | null;
+  joinedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  priorityPenalty: number;
+  timeoutStrikes: number;
+  transitionReason: 'opponent_timeout' | 'opponent_cancelled' | 'opponent_invalid_deck' | 'proposal_expired' | 'cancelled_proposal' | 'invalid_deck' | null;
+}
+
+export interface ArenaV2QuickQueueResponseDto {
+  status: ArenaV2QueueStatusDto | 'none';
+  serverNow: string;
+  queueId?: string;
+  joinedAt?: string;
+  acceptDeadlineAt?: string | null;
+  proposalId?: string | null;
+  acceptedBySelf?: boolean;
+  opponentAccepted?: boolean;
+  requiresAcceptance?: boolean;
+  transitionReason?: ArenaV2QuickQueueTicketDto['transitionReason'];
+  estimatedRange?: { minMmr: number; maxMmr: number };
+  matchId?: string | null;
+  ticket: ArenaV2QuickQueueTicketDto | null;
+}
 export type ArenaV2BoardRowDto = 'front' | 'back';
 export type ArenaV2BoardColumnDto = 0 | 1 | 2;
 
@@ -89,6 +139,32 @@ export interface ArenaV2MatchPlayerDto {
   graveyardCardInstanceIds: string[];
   boardState: Array<{ cardInstanceId: string; position: ArenaV2BoardPositionDto; createdTurn: number }>;
   mulliganState: unknown;
+  finalRank: number | null;
+}
+
+export type ArenaV2ViewerRoleDto = 'participant' | 'spectator';
+
+export interface ArenaV2PhaseTimingDto {
+  replayDurationMs: number;
+  replayEndsAt: string | null;
+  introDurationMs: number;
+  planningStartsAt: string | null;
+  turnDeadlineAt: string | null;
+  serverNow: string;
+}
+
+export interface ArenaV2ViewerResultDto {
+  outcome: 'win' | 'loss' | 'draw';
+  mmrBefore: number | null;
+  mmrAfter: number | null;
+  mmrDelta: number | null;
+  tierBefore: string | null;
+  tierAfter: string | null;
+  unrated: boolean;
+  placement: number | null;
+  sharedPlacement: boolean;
+  canSpectate: boolean;
+  nextMatchId: string | null;
 }
 
 export interface ArenaV2MatchViewDto {
@@ -105,6 +181,9 @@ export interface ArenaV2MatchViewDto {
   finishedAt: string | null;
   winnerUserId: string | null;
   resultSummary: unknown;
+  viewerRole: ArenaV2ViewerRoleDto;
+  phaseTiming: ArenaV2PhaseTimingDto | null;
+  viewerResult: ArenaV2ViewerResultDto | null;
   selfSeatNo: number | null;
   players: ArenaV2MatchPlayerDto[];
   cardInstances: ArenaV2CardInstanceDto[];

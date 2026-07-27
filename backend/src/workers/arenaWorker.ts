@@ -11,8 +11,10 @@ const parseInterval = (value: string | undefined, fallback: number, min: number,
 const JOB_POLL_INTERVAL_MS = parseInterval(process.env.ARENA_WORKER_JOB_POLL_INTERVAL_MS, 30_000, 10_000, 300_000);
 const STALE_JOB_RESET_INTERVAL_MS = parseInterval(process.env.ARENA_WORKER_STALE_JOB_RESET_INTERVAL_MS, 300_000, 60_000, 3_600_000);
 const HEARTBEAT_INTERVAL_MS = parseInterval(process.env.ARENA_WORKER_HEARTBEAT_INTERVAL_MS, 30_000, 15_000, 300_000);
-const TURN_TIMEOUT_SCAN_INTERVAL_MS = parseInterval(process.env.ARENA_V2_TURN_TIMEOUT_SCAN_INTERVAL_MS, 15_000, 5_000, 120_000);
+const TURN_TIMEOUT_SCAN_INTERVAL_MS = parseInterval(process.env.ARENA_V2_TURN_TIMEOUT_SCAN_INTERVAL_MS, 2_000, 1_000, 120_000);
 const TURN_TIMEOUT_SECONDS = parseInterval(process.env.ARENA_V2_TURN_TIMEOUT_SECONDS, 40, 5, 300);
+const QUICK_MATCHMAKING_INTERVAL_MS = parseInterval(process.env.ARENA_V2_QUICK_MATCHMAKING_INTERVAL_MS, 1_000, 250, 1_000);
+const BATTLE_ROYALE_RECOVERY_INTERVAL_MS = parseInterval(process.env.ARENA_V2_BR_RECOVERY_INTERVAL_MS, 15_000, 5_000, 120_000);
 const QUEUE_EXPIRY_SCAN_INTERVAL_MS = parseInterval(process.env.ARENA_V2_QUEUE_EXPIRY_SCAN_INTERVAL_MS, 60_000, 15_000, 300_000);
 const REPLAY_PRUNE_INTERVAL_MS = parseInterval(process.env.ARENA_V2_REPLAY_PRUNE_INTERVAL_MS, 3_600_000, 300_000, 86_400_000);
 const WORKER_STARTED_AT = new Date().toISOString();
@@ -21,14 +23,18 @@ let jobTimer: NodeJS.Timeout | null = null;
 let staleTimer: NodeJS.Timeout | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let turnTimeoutTimer: NodeJS.Timeout | null = null;
+let battleRoyaleRecoveryTimer: NodeJS.Timeout | null = null;
 let queueExpiryTimer: NodeJS.Timeout | null = null;
+let quickMatchmakingTimer: NodeJS.Timeout | null = null;
 let replayPruneTimer: NodeJS.Timeout | null = null;
 let jobInFlight = false;
 let staleResetInFlight = false;
 let turnTimeoutInFlight = false;
+let battleRoyaleRecoveryInFlight = false;
 let queueExpiryInFlight = false;
 let replayPruneInFlight = false;
 
+let quickMatchmakingInFlight = false;
 const start = async () => {
   const [
     { initDatabaseConnection },
@@ -77,8 +83,9 @@ const start = async () => {
       await adminJobs.recordArenaWorkerHeartbeat({
         arena_version: 'v2',
         job_poll_interval_ms: JOB_POLL_INTERVAL_MS,
+        quick_matchmaking_interval_ms: QUICK_MATCHMAKING_INTERVAL_MS,
         queue_recovery_interval_ms: 0,
-        round_recovery_interval_ms: TURN_TIMEOUT_SCAN_INTERVAL_MS,
+        round_recovery_interval_ms: BATTLE_ROYALE_RECOVERY_INTERVAL_MS,
         auto_queue_recovery: true,
         auto_round_recovery: true,
         queue_expiry_interval_ms: QUEUE_EXPIRY_SCAN_INTERVAL_MS,
@@ -95,7 +102,7 @@ const start = async () => {
     if (turnTimeoutInFlight) return;
     turnTimeoutInFlight = true;
     try {
-      const result = await arenaV2Service.processArenaV2ExpiredTurns(TURN_TIMEOUT_SECONDS, 25);
+      const result = await arenaV2Service.processArenaV2ExpiredTurns(TURN_TIMEOUT_SECONDS, 25, false);
       if (Number((result as any).resolved || 0) > 0) {
         console.log(`[ArenaWorker] v2 만료 턴 확정: ${(result as any).resolved}/${(result as any).scanned}`);
       }
@@ -103,6 +110,37 @@ const start = async () => {
       console.error('[ArenaWorker] v2 만료 턴 처리 실패:', (err as any)?.message || err);
     } finally {
       turnTimeoutInFlight = false;
+    }
+  };
+
+  const processQuickMatchmaking = async () => {
+    if (quickMatchmakingInFlight) return;
+    quickMatchmakingInFlight = true;
+    try {
+      const result = await arenaV2Service.processArenaV2QuickMatchmaking(32);
+      if (Number((result as any).proposed || 0) > 0 || Number((result as any).recovered || 0) > 0) {
+        console.log(`[ArenaWorker] v2 빠른대전: proposed=${(result as any).proposed} recovered=${(result as any).recovered}`);
+      }
+    } catch (err) {
+      console.error('[ArenaWorker] v2 빠른대전 처리 실패:', (err as any)?.message || err);
+    } finally {
+      quickMatchmakingInFlight = false;
+    }
+  };
+
+  const processBattleRoyaleRecovery = async () => {
+    if (battleRoyaleRecoveryInFlight) return;
+    battleRoyaleRecoveryInFlight = true;
+    try {
+      const result = await arenaV2Service.processArenaV2BattleRoyaleProgressions(25);
+      const progressed = Number((result as any).advanced || 0) + Number((result as any).finished || 0);
+      if (progressed > 0) {
+        console.log(`[ArenaWorker] v2 8인전 복구: advanced=${(result as any).advanced} finished=${(result as any).finished}`);
+      }
+    } catch (err) {
+      console.error('[ArenaWorker] v2 8인전 복구 실패:', (err as any)?.message || err);
+    } finally {
+      battleRoyaleRecoveryInFlight = false;
     }
   };
 
@@ -159,6 +197,8 @@ const start = async () => {
   await executeJob();
   await processTurnTimeouts();
   await processQueueExpiry();
+  await processBattleRoyaleRecovery();
+  await processQuickMatchmaking();
   await pruneReplayEvents();
 
   jobTimer = setInterval(() => void executeJob(), JOB_POLL_INTERVAL_MS);
@@ -166,9 +206,11 @@ const start = async () => {
   heartbeatTimer = setInterval(() => void recordHeartbeat(), HEARTBEAT_INTERVAL_MS);
   turnTimeoutTimer = setInterval(() => void processTurnTimeouts(), TURN_TIMEOUT_SCAN_INTERVAL_MS);
   queueExpiryTimer = setInterval(() => void processQueueExpiry(), QUEUE_EXPIRY_SCAN_INTERVAL_MS);
+  battleRoyaleRecoveryTimer = setInterval(() => void processBattleRoyaleRecovery(), BATTLE_ROYALE_RECOVERY_INTERVAL_MS);
   replayPruneTimer = setInterval(() => void pruneReplayEvents(), REPLAY_PRUNE_INTERVAL_MS);
 
-  console.log(`[ArenaWorker] 치카포 아레나 v2 worker가 시작되었습니다. jobPoll=${JOB_POLL_INTERVAL_MS}ms turnTimeoutScan=${TURN_TIMEOUT_SCAN_INTERVAL_MS}ms queueExpiry=${QUEUE_EXPIRY_SCAN_INTERVAL_MS}ms replayPrune=${REPLAY_PRUNE_INTERVAL_MS}ms`);
+  quickMatchmakingTimer = setInterval(() => void processQuickMatchmaking(), QUICK_MATCHMAKING_INTERVAL_MS);
+  console.log(`[ArenaWorker] 치카포 아레나 v2 worker가 시작되었습니다. jobPoll=${JOB_POLL_INTERVAL_MS}ms quickMatchmaking=${QUICK_MATCHMAKING_INTERVAL_MS}ms turnTimeoutScan=${TURN_TIMEOUT_SCAN_INTERVAL_MS}ms brRecovery=${BATTLE_ROYALE_RECOVERY_INTERVAL_MS}ms queueExpiry=${QUEUE_EXPIRY_SCAN_INTERVAL_MS}ms replayPrune=${REPLAY_PRUNE_INTERVAL_MS}ms`);
 };
 
 const shutdown = () => {
@@ -178,6 +220,8 @@ const shutdown = () => {
   if (turnTimeoutTimer) clearInterval(turnTimeoutTimer);
   if (queueExpiryTimer) clearInterval(queueExpiryTimer);
   if (replayPruneTimer) clearInterval(replayPruneTimer);
+  if (quickMatchmakingTimer) clearInterval(quickMatchmakingTimer);
+  if (battleRoyaleRecoveryTimer) clearInterval(battleRoyaleRecoveryTimer);
   console.log('[ArenaWorker] 종료 신호를 받아 타이머를 정리했습니다.');
   process.exit(0);
 };

@@ -11,6 +11,7 @@
   --arena-coral-deep: #bd2745;
   --arena-coral-soft: #fff0f2;
   --arena-cyan: #0799b4;
+  --arena-accent: var(--arena-cyan);
   --arena-cyan-deep: #056c82;
   --arena-cyan-soft: #eaf9fc;
   --arena-green: #159f72;
@@ -628,6 +629,51 @@
   line-height: 1.5;
 }
 
+.arenaV2Scope :global(.arena-v2-replay-toggle) {
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+  color: var(--arena-text);
+}
+
+.arenaV2Scope :global(.arena-v2-replay-toggle svg:last-child) {
+  margin-left: auto;
+  transition: transform 180ms ease;
+}
+
+.arenaV2Scope :global(.arena-v2-replay-toggle svg.is-open) {
+  transform: rotate(180deg);
+}
+
+.arenaV2Scope :global(.arena-v2-replay-events) {
+  display: grid;
+  gap: 6px;
+  max-height: 224px;
+  overflow-y: auto;
+  padding-right: 3px;
+  scrollbar-width: thin;
+}
+
+.arenaV2Scope :global(.arena-v2-replay-events[hidden]) {
+  display: none;
+}
+
+.arenaV2Scope :global(.arena-v2-replay-events > span) {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 38px;
+  padding: 9px 10px;
+  border: 1px solid var(--arena-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--arena-surface-soft) 55%, var(--arena-surface));
+  color: var(--arena-muted);
+  font-size: 0.73rem;
+  font-weight: 720;
+  line-height: 1.5;
+}
+
 .arenaV2Scope :global(.arena-v2-queue-actions) {
   align-items: stretch;
 }
@@ -1198,7 +1244,7 @@
   transition: opacity 160ms ease, rotate 160ms ease;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button) {
+.arenaV2Scope :global(.arena-v2-pie-slot) {
   position: absolute;
   z-index: 1;
   display: grid;
@@ -1214,18 +1260,18 @@
   place-items: center;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button:hover),
-.arenaV2Scope :global(.arena-v2-pie-menu > button:focus-visible) {
+.arenaV2Scope :global(.arena-v2-pie-slot:hover),
+.arenaV2Scope :global(.arena-v2-pie-slot:focus-visible) {
   color: var(--arena-coral-deep);
   filter: saturate(1.05);
   scale: 1.05;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button.is-selected) {
+.arenaV2Scope :global(.arena-v2-pie-slot.is-selected) {
   color: white;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button:disabled) { opacity: 0.48; }
+.arenaV2Scope :global(.arena-v2-pie-slot:disabled) { opacity: 0.48; }
 
 .arenaV2Scope :global(.arena-v2-pie-visual) {
   display: grid;
@@ -1240,7 +1286,7 @@
   place-items: center;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button.is-selected .arena-v2-pie-visual) {
+.arenaV2Scope :global(.arena-v2-pie-slot.is-selected .arena-v2-pie-visual) {
   border-color: white;
   background: var(--arena-coral);
   box-shadow: 0 9px 22px rgb(125 38 54 / 0.2);
@@ -1263,7 +1309,7 @@
   font-weight: 950;
 }
 
-.arenaV2Scope :global(.arena-v2-pie-menu > button.is-selected .arena-v2-pie-slot-number) {
+.arenaV2Scope :global(.arena-v2-pie-slot.is-selected .arena-v2-pie-slot-number) {
   border-color: white;
   background: var(--arena-coral-deep);
   color: white;
@@ -2348,8 +2394,8 @@
 
 .arenaV2Scope :global(.arena-v2-emote-wheel) {
   position: fixed;
-  width: 240px;
-  height: 240px;
+  width: var(--arena-emote-wheel-size, 304px);
+  height: var(--arena-emote-wheel-size, 304px);
   transform: translate(-50%, -50%);
   border-radius: 50%;
   outline: none;
@@ -2361,17 +2407,18 @@
 }
 
 .arenaV2Scope :global(.arena-v2-pie-menu.is-compact) {
-  width: 240px;
+  width: var(--arena-emote-wheel-size, 304px);
+  height: var(--arena-emote-wheel-size, 304px);
   max-width: none;
   filter: drop-shadow(0 18px 30px rgb(10 14 24 / 0.22));
 }
 
 .arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-ring) { background-color: color-mix(in srgb, var(--arena-surface) 92%, transparent); }
-.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-visual) { width: 42px; height: 42px; border-radius: 13px; font-size: 1.25rem; }
-.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core) { width: 33%; padding: 8px; }
-.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core svg) { width: 15px; height: 15px; margin-bottom: 2px; }
-.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core strong) { font-size: 0.62rem; }
-.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core span) { font-size: 0.5rem; }
+.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-visual) { width: clamp(42px, 19%, 58px); height: clamp(42px, 19%, 58px); border-radius: 18px; font-size: 1.65rem; }
+.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core) { width: 33%; padding: clamp(7px, 3%, 10px); }
+.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core svg) { width: 18px; height: 18px; margin-bottom: 4px; }
+.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core strong) { font-size: 0.72rem; }
+.arenaV2Scope :global(.arena-v2-pie-menu.is-compact .arena-v2-pie-core span) { font-size: 0.56rem; }
 
 .arenaV2Scope :global(.arena-v2-bottom-hand) {
   padding: 14px 16px;
@@ -2410,6 +2457,13 @@
 
 .arenaV2Scope :global(.arena-v2-card.is-combat-target) {
   animation: arenaImpact 520ms ease;
+}
+
+.arenaV2Scope :global(.arena-v2-card.is-combat-destroying) {
+  z-index: 14;
+  transform-origin: 50% 72%;
+  will-change: opacity, filter, transform;
+  animation: arenaDefeat 720ms cubic-bezier(0.2, 0.76, 0.24, 1) both;
 }
 
 .arenaV2Scope :global(.arena-v2-card[data-combat-damage]::after) {
@@ -3124,4 +3178,113 @@
   30% { filter: brightness(1.35) saturate(1.18); transform: translateX(4px); }
   52% { transform: translateX(-3px); }
   72% { transform: translateX(2px); }
+}
+
+@keyframes arenaDefeat {
+  0% { opacity: 1; filter: brightness(1) saturate(1); transform: translate(0, 0) rotate(0) scale(1); }
+  20% { opacity: 1; filter: brightness(1.75) saturate(1.35); transform: translate(4px, -2px) rotate(0.6deg) scale(1.035); }
+  42% { opacity: 1; filter: brightness(0.88) saturate(1.2); transform: translate(-4px, 2px) rotate(-1.2deg) scale(0.97); }
+  70% { opacity: 0.9; filter: brightness(1.05) saturate(0.72); transform: translate(2px, 8px) rotate(2.4deg) scale(0.88); }
+  100% { opacity: 0; filter: brightness(0.6) saturate(0.2) blur(4px); transform: translate(-5px, 34px) rotate(-5deg) scale(0.52); }
+}
+
+.arenaV2Scope :global(.arena-v2-turn-intro) {
+  position: absolute !important;
+  z-index: 7 !important;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  min-width: 190px;
+  place-items: center;
+  gap: 3px;
+  padding: 18px 34px;
+  border: 1px solid color-mix(in srgb, var(--arena-accent) 58%, white);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--arena-surface) 86%, transparent);
+  box-shadow: 0 22px 70px rgb(0 0 0 / 0.28), inset 0 0 32px color-mix(in srgb, var(--arena-accent) 12%, transparent);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+  animation: arenaTurnIntro 1400ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.arenaV2Scope :global(.arena-v2-turn-intro span) {
+  color: var(--arena-accent);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.arenaV2Scope :global(.arena-v2-turn-intro strong) {
+  color: var(--arena-text);
+  font-size: clamp(1.7rem, 4vw, 2.55rem);
+  font-weight: 950;
+  letter-spacing: -0.045em;
+}
+
+.arenaV2Scope :global(.arena-v2-spectator-toolbar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--arena-accent) 28%, var(--arena-line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--arena-surface) 88%, transparent);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 0.09);
+}
+
+.arenaV2Scope :global(.arena-v2-spectator-summary),
+.arenaV2Scope :global(.arena-v2-spectator-controls),
+.arenaV2Scope :global(.arena-v2-spectator-controls label) {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.arenaV2Scope :global(.arena-v2-spectator-summary > svg) { color: var(--arena-accent); }
+.arenaV2Scope :global(.arena-v2-spectator-summary div) { display: grid; gap: 1px; }
+.arenaV2Scope :global(.arena-v2-spectator-summary span),
+.arenaV2Scope :global(.arena-v2-spectator-controls label > span) { color: var(--arena-muted); font-size: 0.72rem; font-weight: 800; }
+.arenaV2Scope :global(.arena-v2-spectator-summary strong) { color: var(--arena-text); font-size: 0.92rem; }
+
+.arenaV2Scope :global(.arena-v2-spectator-controls select) {
+  min-height: 38px;
+  padding: 0 32px 0 11px;
+  border: 1px solid var(--arena-line);
+  border-radius: 10px;
+  background: var(--arena-surface);
+  color: var(--arena-text);
+  font-weight: 760;
+}
+
+.arenaV2Scope :global(.arena-v2-spectator-privacy) {
+  display: grid;
+  min-height: 112px;
+  flex: 1 1 100%;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  border: 1px dashed color-mix(in srgb, var(--arena-accent) 30%, var(--arena-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--arena-surface-soft) 70%, transparent);
+  color: var(--arena-muted);
+  text-align: center;
+}
+
+.arenaV2Scope :global(.arena-v2-spectator-privacy svg) { color: var(--arena-accent); }
+.arenaV2Scope :global(.arena-v2-spectator-privacy strong) { color: var(--arena-text); }
+.arenaV2Scope :global(.arena-v2-spectator-privacy span) { font-size: 0.76rem; }
+
+@media (max-width: 720px) {
+  .arenaV2Scope :global(.arena-v2-spectator-toolbar),
+  .arenaV2Scope :global(.arena-v2-spectator-controls) { align-items: stretch; flex-direction: column; }
+  .arenaV2Scope :global(.arena-v2-spectator-controls label) { justify-content: space-between; }
+  .arenaV2Scope :global(.arena-v2-spectator-controls select) { width: min(68vw, 260px); }
+  .arenaV2Scope :global(.arena-v2-turn-intro) { min-width: 156px; padding: 14px 25px; }
+}
+
+@keyframes arenaTurnIntro {
+  0% { opacity: 0; transform: translate(-50%, -42%) scale(0.86); filter: blur(5px); }
+  22%, 72% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translate(-50%, -58%) scale(1.04); filter: blur(3px); }
 }

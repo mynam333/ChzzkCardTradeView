@@ -55,6 +55,7 @@ export interface ArenaV2ActionValidationInput {
   boardCards: ArenaV2BoardCard[];
   cardInstancesById: Record<string, ArenaV2CardInstanceForAction>;
   actions: ArenaV2TurnActionDto[];
+  freeTacticalMoveCount?: number;
 }
 
 export interface ArenaV2RuntimePlayer {
@@ -548,6 +549,7 @@ export function validateArenaV2TurnAction(input: ArenaV2ActionValidationInput): 
   const placedTargets = new Set<string>();
   let spentCost = 0;
   let tacticalMoveCount = 0;
+  const freeTacticalMoveCount = Math.max(0, Math.floor(Number(input.freeTacticalMoveCount || 0)));
 
   const orderedActions = [
     ...input.actions.filter((action) => action.type === 'move'),
@@ -589,7 +591,7 @@ export function validateArenaV2TurnAction(input: ArenaV2ActionValidationInput): 
         board.set(toKey, movingSlot);
         movedCards.add(action.cardInstanceId);
         tacticalMoveCount += 1;
-        spentCost += ARENA_V2_TACTICAL_MOVE_COST;
+        spentCost += tacticalMoveCount <= freeTacticalMoveCount ? 0 : ARENA_V2_TACTICAL_MOVE_COST;
       } else {
         errors.push(issue('ArenaV2MoveTargetWasOccupiedAtStart', '전술 이동 목적지는 시작 필드 기준 빈 칸이어야 합니다.'));
       }
@@ -684,11 +686,13 @@ export function resolveArenaV2Turn(input: ArenaV2TurnResolutionInput): ArenaV2Tu
     revivedInstanceIds: new Set()
   };
 
-  replayEvents.push(event(input.turnNo, 'turn_start', {
+  const turnStartEvent = event(input.turnNo, 'turn_start', {
     matchId: input.matchId,
     turnNo: input.turnNo,
-    cost: getArenaV2AvailableCost(input.turnNo)
-  }));
+    cost: getArenaV2AvailableCost(input.turnNo),
+    replayVersion: 2
+  });
+  replayEvents.push(turnStartEvent);
 
   for (const player of players) {
     applyActionsForSeat({
@@ -700,12 +704,34 @@ export function resolveArenaV2Turn(input: ArenaV2TurnResolutionInput): ArenaV2Tu
     });
   }
   syncBoardInstancePositions(players, instanceById);
+  turnStartEvent.payload.combatSnapshot = buildPublicCombatSnapshot(players, instanceById);
   combatContext.shieldByInstanceId = initializeCombatShields(players, instanceById);
 
-  resolveCombatPhase('front', input.turnNo, players, instanceById, replayEvents, combatContext);
+  resolveCombatPhase('front', input.mode, input.turnNo, players, instanceById, replayEvents, combatContext);
   moveDefeatedCards(players, instanceById, input.turnNo, replayEvents, combatContext);
-  resolveCombatPhase('back', input.turnNo, players, instanceById, replayEvents, combatContext);
+  resolveCombatPhase('back', input.mode, input.turnNo, players, instanceById, replayEvents, combatContext);
   moveDefeatedCards(players, instanceById, input.turnNo, replayEvents, combatContext);
+
+  if (input.mode === 'battle_royale_8') {
+    const roundResult = decideArenaV2BattleRoyaleRoundWinner(
+      players,
+      combatContext.directDamageTakenBySeatNo,
+      replayEvents
+    );
+    const battleRoyaleRound = {
+      roundNo: input.turnNo,
+      winnerSeatNo: roundResult.winnerSeatNo,
+      winnerUserId: roundResult.winnerUserId,
+      result: roundResult.result,
+      roundStats: roundResult.roundStats
+    };
+    replayEvents.push(event(input.turnNo, 'battle_royale_round_result', battleRoyaleRound));
+    const nextRoundNo = input.turnNo + 1;
+    for (const player of players) {
+      drawForNextTurn(player, instanceById, nextRoundNo, replayEvents);
+    }
+    return buildResolutionResult(input, players, instances, replayEvents, roundResult, { battleRoyaleRound });
+  }
 
   const winnerAfterCombat = decideArenaV2Winner(players, input.turnNo, combatContext.directDamageTakenBySeatNo);
   if (winnerAfterCombat.completed) {
@@ -748,6 +774,14 @@ export function resolveArenaV2Turn(input: ArenaV2TurnResolutionInput): ArenaV2Tu
     cardInstances: instances,
     replayEvents
   };
+}
+
+export function getArenaV2FreeTacticalMoveCount(mulliganState: unknown): number {
+  if (!mulliganState || typeof mulliganState !== 'object' || Array.isArray(mulliganState)) return 0;
+  const value = (mulliganState as Record<string, unknown>).freeTacticalMoveCount
+    ?? (mulliganState as Record<string, unknown>).freeTacticalMove;
+  if (value === true) return 1;
+  return Math.max(0, Math.floor(Number(value || 0)));
 }
 
 export function getArenaV2AvailableCost(turnNo: number): number {
@@ -844,6 +878,50 @@ function syncBoardInstancePositions(
   }
 }
 
+function buildPublicCombatSnapshot(
+  players: ArenaV2RuntimePlayer[],
+  instances: Map<string, ArenaV2RuntimeCardInstance>
+) {
+  const publicPlayers = [...players]
+    .sort((a, b) => a.seatNo - b.seatNo)
+    .map((player) => ({
+      seatNo: player.seatNo,
+      playerHealth: player.playerHealth,
+      boardState: [...player.boardState]
+        .sort((a, b) => (
+          (a.position.row === b.position.row ? 0 : a.position.row === 'front' ? -1 : 1)
+          || a.position.column - b.position.column
+          || a.cardInstanceId.localeCompare(b.cardInstanceId)
+        ))
+        .map((boardCard) => ({
+          cardInstanceId: boardCard.cardInstanceId,
+          position: { ...boardCard.position },
+          createdTurn: boardCard.createdTurn
+        }))
+    }));
+  const boardCardIds = new Set(
+    publicPlayers.flatMap((player) => player.boardState.map((card) => card.cardInstanceId))
+  );
+  return {
+    players: publicPlayers,
+    cardInstances: [...boardCardIds]
+      .map((id) => instances.get(id))
+      .filter((instance): instance is ArenaV2RuntimeCardInstance => Boolean(instance))
+      .sort((a, b) => (
+        a.ownerSeatNo - b.ownerSeatNo
+        || a.id.localeCompare(b.id)
+      ))
+      .map((instance) => ({
+        id: instance.id,
+        ownerSeatNo: instance.ownerSeatNo,
+        position: instance.position ? { ...instance.position } : null,
+        currentAttack: Number(instance.currentAttack || 0),
+        currentHealth: Number(instance.currentHealth || 0),
+        damageTaken: Number(instance.damageTaken || 0)
+      }))
+  };
+}
+
 function applyActionsForSeat(input: {
   turnNo: number;
   player: ArenaV2RuntimePlayer;
@@ -851,6 +929,7 @@ function applyActionsForSeat(input: {
   actions: ArenaV2TurnActionDto[];
   replayEvents: ArenaV2ReplayEvent[];
 }) {
+  let freeTacticalMoveCount = getArenaV2FreeTacticalMoveCount(input.player.mulliganState);
   const orderedActions = [
     ...input.actions.filter((action) => action.type === 'move'),
     ...input.actions.filter((action) => action.type === 'place'),
@@ -861,13 +940,17 @@ function applyActionsForSeat(input: {
       const boardCard = input.player.boardState.find((card) => card.cardInstanceId === action.cardInstanceId);
       const instance = input.instances.get(action.cardInstanceId);
       if (!boardCard || !instance) continue;
+      const moveCost = freeTacticalMoveCount > 0 ? 0 : ARENA_V2_TACTICAL_MOVE_COST;
+      freeTacticalMoveCount = Math.max(0, freeTacticalMoveCount - 1);
       boardCard.position = { ...action.to };
       instance.position = { ...action.to };
       input.replayEvents.push(event(input.turnNo, 'move', {
         seatNo: input.player.seatNo,
         cardInstanceId: action.cardInstanceId,
         from: action.from,
-        to: action.to
+        to: action.to,
+        cost: moveCost,
+        usedFreeTacticalMove: moveCost === 0
       }));
       continue;
     }
@@ -912,10 +995,16 @@ function applyActionsForSeat(input: {
       }));
     }
   }
+  const mulliganState = input.player.mulliganState && typeof input.player.mulliganState === 'object' && !Array.isArray(input.player.mulliganState)
+    ? { ...(input.player.mulliganState as Record<string, unknown>) }
+    : {};
+  mulliganState.freeTacticalMoveCount = freeTacticalMoveCount;
+  input.player.mulliganState = mulliganState;
 }
 
 function resolveCombatPhase(
   row: ArenaV2BoardRowDto,
+  mode: string,
   turnNo: number,
   players: ArenaV2RuntimePlayer[],
   instances: Map<string, ArenaV2RuntimeCardInstance>,
@@ -951,7 +1040,9 @@ function resolveCombatPhase(
       }
       const target = pickLineTarget(targetPlayer, instances, column, attackerSlot.instance, combatContext);
       const rawAttack = getEffectiveAttack(attackerSlot.instance, targetPlayer, instances, combatContext);
-      const damage = target ? rawAttack : row === 'back' ? Math.max(0, rawAttack - 1) : rawAttack;
+      const directAttackDamage = row === 'back' ? Math.max(0, rawAttack - 1) : rawAttack;
+      const damage = target ? rawAttack : mode === 'battle_royale_8' && turnNo >= 10
+        ? Math.floor(directAttackDamage * 1.25) : directAttackDamage;
       attackPlans.push({
         attacker: attackerSlot.instance,
         attackerPosition: attackerSlot.position,
@@ -986,7 +1077,10 @@ function resolveCombatPhase(
         targetPosition,
         damage: plan.damage,
         healthDamage: damageResult.healthDamage,
-        shieldDamage: damageResult.shieldDamage
+        shieldDamage: damageResult.shieldDamage,
+        hp_before: damageResult.hpBefore,
+        hp_after: damageResult.hpAfter,
+        alive_after: damageResult.aliveAfter
       }));
       if (damageResult.healthDamage > 0) {
         applyDrain(plan.attacker, damageResult.healthDamage, turnNo, replayEvents, combatContext);
@@ -1017,7 +1111,10 @@ function resolveCombatPhase(
               targetPosition: { row: 'back', column: targetPosition.column },
               damage: spillDamage,
               healthDamage: spillResult.healthDamage,
-              shieldDamage: spillResult.shieldDamage
+              shieldDamage: spillResult.shieldDamage,
+              hp_before: spillResult.hpBefore,
+              hp_after: spillResult.hpAfter,
+              alive_after: spillResult.aliveAfter
             }));
           }
         }
@@ -1025,7 +1122,9 @@ function resolveCombatPhase(
       continue;
     }
 
-    plan.targetPlayer.playerHealth -= plan.damage;
+    const hpBefore = Math.max(0, Number(plan.targetPlayer.playerHealth || 0));
+    plan.targetPlayer.playerHealth = Math.max(0, plan.targetPlayer.playerHealth - plan.damage);
+    const hpAfter = plan.targetPlayer.playerHealth;
     if (plan.damage > 0) {
       combatContext.directDamageTakenBySeatNo.set(
         plan.targetPlayer.seatNo,
@@ -1040,7 +1139,13 @@ function resolveCombatPhase(
       cardInstanceId: plan.attacker.id,
       sourcePosition: plan.attackerPosition,
       damage: plan.damage,
-      targetHealth: plan.targetPlayer.playerHealth
+      targetHealth: plan.targetPlayer.playerHealth,
+      targetPosition: { row: 'back', column: plan.attackerPosition.column },
+      playerHealthBefore: hpBefore,
+      playerHealthAfter: hpAfter,
+      hp_before: hpBefore,
+      hp_after: hpAfter,
+      alive_after: plan.targetPlayer.playerHealth > 0
     }));
   }
 }
@@ -1223,6 +1328,7 @@ function applyCardDamage(
   }
 ) {
   const damage = Math.max(0, Math.floor(Number(rawDamage || 0)));
+  const hpBefore = Math.max(0, getRemainingHealth(target));
   const shield = combatContext.shieldByInstanceId.get(target.id) || 0;
   const shieldDamage = Math.min(shield, damage);
   const healthDamage = Math.max(0, damage - shieldDamage);
@@ -1243,7 +1349,14 @@ function applyCardDamage(
     }));
   }
   target.damageTaken += healthDamage;
-  return { healthDamage, shieldDamage };
+  const hpAfter = Math.max(0, getRemainingHealth(target));
+  return {
+    healthDamage,
+    shieldDamage,
+    hpBefore,
+    hpAfter,
+    aliveAfter: hpAfter > 0
+  };
 }
 
 function applyDrain(
@@ -1293,7 +1406,10 @@ function applyCounter(
     targetPosition: attacker.position,
     damage: counter,
     healthDamage: result.healthDamage,
-    shieldDamage: result.shieldDamage
+    shieldDamage: result.shieldDamage,
+    hp_before: result.hpBefore,
+    hp_after: result.hpAfter,
+    alive_after: result.aliveAfter
   }));
 }
 
@@ -1312,6 +1428,7 @@ function applyMovementKeyword(
 ) {
   if (!plan.targetCard || !plan.targetPosition) return plan.targetPosition;
   const column = plan.targetPosition.column;
+  const fromPosition = { ...plan.targetPosition };
   if (plan.targetPosition.row === 'front' && hasKeyword(plan.attacker, ['push', '밀치기'], combatContext)) {
     if (!getBoardInstanceAt(plan.targetPlayer, instances, { row: 'back', column })) {
       moveBoardCard(plan.targetPlayer, plan.targetCard.id, { row: 'back', column });
@@ -1322,6 +1439,7 @@ function applyMovementKeyword(
         sourcePosition: plan.attacker.position,
         targetCardInstanceId: plan.targetCard.id,
         targetSeatNo: plan.targetPlayer.seatNo,
+        fromPosition,
         targetPosition: { row: 'back', column },
         to: { row: 'back', column }
       }));
@@ -1338,6 +1456,7 @@ function applyMovementKeyword(
         sourcePosition: plan.attacker.position,
         targetCardInstanceId: plan.targetCard.id,
         targetSeatNo: plan.targetPlayer.seatNo,
+        fromPosition,
         targetPosition: { row: 'front', column },
         to: { row: 'front', column }
       }));
@@ -1439,7 +1558,10 @@ function applyDefeatedCardEffects(
           targetPosition: target.position,
           damage: vengeance,
           healthDamage: result.healthDamage,
-          shieldDamage: result.shieldDamage
+          shieldDamage: result.shieldDamage,
+          hp_before: result.hpBefore,
+          hp_after: result.hpAfter,
+          alive_after: result.aliveAfter
         }));
       }
     }
@@ -1471,14 +1593,19 @@ function applyDefeatedCardEffects(
     const spirit = getKeywordValue(record.instance, ['spirit', 'haunt', '원혼'], combatContext, 1);
     const opponent = players.find((player) => player.seatNo !== record.player.seatNo);
     if (opponent && spirit > 0) {
+      const hpBefore = Math.max(0, Number(opponent.playerHealth || 0));
       opponent.playerHealth -= spirit;
+      const hpAfter = Math.max(0, Number(opponent.playerHealth || 0));
       replayEvents.push(event(turnNo, 'spirit_damage', {
         sourceCardInstanceId: record.instance.id,
         sourceSeatNo: record.player.seatNo,
         sourcePosition: record.position,
         targetSeatNo: opponent.seatNo,
         damage: spirit,
-        targetHealth: opponent.playerHealth
+        targetHealth: opponent.playerHealth,
+        hp_before: hpBefore,
+        hp_after: hpAfter,
+        alive_after: opponent.playerHealth > 0
       }));
     }
   }
@@ -1512,14 +1639,20 @@ function drawForNextTurn(
   if (nextTurnNo < ARENA_V2_FIRST_DRAW_TURN) return;
   const drawnId = player.deckCardInstanceIds.shift();
   if (!drawnId) {
+    const playerHealthBefore = Math.max(0, Number(player.playerHealth || 0));
     player.fatigueCount = Math.max(0, Number(player.fatigueCount || 0)) + 1;
     const fatigueDamage = player.fatigueCount;
-    player.playerHealth -= fatigueDamage;
+    player.playerHealth = Math.max(0, playerHealthBefore - fatigueDamage);
     replayEvents.push(event(nextTurnNo, 'fatigue', {
       seatNo: player.seatNo,
       fatigueCount: player.fatigueCount,
       damage: fatigueDamage,
-      health: player.playerHealth
+      health: player.playerHealth,
+      playerHealthBefore,
+      playerHealthAfter: player.playerHealth,
+      hp_before: playerHealthBefore,
+      hp_after: player.playerHealth,
+      alive_after: player.playerHealth > 0
     }));
     return;
   }
@@ -1544,6 +1677,61 @@ function drawForNextTurn(
     handCount: player.handCardInstanceIds.length,
     deckCount: player.deckCardInstanceIds.length
   }));
+}
+
+function decideArenaV2BattleRoyaleRoundWinner(
+  players: ArenaV2RuntimePlayer[],
+  directDamageTakenBySeatNo: Map<number, number>,
+  replayEvents: ArenaV2ReplayEvent[]
+): {
+  winnerSeatNo: number | null;
+  winnerUserId: string | null;
+  result: 'win' | 'draw';
+  roundStats: Array<{
+    seatNo: number;
+    userId: string | null;
+    health: number;
+    directDamageDealt: number;
+    defeatedCardCount: number;
+  }>;
+} {
+  const defeatedCardCountBySeatNo = new Map<number, number>();
+  for (const replayEvent of replayEvents) {
+    if (replayEvent.eventType !== 'card_defeated') continue;
+    const defeatedSeatNo = Number(replayEvent.payload.seatNo);
+    if (!Number.isInteger(defeatedSeatNo)) continue;
+    defeatedCardCountBySeatNo.set(defeatedSeatNo, (defeatedCardCountBySeatNo.get(defeatedSeatNo) || 0) + 1);
+  }
+  const orderedPlayers = [...players].sort((left, right) => left.seatNo - right.seatNo);
+  const roundStats = orderedPlayers.map((player) => {
+    const opponent = orderedPlayers.find((candidate) => candidate.seatNo !== player.seatNo);
+    return {
+      seatNo: player.seatNo,
+      userId: player.userId,
+      health: Math.max(0, Number(player.playerHealth || 0)),
+      directDamageDealt: opponent
+        ? Math.max(0, Number(directDamageTakenBySeatNo.get(opponent.seatNo) || 0))
+        : 0,
+      defeatedCardCount: opponent ? Math.max(0, defeatedCardCountBySeatNo.get(opponent.seatNo) || 0) : 0
+    };
+  });
+  const [left, right] = roundStats;
+  if (!left || !right) return { winnerSeatNo: null, winnerUserId: null, result: 'draw', roundStats };
+
+  const winnerStat = left.health !== right.health
+    ? (left.health > right.health ? left : right)
+    : left.directDamageDealt !== right.directDamageDealt
+      ? (left.directDamageDealt > right.directDamageDealt ? left : right)
+      : left.defeatedCardCount !== right.defeatedCardCount
+        ? (left.defeatedCardCount > right.defeatedCardCount ? left : right)
+        : null;
+  if (!winnerStat) return { winnerSeatNo: null, winnerUserId: null, result: 'draw', roundStats };
+  return {
+    winnerSeatNo: winnerStat.seatNo,
+    winnerUserId: winnerStat.userId,
+    result: 'win',
+    roundStats
+  };
 }
 
 function decideArenaV2Winner(
@@ -1606,9 +1794,11 @@ function buildResolutionResult(
   players: ArenaV2RuntimePlayer[],
   instances: ArenaV2RuntimeCardInstance[],
   replayEvents: ArenaV2ReplayEvent[],
-  winner: { winnerSeatNo: number | null; winnerUserId: string | null; result: 'win' | 'draw' }
+  winner: { winnerSeatNo: number | null; winnerUserId: string | null; result: 'win' | 'draw' },
+  extraSummary: Record<string, unknown> = {}
 ): ArenaV2TurnResolutionResult {
   replayEvents.push(event(input.turnNo, 'match_completed', {
+    ...extraSummary,
     result: winner.result,
     winnerSeatNo: winner.winnerSeatNo,
     winnerUserId: winner.winnerUserId,
@@ -1631,6 +1821,7 @@ function buildResolutionResult(
       result: winner.result,
       winnerSeatNo: winner.winnerSeatNo,
       winnerUserId: winner.winnerUserId,
+      ...extraSummary,
       health: players.map((player) => ({
         seatNo: player.seatNo,
         userId: player.userId,

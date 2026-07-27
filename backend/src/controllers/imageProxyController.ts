@@ -46,7 +46,11 @@ const readPositiveNumber = (name: string, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const IMAGE_PROXY_TIMEOUT_MS = readPositiveNumber('IMAGE_PROXY_TIMEOUT_MS', 4_000);
+const IMAGE_PROXY_TIMEOUT_MS = readPositiveNumber('IMAGE_PROXY_TIMEOUT_MS', 5_000);
+const IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS = Math.min(
+  IMAGE_PROXY_TIMEOUT_MS,
+  readPositiveNumber('IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS', 1_500)
+);
 const IMAGE_PROXY_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_CACHE_TTL_MS', 24 * 60 * 60_000);
 const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = readPositiveNumber('IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS', 5 * 60_000);
 const IMAGE_PROXY_RETRY_NEGATIVE_CACHE_TTL_MS = Math.min(
@@ -248,10 +252,12 @@ const resizeImageForProxy = async (
   }
 };
 
-const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise<ProxyCacheEntry> => {
-  const upstreamUrl = getUpstreamImageUrl(target, transform);
+const fetchRemoteImageBody = async (
+  upstreamUrl: URL,
+  timeoutMs: number
+): Promise<{ body: Buffer; contentType: string }> => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), IMAGE_PROXY_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const upstream = await fetch(upstreamUrl.toString(), {
       signal: controller.signal,
@@ -282,17 +288,36 @@ const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise
       throw error;
     }
 
-    const rawBody = await readBodyWithLimit(upstream);
-    const transformed = await resizeImageForProxy(rawBody, contentType, transform);
-    return {
-      body: transformed.body,
-      contentType: transformed.contentType,
-      expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
-      size: transformed.body.length
-    };
+    return { body: await readBodyWithLimit(upstream), contentType };
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise<ProxyCacheEntry> => {
+  const upstreamUrl = getUpstreamImageUrl(target, transform);
+  const targetUrl = target.toString();
+  let source: { body: Buffer; contentType: string };
+
+  if (upstreamUrl.toString() !== targetUrl) {
+    try {
+      source = await fetchRemoteImageBody(upstreamUrl, IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS);
+    } catch {
+      // Some pstatic images do not expose every `type=f*_na` derivative. The
+      // allow-listed original URL is still safe and can be resized locally.
+      source = await fetchRemoteImageBody(target, IMAGE_PROXY_TIMEOUT_MS);
+    }
+  } else {
+    source = await fetchRemoteImageBody(upstreamUrl, IMAGE_PROXY_TIMEOUT_MS);
+  }
+
+  const transformed = await resizeImageForProxy(source.body, source.contentType, transform);
+  return {
+    body: transformed.body,
+    contentType: transformed.contentType,
+    expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
+    size: transformed.body.length
+  };
 };
 
 export const proxyImage = async (req: Request, res: Response) => {
@@ -405,23 +430,27 @@ export const proxyImage = async (req: Request, res: Response) => {
   }
 
   const upstreamTarget = getUpstreamImageUrl(target, transform);
-  const cacheKey = `${upstreamTarget.toString()}${transformCacheSuffix(transform)}|retry=${retryVariant}`;
+  // `retry` is a request policy, not image identity. Keeping the positive cache
+  // and in-flight key canonical prevents simultaneous normal/retry requests from
+  // duplicating the same upstream download.
+  const cacheKey = `${upstreamTarget.toString()}${transformCacheSuffix(transform)}`;
   const cached = getCachedProxyImage(cacheKey);
   if (cached) {
     return sendProxyImage(res, cached, 'HIT');
   }
 
   const failedUntil = negativeCache.get(cacheKey) || 0;
-  if (failedUntil > Date.now()) {
+  if (retryVariant === 0 && failedUntil > Date.now()) {
     return res.status(502).json({ error: 'BadGateway', message: '원본 이미지가 최근 프록시에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
   }
-  if (failedUntil) negativeCache.delete(cacheKey);
+  if (failedUntil && failedUntil <= Date.now()) negativeCache.delete(cacheKey);
 
   let request = inFlight.get(cacheKey);
   if (!request) {
     request = fetchRemoteImage(target, transform)
       .then((entry) => {
         setCachedProxyImage(cacheKey, entry);
+        negativeCache.delete(cacheKey);
         return entry;
       })
       .catch((err) => {

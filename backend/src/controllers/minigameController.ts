@@ -440,6 +440,15 @@ export function getCardImageUrl(streamer: any, star: number): string {
   return streamer.logo_url || '';
 }
 
+const getDistinctFallbackImageUrl = (
+  imageUrl: string | null | undefined,
+  fallbackImageUrl: string | null | undefined
+): string | null => {
+  const primary = String(imageUrl || '').trim();
+  const fallback = String(fallbackImageUrl || '').trim();
+  return fallback && fallback !== primary ? fallback : null;
+};
+
 const loadMinigamePool = async (): Promise<any[]> => {
   const now = Date.now();
   if (minigamePoolCache && minigamePoolCache.expiresAt > now) {
@@ -459,12 +468,16 @@ const loadMinigamePool = async (): Promise<any[]> => {
   return minigamePoolInFlight;
 };
 
-const buildCardOption = (streamer: any, star: number) => ({
-  channel_id: streamer.channel_id,
-  name: streamer.name,
-  image_url: getCardImageUrl(streamer, star),
-  star
-});
+const buildCardOption = (streamer: any, star: number) => {
+  const imageUrl = getCardImageUrl(streamer, star);
+  return {
+    channel_id: streamer.channel_id,
+    name: streamer.name,
+    image_url: imageUrl,
+    fallback_image_url: getDistinctFallbackImageUrl(imageUrl, streamer.logo_url),
+    star
+  };
+};
 
 const buildValuedCardOption = (streamer: any, star: number) => ({
   ...buildCardOption(streamer, star),
@@ -475,6 +488,7 @@ const stripCardValue = (card: any) => ({
   channel_id: card.channel_id,
   name: card.name,
   image_url: card.image_url,
+  fallback_image_url: getDistinctFallbackImageUrl(card.image_url, card.fallback_image_url),
   star: Number(card.star) || 0
 });
 
@@ -505,6 +519,7 @@ const getPlayableImageCards = (streamers: any[], imageBlindKeys = new Set<string
           channel_id: streamer.channel_id,
           name: streamer.name,
           image_url: imageUrl,
+          fallback_image_url: getDistinctFallbackImageUrl(imageUrl, streamer.logo_url),
           star,
           base_value: Number(streamer.base_value || 0)
         }
@@ -580,6 +595,10 @@ const buildPublicCropDetectiveGameData = (session: MinigameSession) => {
     const y = Number(crop.y);
     const size = Number(crop.size);
     const sourceImageUrl = String(round?.source_image_url || '').trim();
+    const sourceFallbackImageUrl = getDistinctFallbackImageUrl(
+      sourceImageUrl,
+      round?.source_fallback_image_url
+    );
     const choices = Array.isArray(round?.choices) ? round.choices.map(stripCardValue) : [];
     if (
       Number(round?.round) !== index ||
@@ -593,6 +612,7 @@ const buildPublicCropDetectiveGameData = (session: MinigameSession) => {
     return {
       round: index,
       source_image_url: sourceImageUrl,
+      source_fallback_image_url: sourceFallbackImageUrl,
       crop: { x, y, size, rotation },
       choices
     };
@@ -1010,6 +1030,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           round: roundIndex,
           answer_channel_id: answer.channel_id,
           source_image_url: answer.image_url,
+          source_fallback_image_url: answer.fallback_image_url,
           crop: buildCrop(roundIndex),
           choices
         };
@@ -1021,6 +1042,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           round: round.round,
           crop: round.crop,
           source_image_url: round.source_image_url,
+          source_fallback_image_url: round.source_fallback_image_url,
           choices: round.choices
         }))
       };

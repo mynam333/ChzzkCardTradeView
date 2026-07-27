@@ -65,6 +65,7 @@ import {
   formatArenaCardKeyword as formatArenaKeyword
 } from './ArenaCard';
 import { ArenaEmotePieMenu } from './ArenaEmotePieMenu';
+import { ArenaQuickMatchFlow } from './ArenaQuickMatchFlow';
 import { ArenaStreamerCardEditor } from './ArenaStreamerCardEditor';
 import { ArenaTooltip } from './ArenaTooltip';
 import type { ArenaSiteTab } from './types';
@@ -1533,9 +1534,14 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
           <div className="arena-v2-panel-section">
             <span className="arena-v2-panel-label">대전 찾기</span>
             <div className="arena-v2-queue-actions">
-              <ArenaTooltip data={arenaCoreTooltips.quickMode} side="left">
-                <button type="button" onClick={() => joinQueue('quick')}><Swords className="h-4 w-4" /> 빠른대전</button>
-              </ArenaTooltip>
+              <ArenaQuickMatchFlow
+                deckId={selectedDeckId}
+                seasonId={season?.id}
+                initialStatus={queueStatus.quick}
+                onMissingDeck={() => setNotice('빠른대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.')}
+                onMatch={(matchId) => router.push(getArenaMatchHref(matchId))}
+                notify={(message, tone) => toast(message, tone)}
+              />
               <ArenaTooltip data={arenaCoreTooltips.battleRoyaleMode} side="left">
                 <button type="button" onClick={() => joinQueue('battle_royale_8')}><Users className="h-4 w-4" /> 8인전</button>
               </ArenaTooltip>

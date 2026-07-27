@@ -212,6 +212,7 @@ import {
   submitMinigameResult
 } from '../controllers/minigameController';
 import {
+  acceptMyArenaV2QuickQueueController,
   cancelMyArenaV2BattleRoyaleQueueController,
   cancelMyArenaV2QuickQueueController,
   createArenaV2BotMatchController,
@@ -282,7 +283,8 @@ const arenaReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_REA
 const arenaDeckWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_DECK_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_DECK_WRITE_RATE_LIMIT_MAX', 12), key: 'arena-deck-write', keyByUser: true });
 const arenaBotMatchLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_BOT_MATCH_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_BOT_MATCH_RATE_LIMIT_MAX', 10), key: 'arena-bot-match', keyByUser: true });
 const arenaQuickJoinLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_JOIN_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_JOIN_RATE_LIMIT_MAX', 6), key: 'arena-quick-join', keyByUser: true });
-const arenaQuickStatusLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_STATUS_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_STATUS_RATE_LIMIT_MAX', 20), key: 'arena-quick-status', keyByUser: true });
+const arenaQuickStatusLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_STATUS_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_STATUS_RATE_LIMIT_MAX', 120), key: 'arena-quick-status', keyByUser: true });
+const arenaQuickAcceptLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_ACCEPT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_ACCEPT_RATE_LIMIT_MAX', 12), key: 'arena-quick-accept', keyByUser: true });
 const arenaQuickCancelLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_QUICK_CANCEL_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_QUICK_CANCEL_RATE_LIMIT_MAX', 6), key: 'arena-quick-cancel', keyByUser: true });
 const arenaAdminLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_ADMIN_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_ADMIN_RATE_LIMIT_MAX', 30), key: 'arena-admin', keyByUser: true });
 const arenaStreamerConfigLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_STREAMER_CONFIG_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_STREAMER_CONFIG_RATE_LIMIT_MAX', 3), key: 'arena-streamer-config', keyByUser: true });
@@ -587,6 +589,7 @@ router.post('/arena/streamer-right-requests', authMiddleware, banCheckMiddleware
 router.get('/arena/streamer-right-requests/mine', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/arena/matchmaking/quick/join', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickJoinLimiter, joinArenaV2QuickQueueController);
 router.get('/arena/matchmaking/quick/status', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, getMyArenaV2QuickQueueStatusController);
+router.post('/arena/matchmaking/quick/accept', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, arenaQuickAcceptLimiter, acceptMyArenaV2QuickQueueController);
 router.get('/arena/matchmaking/quick/events', authMiddleware, banCheckMiddleware, arenaQuickStatusLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/arena/matchmaking/quick/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2QuickQueueController);
 router.post('/arena/matches', authMiddleware, banCheckMiddleware, arenaBotMatchLimiter, createArenaV2MatchController);
