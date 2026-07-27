@@ -17,6 +17,59 @@ type CropDetectiveImageSourceInput = {
   rawUrl?: string | null;
   backendFallbackUrl?: string | null;
   fallbackSeed: string;
+  preferOriginal?: boolean;
+};
+
+export const CROP_DETECTIVE_IMAGE_REQUEST_PROFILES = {
+  choice: {
+    width: 360,
+    quality: 82,
+    timeoutMs: 3_000,
+    retainResolved: true
+  },
+  preview: {
+    width: 768,
+    quality: 92,
+    timeoutMs: 6_000,
+    retainResolved: false
+  }
+} as const;
+
+type CropDetectiveCssCropGeometryInput = {
+  x: number;
+  y: number;
+  size: number;
+  rotation?: number;
+  aspectRatio?: number;
+};
+
+/**
+ * Positions the complete card image behind the square clue viewport. The analysis
+ * canvas only chooses x/y; the browser renders the decoded source directly so the
+ * clue is never upscaled from the small analysis bitmap or re-encoded.
+ */
+export const createCropDetectiveCssCropGeometry = ({
+  x,
+  y,
+  size,
+  rotation = 0,
+  aspectRatio = 5 / 8
+}: CropDetectiveCssCropGeometryInput) => {
+  const safeX = Number.isFinite(x) ? x : 0.5;
+  const safeY = Number.isFinite(y) ? y : 0.5;
+  const safeSize = Number.isFinite(size) && size > 0 ? size : 0.08;
+  const safeAspectRatio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 5 / 8;
+  const widthPercent = 100 / safeSize;
+  const heightPercent = widthPercent / safeAspectRatio;
+  const normalizedRotation = ((Math.trunc(Number.isFinite(rotation) ? rotation : 0) % 360) + 360) % 360;
+
+  return {
+    widthPercent,
+    heightPercent,
+    leftPercent: 50 - safeX * widthPercent,
+    topPercent: 50 - safeY * heightPercent,
+    rotationDegrees: normalizedRotation
+  };
 };
 
 const hashStringToUint32 = (value: string) => {
@@ -59,11 +112,14 @@ export const createCropDetectiveImageSourceChain = ({
   originalProxyUrl,
   rawUrl,
   backendFallbackUrl,
-  fallbackSeed
+  fallbackSeed,
+  preferOriginal = false
 }: CropDetectiveImageSourceInput): CropDetectiveImageSource[] => {
+  const primaryCandidates: Array<[CropDetectiveImageSourceKind, string | null | undefined]> = preferOriginal
+    ? [['original-proxy', originalProxyUrl], ['resized-proxy', resizedProxyUrl]]
+    : [['resized-proxy', resizedProxyUrl], ['original-proxy', originalProxyUrl]];
   const candidates: Array<[CropDetectiveImageSourceKind, string | null | undefined]> = [
-    ['resized-proxy', resizedProxyUrl],
-    ['original-proxy', originalProxyUrl],
+    ...primaryCandidates,
     ['raw', rawUrl],
     ['backend-fallback', backendFallbackUrl]
   ];

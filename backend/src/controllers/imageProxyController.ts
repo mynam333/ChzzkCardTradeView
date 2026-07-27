@@ -144,12 +144,23 @@ const pickPstaticResizeType = (width: number): string | null => {
   return null;
 };
 
+const getPstaticResizeTypeSize = (value: string | null): number | null => {
+  const [, width, height] = value?.match(/^f(\d+)_(\d+)_na$/) || [];
+  if (!width || !height) return null;
+  return Math.max(Number(width), Number(height));
+};
+
 const getUpstreamImageUrl = (target: URL, transform: ProxyTransform): URL => {
   const upstream = new URL(target.toString());
   if (transform.width && isPstaticImageHost(upstream.hostname)) {
     const resizeType = pickPstaticResizeType(transform.width);
     if (resizeType) {
       upstream.searchParams.set('type', resizeType);
+    } else {
+      const existingResizeSize = getPstaticResizeTypeSize(upstream.searchParams.get('type'));
+      if (existingResizeSize !== null && existingResizeSize < transform.width) {
+        upstream.searchParams.delete('type');
+      }
     }
   }
   return upstream;
@@ -297,11 +308,23 @@ const fetchRemoteImageBody = async (
 const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise<ProxyCacheEntry> => {
   const upstreamUrl = getUpstreamImageUrl(target, transform);
   const targetUrl = target.toString();
+  const targetResizeSize = isPstaticImageHost(target.hostname)
+    ? getPstaticResizeTypeSize(target.searchParams.get('type'))
+    : null;
+  const isRecoveringOriginal = Boolean(
+    transform.width &&
+    targetResizeSize !== null &&
+    targetResizeSize < transform.width &&
+    upstreamUrl.searchParams.get('type') === null
+  );
   let source: { body: Buffer; contentType: string };
 
   if (upstreamUrl.toString() !== targetUrl) {
     try {
-      source = await fetchRemoteImageBody(upstreamUrl, IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS);
+      source = await fetchRemoteImageBody(
+        upstreamUrl,
+        isRecoveringOriginal ? IMAGE_PROXY_TIMEOUT_MS : IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS
+      );
     } catch {
       // Some pstatic images do not expose every `type=f*_na` derivative. The
       // allow-listed original URL is still safe and can be resized locally.

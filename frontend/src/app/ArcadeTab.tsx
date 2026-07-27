@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useApp } from './AppContext';
-import { apiFetch } from '@/lib/api';
+import { API_BASE_URL, apiFetch } from '@/lib/api';
 import {
   Gamepad2,
   Timer,
@@ -25,7 +25,9 @@ import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { proxiedImage } from '@/lib/cosmetics';
 import {
+  CROP_DETECTIVE_IMAGE_REQUEST_PROFILES,
   areCropDetectiveAssetsSettled,
+  createCropDetectiveCssCropGeometry,
   createCropDetectiveImageSourceChain,
   type CropDetectiveImageSource
 } from './cropDetectiveImageSources';
@@ -920,7 +922,6 @@ const clampCropValue = (value: number, min: number, max: number) => {
 };
 
 const CROP_DETECTIVE_CARD_ASPECT_RATIO = 5 / 8;
-const CROP_DETECTIVE_STILL_CHOICE_WIDTH = 360;
 
 const getRotatedCropHalfExtent = (size: number, rotation: number) => {
   const radians = (rotation * Math.PI) / 180;
@@ -1011,21 +1012,23 @@ const clearCropDetectiveProgress = (userId?: string | null, sessionId?: string |
   }
 };
 
-const getCropDetectiveStillImage = (url?: string | null, width = CROP_DETECTIVE_STILL_CHOICE_WIDTH) => {
+const getCropDetectiveStillImage = (
+  url?: string | null,
+  width: number = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.width,
+  quality: number = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.quality
+) => {
   if (!url) return '/icon.png';
-  return proxiedImage(url, { width, quality: 82 }) || '/icon.png';
+  return proxiedImage(url, { width, quality }) || '/icon.png';
 };
 
 const CROP_ANALYSIS_CANVAS_WIDTH = 240;
 const CROP_ANALYSIS_CANVAS_HEIGHT = Math.round(CROP_ANALYSIS_CANVAS_WIDTH / CROP_DETECTIVE_CARD_ASPECT_RATIO);
-const CROP_PREVIEW_CANVAS_SIZE = 640;
 const CROP_ALPHA_GRID_SIZE = 13;
 const CROP_ALPHA_THRESHOLD = 40;
 const CROP_MIN_OPAQUE_RATIO = 0.82;
 const CROP_MIN_DETAIL_SCORE = 0.16;
 const CROP_GOOD_CONTENT_SCORE = 0.52;
 const CROP_ALPHA_CANDIDATE_COUNT = 64;
-const CROP_IMAGE_SOURCE_TIMEOUT_MS = 3_000;
 const CROP_IMAGE_BACKEND_RETRY_VARIANT = 2;
 const CROP_IMAGE_PRELOAD_CACHE_LIMIT = 80;
 
@@ -1221,33 +1224,6 @@ const drawImageCover = (
   );
 };
 
-const createCropPreviewDataUrl = (
-  sourceCanvas: HTMLCanvasElement,
-  crop: { x: number; y: number },
-  size: number,
-  rotation: number
-) => {
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = CROP_PREVIEW_CANVAS_SIZE;
-  previewCanvas.height = CROP_PREVIEW_CANVAS_SIZE;
-  const context = previewCanvas.getContext('2d');
-  if (!context) return '';
-
-  const cropPixelSize = Math.max(1, size * sourceCanvas.width);
-  const scale = CROP_PREVIEW_CANVAS_SIZE / cropPixelSize;
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = 'high';
-  context.translate(CROP_PREVIEW_CANVAS_SIZE / 2, CROP_PREVIEW_CANVAS_SIZE / 2);
-  context.rotate((rotation * Math.PI) / 180);
-  context.scale(scale, scale);
-  context.drawImage(
-    sourceCanvas,
-    -crop.x * sourceCanvas.width,
-    -crop.y * sourceCanvas.height
-  );
-  return previewCanvas.toDataURL('image/webp', 0.9);
-};
-
 const getCropDetectiveRoundKey = (round: CropDetectiveRound) =>
   `${round.round}-${round.source_image_url}-${round.crop.x}-${round.crop.y}-${round.crop.size}-${round.crop.rotation || 0}`;
 
@@ -1258,19 +1234,32 @@ const withCropDetectiveRetryToken = (url: string, attempt: number) => {
 
 const getCropDetectiveImageSources = (
   url?: string | null,
-  fallbackUrl?: string | null
+  fallbackUrl?: string | null,
+  profile: { readonly width: number; readonly quality: number } = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice
 ): CropDetectiveImageSource[] => {
   const rawUrl = String(url || '/icon.png').trim() || '/icon.png';
   const originalProxyUrl = proxiedImage(rawUrl) || rawUrl;
+  const isRelativeLocalUpload = /^\/?uploads\//i.test(rawUrl);
+  let isAbsoluteLocalUpload = false;
+  if (!isRelativeLocalUpload) {
+    try {
+      const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+      const sourceUrl = new URL(rawUrl, baseOrigin);
+      const apiUrl = new URL(API_BASE_URL, baseOrigin);
+      isAbsoluteLocalUpload = sourceUrl.origin === apiUrl.origin && sourceUrl.pathname.startsWith('/uploads/');
+    } catch {
+      // Malformed URLs continue through the proxy/raw fallback chain.
+    }
+  }
   return createCropDetectiveImageSourceChain({
-    // Preview and answer use the same 360px URL, allowing browser/proxy request coalescing.
-    resizedProxyUrl: getCropDetectiveStillImage(rawUrl, CROP_DETECTIVE_STILL_CHOICE_WIDTH),
+    resizedProxyUrl: getCropDetectiveStillImage(rawUrl, profile.width, profile.quality),
     originalProxyUrl,
     rawUrl,
     backendFallbackUrl: fallbackUrl
-      ? getCropDetectiveStillImage(fallbackUrl, CROP_DETECTIVE_STILL_CHOICE_WIDTH)
+      ? getCropDetectiveStillImage(fallbackUrl, profile.width, profile.quality)
       : withCropDetectiveRetryToken(originalProxyUrl, CROP_IMAGE_BACKEND_RETRY_VARIANT),
-    fallbackSeed: rawUrl
+    fallbackSeed: rawUrl,
+    preferOriginal: profile === CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview && (isRelativeLocalUpload || isAbsoluteLocalUpload)
   });
 };
 
@@ -1282,7 +1271,7 @@ type LoadedCropDetectiveImage = {
 
 const cropDetectiveImagePreloadCache = new Map<string, Promise<HTMLImageElement | null>>();
 
-const preloadCropDetectiveImage = (url: string) => {
+const preloadCropDetectiveImage = (url: string, retainResolved = true) => {
   const cached = cropDetectiveImagePreloadCache.get(url);
   if (cached) return cached;
 
@@ -1313,7 +1302,9 @@ const preloadCropDetectiveImage = (url: string) => {
 
   cropDetectiveImagePreloadCache.set(url, request);
   void request.then((image) => {
-    if (!image) cropDetectiveImagePreloadCache.delete(url);
+    if ((!image || !retainResolved) && cropDetectiveImagePreloadCache.get(url) === request) {
+      cropDetectiveImagePreloadCache.delete(url);
+    }
   });
   if (cropDetectiveImagePreloadCache.size > CROP_IMAGE_PRELOAD_CACHE_LIMIT) {
     const oldestKey = cropDetectiveImagePreloadCache.keys().next().value;
@@ -1324,7 +1315,9 @@ const preloadCropDetectiveImage = (url: string) => {
 
 const useCropDetectiveImageSource = (
   generationKey: string,
-  sources: readonly CropDetectiveImageSource[]
+  sources: readonly CropDetectiveImageSource[],
+  timeoutMs: number = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.timeoutMs,
+  retainResolved: boolean = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.retainResolved
 ): LoadedCropDetectiveImage | null => {
   const sourceSignature = sources.map((source) => `${source.kind}:${source.url}`).join('\u0001');
   const [loadedState, setLoadedState] = useState<{
@@ -1346,9 +1339,9 @@ const useCropDetectiveImageSource = (
       if (!source) return;
 
       const timeout = new Promise<null>((resolve) => {
-        timeoutId = window.setTimeout(() => resolve(null), CROP_IMAGE_SOURCE_TIMEOUT_MS);
+        timeoutId = window.setTimeout(() => resolve(null), timeoutMs);
       });
-      const image = await Promise.race([preloadCropDetectiveImage(source.url), timeout]);
+      const image = await Promise.race([preloadCropDetectiveImage(source.url, retainResolved), timeout]);
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       timeoutId = null;
       if (cancelled) return;
@@ -1375,7 +1368,7 @@ const useCropDetectiveImageSource = (
       cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [generationKey, sourceSignature, sources]);
+  }, [generationKey, retainResolved, sourceSignature, sources, timeoutMs]);
 
   return currentLoaded;
 };
@@ -1409,7 +1402,7 @@ const CardImageTile: React.FC<{
 }) => {
   const imageUrl = imageUrlOverride || (
     freezeImage
-      ? getCropDetectiveStillImage(card.image_url, CROP_DETECTIVE_STILL_CHOICE_WIDTH)
+      ? getCropDetectiveStillImage(card.image_url)
       : card.image_url || '/icon.png'
   );
   const nativeDisabled = disabled && !imageBlindEnabled;
@@ -1485,16 +1478,26 @@ const CropPreview: React.FC<{
   const roundKey = getCropDetectiveRoundKey(round);
   const generationKey = `${roundKey}:crop`;
   const sources = useMemo(
-    () => getCropDetectiveImageSources(round.source_image_url, round.source_fallback_image_url),
+    () => getCropDetectiveImageSources(
+      round.source_image_url,
+      round.source_fallback_image_url,
+      CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview
+    ),
     [round.source_fallback_image_url, round.source_image_url]
   );
-  const loadedSource = useCropDetectiveImageSource(generationKey, sources);
+  const loadedSource = useCropDetectiveImageSource(
+    generationKey,
+    sources,
+    CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview.timeoutMs,
+    CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview.retainResolved
+  );
   const localFallbackUrl = sources[sources.length - 1]?.url || '/icon.png';
   const [previewState, setPreviewState] = useState<{
     roundKey: string;
-    mode: 'canvas' | 'css';
     imageUrl: string;
-  }>({ roundKey: '', mode: 'css', imageUrl: '' });
+    cropX: number;
+    cropY: number;
+  }>({ roundKey: '', imageUrl: '', cropX: 0.5, cropY: 0.5 });
   const currentPreview = previewState.roundKey === roundKey ? previewState : null;
   const preparedRoundRef = useRef('');
 
@@ -1507,17 +1510,22 @@ const CropPreview: React.FC<{
   useEffect(() => {
     if (!loadedSource) return;
     let cancelled = false;
-    const applyCssFallback = () => {
+    const applyDirectPreview = (crop: { x: number; y: number }) => {
       queueMicrotask(() => {
         if (cancelled) return;
-        setPreviewState({ roundKey, mode: 'css', imageUrl: loadedSource.url });
+        setPreviewState({
+          roundKey,
+          imageUrl: loadedSource.url,
+          cropX: crop.x,
+          cropY: crop.y
+        });
         notifyPrepared();
       });
     };
 
     try {
       if (!loadedSource.image || typeof document === 'undefined') {
-        applyCssFallback();
+        applyDirectPreview({ x, y });
         return () => {
           cancelled = true;
         };
@@ -1553,20 +1561,14 @@ const CropPreview: React.FC<{
         }
       }
 
-      const preparedUrl = createCropPreviewDataUrl(
-        displayCanvas,
-        bestGoodCrop || bestCrop,
-        size,
-        rotation
-      );
-      if (!preparedUrl) throw new Error('Crop detective preview encoding failed.');
-      queueMicrotask(() => {
-        if (!cancelled) setPreviewState({ roundKey, mode: 'canvas', imageUrl: preparedUrl });
-      });
+      // Keep the small canvas for content analysis only. Rendering the decoded
+      // high-resolution source directly avoids a 12-24px -> 640px upscale and
+      // a second lossy WebP encoding pass.
+      applyDirectPreview(bestGoodCrop || bestCrop);
     } catch {
       // Canvas can be unavailable or tainted even after a successful image load. The
       // clipped CSS transform preserves the clue without exposing the full answer.
-      applyCssFallback();
+      applyDirectPreview({ x, y });
     }
 
     return () => {
@@ -1574,8 +1576,13 @@ const CropPreview: React.FC<{
     };
   }, [loadedSource, maxX, maxY, minX, minY, notifyPrepared, rotation, round.round, round.source_image_url, roundKey, size, x, y]);
 
-  const cssCardWidth = 100 / size;
-  const cssCardHeight = 100 / (size * CROP_DETECTIVE_CARD_ASPECT_RATIO);
+  const previewGeometry = createCropDetectiveCssCropGeometry({
+    x: currentPreview?.cropX ?? x,
+    y: currentPreview?.cropY ?? y,
+    size,
+    rotation,
+    aspectRatio: CROP_DETECTIVE_CARD_ASPECT_RATIO
+  });
   return (
     <div
       role="img"
@@ -1584,31 +1591,13 @@ const CropPreview: React.FC<{
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => event.preventDefault()}
     >
-      {currentPreview?.mode === 'canvas' ? (
-        <img
-          src={currentPreview.imageUrl}
-          alt=""
-          className={`absolute inset-0 h-full w-full object-cover ${revealed ? 'opacity-100' : 'opacity-0'}`}
-          draggable={false}
-          onLoad={(event) => {
-            if (previewState.roundKey !== roundKey) return;
-            const element = event.currentTarget;
-            const finish = () => {
-              if (element.isConnected && previewState.roundKey === roundKey) notifyPrepared();
-            };
-            if (typeof element.decode !== 'function') finish();
-            else element.decode().then(finish).catch(finish);
-          }}
-          onError={() => {
-            if (!loadedSource || previewState.roundKey !== roundKey) return;
-            setPreviewState({ roundKey, mode: 'css', imageUrl: loadedSource.url });
-            notifyPrepared();
-          }}
-        />
-      ) : currentPreview?.mode === 'css' ? (
+      {currentPreview ? (
         <div
           className={`absolute inset-0 ${revealed ? 'opacity-100' : 'opacity-0'}`}
-          style={{ transform: `rotate(${rotation}deg)` }}
+          style={{
+            transform: `rotate(${previewGeometry.rotationDegrees}deg)`,
+            transformOrigin: '50% 50%'
+          }}
         >
           <img
             src={currentPreview.imageUrl}
@@ -1616,10 +1605,11 @@ const CropPreview: React.FC<{
             className="absolute max-w-none object-cover"
             draggable={false}
             style={{
-              width: `${cssCardWidth}%`,
-              height: `${cssCardHeight}%`,
-              left: `${50 - x * cssCardWidth}%`,
-              top: `${50 - y * cssCardHeight}%`
+              width: `${previewGeometry.widthPercent}%`,
+              height: `${previewGeometry.heightPercent}%`,
+              left: `${previewGeometry.leftPercent}%`,
+              top: `${previewGeometry.topPercent}%`,
+              objectPosition: 'center'
             }}
             onError={(event) => {
               const element = event.currentTarget;

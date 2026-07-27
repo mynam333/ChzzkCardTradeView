@@ -137,4 +137,18 @@ describe('image proxy retry cache contract', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('type=f240_240_na');
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(url);
   });
+
+  it('recovers the pstatic original before resizing when the supplied derivative is too small', async () => {
+    const url = 'https://ssl.pstatic.net/static/chikapo/high-resolution-source.png?type=f240_240_na';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse([50, 60, 70, 80]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = createResponse();
+    await proxyImage(createRequest(url, { w: '768', q: '92' }), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestedUrl.searchParams.has('type')).toBe(false);
+  });
 });
