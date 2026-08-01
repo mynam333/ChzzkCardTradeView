@@ -649,6 +649,10 @@ export interface UserMinigameTicket {
   updated_at?: string;
 }
 
+export type RefreshedMinigameTicket = UserMinigameTicket & {
+  seconds_until_next_ticket: number;
+};
+
 export interface MinigameSession {
   id: string;
   user_id: string;
@@ -659,14 +663,55 @@ export interface MinigameSession {
   created_at?: string;
   completed_at?: string | null;
   earned_points?: number;
+  validation_version?: number;
+  progress_data?: string;
+  progress_revision?: number;
+  expires_at?: string | null;
+  result_data?: string | null;
 }
+
+export type MinigameRoundOutcomeResult = {
+  ok: boolean;
+  reason?: string;
+  session?: MinigameSession;
+  duplicate?: boolean;
+};
+
+export type MinigameCompletionResult =
+  | {
+      ok: true;
+      /** 이번 호출이 세션과 포인트를 최초로 정산했는지 여부입니다. */
+      settledNow: boolean;
+      newPoints: number;
+      /** 호출 인자가 아닌 DB에 확정 저장된 보상입니다. */
+      earnedPoints: number;
+      /** 호출 인자가 아닌 DB에 확정 저장된 결과입니다. */
+      resultData: string | null;
+    }
+  | {
+      ok: false;
+      reason: string;
+    };
 
 export interface IMinigameRepository {
   getTicketStatus(userId: string): Promise<UserMinigameTicket>;
+  refreshTicketStatus(userId: string, chargeIntervalMinutes: number): Promise<RefreshedMinigameTicket>;
   updateTickets(userId: string, currentTickets: number, lastChargedAt: string): Promise<void>;
   addBonusTickets(userId: string, amount: number): Promise<UserMinigameTicket>;
-  startSession(session: MinigameSession): Promise<{ ok: boolean; reason?: string }>;
-  completeSession(sessionId: string, earnedPoints: number): Promise<{ ok: boolean; reason?: string; newPoints?: number }>;
+  startSession(session: MinigameSession, chargeIntervalMinutes?: number): Promise<{ ok: boolean; reason?: string }>;
+  recordRoundOutcome(
+    sessionId: string,
+    userId: string,
+    round: number,
+    selectedChannelId: string | null,
+    /** 다음 라운드의 서버 마감 시각. 마지막 라운드는 null을 명시합니다. */
+    nextRoundDeadlineAt: string | null
+  ): Promise<MinigameRoundOutcomeResult>;
+  completeSession(
+    sessionId: string,
+    earnedPoints: number,
+    resultData?: string
+  ): Promise<MinigameCompletionResult>;
   findSessionById(id: string): Promise<MinigameSession | null>;
   findActiveStartedSession(userId: string, gameType: MinigameType): Promise<MinigameSession | null>;
   expireSessions(olderThanMinutes: number, limit?: number): Promise<void>;

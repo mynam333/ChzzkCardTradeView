@@ -2,6 +2,7 @@ process.env.PROCESS_ROLE = process.env.PROCESS_ROLE || 'image-worker';
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { bootstrapProcess } from '../services/processBootstrap';
 
 bootstrapProcess('ImageProxyWorker');
@@ -12,6 +13,15 @@ const slowLogMs = Math.max(100, Number(process.env.IMAGE_PROXY_SLOW_REQUEST_LOG_
 
 app.set('trust proxy', 1);
 app.use(cors({ origin: '*', credentials: false }));
+app.use(cookieParser());
+
+// Keep config-dependent auth code behind bootstrapProcess(). A static import
+// would evaluate config.ts before this worker has loaded backend/.env.
+const lazyMinigameImageAuth = (req: Request, res: Response, next: NextFunction) => {
+  import('../middlewares/minigameImageAuth')
+    .then(({ minigameImageAuthMiddleware }) => minigameImageAuthMiddleware(req, res, next))
+    .catch(next);
+};
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const startedAt = Date.now();
@@ -29,6 +39,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
   });
   next();
+});
+
+app.get('/api/image-proxy/minigame', lazyMinigameImageAuth, async (req, res, next) => {
+  try {
+    const { proxyMinigameImage } = await import('../controllers/imageProxyController');
+    return proxyMinigameImage(
+      req,
+      res,
+      (req as Request & { minigameImageUserId?: string }).minigameImageUserId || ''
+    );
+  } catch (err) {
+    return next(err);
+  }
 });
 
 app.get('/api/image-proxy', async (req, res, next) => {

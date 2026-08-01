@@ -12,6 +12,13 @@ export const proxiedImage = (
 ): string => {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const minigameImagePrefix = 'minigame-image:v1:';
+  if (url.startsWith(minigameImagePrefix)) {
+    const token = url.slice(minigameImagePrefix.length);
+    return token
+      ? `${API_BASE_URL}/image-proxy/minigame?mg=${encodeURIComponent(token)}`
+      : '';
+  }
   const shouldResize = !!options.width;
   if (!shouldResize && (url.startsWith('/uploads/') || url.startsWith('uploads/'))) return url.startsWith('/') ? url : `/${url}`;
   try {

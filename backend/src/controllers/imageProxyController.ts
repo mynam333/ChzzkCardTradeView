@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { IS_PRODUCTION } from '../config';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
@@ -10,6 +11,11 @@ import {
   OutboundNetworkSafetyError,
   validateSafeOutboundUrl
 } from '../utils/outboundNetworkSafety';
+import {
+  MinigameImagePayload,
+  MinigameImageTokenError,
+  openMinigameImageToken
+} from '../services/minigameImageToken';
 
 /**
  * 이미지 프록시 — 치지직 CDN/외부 이미지를 동일 출처(+CORS 허용)로 우회 제공.
@@ -45,6 +51,8 @@ interface ProxyCacheEntry {
 interface ProxyTransform {
   width: number | null;
   quality: number;
+  minigame: Pick<MinigameImagePayload, 'kind' | 'crop'> | null;
+  minigameCacheKey: string | null;
 }
 
 const IMAGE_PROXY_DEFAULT_MAX_IN_FLIGHT = 32;
@@ -55,6 +63,11 @@ const IMAGE_PROXY_DEFAULT_MAX_INPUT_PIXELS = 16_000_000;
 const IMAGE_PROXY_HARD_MAX_INPUT_PIXELS = 24_000_000;
 const IMAGE_PROXY_MAX_REDIRECTS = 3;
 const IMAGE_PROXY_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MINIGAME_QUIZ_WIDTH = 240;
+const MINIGAME_QUIZ_HEIGHT = 384;
+const MINIGAME_CROP_CARD_WIDTH = 640;
+const MINIGAME_CROP_CARD_HEIGHT = 1_024;
+const MINIGAME_CROP_OUTPUT_SIZE = 320;
 
 export const normalizeImageProxyMaxInFlight = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -231,12 +244,16 @@ const parseTransform = (req: Request): ProxyTransform => {
   const quality = readQueryNumber(req.query.q);
   return {
     width: width ? Math.max(16, Math.min(IMAGE_PROXY_MAX_RESIZE_WIDTH, Math.floor(width))) : null,
-    quality: quality ? Math.max(45, Math.min(92, Math.floor(quality))) : 78
+    quality: quality ? Math.max(45, Math.min(92, Math.floor(quality))) : 78,
+    minigame: null,
+    minigameCacheKey: null
   };
 };
 
 const transformCacheSuffix = (transform: ProxyTransform) =>
-  transform.width ? `|w=${transform.width}|q=${transform.quality}` : '|original';
+  transform.minigameCacheKey
+    ? `|mg=${transform.minigameCacheKey}`
+    : transform.width ? `|w=${transform.width}|q=${transform.quality}` : '|original';
 
 const isPstaticImageHost = (hostname: string): boolean => {
   const h = hostname.toLowerCase();
@@ -326,13 +343,25 @@ const setCachedProxyImage = (key: string, entry: ProxyCacheEntry) => {
   }
 };
 
-const sendProxyImage = (res: Response, entry: ProxyCacheEntry, cacheStatus: 'HIT' | 'MISS') => {
+type ProxyResponsePolicy = 'generic' | 'minigame';
+
+const sendProxyImage = (
+  res: Response,
+  entry: ProxyCacheEntry,
+  cacheStatus: 'HIT' | 'MISS',
+  policy: ProxyResponsePolicy = 'generic'
+) => {
   res.setHeader('Content-Type', entry.contentType);
   res.setHeader('Content-Length', String(entry.body.length));
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (policy === 'minigame') {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  } else {
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
   res.setHeader('X-Image-Proxy-Cache', cacheStatus);
   return res.status(200).send(entry.body);
 };
@@ -440,12 +469,71 @@ const sanitizeAndResizeImageForProxy = async (
       if (!metadata.width || !metadata.height || metadata.width * metadata.height > IMAGE_PROXY_MAX_INPUT_PIXELS) {
         throwUnsupportedProxyImage();
       }
-      if (transform.width) {
-        pipeline = pipeline.resize({ width: transform.width, withoutEnlargement: true });
+
+      let sanitized: Buffer;
+      if (transform.minigame?.kind === 'quiz') {
+        // The paid quiz must never send recoverable full-resolution pixels to the
+        // browser. A small cover render, fixed Gaussian blur, and lossy WebP pass
+        // leave the clue playable while making the transform irreversible.
+        sanitized = await pipeline
+          .resize({ width: MINIGAME_QUIZ_WIDTH, height: MINIGAME_QUIZ_HEIGHT, fit: 'cover' })
+          .blur(4)
+          .webp({ quality: 70, effort: 3 })
+          .toBuffer();
+      } else if (transform.minigame?.kind === 'crop' && transform.minigame.crop) {
+        const crop = transform.minigame.crop;
+        const radians = (crop.rotation * Math.PI) / 180;
+        const cropSide = Math.max(16, Math.round(crop.size * MINIGAME_CROP_CARD_WIDTH));
+        const rotatedExtent = Math.min(
+          MINIGAME_CROP_CARD_WIDTH,
+          Math.ceil(cropSide * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))) + 4
+        );
+        const centerX = crop.x * MINIGAME_CROP_CARD_WIDTH;
+        const centerY = crop.y * MINIGAME_CROP_CARD_HEIGHT;
+        const left = Math.max(0, Math.min(
+          MINIGAME_CROP_CARD_WIDTH - rotatedExtent,
+          Math.round(centerX - rotatedExtent / 2)
+        ));
+        const top = Math.max(0, Math.min(
+          MINIGAME_CROP_CARD_HEIGHT - rotatedExtent,
+          Math.round(centerY - rotatedExtent / 2)
+        ));
+
+        // Render the source into the exact 5:8 card viewport first. Only the
+        // bounded region needed for the rotated square survives the first pass;
+        // the full card is never encoded into an HTTP response.
+        const rotated = await pipeline
+          .resize({
+            width: MINIGAME_CROP_CARD_WIDTH,
+            height: MINIGAME_CROP_CARD_HEIGHT,
+            fit: 'cover'
+          })
+          .extract({ left, top, width: rotatedExtent, height: rotatedExtent })
+          .rotate(crop.rotation, { background: { r: 9, g: 9, b: 11, alpha: 1 } })
+          .toBuffer({ resolveWithObject: true });
+        const finalSide = Math.min(cropSide, rotated.info.width, rotated.info.height);
+        sanitized = await sharp(rotated.data, {
+          animated: false,
+          failOn: 'warning',
+          limitInputPixels: IMAGE_PROXY_MAX_INPUT_PIXELS
+        })
+          .extract({
+            left: Math.max(0, Math.floor((rotated.info.width - finalSide) / 2)),
+            top: Math.max(0, Math.floor((rotated.info.height - finalSide) / 2)),
+            width: finalSide,
+            height: finalSide
+          })
+          .resize({ width: MINIGAME_CROP_OUTPUT_SIZE, height: MINIGAME_CROP_OUTPUT_SIZE, fit: 'fill' })
+          .webp({ quality: 82, effort: 3 })
+          .toBuffer();
+      } else {
+        if (transform.width) {
+          pipeline = pipeline.resize({ width: transform.width, withoutEnlargement: true });
+        }
+        sanitized = await pipeline
+          .webp({ quality: transform.width ? transform.quality : 88, effort: 3 })
+          .toBuffer();
       }
-      const sanitized = await pipeline
-        .webp({ quality: transform.width ? transform.quality : 88, effort: 3 })
-        .toBuffer();
       if (sanitized.byteLength > IMAGE_PROXY_MAX_BYTES) {
         const error = new Error('IMAGE_TOO_LARGE') as Error & { statusCode?: number };
         error.statusCode = 413;
@@ -464,7 +552,8 @@ const sendTransformedLocalImage = async (
   resolvedPath: string,
   stat: fs.Stats,
   contentType: string,
-  transform: ProxyTransform
+  transform: ProxyTransform,
+  responsePolicy: ProxyResponsePolicy = 'generic'
 ) => {
   if (stat.size > IMAGE_PROXY_MAX_BYTES) {
     return res.status(413).json({
@@ -476,7 +565,7 @@ const sendTransformedLocalImage = async (
   const normalizedPath = process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath;
   const cacheKey = `local:${normalizedPath}|mtime=${stat.mtimeMs}|bytes=${stat.size}${transformCacheSuffix(transform)}`;
   const cached = getCachedProxyImage(cacheKey);
-  if (cached) return sendProxyImage(res, cached, 'HIT');
+  if (cached) return sendProxyImage(res, cached, 'HIT', responsePolicy);
 
   const admission = inFlight.getOrStart(cacheKey, async () => {
     const rawBody = await fs.promises.readFile(resolvedPath);
@@ -494,7 +583,7 @@ const sendTransformedLocalImage = async (
   if (!admission) return sendImageProxyOverloaded(res);
 
   try {
-    return sendProxyImage(res, await admission.request, 'MISS');
+    return sendProxyImage(res, await admission.request, 'MISS', responsePolicy);
   } catch (err: any) {
     if (err?.message === 'NOT_IMAGE' || err?.statusCode === 415) {
       return res.status(415).json({
@@ -652,7 +741,175 @@ const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise
   };
 };
 
+const createMinigameTransform = (payload: MinigameImagePayload): ProxyTransform => {
+  const identity = JSON.stringify({ kind: payload.kind, crop: payload.crop || null });
+  return {
+    width: payload.kind === 'quiz' ? MINIGAME_QUIZ_WIDTH : MINIGAME_CROP_CARD_WIDTH,
+    quality: payload.kind === 'quiz' ? 70 : 82,
+    minigame: { kind: payload.kind, crop: payload.crop },
+    minigameCacheKey: crypto.createHash('sha256').update(identity).digest('hex').slice(0, 32)
+  };
+};
+
+const constantTimeStringEqual = (left: string, right: string): boolean => {
+  const leftHash = crypto.createHash('sha256').update(left, 'utf8').digest();
+  const rightHash = crypto.createHash('sha256').update(right, 'utf8').digest();
+  return crypto.timingSafeEqual(leftHash, rightHash);
+};
+
+const getSelfHostedUploadPath = (target: URL): string | null => {
+  let isSelfHost = false;
+  try {
+    const selfUrl = process.env.BACKEND_PUBLIC_URL;
+    if (selfUrl) {
+      isSelfHost = target.hostname.toLowerCase() === new URL(selfUrl).hostname.toLowerCase();
+    }
+  } catch { /* noop */ }
+  if (target.hostname.toLowerCase() === 'localhost' || target.hostname.toLowerCase() === '127.0.0.1') {
+    isSelfHost = true;
+  }
+  if (!isSelfHost || !target.pathname.startsWith('/uploads/')) return null;
+  try {
+    return resolveLocalUploadPath(decodeURIComponent(target.pathname));
+  } catch {
+    return resolveLocalUploadPath(target.pathname);
+  }
+};
+
+const sendMinigameProxyFailure = (res: Response, err: any) => {
+  if (err?.message === 'NOT_IMAGE' || err?.statusCode === 415) {
+    return res.status(415).json({ error: 'UnsupportedMediaType', message: '이미지가 아닌 리소스입니다.' });
+  }
+  if (err?.message === 'IMAGE_TOO_LARGE' || err?.statusCode === 413) {
+    return res.status(413).json({ error: 'PayloadTooLarge', message: '이미지가 프록시 허용 크기를 초과했습니다.' });
+  }
+  return res.status(502).json({
+    error: 'BadGateway',
+    message: '미니게임 이미지 처리 중 오류가 발생했습니다.',
+    details: IS_PRODUCTION ? undefined : err?.message
+  });
+};
+
+/**
+ * Authenticated paid-minigame image renderer. The caller supplies the user id
+ * from verified session claims; this handler performs no database reads.
+ */
+export const proxyMinigameImage = async (req: Request, res: Response, userId: string) => {
+  const queryKeys = Object.keys(req.query || {});
+  if (queryKeys.length !== 1 || queryKeys[0] !== 'mg' || typeof req.query.mg !== 'string') {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: 'mg 파라미터만 사용할 수 있습니다.'
+    });
+  }
+
+  let payload: MinigameImagePayload;
+  try {
+    payload = openMinigameImageToken(req.query.mg);
+  } catch (error) {
+    if (error instanceof MinigameImageTokenError && error.code === 'EXPIRED') {
+      return res.status(410).json({ error: 'Gone', message: '미니게임 이미지 참조가 만료되었습니다.' });
+    }
+    return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 미니게임 이미지 참조입니다.' });
+  }
+  if (typeof userId !== 'string' || !constantTimeStringEqual(payload.userId, userId)) {
+    return res.status(403).json({ error: 'Forbidden', message: '이 이미지에 접근할 권한이 없습니다.' });
+  }
+
+  const raw = payload.sourceUrl;
+  const transform = createMinigameTransform(payload);
+
+  if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
+    const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(cleanPath);
+    } catch {
+      decodedPath = cleanPath;
+    }
+    const resolvedPath = resolveLocalUploadPath(decodedPath);
+    if (!resolvedPath) {
+      return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 파일 경로입니다.' });
+    }
+    const stat = getLocalFileStat(resolvedPath);
+    if (!stat) return res.status(404).json({ error: 'NotFound', message: '파일을 찾을 수 없습니다.' });
+    return sendTransformedLocalImage(
+      res,
+      resolvedPath,
+      stat,
+      getLocalContentType(resolvedPath),
+      transform,
+      'minigame'
+    );
+  }
+
+  let target: URL;
+  try {
+    target = new URL(raw);
+  } catch {
+    return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 이미지 참조입니다.' });
+  }
+
+  const localPath = getSelfHostedUploadPath(target);
+  if (localPath) {
+    const stat = getLocalFileStat(localPath);
+    if (!stat) return res.status(404).json({ error: 'NotFound', message: '자체 업로드 파일을 찾을 수 없습니다.' });
+    return sendTransformedLocalImage(
+      res,
+      localPath,
+      stat,
+      getLocalContentType(localPath),
+      transform,
+      'minigame'
+    );
+  }
+
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return res.status(400).json({ error: 'BadRequest', message: '지원하지 않는 프로토콜입니다.' });
+  }
+  if (!isAllowedHost(target.hostname) || !isAllowedImagePort(target)) {
+    return res.status(403).json({ error: 'Forbidden', message: '허용되지 않은 이미지 원본입니다.' });
+  }
+
+  const cacheKey = `${getUpstreamImageUrl(target, transform).toString()}${transformCacheSuffix(transform)}`;
+  const cached = getCachedProxyImage(cacheKey);
+  if (cached) return sendProxyImage(res, cached, 'HIT', 'minigame');
+
+  const failedUntil = negativeCache.get(cacheKey) || 0;
+  if (failedUntil > Date.now()) {
+    return res.status(502).json({ error: 'BadGateway', message: '원본 이미지가 최근 처리에 실패했습니다.' });
+  }
+  if (failedUntil) negativeCache.delete(cacheKey);
+
+  const admission = inFlight.getOrStart(cacheKey, () => (
+    fetchRemoteImage(target, transform)
+      .then((entry) => {
+        setCachedProxyImage(cacheKey, entry);
+        negativeCache.delete(cacheKey);
+        return entry;
+      })
+      .catch((err) => {
+        cleanupNegativeCache();
+        negativeCache.set(cacheKey, Date.now() + IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS);
+        throw err;
+      })
+  ));
+  if (!admission) return sendImageProxyOverloaded(res);
+
+  try {
+    return sendProxyImage(res, await admission.request, 'MISS', 'minigame');
+  } catch (err: any) {
+    return sendMinigameProxyFailure(res, err);
+  }
+};
+
 export const proxyImage = async (req: Request, res: Response) => {
+  if (req.query.mg !== undefined) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: '미니게임 이미지 참조는 전용 경로에서만 사용할 수 있습니다.'
+    });
+  }
   const raw = String(req.query.url || '').trim();
   if (!raw) {
     return res.status(400).json({ error: 'BadRequest', message: 'url 파라미터가 필요합니다.' });

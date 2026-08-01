@@ -798,11 +798,17 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
       CONSTRAINT fk_market_bids_bidder FOREIGN KEY(bidder_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureMysqlColumn(db, 'minigame_sessions', 'validation_version', 'validation_version INT NOT NULL DEFAULT 0 AFTER earned_points');
+  await ensureMysqlColumn(db, 'minigame_sessions', 'progress_data', "progress_data MEDIUMTEXT NOT NULL DEFAULT ('{}') AFTER validation_version");
+  await ensureMysqlColumn(db, 'minigame_sessions', 'progress_revision', 'progress_revision INT NOT NULL DEFAULT 0 AFTER progress_data');
+  await ensureMysqlColumn(db, 'minigame_sessions', 'expires_at', 'expires_at VARCHAR(64) NULL AFTER progress_revision');
+  await ensureMysqlColumn(db, 'minigame_sessions', 'result_data', 'result_data MEDIUMTEXT NULL AFTER expires_at');
   await ensureMysqlIndex(db, 'streamers', 'idx_streamers_base_value', '(base_value DESC, channel_id)');
   await ensureMysqlIndex(db, 'value_history', 'idx_value_history_channel_recorded', '(channel_id, recorded_at DESC)');
   await ensureMysqlIndex(db, 'value_history', 'idx_value_history_recorded_channel', '(recorded_at DESC, channel_id)');
   await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_status_created', '(status, created_at, id)');
   await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_user_game_status_created', '(user_id, game_type, status, created_at DESC)');
+  await ensureMysqlIndex(db, 'minigame_sessions', 'idx_minigame_sessions_user_status_paid_created', '(user_id, status, ticket_spent_type, created_at DESC)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible', '(user_id, is_hidden)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_user_visible_channel_star', '(user_id, is_hidden, channel_id, star)');
   await ensureMysqlIndex(db, 'user_cards', 'idx_user_cards_channel_star_visible', '(channel_id, star, is_hidden)');
@@ -940,6 +946,14 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   } catch (err: any) {
     console.warn('[DB] pg_trgm 확장 보정 실패, trigram 검색 인덱스는 건너뜁니다:', err?.message || err);
   }
+  await db.run(`
+    ALTER TABLE minigame_sessions
+      ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS progress_data TEXT NOT NULL DEFAULT '{}',
+      ADD COLUMN IF NOT EXISTS progress_revision INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS result_data TEXT
+  `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS deleted_user_accounts (
       user_id TEXT PRIMARY KEY,
@@ -1292,6 +1306,22 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_rules_active ON subscription_title_rules (active, title_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_valid ON subscription_title_states (rule_id, is_subscribed, checked_until)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subscription_title_states_user ON subscription_title_states (user_id, checked_until)');
+  await db.run(`
+    WITH ranked_paid_sessions AS (
+      SELECT id,
+             ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC NULLS LAST, id DESC) AS rn
+        FROM minigame_sessions
+       WHERE status = 'STARTED'
+         AND ticket_spent_type IN ('BASE', 'BONUS')
+    )
+    UPDATE minigame_sessions AS session
+       SET status = 'EXPIRED',
+           completed_at = COALESCE(session.completed_at, NOW())
+      FROM ranked_paid_sessions AS ranked
+     WHERE session.id = ranked.id
+       AND ranked.rn > 1
+  `);
+  await ensureIndex("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uniq_minigame_sessions_paid_started_user ON minigame_sessions (user_id) WHERE status = 'STARTED' AND ticket_spent_type IN ('BASE', 'BONUS')");
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_status_created ON minigame_sessions (status, created_at, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_minigame_sessions_user_game_status_created ON minigame_sessions (user_id, game_type, status, created_at DESC)');
 };
@@ -2101,6 +2131,11 @@ export const initDatabaseConnection = async (): Promise<void> => {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         completed_at TEXT,
         earned_points INTEGER DEFAULT 0,
+        validation_version INTEGER NOT NULL DEFAULT 0,
+        progress_data TEXT NOT NULL DEFAULT '{}',
+        progress_revision INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT,
+        result_data TEXT,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
       );`);
       sqliteDb.exec("CREATE INDEX IF NOT EXISTS idx_minigame_sessions_status_created ON minigame_sessions(status, created_at, id);");
@@ -2112,6 +2147,42 @@ export const initDatabaseConnection = async (): Promise<void> => {
         console.log('[DB Migration] minigame_sessions 테이블에 ticket_spent_type 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE minigame_sessions ADD COLUMN ticket_spent_type TEXT DEFAULT 'NONE';");
       }
+
+      for (const [column, ddl] of [
+        ['validation_version', 'ALTER TABLE minigame_sessions ADD COLUMN validation_version INTEGER NOT NULL DEFAULT 0;'],
+        ['progress_data', "ALTER TABLE minigame_sessions ADD COLUMN progress_data TEXT NOT NULL DEFAULT '{}';"],
+        ['progress_revision', 'ALTER TABLE minigame_sessions ADD COLUMN progress_revision INTEGER NOT NULL DEFAULT 0;'],
+        ['expires_at', 'ALTER TABLE minigame_sessions ADD COLUMN expires_at TEXT;'],
+        ['result_data', 'ALTER TABLE minigame_sessions ADD COLUMN result_data TEXT;']
+      ] as const) {
+        try {
+          sqliteDb.prepare(`SELECT ${column} FROM minigame_sessions LIMIT 1`).get();
+        } catch {
+          console.log(`[DB Migration] minigame_sessions 테이블에 ${column} 컬럼이 없어 추가합니다.`);
+          sqliteDb.exec(ddl);
+        }
+      }
+
+      sqliteDb.exec(`
+        UPDATE minigame_sessions
+           SET status = 'EXPIRED',
+               completed_at = COALESCE(completed_at, datetime('now'))
+         WHERE id IN (
+           SELECT id
+             FROM (
+               SELECT id,
+                      ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY datetime(created_at) DESC, id DESC) AS rn
+                 FROM minigame_sessions
+                WHERE status = 'STARTED'
+                  AND ticket_spent_type IN ('BASE', 'BONUS')
+             ) ranked_paid_sessions
+            WHERE rn > 1
+         );
+        CREATE UNIQUE INDEX IF NOT EXISTS uniq_minigame_sessions_paid_started_user
+          ON minigame_sessions(user_id)
+         WHERE status = 'STARTED'
+           AND ticket_spent_type IN ('BASE', 'BONUS');
+      `);
 
       try {
         sqliteDb.prepare("SELECT with_cosmetics FROM market_listings LIMIT 1").get();

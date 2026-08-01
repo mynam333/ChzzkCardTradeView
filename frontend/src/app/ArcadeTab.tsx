@@ -72,13 +72,14 @@ type CropDetectiveRound = {
 };
 
 type MatchCardSource = {
+  card_id?: string | number;
   channel_id: string;
   name: string;
   logo_url?: string | null;
 };
 
 type MatchCard = MatchCardSource & {
-  id: number;
+  card_id: string;
   isFlipped: boolean;
   isMatched: boolean;
 };
@@ -88,11 +89,23 @@ type PuzzlePiece = {
   rotation: number;
 };
 
+type PuzzleMove =
+  | { type: 'swap'; from: number; to: number }
+  | { type: 'rotate'; index: number };
+
+type MatchedPair = {
+  first_card_id: string;
+  second_card_id: string;
+};
+
 type MinigameData = {
   image_url?: string;
   choices?: QuizChoice[];
   cards?: MatchCardSource[];
+  puzzle_pieces?: PuzzlePiece[];
   rounds?: Array<QuizRound | ValueDuelRound | CropDetectiveRound>;
+  total_rounds?: number;
+  round_deadline_at?: string | null;
 };
 
 type MinigameResult = {
@@ -113,6 +126,9 @@ type SubmitPayload = {
   success?: boolean;
   answer_channel_id?: string;
   puzzle_pieces?: Array<{ id: number; rotation: number }>;
+  puzzle_moves?: PuzzleMove[];
+  matched_pairs?: MatchedPair[];
+  /** Practice-only compatibility with servers that still issue the legacy six-card source list. */
   matched_channel_ids?: string[];
   answers?: Array<{ round: number; selected_channel_id: string }>;
 };
@@ -128,6 +144,7 @@ type RoundFeedback = {
   correct: boolean;
   correct_channel_ids: string[];
   timed_out?: boolean;
+  locked?: boolean;
 };
 
 type TicketStatusResponse = {
@@ -151,6 +168,15 @@ type StartGameResponse = {
   practice_mode?: boolean;
   resumed_session?: boolean;
   interrupted_session_closed?: boolean;
+  round_progress?: {
+    outcomes: Array<{ round: number; selected_channel_id: string | null }>;
+    next_round: number;
+    correct_count: number;
+    total_rounds?: number;
+    round_deadline_at?: string | null;
+  };
+  total_rounds?: number;
+  round_deadline_at?: string | null;
   timing?: {
     server_now: string;
     session_started_at: string | null;
@@ -164,6 +190,22 @@ type StartGameResponse = {
   today_game?: GameType;
   kst_date?: string;
   next_game_at?: string;
+};
+
+type RoundAnswerResponse = {
+  message?: string;
+  server_now?: string;
+  correct?: boolean;
+  correct_channel_ids?: string[];
+  timed_out?: boolean;
+  next_round?: QuizRound | ValueDuelRound | CropDetectiveRound | null;
+  next_round_deadline_at?: string | null;
+  total_rounds?: number;
+};
+
+type PendingPaidRound = {
+  roundIndex: number;
+  localDeadlineAt: number;
 };
 
 const GAME_TYPES: GameType[] = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'];
@@ -233,10 +275,12 @@ const DAILY_GAME_DETAILS: Record<GameType, {
 const PUZZLE_COLUMNS = 3;
 const PUZZLE_ROWS = 4;
 const PUZZLE_PIECE_COUNT = PUZZLE_COLUMNS * PUZZLE_ROWS;
+const MAX_PUZZLE_MOVES = 128;
 const PUZZLE_TIME_LIMIT_SECONDS = 120;
 const PUZZLE_HINT_PENALTY_SECONDS = 10;
 const PUZZLE_HINT_DURATION_MS = 2000;
 const MATCH_TIME_LIMIT_SECONDS = 30;
+const ROUND_GAME_TOTAL_ROUNDS = 5;
 const ROUND_GAME_ROUND_SECONDS = 10;
 const QUIZ_TIME_LIMIT_SECONDS = 10;
 type QuizBlurType = 'gaussian' | 'mosaic' | 'motion' | 'radial';
@@ -904,17 +948,148 @@ const createInitialPuzzlePieces = (): PuzzlePiece[] => {
   return pieces;
 };
 
+const parseServerPuzzlePieces = (rawPieces: unknown): PuzzlePiece[] | null => {
+  if (!Array.isArray(rawPieces) || rawPieces.length !== PUZZLE_PIECE_COUNT) return null;
+
+  const seenIds = new Set<number>();
+  const pieces: PuzzlePiece[] = [];
+  for (const rawPiece of rawPieces) {
+    const id = Number((rawPiece as PuzzlePiece | undefined)?.id);
+    const rotation = Number((rawPiece as PuzzlePiece | undefined)?.rotation);
+    if (
+      !Number.isInteger(id) ||
+      id < 0 ||
+      id >= PUZZLE_PIECE_COUNT ||
+      seenIds.has(id) ||
+      !Number.isFinite(rotation)
+    ) return null;
+    seenIds.add(id);
+    pieces.push({ id, rotation });
+  }
+
+  return seenIds.size === PUZZLE_PIECE_COUNT ? pieces : null;
+};
+
+const parseServerMatchDeck = (rawCards: MatchCardSource[] | undefined): MatchCard[] | null => {
+  if (!Array.isArray(rawCards) || rawCards.length !== 12) return null;
+
+  const cardIds = new Set<string>();
+  const channelCounts = new Map<string, number>();
+  const deck: MatchCard[] = [];
+  for (const rawCard of rawCards) {
+    const cardId = rawCard?.card_id === undefined || rawCard?.card_id === null
+      ? ''
+      : String(rawCard.card_id).trim();
+    const channelId = String(rawCard?.channel_id || '').trim();
+    const name = String(rawCard?.name || '').trim();
+    if (!cardId || cardIds.has(cardId) || !channelId || !name) return null;
+
+    cardIds.add(cardId);
+    channelCounts.set(channelId, (channelCounts.get(channelId) || 0) + 1);
+    deck.push({
+      card_id: cardId,
+      channel_id: channelId,
+      name,
+      logo_url: rawCard.logo_url,
+      isFlipped: true,
+      isMatched: false
+    });
+  }
+
+  if (channelCounts.size !== 6 || Array.from(channelCounts.values()).some((count) => count !== 2)) return null;
+  return deck;
+};
+
+const createLegacyPracticeMatchDeck = (rawCards: MatchCardSource[], sessionId: string): MatchCard[] | null => {
+  if (
+    rawCards.length !== 6 ||
+    new Set(rawCards.map((card) => String(card?.channel_id || '').trim())).size !== 6
+  ) return null;
+
+  return [...rawCards, ...rawCards]
+    .map((card, index) => ({
+      ...card,
+      card_id: `practice:${sessionId}:${index}`,
+      isFlipped: true,
+      isMatched: false
+    }))
+    .sort(() => 0.5 - Math.random());
+};
+
 const isRoundGame = (game: GameType | null): game is 'quiz' | 'value_duel' | 'crop_detective' =>
   game === 'quiz' || game === 'value_duel' || game === 'crop_detective';
 
-const isQuizRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is QuizRound =>
-  Boolean(round && 'image_url' in round && 'choices' in round && !('source_image_url' in round));
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object');
 
-const isValueDuelRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is ValueDuelRound =>
-  Boolean(round && 'left' in round && 'right' in round);
+const isQuizChoice = (value: unknown): value is QuizChoice =>
+  isRecord(value) &&
+  typeof value.channel_id === 'string' && Boolean(value.channel_id.trim()) &&
+  typeof value.name === 'string' && Boolean(value.name.trim());
 
-const isCropDetectiveRound = (round: QuizRound | ValueDuelRound | CropDetectiveRound | undefined): round is CropDetectiveRound =>
-  Boolean(round && 'choices' in round && 'source_image_url' in round);
+const isArcadeCardOption = (value: unknown): value is ArcadeCardOption =>
+  isRecord(value) &&
+  typeof value.channel_id === 'string' && Boolean(value.channel_id.trim()) &&
+  typeof value.name === 'string' && Boolean(value.name.trim()) &&
+  typeof value.image_url === 'string' && Boolean(value.image_url.trim()) &&
+  Number.isFinite(Number(value.star));
+
+const hasUniqueChannelIds = (choices: Array<{ channel_id: string }>) =>
+  new Set(choices.map((choice) => choice.channel_id.trim())).size === choices.length;
+
+const isQuizRound = (round: unknown): round is QuizRound => {
+  if (!isRecord(round) || !Number.isInteger(Number(round.round)) || Number(round.round) < 0) return false;
+  if (typeof round.image_url !== 'string' || !round.image_url.trim() || !Array.isArray(round.choices)) return false;
+  return round.choices.length === 2 && round.choices.every(isQuizChoice) && hasUniqueChannelIds(round.choices);
+};
+
+const isValueDuelRound = (round: unknown): round is ValueDuelRound => {
+  if (!isRecord(round) || !Number.isInteger(Number(round.round)) || Number(round.round) < 0) return false;
+  if (!isArcadeCardOption(round.left) || !isArcadeCardOption(round.right)) return false;
+  return round.left.channel_id.trim() !== round.right.channel_id.trim();
+};
+
+const isCropDetectiveRound = (round: unknown): round is CropDetectiveRound => {
+  if (!isRecord(round) || !Number.isInteger(Number(round.round)) || Number(round.round) < 0) return false;
+  if (
+    typeof round.source_image_url !== 'string' ||
+    !round.source_image_url.trim() ||
+    !isRecord(round.crop) ||
+    !Number.isFinite(Number(round.crop.x)) ||
+    !Number.isFinite(Number(round.crop.y)) ||
+    !Number.isFinite(Number(round.crop.size)) ||
+    Number(round.crop.size) <= 0 ||
+    !Array.isArray(round.choices) ||
+    round.choices.length !== 4 ||
+    !round.choices.every(isArcadeCardOption)
+  ) return false;
+  return hasUniqueChannelIds(round.choices);
+};
+
+const isRoundForGame = (
+  gameType: GameType,
+  round: unknown
+) => {
+  if (gameType === 'quiz') return isQuizRound(round);
+  if (gameType === 'value_duel') return isValueDuelRound(round);
+  if (gameType === 'crop_detective') return isCropDetectiveRound(round);
+  return false;
+};
+
+const getLocalRoundDeadline = (rawDeadline: unknown, serverClockOffsetMs: number): number | null => {
+  if (typeof rawDeadline !== 'string' || !rawDeadline.trim()) return null;
+  const serverDeadlineMs = Date.parse(rawDeadline);
+  if (!Number.isFinite(serverDeadlineMs)) return null;
+  const now = Date.now();
+  const remainingMs = serverDeadlineMs - (now + serverClockOffsetMs);
+  return now + Math.max(0, remainingMs);
+};
+
+const getVisibleRoundTimeLeft = (deadlineAt: number, now = Date.now()) =>
+  Math.max(
+    0,
+    Math.min(ROUND_GAME_ROUND_SECONDS, Math.ceil((deadlineAt - now) / 1000))
+  );
 
 const clampCropValue = (value: number, min: number, max: number) => {
   if (max <= min) return 0.5;
@@ -960,47 +1135,146 @@ const CROP_PROGRESS_STORAGE_PREFIX = 'chikapo:crop-detective-progress:';
 const cropProgressStorageKey = (userId: string, sessionId: string) =>
   `${CROP_PROGRESS_STORAGE_PREFIX}${userId}:${sessionId}`;
 
-const readCropDetectiveProgress = (userId: string, sessionId: string, totalRounds: number) => {
-  if (typeof window === 'undefined' || !userId || !sessionId) return null;
-  try {
-    const raw = window.sessionStorage.getItem(cropProgressStorageKey(userId, sessionId));
-    if (!raw) return null;
-    const snapshot = JSON.parse(raw) as CropDetectiveProgressSnapshot;
-    if (
-      snapshot.version !== 1 ||
-      snapshot.userId !== userId ||
-      snapshot.sessionId !== sessionId ||
-      !Number.isInteger(snapshot.roundIndex) ||
-      snapshot.roundIndex < 0 ||
-      snapshot.roundIndex >= totalRounds ||
-      !Array.isArray(snapshot.roundAnswers) ||
-      (snapshot.roundTimeLeft !== undefined && (
-        !Number.isFinite(snapshot.roundTimeLeft) ||
-        snapshot.roundTimeLeft < 0 ||
-        snapshot.roundTimeLeft > ROUND_GAME_ROUND_SECONDS
-      )) ||
-      (snapshot.roundDeadlineAt !== undefined && snapshot.roundDeadlineAt !== null && !Number.isFinite(snapshot.roundDeadlineAt)) ||
-      !Number.isFinite(snapshot.savedAt) ||
-      Date.now() - snapshot.savedAt > 4 * 60_000
-    ) return null;
-    return snapshot;
-  } catch {
-    return null;
-  }
+type ParsedServerRoundProgress = {
+  nextRound: number;
+  complete: boolean;
+  correctCount: number;
+  answers: Array<{ round: number; selected_channel_id: string }>;
 };
 
-const getRestoredCropDetectiveRoundTiming = (
-  snapshot: CropDetectiveProgressSnapshot | null,
-  hasFeedback: boolean
-) => {
-  const storedSeconds = snapshot?.roundTimeLeft === undefined
-    ? ROUND_GAME_ROUND_SECONDS
-    : Math.max(0, Math.min(ROUND_GAME_ROUND_SECONDS, Math.ceil(snapshot.roundTimeLeft)));
-  const storedDeadline = snapshot?.roundDeadlineAt;
-  if (hasFeedback || storedDeadline === undefined || storedDeadline === null || !Number.isFinite(storedDeadline)) {
-    return storedSeconds;
+type PaidRoundContract = {
+  rounds: Array<QuizRound | ValueDuelRound | CropDetectiveRound>;
+  totalRounds: number;
+  currentRoundIndex: number;
+  complete: boolean;
+  progress: ParsedServerRoundProgress | null;
+  localDeadlineAt: number | null;
+  serverClockOffsetMs: number;
+};
+
+const parseServerRoundProgress = (
+  rawProgress: StartGameResponse['round_progress'],
+  totalRounds: number
+): ParsedServerRoundProgress | null => {
+  if (!rawProgress || !Array.isArray(rawProgress.outcomes)) return null;
+  const nextRound = Number(rawProgress.next_round);
+  const correctCount = Number(rawProgress.correct_count);
+  if (
+    !Number.isInteger(nextRound) ||
+    nextRound < 0 ||
+    nextRound > totalRounds ||
+    !Number.isInteger(correctCount) ||
+    correctCount < 0 ||
+    correctCount > totalRounds ||
+    rawProgress.outcomes.length !== nextRound
+  ) return null;
+
+  const outcomes = rawProgress.outcomes
+    .map((outcome) => ({
+      round: Number(outcome?.round),
+      selected_channel_id: outcome?.selected_channel_id === null
+        ? null
+        : String(outcome?.selected_channel_id || '').trim()
+    }))
+    .sort((a, b) => a.round - b.round);
+  if (outcomes.some((outcome, index) => (
+    !Number.isInteger(outcome.round) ||
+    outcome.round !== index ||
+    (outcome.selected_channel_id !== null && !outcome.selected_channel_id)
+  ))) return null;
+
+  return {
+    nextRound: Math.min(nextRound, Math.max(0, totalRounds - 1)),
+    complete: nextRound === totalRounds,
+    correctCount,
+    answers: outcomes
+      .filter((outcome): outcome is { round: number; selected_channel_id: string } => outcome.selected_channel_id !== null)
+      .map((outcome) => ({ round: outcome.round, selected_channel_id: outcome.selected_channel_id }))
+  };
+};
+
+const hasValidDisclosedRounds = (
+  gameType: GameType,
+  rounds: Array<QuizRound | ValueDuelRound | CropDetectiveRound>,
+  expectedLength: number
+) => (
+  rounds.length === expectedLength &&
+  rounds.every((round, index) => Number(round?.round) === index && isRoundForGame(gameType, round))
+);
+
+const parsePaidRoundContract = (
+  data: StartGameResponse,
+  gameType: GameType
+): PaidRoundContract | null => {
+  if (
+    !isRoundGame(gameType) ||
+    data.practice_mode === true ||
+    typeof data.session_id !== 'string' ||
+    !data.session_id.trim() ||
+    !data.game_data ||
+    !Array.isArray(data.game_data.rounds)
+  ) return null;
+
+  const totalRounds = Number(data.game_data.total_rounds);
+  if (
+    !Number.isInteger(totalRounds) ||
+    totalRounds !== ROUND_GAME_TOTAL_ROUNDS ||
+    (data.total_rounds !== undefined && Number(data.total_rounds) !== totalRounds) ||
+    (data.game_type !== undefined && data.game_type !== gameType)
+  ) return null;
+
+  const serverNowMs = Date.parse(data.timing?.server_now || '');
+  if (!Number.isFinite(serverNowMs)) return null;
+  const clockOffsetMs = serverNowMs - Date.now();
+  const resumed = data.resumed_session === true;
+  let progress: ParsedServerRoundProgress | null = null;
+  let currentRoundIndex = 0;
+  let complete = false;
+  let rawDeadline: unknown = data.game_data.round_deadline_at ?? data.round_deadline_at;
+  let expectedDisclosedRounds = 1;
+
+  if (resumed) {
+    if (gameType !== 'crop_detective' || Number(data.round_progress?.total_rounds) !== totalRounds) return null;
+    progress = parseServerRoundProgress(data.round_progress, totalRounds);
+    if (!progress) return null;
+    currentRoundIndex = progress.nextRound;
+    complete = progress.complete;
+    expectedDisclosedRounds = complete ? totalRounds : currentRoundIndex + 1;
+    rawDeadline = data.round_progress?.round_deadline_at ?? rawDeadline;
+  } else if (data.round_progress !== undefined) {
+    return null;
   }
-  return Math.max(0, Math.min(ROUND_GAME_ROUND_SECONDS, Math.ceil((storedDeadline - Date.now()) / 1000)));
+
+  const rounds = data.game_data.rounds;
+  if (!hasValidDisclosedRounds(gameType, rounds, expectedDisclosedRounds)) return null;
+
+  const localDeadlineAt = getLocalRoundDeadline(rawDeadline, clockOffsetMs);
+  if (!complete && localDeadlineAt === null) return null;
+
+  return {
+    rounds,
+    totalRounds,
+    currentRoundIndex,
+    complete,
+    progress,
+    localDeadlineAt: complete ? null : localDeadlineAt,
+    serverClockOffsetMs: clockOffsetMs
+  };
+};
+
+const parsePracticeRoundTotal = (data: StartGameResponse, gameType: GameType): number | null => {
+  if (!isRoundGame(gameType) || !Array.isArray(data.game_data?.rounds)) return null;
+  const rounds = data.game_data.rounds;
+  const declaredTotal = data.game_data.total_rounds === undefined
+    ? rounds.length
+    : Number(data.game_data.total_rounds);
+  if (
+    !Number.isInteger(declaredTotal) ||
+    declaredTotal !== ROUND_GAME_TOTAL_ROUNDS ||
+    (data.total_rounds !== undefined && Number(data.total_rounds) !== declaredTotal) ||
+    !hasValidDisclosedRounds(gameType, rounds, declaredTotal)
+  ) return null;
+  return declaredTotal;
 };
 
 const clearCropDetectiveProgress = (userId?: string | null, sessionId?: string | null) => {
@@ -1019,6 +1293,14 @@ const getCropDetectiveStillImage = (
 ) => {
   if (!url) return '/icon.png';
   return proxiedImage(url, { width, quality }) || '/icon.png';
+};
+
+const MINIGAME_IMAGE_REFERENCE_PREFIX = 'minigame-image:v1:';
+const isProtectedMinigameImage = (url?: string | null) =>
+  Boolean(url?.startsWith(MINIGAME_IMAGE_REFERENCE_PREFIX));
+const resolveMinigameImage = (url?: string | null) => {
+  if (!url) return '/icon.png';
+  return isProtectedMinigameImage(url) ? (proxiedImage(url) || '/icon.png') : url;
 };
 
 const CROP_ANALYSIS_CANVAS_WIDTH = 240;
@@ -1464,11 +1746,64 @@ const CardImageTile: React.FC<{
   );
 };
 
-const CropPreview: React.FC<{
+type CropPreviewProps = {
   round: CropDetectiveRound;
   revealed: boolean;
   onPrepared?: (roundKey: string) => void;
-}> = ({ round, revealed, onPrepared }) => {
+};
+
+const ProtectedCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrepared }) => {
+  const roundKey = getCropDetectiveRoundKey(round);
+  const primaryUrl = resolveMinigameImage(round.source_image_url);
+  const fallbackUrl = round.source_fallback_image_url
+    ? resolveMinigameImage(round.source_fallback_image_url)
+    : '/icon.png';
+
+  return (
+    <div
+      role="img"
+      aria-label="확대된 카드 이미지 조각"
+      aria-busy={!revealed}
+      className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {/* Authenticated short-lived image URLs must load in the user's browser so
+          the httpOnly session cookie is sent; Next/Image's server optimizer cannot. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        key={roundKey}
+        src={primaryUrl}
+        alt=""
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity ${revealed ? 'opacity-100' : 'opacity-0'}`}
+        draggable={false}
+        onLoad={() => onPrepared?.(roundKey)}
+        onError={(event) => {
+          const element = event.currentTarget;
+          if (element.dataset.fallbackApplied !== 'true') {
+            element.dataset.fallbackApplied = 'true';
+            element.src = fallbackUrl;
+            return;
+          }
+          if (!element.src.endsWith('/icon.png')) element.src = '/icon.png';
+        }}
+      />
+      {!revealed ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] text-white">
+          <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
+          <span className="text-[10px] font-black tracking-wide text-white/75">확대 이미지 준비 중</span>
+        </div>
+      ) : null}
+      <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
+      {revealed ? (
+        <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-black tracking-[0.14em] text-white/80">
+          ZOOM CROP
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrepared }) => {
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
   const cropBounds = getCropDetectiveBounds(size, rotation);
@@ -1635,6 +1970,11 @@ const CropPreview: React.FC<{
     </div>
   );
 };
+
+const CropPreview: React.FC<CropPreviewProps> = (props) =>
+  isProtectedMinigameImage(props.round.source_image_url)
+    ? <ProtectedCropPreview {...props} />
+    : <ClientCropPreview {...props} />;
 
 const CropDetectiveChoiceTile: React.FC<{
   roundKey: string;
@@ -1835,6 +2175,9 @@ export const ArcadeTab: React.FC = () => {
 
   // 2. 카드 퍼즐 전용 상태
   const [puzzlePieces, setPuzzlePieces] = useState<PuzzlePiece[]>([]);
+  const [puzzleMoves, setPuzzleMoves] = useState<PuzzleMove[]>([]);
+  const puzzleMovesRef = useRef<PuzzleMove[]>([]);
+  const [puzzleUsesServerLayout, setPuzzleUsesServerLayout] = useState(false);
   const [draggingPuzzleIndex, setDraggingPuzzleIndex] = useState<number | null>(null);
   const [dragOverPuzzleIndex, setDragOverPuzzleIndex] = useState<number | null>(null);
   const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(PUZZLE_TIME_LIMIT_SECONDS);
@@ -1854,20 +2197,37 @@ export const ArcadeTab: React.FC = () => {
 
   // 3. 카드 뒤집기 전용 상태
   const [matchCards, setMatchCards] = useState<MatchCard[]>([]);
+  const [matchedPairs, setMatchedPairs] = useState<MatchedPair[]>([]);
+  const [matchUsesServerDeck, setMatchUsesServerDeck] = useState(false);
   const [flippedIndices, setFlippedIndices] = useState<number[]>([]);
   const [revealActive, setRevealActive] = useState(false); // 시작 시 2초 공개 중인지 여부
   const [gameTimeLeft, setGameTimeLeft] = useState(MATCH_TIME_LIMIT_SECONDS);
   const [isGameOver, setIsGameOver] = useState(false);
   const matchDeadlineRef = useRef<number | null>(null);
+  const matchActionTimeoutsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const timeouts = matchActionTimeoutsRef.current;
+    return () => {
+      timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      timeouts.clear();
+    };
+  }, []);
 
   // 4. 5라운드형 게임 공통 상태 (시세 듀얼 / 카드 확대 탐정)
   const [roundIndex, setRoundIndex] = useState(0);
+  const [roundTotalRounds, setRoundTotalRounds] = useState(ROUND_GAME_TOTAL_ROUNDS);
   const [roundAnswers, setRoundAnswers] = useState<Array<{ round: number; selected_channel_id: string }>>([]);
   const [roundFeedback, setRoundFeedback] = useState<RoundFeedback | null>(null);
   const [roundCorrectCount, setRoundCorrectCount] = useState(0);
   const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
   const [roundChecking, setRoundChecking] = useState(false);
+  const [roundTimeoutRetryAttempt, setRoundTimeoutRetryAttempt] = useState(0);
   const roundDeadlineRef = useRef<number | null>(null);
+  const [roundDeadlineSyncAt, setRoundDeadlineSyncAt] = useState<number | null>(null);
+  const [roundSubmissionKey, setRoundSubmissionKey] = useState<string | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
+  const [pendingPaidRound, setPendingPaidRound] = useState<PendingPaidRound | null>(null);
   const [cropDetectiveReadyKey, setCropDetectiveReadyKey] = useState('');
   const [imageBlindMenu, setImageBlindMenu] = useState<{ x: number; y: number; imageUrl: string } | null>(null);
   const currentCropDetectiveRound = activeGame === 'crop_detective'
@@ -1879,6 +2239,10 @@ export const ArcadeTab: React.FC = () => {
   const cropDetectiveRoundReady = Boolean(
     currentCropDetectiveRoundKey && cropDetectiveReadyKey === currentCropDetectiveRoundKey
   );
+
+  useEffect(() => {
+    if (roundDeadlineSyncAt !== null) roundDeadlineRef.current = roundDeadlineSyncAt;
+  }, [roundDeadlineSyncAt]);
 
   const handleCropDetectiveRoundReady = useCallback((roundKey: string) => {
     setCropDetectiveReadyKey((previousKey) => previousKey === roundKey ? previousKey : roundKey);
@@ -1973,36 +2337,68 @@ export const ArcadeTab: React.FC = () => {
   }, []);
 
   const restoreCropDetectiveSession = useCallback((data: StartGameResponse) => {
-    if (!data.session_id || !Array.isArray(data.game_data?.rounds)) return;
-    const progress = readCropDetectiveProgress(currentUserId || '', data.session_id, data.game_data.rounds.length);
-    const restoredRoundIndex = progress?.roundIndex ?? 0;
-    const restoredFeedback = progress?.roundFeedback?.round === restoredRoundIndex
-      ? progress.roundFeedback
+    const contract = parsePaidRoundContract(data, 'crop_detective');
+    if (!contract || !data.resumed_session || !contract.progress) {
+      toast('진행 중인 카드 확대 탐정의 서버 검증 데이터를 확인할 수 없어 복구를 중단했습니다.', 'error');
+      return;
+    }
+
+    const serverProgress = contract.progress;
+    const restoredRoundIndex = contract.currentRoundIndex;
+    const restoredFeedback: RoundFeedback | null = contract.complete
+      ? {
+          round: restoredRoundIndex,
+          correct: false,
+          correct_channel_ids: [],
+          locked: true
+        }
       : null;
-    const restoredTimeLeft = getRestoredCropDetectiveRoundTiming(progress, Boolean(restoredFeedback));
+    const restoredTimeLeft = contract.localDeadlineAt === null
+      ? 0
+      : getVisibleRoundTimeLeft(contract.localDeadlineAt);
     submitInFlightRef.current = false;
+    setRoundSubmissionKey(null);
     setSubmitRetry(null);
     setSessionId(data.session_id);
-    setGameData(data.game_data);
+    setGameData({
+      ...data.game_data,
+      rounds: contract.rounds,
+      total_rounds: contract.totalRounds
+    });
     setActiveGame('crop_detective');
     setIsPracticeMode(false);
     setGameResult(null);
     setIsGameOver(false);
     setRoundIndex(restoredRoundIndex);
-    setRoundAnswers(progress?.roundAnswers || []);
+    setRoundTotalRounds(contract.totalRounds);
+    setPendingPaidRound(null);
+    setServerClockOffsetMs(contract.serverClockOffsetMs);
+    setRoundAnswers(serverProgress.answers);
     setRoundFeedback(restoredFeedback);
-    setRoundCorrectCount(Math.max(0, Math.min(data.game_data.rounds.length, progress?.roundCorrectCount || 0)));
+    setRoundCorrectCount(Math.max(0, Math.min(
+      contract.totalRounds,
+      serverProgress.correctCount
+    )));
     setRoundChecking(false);
+    setRoundTimeoutRetryAttempt(0);
+    setRoundDeadlineSyncAt(contract.localDeadlineAt);
     setRoundTimeLeft(restoredTimeLeft);
     setCropDetectiveReadyKey('');
-    roundDeadlineRef.current = null;
-    // A resumed round remains paused until its enlarged clue and four choices finish loading.
+    puzzleMovesRef.current = [];
+    setPuzzleMoves([]);
+    setPuzzleUsesServerLayout(false);
+    setMatchedPairs([]);
+    setMatchUsesServerDeck(false);
+    matchActionTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    matchActionTimeoutsRef.current.clear();
+    roundDeadlineRef.current = contract.localDeadlineAt;
     setCountdownLeft(0);
     toast(data.message || '진행 중이던 카드 확대 탐정을 복구했습니다.', 'info');
-  }, [currentUserId, toast]);
+  }, [toast]);
 
   const resetGameView = useCallback(() => {
     submitInFlightRef.current = false;
+    setRoundSubmissionKey(null);
     setSubmitRetry(null);
     setActiveGame(null);
     setGameData(null);
@@ -2012,11 +2408,23 @@ export const ArcadeTab: React.FC = () => {
     setIsPracticeMode(false);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    puzzleMovesRef.current = [];
+    setPuzzleMoves([]);
+    setPuzzleUsesServerLayout(false);
+    setMatchedPairs([]);
+    setMatchUsesServerDeck(false);
+    matchActionTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    matchActionTimeoutsRef.current.clear();
     setRoundIndex(0);
+    setRoundTotalRounds(ROUND_GAME_TOTAL_ROUNDS);
+    setPendingPaidRound(null);
+    setServerClockOffsetMs(0);
     setRoundAnswers([]);
     setRoundFeedback(null);
     setRoundCorrectCount(0);
     setRoundChecking(false);
+    setRoundTimeoutRetryAttempt(0);
+    setRoundDeadlineSyncAt(null);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
     setCropDetectiveReadyKey('');
     puzzleDeadlineRef.current = null;
@@ -2135,6 +2543,180 @@ export const ArcadeTab: React.FC = () => {
     }
   }, [activeGame, currentUserId, gameTimeLeft, handleExitGame, puzzleTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
 
+  const submitRoundAnswer = useCallback(async (
+    selectedChannelId: string | null,
+    timedOut = false
+  ) => {
+    if (!sessionId || !isRoundGame(activeGame)) return;
+    const selected = String(selectedChannelId || '').trim();
+    if (!timedOut && !selected) return;
+    if (
+      gameBusy ||
+      roundChecking ||
+      roundFeedback ||
+      gameResult ||
+      isGameOver ||
+      (!timedOut && roundTimeLeft <= 0) ||
+      (countdownLeft !== null && countdownLeft > 0)
+    ) return;
+
+    const submissionKey = `${sessionId}:${roundIndex}`;
+    if (roundSubmissionKey === submissionKey) return;
+    setRoundSubmissionKey(submissionKey);
+    setRoundChecking(true);
+
+    const handleTimedOutSubmissionFailure = () => {
+      setRoundSubmissionKey(null);
+      if (isPracticeMode) {
+        setRoundFeedback({
+          round: roundIndex,
+          correct: false,
+          correct_channel_ids: [],
+          timed_out: true
+        });
+        return;
+      }
+
+      const retrySeconds = Math.min(5, 2 ** Math.min(roundTimeoutRetryAttempt, 3));
+      setRoundTimeoutRetryAttempt((attempt) => attempt + 1);
+      setRoundTimeLeft(retrySeconds);
+      setRoundDeadlineSyncAt(Date.now() + retrySeconds * 1000);
+    };
+
+    try {
+      const res = await apiFetch('/minigames/round-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          payload: {
+            round: roundIndex,
+            ...(timedOut ? { timed_out: true } : { selected_channel_id: selected })
+          }
+        })
+      });
+      const data = await res.json().catch(() => ({})) as RoundAnswerResponse;
+      if (!res.ok) {
+        if (timedOut) {
+          if (isPracticeMode || roundTimeoutRetryAttempt === 0) {
+            toast(data.message || '시간 초과 결과를 저장하지 못했습니다. 잠시 후 다시 시도합니다.', 'warning');
+          }
+          handleTimedOutSubmissionFailure();
+        } else {
+          setRoundSubmissionKey(null);
+          toast(data.message || '라운드 결과 확인에 실패했습니다.', 'error');
+        }
+        return;
+      }
+
+      setRoundTimeoutRetryAttempt(0);
+      setRoundDeadlineSyncAt(null);
+      if (!timedOut) {
+        setRoundAnswers(prev => {
+          const withoutCurrent = prev.filter(answer => answer.round !== roundIndex);
+          return [...withoutCurrent, { round: roundIndex, selected_channel_id: selected }];
+        });
+      }
+      if (!timedOut && data.correct) setRoundCorrectCount(prev => prev + 1);
+      setRoundFeedback({
+        round: roundIndex,
+        ...(selected ? { selected_channel_id: selected } : {}),
+        correct: timedOut ? false : Boolean(data.correct),
+        correct_channel_ids: Array.isArray(data.correct_channel_ids) ? data.correct_channel_ids : [],
+        timed_out: timedOut || Boolean(data.timed_out)
+      });
+
+      if (!isPracticeMode) {
+        const responseTotalRounds = Number(data.total_rounds);
+        const expectedNextIndex = roundIndex + 1;
+        const hasNextRound = expectedNextIndex < roundTotalRounds;
+        const nextRound = data.next_round === null ? null : data.next_round;
+        const responseServerNowMs = Date.parse(data.server_now || '');
+        const nextServerClockOffsetMs = Number.isFinite(responseServerNowMs)
+          ? responseServerNowMs - Date.now()
+          : serverClockOffsetMs;
+        const nextLocalDeadline = getLocalRoundDeadline(
+          data.next_round_deadline_at,
+          nextServerClockOffsetMs
+        );
+        const validNextRound = Boolean(
+          nextRound &&
+          isRoundForGame(activeGame, nextRound) &&
+          Number(nextRound.round) === expectedNextIndex
+        );
+        const validProtocol =
+          Number.isInteger(responseTotalRounds) &&
+          responseTotalRounds === roundTotalRounds &&
+          (hasNextRound
+            ? validNextRound && nextLocalDeadline !== null
+            : data.next_round === null);
+
+        if (!validProtocol) {
+          setPendingPaidRound(null);
+          setIsGameOver(true);
+          toast('다음 라운드의 서버 검증 데이터를 확인할 수 없어 진행을 중단했습니다.', 'error');
+          return;
+        }
+
+        if (nextRound && nextLocalDeadline !== null) {
+          setServerClockOffsetMs(nextServerClockOffsetMs);
+          setGameData((previousData) => {
+            if (!previousData) return previousData;
+            const rounds = [...(previousData.rounds || []).filter((round) => round.round !== nextRound.round), nextRound]
+              .sort((left, right) => left.round - right.round);
+            return { ...previousData, rounds, total_rounds: responseTotalRounds };
+          });
+          setPendingPaidRound({ roundIndex: expectedNextIndex, localDeadlineAt: nextLocalDeadline });
+        } else {
+          setPendingPaidRound(null);
+        }
+      }
+    } catch {
+      if (timedOut) {
+        if (isPracticeMode || roundTimeoutRetryAttempt === 0) {
+          toast('시간 초과 결과를 저장하지 못했습니다. 연결이 복구되면 다시 시도합니다.', 'warning');
+        }
+        handleTimedOutSubmissionFailure();
+      } else {
+        setRoundSubmissionKey(null);
+        toast('라운드 결과 확인에 실패했습니다.', 'warning');
+      }
+    } finally {
+      setRoundChecking(false);
+    }
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, isPracticeMode, roundChecking, roundFeedback, roundIndex, roundSubmissionKey, roundTimeLeft, roundTimeoutRetryAttempt, roundTotalRounds, serverClockOffsetMs, sessionId, toast]);
+
+  const advanceToPaidRound = useCallback((pendingRound: PendingPaidRound) => {
+    if (!isRoundGame(activeGame)) return;
+    const nextRound = gameData?.rounds?.find((round) => round.round === pendingRound.roundIndex);
+    if (!isRoundForGame(activeGame, nextRound)) {
+      setIsGameOver(true);
+      toast('서버가 공개한 다음 라운드를 확인할 수 없어 진행을 중단했습니다.', 'error');
+      return;
+    }
+
+    setPendingPaidRound(null);
+    setRoundIndex(pendingRound.roundIndex);
+    setRoundSubmissionKey(null);
+    setRoundTimeoutRetryAttempt(0);
+    setRoundFeedback(null);
+    setRoundDeadlineSyncAt(pendingRound.localDeadlineAt);
+    setRoundTimeLeft(getVisibleRoundTimeLeft(pendingRound.localDeadlineAt));
+    if (activeGame === 'crop_detective') setCropDetectiveReadyKey('');
+    if (activeGame === 'quiz') {
+      setQuizStartTime(Date.now());
+      setQuizIntensity(100);
+      setQuizBlurType((previousType) => getRandomQuizBlurType(previousType));
+      setQuizBlurAngle(Math.floor(Math.random() * 360));
+    }
+  }, [activeGame, gameData?.rounds, toast]);
+
+  useEffect(() => {
+    if (isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
+    const timer = window.setTimeout(() => advanceToPaidRound(pendingPaidRound), 450);
+    return () => window.clearTimeout(timer);
+  }, [advanceToPaidRound, isGameOver, isPracticeMode, pendingPaidRound, roundFeedback]);
+
   useEffect(() => {
     if (!submitRetry || gameResult || !sessionId) return;
     const retryDelayMs = Math.min(5000, 1200 + submitRetry.attempt * 600);
@@ -2246,8 +2828,12 @@ export const ArcadeTab: React.FC = () => {
           if (activeGame === 'quiz') {
             setQuizStartTime(now);
             setQuizIntensity(100);
-            roundDeadlineRef.current = now + QUIZ_TIME_LIMIT_SECONDS * 1000;
-            setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
+            if (isPracticeMode || roundDeadlineRef.current === null) {
+              roundDeadlineRef.current = now + QUIZ_TIME_LIMIT_SECONDS * 1000;
+              setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
+            } else {
+              setRoundTimeLeft(getVisibleRoundTimeLeft(roundDeadlineRef.current, now));
+            }
           } else if (activeGame === 'puzzle') {
             puzzleDeadlineRef.current = now + PUZZLE_TIME_LIMIT_SECONDS * 1000;
             // 카운트다운 종료 후 바로 퍼즐 조작을 허용합니다.
@@ -2261,13 +2847,21 @@ export const ArcadeTab: React.FC = () => {
               setRevealActive(false);
             }, 2000);
           } else if (activeGame === 'crop_detective') {
-            // Crop detective starts only after the enlarged clue and all four
-            // decoded candidate images have been revealed together.
-            roundDeadlineRef.current = null;
-            setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+            if (isPracticeMode) {
+              // Practice has no authoritative server deadline, so its clock can
+              // wait until the enlarged clue and all candidate images are ready.
+              roundDeadlineRef.current = null;
+              setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+            } else if (roundDeadlineRef.current !== null) {
+              setRoundTimeLeft(getVisibleRoundTimeLeft(roundDeadlineRef.current, now));
+            }
           } else if (isRoundGame(activeGame)) {
-            roundDeadlineRef.current = now + ROUND_GAME_ROUND_SECONDS * 1000;
-            setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+            if (isPracticeMode || roundDeadlineRef.current === null) {
+              roundDeadlineRef.current = now + ROUND_GAME_ROUND_SECONDS * 1000;
+              setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
+            } else {
+              setRoundTimeLeft(getVisibleRoundTimeLeft(roundDeadlineRef.current, now));
+            }
           }
           return 0;
         }
@@ -2276,7 +2870,7 @@ export const ArcadeTab: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [countdownLeft, activeGame]);
+  }, [countdownLeft, activeGame, isPracticeMode]);
 
   // 짝맞추기 30초 인게임 타이머 구동
   useEffect(() => {
@@ -2286,7 +2880,7 @@ export const ArcadeTab: React.FC = () => {
         if (submitInFlightRef.current) return;
         setIsGameOver(true);
         // 시간 제한 만료 실패 제출
-        submitResult({ success: false });
+        submitResult({ success: false, matched_pairs: matchedPairs });
       }, 0);
       return () => window.clearTimeout(timeout);
     }
@@ -2298,7 +2892,7 @@ export const ArcadeTab: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [activeGame, revealActive, gameBusy, gameTimeLeft, gameResult, isGameOver, countdownLeft, submitResult]);
+  }, [activeGame, revealActive, gameBusy, gameTimeLeft, gameResult, isGameOver, countdownLeft, matchedPairs, submitResult]);
 
   useEffect(() => {
     if (
@@ -2313,13 +2907,22 @@ export const ArcadeTab: React.FC = () => {
       return;
     }
 
-    if (matchCards.every(card => card.isMatched)) {
-      submitResult({
-        success: true,
-        matched_channel_ids: matchCards.map(card => card.channel_id)
-      });
+    if (
+      matchCards.every(card => card.isMatched) &&
+      matchedPairs.length === matchCards.length / 2
+    ) {
+      const timeout = window.setTimeout(() => {
+        submitResult({
+          success: true,
+          matched_pairs: matchedPairs,
+          ...(isPracticeMode && !matchUsesServerDeck
+            ? { matched_channel_ids: matchCards.map(card => card.channel_id) }
+            : {})
+        });
+      }, 0);
+      return () => window.clearTimeout(timeout);
     }
-  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, matchCards, revealActive, submitResult]);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, isPracticeMode, matchCards, matchedPairs, matchUsesServerDeck, revealActive, submitResult]);
 
   // 회전 퍼즐 120초 인게임 타이머 구동
   useEffect(() => {
@@ -2328,7 +2931,11 @@ export const ArcadeTab: React.FC = () => {
       const timeout = window.setTimeout(() => {
         if (submitInFlightRef.current) return;
         setIsGameOver(true);
-        submitResult({ success: false });
+        submitResult({
+          success: false,
+          puzzle_moves: puzzleMoves,
+          puzzle_pieces: puzzlePieces.map((piece) => ({ id: piece.id, rotation: piece.rotation }))
+        });
       }, 0);
       return () => window.clearTimeout(timeout);
     }
@@ -2340,7 +2947,7 @@ export const ArcadeTab: React.FC = () => {
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, puzzleTimeLeft, submitResult]);
+  }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, puzzleMoves, puzzlePieces, puzzleTimeLeft, submitResult]);
 
   // 인물 퀴즈 블러 강도 감쇄 타이머 구동 (10초 동안 100 -> 0, 50ms 갱신)
   useEffect(() => {
@@ -2363,11 +2970,12 @@ export const ArcadeTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, roundFeedback]);
 
-  // 카드 확대 탐정은 현재 라운드의 확대 이미지와 후보 이미지가 모두
-  // 디코딩·분석되어 한 번에 공개된 뒤에만 제한 시간을 시작합니다.
+  // 연습 카드 확대 탐정은 이미지가 모두 준비된 뒤에만 로컬 제한 시간을 시작합니다.
+  // 보상형 게임은 이미지 준비 여부와 무관하게 서버 마감시간을 그대로 따릅니다.
   useEffect(() => {
     if (
       activeGame !== 'crop_detective' ||
+      !isPracticeMode ||
       gameBusy ||
       roundChecking ||
       gameResult ||
@@ -2392,6 +3000,7 @@ export const ArcadeTab: React.FC = () => {
     gameBusy,
     gameResult,
     isGameOver,
+    isPracticeMode,
     roundChecking,
     roundFeedback,
     roundTimeLeft
@@ -2400,16 +3009,11 @@ export const ArcadeTab: React.FC = () => {
   // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
   useEffect(() => {
     if (!isRoundGame(activeGame) || gameBusy || roundChecking || gameResult || isGameOver || roundFeedback || (countdownLeft !== null && countdownLeft > 0)) return;
-    if (activeGame === 'crop_detective' && !cropDetectiveRoundReady) return;
+    if (activeGame === 'crop_detective' && isPracticeMode && !cropDetectiveRoundReady) return;
 
     if (roundTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
-        setRoundFeedback({
-          round: roundIndex,
-          correct: false,
-          correct_channel_ids: [],
-          timed_out: true
-        });
+        void submitRoundAnswer(null, true);
       }, 0);
       return () => window.clearTimeout(timeout);
     }
@@ -2417,14 +3021,14 @@ export const ArcadeTab: React.FC = () => {
     const timer = window.setInterval(() => {
       const currentRoundDeadline = roundDeadlineRef.current;
       if (currentRoundDeadline) {
-        setRoundTimeLeft(Math.max(0, Math.ceil((currentRoundDeadline - Date.now()) / 1000)));
+        setRoundTimeLeft(getVisibleRoundTimeLeft(currentRoundDeadline));
       } else {
         setRoundTimeLeft(prev => Math.max(0, prev - 1));
       }
     }, 250);
 
     return () => window.clearInterval(timer);
-  }, [activeGame, countdownLeft, cropDetectiveRoundReady, gameBusy, gameResult, isGameOver, roundChecking, roundFeedback, roundIndex, roundTimeLeft]);
+  }, [activeGame, countdownLeft, cropDetectiveRoundReady, gameBusy, gameResult, isGameOver, isPracticeMode, roundChecking, roundFeedback, roundTimeLeft, submitRoundAnswer]);
 
   // 포맷팅 헬퍼 (초 -> HH:MM:SS)
   const formatTime = (secs: number) => {
@@ -2456,6 +3060,7 @@ export const ArcadeTab: React.FC = () => {
     activeSessionRestoreAllowedRef.current = false;
     setGameBusy(true);
     submitInFlightRef.current = false;
+    setRoundSubmissionKey(null);
     setSubmitRetry(null);
     setGameResult(null);
     setFlippedIndices([]);
@@ -2464,12 +3069,24 @@ export const ArcadeTab: React.FC = () => {
     setPuzzleTimeLeft(PUZZLE_TIME_LIMIT_SECONDS);
     setPuzzleHintUsed(false);
     setShowPuzzleHint(false);
+    puzzleMovesRef.current = [];
+    setPuzzleMoves([]);
+    setPuzzleUsesServerLayout(false);
+    setMatchedPairs([]);
+    setMatchUsesServerDeck(false);
+    matchActionTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    matchActionTimeoutsRef.current.clear();
     setRoundIndex(0);
+    setRoundTotalRounds(ROUND_GAME_TOTAL_ROUNDS);
+    setPendingPaidRound(null);
+    setServerClockOffsetMs(0);
     setRoundAnswers([]);
     setRoundFeedback(null);
     setRoundCorrectCount(0);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
     setRoundChecking(false);
+    setRoundTimeoutRetryAttempt(0);
+    setRoundDeadlineSyncAt(null);
     setCropDetectiveReadyKey('');
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
@@ -2500,10 +3117,78 @@ export const ArcadeTab: React.FC = () => {
         return;
       }
 
+      const responsePracticeMode = data.practice_mode === true;
+      const responseGameData = isRecord(data.game_data)
+        ? data.game_data as MinigameData
+        : null;
+      const serverPuzzlePieces = type === 'puzzle'
+        ? parseServerPuzzlePieces(responseGameData?.puzzle_pieces)
+        : null;
+      const serverMatchDeck = type === 'match'
+        ? parseServerMatchDeck(responseGameData?.cards)
+        : null;
+      const legacyPracticeMatchDeck = type === 'match' && responsePracticeMode && !serverMatchDeck
+        ? createLegacyPracticeMatchDeck(responseGameData?.cards ?? [], data.session_id)
+        : null;
+      const paidRoundContract = !responsePracticeMode && responseGameData && isRoundGame(type)
+        ? parsePaidRoundContract(data, type)
+        : null;
+      const practiceRoundTotal = responsePracticeMode && responseGameData && isRoundGame(type)
+        ? parsePracticeRoundTotal(data, type)
+        : null;
+      const validResponseEnvelope = Boolean(
+        responseGameData &&
+        typeof data.session_id === 'string' &&
+        data.session_id.trim() &&
+        responsePracticeMode === practiceMode &&
+        (data.game_type === undefined || data.game_type === type)
+      );
+      const missingAuthoritativeState = !responsePracticeMode && (
+        !validResponseEnvelope ||
+        (type === 'puzzle' && !serverPuzzlePieces) ||
+        (type === 'match' && !serverMatchDeck) ||
+        (isRoundGame(type) && !paidRoundContract)
+      );
+      const invalidPracticeState = responsePracticeMode && (
+        !validResponseEnvelope ||
+        (type === 'match' && !serverMatchDeck && !legacyPracticeMatchDeck) ||
+        (isRoundGame(type) && practiceRoundTotal === null)
+      );
+
+      if (missingAuthoritativeState || invalidPracticeState) {
+        try {
+          if (typeof data.session_id === 'string' && data.session_id.trim()) {
+            await apiFetch('/minigames/abandon', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_id: data.session_id })
+            });
+          }
+        } catch {
+          // The UI still fails closed; stale session cleanup remains server-owned.
+        }
+        toast(
+          missingAuthoritativeState
+            ? '서버 검증용 게임 데이터를 받지 못해 안전하게 시작을 중단했습니다.'
+            : '연습 게임 데이터를 불러올 수 없습니다.',
+          'error'
+        );
+        fetchStatus();
+        return;
+      }
+
+      if (!responseGameData) return;
+
       setSessionId(data.session_id);
-      setGameData(data.game_data);
+      setGameData(paidRoundContract
+        ? {
+            ...responseGameData,
+            rounds: paidRoundContract.rounds,
+            total_rounds: paidRoundContract.totalRounds
+          }
+        : responseGameData);
       setActiveGame(type);
-      setIsPracticeMode(data.practice_mode === true);
+      setIsPracticeMode(responsePracticeMode);
       if (data.resumed_session) {
         toast(data.message || '진행 중이던 카드 확대 탐정을 이어서 시작합니다.', 'info');
       } else if (data.interrupted_session_closed) {
@@ -2514,15 +3199,40 @@ export const ArcadeTab: React.FC = () => {
         ? Math.max(0, Math.ceil(data.timing.time_remaining_ms / 1000))
         : null;
 
+      if (isRoundGame(type)) {
+        const totalRounds = paidRoundContract?.totalRounds ?? practiceRoundTotal ?? ROUND_GAME_TOTAL_ROUNDS;
+        const serverProgress = paidRoundContract?.progress ?? null;
+        const restoredRoundIndex = paidRoundContract?.currentRoundIndex ?? 0;
+        const restoredFeedback: RoundFeedback | null = paidRoundContract?.complete
+          ? {
+              round: restoredRoundIndex,
+              correct: false,
+              correct_channel_ids: [],
+              locked: true
+            }
+          : null;
+        const authoritativeDeadline = paidRoundContract?.localDeadlineAt ?? null;
+        const restoredTimeLeft = authoritativeDeadline === null
+          ? (paidRoundContract?.complete ? 0 : ROUND_GAME_ROUND_SECONDS)
+          : getVisibleRoundTimeLeft(authoritativeDeadline);
+
+        setRoundIndex(restoredRoundIndex);
+        setRoundTotalRounds(totalRounds);
+        setPendingPaidRound(null);
+        setServerClockOffsetMs(paidRoundContract?.serverClockOffsetMs ?? 0);
+        setRoundAnswers(serverProgress?.answers ?? []);
+        setRoundFeedback(restoredFeedback);
+        setRoundCorrectCount(Math.max(0, Math.min(totalRounds, serverProgress?.correctCount ?? 0)));
+        setRoundChecking(false);
+        setRoundTimeoutRetryAttempt(0);
+        setRoundDeadlineSyncAt(authoritativeDeadline);
+        setRoundTimeLeft(restoredTimeLeft);
+        setCropDetectiveReadyKey('');
+        roundDeadlineRef.current = authoritativeDeadline;
+      }
+
       // 게임별 초기 세팅값 설정
       if (type === 'quiz') {
-        setRoundIndex(0);
-        setRoundAnswers([]);
-        setRoundFeedback(null);
-        setRoundCorrectCount(0);
-        setRoundChecking(false);
-        setRoundTimeLeft(QUIZ_TIME_LIMIT_SECONDS);
-        roundDeadlineRef.current = null;
         setQuizStartTime(Date.now());
         setQuizIntensity(100);
         // 첫 문제는 랜덤 블러로 시작하되, 연습 URL에 blur가 있으면 첫 문제만 강제할 수 있습니다.
@@ -2532,49 +3242,29 @@ export const ArcadeTab: React.FC = () => {
         setQuizBlurType(forcedBlur ?? getRandomQuizBlurType());
         setQuizBlurAngle(Math.floor(Math.random() * 360));
       } else if (type === 'puzzle') {
-        setPuzzlePieces(createInitialPuzzlePieces());
+        setPuzzlePieces(serverPuzzlePieces ?? createInitialPuzzlePieces());
+        puzzleMovesRef.current = [];
+        setPuzzleMoves([]);
+        setPuzzleUsesServerLayout(Boolean(serverPuzzlePieces));
         const puzzleRemaining = remainingSeconds ?? PUZZLE_TIME_LIMIT_SECONDS;
         setPuzzleTimeLeft(puzzleRemaining);
         puzzleDeadlineRef.current = null;
       } else if (type === 'match') {
         setRevealActive(true);
+        setMatchedPairs([]);
+        setMatchUsesServerDeck(Boolean(serverMatchDeck));
         const matchRemaining = remainingSeconds ?? MATCH_TIME_LIMIT_SECONDS;
         setGameTimeLeft(matchRemaining);
         matchDeadlineRef.current = null;
 
-        const rawCards = data.game_data.cards ?? [];
-        const deck: MatchCard[] = [...rawCards, ...rawCards]
-          .map((card, idx): MatchCard => ({
-            id: idx,
-            channel_id: card.channel_id,
-            name: card.name,
-            logo_url: card.logo_url,
-            isFlipped: true, // 2초 공개를 위해 처음에 flipped로 시작
-            isMatched: false
-          }))
-          .sort(() => 0.5 - Math.random()); // 셔플
-        setMatchCards(deck);
-      } else if (isRoundGame(type)) {
-        const progress = type === 'crop_detective' && data.resumed_session
-          ? readCropDetectiveProgress(user?.id || '', data.session_id, data.game_data.rounds?.length || 0)
-          : null;
-        const restoredRoundIndex = progress?.roundIndex ?? 0;
-        const restoredFeedback = progress?.roundFeedback?.round === restoredRoundIndex ? progress.roundFeedback : null;
-        const restoredTimeLeft = getRestoredCropDetectiveRoundTiming(progress, Boolean(restoredFeedback));
-        setRoundIndex(restoredRoundIndex);
-        setRoundAnswers(progress?.roundAnswers || []);
-        setRoundFeedback(restoredFeedback);
-        setRoundCorrectCount(Math.max(0, Math.min(data.game_data.rounds?.length || 0, progress?.roundCorrectCount || 0)));
-        setRoundChecking(false);
-        setRoundTimeLeft(restoredTimeLeft);
-        setCropDetectiveReadyKey('');
-        roundDeadlineRef.current = null;
+        // Paid decks are shuffled and uniquely identified by the server. The
+        // six-card client duplication path is retained only for legacy practice.
+        setMatchCards(serverMatchDeck ?? legacyPracticeMatchDeck ?? []);
       }
 
-      // Resumed crop rounds stay paused until their images have been prepared again.
       setCountdownLeft(data.resumed_session ? 0 : 3);
 
-      if (!practiceMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
+      if (!responsePracticeMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
 
     } catch {
       toast('서버와의 통신에 실패했습니다.', 'error');
@@ -2608,14 +3298,31 @@ export const ArcadeTab: React.FC = () => {
   // ==========================================
   // 2. 카드 퍼즐 회전 제어 (3x4 그리드)
   // ==========================================
-  const completePuzzleIfSolved = (pieces: PuzzlePiece[]) => {
+  const toPuzzlePiecePayload = (pieces: PuzzlePiece[]) =>
+    pieces.map((piece) => ({ id: piece.id, rotation: piece.rotation }));
+
+  const handlePuzzleMoveLimitReached = () => {
+    if (isGameOver || submitInFlightRef.current) return;
+    setIsGameOver(true);
+    toast(`퍼즐 조작은 최대 ${MAX_PUZZLE_MOVES}회까지 기록할 수 있습니다.`, 'warning');
+    submitResult({
+      success: false,
+      puzzle_moves: puzzleMovesRef.current,
+      puzzle_pieces: toPuzzlePiecePayload(puzzlePieces)
+    });
+  };
+
+  const completePuzzleIfSolved = (pieces: PuzzlePiece[], moves: PuzzleMove[]) => {
     if (isPuzzleSolved(pieces)) {
+      if (!isPracticeMode && !puzzleUsesServerLayout) {
+        setIsGameOver(true);
+        toast('서버에서 발급한 퍼즐 상태를 확인할 수 없어 결과를 제출하지 않았습니다.', 'error');
+        return;
+      }
       submitResult({
         success: true,
-        puzzle_pieces: pieces.map((piece) => ({
-          id: piece.id,
-          rotation: normalizeRotation(piece.rotation)
-        }))
+        puzzle_moves: moves,
+        puzzle_pieces: toPuzzlePiecePayload(pieces)
       });
     }
   };
@@ -2649,16 +3356,26 @@ export const ArcadeTab: React.FC = () => {
 
   const handleRotatePiece = (index: number) => {
     if (gameBusy || gameResult || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    if (puzzleMovesRef.current.length >= MAX_PUZZLE_MOVES) {
+      handlePuzzleMoveLimitReached();
+      return;
+    }
+    const nextMoves: PuzzleMove[] = [...puzzleMovesRef.current, { type: 'rotate', index }];
     const newPieces = puzzlePieces.map((piece, pieceIndex) =>
       pieceIndex === index ? { ...piece, rotation: piece.rotation + 90 } : piece
     );
+    puzzleMovesRef.current = nextMoves;
+    setPuzzleMoves(nextMoves);
     setPuzzlePieces(newPieces);
-    completePuzzleIfSolved(newPieces);
+    completePuzzleIfSolved(newPieces, nextMoves);
   };
 
   const handleSwapPuzzlePieces = (fromIndex: number, toIndex: number) => {
     if (
+      gameBusy ||
+      gameResult ||
       isGameOver ||
+      (countdownLeft !== null && countdownLeft > 0) ||
       fromIndex === toIndex ||
       fromIndex < 0 ||
       toIndex < 0 ||
@@ -2667,11 +3384,18 @@ export const ArcadeTab: React.FC = () => {
     ) {
       return;
     }
+    if (puzzleMovesRef.current.length >= MAX_PUZZLE_MOVES) {
+      handlePuzzleMoveLimitReached();
+      return;
+    }
 
+    const nextMoves: PuzzleMove[] = [...puzzleMovesRef.current, { type: 'swap', from: fromIndex, to: toIndex }];
     const newPieces = [...puzzlePieces];
     [newPieces[fromIndex], newPieces[toIndex]] = [newPieces[toIndex], newPieces[fromIndex]];
+    puzzleMovesRef.current = nextMoves;
+    setPuzzleMoves(nextMoves);
     setPuzzlePieces(newPieces);
-    completePuzzleIfSolved(newPieces);
+    completePuzzleIfSolved(newPieces, nextMoves);
   };
 
   const getPuzzleIndexFromPoint = (x: number, y: number) => {
@@ -2769,8 +3493,22 @@ export const ArcadeTab: React.FC = () => {
       const secondCard = nextDeck[secondIdx];
 
       if (firstCard.channel_id === secondCard.channel_id) {
+        const matchedPair: MatchedPair = {
+          first_card_id: firstCard.card_id,
+          second_card_id: secondCard.card_id
+        };
         // 짝 맞춤 성공 -> 0.5초 후 isMatched와 isFlipped를 확실히 true로 세팅
-        setTimeout(() => {
+        const timeoutId = window.setTimeout(() => {
+          matchActionTimeoutsRef.current.delete(timeoutId);
+          setMatchedPairs(prevPairs => {
+            const alreadyRecorded = prevPairs.some(pair =>
+              pair.first_card_id === matchedPair.first_card_id ||
+              pair.first_card_id === matchedPair.second_card_id ||
+              pair.second_card_id === matchedPair.first_card_id ||
+              pair.second_card_id === matchedPair.second_card_id
+            );
+            return alreadyRecorded ? prevPairs : [...prevPairs, matchedPair];
+          });
           setMatchCards(prevDeck => {
             const matchedDeck = prevDeck.map((card, cardIndex) =>
               cardIndex === firstIdx || cardIndex === secondIdx
@@ -2781,9 +3519,11 @@ export const ArcadeTab: React.FC = () => {
           });
           setFlippedIndices([]);
         }, 500);
+        matchActionTimeoutsRef.current.add(timeoutId);
       } else {
         // 매치 실패 -> 0.8초 뒤에 두 카드의 뒤집힘 원복
-        setTimeout(() => {
+        const timeoutId = window.setTimeout(() => {
+          matchActionTimeoutsRef.current.delete(timeoutId);
           setMatchCards(prevDeck =>
             prevDeck.map((card, cardIndex) =>
               cardIndex === firstIdx || cardIndex === secondIdx
@@ -2793,61 +3533,38 @@ export const ArcadeTab: React.FC = () => {
           );
           setFlippedIndices([]);
         }, 800);
+        matchActionTimeoutsRef.current.add(timeoutId);
       }
     }
   };
 
-  const handleRoundChoice = async (selectedChannelId: string) => {
-    if (!sessionId || !isRoundGame(activeGame)) return;
-    if (gameBusy || roundChecking || roundFeedback || gameResult || isGameOver || roundTimeLeft <= 0 || (countdownLeft !== null && countdownLeft > 0)) return;
-
-    setRoundChecking(true);
-    try {
-      const res = await apiFetch('/minigames/round-answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          payload: {
-            round: roundIndex,
-            selected_channel_id: selectedChannelId
-          }
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast(data.message || '라운드 결과 확인에 실패했습니다.', 'error');
-        return;
-      }
-
-      setRoundAnswers(prev => {
-        const withoutCurrent = prev.filter(answer => answer.round !== roundIndex);
-        return [...withoutCurrent, { round: roundIndex, selected_channel_id: selectedChannelId }];
-      });
-      if (data.correct) setRoundCorrectCount(prev => prev + 1);
-      setRoundFeedback({
-        round: roundIndex,
-        selected_channel_id: selectedChannelId,
-        correct: Boolean(data.correct),
-        correct_channel_ids: Array.isArray(data.correct_channel_ids) ? data.correct_channel_ids : []
-      });
-    } catch {
-      toast('라운드 결과 확인에 실패했습니다.', 'warning');
-    } finally {
-      setRoundChecking(false);
-    }
-  };
+  const handleRoundChoice = useCallback((selectedChannelId: string) => {
+    void submitRoundAnswer(selectedChannelId, false);
+  }, [submitRoundAnswer]);
 
   const handleRoundContinue = () => {
-    if (!isRoundGame(activeGame) || !gameData?.rounds) return;
-    const isLastRound = roundIndex >= gameData.rounds.length - 1;
+    if (!isRoundGame(activeGame) || !gameData?.rounds || isGameOver) return;
+    const isLastRound = roundIndex >= roundTotalRounds - 1;
     if (isLastRound) {
       submitResult({ answers: roundAnswers });
       return;
     }
 
     const nextIndex = roundIndex + 1;
+    if (!isPracticeMode) {
+      if (!pendingPaidRound || pendingPaidRound.roundIndex !== nextIndex) {
+        setIsGameOver(true);
+        toast('서버가 공개한 다음 라운드를 확인할 수 없어 진행을 중단했습니다.', 'error');
+        return;
+      }
+      advanceToPaidRound(pendingPaidRound);
+      return;
+    }
+
     setRoundIndex(nextIndex);
+    setRoundSubmissionKey(null);
+    setRoundTimeoutRetryAttempt(0);
+    setRoundDeadlineSyncAt(null);
     setRoundFeedback(null);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
     if (activeGame === 'crop_detective') {
@@ -3375,6 +4092,8 @@ export const ArcadeTab: React.FC = () => {
           {activeGame === 'quiz' && gameData.rounds && (() => {
             const currentRound = gameData.rounds[roundIndex];
             if (!isQuizRound(currentRound)) return null;
+            const protectedRoundImage = isProtectedMinigameImage(currentRound.image_url);
+            const currentRoundImageUrl = resolveMinigameImage(currentRound.image_url);
             const selectedId = roundFeedback?.selected_channel_id || null;
             const correctIds = roundFeedback?.correct_channel_ids || [];
             const imageBlindEnabled = Boolean(roundFeedback);
@@ -3390,7 +4109,7 @@ export const ArcadeTab: React.FC = () => {
                 />
 
                 <div className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-[10px] font-black text-emerald-800 dark:text-emerald-200 sm:text-xs">
-                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/{roundTotalRounds}</span>
                   <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
                   <span>2지선다 · 각 문제 <span className="cute-number-font">{QUIZ_TIME_LIMIT_SECONDS}</span>초</span>
                 </div>
@@ -3398,13 +4117,22 @@ export const ArcadeTab: React.FC = () => {
                 <div
                   className="arcade-quiz-card relative flex aspect-[5/8] items-center justify-center overflow-hidden rounded-[1.75rem] border border-border/80 bg-sky-950 shadow-[0_18px_44px_rgba(7,89,133,0.26)]"
                   onContextMenu={(event) => {
-                    openImageBlindMenu(event, currentRound.image_url || '', imageBlindEnabled);
+                    openImageBlindMenu(event, currentRoundImageUrl, imageBlindEnabled);
                   }}
                   title="우클릭으로 같은 이미지를 블라인드/해제"
                 >
-                  {quizBlurType === 'gaussian' && (
+                  {protectedRoundImage && (
                     <BlindableCardImage
-                      src={currentRound.image_url}
+                      src={currentRoundImageUrl}
+                      alt="Quiz card"
+                      className="h-full w-full object-cover select-none pointer-events-none"
+                      imageBlindMenuEnabled={imageBlindEnabled}
+                    />
+                  )}
+
+                  {!protectedRoundImage && quizBlurType === 'gaussian' && (
+                    <BlindableCardImage
+                      src={currentRoundImageUrl}
                       alt="Quiz card"
                       style={{
                         filter: `blur(${(quizIntensity / 100) * QUIZ_GAUSSIAN_MAX_BLUR_PX}px) contrast(1.1)`,
@@ -3414,27 +4142,27 @@ export const ArcadeTab: React.FC = () => {
                     />
                   )}
 
-                  {quizBlurType === 'mosaic' && (
-                    <MosaicQuizImage src={currentRound.image_url || ''} intensity={quizIntensity} />
+                  {!protectedRoundImage && quizBlurType === 'mosaic' && (
+                    <MosaicQuizImage src={currentRoundImageUrl} intensity={quizIntensity} />
                   )}
 
-                  {quizBlurType === 'motion' && (
+                  {!protectedRoundImage && quizBlurType === 'motion' && (
                     <MotionBlurQuizImage
-                      src={currentRound.image_url || ''}
+                      src={currentRoundImageUrl}
                       intensity={quizIntensity}
                       angle={quizBlurAngle}
                     />
                   )}
 
-                  {quizBlurType === 'radial' && (
+                  {!protectedRoundImage && quizBlurType === 'radial' && (
                     <RadialBlurQuizImage
-                      src={currentRound.image_url || ''}
+                      src={currentRoundImageUrl}
                       intensity={quizIntensity}
                       angle={quizBlurAngle}
                     />
                   )}
 
-                  {quizIntensity > 0 && (
+                  {!protectedRoundImage && quizIntensity > 0 && (
                     <div className="pointer-events-none absolute left-2.5 top-2.5 flex select-none items-center gap-1 rounded-full border border-white/20 bg-sky-950/72 px-1.5 py-0.5 text-[8px] font-black tracking-wider text-rose-300 animate-pulse sm:left-3.5 sm:top-3.5 sm:px-2 sm:py-1 sm:text-[10px]">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-600 animate-ping sm:h-2 sm:w-2" />
                       <span>DECRYPTING {Math.round(100 - quizIntensity)}%</span>
@@ -3446,14 +4174,17 @@ export const ArcadeTab: React.FC = () => {
                   <p className="flex items-center justify-center gap-1.5 text-xs font-black text-muted-foreground sm:text-sm">
                     <span>📡</span>
                     <span>
-                      {quizBlurType === 'gaussian' && '가우시안 블러 전송 방식'}
-                      {quizBlurType === 'mosaic' && '픽셀 모자이크 전송 방식'}
-                      {quizBlurType === 'motion' && '강한 방향성 모션 잔상 방식'}
-                      {quizBlurType === 'radial' && '방사형 소용돌이 복원 방식'}
+                      {protectedRoundImage && '서버 비식별 이미지 전송 방식'}
+                      {!protectedRoundImage && quizBlurType === 'gaussian' && '가우시안 블러 전송 방식'}
+                      {!protectedRoundImage && quizBlurType === 'mosaic' && '픽셀 모자이크 전송 방식'}
+                      {!protectedRoundImage && quizBlurType === 'motion' && '강한 방향성 모션 잔상 방식'}
+                      {!protectedRoundImage && quizBlurType === 'radial' && '방사형 소용돌이 복원 방식'}
                     </span>
                   </p>
                   <p className="max-w-lg text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-                    10초 동안 점점 선명해집니다. 둘 중 누구의 카드인지 골라주세요!
+                    {protectedRoundImage
+                      ? '서버에서 안전하게 흐린 카드입니다. 10초 안에 둘 중 한 명을 골라주세요!'
+                      : '10초 동안 점점 선명해집니다. 둘 중 누구의 카드인지 골라주세요!'}
                   </p>
                 </div>
 
@@ -3492,22 +4223,25 @@ export const ArcadeTab: React.FC = () => {
                   )}
                   {roundFeedback && (
                     <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
-                      roundFeedback.correct
+                      roundFeedback.locked
+                        ? 'border-primary/35 bg-primary/10 text-primary'
+                        : roundFeedback.correct
                         ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                         : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
                     }`}>
                       <div>
-                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="text-sm font-black">{roundFeedback.locked ? '답안 저장 완료' : roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
                         <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
-                          {roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
+                          {roundFeedback.locked ? '서버에 저장된 결과를 이어서 확인합니다.' : roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={handleRoundContinue}
-                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                        disabled={isGameOver}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-55"
                       >
-                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                        {roundIndex >= roundTotalRounds - 1 ? '최종 결과 확인' : '다음 문제'}
                       </button>
                     </div>
                   )}
@@ -3647,7 +4381,7 @@ export const ArcadeTab: React.FC = () => {
                 />
 
                 <div className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[10px] font-black text-amber-800 dark:text-amber-200 sm:text-xs">
-                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/{roundTotalRounds}</span>
                   <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
                   <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
@@ -3680,22 +4414,25 @@ export const ArcadeTab: React.FC = () => {
                   )}
                   {roundFeedback && (
                     <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
-                      roundFeedback.correct
+                      roundFeedback.locked
+                        ? 'border-primary/35 bg-primary/10 text-primary'
+                        : roundFeedback.correct
                         ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                         : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
                     }`}>
                       <div>
-                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="text-sm font-black">{roundFeedback.locked ? '답안 저장 완료' : roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
                         <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
-                          {roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
+                          {roundFeedback.locked ? '서버에 저장된 결과를 이어서 확인합니다.' : roundFeedback.correct ? '좋습니다. 다음 문제로 이어가세요.' : '다음 문제에서 만회할 수 있습니다.'}
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={handleRoundContinue}
-                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                        disabled={isGameOver}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-55"
                       >
-                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                        {roundIndex >= roundTotalRounds - 1 ? '최종 결과 확인' : '다음 문제'}
                       </button>
                     </div>
                   )}
@@ -3722,7 +4459,7 @@ export const ArcadeTab: React.FC = () => {
                 />
 
                 <div className="flex w-full max-w-4xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-2 text-[10px] font-black text-fuchsia-800 dark:text-fuchsia-200 sm:text-xs">
-                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/5</span>
+                  <span>문제 <span className="cute-number-font">{roundIndex + 1}</span>/{roundTotalRounds}</span>
                   <span>현재 정답 <span className="cute-number-font">{roundCorrectCount}</span>개</span>
                   <span>각 문제 <span className="cute-number-font">{ROUND_GAME_ROUND_SECONDS}</span>초</span>
                 </div>
@@ -3747,22 +4484,25 @@ export const ArcadeTab: React.FC = () => {
                   )}
                   {roundFeedback && (
                     <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
-                      roundFeedback.correct
+                      roundFeedback.locked
+                        ? 'border-primary/35 bg-primary/10 text-primary'
+                        : roundFeedback.correct
                         ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                         : 'border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-300'
                     }`}>
                       <div>
-                        <p className="text-sm font-black">{roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
+                        <p className="text-sm font-black">{roundFeedback.locked ? '답안 저장 완료' : roundFeedback.correct ? '정답입니다' : roundFeedback.timed_out ? '시간 초과' : '오답입니다'}</p>
                         <p className="mt-0.5 text-[10px] font-bold text-muted-foreground">
-                          {roundFeedback.correct ? '확대 조각을 정확히 찾았습니다.' : '후보 카드의 이미지 패턴을 다시 살펴보세요.'}
+                          {roundFeedback.locked ? '서버에 저장된 결과를 이어서 확인합니다.' : roundFeedback.correct ? '확대 조각을 정확히 찾았습니다.' : '후보 카드의 이미지 패턴을 다시 살펴보세요.'}
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={handleRoundContinue}
-                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95"
+                        disabled={isGameOver}
+                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-55"
                       >
-                        {roundIndex >= (gameData.rounds?.length || 1) - 1 ? '최종 결과 확인' : '다음 문제'}
+                        {roundIndex >= roundTotalRounds - 1 ? '최종 결과 확인' : '다음 문제'}
                       </button>
                     </div>
                   )}
@@ -3792,7 +4532,7 @@ export const ArcadeTab: React.FC = () => {
                   const showFront = revealActive || card.isFlipped || card.isMatched;
                   return (
                     <div
-                      key={card.id}
+                      key={card.card_id}
                       onClick={() => handleFlipCard(idx)}
                       className={`perspective group relative h-full min-h-0 w-full min-w-0 cursor-pointer transition-all duration-300 ${
                         card.isMatched ? 'scale-95' : ''

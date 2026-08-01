@@ -479,7 +479,12 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     ticket_spent_type TEXT DEFAULT 'NONE',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    earned_points INTEGER DEFAULT 0
+    earned_points INTEGER DEFAULT 0,
+    validation_version INTEGER NOT NULL DEFAULT 0,
+    progress_data TEXT NOT NULL DEFAULT '{}',
+    progress_revision INTEGER NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ,
+    result_data TEXT
 );
 
 -- 유저 차단 (blocker_id가 blocked_id에게 받은 교환 제안을 차단)
@@ -616,6 +621,35 @@ ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_order INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS favorite_at TIMESTAMPTZ;
 ALTER TABLE user_minigame_tickets ADD COLUMN IF NOT EXISTS bonus_tickets INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS ticket_spent_type TEXT DEFAULT 'NONE';
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS progress_data TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS progress_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE minigame_sessions ADD COLUMN IF NOT EXISTS result_data TEXT;
+
+-- 한 사용자의 보상형 STARTED 세션은 하나만 유지한다. 기존 중복은 최신 세션만 남기고 안전하게 만료한다.
+WITH ranked_paid_sessions AS (
+    SELECT id,
+           ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS rn
+      FROM minigame_sessions
+     WHERE status = 'STARTED'
+       AND ticket_spent_type IN ('BASE', 'BONUS')
+)
+UPDATE minigame_sessions AS session
+   SET status = 'EXPIRED',
+       completed_at = COALESCE(session.completed_at, NOW())
+  FROM ranked_paid_sessions AS ranked
+ WHERE session.id = ranked.id
+   AND ranked.rn > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_minigame_sessions_paid_started_user
+    ON minigame_sessions (user_id)
+ WHERE status = 'STARTED'
+   AND ticket_spent_type IN ('BASE', 'BONUS');
+CREATE INDEX IF NOT EXISTS idx_minigame_sessions_status_created
+    ON minigame_sessions (status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_minigame_sessions_user_game_status_created
+    ON minigame_sessions (user_id, game_type, status, created_at DESC);
 ALTER TABLE value_history ALTER COLUMN value TYPE BIGINT USING value::BIGINT;
 
 -- 하위 호환성 유지: user_cards 테이블에 코스메틱 외래키 제약조건 추가
@@ -787,26 +821,111 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 미니게임 세션 시작: 기본 충전 티켓을 먼저 차감하고, 없을 때 보너스 티켓을 차감
-CREATE OR REPLACE FUNCTION start_minigame_session_atomic(
+-- 티켓 자동 충전을 행 잠금 안에서 계산해 조회/게임 시작 간 티켓 복원 경쟁을 방지한다.
+CREATE OR REPLACE FUNCTION refresh_minigame_ticket_status(
+  p_user_id TEXT,
+  p_charge_interval_minutes INTEGER DEFAULT 240
+)
+RETURNS TABLE (
+  user_id TEXT,
+  current_tickets INTEGER,
+  bonus_tickets INTEGER,
+  last_charged_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  seconds_until_next_ticket INTEGER
+) AS $$
+DECLARE
+  ticket user_minigame_tickets%ROWTYPE;
+  interval_minutes INTEGER := GREATEST(COALESCE(p_charge_interval_minutes, 240), 1);
+  charged_count INTEGER := 0;
+  now_at TIMESTAMPTZ := NOW();
+BEGIN
+  INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+  VALUES (p_user_id, 5, 0, now_at, now_at)
+  ON CONFLICT DO NOTHING;
+
+  SELECT source.* INTO ticket
+    FROM user_minigame_tickets AS source
+   WHERE source.user_id = p_user_id
+   FOR UPDATE;
+
+  ticket.current_tickets := LEAST(5, GREATEST(COALESCE(ticket.current_tickets, 5), 0));
+  ticket.bonus_tickets := GREATEST(COALESCE(ticket.bonus_tickets, 0), 0);
+  IF ticket.last_charged_at IS NULL OR ticket.last_charged_at > now_at THEN
+    ticket.last_charged_at := now_at;
+  END IF;
+
+  IF ticket.current_tickets >= 5 THEN
+    ticket.current_tickets := 5;
+    ticket.last_charged_at := now_at;
+  ELSE
+    charged_count := FLOOR(
+      EXTRACT(EPOCH FROM (now_at - ticket.last_charged_at)) / (interval_minutes * 60)
+    )::INTEGER;
+    IF charged_count > 0 THEN
+      ticket.current_tickets := LEAST(5, ticket.current_tickets + charged_count);
+      ticket.last_charged_at := CASE
+        WHEN ticket.current_tickets >= 5 THEN now_at
+        ELSE ticket.last_charged_at + make_interval(mins => charged_count * interval_minutes)
+      END;
+    END IF;
+  END IF;
+
+  UPDATE user_minigame_tickets AS target
+     SET current_tickets = ticket.current_tickets,
+         bonus_tickets = ticket.bonus_tickets,
+         last_charged_at = ticket.last_charged_at,
+         updated_at = now_at
+   WHERE target.user_id = p_user_id
+  RETURNING target.* INTO ticket;
+
+  RETURN QUERY SELECT
+    ticket.user_id,
+    ticket.current_tickets,
+    ticket.bonus_tickets,
+    ticket.last_charged_at,
+    ticket.updated_at,
+    CASE
+      WHEN ticket.current_tickets >= 5 THEN interval_minutes * 60
+      ELSE GREATEST(
+        0,
+        CEIL(EXTRACT(EPOCH FROM (
+          ticket.last_charged_at + make_interval(mins => interval_minutes) - now_at
+        )))::INTEGER
+      )
+    END;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 보상형 세션 시작: 충전, 활성 세션 확인, 티켓 차감, 검증 상태 저장을 하나의 트랜잭션으로 수행한다.
+CREATE OR REPLACE FUNCTION start_minigame_session_authoritative_atomic(
   p_session_id TEXT,
   p_user_id TEXT,
   p_game_type TEXT,
-  p_target_data TEXT
+  p_target_data TEXT,
+  p_charge_interval_minutes INTEGER DEFAULT 240,
+  p_validation_version INTEGER DEFAULT 0,
+  p_progress_data TEXT DEFAULT '{}',
+  p_expires_at TIMESTAMPTZ DEFAULT NULL,
+  p_result_data TEXT DEFAULT NULL
 )
 RETURNS TEXT AS $$
 DECLARE
-  ticket user_minigame_tickets%ROWTYPE;
+  ticket RECORD;
   spent_type TEXT := 'BASE';
 BEGIN
-  INSERT INTO user_minigame_tickets (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
-  VALUES (p_user_id, 5, 0, NOW(), NOW())
-  ON CONFLICT (user_id) DO NOTHING;
-
   SELECT * INTO ticket
-    FROM user_minigame_tickets
-   WHERE user_id = p_user_id
-   FOR UPDATE;
+    FROM refresh_minigame_ticket_status(p_user_id, p_charge_interval_minutes);
+
+  IF EXISTS (
+    SELECT 1
+      FROM minigame_sessions
+     WHERE user_id = p_user_id
+       AND status = 'STARTED'
+       AND ticket_spent_type IN ('BASE', 'BONUS')
+  ) THEN
+    RETURN 'ACTIVE_SESSION';
+  END IF;
 
   IF COALESCE(ticket.bonus_tickets, 0) + COALESCE(ticket.current_tickets, 0) <= 0 THEN
     RETURN 'NO_TICKET';
@@ -826,12 +945,166 @@ BEGIN
     spent_type := 'BONUS';
   END IF;
 
-  INSERT INTO minigame_sessions (id, user_id, game_type, status, target_data, ticket_spent_type, created_at)
-  VALUES (p_session_id, p_user_id, p_game_type, 'STARTED', p_target_data, spent_type, NOW());
+  INSERT INTO minigame_sessions (
+    id, user_id, game_type, status, target_data, ticket_spent_type, created_at,
+    validation_version, progress_data, progress_revision, expires_at, result_data
+  ) VALUES (
+    p_session_id, p_user_id, p_game_type, 'STARTED', p_target_data, spent_type, NOW(),
+    GREATEST(COALESCE(p_validation_version, 0), 0), COALESCE(p_progress_data, '{}'), 0,
+    p_expires_at, p_result_data
+  );
 
   RETURN 'OK';
+EXCEPTION
+  WHEN unique_violation THEN
+    IF EXISTS (
+      SELECT 1
+        FROM minigame_sessions
+       WHERE user_id = p_user_id
+         AND status = 'STARTED'
+         AND ticket_spent_type IN ('BASE', 'BONUS')
+    ) THEN
+      RETURN 'ACTIVE_SESSION';
+    END IF;
+    RAISE;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 기존 Supabase 호출 계약은 권위형 원자 함수로 위임한다.
+CREATE OR REPLACE FUNCTION start_minigame_session_atomic(
+  p_session_id TEXT,
+  p_user_id TEXT,
+  p_game_type TEXT,
+  p_target_data TEXT
+)
+RETURNS TEXT AS $$
+  SELECT start_minigame_session_authoritative_atomic(
+    p_session_id,
+    p_user_id,
+    p_game_type,
+    p_target_data,
+    240,
+    0,
+    '{}',
+    NULL,
+    NULL
+  );
+$$ LANGUAGE sql;
+
+-- 미니게임 완료: 세션 잠금, 검증, 결과 확정, 포인트/원장 반영을 한 트랜잭션으로 수행한다.
+-- 호출자는 서버가 인증한 user_id를 함께 전달해야 하며 함수 실행 권한은 아래에서 service_role로 제한한다.
+CREATE OR REPLACE FUNCTION complete_minigame_session_authoritative_atomic(
+  p_session_id TEXT,
+  p_user_id TEXT,
+  p_earned_points INTEGER,
+  p_result_data TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  ok BOOLEAN,
+  reason TEXT,
+  settled_now BOOLEAN,
+  new_points BIGINT,
+  earned_points INTEGER,
+  result_data TEXT
+) AS $$
+DECLARE
+  session_row minigame_sessions%ROWTYPE;
+  balance_after BIGINT;
+BEGIN
+  IF p_earned_points IS NULL OR p_earned_points NOT IN (0, 1000, 1200) THEN
+    RETURN QUERY SELECT FALSE, 'INVALID_REWARD'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+
+  SELECT source.* INTO session_row
+    FROM minigame_sessions AS source
+   WHERE source.id = p_session_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT FALSE, 'SESSION_NOT_FOUND'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+  IF session_row.user_id <> p_user_id THEN
+    RETURN QUERY SELECT FALSE, 'SESSION_OWNER_MISMATCH'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+
+  IF session_row.status = 'COMPLETED' THEN
+    SELECT account.point INTO balance_after
+      FROM users AS account
+     WHERE account.id = session_row.user_id;
+    IF NOT FOUND THEN
+      RETURN QUERY SELECT FALSE, 'USER_NOT_FOUND'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+      RETURN;
+    END IF;
+    RETURN QUERY SELECT
+      TRUE,
+      'OK'::TEXT,
+      FALSE,
+      balance_after,
+      COALESCE(session_row.earned_points, 0),
+      session_row.result_data;
+    RETURN;
+  END IF;
+
+  IF session_row.status <> 'STARTED' THEN
+    RETURN QUERY SELECT FALSE, 'SESSION_NOT_STARTED'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+  IF p_earned_points <> 0 AND COALESCE(session_row.validation_version, 0) <> 1 THEN
+    RETURN QUERY SELECT FALSE, 'INVALID_VALIDATION_VERSION'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+  IF p_earned_points <> 0 AND COALESCE(session_row.ticket_spent_type, 'NONE') NOT IN ('BASE', 'BONUS') THEN
+    RETURN QUERY SELECT FALSE, 'TICKET_NOT_SPENT'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+
+  IF p_earned_points <> 0 THEN
+    UPDATE users AS account
+       SET point = account.point + p_earned_points
+     WHERE account.id = session_row.user_id
+     RETURNING account.point INTO balance_after;
+  ELSE
+    SELECT account.point INTO balance_after
+      FROM users AS account
+     WHERE account.id = session_row.user_id
+     FOR UPDATE;
+  END IF;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'MINIGAME_SESSION_USER_NOT_FOUND: %', session_row.user_id;
+  END IF;
+
+  UPDATE minigame_sessions AS target
+     SET status = 'COMPLETED',
+         earned_points = p_earned_points,
+         completed_at = NOW(),
+         result_data = p_result_data
+   WHERE target.id = session_row.id
+     AND target.status = 'STARTED';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'MINIGAME_SESSION_SETTLEMENT_CONFLICT: %', session_row.id;
+  END IF;
+
+  IF p_earned_points <> 0 THEN
+    INSERT INTO point_ledger_entries
+      (user_id, amount, balance_after, source_type, source_id, reason, description, metadata)
+    VALUES (
+      session_row.user_id,
+      p_earned_points,
+      balance_after,
+      'minigame',
+      session_row.id,
+      'minigame_reward',
+      session_row.game_type || ' 미니게임 보상',
+      jsonb_build_object('session_id', session_row.id, 'game_type', session_row.game_type)
+    );
+  END IF;
+
+  RETURN QUERY SELECT TRUE, 'OK'::TEXT, TRUE, balance_after, p_earned_points, p_result_data;
+END;
+$$ LANGUAGE plpgsql SECURITY INVOKER;
 
 -- 무료 뽑기: 마지막 무료뽑기가 세그먼트 시작 이전일 때만 갱신 (p_segment_start가 NULL이면 무제한 무료뽑기)
 CREATE OR REPLACE FUNCTION claim_free_draw(p_id TEXT, p_now TIMESTAMPTZ, p_segment_start TIMESTAMPTZ)
@@ -2307,4 +2580,69 @@ EXCEPTION
     RETURN 'FAILED:' || SQLERRM;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Supabase/PostgREST를 통해 직접 호출되면 임의 포인트·티켓·자산 변경이 가능한 서버 전용 RPC입니다.
+-- PostgreSQL 함수의 기본 PUBLIC EXECUTE를 회수하고, Supabase 역할이 존재할 때 service_role에만 허용합니다.
+-- 일반 PostgreSQL 설치에서는 함수 소유자(현재 DB 연결 사용자)의 고유 실행 권한이 유지됩니다.
+DO $$
+DECLARE
+  function_signature TEXT;
+  function_oid REGPROCEDURE;
+  api_role TEXT;
+  secured_functions CONSTANT TEXT[] := ARRAY[
+    'increment_user_point(text,bigint)',
+    'deduct_user_point(text,bigint)',
+    'add_minigame_bonus_tickets(text,integer)',
+    'refresh_minigame_ticket_status(text,integer)',
+    'start_minigame_session_authoritative_atomic(text,text,text,text,integer,integer,text,timestamp with time zone,text)',
+    'start_minigame_session_atomic(text,text,text,text)',
+    'complete_minigame_session_authoritative_atomic(text,text,integer,text)',
+    'claim_free_draw(text,timestamp with time zone,timestamp with time zone)',
+    'sync_free_draw_tickets(text,timestamp with time zone,integer,double precision)',
+    'add_bonus_free_draw_tickets(text,integer)',
+    'claim_tutorial_gacha_ticket(text,text)',
+    'delete_user_account(text)',
+    'increment_streamer_broadcast(text)',
+    'increment_streamer_chat(text,integer)',
+    'bulk_increment_streamer_chat(jsonb)',
+    'decrement_streamer_chat(text,integer)',
+    'increment_streamer_minutes(text,integer)',
+    'bulk_apply_streamer_schedule(jsonb)',
+    'finalize_trade(integer,text)',
+    'sell_cards_atomic(text,jsonb)',
+    'fuse_card_atomic(text,text,integer)',
+    'fuse_card_atomic_v2(text,text,integer,jsonb)',
+    'buy_shop_item_atomic(text,integer)',
+    'equip_cosmetic_atomic(text,integer,integer)',
+    'unequip_cosmetic_atomic(text,integer,text)',
+    'try_acquire_scheduler_lock(text,text,timestamp with time zone)',
+    'draw_card_atomic(text,text,integer,timestamp with time zone,timestamp with time zone,integer,double precision)',
+    'redeem_coupon_atomic(integer,text)',
+    'release_scheduler_lock(text,text)',
+    'cancel_market_listing_atomic(integer,text)',
+    'place_market_bid_atomic(integer,text,bigint)',
+    'buy_market_item_atomic(integer,text)'
+  ];
+BEGIN
+  FOREACH function_signature IN ARRAY secured_functions LOOP
+    function_oid := to_regprocedure(function_signature);
+    IF function_oid IS NULL THEN
+      RAISE WARNING 'server-only RPC signature was not found: %', function_signature;
+      CONTINUE;
+    END IF;
+
+    EXECUTE format('REVOKE ALL PRIVILEGES ON FUNCTION %s FROM PUBLIC', function_oid);
+    FOR api_role IN
+      SELECT rolname
+        FROM pg_roles
+       WHERE rolname IN ('anon', 'authenticated', 'service_role')
+    LOOP
+      IF api_role = 'service_role' THEN
+        EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', function_oid, api_role);
+      ELSE
+        EXECUTE format('REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I', function_oid, api_role);
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
 

@@ -629,5 +629,34 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
     earned_points INTEGER DEFAULT 0,
+    validation_version INTEGER NOT NULL DEFAULT 0,
+    progress_data TEXT NOT NULL DEFAULT '{}',
+    progress_revision INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
+    result_data TEXT,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+UPDATE minigame_sessions
+   SET status = 'EXPIRED',
+       completed_at = COALESCE(completed_at, datetime('now'))
+ WHERE id IN (
+   SELECT id
+     FROM (
+       SELECT id,
+              ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY datetime(created_at) DESC, id DESC) AS rn
+         FROM minigame_sessions
+        WHERE status = 'STARTED'
+          AND ticket_spent_type IN ('BASE', 'BONUS')
+     ) ranked_paid_sessions
+    WHERE rn > 1
+ );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_minigame_sessions_paid_started_user
+    ON minigame_sessions(user_id)
+ WHERE status = 'STARTED'
+   AND ticket_spent_type IN ('BASE', 'BONUS');
+CREATE INDEX IF NOT EXISTS idx_minigame_sessions_status_created
+    ON minigame_sessions(status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_minigame_sessions_user_game_status_created
+    ON minigame_sessions(user_id, game_type, status, created_at DESC);

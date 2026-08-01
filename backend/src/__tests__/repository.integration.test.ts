@@ -448,6 +448,326 @@ describe('MinigameRepository practice mode', () => {
   });
 });
 
+describe('MinigameRepository authoritative paid sessions', () => {
+  it('serializes concurrent starts so one ticket cannot create two active paid sessions', async () => {
+    seedUser(db, 'atomic-minigame-user');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO user_minigame_tickets
+        (user_id, current_tickets, bonus_tickets, last_charged_at, updated_at)
+      VALUES (?, 2, 0, ?, ?)
+    `).run('atomic-minigame-user', now, now);
+
+    const makeSession = (id: string) => ({
+      id,
+      user_id: 'atomic-minigame-user',
+      game_type: 'quiz' as const,
+      status: 'STARTED' as const,
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: JSON.stringify({ round_outcomes: [] }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    });
+
+    const results = await Promise.all([
+      minigameRepository.startSession(makeSession('atomic-session-a'), 240),
+      minigameRepository.startSession(makeSession('atomic-session-b'), 240)
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok)).toHaveLength(1);
+    expect(db.prepare(`
+      SELECT current_tickets, bonus_tickets
+        FROM user_minigame_tickets
+       WHERE user_id = ?
+    `).get('atomic-minigame-user')).toEqual({ current_tickets: 1, bonus_tickets: 0 });
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count
+        FROM minigame_sessions
+       WHERE user_id = ? AND status = 'STARTED' AND ticket_spent_type IN ('BASE', 'BONUS')
+    `).get('atomic-minigame-user')).toEqual({ count: 1 });
+  });
+
+  it('stores only the first sequential round outcome and makes an identical retry idempotent', async () => {
+    seedUser(db, 'round-lock-user');
+    const firstRoundDeadline = new Date(Date.now() + 60_000).toISOString();
+    const secondRoundDeadline = new Date(Date.now() + 120_000).toISOString();
+    const start = await minigameRepository.startSession({
+      id: 'round-lock-session',
+      user_id: 'round-lock-user',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: JSON.stringify({ round_outcomes: [], round_deadline_at: firstRoundDeadline }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240);
+    expect(start.ok).toBe(true);
+
+    const first = await minigameRepository.recordRoundOutcome(
+      'round-lock-session', 'round-lock-user', 0, 'wrong', secondRoundDeadline
+    );
+    const retry = await minigameRepository.recordRoundOutcome(
+      'round-lock-session', 'round-lock-user', 0, 'wrong', new Date(Date.now() + 300_000).toISOString()
+    );
+    const afterRetry = await minigameRepository.findSessionById('round-lock-session');
+    const alternate = await minigameRepository.recordRoundOutcome(
+      'round-lock-session', 'round-lock-user', 0, 'correct', secondRoundDeadline
+    );
+    const skipped = await minigameRepository.recordRoundOutcome(
+      'round-lock-session', 'round-lock-user', 2, 'future', null
+    );
+    const timeout = await minigameRepository.recordRoundOutcome(
+      'round-lock-session', 'round-lock-user', 1, null, null
+    );
+
+    expect(first).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    expect(retry).toEqual(expect.objectContaining({ ok: true, duplicate: true }));
+    expect(JSON.parse(afterRetry?.progress_data || '{}')).toMatchObject({
+      round_deadline_at: secondRoundDeadline
+    });
+    expect(afterRetry?.progress_revision).toBe(1);
+    expect(alternate.ok).toBe(false);
+    expect(skipped.ok).toBe(false);
+    expect(timeout).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    const stored = await minigameRepository.findSessionById('round-lock-session');
+    expect(JSON.parse(stored?.progress_data || '{}')).toEqual({
+      round_outcomes: [
+        { round: 0, selected_channel_id: 'wrong' },
+        { round: 1, selected_channel_id: null }
+      ],
+      round_deadline_at: null
+    });
+    expect(stored?.progress_revision).toBe(2);
+  });
+
+  it('fails closed for elapsed round deadlines while allowing timeout and late idempotent retry', async () => {
+    seedUser(db, 'round-deadline-user');
+    const elapsedDeadline = new Date(Date.now() - 1_000).toISOString();
+    expect((await minigameRepository.startSession({
+      id: 'round-deadline-session',
+      user_id: 'round-deadline-user',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: JSON.stringify({ round_outcomes: [], round_deadline_at: elapsedDeadline }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const lateAnswer = await minigameRepository.recordRoundOutcome(
+      'round-deadline-session', 'round-deadline-user', 0, 'answer', elapsedDeadline
+    );
+    expect(lateAnswer).toMatchObject({ ok: false });
+    expect(lateAnswer.reason).toMatch(/마감/);
+
+    const timeout = await minigameRepository.recordRoundOutcome(
+      'round-deadline-session', 'round-deadline-user', 0, null, elapsedDeadline
+    );
+    const lateRetry = await minigameRepository.recordRoundOutcome(
+      'round-deadline-session', 'round-deadline-user', 0, null, new Date(Date.now() + 60_000).toISOString()
+    );
+    const nextLateAnswer = await minigameRepository.recordRoundOutcome(
+      'round-deadline-session', 'round-deadline-user', 1, 'answer', null
+    );
+    const nextTimeout = await minigameRepository.recordRoundOutcome(
+      'round-deadline-session', 'round-deadline-user', 1, null, null
+    );
+
+    expect(timeout).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    expect(lateRetry).toEqual(expect.objectContaining({ ok: true, duplicate: true }));
+    expect(nextLateAnswer).toMatchObject({ ok: false });
+    expect(nextTimeout).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    const stored = await minigameRepository.findSessionById('round-deadline-session');
+    expect(stored?.progress_revision).toBe(2);
+    expect(JSON.parse(stored?.progress_data || '{}')).toEqual({
+      round_outcomes: [
+        { round: 0, selected_channel_id: null },
+        { round: 1, selected_channel_id: null }
+      ],
+      round_deadline_at: null
+    });
+  });
+
+  it('rejects a new non-timeout answer when authoritative round deadline state is missing', async () => {
+    seedUser(db, 'missing-round-deadline-user');
+    expect((await minigameRepository.startSession({
+      id: 'missing-round-deadline-session',
+      user_id: 'missing-round-deadline-user',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: JSON.stringify({ round_outcomes: [] }),
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const result = await minigameRepository.recordRoundOutcome(
+      'missing-round-deadline-session',
+      'missing-round-deadline-user',
+      0,
+      'answer',
+      null
+    );
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.reason).toMatch(/마감 정보/);
+    expect((await minigameRepository.findSessionById('missing-round-deadline-session'))?.progress_revision).toBe(0);
+  });
+
+  it('rejects arbitrary rewards and credits a versioned paid session only once', async () => {
+    seedUser(db, 'reward-lock-user');
+    const start = await minigameRepository.startSession({
+      id: 'reward-lock-session',
+      user_id: 'reward-lock-user',
+      game_type: 'puzzle',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: '{}',
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    }, 240);
+    expect(start.ok).toBe(true);
+
+    expect((await minigameRepository.completeSession('reward-lock-session', 999)).ok).toBe(false);
+    const first = await minigameRepository.completeSession(
+      'reward-lock-session',
+      1200,
+      JSON.stringify({ correct: true, message: 'stored' })
+    );
+    const retry = await minigameRepository.completeSession('reward-lock-session', 1200, JSON.stringify({ correct: false }));
+
+    expect(first).toEqual(expect.objectContaining({
+      ok: true,
+      settledNow: true,
+      newPoints: 1200,
+      earnedPoints: 1200,
+      resultData: JSON.stringify({ correct: true, message: 'stored' })
+    }));
+    expect(retry).toEqual(expect.objectContaining({
+      ok: true,
+      settledNow: false,
+      newPoints: 1200,
+      earnedPoints: 1200,
+      resultData: JSON.stringify({ correct: true, message: 'stored' })
+    }));
+    expect((await userRepository.findById('reward-lock-user'))?.point).toBe(1200);
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count
+        FROM point_ledger_entries
+       WHERE user_id = ? AND source_type = 'minigame' AND source_id = ?
+    `).get('reward-lock-user', 'reward-lock-session')).toEqual({ count: 1 });
+  });
+
+  it('never credits a versioned practice session', async () => {
+    seedUser(db, 'practice-reward-guard-user');
+    expect((await minigameRepository.startSession({
+      id: 'practice-reward-guard-session',
+      user_id: 'practice-reward-guard-user',
+      game_type: 'match',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: true }),
+      validation_version: 1,
+      progress_data: '{}'
+    })).ok).toBe(true);
+
+    const result = await minigameRepository.completeSession('practice-reward-guard-session', 1200);
+
+    expect(result.ok).toBe(false);
+    expect((await userRepository.findById('practice-reward-guard-user'))?.point).toBe(0);
+    expect((await minigameRepository.findSessionById('practice-reward-guard-session'))?.status).toBe('STARTED');
+  });
+
+  it('returns one authoritative winner when completion requests race', async () => {
+    seedUser(db, 'completion-race-user');
+    expect((await minigameRepository.startSession({
+      id: 'completion-race-session',
+      user_id: 'completion-race-user',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: '{}',
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const firstSnapshot = JSON.stringify({ request: 'first', earned_points: 1200 });
+    const secondSnapshot = JSON.stringify({ request: 'second', earned_points: 1000 });
+    const results = await Promise.all([
+      minigameRepository.completeSession('completion-race-session', 1200, firstSnapshot),
+      minigameRepository.completeSession('completion-race-session', 1000, secondSnapshot)
+    ]);
+    const successes = results.filter((result) => result.ok);
+    const winner = successes.find((result) => result.ok && result.settledNow);
+    const replay = successes.find((result) => result.ok && !result.settledNow);
+
+    expect(successes).toHaveLength(2);
+    expect(winner).toBeDefined();
+    expect(replay).toBeDefined();
+    if (!winner?.ok || !replay?.ok) throw new Error('completion race did not return successful settlements');
+    expect(replay.earnedPoints).toBe(winner.earnedPoints);
+    expect(replay.resultData).toBe(winner.resultData);
+    expect((await userRepository.findById('completion-race-user'))?.point).toBe(winner.earnedPoints);
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count, SUM(amount) AS amount
+        FROM point_ledger_entries
+       WHERE user_id = ? AND source_type = 'minigame' AND source_id = ?
+    `).get('completion-race-user', 'completion-race-session')).toEqual({
+      count: 1,
+      amount: winner.earnedPoints
+    });
+  });
+
+  it('rolls back session and points when settlement ledger persistence fails', async () => {
+    seedUser(db, 'completion-rollback-user');
+    expect((await minigameRepository.startSession({
+      id: 'completion-rollback-session',
+      user_id: 'completion-rollback-user',
+      game_type: 'puzzle',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false }),
+      validation_version: 1,
+      progress_data: '{}',
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    }, 240)).ok).toBe(true);
+    db.exec(`
+      CREATE TRIGGER fail_minigame_ledger
+      BEFORE INSERT ON point_ledger_entries
+      WHEN NEW.source_type = 'minigame'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced minigame ledger failure');
+      END;
+    `);
+
+    await expect(minigameRepository.completeSession(
+      'completion-rollback-session',
+      1200,
+      JSON.stringify({ correct: true })
+    )).rejects.toThrow(/forced minigame ledger failure/);
+
+    expect(db.prepare(`
+      SELECT status, earned_points, completed_at, result_data
+        FROM minigame_sessions
+       WHERE id = ?
+    `).get('completion-rollback-session')).toEqual({
+      status: 'STARTED',
+      earned_points: 0,
+      completed_at: null,
+      result_data: null
+    });
+    expect((await userRepository.findById('completion-rollback-user'))?.point).toBe(0);
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count
+        FROM point_ledger_entries
+       WHERE user_id = ? AND source_type = 'minigame' AND source_id = ?
+    `).get('completion-rollback-user', 'completion-rollback-session')).toEqual({ count: 0 });
+  });
+});
+
 describe('MinigameRepository stale started session cleanup', () => {
   it('expires old paid sessions without refunding the consumed base ticket', async () => {
     seedUser(db, 'refund-base');

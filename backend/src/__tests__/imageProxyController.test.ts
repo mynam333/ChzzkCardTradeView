@@ -3,6 +3,7 @@ import { promises as dns } from 'node:dns';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   IMAGE_PROXY_MAX_BYTES,
@@ -12,8 +13,13 @@ import {
   normalizeImageProxyMaxInFlight,
   normalizeImageProxyMaxInputPixels,
   normalizeImageProxyMaxTransforms,
-  proxyImage
+  proxyImage,
+  proxyMinigameImage
 } from '../controllers/imageProxyController';
+import {
+  createMinigameImageReference,
+  MINIGAME_IMAGE_REFERENCE_PREFIX
+} from '../services/minigameImageToken';
 import { getUploadsDir } from '../services/storagePaths';
 
 const VALID_PNG = Buffer.from(
@@ -81,6 +87,27 @@ const createRequest = (url: string, query: Record<string, string> = {}) => ({
   query: { url, ...query }
 }) as unknown as Request;
 
+const createMinigameRequest = (
+  sourceUrl: string,
+  kind: 'quiz' | 'crop' = 'quiz',
+  overrides: Record<string, string> = {}
+) => {
+  const reference = createMinigameImageReference({
+    userId: 'user-1',
+    sessionId: 'session-1',
+    round: 0,
+    sourceUrl,
+    kind,
+    ...(kind === 'crop' ? { crop: { x: 0.5, y: 0.5, size: 0.1, rotation: 15 } } : {})
+  });
+  return {
+    query: {
+      mg: reference.slice(MINIGAME_IMAGE_REFERENCE_PREFIX.length),
+      ...overrides
+    }
+  } as unknown as Request;
+};
+
 const createResponse = () => {
   const headers = new Map<string, string>();
   const response: any = {
@@ -120,6 +147,122 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe('protected minigame image proxy', () => {
+  it('serves only a small blurred quiz WebP under private no-store response policy', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-quiz-protected';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl), response, 'user-1');
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(sourceUrl);
+    expect(response.getHeader('Content-Type')).toBe('image/webp');
+    expect(response.getHeader('Cache-Control')).toBe('private, no-store');
+    expect(response.getHeader('Cross-Origin-Resource-Policy')).toBe('same-site');
+    expect(response.getHeader('Access-Control-Allow-Origin')).toBeUndefined();
+    const metadata = await sharp(response.body as Buffer).metadata();
+    expect(metadata).toMatchObject({ width: 240, height: 384, format: 'webp' });
+  });
+
+  it('renders a crop token as a square clue instead of returning the full card', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-protected';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(imageResponse()));
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(200);
+    const metadata = await sharp(response.body as Buffer).metadata();
+    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+  });
+
+  it('rejects a different authenticated user before fetching the hidden source', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest('https://api.dicebear.com/9.x/shapes/png?seed=minigame-owner'),
+      response,
+      'user-2'
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 for an expired image reference without touching the source', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-02T01:00:00.000Z'));
+    const request = createMinigameRequest(
+      'https://api.dicebear.com/9.x/shapes/png?seed=minigame-expired'
+    );
+    vi.setSystemTime(new Date('2026-08-02T01:00:30.001Z'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(request, response, 'user-1');
+
+    expect(response.statusCode).toBe(410);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('shares bounded processed-image cache work across freshly issued equivalent references', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-canonical-cache';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const firstResponse = createResponse();
+    const secondResponse = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl), firstResponse, 'user-1');
+    await proxyMinigameImage(createMinigameRequest(sourceUrl), secondResponse, 'user-1');
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(secondResponse.getHeader('X-Image-Proxy-Cache')).toBe('HIT');
+    expect(secondResponse.getHeader('Cache-Control')).toBe('private, no-store');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects URL and transform overrides instead of applying them to a valid token', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(
+        'https://api.dicebear.com/9.x/shapes/png?seed=minigame-no-override',
+        'quiz',
+        { url: 'https://api.dicebear.com/9.x/shapes/png?seed=attacker', w: '768', retry: '2' }
+      ),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps encrypted minigame references out of the public generic proxy', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyImage(createRequest(
+      'https://api.dicebear.com/9.x/shapes/png?seed=generic-source',
+      { mg: 'not-a-public-proxy-token' }
+    ), response);
+
+    expect(response.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('image proxy retry cache contract', () => {

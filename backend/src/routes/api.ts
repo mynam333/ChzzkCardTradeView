@@ -5,6 +5,10 @@ import { getRuntimeStats } from '../services/runtimeStats';
 import { getLogFilePath } from '../services/fileLogger';
 import { collectSiteInsightEvent } from '../controllers/analyticsController';
 import { authMiddleware } from '../middlewares/auth';
+import {
+  minigameImageAuthMiddleware,
+  type MinigameImageAuthenticatedRequest
+} from '../middlewares/minigameImageAuth';
 import { adminMiddleware } from '../middlewares/admin';
 import { banCheckMiddleware } from '../middlewares/banCheck';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
@@ -277,7 +281,12 @@ const authLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('AUTH_RATE_LIMI
 const registerLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REGISTER_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REGISTER_RATE_LIMIT_MAX', 60), key: 'register' });
 const reportLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('REPORT_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('REPORT_RATE_LIMIT_MAX', 60), key: 'report' });
 const chatImageLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('CHAT_IMAGE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('CHAT_IMAGE_RATE_LIMIT_MAX', 60), key: 'chat-image' });
-const minigameLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('MINIGAME_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('MINIGAME_RATE_LIMIT_MAX', 120), key: 'minigame' });
+const minigameLimiter = rateLimit({
+  windowMs: routeRateLimitWindowMs('MINIGAME_RATE_LIMIT_WINDOW_MS'),
+  max: routeRateLimitMax('MINIGAME_RATE_LIMIT_MAX', 120),
+  key: 'minigame',
+  keyByUser: true
+});
 const streamerReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('STREAMER_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('STREAMER_READ_RATE_LIMIT_MAX', 240), key: 'streamer-read' });
 const arenaReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_READ_RATE_LIMIT_MAX', 240), key: 'arena-read' });
 const arenaDeckWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_DECK_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_DECK_WRITE_RATE_LIMIT_MAX', 12), key: 'arena-deck-write', keyByUser: true });
@@ -391,6 +400,24 @@ router.get('/auth/chzzk/url', getChzzkAuthUrl);
 router.post('/auth/chzzk/callback', authLimiter, handleChzzkCallback);
 // 로그아웃 — httpOnly 세션 쿠키 제거
 router.post('/auth/logout', logout);
+router.get('/image-proxy/minigame', minigameImageAuthMiddleware, async (req, res, next) => {
+  if (!shouldServeImageProxyInApi()) {
+    return res.status(503).json({
+      error: 'ImageProxyDisabled',
+      message: '미니게임 이미지는 별도 image-worker 프로세스에서 처리됩니다.'
+    });
+  }
+  try {
+    const { proxyMinigameImage } = await import('../controllers/imageProxyController');
+    return proxyMinigameImage(
+      req,
+      res,
+      (req as MinigameImageAuthenticatedRequest).minigameImageUserId || ''
+    );
+  } catch (err) {
+    return next(err);
+  }
+});
 router.get('/image-proxy', async (req, res, next) => {
   if (!shouldServeImageProxyInApi()) {
     return res.status(503).json({
@@ -512,8 +539,8 @@ router.post('/market/bid/:id', authMiddleware, banCheckMiddleware, accountIntera
 // ==========================================
 // 미니게임 API (티켓 충전식 포인트 획득 기능)
 // ==========================================
-router.get('/minigames/status', authMiddleware, banCheckMiddleware, getMinigameStatus);
-router.get('/minigames/active', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, getActiveMinigameSession);
+router.get('/minigames/status', authMiddleware, banCheckMiddleware, minigameLimiter, getMinigameStatus);
+router.get('/minigames/active', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, getActiveMinigameSession);
 router.post('/minigames/abandon', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, abandonMinigameSession);
 router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigame);
 router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);

@@ -578,7 +578,15 @@ CREATE TABLE IF NOT EXISTS minigame_sessions (
     created_at VARCHAR(64) NOT NULL DEFAULT (UTC_TIMESTAMP()),
     completed_at VARCHAR(64),
     earned_points BIGINT DEFAULT 0,
+    validation_version INT NOT NULL DEFAULT 0,
+    progress_data MEDIUMTEXT NOT NULL DEFAULT ('{}'),
+    progress_revision INT NOT NULL DEFAULT 0,
+    expires_at VARCHAR(64),
+    result_data MEDIUMTEXT,
     KEY idx_minigame_sessions_user (user_id),
+    KEY idx_minigame_sessions_status_created (status, created_at, id),
+    KEY idx_minigame_sessions_user_game_status_created (user_id, game_type, status, created_at),
+    KEY idx_minigame_sessions_user_status_paid_created (user_id, status, ticket_spent_type, created_at),
     CONSTRAINT fk_minigame_sessions_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
