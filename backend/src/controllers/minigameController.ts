@@ -675,6 +675,9 @@ const buildPublicRound = (gameType: string, rawRound: any, sessionId: string, us
     const y = Number(crop.y);
     const size = Number(crop.size);
     const sourceImageUrl = String(rawRound?.source_image_url || '').trim();
+    const fallbackSourceImageUrl = String(
+      rawRound?.source_fallback_image_url || sourceImageUrl
+    ).trim() || sourceImageUrl;
     const choices = Array.isArray(rawRound?.choices) ? rawRound.choices.map(stripCardValue) : [];
     if (
       !sourceImageUrl || !Number.isFinite(x) || !Number.isFinite(y) ||
@@ -683,16 +686,27 @@ const buildPublicRound = (gameType: string, rawRound: any, sessionId: string, us
     ) return null;
     try {
       const protectedCrop = { x, y, size, rotation };
+      const createProtectedCropReference = (sourceUrl: string) => createMinigameImageReference({
+        userId,
+        sessionId,
+        round,
+        sourceUrl,
+        kind: 'crop',
+        crop: protectedCrop
+      });
+      const sourceImageReference = createProtectedCropReference(sourceImageUrl);
+      let fallbackImageReference: string;
+      try {
+        fallbackImageReference = createProtectedCropReference(fallbackSourceImageUrl);
+      } catch {
+        // A malformed legacy fallback must not invalidate an otherwise playable
+        // round. A separately randomized reference also keeps response shape fixed.
+        fallbackImageReference = createProtectedCropReference(sourceImageUrl);
+      }
       return {
         round,
-        source_image_url: createMinigameImageReference({
-          userId,
-          sessionId,
-          round,
-          sourceUrl: sourceImageUrl,
-          kind: 'crop',
-          crop: protectedCrop
-        }),
+        source_image_url: sourceImageReference,
+        source_fallback_image_url: fallbackImageReference,
         // The real crop geometry is encrypted into the image reference. The
         // browser receives only the already-rendered square clue.
         crop: { x: 0.5, y: 0.5, size: 1, rotation: 0 },

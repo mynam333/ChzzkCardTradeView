@@ -68,6 +68,10 @@ const MINIGAME_QUIZ_HEIGHT = 384;
 const MINIGAME_CROP_CARD_WIDTH = 640;
 const MINIGAME_CROP_CARD_HEIGHT = 1_024;
 const MINIGAME_CROP_OUTPUT_SIZE = 320;
+// Naver profile originals can exceed the proxy's 4 MiB safety ceiling. `w640`
+// keeps enough detail for the zoom clue while bounding both network and Sharp
+// work; the widely available f240 derivative is a last-resort CDN fallback.
+const MINIGAME_CROP_PSTATIC_TYPE = 'w640';
 
 export const normalizeImageProxyMaxInFlight = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -279,6 +283,10 @@ const getPstaticResizeTypeSize = (value: string | null): number | null => {
 const getUpstreamImageUrl = (target: URL, transform: ProxyTransform): URL => {
   const upstream = new URL(target.toString());
   if (transform.width && isPstaticImageHost(upstream.hostname)) {
+    if (transform.minigame?.kind === 'crop') {
+      upstream.searchParams.set('type', MINIGAME_CROP_PSTATIC_TYPE);
+      return upstream;
+    }
     const resizeType = pickPstaticResizeType(transform.width);
     if (resizeType) {
       upstream.searchParams.set('type', resizeType);
@@ -290,6 +298,15 @@ const getUpstreamImageUrl = (target: URL, transform: ProxyTransform): URL => {
     }
   }
   return upstream;
+};
+
+const getMinigameCropPstaticFallbackUrl = (target: URL): URL | null => {
+  if (!isPstaticImageHost(target.hostname)) return null;
+  const resizeType = pickPstaticResizeType(480);
+  if (!resizeType) return null;
+  const fallback = new URL(target.toString());
+  fallback.searchParams.set('type', resizeType);
+  return fallback;
 };
 
 const getLocalContentType = (filePath: string): string => {
@@ -724,9 +741,22 @@ const fetchRemoteImage = async (target: URL, transform: ProxyTransform): Promise
         isRecoveringOriginal ? IMAGE_PROXY_TIMEOUT_MS : IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS
       );
     } catch {
-      // Some pstatic images do not expose every `type=f*_na` derivative. The
-      // allow-listed original URL is still safe and can be resized locally.
-      source = await fetchRemoteImageBody(target, IMAGE_PROXY_TIMEOUT_MS);
+      const cropFallbackUrl = transform.minigame?.kind === 'crop'
+        ? getMinigameCropPstaticFallbackUrl(target)
+        : null;
+      if (cropFallbackUrl && cropFallbackUrl.toString() !== upstreamUrl.toString()) {
+        try {
+          source = await fetchRemoteImageBody(cropFallbackUrl, IMAGE_PROXY_PSTATIC_RESIZE_TIMEOUT_MS);
+        } catch {
+          // Some pstatic images expose neither bounded derivative. The original
+          // remains subject to the same strict byte/pixel limits as every proxy input.
+          source = await fetchRemoteImageBody(target, IMAGE_PROXY_TIMEOUT_MS);
+        }
+      } else {
+        // Some pstatic images do not expose every `type=f*_na` derivative. The
+        // allow-listed original URL is still safe and can be resized locally.
+        source = await fetchRemoteImageBody(target, IMAGE_PROXY_TIMEOUT_MS);
+      }
     }
   } else {
     source = await fetchRemoteImageBody(upstreamUrl, IMAGE_PROXY_TIMEOUT_MS);

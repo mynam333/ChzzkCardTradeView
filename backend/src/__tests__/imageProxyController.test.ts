@@ -182,6 +182,44 @@ describe('protected minigame image proxy', () => {
     expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
   });
 
+  it('uses a bounded pstatic derivative for crop clues instead of a multi-megabyte original', async () => {
+    const sourceUrl = 'https://nng-phinf.pstatic.net/MjAyNjA4MDJfMTIz/profile.png?type=f240_240_na';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestedUrl.hostname).toBe('nng-phinf.pstatic.net');
+    expect(requestedUrl.searchParams.get('type')).toBe('w640');
+    expect(requestedUrl.toString()).not.toBe(sourceUrl);
+    const metadata = await sharp(response.body as Buffer).metadata();
+    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+  });
+
+  it('falls back to the small pstatic derivative without fetching the original', async () => {
+    const sourceUrl = 'https://nng-phinf.pstatic.net/MjAyNjA4MDJfNDU2/profile.png';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(failedResponse(404))
+      .mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requestedUrls = fetchMock.mock.calls.map((call) => new URL(String(call[0])));
+    expect(requestedUrls.map((url) => url.searchParams.get('type'))).toEqual([
+      'w640',
+      'f240_240_na'
+    ]);
+    expect(requestedUrls.every((url) => url.toString() !== sourceUrl)).toBe(true);
+  });
+
   it('rejects a different authenticated user before fetching the hidden source', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

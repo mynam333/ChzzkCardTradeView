@@ -55,6 +55,7 @@ vi.mock('../services/puzzleImageExclusionService', () => {
 
 import { abandonMinigameSession, checkMinigameRoundAnswer, getActiveMinigameSession, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
+import { openMinigameImageReference } from '../services/minigameImageToken';
 import { getPuzzleExcludedImageKeys } from '../services/puzzleImageExclusionService';
 
 const getTicketStatus = vi.mocked(minigameRepository.getTicketStatus);
@@ -126,6 +127,7 @@ const cropDetectiveRounds = Array.from({ length: 5 }, (_, round) => ({
   round,
   answer_channel_id: `answer-${round}`,
   source_image_url: `https://example.com/answer-${round}.png`,
+  source_fallback_image_url: `https://example.com/answer-${round}-fallback.png`,
   crop: { x: 0.5, y: 0.5, size: 0.15 },
   choices: [
     { channel_id: `answer-${round}`, name: `정답 ${round}`, image_url: `https://example.com/answer-${round}.png`, star: 0 },
@@ -1458,7 +1460,12 @@ describe('daily minigame selection', () => {
     for (const round of responseBody.active_session.game_data.rounds) {
       expect(round.source_image_url).toMatch(/^minigame-image:v1:/);
       expect(round.source_image_url).not.toContain('example.com');
-      expect(round).not.toHaveProperty('source_fallback_image_url');
+      expect(round.source_fallback_image_url).toMatch(/^minigame-image:v1:/);
+      expect(round.source_fallback_image_url).not.toContain('example.com');
+      expect(openMinigameImageReference(round.source_image_url).sourceUrl)
+        .toBe(`https://example.com/answer-${round.round}.png`);
+      expect(openMinigameImageReference(round.source_fallback_image_url).sourceUrl)
+        .toBe(`https://example.com/answer-${round.round}-fallback.png`);
     }
   });
 
