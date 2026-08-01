@@ -79,6 +79,7 @@ const createResponse = () => {
 
 const solvedPuzzlePieces = Array.from({ length: 12 }, (_, id) => ({ id, rotation: 0 }));
 const solvedMatchChannelIds = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+const affectedRewardMinigameTypes = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'] as const;
 
 const valueDuelRounds = Array.from({ length: 5 }, (_, round) => ({
   round,
@@ -211,7 +212,7 @@ describe('submitMinigameResult puzzle time limit', () => {
   });
 
   it('fails and closes the session when puzzle submission exceeds 125 seconds', async () => {
-    const response = await runPuzzleSubmission(125001);
+    const response = await runPuzzleSubmission(125001, true);
 
     expect(completeSession).toHaveBeenCalledWith('puzzle-session', 0);
     expect(response.status).toHaveBeenCalledWith(200);
@@ -219,7 +220,8 @@ describe('submitMinigameResult puzzle time limit', () => {
       success: false,
       correct: false,
       earned_points: 0,
-      message: '120초 시간 제한이 초과되어 실패 처리되었습니다.',
+      message: '연습 게임의 120초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.',
+      practice_mode: true,
       answer: expect.objectContaining({
         channel_id: 'channel-answer',
         name: '정답 스트리머',
@@ -229,14 +231,15 @@ describe('submitMinigameResult puzzle time limit', () => {
   });
 
   it('accepts a solved puzzle within the server time allowance', async () => {
-    const response = await runPuzzleSubmission(124999);
+    const response = await runPuzzleSubmission(124999, true);
 
-    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 1000);
+    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 0);
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       correct: true,
-      earned_points: 1000,
+      earned_points: 0,
+      practice_mode: true,
       answer: expect.objectContaining({
         name: '정답 스트리머',
         image_url: 'https://example.com/answer.png'
@@ -251,7 +254,7 @@ describe('submitMinigameResult puzzle time limit', () => {
       game_type: 'puzzle',
       status: 'STARTED',
       target_data: JSON.stringify({
-        practice_mode: false,
+        practice_mode: true,
         correct_id: 'channel-answer',
         correct_name: '정답 스트리머',
         image_url: 'https://example.com/answer.png',
@@ -273,10 +276,12 @@ describe('submitMinigameResult puzzle time limit', () => {
 
     await submitMinigameResult(request, response);
 
-    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 1000);
+    expect(completeSession).toHaveBeenCalledWith('puzzle-session', 0);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
-      correct: true
+      correct: true,
+      earned_points: 0,
+      practice_mode: true
     }));
   });
 
@@ -300,7 +305,7 @@ describe('submitMinigameResult puzzle time limit', () => {
       game_type: 'puzzle',
       status: 'STARTED',
       target_data: JSON.stringify({
-        practice_mode: false,
+        practice_mode: true,
         correct_id: 'channel-answer',
         correct_name: '정답 스트리머',
         image_url: 'https://example.com/answer.png',
@@ -337,7 +342,7 @@ describe('submitMinigameResult match time limit', () => {
   });
 
   it('fails and closes the session when match submission exceeds 37 seconds', async () => {
-    const response = await runMatchSubmission(37001);
+    const response = await runMatchSubmission(37001, true);
 
     expect(completeSession).toHaveBeenCalledWith('match-session', 0);
     expect(response.status).toHaveBeenCalledWith(200);
@@ -345,19 +350,34 @@ describe('submitMinigameResult match time limit', () => {
       success: false,
       correct: false,
       earned_points: 0,
-      message: '30초 시간 제한이 초과되어 실패 처리되었습니다.'
+      message: '연습 게임의 30초 시간 제한이 초과되었습니다. 연습 모드에서는 포인트가 지급되지 않습니다.',
+      practice_mode: true
     }));
   });
 
   it('accepts a solved match game within the server time allowance', async () => {
-    const response = await runMatchSubmission(36999);
+    const response = await runMatchSubmission(36999, true);
 
-    expect(completeSession).toHaveBeenCalledWith('match-session', 1000);
+    expect(completeSession).toHaveBeenCalledWith('match-session', 0);
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       correct: true,
-      earned_points: 1000
+      earned_points: 0,
+      practice_mode: true
+    }));
+  });
+
+  it('completes a successful practice match without awarding points', async () => {
+    const response = await runMatchSubmission(36999, true);
+
+    expect(completeSession).toHaveBeenCalledWith('match-session', 0);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      correct: true,
+      earned_points: 0,
+      practice_mode: true
     }));
   });
 
@@ -367,7 +387,7 @@ describe('submitMinigameResult match time limit', () => {
       user_id: 'user-1',
       game_type: 'match',
       status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, channel_ids: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] }),
+      target_data: JSON.stringify({ practice_mode: true, channel_ids: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] }),
       created_at: new Date(Date.now() - 7000).toISOString()
     });
 
@@ -400,188 +420,86 @@ describe('round-based minigames', () => {
     vi.useRealTimers();
   });
 
-  it('awards base points when quiz has at least 3 correct answers', async () => {
+  it.each(affectedRewardMinigameTypes)(
+    'closes a legacy paid STARTED %s session with zero points before evaluating the submission',
+    async (gameType) => {
+      const sessionId = `legacy-paid-${gameType}`;
+      findSessionById.mockResolvedValue({
+        id: sessionId,
+        user_id: 'user-1',
+        game_type: gameType,
+        status: 'STARTED',
+        target_data: JSON.stringify({ practice_mode: false }),
+        created_at: new Date(Date.now() - 20_000).toISOString()
+      });
+
+      const request = {
+        user: { id: 'user-1' },
+        body: { session_id: sessionId, payload: { success: true } }
+      } as AuthenticatedRequest;
+      const response = createResponse();
+
+      await submitMinigameResult(request, response);
+
+      expect(completeSession).toHaveBeenCalledWith(sessionId, 0);
+      expect(findUserById).not.toHaveBeenCalled();
+      expect(response.status).toHaveBeenCalledWith(503);
+      expect(response.json).toHaveBeenCalledWith({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        message: '서버 권위 검증이 준비될 때까지 보상형 미니게임을 일시적으로 이용할 수 없습니다. 연습 모드를 이용해 주세요.',
+        practice_mode_available: true,
+        session_closed: true,
+        earned_points: 0
+      });
+    }
+  );
+
+  it.each([
+    {
+      gameType: 'quiz',
+      sessionId: 'practice-quiz-session',
+      rounds: quizRounds,
+      answers: quizRounds.map((round) => ({ round: round.round, selected_channel_id: round.answer_channel_id }))
+    },
+    {
+      gameType: 'value_duel',
+      sessionId: 'practice-value-duel-session',
+      rounds: valueDuelRounds,
+      answers: valueDuelRounds.map((round) => ({ round: round.round, selected_channel_id: round.left.channel_id }))
+    },
+    {
+      gameType: 'crop_detective',
+      sessionId: 'practice-crop-session',
+      rounds: cropDetectiveRounds,
+      answers: cropDetectiveRounds.map((round) => ({ round: round.round, selected_channel_id: round.answer_channel_id }))
+    }
+  ] as const)('completes a successful practice $gameType game without awarding points', async ({ gameType, sessionId, rounds, answers }) => {
     findSessionById.mockResolvedValue({
-      id: 'quiz-session',
+      id: sessionId,
       user_id: 'user-1',
-      game_type: 'quiz',
+      game_type: gameType,
       status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds }),
       created_at: new Date(Date.now() - 20_000).toISOString()
     });
-
     const request = {
       user: { id: 'user-1' },
       body: {
-        session_id: 'quiz-session',
-        payload: {
-          answers: [
-            { round: 0, selected_channel_id: 'quiz-answer-0' },
-            { round: 1, selected_channel_id: 'quiz-answer-1' },
-            { round: 2, selected_channel_id: 'quiz-answer-2' },
-            { round: 3, selected_channel_id: 'quiz-wrong-3' },
-            { round: 4, selected_channel_id: 'quiz-wrong-4' }
-          ],
-          client_remaining_ms: 0
-        }
+        session_id: sessionId,
+        payload: { answers, client_remaining_ms: 30_000 }
       }
     } as AuthenticatedRequest;
     const response = createResponse();
 
     await submitMinigameResult(request, response);
 
-    expect(completeSession).toHaveBeenCalledWith('quiz-session', 1000);
+    expect(completeSession).toHaveBeenCalledWith(sessionId, 0);
+    expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       correct: true,
-      earned_points: 1000,
-      message: expect.stringContaining('3/5')
-    }));
-  });
-
-  it('awards bonus points when quiz has all 5 correct answers', async () => {
-    findSessionById.mockResolvedValue({
-      id: 'quiz-session',
-      user_id: 'user-1',
-      game_type: 'quiz',
-      status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
-      created_at: new Date(Date.now() - 20_000).toISOString()
-    });
-
-    const request = {
-      user: { id: 'user-1' },
-      body: {
-        session_id: 'quiz-session',
-        payload: {
-          answers: quizRounds.map((round) => ({
-            round: round.round,
-            selected_channel_id: round.answer_channel_id
-          })),
-          client_remaining_ms: 0
-        }
-      }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await submitMinigameResult(request, response);
-
-    expect(completeSession).toHaveBeenCalledWith('quiz-session', 1200);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      correct: true,
-      earned_points: 1200,
-      message: expect.stringContaining('5문제')
-    }));
-  });
-
-  it('awards base points when value duel has at least 3 correct answers', async () => {
-    findSessionById.mockResolvedValue({
-      id: 'value-duel-session',
-      user_id: 'user-1',
-      game_type: 'value_duel',
-      status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
-      created_at: new Date(Date.now() - 20_000).toISOString()
-    });
-
-    const request = {
-      user: { id: 'user-1' },
-      body: {
-        session_id: 'value-duel-session',
-        payload: {
-          answers: [
-            { round: 0, selected_channel_id: 'left-0' },
-            { round: 1, selected_channel_id: 'left-1' },
-            { round: 2, selected_channel_id: 'left-2' },
-            { round: 3, selected_channel_id: 'right-3' },
-            { round: 4, selected_channel_id: 'right-4' }
-          ],
-          client_remaining_ms: 30_000
-        }
-      }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await submitMinigameResult(request, response);
-
-    expect(completeSession).toHaveBeenCalledWith('value-duel-session', 1000);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      correct: true,
-      earned_points: 1000,
-      message: expect.stringContaining('3/5')
-    }));
-  });
-
-  it('does not fail round-based games only because total wall-clock time exceeds 50 seconds', async () => {
-    findSessionById.mockResolvedValue({
-      id: 'value-duel-session',
-      user_id: 'user-1',
-      game_type: 'value_duel',
-      status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
-      created_at: new Date(Date.now() - 70_000).toISOString()
-    });
-
-    const request = {
-      user: { id: 'user-1' },
-      body: {
-        session_id: 'value-duel-session',
-        payload: {
-          answers: [
-            { round: 0, selected_channel_id: 'left-0' },
-            { round: 1, selected_channel_id: 'left-1' },
-            { round: 2, selected_channel_id: 'left-2' }
-          ],
-          client_remaining_ms: 0
-        }
-      }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await submitMinigameResult(request, response);
-
-    expect(completeSession).toHaveBeenCalledWith('value-duel-session', 1000);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      correct: true,
-      earned_points: 1000
-    }));
-  });
-
-  it('awards bonus points when crop detective has all 5 correct answers', async () => {
-    findSessionById.mockResolvedValue({
-      id: 'crop-session',
-      user_id: 'user-1',
-      game_type: 'crop_detective',
-      status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
-      created_at: new Date(Date.now() - 20_000).toISOString()
-    });
-
-    const request = {
-      user: { id: 'user-1' },
-      body: {
-        session_id: 'crop-session',
-        payload: {
-          answers: cropDetectiveRounds.map((round) => ({
-            round: round.round,
-            selected_channel_id: round.answer_channel_id
-          })),
-          client_remaining_ms: 30_000
-        }
-      }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await submitMinigameResult(request, response);
-
-    expect(completeSession).toHaveBeenCalledWith('crop-session', 1200);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      correct: true,
-      earned_points: 1200,
-      message: expect.stringContaining('5문제')
+      earned_points: 0,
+      practice_mode: true
     }));
   });
 
@@ -591,7 +509,7 @@ describe('round-based minigames', () => {
       user_id: 'user-1',
       game_type: 'crop_detective',
       status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds: cropDetectiveRounds }),
       created_at: new Date(Date.now() - 20_000).toISOString()
     });
 
@@ -619,7 +537,7 @@ describe('round-based minigames', () => {
       user_id: 'user-1',
       game_type: 'quiz',
       status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: quizRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds: quizRounds }),
       created_at: new Date(Date.now() - 10_000).toISOString()
     });
 
@@ -649,7 +567,7 @@ describe('round-based minigames', () => {
       user_id: 'user-1',
       game_type: 'value_duel',
       status: 'STARTED',
-      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds: valueDuelRounds }),
       created_at: new Date(Date.now() - 10_000).toISOString()
     });
 
@@ -672,6 +590,46 @@ describe('round-based minigames', () => {
       correct_channel_ids: ['left-0']
     }));
   });
+
+  it.each([
+    { gameType: 'quiz', rounds: quizRounds },
+    { gameType: 'value_duel', rounds: valueDuelRounds },
+    { gameType: 'crop_detective', rounds: cropDetectiveRounds }
+  ] as const)(
+    'closes a legacy paid $gameType session before returning a round-answer oracle',
+    async ({ gameType, rounds }) => {
+      const sessionId = `legacy-round-${gameType}`;
+      findSessionById.mockResolvedValue({
+        id: sessionId,
+        user_id: 'user-1',
+        game_type: gameType,
+        status: 'STARTED',
+        target_data: JSON.stringify({ practice_mode: false, rounds }),
+        created_at: new Date(Date.now() - 10_000).toISOString()
+      });
+      const request = {
+        user: { id: 'user-1' },
+        body: {
+          session_id: sessionId,
+          payload: { round: 0, selected_channel_id: 'attacker-controlled-choice' }
+        }
+      } as AuthenticatedRequest;
+      const response = createResponse();
+
+      await checkMinigameRoundAnswer(request, response);
+
+      expect(completeSession).toHaveBeenCalledWith(sessionId, 0);
+      expect(response.status).toHaveBeenCalledWith(503);
+      const body = vi.mocked(response.json).mock.calls[0][0] as Record<string, unknown>;
+      expect(body).toEqual(expect.objectContaining({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        session_closed: true,
+        earned_points: 0
+      }));
+      expect(body).not.toHaveProperty('correct');
+      expect(body).not.toHaveProperty('correct_channel_ids');
+    }
+  );
 });
 
 describe('daily minigame selection', () => {
@@ -724,41 +682,58 @@ describe('daily minigame selection', () => {
     }));
   });
 
-  it('rejects a game that is not selected for today before reading or spending tickets', async () => {
-    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z'));
-    const todayGame = getDailyMinigame().game_type;
-    const unavailableGame = (['quiz', 'puzzle', 'match'] as const).find(game => game !== todayGame)!;
+  it.each(affectedRewardMinigameTypes)(
+    'rejects paid %s starts before reading tickets or creating a session',
+    async (gameType) => {
+      const request = {
+        user: { id: 'user-1' },
+        body: { game_type: gameType, practice_mode: false }
+      } as AuthenticatedRequest;
+      const response = createResponse();
+
+      await startMinigame(request, response);
+
+      expect(response.status).toHaveBeenCalledWith(503);
+      expect(response.json).toHaveBeenCalledWith({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        message: '서버 권위 검증이 준비될 때까지 보상형 미니게임을 일시적으로 이용할 수 없습니다. 연습 모드를 이용해 주세요.',
+        practice_mode_available: true
+      });
+      expect(findActiveStartedSession).not.toHaveBeenCalled();
+      expect(getTicketStatus).not.toHaveBeenCalled();
+      expect(updateTickets).not.toHaveBeenCalled();
+      expect(findAllStreamers).not.toHaveBeenCalled();
+      expect(startSession).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { label: 'omitted', practiceMode: undefined },
+    { label: 'string true', practiceMode: 'true' },
+    { label: 'numeric true', practiceMode: 1 }
+  ])('does not treat $label practice_mode as the zero-reward mode', async ({ practiceMode }) => {
     const request = {
       user: { id: 'user-1' },
-      body: { game_type: unavailableGame }
+      body: {
+        game_type: 'quiz',
+        ...(practiceMode === undefined ? {} : { practice_mode: practiceMode })
+      }
     } as AuthenticatedRequest;
     const response = createResponse();
 
     await startMinigame(request, response);
 
-    expect(response.status).toHaveBeenCalledWith(409);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      error: 'DailyMinigameChanged',
-      today_game: todayGame
-    }));
-    expect(getTicketStatus).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(startSession).not.toHaveBeenCalled();
   });
 
-  it('starts any game in practice mode without reading or spending tickets', async () => {
+  it.each(affectedRewardMinigameTypes)('starts %s in practice mode without reading or spending tickets', async (gameType) => {
     vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z'));
-    const todayGame = getDailyMinigame().game_type;
-    const practiceGame = (['quiz', 'puzzle', 'match'] as const).find(game => game !== todayGame)!;
-    findAllStreamers.mockResolvedValue(
-      Array.from({ length: 6 }, (_, index) => ({
-        channel_id: `channel-${index}`,
-        name: `streamer-${index}`,
-        logo_url: `https://example.com/${index}.png`
-      })) as never
-    );
+    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
     startSession.mockResolvedValue({ ok: true });
     const request = {
       user: { id: 'user-1' },
-      body: { game_type: practiceGame, practice_mode: true }
+      body: { game_type: gameType, practice_mode: true }
     } as AuthenticatedRequest;
     const response = createResponse();
 
@@ -766,7 +741,7 @@ describe('daily minigame selection', () => {
 
     expect(response.status).toHaveBeenCalledWith(200);
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      game_type: practiceGame,
+      game_type: gameType,
       practice_mode: true
     }));
     expect(getTicketStatus).not.toHaveBeenCalled();
@@ -802,89 +777,9 @@ describe('daily minigame selection', () => {
     }
   });
 
-  it('closes an interrupted paid session as failed before starting a fresh game', async () => {
-    vi.setSystemTime(new Date('2026-06-07T03:00:00.000Z'));
-    const todayGame = getDailyMinigame().game_type;
-    findActiveStartedSession.mockResolvedValue({
-      id: 'started-session',
-      user_id: 'user-1',
-      game_type: todayGame,
-      status: 'STARTED',
-      ticket_spent_type: 'BASE',
-      target_data: JSON.stringify({ practice_mode: false })
-    });
+  it('closes a legacy paid crop detective session instead of resuming it', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
     completeSession.mockResolvedValue({ ok: true, newPoints: 5000 });
-    getTicketStatus.mockResolvedValue({
-      user_id: 'user-1',
-      current_tickets: 1,
-      bonus_tickets: 0,
-      last_charged_at: new Date('2026-06-07T02:00:00.000Z').toISOString()
-    });
-    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
-    startSession.mockResolvedValue({ ok: true });
-    const request = {
-      user: { id: 'user-1' },
-      body: { game_type: todayGame }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await startMinigame(request, response);
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
-      practice_mode: false,
-      interrupted_session_closed: true,
-      message: expect.stringContaining('실패 처리')
-    }));
-    expect(completeSession).toHaveBeenCalledWith('started-session', 0);
-    expect(getTicketStatus).toHaveBeenCalledWith('user-1');
-    expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
-      user_id: 'user-1',
-      game_type: todayGame,
-      status: 'STARTED'
-    }));
-  });
-
-  it('resumes a fresh paid crop detective session without closing it or spending another ticket', async () => {
-    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
-    expect(getDailyMinigame().game_type).toBe('crop_detective');
-    findActiveStartedSession.mockResolvedValue({
-      id: 'crop-resume-session',
-      user_id: 'user-1',
-      game_type: 'crop_detective',
-      status: 'STARTED',
-      ticket_spent_type: 'BASE',
-      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
-      created_at: new Date(Date.now() - 30_000).toISOString()
-    });
-    const request = {
-      user: { id: 'user-1' },
-      body: { game_type: 'crop_detective' }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await startMinigame(request, response);
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    const body = vi.mocked(response.json).mock.calls[0][0] as any;
-    expect(body).toEqual(expect.objectContaining({
-      session_id: 'crop-resume-session',
-      game_type: 'crop_detective',
-      resumed_session: true,
-      interrupted_session_closed: false
-    }));
-    expect(body.game_data.rounds).toHaveLength(5);
-    expect(body.game_data.rounds[0]).not.toHaveProperty('answer_channel_id');
-    expect(body.game_data.rounds[0].source_fallback_image_url).toBeNull();
-    expect(body.game_data.rounds[0].choices[0]).not.toHaveProperty('base_value');
-    expect(body.game_data.rounds[0].choices[0].fallback_image_url).toBeNull();
-    expect(completeSession).not.toHaveBeenCalled();
-    expect(getTicketStatus).not.toHaveBeenCalled();
-    expect(startSession).not.toHaveBeenCalled();
-  });
-
-  it('returns the same sanitized crop detective session from the active-session endpoint', async () => {
-    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
     findActiveStartedSession.mockResolvedValue({
       id: 'crop-active-session',
       user_id: 'user-1',
@@ -903,13 +798,12 @@ describe('daily minigame selection', () => {
     await getActiveMinigameSession(request, response);
 
     expect(response.status).toHaveBeenCalledWith(200);
-    const body = vi.mocked(response.json).mock.calls[0][0] as any;
-    expect(body.active_session).toEqual(expect.objectContaining({
-      session_id: 'crop-active-session',
-      resumed_session: true
-    }));
-    expect(body.active_session.game_data.rounds[0]).not.toHaveProperty('answer_channel_id');
-    expect(completeSession).not.toHaveBeenCalled();
+    expect(completeSession).toHaveBeenCalledWith('crop-active-session', 0);
+    expect(response.json).toHaveBeenCalledWith({
+      active_session: null,
+      rewards_temporarily_unavailable: true,
+      practice_mode_available: true
+    });
   });
 
   it('does not resume an expired crop detective session', async () => {
@@ -920,7 +814,7 @@ describe('daily minigame selection', () => {
       game_type: 'crop_detective',
       status: 'STARTED',
       ticket_spent_type: 'BASE',
-      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds: cropDetectiveRounds }),
       created_at: new Date(Date.now() - 4 * 60_000).toISOString()
     });
     const request = {
@@ -944,7 +838,7 @@ describe('daily minigame selection', () => {
       game_type: 'crop_detective',
       status: 'STARTED',
       ticket_spent_type: 'BASE',
-      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      target_data: JSON.stringify({ practice_mode: true, rounds: cropDetectiveRounds }),
       created_at: new Date(Date.now() - 181_000).toISOString()
     });
     const request = {
@@ -1037,60 +931,6 @@ describe('daily minigame selection', () => {
     expect(getCardImageUrl(streamer, 5)).toBe('https://example.com/star-3.png');
     expect(getCardImageUrl(streamer, 2)).toBe('https://example.com/star-1.png');
     expect(getCardImageUrl(streamer, 0)).toBe('https://example.com/logo.png');
-  });
-
-  it('does not issue a puzzle image that is excluded through a lower-star fallback', async () => {
-    let puzzleDay = Date.parse('2026-06-01T03:00:00.000Z');
-    for (let offset = 0; offset < 40; offset++) {
-      const candidate = Date.UTC(2026, 5, 1 + offset, 3, 0, 0);
-      if (getDailyMinigame(candidate).game_type === 'puzzle') {
-        puzzleDay = candidate;
-        break;
-      }
-    }
-    vi.setSystemTime(new Date(puzzleDay));
-
-    const excludedImage = 'https://api.yuaru.com/uploads/cards/reported-image.webp';
-    getExcludedPuzzleImageKeys.mockResolvedValue(new Set(['uploads:cards/reported-image.webp']));
-    findAllStreamers.mockResolvedValue([
-      {
-        channel_id: 'reported-channel',
-        name: '신고된 이미지',
-        logo_url: 'https://example.com/reported-logo.png',
-        custom_image_url: null,
-        custom_images: [null, null, null, excludedImage, null, null]
-      },
-      ...Array.from({ length: 5 }, (_, index) => ({
-        channel_id: `safe-channel-${index}`,
-        name: `안전 ${index}`,
-        logo_url: `https://example.com/safe-${index}.png`,
-        custom_image_url: null,
-        custom_images: []
-      }))
-    ] as never);
-    getTicketStatus.mockResolvedValue({
-      user_id: 'user-1',
-      current_tickets: 5,
-      bonus_tickets: 0,
-      last_charged_at: new Date(puzzleDay).toISOString()
-    });
-    updateTickets.mockResolvedValue(undefined);
-    startSession.mockResolvedValue({ ok: true });
-
-    const request = {
-      user: { id: 'user-1' },
-      body: { game_type: 'puzzle' }
-    } as AuthenticatedRequest;
-    const response = createResponse();
-
-    await startMinigame(request, response);
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
-    expect(responseBody.game_data.image_url).not.toBe(excludedImage);
-
-    const target = JSON.parse(startSession.mock.calls[0][0].target_data);
-    expect(target.image_url).not.toBe(excludedImage);
   });
 
   it('issues crop detective rounds inside the 5:8 card viewport with doubled zoom and rotation data', async () => {

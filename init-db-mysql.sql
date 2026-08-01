@@ -24,6 +24,34 @@ CREATE TABLE IF NOT EXISTS users (
     created_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP())
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    id VARCHAR(128) PRIMARY KEY,
+    user_id VARCHAR(191) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_auth_sessions_user_active (user_id, revoked_at, expires_at),
+    KEY idx_auth_sessions_expires_at (expires_at),
+    CONSTRAINT fk_auth_sessions_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_attachment_quota_locks (
+    user_id VARCHAR(191) PRIMARY KEY,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chat_attachment_quota_locks_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS chat_attachment_quota_reservations (
+    id VARCHAR(128) PRIMARY KEY,
+    user_id VARCHAR(191) NOT NULL,
+    reserved_bytes BIGINT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_chat_attachment_quota_reservations_user (user_id, expires_at),
+    KEY idx_chat_attachment_quota_reservations_expiry (expires_at),
+    CONSTRAINT fk_chat_attachment_quota_reservations_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_chat_attachment_quota_reserved_bytes CHECK (reserved_bytes > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     user_id VARCHAR(191) PRIMARY KEY,
     deleted_at VARCHAR(64) NOT NULL DEFAULT (UTC_TIMESTAMP()),

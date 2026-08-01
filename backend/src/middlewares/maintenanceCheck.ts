@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { systemConfigRepository, userRepository } from '../repositories';
-import { IS_PRODUCTION, JWT_SECRET } from '../config';
-import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
+import { getRequestSessionToken, verifyAuthSessionToken } from '../services/authSessionService';
 
 // 점검 예외 허용 API 경로 목록 (Prefix 매칭 또는 Exact 매칭)
 const MAINTENANCE_BYPASS_PATHS = [
@@ -14,23 +12,6 @@ const MAINTENANCE_BYPASS_PATHS = [
   '/image-proxy',
   '/realtime/stream'
 ];
-
-const AUTH_BEARER_ENABLED =
-  process.env.AUTH_BEARER_ENABLED === 'true' ||
-  (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
-
-const getSessionToken = (req: Request): string | undefined => {
-  const cookies = (req as any).cookies || {};
-  const cookieToken = SESSION_COOKIE_NAMES
-    .map(cookieName => cookies[cookieName])
-    .find(Boolean);
-  if (cookieToken) return cookieToken;
-
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !AUTH_BEARER_ENABLED) return undefined;
-  const [type, token] = authHeader.split(' ');
-  return type === 'Bearer' && token ? token : undefined;
-};
 
 /**
  * 점검 상태 점검 미들웨어
@@ -48,10 +29,10 @@ export const maintenanceCheckMiddleware = async (req: Request, res: Response, ne
     const active = await systemConfigRepository.get('maintenance_active', 'false');
     if (active === 'true') {
       // 3. 세션 쿠키 또는 Authorization 헤더를 디코딩하여 ADMIN 검사
-      const token = getSessionToken(req);
+      const token = getRequestSessionToken(req);
       if (token) {
         try {
-          const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+          const decoded = await verifyAuthSessionToken(token);
           const user = await userRepository.findById(decoded.id);
           if (user?.role === 'ADMIN') {
             return next();

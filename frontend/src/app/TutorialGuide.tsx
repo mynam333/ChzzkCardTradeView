@@ -1044,7 +1044,7 @@ export const TutorialGuide: React.FC = () => {
   const [actionStatus, setActionStatus] = useState('');
   const [gachaRewardClaiming, setGachaRewardClaiming] = useState(false);
   const [mobilePanelPosition, setMobilePanelPosition] = useState<'bottom' | 'top'>('bottom');
-  const [uaruImageUrl, setUaruImageUrl] = useState(`https://api.dicebear.com/10.x/fun-emoji/svg?seed=${UARU_CHANNEL_ID}`);
+  const [uaruImageUrl, setUaruImageUrl] = useState(`https://api.dicebear.com/10.x/fun-emoji/png?seed=${UARU_CHANNEL_ID}`);
   const [tutorialProgressCheckedFor, setTutorialProgressCheckedFor] = useState<string | null>(null);
   const [tutorialCompletedOnBackend, setTutorialCompletedOnBackend] = useState(false);
   // 티켓 지급을 스텝당 1회만 시도하기 위한 가드 (effect 재실행에 따른 중복 호출·로딩 고착 방지)

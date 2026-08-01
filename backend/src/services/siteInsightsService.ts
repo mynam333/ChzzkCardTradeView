@@ -1,9 +1,7 @@
 import crypto from 'crypto';
 import { Request } from 'express';
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '../config';
 import { getDbMode, getMysqlDb, getSqlDialect, getSqliteDb } from './db';
-import { SESSION_COOKIE_NAMES } from './sessionCookie';
+import { getRequestSessionToken, verifyAuthSessionToken } from './authSessionService';
 import { toMysqlDateTime } from '../repositories/mysql/dateUtils';
 
 export type InsightsRange = '24h' | '7d' | '30d' | 'all';
@@ -210,16 +208,11 @@ const buildDisabledInsights = (range: InsightsRange, granularity: InsightsGranul
   notifications: []
 });
 
-const getCookieToken = (req: Request) => {
-  const cookies = (req as any).cookies || {};
-  return SESSION_COOKIE_NAMES.map((name) => cookies[name]).find(Boolean) as string | undefined;
-};
-
-const getAuthenticatedUserId = (req: Request): string | null => {
-  const token = getCookieToken(req);
+export const resolveSiteInsightsUserId = async (req: Request): Promise<string | null> => {
+  const token = getRequestSessionToken(req);
   if (!token) return null;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id?: string };
+    const decoded = await verifyAuthSessionToken(token);
     return typeof decoded.id === 'string' ? decoded.id : null;
   } catch {
     return null;
@@ -487,14 +480,14 @@ const runCleanupIfNeeded = async () => {
   }
 };
 
-const buildEvent = (payload: AnalyticsPayload, req: Request) => {
+const buildEvent = async (payload: AnalyticsPayload, req: Request) => {
   const eventType = normalizeEventType(payload.event_type);
   if (!eventType) return null;
   const path = sanitizePath(payload.path);
   const featureName = eventType === 'feature'
     ? clampText(payload.feature_name || payload.eventName, 96, 'unknown')
     : null;
-  const userId = getAuthenticatedUserId(req);
+  const userId = await resolveSiteInsightsUserId(req);
   const sessionId = clampText(payload.session_id, 96, '').replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 96);
   if (!sessionId || sessionId === 'server') return null;
   const duration = Math.max(0, Math.min(24 * 60 * 60, Math.round(Number(payload.duration_seconds || 0))));
@@ -525,7 +518,9 @@ const buildEvent = (payload: AnalyticsPayload, req: Request) => {
 
 const bucketHour = (createdAt: string) => `${createdAt.slice(0, 13)}:00:00`;
 
-const rollupDimensions = (event: ReturnType<typeof buildEvent>) => {
+type SiteInsightEvent = NonNullable<Awaited<ReturnType<typeof buildEvent>>>;
+
+const rollupDimensions = (event: SiteInsightEvent | null) => {
   if (!event) return [];
   const rows = [
     { type: 'total', key: 'total' },
@@ -537,7 +532,6 @@ const rollupDimensions = (event: ReturnType<typeof buildEvent>) => {
   return rows;
 };
 
-type SiteInsightEvent = NonNullable<ReturnType<typeof buildEvent>>;
 const pendingEvents: SiteInsightEvent[] = [];
 
 const flushPendingEvents = async () => {
@@ -703,7 +697,7 @@ const recordSqliteEvent = (event: SiteInsightEvent) => {
 export const recordSiteInsightEvent = async (payload: AnalyticsPayload, req: Request) => {
   if (process.env.SITE_INSIGHTS_ENABLED === 'false') return false;
   if (!isSiteInsightsStorageSupported()) return false;
-  const event = buildEvent(payload, req);
+  const event = await buildEvent(payload, req);
   if (!event) return false;
   enqueueEvent(event);
   return true;

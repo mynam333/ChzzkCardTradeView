@@ -416,6 +416,43 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await normalizeMysqlIsoDateColumn(db, 'users', 'token_expires_at');
   await normalizeMysqlIsoDateColumn(db, 'users', 'last_seen_at');
   await db.run(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id VARCHAR(128) PRIMARY KEY,
+      user_id VARCHAR(191) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      revoked_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_auth_sessions_user_active (user_id, revoked_at, expires_at),
+      INDEX idx_auth_sessions_expires_at (expires_at),
+      CONSTRAINT fk_auth_sessions_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await ensureMysqlTableCollation(db, 'auth_sessions');
+  await ensureMysqlIndex(db, 'auth_sessions', 'idx_auth_sessions_user_active', '(user_id, revoked_at, expires_at)');
+  await ensureMysqlIndex(db, 'auth_sessions', 'idx_auth_sessions_expires_at', '(expires_at)');
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_attachment_quota_locks (
+      user_id VARCHAR(191) PRIMARY KEY,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_chat_attachment_quota_locks_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_attachment_quota_reservations (
+      id VARCHAR(128) PRIMARY KEY,
+      user_id VARCHAR(191) NOT NULL,
+      reserved_bytes BIGINT NOT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_chat_attachment_quota_reservations_user (user_id, expires_at),
+      INDEX idx_chat_attachment_quota_reservations_expiry (expires_at),
+      CONSTRAINT fk_chat_attachment_quota_reservations_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT chk_chat_attachment_quota_reserved_bytes CHECK (reserved_bytes > 0)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await ensureMysqlIndex(db, 'chat_attachment_quota_reservations', 'idx_chat_attachment_quota_reservations_user', '(user_id, expires_at)');
+  await ensureMysqlIndex(db, 'chat_attachment_quota_reservations', 'idx_chat_attachment_quota_reservations_expiry', '(expires_at)');
+  await db.run(`
     CREATE TABLE IF NOT EXISTS puzzle_excluded_images (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       image_key VARCHAR(512) NOT NULL,
@@ -919,6 +956,30 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
       ADD COLUMN IF NOT EXISTS point_at_deletion BIGINT
   `);
   await db.run(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_attachment_quota_locks (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS chat_attachment_quota_reservations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reserved_bytes BIGINT NOT NULL CHECK (reserved_bytes > 0),
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.run(`
     CREATE TABLE IF NOT EXISTS market_transaction_audit_logs (
       id BIGSERIAL PRIMARY KEY,
       audit_key TEXT NOT NULL,
@@ -1179,6 +1240,10 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_friendships_pair ON friendships (user_a_id, user_b_id)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_blocks_pair ON user_blocks (blocker_id, blocked_id)');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS uniq_deleted_user_accounts_user ON deleted_user_accounts (user_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_auth_sessions_user_active ON auth_sessions (user_id, revoked_at, expires_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions (expires_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachment_quota_reservations_user ON chat_attachment_quota_reservations (user_id, expires_at)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachment_quota_reservations_expiry ON chat_attachment_quota_reservations (expires_at)');
 
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_id_trgm ON users USING GIN (id gin_trgm_ops)');

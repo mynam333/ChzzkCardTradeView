@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import cron from 'node-cron';
+import cron, { ScheduledTask } from 'node-cron';
 import Database from 'better-sqlite3';
 import { getDbMode, getMysqlDb, getSqlDialect } from './db';
 import { ensureDirectory } from './storagePaths';
@@ -322,7 +322,7 @@ export const runMysqlToSqliteBackupOnce = async (): Promise<{ ok: boolean; path?
   }
 };
 
-let backupTask: cron.ScheduledTask | null = null;
+let backupTask: ScheduledTask | null = null;
 let backupRunning = false;
 let lastSkipLogAt = 0;
 

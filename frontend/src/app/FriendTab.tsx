@@ -127,7 +127,7 @@ type ContextMenuState =
   | { x: number; y: number; kind: 'room'; room: ChatRoom }
   | null;
 
-const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(id)}`;
+const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/png?seed=${encodeURIComponent(id)}`;
 const isDraftRoom = (room: ActiveChatRoom | null): room is DraftChatRoom => Boolean(room && 'draft' in room);
 const parseChatDate = (value?: string) => {
   if (!value) return null;

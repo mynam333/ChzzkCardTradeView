@@ -336,7 +336,7 @@ export const getUserMe = async (req: Request, res: Response) => {
     return res.status(200).json({
       id: user.id,
       username: user.username,
-      avatarUrl: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
+      avatarUrl: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${user.id}`,
       role: user.role,
       statusMessage: user.status_message || null,
       titles,
@@ -418,7 +418,7 @@ export const searchUsers = async (req: Request, res: Response) => {
       .map((u) => ({
         id: u.id,
         username: u.username,
-        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`
+        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${u.id}`
       }));
     return res.status(200).json(mapped);
   } catch (err: any) {
@@ -470,7 +470,7 @@ export const getMyBlocks = async (req: Request, res: Response) => {
     return res.status(200).json(users.map((u) => ({
       id: u.id,
       username: u.username,
-      avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`
+      avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${u.id}`
     })));
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '차단 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -618,7 +618,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
       role: user.role,
       status_message: user.status_message || null,
       titles,
-      avatar_url: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${user.id}`,
+      avatar_url: user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${user.id}`,
       point: user.point,
       card_count: cards.length,
       unique_count: collection.length,
@@ -1325,7 +1325,7 @@ export const getUserRankings = async (req: Request, res: Response) => {
       return {
         id: u.id,
         username: u.username,
-        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${u.id}`,
+        avatar_url: u.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${u.id}`,
         point: u.point,
         card_count: u.card_count,
         cards_value: u.cards_value,

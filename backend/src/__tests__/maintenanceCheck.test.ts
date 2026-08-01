@@ -11,9 +11,15 @@ vi.mock('../repositories', () => ({
   }
 }));
 
+vi.mock('../services/authSessionService', () => ({
+  getRequestSessionToken: vi.fn(),
+  verifyAuthSessionToken: vi.fn()
+}));
+
 import { JWT_SECRET } from '../config';
 import { maintenanceCheckMiddleware } from '../middlewares/maintenanceCheck';
 import { systemConfigRepository, userRepository } from '../repositories';
+import { getRequestSessionToken, verifyAuthSessionToken } from '../services/authSessionService';
 import {
   LEGACY_SESSION_COOKIE_NAME,
   SESSION_COOKIE_NAME
@@ -21,6 +27,8 @@ import {
 
 const systemConfigGet = vi.mocked(systemConfigRepository.get);
 const findUserById = vi.mocked(userRepository.findById);
+const getSessionToken = vi.mocked(getRequestSessionToken);
+const verifySessionToken = vi.mocked(verifyAuthSessionToken);
 
 const createResponse = () => {
   const response = {
@@ -44,6 +52,14 @@ const runMiddleware = async (request: Partial<Request>) => {
 describe('maintenanceCheckMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getSessionToken.mockImplementation((req: Request) => {
+      const cookies = (req as any).cookies || {};
+      const cookieToken = cookies[SESSION_COOKIE_NAME] || cookies[LEGACY_SESSION_COOKIE_NAME];
+      if (cookieToken) return cookieToken;
+      const [type, token] = String(req.headers.authorization || '').split(' ');
+      return type === 'Bearer' ? token : undefined;
+    });
+    verifySessionToken.mockImplementation(async (token: string) => jwt.verify(token, JWT_SECRET) as any);
     systemConfigGet.mockImplementation(async (key: string, defaultValue?: string) => {
       if (key === 'maintenance_active') return 'true';
       return defaultValue ?? '';
@@ -103,6 +119,22 @@ describe('maintenanceCheckMiddleware', () => {
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
       error: 'Maintenance'
     }));
+  });
+
+  it('does not allow a database-revoked admin session through maintenance mode', async () => {
+    const token = jwt.sign({ id: 'admin-id', role: 'ADMIN' }, JWT_SECRET);
+    verifySessionToken.mockRejectedValueOnce(new Error('InvalidAuthSession'));
+    findUserById.mockResolvedValue({ id: 'admin-id', role: 'ADMIN' } as never);
+
+    const { response, next } = await runMiddleware({
+      path: '/admin/stats',
+      headers: {},
+      cookies: { [SESSION_COOKIE_NAME]: token }
+    } as Partial<Request> & { cookies: Record<string, string> });
+
+    expect(findUserById).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(503);
   });
 
   it('blocks unauthenticated requests while maintenance is active', async () => {

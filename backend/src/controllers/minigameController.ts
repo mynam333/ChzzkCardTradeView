@@ -12,6 +12,11 @@ const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'] as const;
+// Reward-bearing play stays fail-closed until success is derived from server-owned gameplay events.
+const REWARD_MINIGAMES_PENDING_SERVER_VALIDATION = new Set<string>(DAILY_MINIGAMES);
+const PAID_MINIGAME_UNAVAILABLE_MESSAGE = '서버 권위 검증이 준비될 때까지 보상형 미니게임을 일시적으로 이용할 수 없습니다. 연습 모드를 이용해 주세요.';
+const isDisabledPaidRewardSession = (session: MinigameSession, target: any) =>
+  target?.practice_mode !== true && REWARD_MINIGAMES_PENDING_SERVER_VALIDATION.has(session.game_type);
 const COUNTDOWN_MS = 3_000;
 const SUBMISSION_GRACE_MS = 2_000;
 const CLIENT_REPORTED_GRACE_MS = 8_000;
@@ -630,10 +635,11 @@ const buildCropDetectiveResumePayload = (session: MinigameSession) => {
   if (timing.time_remaining_ms <= 0) return null;
   const gameData = buildPublicCropDetectiveGameData(session);
   if (!gameData) return null;
+  const target = parseDbJson<any>(session.target_data, {});
   return {
     session_id: session.id,
     game_type: 'crop_detective' as const,
-    practice_mode: false,
+    practice_mode: target.practice_mode === true,
     game_data: gameData,
     resumed_session: true,
     interrupted_session_closed: false,
@@ -723,6 +729,21 @@ export const getActiveMinigameSession = async (req: AuthenticatedRequest, res: R
     scheduleMinigameSessionExpiry();
     const activeSession = await minigameRepository.findActiveStartedSession(userId, 'crop_detective');
     if (!activeSession) return res.status(200).json({ active_session: null });
+    const activeTarget = parseDbJson<any>(activeSession.target_data, {});
+    if (isDisabledPaidRewardSession(activeSession, activeTarget)) {
+      const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+      if (!closeResult.ok) {
+        return res.status(409).json({
+          error: 'ActiveSessionCloseFailed',
+          message: '기존 보상형 미니게임 세션을 안전하게 종료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        });
+      }
+      return res.status(200).json({
+        active_session: null,
+        rewards_temporarily_unavailable: true,
+        practice_mode_available: true
+      });
+    }
     const activePayload = buildCropDetectiveResumePayload(activeSession);
     if (activePayload) return res.status(200).json({ active_session: activePayload });
 
@@ -772,7 +793,6 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
   if (!['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'].includes(game_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 게임 타입입니다.' });
   }
-
   // 연습 모드 한정 테스트용 강제 지정: 특정 스트리머(channel)와 특정 별(0~5성) 이미지를 사용합니다.
   // (일반 게임에서는 무시 — 무작위성/공정성을 해치지 않도록 연습 모드에서만 적용)
   const forceChannelId = practiceMode && typeof req.body.force_channel_id === 'string'
@@ -794,6 +814,14 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
   try {
     const dailyMinigame = getDailyMinigame();
     let interruptedSessionClosed = false;
+    if (!practiceMode && REWARD_MINIGAMES_PENDING_SERVER_VALIDATION.has(game_type)) {
+      scheduleMinigameSessionExpiry();
+      return res.status(503).json({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        message: PAID_MINIGAME_UNAVAILABLE_MESSAGE,
+        practice_mode_available: true
+      });
+    }
     if (!practiceMode && game_type !== dailyMinigame.game_type) {
       return res.status(409).json({
         error: 'DailyMinigameChanged',
@@ -1109,6 +1137,25 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     }
     const target = parseDbJson<any>(session.target_data, {});
     const practiceMode = target.practice_mode === true;
+
+    // 배포 전에 발급된 보상 세션도 서버 권위 검증을 우회해 정산되지 않도록 0점으로 원자 종료합니다.
+    if (session.status === 'STARTED' && isDisabledPaidRewardSession(session, target)) {
+      const closeResult = await minigameRepository.completeSession(session_id, 0);
+      if (!closeResult.ok) {
+        return res.status(409).json({
+          error: 'MinigameSessionCloseFailed',
+          message: '기존 보상형 미니게임 세션을 안전하게 종료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        });
+      }
+      return res.status(503).json({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        message: PAID_MINIGAME_UNAVAILABLE_MESSAGE,
+        practice_mode_available: true,
+        session_closed: true,
+        earned_points: 0
+      });
+    }
+
     const answer = await getAnswerReveal(session.game_type, target);
 
     if (session.status === 'COMPLETED') {
@@ -1377,6 +1424,22 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
     }
 
     const target = parseDbJson<any>(session.target_data, {});
+    if (isDisabledPaidRewardSession(session, target)) {
+      const closeResult = await minigameRepository.completeSession(session_id, 0);
+      if (!closeResult.ok) {
+        return res.status(409).json({
+          error: 'MinigameSessionCloseFailed',
+          message: '기존 보상형 미니게임 세션을 안전하게 종료하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        });
+      }
+      return res.status(503).json({
+        error: 'MinigameRewardsTemporarilyUnavailable',
+        message: PAID_MINIGAME_UNAVAILABLE_MESSAGE,
+        practice_mode_available: true,
+        session_closed: true,
+        earned_points: 0
+      });
+    }
     const round = Number(payload?.round);
     const selectedChannelId = String(payload?.selected_channel_id || '').trim();
     if (!Number.isInteger(round) || round < 0 || !selectedChannelId) {

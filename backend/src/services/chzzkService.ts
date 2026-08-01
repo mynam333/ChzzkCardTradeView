@@ -340,7 +340,7 @@ export const fetchChzzkChannelProfile = async (
     }
     return {
       name: `스트리머_${channelId.substring(0, 5)}`,
-      logoUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${channelId}`,
+      logoUrl: `https://api.dicebear.com/7.x/adventurer/png?seed=${channelId}`,
       followerCount: 150,
       openLive: false,
       lastLiveAt: null

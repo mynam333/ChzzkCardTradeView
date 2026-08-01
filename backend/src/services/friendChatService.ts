@@ -1,6 +1,11 @@
 import { deleteLocalUploadByUrl, formatUploadUrl } from './imageService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from './db';
-import { extractFirstUrl, getLinkPreviewForText, type ChatLinkPreview } from './linkPreviewService';
+import {
+  extractFirstUrl,
+  getLinkPreviewForText,
+  sanitizeChatLinkPreviewForDelivery,
+  type ChatLinkPreview
+} from './linkPreviewService';
 import { notificationRepository } from '../repositories';
 
 export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'canceled';
@@ -96,7 +101,7 @@ export type RecentChatAttachmentPage = {
 const pair = (a: string, b: string) => a.localeCompare(b) <= 0 ? [a, b] : [b, a];
 const bool = (value: any) => value === true || value === 1 || value === '1';
 
-const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${encodeURIComponent(id)}`;
+const avatarFallback = (id: string) => `https://api.dicebear.com/10.x/fun-emoji/png?seed=${encodeURIComponent(id)}`;
 
 const normalizeUtcDateTime = (value: any): string => {
   if (!value) return value;
@@ -135,7 +140,9 @@ const mapMessage = (row: any): ChatMessageRow => ({
     const attachmentDeletedAt = row.effective_attachment_deleted_at ?? row.attachment_deleted_at;
     const expiresAt = attachmentExpiresAt ? new Date(normalizeUtcDateTime(attachmentExpiresAt)).getTime() : 0;
     const expired = Boolean(attachmentDeletedAt) || Boolean(expiresAt && expiresAt <= Date.now());
-    const linkPreview = parseDbJson<ChatLinkPreview | null>(row.link_preview_json, null);
+    const linkPreview = sanitizeChatLinkPreviewForDelivery(
+      parseDbJson<ChatLinkPreview | null>(row.link_preview_json, null)
+    );
     return {
       id: Number(row.id),
       room_id: Number(row.room_id),
@@ -861,10 +868,39 @@ export const markRoomMessagesRead = async (roomId: number, userId: string): Prom
 
 type ChatMessageUpdateNotifier = (roomId: number, message: ChatMessageRow) => void | Promise<void>;
 const chatMessageUpdateNotifiers = new Set<ChatMessageUpdateNotifier>();
-const linkPreviewQueue: Array<{ roomId: number; messageId: number; body: string }> = [];
+type LinkPreviewJob = {
+  roomId: number;
+  messageId: number;
+  senderId: string;
+  body: string;
+  enqueuedAt: number;
+};
+
+const readPositiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const LINK_PREVIEW_MAX_PENDING = readPositiveInteger(process.env.LINK_PREVIEW_QUEUE_MAX_PENDING, 500);
+const LINK_PREVIEW_CONCURRENCY = Math.min(
+  LINK_PREVIEW_MAX_PENDING,
+  readPositiveInteger(process.env.LINK_PREVIEW_CONCURRENCY, 2)
+);
+const LINK_PREVIEW_MAX_PENDING_PER_SENDER = Math.min(
+  LINK_PREVIEW_MAX_PENDING,
+  readPositiveInteger(process.env.LINK_PREVIEW_QUEUE_MAX_PENDING_PER_SENDER, 10)
+);
+const LINK_PREVIEW_JOB_TTL_MS = Math.max(
+  1_000,
+  readPositiveInteger(process.env.LINK_PREVIEW_QUEUE_JOB_TTL_MS, 60_000)
+);
+
+const linkPreviewQueue: LinkPreviewJob[] = [];
 const queuedLinkPreviewMessageIds = new Set<number>();
+const linkPreviewJobsBySender = new Map<string, number>();
 let activeLinkPreviewJobs = 0;
-const LINK_PREVIEW_CONCURRENCY = 2;
+let linkPreviewDrainScheduled = false;
+let linkPreviewExpiryTimer: NodeJS.Timeout | null = null;
 
 export const registerChatMessageUpdateNotifier = (notifier: ChatMessageUpdateNotifier) => {
   chatMessageUpdateNotifiers.add(notifier);
@@ -877,7 +913,7 @@ const notifyChatMessageUpdated = async (roomId: number, message: ChatMessageRow)
 
 const updateMessageLinkPreview = async (messageId: number, preview: ChatLinkPreview | null): Promise<ChatMessageRow | null> => {
   if (!preview) return null;
-  const previewJson = JSON.stringify(preview);
+  const previewJson = JSON.stringify(sanitizeChatLinkPreviewForDelivery(preview));
   const mode = getDbMode();
   let row: any;
   if (mode === 'MYSQL') {
@@ -894,66 +930,151 @@ const updateMessageLinkPreview = async (messageId: number, preview: ChatLinkPrev
   return row ? mapMessage(row) : null;
 };
 
+const releaseLinkPreviewJob = (job: LinkPreviewJob) => {
+  queuedLinkPreviewMessageIds.delete(job.messageId);
+  const remaining = (linkPreviewJobsBySender.get(job.senderId) || 1) - 1;
+  if (remaining > 0) linkPreviewJobsBySender.set(job.senderId, remaining);
+  else linkPreviewJobsBySender.delete(job.senderId);
+};
+
+const pruneExpiredLinkPreviewJobs = () => {
+  const now = Date.now();
+  while (linkPreviewQueue.length > 0 && now - linkPreviewQueue[0].enqueuedAt >= LINK_PREVIEW_JOB_TTL_MS) {
+    releaseLinkPreviewJob(linkPreviewQueue.shift()!);
+  }
+};
+
+const scheduleLinkPreviewExpirySweep = () => {
+  if (linkPreviewExpiryTimer || linkPreviewQueue.length === 0) return;
+  const delay = Math.max(0, linkPreviewQueue[0].enqueuedAt + LINK_PREVIEW_JOB_TTL_MS - Date.now());
+  linkPreviewExpiryTimer = setTimeout(() => {
+    linkPreviewExpiryTimer = null;
+    pruneExpiredLinkPreviewJobs();
+    scheduleLinkPreviewExpirySweep();
+  }, delay);
+  linkPreviewExpiryTimer.unref();
+};
+
 const drainLinkPreviewQueue = () => {
+  pruneExpiredLinkPreviewJobs();
   while (activeLinkPreviewJobs < LINK_PREVIEW_CONCURRENCY && linkPreviewQueue.length > 0) {
     const job = linkPreviewQueue.shift()!;
+    if (Date.now() - job.enqueuedAt >= LINK_PREVIEW_JOB_TTL_MS) {
+      releaseLinkPreviewJob(job);
+      continue;
+    }
     activeLinkPreviewJobs += 1;
-    queuedLinkPreviewMessageIds.delete(job.messageId);
     getLinkPreviewForText(job.body)
-      .then((preview) => updateMessageLinkPreview(job.messageId, preview))
+      .then((preview) => (
+        Date.now() - job.enqueuedAt < LINK_PREVIEW_JOB_TTL_MS
+          ? updateMessageLinkPreview(job.messageId, preview)
+          : null
+      ))
       .then((message) => {
         if (message?.link_preview) return notifyChatMessageUpdated(job.roomId, message);
       })
       .catch((err) => console.warn('[LinkPreviewQueue] 링크 프리뷰 처리 실패:', err?.message || err))
       .finally(() => {
         activeLinkPreviewJobs -= 1;
+        releaseLinkPreviewJob(job);
         drainLinkPreviewQueue();
       });
   }
+  scheduleLinkPreviewExpirySweep();
 };
 
-const enqueueLinkPreviewForMessage = (roomId: number, messageId: number, body: string) => {
-  if (!extractFirstUrl(body) || queuedLinkPreviewMessageIds.has(messageId)) return;
+const scheduleLinkPreviewDrain = () => {
+  if (linkPreviewDrainScheduled) return;
+  linkPreviewDrainScheduled = true;
+  setTimeout(() => {
+    linkPreviewDrainScheduled = false;
+    drainLinkPreviewQueue();
+  }, 0);
+};
+
+export const enqueueLinkPreviewForMessage = (roomId: number, messageId: number, senderId: string, body: string): boolean => {
+  if (!extractFirstUrl(body) || queuedLinkPreviewMessageIds.has(messageId)) return false;
+  if (queuedLinkPreviewMessageIds.size >= LINK_PREVIEW_MAX_PENDING) return false;
+  const senderJobs = linkPreviewJobsBySender.get(senderId) || 0;
+  if (senderJobs >= LINK_PREVIEW_MAX_PENDING_PER_SENDER) return false;
+
   queuedLinkPreviewMessageIds.add(messageId);
-  linkPreviewQueue.push({ roomId, messageId, body });
-  setTimeout(drainLinkPreviewQueue, 0);
+  linkPreviewJobsBySender.set(senderId, senderJobs + 1);
+  linkPreviewQueue.push({ roomId, messageId, senderId, body, enqueuedAt: Date.now() });
+  scheduleLinkPreviewDrain();
+  scheduleLinkPreviewExpirySweep();
+  return true;
 };
 
-export const sendChatMessage = async (roomId: number, senderId: string, body: string, markReadForReceiver: boolean): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
+export type ChatSendOptions = {
+  allowNonFriend?: boolean;
+};
+
+const assertLockedFriendship = async (tx: any, senderId: string, receiverId: string) => {
+  const [userA, userB] = pair(senderId, receiverId);
+  const friendship = await tx.get(
+    'SELECT 1 AS present FROM friendships WHERE user_a_id = ? AND user_b_id = ? LIMIT 1 FOR UPDATE',
+    userA,
+    userB
+  );
+  if (!friendship) throw new Error('FriendsOnly');
+};
+
+export const sendChatMessage = async (
+  roomId: number,
+  senderId: string,
+  body: string,
+  markReadForReceiver: boolean,
+  options: ChatSendOptions = {}
+): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
   const room = await getRoomForUser(roomId, senderId);
   if (!room) throw new Error('RoomNotFound');
   const receiverId = room.user_a_id === senderId ? room.user_b_id : room.user_a_id;
+  const receiverDeletedColumn = room.user_a_id === receiverId ? 'deleted_for_a' : 'deleted_for_b';
+  const allowNonFriendAdminSend = options.allowNonFriend === true && room.is_admin_room;
   const mode = getDbMode();
   let row: any;
   if (mode === 'MYSQL') {
-    if (!room.can_send) {
-      await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', roomId);
-    }
-    const result = await getMysqlDb().run(
-      `INSERT INTO chat_messages (room_id, sender_id, body, read_at, created_at)
-       VALUES (?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
-      roomId, senderId, body
-    );
-    await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP(), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?', roomId);
-    row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
+    row = await getMysqlDb().transaction(async (tx) => {
+      if (!allowNonFriendAdminSend) await assertLockedFriendship(tx, senderId, receiverId);
+      const result = await tx.run(
+        `INSERT INTO chat_messages (room_id, sender_id, body, read_at, created_at)
+         VALUES (?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
+        roomId, senderId, body
+      );
+      await tx.run(
+        `UPDATE chat_rooms
+            SET closed_at = NULL,
+                closed_by_user_id = NULL,
+                updated_at = UTC_TIMESTAMP(),
+                ${receiverDeletedColumn} = FALSE
+          WHERE id = ?`,
+        roomId
+      );
+      return tx.get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
+    });
   } else if (mode === 'SUPABASE') {
-    if (!room.can_send) {
-      await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString() }).eq('id', roomId);
-    }
+    if (!allowNonFriendAdminSend && !(await areFriends(senderId, receiverId))) throw new Error('FriendsOnly');
     const { data } = await getSupabaseClient().from('chat_messages').insert({ room_id: roomId, sender_id: senderId, body, read_at: markReadForReceiver ? new Date().toISOString() : null }).select('*').single();
-    await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString(), deleted_for_a: false, deleted_for_b: false }).eq('id', roomId);
+    await getSupabaseClient().from('chat_rooms').update({
+      closed_at: null,
+      closed_by_user_id: null,
+      updated_at: new Date().toISOString(),
+      [receiverDeletedColumn]: false
+    }).eq('id', roomId);
     row = data;
   } else {
     const db = getSqliteDb();
-    if (!room.can_send) {
-      db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now') WHERE id = ?").run(roomId);
+    const [userA, userB] = pair(senderId, receiverId);
+    if (!allowNonFriendAdminSend && !db.prepare('SELECT 1 FROM friendships WHERE user_a_id = ? AND user_b_id = ? LIMIT 1').get(userA, userB)) {
+      throw new Error('FriendsOnly');
     }
     const result = db.prepare(`INSERT INTO chat_messages (room_id, sender_id, body, read_at) VALUES (?, ?, ?, ${markReadForReceiver ? "datetime('now')" : 'NULL'})`).run(roomId, senderId, body);
-    db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
+    db.prepare(`UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), ${receiverDeletedColumn} = 0 WHERE id = ?`).run(roomId);
     row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
   }
   const message = mapMessage(row);
-  enqueueLinkPreviewForMessage(roomId, message.id, body);
+  enqueueLinkPreviewForMessage(roomId, message.id, senderId, body);
   return { message, room, receiverId };
 };
 
@@ -1058,34 +1179,73 @@ export const getReusableChatAttachmentById = async (userId: string, attachmentId
   const mode = getDbMode();
   const nextExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   if (mode === 'MYSQL') {
-    const row = await getMysqlDb().get<any>(
-      `SELECT id, url, mime, size_bytes, width, height, expires_at
-         FROM chat_attachments
-        WHERE id = ?
-          AND owner_user_id = ?
-          AND deleted_at IS NULL
-          AND expires_at > UTC_TIMESTAMP()
-        LIMIT 1`,
-      attachmentId,
-      userId
-    );
-    if (!row) return null;
-    await getMysqlDb().run('UPDATE chat_attachments SET last_used_at = UTC_TIMESTAMP(), expires_at = ? WHERE id = ?', toMysqlDateTime(nextExpiresAt), row.id);
-    return mapAttachmentRow(row, nextExpiresAt);
+    return getMysqlDb().transaction(async (tx) => {
+      const row = await tx.get<any>(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()
+          FOR UPDATE`,
+        attachmentId,
+        userId
+      );
+      if (!row) return null;
+      await tx.run(
+        `UPDATE chat_attachments
+            SET last_used_at = UTC_TIMESTAMP(), expires_at = ?
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()`,
+        toMysqlDateTime(nextExpiresAt),
+        row.id,
+        userId
+      );
+      const latest = await tx.get<any>(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()`,
+        row.id,
+        userId
+      );
+      return latest ? mapAttachmentRow(latest) : null;
+    });
   }
   if (mode === 'LOCAL_SQL') {
-    const row = getSqliteDb().prepare(
-      `SELECT id, url, mime, size_bytes, width, height, expires_at
-         FROM chat_attachments
-        WHERE id = ?
-          AND owner_user_id = ?
-          AND deleted_at IS NULL
-          AND datetime(expires_at) > datetime('now')
-        LIMIT 1`
-    ).get(attachmentId, userId) as any;
-    if (!row) return null;
-    getSqliteDb().prepare("UPDATE chat_attachments SET last_used_at = datetime('now'), expires_at = ? WHERE id = ?").run(nextExpiresAt.toISOString(), row.id);
-    return mapAttachmentRow(row, nextExpiresAt);
+    const db = getSqliteDb();
+    return db.transaction(() => {
+      const row = db.prepare(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).get(attachmentId, userId) as any;
+      if (!row) return null;
+      db.prepare(
+        `UPDATE chat_attachments
+            SET last_used_at = datetime('now'), expires_at = ?
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).run(nextExpiresAt.toISOString(), row.id, userId);
+      const latest = db.prepare(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).get(row.id, userId) as any;
+      return latest ? mapAttachmentRow(latest) : null;
+    })();
   }
   return null;
 };
@@ -1094,93 +1254,75 @@ export const findReusableChatAttachment = async (userId: string, sourceHash: str
   const mode = getDbMode();
   const nextExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   if (mode === 'MYSQL') {
-    const row = await getMysqlDb().get<any>(
-      `SELECT id, url, mime, size_bytes, width, height, expires_at
-         FROM chat_attachments
-        WHERE owner_user_id = ?
-          AND source_hash = ?
-          AND deleted_at IS NULL
-          AND expires_at > UTC_TIMESTAMP()
-        LIMIT 1`,
-      userId,
-      sourceHash
-    );
-    if (!row) return null;
-    await getMysqlDb().run(
-      'UPDATE chat_attachments SET last_used_at = UTC_TIMESTAMP(), expires_at = ? WHERE id = ?',
-      toMysqlDateTime(nextExpiresAt),
-      row.id
-    );
-    return mapAttachmentRow(row, nextExpiresAt);
+    return getMysqlDb().transaction(async (tx) => {
+      const row = await tx.get<any>(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE owner_user_id = ?
+            AND source_hash = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()
+          FOR UPDATE`,
+        userId,
+        sourceHash
+      );
+      if (!row) return null;
+      await tx.run(
+        `UPDATE chat_attachments
+            SET last_used_at = UTC_TIMESTAMP(), expires_at = ?
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()`,
+        toMysqlDateTime(nextExpiresAt),
+        row.id,
+        userId
+      );
+      const latest = await tx.get<any>(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND expires_at > UTC_TIMESTAMP()`,
+        row.id,
+        userId
+      );
+      return latest ? mapAttachmentRow(latest) : null;
+    });
   }
   if (mode === 'LOCAL_SQL') {
-    const row = getSqliteDb().prepare(
-      `SELECT id, url, mime, size_bytes, width, height, expires_at
-         FROM chat_attachments
-        WHERE owner_user_id = ?
-          AND source_hash = ?
-          AND deleted_at IS NULL
-          AND datetime(expires_at) > datetime('now')
-        LIMIT 1`
-    ).get(userId, sourceHash) as any;
-    if (!row) return null;
-    getSqliteDb().prepare("UPDATE chat_attachments SET last_used_at = datetime('now'), expires_at = ? WHERE id = ?").run(nextExpiresAt.toISOString(), row.id);
-    return mapAttachmentRow(row, nextExpiresAt);
+    const db = getSqliteDb();
+    return db.transaction(() => {
+      const row = db.prepare(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE owner_user_id = ?
+            AND source_hash = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).get(userId, sourceHash) as any;
+      if (!row) return null;
+      db.prepare(
+        `UPDATE chat_attachments
+            SET last_used_at = datetime('now'), expires_at = ?
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).run(nextExpiresAt.toISOString(), row.id, userId);
+      const latest = db.prepare(
+        `SELECT id, url, mime, size_bytes, width, height, expires_at
+           FROM chat_attachments
+          WHERE id = ?
+            AND owner_user_id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) > datetime('now')`
+      ).get(row.id, userId) as any;
+      return latest ? mapAttachmentRow(latest) : null;
+    })();
   }
   return null;
-};
-
-export const saveChatAttachmentRecord = async (userId: string, sourceHash: string, attachment: ChatAttachmentInput): Promise<ChatAttachmentInput> => {
-  const mode = getDbMode();
-  if (mode === 'MYSQL') {
-    const previous = await getMysqlDb().get<any>('SELECT id, url FROM chat_attachments WHERE owner_user_id = ? AND source_hash = ? LIMIT 1', userId, sourceHash);
-    if (previous?.url && previous.url !== attachment.url) deleteLocalUploadByUrl(previous.url);
-    await getMysqlDb().run(
-      `INSERT INTO chat_attachments
-        (owner_user_id, source_hash, url, mime, size_bytes, width, height, last_used_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?, NULL)
-       ON DUPLICATE KEY UPDATE
-         url = VALUES(url),
-         mime = VALUES(mime),
-         size_bytes = VALUES(size_bytes),
-         width = VALUES(width),
-         height = VALUES(height),
-         last_used_at = UTC_TIMESTAMP(),
-         expires_at = VALUES(expires_at),
-         deleted_at = NULL`,
-      userId,
-      sourceHash,
-      attachment.url,
-      attachment.mime,
-      attachment.sizeBytes,
-      attachment.width ?? null,
-      attachment.height ?? null,
-      toMysqlDateTime(attachment.expiresAt)
-    );
-    const row = await getMysqlDb().get<any>('SELECT id, url, mime, size_bytes, width, height, expires_at FROM chat_attachments WHERE owner_user_id = ? AND source_hash = ? LIMIT 1', userId, sourceHash);
-    return { ...mapAttachmentRow(row, attachment.expiresAt), reused: false };
-  }
-  if (mode === 'LOCAL_SQL') {
-    const previous = getSqliteDb().prepare('SELECT id, url FROM chat_attachments WHERE owner_user_id = ? AND source_hash = ? LIMIT 1').get(userId, sourceHash) as any;
-    if (previous?.url && previous.url !== attachment.url) deleteLocalUploadByUrl(previous.url);
-    getSqliteDb().prepare(
-      `INSERT INTO chat_attachments
-        (owner_user_id, source_hash, url, mime, size_bytes, width, height, last_used_at, expires_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, NULL)
-       ON CONFLICT(owner_user_id, source_hash) DO UPDATE SET
-         url = excluded.url,
-         mime = excluded.mime,
-         size_bytes = excluded.size_bytes,
-         width = excluded.width,
-         height = excluded.height,
-         last_used_at = datetime('now'),
-         expires_at = excluded.expires_at,
-         deleted_at = NULL`
-    ).run(userId, sourceHash, attachment.url, attachment.mime, attachment.sizeBytes, attachment.width ?? null, attachment.height ?? null, attachment.expiresAt.toISOString());
-    const row = getSqliteDb().prepare('SELECT id, url, mime, size_bytes, width, height, expires_at FROM chat_attachments WHERE owner_user_id = ? AND source_hash = ? LIMIT 1').get(userId, sourceHash) as any;
-    return { ...mapAttachmentRow(row, attachment.expiresAt), reused: false };
-  }
-  return attachment;
 };
 
 export const deleteSavedChatAttachment = async (attachment: ChatAttachmentInput) => {
@@ -1189,11 +1331,37 @@ export const deleteSavedChatAttachment = async (attachment: ChatAttachmentInput)
     return;
   }
   const mode = getDbMode();
-  deleteLocalUploadByUrl(attachment.url);
   if (mode === 'MYSQL') {
-    await getMysqlDb().run('UPDATE chat_attachments SET deleted_at = UTC_TIMESTAMP() WHERE id = ?', attachment.attachmentId);
+    const removableUrl = await getMysqlDb().transaction(async (tx) => {
+      const row = await tx.get<any>(`
+        SELECT id, url
+          FROM chat_attachments
+         WHERE id = ? AND deleted_at IS NULL
+         FOR UPDATE
+      `, attachment.attachmentId);
+      if (!row) return null;
+      const referenced = await tx.get(
+        'SELECT 1 AS present FROM chat_messages WHERE attachment_id = ? LIMIT 1',
+        attachment.attachmentId
+      );
+      if (referenced) return null;
+      await tx.run('UPDATE chat_attachments SET deleted_at = UTC_TIMESTAMP() WHERE id = ?', attachment.attachmentId);
+      return String(row.url || '');
+    });
+    if (removableUrl) deleteLocalUploadByUrl(removableUrl);
   } else if (mode === 'LOCAL_SQL') {
-    getSqliteDb().prepare("UPDATE chat_attachments SET deleted_at = datetime('now') WHERE id = ?").run(attachment.attachmentId);
+    const db = getSqliteDb();
+    const removableUrl = db.transaction(() => {
+      const row = db.prepare('SELECT id, url FROM chat_attachments WHERE id = ? AND deleted_at IS NULL')
+        .get(attachment.attachmentId) as any;
+      if (!row) return null;
+      const referenced = db.prepare('SELECT 1 AS present FROM chat_messages WHERE attachment_id = ? LIMIT 1')
+        .get(attachment.attachmentId);
+      if (referenced) return null;
+      db.prepare("UPDATE chat_attachments SET deleted_at = datetime('now') WHERE id = ?").run(attachment.attachmentId);
+      return String(row.url || '');
+    })();
+    if (removableUrl) deleteLocalUploadByUrl(removableUrl);
   }
 };
 
@@ -1253,38 +1421,61 @@ export const sendChatAttachmentMessage = async (
   roomId: number,
   senderId: string,
   attachment: ChatAttachmentInput,
-  markReadForReceiver: boolean
+  markReadForReceiver: boolean,
+  options: ChatSendOptions = {}
 ): Promise<{ message: ChatMessageRow; room: ChatRoomRow; receiverId: string }> => {
   const room = await getRoomForUser(roomId, senderId);
   if (!room) throw new Error('RoomNotFound');
   const receiverId = room.user_a_id === senderId ? room.user_b_id : room.user_a_id;
+  const receiverDeletedColumn = room.user_a_id === receiverId ? 'deleted_for_a' : 'deleted_for_b';
+  const allowNonFriendAdminSend = options.allowNonFriend === true && room.is_admin_room;
   const mode = getDbMode();
   let row: any;
   if (mode === 'MYSQL') {
-    if (!room.can_send) {
-      await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', roomId);
-    }
-    const result = await getMysqlDb().run(
-      `INSERT INTO chat_messages
-        (room_id, sender_id, body, message_type, attachment_id, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at, created_at)
-       VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
-      roomId,
-      senderId,
-      '이미지',
-      attachment.attachmentId ?? null,
-      attachment.url,
-      attachment.mime,
-      attachment.sizeBytes,
-      attachment.width ?? null,
-      attachment.height ?? null,
-      toMysqlDateTime(attachment.expiresAt)
-    );
-    await getMysqlDb().run('UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = UTC_TIMESTAMP(), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?', roomId);
-    row = await getMysqlDb().get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
+    row = await getMysqlDb().transaction(async (tx) => {
+      if (!allowNonFriendAdminSend) await assertLockedFriendship(tx, senderId, receiverId);
+      let effectiveAttachment = attachment;
+      if (attachment.attachmentId) {
+        const persistedAttachment = await tx.get<any>(`
+          SELECT id, url, mime, size_bytes, width, height, expires_at
+            FROM chat_attachments
+           WHERE id = ?
+             AND owner_user_id = ?
+             AND deleted_at IS NULL
+             AND expires_at > UTC_TIMESTAMP()
+          FOR UPDATE
+        `, attachment.attachmentId, senderId);
+        if (!persistedAttachment) throw new Error('AttachmentUnavailable');
+        effectiveAttachment = mapAttachmentRow(persistedAttachment);
+      }
+      const result = await tx.run(
+        `INSERT INTO chat_messages
+          (room_id, sender_id, body, message_type, attachment_id, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at, created_at)
+         VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? 'UTC_TIMESTAMP()' : 'NULL'}, UTC_TIMESTAMP())`,
+        roomId,
+        senderId,
+        '이미지',
+        effectiveAttachment.attachmentId ?? null,
+        effectiveAttachment.url,
+        effectiveAttachment.mime,
+        effectiveAttachment.sizeBytes,
+        effectiveAttachment.width ?? null,
+        effectiveAttachment.height ?? null,
+        toMysqlDateTime(effectiveAttachment.expiresAt)
+      );
+      await tx.run(
+        `UPDATE chat_rooms
+            SET closed_at = NULL,
+                closed_by_user_id = NULL,
+                updated_at = UTC_TIMESTAMP(),
+                ${receiverDeletedColumn} = FALSE
+          WHERE id = ?`,
+        roomId
+      );
+      return tx.get('SELECT * FROM chat_messages WHERE id = ?', result.insertId);
+    });
   } else if (mode === 'SUPABASE') {
-    if (!room.can_send) {
-      await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString() }).eq('id', roomId);
-    }
+    if (!allowNonFriendAdminSend && !(await areFriends(senderId, receiverId))) throw new Error('FriendsOnly');
     const { data } = await getSupabaseClient().from('chat_messages').insert({
       room_id: roomId,
       sender_id: senderId,
@@ -1298,31 +1489,52 @@ export const sendChatAttachmentMessage = async (
       attachment_expires_at: attachment.expiresAt.toISOString(),
       read_at: markReadForReceiver ? new Date().toISOString() : null
     }).select('*').single();
-    await getSupabaseClient().from('chat_rooms').update({ closed_at: null, closed_by_user_id: null, updated_at: new Date().toISOString(), deleted_for_a: false, deleted_for_b: false }).eq('id', roomId);
+    await getSupabaseClient().from('chat_rooms').update({
+      closed_at: null,
+      closed_by_user_id: null,
+      updated_at: new Date().toISOString(),
+      [receiverDeletedColumn]: false
+    }).eq('id', roomId);
     row = data;
   } else {
     const db = getSqliteDb();
-    if (!room.can_send) {
-      db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now') WHERE id = ?").run(roomId);
-    }
-    const result = db.prepare(
-      `INSERT INTO chat_messages
-        (room_id, sender_id, body, message_type, attachment_id, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at)
-       VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? "datetime('now')" : 'NULL'})`
-    ).run(
-      roomId,
-      senderId,
-      '이미지',
-      attachment.attachmentId ?? null,
-      attachment.url,
-      attachment.mime,
-      attachment.sizeBytes,
-      attachment.width ?? null,
-      attachment.height ?? null,
-      attachment.expiresAt.toISOString()
-    );
-    db.prepare("UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), deleted_for_a = 0, deleted_for_b = 0 WHERE id = ?").run(roomId);
-    row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
+    row = db.transaction(() => {
+      const [userA, userB] = pair(senderId, receiverId);
+      if (!allowNonFriendAdminSend && !db.prepare('SELECT 1 FROM friendships WHERE user_a_id = ? AND user_b_id = ? LIMIT 1').get(userA, userB)) {
+        throw new Error('FriendsOnly');
+      }
+      let effectiveAttachment = attachment;
+      if (attachment.attachmentId) {
+        const persistedAttachment = db.prepare(`
+          SELECT id, url, mime, size_bytes, width, height, expires_at
+            FROM chat_attachments
+           WHERE id = ?
+             AND owner_user_id = ?
+             AND deleted_at IS NULL
+             AND datetime(expires_at) > datetime('now')
+        `).get(attachment.attachmentId, senderId) as any;
+        if (!persistedAttachment) throw new Error('AttachmentUnavailable');
+        effectiveAttachment = mapAttachmentRow(persistedAttachment);
+      }
+      const result = db.prepare(
+        `INSERT INTO chat_messages
+          (room_id, sender_id, body, message_type, attachment_id, attachment_url, attachment_mime, attachment_size_bytes, attachment_width, attachment_height, attachment_expires_at, read_at)
+         VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?, ?, ?, ${markReadForReceiver ? "datetime('now')" : 'NULL'})`
+      ).run(
+        roomId,
+        senderId,
+        '이미지',
+        effectiveAttachment.attachmentId ?? null,
+        effectiveAttachment.url,
+        effectiveAttachment.mime,
+        effectiveAttachment.sizeBytes,
+        effectiveAttachment.width ?? null,
+        effectiveAttachment.height ?? null,
+        effectiveAttachment.expiresAt.toISOString()
+      );
+      db.prepare(`UPDATE chat_rooms SET closed_at = NULL, closed_by_user_id = NULL, updated_at = datetime('now'), ${receiverDeletedColumn} = 0 WHERE id = ?`).run(roomId);
+      return db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid);
+    })();
   }
   return { message: mapMessage(row), room, receiverId };
 };
@@ -1376,19 +1588,44 @@ export const deleteExpiredChatAttachments = async (): Promise<number> => {
   const mode = getDbMode();
   let rows: any[] = [];
   if (mode === 'MYSQL') {
-    const attachmentRows = await getMysqlDb().all<any>(
-      `SELECT id, url
+    const db = getMysqlDb();
+    const attachmentRows = await db.all<any>(
+      `SELECT id
          FROM chat_attachments
         WHERE deleted_at IS NULL
           AND expires_at <= UTC_TIMESTAMP()
         LIMIT 200`
     );
-    for (const row of attachmentRows) {
-      deleteLocalUploadByUrl(row.url);
-      await getMysqlDb().run('UPDATE chat_attachments SET deleted_at = UTC_TIMESTAMP() WHERE id = ?', row.id);
+    let deletedCount = 0;
+    for (const candidate of attachmentRows) {
+      const removableUrl = await db.transaction(async (tx) => {
+        const current = await tx.get<any>(
+          `SELECT id, url
+             FROM chat_attachments
+            WHERE id = ?
+              AND deleted_at IS NULL
+              AND expires_at <= UTC_TIMESTAMP()
+            FOR UPDATE`,
+          candidate.id
+        );
+        if (!current) return null;
+        const marked = await tx.run(
+          `UPDATE chat_attachments
+              SET deleted_at = UTC_TIMESTAMP()
+            WHERE id = ?
+              AND deleted_at IS NULL
+              AND expires_at <= UTC_TIMESTAMP()`,
+          current.id
+        );
+        if (Number(marked.affectedRows || marked.changes || 0) === 0) return null;
+        return String(current.url || '');
+      });
+      if (removableUrl === null) continue;
+      deleteLocalUploadByUrl(removableUrl);
+      deletedCount += 1;
     }
-    rows = await getMysqlDb().all<any>(
-      `SELECT id, attachment_url
+    rows = await db.all<any>(
+      `SELECT id
          FROM chat_messages
         WHERE message_type = 'image'
           AND attachment_id IS NULL
@@ -1397,11 +1634,40 @@ export const deleteExpiredChatAttachments = async (): Promise<number> => {
           AND attachment_expires_at <= UTC_TIMESTAMP()
         LIMIT 200`
     );
-    for (const row of rows) {
-      deleteLocalUploadByUrl(row.attachment_url);
-      await getMysqlDb().run('UPDATE chat_messages SET attachment_url = NULL, attachment_deleted_at = UTC_TIMESTAMP() WHERE id = ?', row.id);
+    for (const candidate of rows) {
+      const removableUrl = await db.transaction(async (tx) => {
+        const current = await tx.get<any>(
+          `SELECT id, attachment_url
+             FROM chat_messages
+            WHERE id = ?
+              AND message_type = 'image'
+              AND attachment_id IS NULL
+              AND attachment_url IS NOT NULL
+              AND attachment_deleted_at IS NULL
+              AND attachment_expires_at <= UTC_TIMESTAMP()
+            FOR UPDATE`,
+          candidate.id
+        );
+        if (!current) return null;
+        const marked = await tx.run(
+          `UPDATE chat_messages
+              SET attachment_url = NULL, attachment_deleted_at = UTC_TIMESTAMP()
+            WHERE id = ?
+              AND message_type = 'image'
+              AND attachment_id IS NULL
+              AND attachment_url IS NOT NULL
+              AND attachment_deleted_at IS NULL
+              AND attachment_expires_at <= UTC_TIMESTAMP()`,
+          current.id
+        );
+        if (Number(marked.affectedRows || marked.changes || 0) === 0) return null;
+        return String(current.attachment_url || '');
+      });
+      if (removableUrl === null) continue;
+      deleteLocalUploadByUrl(removableUrl);
+      deletedCount += 1;
     }
-    return attachmentRows.length + rows.length;
+    return deletedCount;
   }
   if (mode === 'SUPABASE') {
     const { data } = await getSupabaseClient()
@@ -1419,32 +1685,78 @@ export const deleteExpiredChatAttachments = async (): Promise<number> => {
     }
     return rows.length;
   }
-  rows = getSqliteDb().prepare(
-    `SELECT id, url
+  const db = getSqliteDb();
+  rows = db.prepare(
+    `SELECT id
        FROM chat_attachments
       WHERE deleted_at IS NULL
         AND datetime(expires_at) <= datetime('now')
       LIMIT 200`
   ).all() as any[];
-  for (const row of rows) {
-    deleteLocalUploadByUrl(row.url);
-    getSqliteDb().prepare("UPDATE chat_attachments SET deleted_at = datetime('now') WHERE id = ?").run(row.id);
+  let deletedCount = 0;
+  for (const candidate of rows) {
+    const removableUrl = db.transaction(() => {
+      const current = db.prepare(
+        `SELECT id, url
+           FROM chat_attachments
+          WHERE id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) <= datetime('now')`
+      ).get(candidate.id) as any;
+      if (!current) return null;
+      const marked = db.prepare(
+        `UPDATE chat_attachments
+            SET deleted_at = datetime('now')
+          WHERE id = ?
+            AND deleted_at IS NULL
+            AND datetime(expires_at) <= datetime('now')`
+      ).run(current.id);
+      return marked.changes > 0 ? String(current.url || '') : null;
+    })();
+    if (removableUrl === null) continue;
+    deleteLocalUploadByUrl(removableUrl);
+    deletedCount += 1;
   }
-  const legacyRows = getSqliteDb().prepare(
-    `SELECT id, attachment_url
+  const legacyRows = db.prepare(
+    `SELECT id
        FROM chat_messages
       WHERE message_type = 'image'
         AND attachment_id IS NULL
         AND attachment_url IS NOT NULL
         AND attachment_deleted_at IS NULL
-        AND datetime(attachment_expires_at) <= datetime('now')
+       AND datetime(attachment_expires_at) <= datetime('now')
       LIMIT 200`
   ).all() as any[];
-  for (const row of legacyRows) {
-    deleteLocalUploadByUrl(row.attachment_url);
-    getSqliteDb().prepare("UPDATE chat_messages SET attachment_url = NULL, attachment_deleted_at = datetime('now') WHERE id = ?").run(row.id);
+  for (const candidate of legacyRows) {
+    const removableUrl = db.transaction(() => {
+      const current = db.prepare(
+        `SELECT id, attachment_url
+           FROM chat_messages
+          WHERE id = ?
+            AND message_type = 'image'
+            AND attachment_id IS NULL
+            AND attachment_url IS NOT NULL
+            AND attachment_deleted_at IS NULL
+            AND datetime(attachment_expires_at) <= datetime('now')`
+      ).get(candidate.id) as any;
+      if (!current) return null;
+      const marked = db.prepare(
+        `UPDATE chat_messages
+            SET attachment_url = NULL, attachment_deleted_at = datetime('now')
+          WHERE id = ?
+            AND message_type = 'image'
+            AND attachment_id IS NULL
+            AND attachment_url IS NOT NULL
+            AND attachment_deleted_at IS NULL
+            AND datetime(attachment_expires_at) <= datetime('now')`
+      ).run(current.id);
+      return marked.changes > 0 ? String(current.attachment_url || '') : null;
+    })();
+    if (removableUrl === null) continue;
+    deleteLocalUploadByUrl(removableUrl);
+    deletedCount += 1;
   }
-  return rows.length + legacyRows.length;
+  return deletedCount;
 };
 
 let attachmentCleanupTimer: NodeJS.Timeout | null = null;

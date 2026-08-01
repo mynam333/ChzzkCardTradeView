@@ -301,7 +301,13 @@ const CHAT_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_IMAGE_MAX_UPLOAD_BYTES', 
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: STREAMER_IMAGE_MAX_UPLOAD_BYTES },
+  limits: {
+    fileSize: STREAMER_IMAGE_MAX_UPLOAD_BYTES,
+    files: 1,
+    fields: 4,
+    parts: 5,
+    fieldNestingDepth: 0
+  },
   fileFilter: (_req, file, cb) => {
     // 비이미지 업로드를 버퍼링 전에 조기 차단 (sharp 처리 이전 1차 방어)
     if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
@@ -324,7 +330,13 @@ const uploadSingleImage = (req: any, res: any, next: any) => {
 
 const chatImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: CHAT_IMAGE_MAX_UPLOAD_BYTES },
+  limits: {
+    fileSize: CHAT_IMAGE_MAX_UPLOAD_BYTES,
+    files: 1,
+    fields: 0,
+    parts: 1,
+    fieldNestingDepth: 0
+  },
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_UPLOAD_MIME.has(file.mimetype)) cb(null, true);
     else cb(new Error('이미지 파일(JPEG/PNG/WebP/GIF/AVIF)만 첨부할 수 있습니다.'));

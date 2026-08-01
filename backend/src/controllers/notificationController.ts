@@ -3,6 +3,7 @@ import { notificationRepository } from '../repositories';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { IS_PRODUCTION } from '../config';
 import { subscribeNotificationStream } from '../services/notificationStream';
+import { getRequestSessionToken } from '../services/authSessionService';
 
 /**
  * 내 인앱 알림 목록 + 미읽음 수 조회
@@ -28,7 +29,9 @@ export const getNotifications = async (req: AuthenticatedRequest, res: Response)
 export const streamNotifications = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
-  subscribeNotificationStream(userId, res);
+  const token = getRequestSessionToken(req);
+  if (!token) return res.status(401).json({ error: 'Unauthorized', message: '유효한 로그인 세션이 필요합니다.' });
+  subscribeNotificationStream(userId, token, res);
 };
 
 /**

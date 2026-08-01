@@ -1,9 +1,12 @@
 import { Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories';
 import { AuthenticatedRequest } from './admin';
-import { JWT_SECRET, IS_PRODUCTION } from '../config';
-import { SESSION_COOKIE_NAMES } from '../services/sessionCookie';
+import { IS_PRODUCTION } from '../config';
+import {
+  AuthSessionLookupTimeoutError,
+  getRequestSessionToken,
+  verifyAuthSessionToken
+} from '../services/authSessionService';
 
 const AUTH_USER_CACHE_TTL_MS = Math.max(1000, Number(process.env.AUTH_USER_CACHE_TTL_MS || 15_000));
 const AUTH_USER_LOOKUP_TIMEOUT_MS = Math.max(500, Number(process.env.AUTH_USER_LOOKUP_TIMEOUT_MS || 3000));
@@ -14,10 +17,6 @@ const LAST_SEEN_TOUCH_RETENTION_MS = Math.max(
   LAST_SEEN_TOUCH_INTERVAL_MS,
   Number(process.env.LAST_SEEN_TOUCH_RETENTION_MS || 24 * 60 * 60_000)
 );
-const AUTH_BEARER_ENABLED =
-  process.env.AUTH_BEARER_ENABLED === 'true' ||
-  (!IS_PRODUCTION && process.env.AUTH_BEARER_ENABLED !== 'false');
-
 const userCache = new Map<string, { user: any; expiresAt: number }>();
 const userLookups = new Map<string, Promise<any>>();
 const lastSeenTouches = new Map<string, number>();
@@ -62,6 +61,7 @@ const findUserCached = async (userId: string) => {
   const now = Date.now();
   const cached = userCache.get(userId);
   if (cached && cached.expiresAt > now) return cached.user;
+  if (cached) userCache.delete(userId);
 
   let lookup = userLookups.get(userId);
   if (!lookup) {
@@ -81,12 +81,7 @@ const findUserCached = async (userId: string) => {
     userLookups.set(userId, lookup);
   }
 
-  try {
-    return await withTimeout(lookup, AUTH_USER_LOOKUP_TIMEOUT_MS);
-  } catch (err: any) {
-    if (cached) return cached.user;
-    throw err;
-  }
+  return withTimeout(lookup, AUTH_USER_LOOKUP_TIMEOUT_MS);
 };
 
 const touchLastSeen = (userId: string) => {
@@ -112,21 +107,7 @@ const touchLastSeen = (userId: string) => {
  * 우선순위: httpOnly 세션 쿠키 → Authorization: Bearer 헤더 (둘 다 지원하여 점진적 전환).
  */
 export const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  // 1) httpOnly 세션 쿠키 우선
-  const cookies = (req as any).cookies || {};
-  let token: string | undefined = SESSION_COOKIE_NAMES
-    .map(cookieName => cookies[cookieName])
-    .find(Boolean);
-
-  // 2) 없으면 Authorization: Bearer 헤더 폴백.
-  // 운영 프론트는 httpOnly 쿠키만 쓰므로 Bearer는 명시적으로 켠 경우에만 허용합니다.
-  if (!token) {
-    const authHeader = req.headers.authorization;
-    if (authHeader) {
-      const [type, headerToken] = authHeader.split(' ');
-      if (type === 'Bearer' && headerToken && AUTH_BEARER_ENABLED) token = headerToken;
-    }
-  }
+  const token = getRequestSessionToken(req);
 
   if (!token) {
     return res.status(401).json({
@@ -136,7 +117,7 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+    const decoded = await verifyAuthSessionToken(token);
     const user = await findUserCached(decoded.id);
 
     if (!user) {
@@ -150,7 +131,7 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
     touchLastSeen(decoded.id);
     next();
   } catch (err: any) {
-    if (err?.message === 'AuthUserLookupTimeout') {
+    if (err?.message === 'AuthUserLookupTimeout' || err instanceof AuthSessionLookupTimeoutError) {
       res.setHeader('Retry-After', '3');
       return res.status(503).json({
         error: 'AuthServiceBusy',
@@ -163,4 +144,12 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
       details: IS_PRODUCTION ? undefined : err.message
     });
   }
+};
+
+/** 테스트 격리용 캐시 초기화. 운영 코드에서는 호출하지 않습니다. */
+export const __resetAuthCachesForTest = (): void => {
+  userCache.clear();
+  userLookups.clear();
+  lastSeenTouches.clear();
+  lastCachePruneAt = 0;
 };

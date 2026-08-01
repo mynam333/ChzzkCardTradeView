@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import sharp from 'sharp';
 import { ensureDirectory, getUploadsDir } from './storagePaths';
-import { readBytesEnv } from '../utils/env';
+import { readBytesEnv, readIntegerEnv } from '../utils/env';
 
 export const CHAT_ATTACHMENT_MAX_ACTIVE_BYTES = 100 * 1024 * 1024;
 export const CHAT_ATTACHMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -20,6 +20,16 @@ const CHAT_GIF_CPU_USED = Math.round(clampNumber(Number(process.env.CHAT_GIF_CPU
 const CHAT_GIF_THREADS = Math.round(clampNumber(Number(process.env.CHAT_GIF_THREADS || 1), 1, 4, 1));
 const CHAT_GIF_TIMEOUT_MS = Math.round(clampNumber(Number(process.env.CHAT_GIF_TIMEOUT_MS || 45_000), 5_000, 180_000, 45_000));
 const CHAT_GIF_CODEC = (process.env.CHAT_GIF_CODEC || 'vp8').toLowerCase() === 'vp9' ? 'vp9' : 'vp8';
+export const CHAT_IMAGE_MAX_PENDING_JOBS = readIntegerEnv('CHAT_IMAGE_MAX_PENDING_JOBS', 16, { min: 1, max: 128 });
+export const CHAT_IMAGE_MAX_PENDING_BYTES = readBytesEnv('CHAT_IMAGE_MAX_PENDING_BYTES', 64 * 1024 * 1024, {
+  minBytes: 1024 * 1024,
+  maxBytes: 512 * 1024 * 1024
+});
+export const CHAT_IMAGE_MAX_INPUT_PIXELS = readIntegerEnv('CHAT_IMAGE_MAX_INPUT_PIXELS', 40_000_000, {
+  min: 1_000_000,
+  max: 64_000_000
+});
+export const CHAT_GIF_MAX_PAGES = readIntegerEnv('CHAT_GIF_MAX_PAGES', 300, { min: 1, max: 300 });
 
 type ProcessedChatAttachment = {
   url: string;
@@ -35,6 +45,51 @@ const allowedMime = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avi
 
 const safeUserPart = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80) || 'user';
 
+export type ChatAttachmentImageMetadata = {
+  width?: number;
+  height?: number;
+  pages?: number;
+  pageHeight?: number;
+};
+
+export const getChatAttachmentSharpOptions = (animated = false) => ({
+  limitInputPixels: CHAT_IMAGE_MAX_INPUT_PIXELS,
+  ...(animated ? { animated: true } : {})
+});
+
+export const assertChatAttachmentDecodeBudget = (
+  metadata: ChatAttachmentImageMetadata,
+  animated: boolean
+) => {
+  const width = metadata.width;
+  const height = metadata.height;
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width! < 1 || height! < 1) {
+    throw new Error('이미지 크기 정보를 확인할 수 없습니다.');
+  }
+
+  const pages = animated ? (metadata.pages ?? 1) : 1;
+  if (!Number.isSafeInteger(pages) || pages < 1) {
+    throw new Error('이미지 프레임 정보를 확인할 수 없습니다.');
+  }
+  if (animated && pages > CHAT_GIF_MAX_PAGES) {
+    throw new Error(`GIF 첨부는 최대 ${CHAT_GIF_MAX_PAGES}프레임까지만 가능합니다.`);
+  }
+
+  const pageHeight = animated && pages > 1 ? metadata.pageHeight : height;
+  if (!Number.isSafeInteger(pageHeight) || pageHeight! < 1) {
+    throw new Error('GIF 프레임 크기 정보를 확인할 수 없습니다.');
+  }
+  const pixelsPerPage = width! * pageHeight!;
+  const totalPixels = pixelsPerPage * pages;
+  if (
+    !Number.isSafeInteger(pixelsPerPage)
+    || !Number.isSafeInteger(totalPixels)
+    || totalPixels > CHAT_IMAGE_MAX_INPUT_PIXELS
+  ) {
+    throw new Error('이미지의 전체 픽셀 수가 허용 한도를 초과했습니다.');
+  }
+};
+
 export const getChatAttachmentSourceHash = (file: Express.Multer.File) => {
   if (!file?.buffer?.length) throw new Error('업로드할 이미지가 없습니다.');
   return crypto
@@ -45,32 +100,110 @@ export const getChatAttachmentSourceHash = (file: Express.Multer.File) => {
     .digest('hex');
 };
 
-const createLimiter = (maxConcurrency: number) => {
-  const max = Math.max(1, Math.floor(maxConcurrency));
+export type ChatAttachmentOverloadReason = 'pending_jobs' | 'retained_bytes';
+
+export class ChatAttachmentProcessingOverloadedError extends Error {
+  readonly code = 'ChatAttachmentProcessingOverloaded';
+  readonly retryAfterSeconds = 2;
+
+  constructor(readonly reason: ChatAttachmentOverloadReason) {
+    super('ChatAttachmentProcessingOverloaded');
+    this.name = 'ChatAttachmentProcessingOverloadedError';
+  }
+}
+
+export const createChatAttachmentWorkBudget = (maxPendingJobs: number, maxRetainedBytes: number) => {
+  if (!Number.isSafeInteger(maxPendingJobs) || maxPendingJobs < 1) {
+    throw new RangeError('maxPendingJobs must be a positive safe integer');
+  }
+  if (!Number.isSafeInteger(maxRetainedBytes) || maxRetainedBytes < 1) {
+    throw new RangeError('maxRetainedBytes must be a positive safe integer');
+  }
+
+  let pendingJobs = 0;
+  let retainedBytes = 0;
+
+  return {
+    reserve(costBytes: number) {
+      if (!Number.isSafeInteger(costBytes) || costBytes < 1) {
+        throw new TypeError('costBytes must be a positive safe integer');
+      }
+      if (pendingJobs >= maxPendingJobs) {
+        throw new ChatAttachmentProcessingOverloadedError('pending_jobs');
+      }
+      if (retainedBytes + costBytes > maxRetainedBytes) {
+        throw new ChatAttachmentProcessingOverloadedError('retained_bytes');
+      }
+
+      pendingJobs += 1;
+      retainedBytes += costBytes;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        pendingJobs -= 1;
+        retainedBytes -= costBytes;
+      };
+    },
+    snapshot() {
+      return { pendingJobs, retainedBytes };
+    }
+  };
+};
+
+type ChatAttachmentWorkBudget = ReturnType<typeof createChatAttachmentWorkBudget>;
+
+export const createChatAttachmentTaskLimiter = (
+  maxConcurrency: number,
+  workBudget: ChatAttachmentWorkBudget
+) => {
+  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1) {
+    throw new RangeError('maxConcurrency must be a positive safe integer');
+  }
+  const max = maxConcurrency;
   let active = 0;
   const queue: Array<() => void> = [];
   const runNext = () => {
-    if (active >= max) return;
-    const next = queue.shift();
-    if (!next) return;
-    active += 1;
-    next();
+    while (active < max) {
+      const next = queue.shift();
+      if (!next) return;
+      active += 1;
+      next();
+    }
   };
-  return async <T>(task: () => Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
-    queue.push(() => {
-      task()
-        .then(resolve, reject)
-        .finally(() => {
-          active -= 1;
-          runNext();
-        });
+  return async <T>(costBytes: number, task: () => Promise<T>): Promise<T> => {
+    const releaseBudget = workBudget.reserve(costBytes);
+    return new Promise<T>((resolve, reject) => {
+      queue.push(() => {
+        void (async () => {
+          try {
+            resolve(await task());
+          } catch (err) {
+            reject(err);
+          } finally {
+            releaseBudget();
+            active -= 1;
+            runNext();
+          }
+        })();
+      });
+      runNext();
     });
-    runNext();
-  });
+  };
 };
 
-const staticImageLimiter = createLimiter(Number(process.env.CHAT_IMAGE_CONCURRENCY || 2));
-const gifLimiter = createLimiter(Number(process.env.CHAT_GIF_CONCURRENCY || 1));
+const attachmentWorkBudget = createChatAttachmentWorkBudget(
+  CHAT_IMAGE_MAX_PENDING_JOBS,
+  CHAT_IMAGE_MAX_PENDING_BYTES
+);
+const staticImageLimiter = createChatAttachmentTaskLimiter(
+  readIntegerEnv('CHAT_IMAGE_CONCURRENCY', 2, { min: 1, max: 16 }),
+  attachmentWorkBudget
+);
+const gifLimiter = createChatAttachmentTaskLimiter(
+  readIntegerEnv('CHAT_GIF_CONCURRENCY', 1, { min: 1, max: 8 }),
+  attachmentWorkBudget
+);
 
 const runFfmpeg = (args: string[]) => new Promise<void>((resolve, reject) => {
   const child = spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
@@ -117,8 +250,9 @@ const getResizedDimensions = (width?: number, height?: number) => {
 };
 
 const saveStaticImage = async (buffer: Buffer, outputPath: string) => {
-  const image = sharp(buffer);
+  const image = sharp(buffer, getChatAttachmentSharpOptions());
   const metadata = await image.metadata();
+  assertChatAttachmentDecodeBudget(metadata, false);
   const size = getResizedDimensions(metadata.width, metadata.height);
   await image
     .resize(size.width || undefined, size.height || undefined, { fit: 'inside', withoutEnlargement: true })
@@ -132,7 +266,8 @@ const saveGifAsWebm = async (buffer: Buffer, outputPath: string) => {
   const inputPath = path.join(tempDir, 'input.gif');
   try {
     await fsp.writeFile(inputPath, buffer);
-    const metadata = await sharp(buffer, { animated: true }).metadata();
+    const metadata = await sharp(buffer, getChatAttachmentSharpOptions(true)).metadata();
+    assertChatAttachmentDecodeBudget(metadata, true);
     const size = getResizedDimensions(metadata.width, metadata.height);
     const codecArgs = CHAT_GIF_CODEC === 'vp9'
       ? [
@@ -177,8 +312,9 @@ export const processChatImageAttachment = async (
   if (!allowedMime.has(file.mimetype)) throw new Error('이미지 파일만 첨부할 수 있습니다.');
 
   const isGif = file.mimetype === 'image/gif';
+  const inputBytes = file.buffer.byteLength;
   const sourceHash = getChatAttachmentSourceHash(file);
-  if (isGif && file.size > CHAT_GIF_MAX_UPLOAD_BYTES) {
+  if (isGif && inputBytes > CHAT_GIF_MAX_UPLOAD_BYTES) {
     throw new Error(`GIF 첨부는 ${Math.floor(CHAT_GIF_MAX_UPLOAD_BYTES / 1024 / 1024)}MB 이하만 가능합니다.`);
   }
   const extension = isGif ? 'webm' : 'webp';
@@ -191,8 +327,8 @@ export const processChatImageAttachment = async (
   const fileName = `chat_${now}_${Math.random().toString(36).slice(2, 10)}.${extension}`;
   const filePath = path.join(uploadDir, fileName);
   const size = isGif
-    ? await gifLimiter(() => saveGifAsWebm(file.buffer, filePath))
-    : await staticImageLimiter(() => saveStaticImage(file.buffer, filePath));
+    ? await gifLimiter(inputBytes, () => saveGifAsWebm(file.buffer, filePath))
+    : await staticImageLimiter(inputBytes, () => saveStaticImage(file.buffer, filePath));
   const stat = await fsp.stat(filePath);
 
   return {

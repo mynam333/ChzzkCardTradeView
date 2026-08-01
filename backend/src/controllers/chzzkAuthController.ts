@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { minigameRepository, userRepository } from '../repositories';
-import { JWT_SECRET, IS_PRODUCTION, CORS_ALLOWED_ORIGINS } from '../config';
+import { IS_PRODUCTION, CORS_ALLOWED_ORIGINS } from '../config';
 import { encryptToken } from '../services/cryptoService';
 import {
   setSessionCookie,
@@ -12,6 +11,12 @@ import {
   OAUTH_STATE_COOKIE_NAMES
 } from '../services/sessionCookie';
 import { getActiveAccountInteractionRestriction } from '../services/accountInteractionRestriction';
+import {
+  AuthSessionLookupTimeoutError,
+  createAuthSessionToken,
+  getRequestSessionToken,
+  revokeAuthSessionToken
+} from '../services/authSessionService';
 
 const CHZZK_CLIENT_ID = process.env.CHZZK_CLIENT_ID || '';
 const CHZZK_CLIENT_SECRET = process.env.CHZZK_CLIENT_SECRET || '';
@@ -250,11 +255,7 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
     }
 
     // D. JWT 토큰 발행
-    const sessionToken = jwt.sign(
-      { id: user.id, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    const sessionToken = await createAuthSessionToken(user.id, user.role);
 
     // httpOnly 쿠키로 세션 발급(XSS 토큰 탈취 방지). JS 응답에는 세션 토큰을 노출하지 않습니다.
     setSessionCookie(res, sessionToken);
@@ -290,10 +291,30 @@ export const handleChzzkCallback = async (req: Request, res: Response) => {
 };
 
 /**
- * 로그아웃 — httpOnly 세션 쿠키 제거
- * (Bearer 토큰을 쓰는 클라이언트는 추가로 로컬 토큰을 폐기해야 함)
+ * 로그아웃 — 서버 세션을 폐기한 뒤 httpOnly 세션 쿠키 제거
  */
-export const logout = (_req: Request, res: Response) => {
+export const logout = async (req: Request, res: Response) => {
+  const token = getRequestSessionToken(req);
+  if (token) {
+    try {
+      await revokeAuthSessionToken(token);
+    } catch (err: any) {
+      // 이미 만료되었거나 손상된 토큰은 로컬 쿠키만 제거하면 됩니다.
+      if (
+        err?.name !== 'JsonWebTokenError' &&
+        err?.name !== 'TokenExpiredError' &&
+        err?.name !== 'NotBeforeError' &&
+        err?.name !== 'InvalidAuthSessionError'
+      ) {
+        console.error('[ChzzkAuthController] 로그아웃 세션 폐기 실패:', err?.message || err);
+        if (err instanceof AuthSessionLookupTimeoutError) res.setHeader('Retry-After', '3');
+        return res.status(503).json({
+          error: 'AuthServiceBusy',
+          message: '로그아웃을 안전하게 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        });
+      }
+    }
+  }
   clearSessionCookie(res);
   return res.status(200).json({ message: '로그아웃되었습니다.' });
 };

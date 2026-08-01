@@ -26,6 +26,34 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
+    ON auth_sessions(user_id, revoked_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at
+    ON auth_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS chat_attachment_quota_locks (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS chat_attachment_quota_reservations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reserved_bytes BIGINT NOT NULL CHECK (reserved_bytes > 0),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_attachment_quota_reservations_user
+    ON chat_attachment_quota_reservations(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_chat_attachment_quota_reservations_expiry
+    ON chat_attachment_quota_reservations(expires_at);
+
 CREATE TABLE IF NOT EXISTS deleted_user_accounts (
     user_id TEXT PRIMARY KEY,
     deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

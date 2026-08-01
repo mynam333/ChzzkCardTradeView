@@ -86,7 +86,7 @@ const ChzzkCallbackContent: React.FC = () => {
         const sessionUser = {
           id: confirmedUser.id || data.user.id,
           username: confirmedUser.username || data.user.username,
-          avatarUrl: confirmedUser.avatarUrl || data.user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${data.user.id}`,
+          avatarUrl: confirmedUser.avatarUrl || data.user.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${data.user.id}`,
           role: confirmedUser.role || data.user.role,
           statusMessage: confirmedUser.statusMessage ?? null,
           titles: confirmedUser.titles || [],

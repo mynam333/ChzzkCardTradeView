@@ -6,16 +6,23 @@ import { createRealtimeNotification } from '../services/notificationDelivery';
 import { sendPushToUser } from './pushController';
 import {
   CHAT_ATTACHMENT_MAX_ACTIVE_BYTES,
+  ChatAttachmentProcessingOverloadedError,
   deleteProcessedChatAttachment,
   getChatAttachmentSourceHash,
   processChatImageAttachment
 } from '../services/chatAttachmentService';
 import {
+  ChatAttachmentLimitExceededError,
+  ChatAttachmentQuotaReservationExpiredError,
+  commitChatAttachmentQuotaReservation,
+  releaseChatAttachmentQuotaReservation,
+  reserveChatAttachmentQuota
+} from '../services/chatAttachmentQuotaService';
+import {
   cancelFriendRequest,
   createFriendRequest,
   deleteSavedChatAttachment,
   findReusableChatAttachment,
-  getActiveChatAttachmentBytes,
   getOrCreateChatRoom,
   getReusableChatAttachmentById,
   getRoomForUser,
@@ -29,7 +36,6 @@ import {
   markRoomMessagesRead,
   removeFriend,
   respondFriendRequest,
-  saveChatAttachmentRecord,
   sendChatAttachmentMessage,
   sendChatMessage,
   setChatRoomClosed,
@@ -75,7 +81,7 @@ export const searchFriendCandidates = async (req: AuthenticatedRequest, res: Res
       .map((candidate) => ({
         id: candidate.id,
         username: candidate.username,
-        avatar_url: candidate.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/svg?seed=${candidate.id}`,
+        avatar_url: candidate.avatar_url || `https://api.dicebear.com/10.x/fun-emoji/png?seed=${candidate.id}`,
         role: candidate.role
       })));
   } catch (err: any) {
@@ -297,6 +303,8 @@ export const createChatMessage = async (req: AuthenticatedRequest, res: Response
     return res.status(201).json(result.message);
   } catch (err: any) {
     if (err.message === 'RoomClosed') return jsonError(res, 403, '닫힌 채팅방에는 메시지를 보낼 수 없습니다.');
+    if (err.message === 'FriendsOnly') return jsonError(res, 403, '현재 친구인 사용자에게만 메시지를 보낼 수 있습니다.', undefined, 'FriendsOnly');
+    if (err.message === 'AttachmentUnavailable') return jsonError(res, 409, '첨부가 만료되었거나 더 이상 사용할 수 없습니다.', undefined, 'AttachmentUnavailable');
     return jsonError(res, 500, '메시지 전송 실패', err.message);
   }
 };
@@ -312,6 +320,7 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
   let pendingProcessedUrl: string | null = null;
   let savedAttachment: Awaited<ReturnType<typeof findReusableChatAttachment>> = null;
   let messageCreated = false;
+  let quotaReservationId: string | null = null;
   try {
     const room = await getRoomForUser(roomId, user.id);
     if (!room) return jsonError(res, 404, '채팅방을 찾을 수 없습니다.');
@@ -319,22 +328,30 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
     const sourceHash = getChatAttachmentSourceHash(file);
     const reusableAttachment = await findReusableChatAttachment(user.id, sourceHash);
     const attachment = reusableAttachment || await (async () => {
-      const activeBytes = await getActiveChatAttachmentBytes(user.id);
-      if (activeBytes >= CHAT_ATTACHMENT_MAX_ACTIVE_BYTES || activeBytes + file.size > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
-        throw new Error('ChatAttachmentLimitExceeded');
-      }
+      quotaReservationId = await reserveChatAttachmentQuota(
+        user.id,
+        file.size,
+        CHAT_ATTACHMENT_MAX_ACTIVE_BYTES
+      );
 
       const processed = await processChatImageAttachment(user.id, file);
       pendingProcessedUrl = processed.url;
-      if (activeBytes + processed.sizeBytes > CHAT_ATTACHMENT_MAX_ACTIVE_BYTES) {
+
+      const committed = await commitChatAttachmentQuotaReservation(
+        user.id,
+        quotaReservationId,
+        sourceHash,
+        processed,
+        CHAT_ATTACHMENT_MAX_ACTIVE_BYTES
+      );
+      quotaReservationId = null;
+      if (committed.discardProcessedFile) {
         deleteProcessedChatAttachment(processed.url);
-        pendingProcessedUrl = null;
-        throw new Error('ChatAttachmentLimitExceeded');
       }
-      const saved = await saveChatAttachmentRecord(user.id, sourceHash, processed);
+      if (committed.previousUrlToDelete) deleteProcessedChatAttachment(committed.previousUrlToDelete);
       pendingProcessedUrl = null;
-      savedAttachment = saved;
-      return saved;
+      savedAttachment = committed.attachment;
+      return committed.attachment;
     })();
     if (reusableAttachment) {
       savedAttachment = reusableAttachment;
@@ -352,11 +369,25 @@ export const createChatImageMessage = async (req: AuthenticatedRequest, res: Res
 
     return res.status(201).json(result.message);
   } catch (err: any) {
+    if (quotaReservationId) {
+      await releaseChatAttachmentQuotaReservation(user.id, quotaReservationId).catch(() => { /* 만료 정리에서 회수됩니다. */ });
+      quotaReservationId = null;
+    }
     if (pendingProcessedUrl) deleteProcessedChatAttachment(pendingProcessedUrl);
     if (savedAttachment && !savedAttachment.reused && !messageCreated) await deleteSavedChatAttachment(savedAttachment).catch(() => { /* noop */ });
     if (err.message === 'RoomClosed') return jsonError(res, 403, '닫힌 채팅방에는 메시지를 보낼 수 없습니다.');
-    if (err.message === 'ChatAttachmentLimitExceeded') {
+    if (err.message === 'FriendsOnly') return jsonError(res, 403, '현재 친구인 사용자에게만 메시지를 보낼 수 있습니다.', undefined, 'FriendsOnly');
+    if (err.message === 'AttachmentUnavailable') return jsonError(res, 409, '첨부가 만료되었거나 더 이상 사용할 수 없습니다.', undefined, 'AttachmentUnavailable');
+    if (err instanceof ChatAttachmentLimitExceededError || err.message === 'ChatAttachmentLimitExceeded') {
       return jsonError(res, 413, '이미지 첨부 보관 한도 100MB를 초과했습니다. 오래된 첨부가 만료된 뒤 다시 시도해 주세요.', undefined, 'ChatAttachmentLimitExceeded');
+    }
+    if (err instanceof ChatAttachmentProcessingOverloadedError) {
+      res.setHeader('Retry-After', String(err.retryAfterSeconds));
+      return jsonError(res, 503, '이미지 처리 요청이 많습니다. 잠시 후 다시 시도해 주세요.', undefined, err.code);
+    }
+    if (err instanceof ChatAttachmentQuotaReservationExpiredError) {
+      res.setHeader('Retry-After', String(err.retryAfterSeconds));
+      return jsonError(res, 503, '이미지 처리 시간이 길어져 저장 공간 예약이 만료되었습니다. 다시 시도해 주세요.', undefined, err.code);
     }
     const badRequest = /이미지|ffmpeg|GIF|변환|첨부/.test(String(err.message || ''));
     return jsonError(res, badRequest ? 400 : 500, badRequest ? err.message : '이미지 메시지 전송 실패', err.message);
@@ -404,6 +435,8 @@ export const reuseChatAttachmentMessage = async (req: AuthenticatedRequest, res:
     return res.status(201).json(result.message);
   } catch (err: any) {
     if (err.message === 'RoomClosed') return jsonError(res, 403, '닫힌 채팅방에는 메시지를 보낼 수 없습니다.');
+    if (err.message === 'FriendsOnly') return jsonError(res, 403, '현재 친구인 사용자에게만 메시지를 보낼 수 있습니다.', undefined, 'FriendsOnly');
+    if (err.message === 'AttachmentUnavailable') return jsonError(res, 409, '첨부가 만료되었거나 더 이상 사용할 수 없습니다.', undefined, 'AttachmentUnavailable');
     return jsonError(res, 500, '이미지 재사용 전송 실패', err.message);
   }
 };

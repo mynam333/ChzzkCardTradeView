@@ -18,7 +18,7 @@ describe('chzzkService profile image validation', () => {
     expect(isPlaceholderProfileImageUrl('/icon.png')).toBe(true);
     expect(isPlaceholderProfileImageUrl('https://chikapo.yuaru.com/icon.png')).toBe(true);
     expect(isPlaceholderProfileImageUrl('https://ssl.pstatic.net/static/nng/glive/icon.png?type=f120')).toBe(true);
-    expect(isPlaceholderProfileImageUrl('https://api.dicebear.com/10.x/fun-emoji/svg?seed=test')).toBe(true);
+    expect(isPlaceholderProfileImageUrl('https://api.dicebear.com/10.x/fun-emoji/png?seed=test')).toBe(true);
   });
 
   it('실제 외부 프로필 이미지 URL은 허용한다', () => {
