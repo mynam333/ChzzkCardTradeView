@@ -83,6 +83,11 @@ export type StreamerCardDeletionSettlementResult = CardDeletionCompensationResul
 
 const DEFAULT_DRAW_COST = 10_000;
 
+// postgres.js infers a parameter used directly as `?::jsonb` as JSONB and
+// serializes it again. All values below are already JSON.stringify() output,
+// so bind them as TEXT first and let PostgreSQL parse that text as JSONB.
+const POSTGRES_JSON_TEXT_PARAM = 'CAST(? AS TEXT)::jsonb';
+
 const parseDrawCost = (raw: unknown): number => {
   const parsed = Math.trunc(Number(raw));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DRAW_COST;
@@ -107,6 +112,15 @@ const tradeReferencesChannel = (trade: TradeRow, channelId: string): boolean => 
   }
   return false;
 };
+
+// Existing PostgreSQL rows can contain a JSONB string scalar because trade
+// offers were historically passed to postgres.js after JSON.stringify().
+const normalizePostgresTradeOffer = (column: 'sender_offer' | 'receiver_offer'): string => `
+  CASE
+    WHEN jsonb_typeof(${column}) = 'string' THEN (${column} #>> '{}')::jsonb
+    ELSE ${column}
+  END
+`;
 
 const compensationTotals = (
   drawCost: number,
@@ -218,7 +232,7 @@ const grantPostgresBidRefunds = async (
 
   await tx.run(`
     WITH raw_refunds AS (
-      SELECT * FROM jsonb_to_recordset(?::jsonb)
+      SELECT * FROM jsonb_to_recordset(${POSTGRES_JSON_TEXT_PARAM})
         AS r(listing_id BIGINT, user_id TEXT, amount BIGINT)
     ), totals AS (
       SELECT user_id, SUM(amount)::BIGINT AS amount
@@ -233,7 +247,7 @@ const grantPostgresBidRefunds = async (
 
   await tx.run(`
     WITH refunds AS (
-      SELECT * FROM jsonb_to_recordset(?::jsonb)
+      SELECT * FROM jsonb_to_recordset(${POSTGRES_JSON_TEXT_PARAM})
         AS r(listing_id BIGINT, user_id TEXT, amount BIGINT)
     )
     INSERT INTO point_ledger_entries
@@ -252,7 +266,7 @@ const grantPostgresBidRefunds = async (
 
   await tx.run(`
     WITH refunds AS (
-      SELECT * FROM jsonb_to_recordset(?::jsonb)
+      SELECT * FROM jsonb_to_recordset(${POSTGRES_JSON_TEXT_PARAM})
         AS r(listing_id BIGINT, user_id TEXT, amount BIGINT)
     )
     INSERT INTO asset_event_logs
@@ -282,7 +296,7 @@ const grantPostgresCardCompensations = async (
   if (compensations.length === 0) return;
   const compensationJson = JSON.stringify(compensations);
   const compensationRows = `
-    SELECT * FROM jsonb_to_recordset(?::jsonb)
+    SELECT * FROM jsonb_to_recordset(${POSTGRES_JSON_TEXT_PARAM})
       AS c(
         user_id TEXT, deleted_count INTEGER, point_refund BIGINT, free_draw_tickets INTEGER,
         high_value_cards INTEGER, ticket_compensated_cards INTEGER
@@ -509,10 +523,12 @@ const settleMysql = async (
        ${listingLockClause}
     `, channelId);
 
+    const senderOffer = normalizePostgresTradeOffer('sender_offer');
+    const receiverOffer = normalizePostgresTradeOffer('receiver_offer');
     const tradeChannelFilter = isPostgres
       ? `(
-          sender_offer @> jsonb_build_object('cards', jsonb_build_array(jsonb_build_object('channel_id', CAST(? AS TEXT))))
-          OR receiver_offer @> jsonb_build_object('cards', jsonb_build_array(jsonb_build_object('channel_id', CAST(? AS TEXT))))
+          (${senderOffer}) @> jsonb_build_object('cards', jsonb_build_array(jsonb_build_object('channel_id', CAST(? AS TEXT))))
+          OR (${receiverOffer}) @> jsonb_build_object('cards', jsonb_build_array(jsonb_build_object('channel_id', CAST(? AS TEXT))))
         )`
       : `(
           JSON_SEARCH(sender_offer, 'one', ?, NULL, '$.cards[*].channel_id') IS NOT NULL
@@ -527,20 +543,12 @@ const settleMysql = async (
        FOR UPDATE
     `, channelId, channelId);
     if (cancelledTrades.length > 0) {
-      if (isPostgres) {
-        await tx.run(`
-          UPDATE trades
-             SET status = 'CANCELLED', completed_at = COALESCE(completed_at, UTC_TIMESTAMP())
-           WHERE status IN ('PENDING','CONFIRMED') AND ${tradeChannelFilter}
-        `, channelId, channelId);
-      } else {
-        const ids = cancelledTrades.map((trade) => Number(trade.id));
-        await tx.run(`
-          UPDATE trades
-             SET status = 'CANCELLED', completed_at = COALESCE(completed_at, UTC_TIMESTAMP())
-           WHERE id IN (${placeholdersFor(ids)}) AND status IN ('PENDING','CONFIRMED')
-        `, ...ids);
-      }
+      const ids = cancelledTrades.map((trade) => Number(trade.id));
+      await tx.run(`
+        UPDATE trades
+           SET status = 'CANCELLED', completed_at = COALESCE(completed_at, UTC_TIMESTAMP())
+         WHERE id IN (${placeholdersFor(ids)}) AND status IN ('PENDING','CONFIRMED')
+      `, ...ids);
     }
 
     const cards = await tx.all<CardRow>(`
@@ -564,7 +572,7 @@ const settleMysql = async (
         await tx.all(`
           SELECT id
             FROM users
-           WHERE id IN (SELECT jsonb_array_elements_text(?::jsonb))
+           WHERE id IN (SELECT jsonb_array_elements_text(${POSTGRES_JSON_TEXT_PARAM}))
            ORDER BY id
            FOR UPDATE
         `, JSON.stringify(relatedUserIds));
