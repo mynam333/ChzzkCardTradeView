@@ -198,8 +198,19 @@ type RoundAnswerResponse = {
   correct?: boolean;
   correct_channel_ids?: string[];
   timed_out?: boolean;
+  has_next_round?: boolean;
   next_round?: QuizRound | ValueDuelRound | CropDetectiveRound | null;
   next_round_deadline_at?: string | null;
+  total_rounds?: number;
+};
+
+type RoundStartResponse = {
+  success?: boolean;
+  message?: string;
+  round?: number;
+  round_data?: ValueDuelRound;
+  round_deadline_at?: string;
+  server_now?: string;
   total_rounds?: number;
 };
 
@@ -2486,12 +2497,15 @@ export const ArcadeTab: React.FC = () => {
   const [roundCorrectCount, setRoundCorrectCount] = useState(0);
   const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
   const [roundChecking, setRoundChecking] = useState(false);
+  const [roundStartBusy, setRoundStartBusy] = useState(false);
   const [roundTimeoutRetryAttempt, setRoundTimeoutRetryAttempt] = useState(0);
   const roundDeadlineRef = useRef<number | null>(null);
   const [roundDeadlineSyncAt, setRoundDeadlineSyncAt] = useState<number | null>(null);
   const [roundSubmissionKey, setRoundSubmissionKey] = useState<string | null>(null);
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [pendingPaidRound, setPendingPaidRound] = useState<PendingPaidRound | null>(null);
+  const roundStartInFlightRef = useRef(false);
+  const roundStartRequestRef = useRef(0);
   const [cropDetectiveReadyKey, setCropDetectiveReadyKey] = useState('');
   const [imageBlindMenu, setImageBlindMenu] = useState<{ x: number; y: number; imageUrl: string } | null>(null);
   const currentCropDetectiveRound = activeGame === 'crop_detective'
@@ -2763,6 +2777,8 @@ export const ArcadeTab: React.FC = () => {
     cropImageRecoveryRequestRef.current += 1;
     cropImageRecoveryAttemptsRef.current.clear();
     autoSubmittedCompletedSessionsRef.current.clear();
+    roundStartRequestRef.current += 1;
+    roundStartInFlightRef.current = false;
     submitInFlightRef.current = false;
     setRoundSubmissionKey(null);
     setSubmitRetry(null);
@@ -2789,6 +2805,7 @@ export const ArcadeTab: React.FC = () => {
     setRoundFeedback(null);
     setRoundCorrectCount(0);
     setRoundChecking(false);
+    setRoundStartBusy(false);
     setRoundTimeoutRetryAttempt(0);
     setRoundDeadlineSyncAt(null);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
@@ -3039,16 +3056,23 @@ export const ArcadeTab: React.FC = () => {
           isRoundForGame(activeGame, nextRound) &&
           Number(nextRound.round) === expectedNextIndex
         );
+        const validDeferredValueDuelProtocol =
+          activeGame === 'value_duel' &&
+          data.has_next_round === hasNextRound &&
+          data.next_round === null &&
+          data.next_round_deadline_at === null;
         const validProtocol =
           Number.isInteger(responseTotalRounds) &&
           responseTotalRounds === roundTotalRounds &&
-          (hasNextRound
-            ? validNextRound && (
-                activeGame === 'crop_detective'
-                  ? data.next_round_deadline_at === null && nextLocalDeadline === null
-                  : nextLocalDeadline !== null
-              )
-            : data.next_round === null);
+          (activeGame === 'value_duel'
+            ? validDeferredValueDuelProtocol
+            : hasNextRound
+              ? validNextRound && (
+                  activeGame === 'crop_detective'
+                    ? data.next_round_deadline_at === null && nextLocalDeadline === null
+                    : nextLocalDeadline !== null
+                )
+              : data.next_round === null);
 
         if (!validProtocol) {
           setPendingPaidRound(null);
@@ -3057,7 +3081,11 @@ export const ArcadeTab: React.FC = () => {
           return;
         }
 
-        if (nextRound) {
+        if (activeGame === 'value_duel') {
+          setPendingPaidRound(hasNextRound
+            ? { roundIndex: expectedNextIndex, localDeadlineAt: null }
+            : null);
+        } else if (nextRound) {
           setServerClockOffsetMs(nextServerClockOffsetMs);
           setGameData((previousData) => {
             if (!previousData) return previousData;
@@ -3085,10 +3113,13 @@ export const ArcadeTab: React.FC = () => {
     }
   }, [activeGame, countdownLeft, gameBusy, gameResult, isGameOver, isPracticeMode, roundChecking, roundFeedback, roundIndex, roundSubmissionKey, roundTimeLeft, roundTimeoutRetryAttempt, roundTotalRounds, serverClockOffsetMs, sessionId, toast]);
 
-  const advanceToPaidRound = useCallback((pendingRound: PendingPaidRound) => {
+  const advanceToPaidRound = useCallback((
+    pendingRound: PendingPaidRound,
+    disclosedRound?: QuizRound | ValueDuelRound | CropDetectiveRound
+  ) => {
     if (!isRoundGame(activeGame)) return;
-    const nextRound = gameData?.rounds?.find((round) => round.round === pendingRound.roundIndex);
-    if (!isRoundForGame(activeGame, nextRound)) {
+    const nextRound = disclosedRound || gameData?.rounds?.find((round) => round.round === pendingRound.roundIndex);
+    if (!isRoundForGame(activeGame, nextRound) || nextRound.round !== pendingRound.roundIndex) {
       setIsGameOver(true);
       toast('서버가 공개한 다음 라운드를 확인할 수 없어 진행을 중단했습니다.', 'error');
       return;
@@ -3114,10 +3145,10 @@ export const ArcadeTab: React.FC = () => {
   }, [activeGame, gameData?.rounds, toast]);
 
   useEffect(() => {
-    if (isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
+    if (activeGame === 'value_duel' || isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
     const timer = window.setTimeout(() => advanceToPaidRound(pendingPaidRound), 450);
     return () => window.clearTimeout(timer);
-  }, [advanceToPaidRound, isGameOver, isPracticeMode, pendingPaidRound, roundFeedback]);
+  }, [activeGame, advanceToPaidRound, isGameOver, isPracticeMode, pendingPaidRound, roundFeedback]);
 
   useEffect(() => {
     if (!submitRetry || gameResult || !sessionId) return;
@@ -3475,6 +3506,8 @@ export const ArcadeTab: React.FC = () => {
 
     activeSessionRestoreAllowedRef.current = false;
     setGameBusy(true);
+    roundStartRequestRef.current += 1;
+    roundStartInFlightRef.current = false;
     submitInFlightRef.current = false;
     setRoundSubmissionKey(null);
     setSubmitRetry(null);
@@ -3501,6 +3534,7 @@ export const ArcadeTab: React.FC = () => {
     setRoundCorrectCount(0);
     setRoundTimeLeft(ROUND_GAME_ROUND_SECONDS);
     setRoundChecking(false);
+    setRoundStartBusy(false);
     setRoundTimeoutRetryAttempt(0);
     setRoundDeadlineSyncAt(null);
     setCropDetectiveReadyKey('');
@@ -3968,8 +4002,8 @@ export const ArcadeTab: React.FC = () => {
     void submitRoundAnswer(selectedChannelId, false);
   }, [submitRoundAnswer]);
 
-  const handleRoundContinue = () => {
-    if (!isRoundGame(activeGame) || !gameData?.rounds || isGameOver) return;
+  const handleRoundContinue = async () => {
+    if (!isRoundGame(activeGame) || !gameData?.rounds || !roundFeedback || isGameOver || roundStartBusy) return;
     const isLastRound = roundIndex >= roundTotalRounds - 1;
     if (isLastRound) {
       submitResult({ answers: roundAnswers });
@@ -3979,10 +4013,83 @@ export const ArcadeTab: React.FC = () => {
     const nextIndex = roundIndex + 1;
     if (!isPracticeMode) {
       if (!pendingPaidRound || pendingPaidRound.roundIndex !== nextIndex) {
-        setIsGameOver(true);
         toast('서버가 공개한 다음 라운드를 확인할 수 없어 진행을 중단했습니다.', 'error');
         return;
       }
+
+      if (activeGame === 'value_duel') {
+        if (!sessionId || pendingPaidRound.localDeadlineAt !== null || roundStartInFlightRef.current) return;
+
+        const requestId = ++roundStartRequestRef.current;
+        roundStartInFlightRef.current = true;
+        setRoundStartBusy(true);
+        try {
+          const res = await apiFetch('/minigames/round-start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, round: nextIndex })
+          });
+          const data = await res.json().catch(() => ({})) as RoundStartResponse;
+          if (requestId !== roundStartRequestRef.current) return;
+          if (!res.ok) {
+            toast(data.message || '다음 문제를 시작하지 못했습니다. 다시 시도해 주세요.', 'warning');
+            return;
+          }
+
+          const responseRound = Number(data.round);
+          const responseTotalRounds = Number(data.total_rounds);
+          const responseServerNowMs = Date.parse(data.server_now || '');
+          const responseDeadlineMs = Date.parse(data.round_deadline_at || '');
+          const nextRound = data.round_data;
+          const nextServerClockOffsetMs = responseServerNowMs - Date.now();
+          const nextLocalDeadline = getLocalRoundDeadline(
+            data.round_deadline_at,
+            nextServerClockOffsetMs
+          );
+          const validProtocol =
+            data.success === true &&
+            Number.isInteger(responseRound) &&
+            responseRound === nextIndex &&
+            Number.isInteger(responseTotalRounds) &&
+            responseTotalRounds === roundTotalRounds &&
+            Number.isFinite(responseServerNowMs) &&
+            Number.isFinite(responseDeadlineMs) &&
+            responseDeadlineMs > responseServerNowMs &&
+            isValueDuelRound(nextRound) &&
+            nextRound.round === nextIndex &&
+            nextLocalDeadline !== null;
+
+          if (!validProtocol) {
+            toast('다음 문제의 서버 검증 데이터를 확인할 수 없습니다. 다시 시도해 주세요.', 'error');
+            return;
+          }
+
+          setServerClockOffsetMs(nextServerClockOffsetMs);
+          setGameData((previousData) => {
+            if (!previousData) return previousData;
+            const rounds = [
+              ...(previousData.rounds || []).filter((round) => round.round !== nextRound.round),
+              nextRound
+            ].sort((left, right) => left.round - right.round);
+            return { ...previousData, rounds, total_rounds: responseTotalRounds };
+          });
+          advanceToPaidRound(
+            { roundIndex: nextIndex, localDeadlineAt: nextLocalDeadline },
+            nextRound
+          );
+        } catch {
+          if (requestId === roundStartRequestRef.current) {
+            toast('다음 문제를 시작하지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.', 'warning');
+          }
+        } finally {
+          if (requestId === roundStartRequestRef.current) {
+            roundStartInFlightRef.current = false;
+            setRoundStartBusy(false);
+          }
+        }
+        return;
+      }
+
       advanceToPaidRound(pendingPaidRound);
       return;
     }
@@ -4855,10 +4962,16 @@ export const ArcadeTab: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleRoundContinue}
-                        disabled={isGameOver}
-                        className="cute-wiggle-hover rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-55"
+                        disabled={isGameOver || roundStartBusy}
+                        aria-busy={roundStartBusy}
+                        className="cute-wiggle-hover inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-xs font-black text-primary-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-55"
                       >
-                        {roundIndex >= roundTotalRounds - 1 ? '최종 결과 확인' : '다음 문제'}
+                        {roundStartBusy ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                            다음 문제 준비 중
+                          </>
+                        ) : roundIndex >= roundTotalRounds - 1 ? '최종 결과 확인' : '다음 문제'}
                       </button>
                     </div>
                   )}

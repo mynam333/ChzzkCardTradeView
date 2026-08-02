@@ -1012,7 +1012,7 @@ const armPreparedCropRound = async (payload: MinigameImagePayload) => {
     const proposedDeadline = new Date(
       Date.now() + MINIGAME_CROP_ROUND_TIME_MS + MINIGAME_CROP_SUBMISSION_GRACE_MS
     ).toISOString();
-    const result = await minigameRepository.armCropDetectiveRoundDeadline(
+    const result = await minigameRepository.armRoundDeadline(
       payload.sessionId,
       payload.userId,
       payload.round,

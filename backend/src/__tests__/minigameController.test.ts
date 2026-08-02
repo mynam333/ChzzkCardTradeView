@@ -11,7 +11,7 @@ vi.mock('../repositories', () => ({
     expireSessions: vi.fn(),
     findSessionById: vi.fn(),
     findActiveStartedSession: vi.fn(),
-    armCropDetectiveRoundDeadline: vi.fn(),
+    armRoundDeadline: vi.fn(),
     recordRoundOutcome: vi.fn(),
     completeSession: vi.fn()
   },
@@ -54,7 +54,7 @@ vi.mock('../services/puzzleImageExclusionService', () => {
   };
 });
 
-import { abandonMinigameSession, checkMinigameRoundAnswer, getActiveMinigameSession, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+import { abandonMinigameSession, checkMinigameRoundAnswer, getActiveMinigameSession, getCardImageUrl, getDailyMinigame, getMinigameStatus, startMinigame, startMinigameRound, submitMinigameResult } from '../controllers/minigameController';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
 import { openMinigameImageReference } from '../services/minigameImageToken';
 import { getPuzzleExcludedImageKeys } from '../services/puzzleImageExclusionService';
@@ -66,6 +66,7 @@ const startSession = vi.mocked(minigameRepository.startSession);
 const expireSessions = vi.mocked(minigameRepository.expireSessions);
 const findSessionById = vi.mocked(minigameRepository.findSessionById);
 const findActiveStartedSession = vi.mocked(minigameRepository.findActiveStartedSession);
+const armRoundDeadline = vi.mocked(minigameRepository.armRoundDeadline);
 const recordRoundOutcome = vi.mocked(minigameRepository.recordRoundOutcome);
 const completeSession = vi.mocked(minigameRepository.completeSession);
 const findAllStreamers = vi.mocked(streamerRepository.findAll);
@@ -674,6 +675,124 @@ describe('round-based minigames', () => {
     const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
     expect(responseBody.next_round.image_url).toMatch(/^minigame-image:v1:/);
     expect(responseBody.next_round.image_url).not.toContain('quiz-answer-1');
+  });
+
+  it('keeps the next paid value-duel round undisclosed and unarmed until the player continues', async () => {
+    const currentDeadline = new Date(Date.now() + 5_000).toISOString();
+    const session = {
+      id: 'paid-value-duel-session',
+      user_id: 'user-1',
+      game_type: 'value_duel' as const,
+      status: 'STARTED' as const,
+      validation_version: 1,
+      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: currentDeadline,
+        round_started_round: 0
+      }),
+      progress_revision: 0,
+      created_at: new Date(Date.now() - 10_000).toISOString()
+    };
+    findSessionById.mockResolvedValue(session);
+    recordRoundOutcome.mockResolvedValue({
+      ok: true,
+      duplicate: false,
+      session: {
+        ...session,
+        progress_data: JSON.stringify({
+          round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+          round_deadline_at: null,
+          round_started_round: null
+        }),
+        progress_revision: 1
+      }
+    });
+    const response = createResponse();
+
+    await checkMinigameRoundAnswer({
+      user: { id: 'user-1' },
+      body: {
+        session_id: session.id,
+        payload: { round: 0, selected_channel_id: 'left-0' }
+      }
+    } as AuthenticatedRequest, response);
+
+    expect(recordRoundOutcome).toHaveBeenCalledWith(
+      session.id,
+      'user-1',
+      0,
+      'left-0',
+      null
+    );
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      correct: true,
+      has_next_round: true,
+      next_round: null,
+      next_round_deadline_at: null,
+      server_now: expect.any(String)
+    }));
+  });
+
+  it('atomically starts and reveals the requested paid value-duel round', async () => {
+    const deadline = new Date(Date.now() + 12_000).toISOString();
+    const session = {
+      id: 'paid-value-duel-round-start',
+      user_id: 'user-1',
+      game_type: 'value_duel' as const,
+      status: 'STARTED' as const,
+      ticket_spent_type: 'BASE' as const,
+      validation_version: 1,
+      target_data: JSON.stringify({ practice_mode: false, rounds: valueDuelRounds }),
+      progress_data: JSON.stringify({
+        round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+        round_deadline_at: null,
+        round_started_round: null
+      }),
+      progress_revision: 1,
+      created_at: new Date(Date.now() - 10_000).toISOString()
+    };
+    findSessionById.mockResolvedValue(session);
+    armRoundDeadline.mockResolvedValue({
+      ok: true,
+      armedNow: true,
+      session: {
+        ...session,
+        progress_data: JSON.stringify({
+          round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+          round_deadline_at: deadline,
+          round_started_round: 1
+        }),
+        progress_revision: 2
+      }
+    });
+    const response = createResponse();
+
+    await startMinigameRound({
+      user: { id: 'user-1' },
+      body: { session_id: session.id, round: 1 }
+    } as AuthenticatedRequest, response);
+
+    expect(armRoundDeadline).toHaveBeenCalledWith(
+      session.id,
+      'user-1',
+      1,
+      expect.any(String)
+    );
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({
+      success: true,
+      round: 1,
+      round_data: {
+        round: 1,
+        left: expect.not.objectContaining({ base_value: expect.anything() }),
+        right: expect.not.objectContaining({ base_value: expect.anything() })
+      },
+      round_deadline_at: deadline,
+      server_now: expect.any(String),
+      total_rounds: 5
+    });
   });
 
   it('reveals the next paid crop round unarmed until its protected clue image is ready', async () => {
@@ -1363,6 +1482,29 @@ describe('daily minigame selection', () => {
     expect(target.rounds).toHaveLength(5);
     expect(progress.round_outcomes).toEqual([]);
     expect(progress.round_deadline_at).toBe(body.game_data.round_deadline_at);
+  });
+
+  it('marks only the initial paid value-duel round as started', async () => {
+    vi.setSystemTime(new Date('2026-06-02T03:00:00.000Z')); // value duel day
+    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
+    startSession.mockResolvedValue({ ok: true });
+    const response = createResponse();
+
+    await startMinigame({
+      user: { id: 'user-1' },
+      body: { game_type: 'value_duel', practice_mode: false }
+    } as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const body = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(body.game_data.rounds).toHaveLength(1);
+    expect(body.game_data.round_deadline_at).toEqual(expect.any(String));
+    const issuedProgress = JSON.parse(startSession.mock.calls[0][0].progress_data || '{}');
+    expect(issuedProgress).toEqual({
+      round_outcomes: [],
+      round_deadline_at: body.game_data.round_deadline_at,
+      round_started_round: 0
+    });
   });
 
   it('issues a paid crop round unarmed so image preparation cannot consume its timer', async () => {

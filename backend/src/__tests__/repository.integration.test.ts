@@ -543,7 +543,7 @@ describe('MinigameRepository authoritative paid sessions', () => {
     expect(stored?.progress_revision).toBe(2);
   });
 
-  it('fails closed for elapsed round deadlines while allowing timeout and late idempotent retry', async () => {
+  it('fails closed for elapsed value-duel deadlines and does not resolve an unstarted next round', async () => {
     seedUser(db, 'round-deadline-user');
     const elapsedDeadline = new Date(Date.now() - 1_000).toISOString();
     expect((await minigameRepository.startSession({
@@ -580,15 +580,15 @@ describe('MinigameRepository authoritative paid sessions', () => {
     expect(timeout).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
     expect(lateRetry).toEqual(expect.objectContaining({ ok: true, duplicate: true }));
     expect(nextLateAnswer).toMatchObject({ ok: false });
-    expect(nextTimeout).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    expect(nextTimeout).toMatchObject({ ok: false });
     const stored = await minigameRepository.findSessionById('round-deadline-session');
-    expect(stored?.progress_revision).toBe(2);
+    expect(stored?.progress_revision).toBe(1);
     expect(JSON.parse(stored?.progress_data || '{}')).toEqual({
       round_outcomes: [
-        { round: 0, selected_channel_id: null },
-        { round: 1, selected_channel_id: null }
+        { round: 0, selected_channel_id: null }
       ],
-      round_deadline_at: null
+      round_deadline_at: null,
+      round_started_round: null
     });
   });
 
@@ -616,6 +616,118 @@ describe('MinigameRepository authoritative paid sessions', () => {
     expect(result).toMatchObject({ ok: false });
     expect(result.reason).toMatch(/마감 정보/);
     expect((await minigameRepository.findSessionById('missing-round-deadline-session'))?.progress_revision).toBe(0);
+  });
+
+  it('arms a paid value-duel round only when the player continues and never extends it', async () => {
+    seedUser(db, 'value-duel-round-arm-user');
+    const initialDeadline = new Date(Date.now() + 60_000).toISOString();
+    const nextDeadline = new Date(Date.now() + 90_000).toISOString();
+    const attemptedExtension = new Date(Date.now() + 120_000).toISOString();
+    expect((await minigameRepository.startSession({
+      id: 'value-duel-round-arm-session',
+      user_id: 'value-duel-round-arm-user',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({
+        practice_mode: false,
+        rounds: [{ round: 0 }, { round: 1 }]
+      }),
+      validation_version: 1,
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: initialDeadline,
+        round_started_round: 0
+      }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const firstOutcome = await minigameRepository.recordRoundOutcome(
+      'value-duel-round-arm-session',
+      'value-duel-round-arm-user',
+      0,
+      'left-0',
+      attemptedExtension
+    );
+    expect(firstOutcome).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    expect(JSON.parse((await minigameRepository.findSessionById(
+      'value-duel-round-arm-session'
+    ))?.progress_data || '{}')).toEqual({
+      round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+      round_deadline_at: null,
+      round_started_round: null
+    });
+
+    const timeoutBeforeContinue = await minigameRepository.recordRoundOutcome(
+      'value-duel-round-arm-session', 'value-duel-round-arm-user', 1, null, null
+    );
+    expect(timeoutBeforeContinue).toMatchObject({ ok: false });
+
+    const firstArm = await minigameRepository.armRoundDeadline(
+      'value-duel-round-arm-session', 'value-duel-round-arm-user', 1, nextDeadline
+    );
+    const repeatedArm = await minigameRepository.armRoundDeadline(
+      'value-duel-round-arm-session', 'value-duel-round-arm-user', 1, attemptedExtension
+    );
+    expect(firstArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
+    expect(repeatedArm).toEqual(expect.objectContaining({ ok: true, armedNow: false }));
+    const armedSession = await minigameRepository.findSessionById('value-duel-round-arm-session');
+    expect(JSON.parse(armedSession?.progress_data || '{}')).toEqual({
+      round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+      round_deadline_at: nextDeadline,
+      round_started_round: 1
+    });
+    expect(armedSession?.progress_revision).toBe(2);
+  });
+
+  it('keeps a future markerless legacy value-duel deadline without extending it', async () => {
+    seedUser(db, 'legacy-value-duel-arm-user');
+    const legacyDeadline = new Date(Date.now() + 60_000).toISOString();
+    const attemptedExtension = new Date(Date.now() + 120_000).toISOString();
+    expect((await minigameRepository.startSession({
+      id: 'legacy-value-duel-arm-session',
+      user_id: 'legacy-value-duel-arm-user',
+      game_type: 'value_duel',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: [{ round: 0 }] }),
+      validation_version: 1,
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: legacyDeadline
+      }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const arm = await minigameRepository.armRoundDeadline(
+      'legacy-value-duel-arm-session',
+      'legacy-value-duel-arm-user',
+      0,
+      attemptedExtension
+    );
+
+    expect(arm).toEqual(expect.objectContaining({ ok: true, armedNow: false }));
+    const stored = await minigameRepository.findSessionById('legacy-value-duel-arm-session');
+    expect(JSON.parse(stored?.progress_data || '{}')).toEqual({
+      round_outcomes: [],
+      round_deadline_at: legacyDeadline
+    });
+    expect(stored?.progress_revision).toBe(0);
+
+    const outcome = await minigameRepository.recordRoundOutcome(
+      'legacy-value-duel-arm-session',
+      'legacy-value-duel-arm-user',
+      0,
+      'left-0',
+      attemptedExtension
+    );
+    expect(outcome).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    const completed = await minigameRepository.findSessionById('legacy-value-duel-arm-session');
+    expect(JSON.parse(completed?.progress_data || '{}')).toEqual({
+      round_outcomes: [{ round: 0, selected_channel_id: 'left-0' }],
+      round_deadline_at: null,
+      round_started_round: null
+    });
   });
 
   it('arms each paid crop round once and leaves the following round unarmed until its image is ready', async () => {
@@ -653,10 +765,10 @@ describe('MinigameRepository authoritative paid sessions', () => {
     expect(answerBeforeImage.reason).toMatch(/준비|시작/);
     expect((await minigameRepository.findSessionById('crop-round-arm-session'))?.progress_revision).toBe(0);
 
-    const firstArm = await minigameRepository.armCropDetectiveRoundDeadline(
+    const firstArm = await minigameRepository.armRoundDeadline(
       'crop-round-arm-session', 'crop-round-arm-user', 0, firstDeadline
     );
-    const repeatedArm = await minigameRepository.armCropDetectiveRoundDeadline(
+    const repeatedArm = await minigameRepository.armRoundDeadline(
       'crop-round-arm-session', 'crop-round-arm-user', 0, attemptedExtension
     );
     expect(firstArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
@@ -682,7 +794,7 @@ describe('MinigameRepository authoritative paid sessions', () => {
     });
     expect(nextRoundUnarmed?.progress_revision).toBe(2);
 
-    const secondArm = await minigameRepository.armCropDetectiveRoundDeadline(
+    const secondArm = await minigameRepository.armRoundDeadline(
       'crop-round-arm-session', 'crop-round-arm-user', 1, secondDeadline
     );
     expect(secondArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
@@ -715,10 +827,10 @@ describe('MinigameRepository authoritative paid sessions', () => {
       expires_at: new Date(Date.now() + 180_000).toISOString()
     }, 240)).ok).toBe(true);
 
-    const firstArm = await minigameRepository.armCropDetectiveRoundDeadline(
+    const firstArm = await minigameRepository.armRoundDeadline(
       'legacy-crop-arm-session', 'legacy-crop-arm-user', 0, armedDeadline
     );
-    const repeatedArm = await minigameRepository.armCropDetectiveRoundDeadline(
+    const repeatedArm = await minigameRepository.armRoundDeadline(
       'legacy-crop-arm-session', 'legacy-crop-arm-user', 0, attemptedExtension
     );
 

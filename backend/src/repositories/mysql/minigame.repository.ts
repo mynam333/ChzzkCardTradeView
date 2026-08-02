@@ -266,7 +266,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     });
   }
 
-  async armCropDetectiveRoundDeadline(
+  async armRoundDeadline(
     sessionId: string,
     userId: string,
     round: number,
@@ -290,10 +290,10 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       if (!row) return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
       if (row.status !== 'STARTED') return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
       if (
-        row.game_type !== 'crop_detective' ||
+        !['crop_detective', 'value_duel'].includes(String(row.game_type)) ||
         !['BASE', 'BONUS'].includes(String(row.ticket_spent_type || 'NONE'))
       ) {
-        return { ok: false, reason: '보상형 카드 확대 탐정 세션이 아닙니다.' };
+        return { ok: false, reason: '라운드 시작을 지원하는 보상형 미니게임 세션이 아닙니다.' };
       }
 
       const expiresAtMs = row.expires_at ? new Date(row.expires_at).getTime() : NaN;
@@ -320,9 +320,12 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         return { ok: false, reason: '존재하지 않는 라운드입니다.' };
       }
 
-      const armedRound = progress.round_image_armed_round;
+      const markerKey = row.game_type === 'crop_detective'
+        ? 'round_image_armed_round'
+        : 'round_started_round';
+      const armedRound = progress[markerKey];
       if (armedRound != null && (!Number.isInteger(armedRound) || armedRound < 0)) {
-        return { ok: false, reason: '저장된 확대 이미지 준비 상태가 올바르지 않습니다.' };
+        return { ok: false, reason: '저장된 라운드 시작 상태가 올바르지 않습니다.' };
       }
       const storedDeadlineRaw = progress.round_deadline_at;
       const storedDeadlineMs = typeof storedDeadlineRaw === 'string'
@@ -338,7 +341,16 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         return { ok: true, armedNow: false, session: this.mapSession(row) };
       }
       if (armedRound != null) {
-        return { ok: false, reason: '현재 라운드와 확대 이미지 준비 상태가 일치하지 않습니다.' };
+        return { ok: false, reason: '현재 라운드와 저장된 시작 상태가 일치하지 않습니다.' };
+      }
+      // Before round_started_round existed, paid value-duel sessions used only
+      // round_deadline_at. Preserve an already-running legacy round, but never
+      // extend it or revive an expired deadline.
+      if (row.game_type === 'value_duel' && Number.isFinite(storedDeadlineMs)) {
+        if (storedDeadlineMs <= Date.now()) {
+          return { ok: false, reason: '이미 마감된 라운드는 다시 시작할 수 없습니다.' };
+        }
+        return { ok: true, armedNow: false, session: this.mapSession(row) };
       }
 
       const currentRevision = Math.max(0, Math.floor(Number(row.progress_revision ?? 0)));
@@ -346,7 +358,7 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         ...progress,
         round_outcomes: outcomes,
         round_deadline_at: normalizedDeadline.value,
-        round_image_armed_round: round
+        [markerKey]: round
       });
       const updateResult = await tx.run(`
         UPDATE minigame_sessions
@@ -424,6 +436,16 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       ) {
         return { ok: false, reason: '확대 이미지 준비가 끝나지 않아 라운드가 아직 시작되지 않았습니다.' };
       }
+      if (row.game_type === 'value_duel') {
+        const hasStartedMarker = Object.prototype.hasOwnProperty.call(progress, 'round_started_round');
+        const startedRound = progress.round_started_round;
+        if (
+          (hasStartedMarker && (startedRound !== round || !Number.isFinite(currentDeadlineMs))) ||
+          (!hasStartedMarker && !Number.isFinite(currentDeadlineMs))
+        ) {
+          return { ok: false, reason: '시세 듀얼 라운드가 아직 시작되지 않았습니다.' };
+        }
+      }
       if (normalizedSelection !== null) {
         if (!Number.isFinite(currentDeadlineMs)) {
           return { ok: false, reason: '서버 라운드 마감 정보가 없어 답안을 처리할 수 없습니다.' };
@@ -432,7 +454,9 @@ export class MysqlMinigameRepository implements IMinigameRepository {
           return { ok: false, reason: '라운드 답안 제출 시간이 마감되었습니다.' };
         }
       }
-      const nextDeadline = normalizeRoundDeadline(nextRoundDeadlineAt);
+      const nextDeadline = normalizeRoundDeadline(
+        row.game_type === 'value_duel' ? null : nextRoundDeadlineAt
+      );
       if (!nextDeadline.ok) {
         return { ok: false, reason: '다음 라운드 마감 정보가 올바르지 않습니다.' };
       }
@@ -442,7 +466,8 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         ...progress,
         round_outcomes: [...outcomes, { round, selected_channel_id: normalizedSelection }],
         round_deadline_at: nextDeadline.value,
-        ...(row.game_type === 'crop_detective' ? { round_image_armed_round: null } : {})
+        ...(row.game_type === 'crop_detective' ? { round_image_armed_round: null } : {}),
+        ...(row.game_type === 'value_duel' ? { round_started_round: null } : {})
       };
       const nextProgressData = JSON.stringify(nextProgress);
       const updateResult = await tx.run(`

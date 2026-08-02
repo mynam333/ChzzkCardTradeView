@@ -212,6 +212,7 @@ import {
   getActiveMinigameSession,
   abandonMinigameSession,
   startMinigame,
+  startMinigameRound,
   checkMinigameRoundAnswer,
   submitMinigameResult
 } from '../controllers/minigameController';
@@ -543,6 +544,7 @@ router.get('/minigames/status', authMiddleware, banCheckMiddleware, minigameLimi
 router.get('/minigames/active', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, getActiveMinigameSession);
 router.post('/minigames/abandon', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, abandonMinigameSession);
 router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigame);
+router.post('/minigames/round-start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigameRound);
 router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);
 router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, submitMinigameResult);
 

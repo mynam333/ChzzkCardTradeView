@@ -717,7 +717,8 @@ export interface IMinigameRepository {
     /** 다음 라운드의 서버 마감 시각. 마지막 라운드는 null을 명시합니다. */
     nextRoundDeadlineAt: string | null
   ): Promise<MinigameRoundOutcomeResult>;
-  armCropDetectiveRoundDeadline(
+  /** Atomically arms the current paid crop/value-duel round without extending an existing deadline. */
+  armRoundDeadline(
     sessionId: string,
     userId: string,
     round: number,

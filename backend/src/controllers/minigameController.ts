@@ -520,6 +520,13 @@ const getStoredRoundDeadline = (session: MinigameSession): string | null => {
     const outcomes = Array.isArray(progress?.round_outcomes) ? progress.round_outcomes : [];
     if (progress?.round_image_armed_round !== outcomes.length) return null;
   }
+  if (
+    session.game_type === 'value_duel' &&
+    Object.prototype.hasOwnProperty.call(progress, 'round_started_round')
+  ) {
+    const outcomes = Array.isArray(progress?.round_outcomes) ? progress.round_outcomes : [];
+    if (progress?.round_started_round !== outcomes.length) return null;
+  }
   const rawDeadline = String(progress?.round_deadline_at || '').trim();
   return rawDeadline && Number.isFinite(new Date(rawDeadline).getTime()) ? rawDeadline : null;
 };
@@ -1340,7 +1347,8 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
         ...(!practiceMode && isRoundGameType(game_type)
           ? {
               round_deadline_at: initialRoundDeadlineAt,
-              ...(game_type === 'crop_detective' ? { round_image_armed_round: null } : {})
+              ...(game_type === 'crop_detective' ? { round_image_armed_round: null } : {}),
+              ...(game_type === 'value_duel' ? { round_started_round: 0 } : {})
             }
           : {})
       }),
@@ -1796,13 +1804,14 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
     }
 
     const hasNextRound = round + 1 < rounds.length;
-    const nextPublicRound = hasNextRound
+    const deferValueDuelNextRound = !practiceMode && session.game_type === 'value_duel';
+    const nextPublicRound = hasNextRound && !deferValueDuelNextRound
       ? buildPublicRound(session.game_type, rounds[round + 1], session.id, userId)
       : null;
-    const nextRoundDeadlineAt = !practiceMode && hasNextRound
+    const nextRoundDeadlineAt = !practiceMode && hasNextRound && !deferValueDuelNextRound
       ? session.game_type === 'crop_detective' ? null : createRoundDeadline(session.game_type)
       : null;
-    if (hasNextRound && !nextPublicRound) {
+    if (hasNextRound && !deferValueDuelNextRound && !nextPublicRound) {
       return res.status(500).json({
         error: 'InternalServerError',
         message: '서버가 다음 라운드를 안전하게 발급하지 못했습니다.'
@@ -1811,6 +1820,7 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
 
     let authoritativeNextRoundDeadlineAt = nextRoundDeadlineAt;
     let issuedNextRound = nextPublicRound;
+    let authoritativeHasNextRound = hasNextRound;
     if (!practiceMode) {
       const recordResult = await minigameRepository.recordRoundOutcome(
         session_id,
@@ -1832,7 +1842,8 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
       if (recordResult.session) {
         const storedOutcomes = getStoredRoundOutcomes(recordResult.session);
         const authoritativeNextRoundIndex = storedOutcomes.length;
-        issuedNextRound = authoritativeNextRoundIndex < rounds.length
+        authoritativeHasNextRound = authoritativeNextRoundIndex < rounds.length;
+        issuedNextRound = authoritativeHasNextRound && !deferValueDuelNextRound
           ? buildPublicRound(session.game_type, rounds[authoritativeNextRoundIndex], session.id, userId)
           : null;
       }
@@ -1848,11 +1859,110 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
       ...(!practiceMode ? {
         server_now: new Date().toISOString(),
         next_round: issuedNextRound,
-        next_round_deadline_at: authoritativeNextRoundDeadlineAt
+        next_round_deadline_at: authoritativeNextRoundDeadlineAt,
+        ...(session.game_type === 'value_duel'
+          ? { has_next_round: authoritativeHasNextRound }
+          : {})
       } : {})
     });
   } catch (err: any) {
     console.error('[MinigameController] round check error:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '라운드 결과 확인 중 오류가 발생했습니다.' });
+  }
+};
+
+export const startMinigameRound = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
+
+  const sessionId = String(req.body?.session_id || '').trim();
+  const round = Number(req.body?.round);
+  if (!sessionId || !Number.isInteger(round) || round < 0) {
+    return res.status(400).json({ error: 'BadRequest', message: '시작할 라운드 정보가 올바르지 않습니다.' });
+  }
+
+  try {
+    const session = await minigameRepository.findSessionById(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'NotFound', message: '유효하지 않은 미니게임 세션입니다.' });
+    }
+    if (session.user_id !== userId) {
+      return res.status(403).json({ error: 'Forbidden', message: '잘못된 세션 소유권입니다.' });
+    }
+    if (session.status !== 'STARTED') {
+      return res.status(409).json({ error: 'MinigameSessionClosed', message: '이미 처리되었거나 만료된 세션입니다.' });
+    }
+    if (session.game_type !== 'value_duel') {
+      return res.status(400).json({ error: 'BadRequest', message: '시세 듀얼 라운드만 직접 시작할 수 있습니다.' });
+    }
+
+    const target = parseDbJson<any>(session.target_data, {});
+    if (target.practice_mode === true) {
+      return res.status(400).json({ error: 'BadRequest', message: '보상형 시세 듀얼 세션이 아닙니다.' });
+    }
+    if (isLegacyUnverifiablePaidSession(session, target)) {
+      return res.status(409).json({
+        error: 'LegacyMinigameSession',
+        message: '이전 검증 방식으로 발급된 미니게임은 새 라운드를 시작할 수 없습니다.'
+      });
+    }
+    const targetValidation = scoreValueDuelAnswers([], target);
+    if (!targetValidation.valid) {
+      return res.status(409).json({
+        error: 'InvalidMinigameSession',
+        message: targetValidation.reason || '시세 듀얼 문제 데이터가 올바르지 않습니다.'
+      });
+    }
+
+    const proposedDeadline = createRoundDeadline('value_duel');
+    if (!proposedDeadline) {
+      return res.status(500).json({ error: 'InternalServerError', message: '라운드 마감 시간을 생성하지 못했습니다.' });
+    }
+    const armResult = await minigameRepository.armRoundDeadline(
+      sessionId,
+      userId,
+      round,
+      proposedDeadline
+    );
+    if (!armResult.ok || !armResult.session) {
+      const deadlineExpired = /시간|마감|만료|deadline|expired/i.test(String(armResult.reason || ''));
+      return res.status(409).json({
+        error: deadlineExpired ? 'RoundTimeExpired' : 'RoundStartConflict',
+        message: armResult.reason || '현재 라운드를 시작할 수 없습니다.'
+      });
+    }
+
+    const authoritativeSession = armResult.session;
+    const authoritativeTarget = parseDbJson<any>(authoritativeSession.target_data, {});
+    const authoritativeRounds = Array.isArray(authoritativeTarget?.rounds)
+      ? authoritativeTarget.rounds
+      : [];
+    const authoritativeOutcomes = getStoredRoundOutcomes(authoritativeSession);
+    const deadline = getStoredRoundDeadline(authoritativeSession);
+    const roundData = authoritativeOutcomes.length === round
+      ? buildPublicRound('value_duel', authoritativeRounds[round], sessionId, userId)
+      : null;
+    if (
+      authoritativeRounds.length !== VALUE_DUEL_ROUND_COUNT ||
+      !deadline ||
+      !roundData
+    ) {
+      return res.status(409).json({
+        error: 'InvalidMinigameRoundState',
+        message: '서버에 저장된 시세 듀얼 라운드 상태가 올바르지 않습니다.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      round,
+      round_data: roundData,
+      round_deadline_at: deadline,
+      server_now: new Date().toISOString(),
+      total_rounds: authoritativeRounds.length
+    });
+  } catch (err: any) {
+    console.error('[MinigameController] round start error:', err);
+    return res.status(500).json({ error: 'InternalServerError', message: '라운드 시작 중 오류가 발생했습니다.' });
   }
 };
