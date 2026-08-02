@@ -3119,7 +3119,7 @@ export const ArcadeTab: React.FC = () => {
   ) => {
     if (!isRoundGame(activeGame)) return;
     const nextRound = disclosedRound || gameData?.rounds?.find((round) => round.round === pendingRound.roundIndex);
-    if (!isRoundForGame(activeGame, nextRound) || nextRound.round !== pendingRound.roundIndex) {
+    if (!nextRound || !isRoundForGame(activeGame, nextRound) || nextRound.round !== pendingRound.roundIndex) {
       setIsGameOver(true);
       toast('서버가 공개한 다음 라운드를 확인할 수 없어 진행을 중단했습니다.', 'error');
       return;
