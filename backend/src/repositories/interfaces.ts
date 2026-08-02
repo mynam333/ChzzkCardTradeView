@@ -64,6 +64,8 @@ export interface Streamer {
   broadcast_multiplier?: number;
   prev_value?: number;
   last_broadcast_at?: string | null;
+  /** 재등록 시마다 새로 발급되는 불변 생명주기 ID. 오래된 삭제 요청의 재실행을 차단합니다. */
+  lifecycle_id?: string;
   updated_at?: string;
   registered_by?: string | null;
 }

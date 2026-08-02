@@ -180,10 +180,19 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
     const db = this.getDb();
     const newId = db.transaction(() => {
+      const candidate = db.prepare(
+        'SELECT channel_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0'
+      ).get(listing.user_card_id, listing.seller_id) as { channel_id?: string } | undefined;
+      if (!candidate?.channel_id) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+      const streamerLock = db.prepare(
+        'UPDATE streamers SET updated_at = updated_at WHERE channel_id = ?'
+      ).run(candidate.channel_id);
+      if (streamerLock.changes !== 1) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+
       const card = db.prepare(
         'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0'
       ).get(listing.user_card_id, listing.seller_id) as any;
-      if (!card) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+      if (!card || String(card.channel_id) !== String(candidate.channel_id)) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
 
       if (!listing.with_cosmetics) {
         if (card?.border_item_id) {

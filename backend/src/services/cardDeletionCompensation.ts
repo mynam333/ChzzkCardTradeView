@@ -45,6 +45,40 @@ const getCurrentDrawCost = async (): Promise<number> => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10000;
 };
 
+export const calculateCardDeletionUserCompensations = (
+  streamer: Pick<Streamer, 'base_value'>,
+  cards: DeletedCardCompensationTarget[],
+  drawCost: number
+): CardDeletionUserCompensation[] => {
+  const byUser = new Map<string, CardDeletionUserCompensation>();
+
+  for (const card of cards) {
+    if (!card.user_id) continue;
+    const current = byUser.get(card.user_id) || {
+      user_id: card.user_id,
+      deleted_count: 0,
+      point_refund: 0,
+      free_draw_tickets: 0,
+      high_value_cards: 0,
+      ticket_compensated_cards: 0
+    };
+    current.deleted_count += 1;
+    const value = calculateDeletedCardValue(streamer, card.star);
+    if (value > drawCost) {
+      current.point_refund += value;
+      current.high_value_cards += 1;
+    } else {
+      current.ticket_compensated_cards += 1;
+    }
+    byUser.set(card.user_id, current);
+  }
+
+  return [...byUser.values()].map((compensation) => ({
+    ...compensation,
+    free_draw_tickets: compensation.ticket_compensated_cards > 0 ? 1 : 0
+  }));
+};
+
 export const formatCardDeletionCompensationSummary = (result: Pick<CardDeletionCompensationResult, 'total_point_refunded' | 'total_free_draw_tickets_granted'>): string => {
   const parts: string[] = [];
   if (result.total_point_refunded > 0) {
@@ -155,33 +189,7 @@ export const grantCardDeletionCompensations = async (
   cards: DeletedCardCompensationTarget[]
 ): Promise<CardDeletionCompensationResult> => {
   const drawCost = await getCurrentDrawCost();
-  const byUser = new Map<string, CardDeletionUserCompensation>();
-
-  for (const card of cards) {
-    if (!card.user_id) continue;
-    const current = byUser.get(card.user_id) || {
-      user_id: card.user_id,
-      deleted_count: 0,
-      point_refund: 0,
-      free_draw_tickets: 0,
-      high_value_cards: 0,
-      ticket_compensated_cards: 0
-    };
-    current.deleted_count += 1;
-    const value = calculateDeletedCardValue(streamer, card.star);
-    if (value > drawCost) {
-      current.point_refund += value;
-      current.high_value_cards += 1;
-    } else {
-      current.ticket_compensated_cards += 1;
-    }
-    byUser.set(card.user_id, current);
-  }
-
-  const users = [...byUser.values()].map((compensation) => ({
-    ...compensation,
-    free_draw_tickets: compensation.ticket_compensated_cards > 0 ? 1 : 0
-  }));
+  const users = calculateCardDeletionUserCompensations(streamer, cards, drawCost);
 
   for (const compensation of users) {
     if (compensation.free_draw_tickets > 0) {

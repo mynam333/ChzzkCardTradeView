@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     last_broadcast_at VARCHAR(64),
     serial_number BIGINT,
     registered_by VARCHAR(191),
+    lifecycle_id VARCHAR(64),
     updated_at VARCHAR(64) DEFAULT (UTC_TIMESTAMP()),
     KEY idx_streamers_registered_by (registered_by),
     CONSTRAINT fk_streamers_registered_by FOREIGN KEY(registered_by) REFERENCES users(id) ON DELETE SET NULL

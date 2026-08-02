@@ -149,7 +149,7 @@ const loadDrawPool = async (): Promise<any[]> => {
   return drawPoolInFlight;
 };
 
-const clearDrawPoolCache = () => {
+export const clearDrawPoolCache = () => {
   drawPoolCache = null;
 };
 
@@ -1961,6 +1961,15 @@ export const registerStreamer = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[PlayController] registerStreamer 에러:', err);
+    if (err?.message === 'STREAMER_ALREADY_EXISTS') {
+      return res.status(409).json({ error: 'Conflict', message: '이미 카드로 등록되어 있는 스트리머입니다.' });
+    }
+    if (err?.message === 'STREAMER_REGISTRATION_BLOCKED') {
+      return res.status(403).json({
+        error: 'RegistrationBlocked',
+        message: '본인 카드 삭제 요청에 따라 재등록이 제한된 스트리머입니다.'
+      });
+    }
     return res.status(500).json({ error: 'InternalServerError', message: '서버 내부 오류가 발생했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

@@ -22,6 +22,7 @@ import {
 } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, extractStarImages } from "./shared";
 import { formatUploadUrl } from "../../services/imageService";
+import { randomUUID } from 'node:crypto';
 
 export class SqliteStreamerRepository implements IStreamerRepository {
   private static readonly VALUE_AGO_CACHE_TTL_MS = Math.max(
@@ -70,6 +71,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
       last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
+      lifecycle_id: row.lifecycle_id || undefined,
       updated_at: row.updated_at
     }));
   }
@@ -130,6 +132,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
       last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
+      lifecycle_id: row.lifecycle_id || undefined,
       updated_at: row.updated_at
     };
   }
@@ -157,45 +160,49 @@ export class SqliteStreamerRepository implements IStreamerRepository {
       prev_value: row.prev_value !== undefined ? row.prev_value : 1000,
       last_broadcast_at: row.last_broadcast_at ?? null,
       registered_by: row.registered_by || null,
+      lifecycle_id: row.lifecycle_id || undefined,
       updated_at: row.updated_at
     }));
   }
 
   async save(streamer: Streamer): Promise<void> {
-    this.getDb().prepare(`
-      INSERT INTO streamers (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active, serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value, last_broadcast_at, registered_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(channel_id) DO UPDATE SET
-        name = excluded.name,
-        logo_url = excluded.logo_url,
-        follower_count = excluded.follower_count,
-        activity_score = excluded.activity_score,
-        base_value = excluded.base_value,
-        is_active = excluded.is_active,
-        serial_number = COALESCE(excluded.serial_number, streamers.serial_number),
-        broadcast_count = COALESCE(excluded.broadcast_count, streamers.broadcast_count),
-        chat_count = COALESCE(excluded.chat_count, streamers.chat_count),
-        broadcast_multiplier = COALESCE(excluded.broadcast_multiplier, streamers.broadcast_multiplier),
-        prev_value = COALESCE(excluded.prev_value, streamers.prev_value),
-        last_broadcast_at = COALESCE(excluded.last_broadcast_at, streamers.last_broadcast_at),
-        registered_by = COALESCE(excluded.registered_by, streamers.registered_by),
-        updated_at = datetime('now')
-    `).run(
-      streamer.channel_id,
-      streamer.name,
-      streamer.logo_url,
-      streamer.follower_count,
-      streamer.activity_score,
-      streamer.base_value,
-      streamer.is_active ? 1 : 0,
-      streamer.serial_number || null,
-      streamer.broadcast_count || 0,
-      streamer.chat_count || 0,
-      streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0,
-      streamer.prev_value !== undefined ? streamer.prev_value : 1000,
-      streamer.last_broadcast_at || null,
-      streamer.registered_by || null
-    );
+    const db = this.getDb();
+    const lifecycleId = streamer.lifecycle_id || randomUUID();
+    const transaction = db.transaction(() => {
+      const existing = db.prepare('SELECT 1 FROM streamers WHERE channel_id = ? LIMIT 1')
+        .get(streamer.channel_id);
+      if (existing) throw new Error('STREAMER_ALREADY_EXISTS');
+
+      const blocked = db.prepare('SELECT 1 FROM streamer_registration_blocks WHERE channel_id = ? LIMIT 1')
+        .get(streamer.channel_id);
+      const isSelfRegistration = Boolean(streamer.registered_by) && streamer.registered_by === streamer.channel_id;
+      if (blocked && !isSelfRegistration) throw new Error('STREAMER_REGISTRATION_BLOCKED');
+
+      db.prepare(`
+        INSERT INTO streamers
+          (channel_id, name, logo_url, follower_count, activity_score, base_value, is_active,
+           serial_number, broadcast_count, chat_count, broadcast_multiplier, prev_value,
+           last_broadcast_at, registered_by, lifecycle_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        streamer.channel_id,
+        streamer.name,
+        streamer.logo_url,
+        streamer.follower_count,
+        streamer.activity_score,
+        streamer.base_value,
+        streamer.is_active ? 1 : 0,
+        streamer.serial_number || null,
+        streamer.broadcast_count || 0,
+        streamer.chat_count || 0,
+        streamer.broadcast_multiplier !== undefined ? streamer.broadcast_multiplier : 1.0,
+        streamer.prev_value !== undefined ? streamer.prev_value : 1000,
+        streamer.last_broadcast_at || null,
+        streamer.registered_by || null,
+        lifecycleId
+      );
+    });
+    transaction.immediate();
   }
 
   async updateCustomImage(channelId: string, imageUrl: string | null, star: number = 0): Promise<void> {

@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     last_broadcast_at TEXT,                     -- 마지막 방송 감지 일시
     serial_number INTEGER,                      -- 스트리머 카드 발행 일련번호
     registered_by TEXT,                         -- 카드를 등록한 유저의 ID (nullable)
+    lifecycle_id TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
     updated_at TEXT DEFAULT (datetime('now'))
 );
 

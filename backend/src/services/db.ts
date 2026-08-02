@@ -390,6 +390,8 @@ const normalizeMysqlIsoDateColumn = async (db: MysqlDb, table: string, column: s
 };
 
 const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
+  await ensureMysqlColumn(db, 'streamers', 'lifecycle_id', 'lifecycle_id VARCHAR(64) NULL AFTER registered_by');
+  await db.run("UPDATE streamers SET lifecycle_id = UUID() WHERE lifecycle_id IS NULL OR lifecycle_id = ''");
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
   await ensureMysqlColumn(db, 'shop_items', 'sale_start_at', 'sale_start_at DATETIME NULL AFTER purchase_limit');
   await ensureMysqlColumn(db, 'shop_items', 'sale_end_at', 'sale_end_at DATETIME NULL AFTER sale_start_at');
@@ -946,6 +948,10 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   } catch (err: any) {
     console.warn('[DB] pg_trgm 확장 보정 실패, trigram 검색 인덱스는 건너뜁니다:', err?.message || err);
   }
+  await db.run('ALTER TABLE streamers ADD COLUMN IF NOT EXISTS lifecycle_id TEXT');
+  await db.run("UPDATE streamers SET lifecycle_id = md5(random()::text || clock_timestamp()::text || channel_id) WHERE lifecycle_id IS NULL OR lifecycle_id = ''");
+  await db.run("ALTER TABLE streamers ALTER COLUMN lifecycle_id SET DEFAULT md5(random()::text || clock_timestamp()::text)");
+  await db.run('ALTER TABLE streamers ALTER COLUMN lifecycle_id SET NOT NULL');
   await db.run(`
     ALTER TABLE minigame_sessions
       ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 0,
@@ -1459,6 +1465,13 @@ export const initDatabaseConnection = async (
         console.log('[DB Migration] streamers 테이블에 registered_by 컬럼이 없어 추가합니다.');
         sqliteDb.exec("ALTER TABLE streamers ADD COLUMN registered_by TEXT;");
       }
+      try {
+        sqliteDb.prepare("SELECT lifecycle_id FROM streamers LIMIT 1").get();
+      } catch (e) {
+        console.log('[DB Migration] streamers 테이블에 lifecycle_id 컬럼이 없어 추가합니다.');
+        sqliteDb.exec("ALTER TABLE streamers ADD COLUMN lifecycle_id TEXT;");
+      }
+      sqliteDb.exec("UPDATE streamers SET lifecycle_id = lower(hex(randomblob(16))) WHERE lifecycle_id IS NULL OR lifecycle_id = '';");
       try {
         sqliteDb.prepare("SELECT serial_number FROM streamers LIMIT 1").get();
       } catch (e) {

@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { streamerRepository, userCardRepository } from '../repositories';
+import { streamerRepository } from '../repositories';
 import { sendPushToUser } from '../controllers/pushController';
 import type { Streamer, StreamerScheduleResult } from '../repositories/interfaces';
 import {
@@ -13,15 +13,16 @@ import { chatManager } from '../services/chatManager';
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { publishRealtimeEvent } from '../services/realtimeStream';
 import {
+  clearDrawPoolCache,
   clearStreamerLiveStatusCache,
   clearStreamerRankingCaches,
   scheduleUserRankingRefresh
 } from '../controllers/playController';
 import {
   formatCardDeletionCompensationReward,
-  formatCardDeletionCompensationSummary,
-  grantCardDeletionCompensations
+  formatCardDeletionCompensationSummary
 } from '../services/cardDeletionCompensation';
+import { settleStreamerCardDeletion } from '../services/cardDeletionSettlement';
 import { createRealtimeNotification } from '../services/notificationDelivery';
 
 // 스케줄러 실행 주기(분). 크론 '*/2 * * * *'와 일치해야 방송 시간 누적이 정확합니다.
@@ -302,8 +303,7 @@ const isThreeMonthsInactive = (lastLiveAt?: string | null): boolean => {
 };
 
 const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inactive' | 'not_found', lastLiveAt?: string) => {
-  const holders = await userCardRepository.findByChannel(streamer.channel_id);
-  const compensation = await grantCardDeletionCompensations(streamer, holders);
+  const compensation = await settleStreamerCardDeletion(streamer);
 
   for (const userCompensation of compensation.users) {
     const title = '보유 카드 삭제 및 보상 지급';
@@ -311,7 +311,7 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inact
     const body = reason === 'not_found'
       ? `'${streamer.name}' 카드 정보를 더 이상 불러올 수 없어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 정리되었고 ${reward}이 지급되었습니다.`
       : `'${streamer.name}' 카드가 최근 방송 없음으로 정리되어 보유 카드 ${userCompensation.deleted_count.toLocaleString()}장이 삭제되었고 ${reward}이 지급되었습니다.`;
-    sendPushToUser(userCompensation.user_id, title, body, '/shop');
+    sendPushToUser(userCompensation.user_id, title, body, '/shop').catch(() => { /* 푸시 실패는 정산을 되돌리지 않습니다. */ });
     createRealtimeNotification({
       user_id: userCompensation.user_id,
       title,
@@ -320,10 +320,10 @@ const rewardHoldersAndDeleteStreamer = async (streamer: Streamer, reason: 'inact
     }).catch(() => { /* 알림 실패는 정리 작업을 막지 않음 */ });
   }
 
-  await streamerRepository.delete(streamer.channel_id);
   console.log(
     `[LiveStatusScheduler] 스트리머 삭제: ${streamer.name}(${streamer.channel_id}), ` +
-    `reason=${reason}, lastLiveAt=${lastLiveAt || '-'}, 보상 ${compensation.affected_users}명(${formatCardDeletionCompensationSummary(compensation)})`
+    `reason=${reason}, lastLiveAt=${lastLiveAt || '-'}, 보상 ${compensation.affected_users}명(${formatCardDeletionCompensationSummary(compensation)}), ` +
+    `교환취소 ${compensation.cancelled_trades}건, 매물취소 ${compensation.cancelled_listings}건, 입찰환불 ${compensation.refunded_market_bid_points}P`
   );
 };
 
@@ -522,9 +522,24 @@ export const syncAllStreamersLiveStatus = async () => {
     } else {
       console.log('[LiveStatusScheduler] 반영할 시세 변경이 없어 DB 쓰기와 랭킹 이벤트를 건너뜁니다.');
     }
+    let successfulPrunes = 0;
     for (const target of pruneTargets) {
-      await rewardHoldersAndDeleteStreamer(target.streamer, target.reason || 'inactive', target.lastLiveAt).catch((err: any) => {
+      await rewardHoldersAndDeleteStreamer(target.streamer, target.reason || 'inactive', target.lastLiveAt).then(() => {
+        successfulPrunes += 1;
+      }).catch((err: any) => {
         console.error(`[LiveStatusScheduler] 장기 미방송 스트리머 정리 실패 (${target.streamer.channel_id}):`, err.message);
+      });
+    }
+    if (successfulPrunes > 0) {
+      clearDrawPoolCache();
+      clearStreamerLiveStatusCache();
+      clearStreamerRankingCaches();
+      scheduleUserRankingRefresh('streamer_prune');
+      publishRealtimeEvent('ranking', {
+        reason: 'streamer_prune',
+        scope: 'streamers',
+        affects: ['streamer_rankings', 'streamer_values', 'streamer_live', 'user_live'],
+        deleted_streamers: successfulPrunes
       });
     }
     // 6) 주기적으로 오래된 시세 이력 정리 (7일 초과분)

@@ -267,6 +267,7 @@ CREATE TABLE IF NOT EXISTS streamers (
     prev_value INTEGER DEFAULT 1000,              -- 이전 환산 시세 (등락률 계산용)
     last_broadcast_at TIMESTAMPTZ,                -- 마지막 방송 감지 일시
     registered_by TEXT,                           -- 카드를 등록한 유저의 ID (nullable)
+    lifecycle_id TEXT NOT NULL DEFAULT md5(random()::text || clock_timestamp()::text),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_streamers_name_trgm ON streamers USING GIN (name gin_trgm_ops);

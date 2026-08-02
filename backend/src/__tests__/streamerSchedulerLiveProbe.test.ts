@@ -13,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   clearStreamerRankingCaches: vi.fn(),
   scheduleUserRankingRefresh: vi.fn(),
   chatConnect: vi.fn(),
-  chatDisconnect: vi.fn()
+  chatDisconnect: vi.fn(),
+  settleStreamerCardDeletion: vi.fn()
 }));
 
 vi.mock('node-cron', () => ({ default: { schedule: vi.fn() } }));
@@ -49,8 +50,10 @@ vi.mock('../controllers/playController', () => ({
 vi.mock('../controllers/pushController', () => ({ sendPushToUser: vi.fn() }));
 vi.mock('../services/cardDeletionCompensation', () => ({
   formatCardDeletionCompensationReward: vi.fn(),
-  formatCardDeletionCompensationSummary: vi.fn(),
-  grantCardDeletionCompensations: vi.fn()
+  formatCardDeletionCompensationSummary: vi.fn()
+}));
+vi.mock('../services/cardDeletionSettlement', () => ({
+  settleStreamerCardDeletion: mocks.settleStreamerCardDeletion
 }));
 vi.mock('../services/notificationDelivery', () => ({ createRealtimeNotification: vi.fn() }));
 
@@ -63,6 +66,22 @@ describe('streamerScheduler live-status probe', () => {
     mocks.bulkApplyScheduleResults.mockResolvedValue(undefined);
     mocks.bulkRecordValueHistory.mockResolvedValue(undefined);
     mocks.pruneValueHistory.mockResolvedValue(undefined);
+    mocks.settleStreamerCardDeletion.mockResolvedValue({
+      already_settled: false,
+      draw_cost: 10_000,
+      affected_users: 0,
+      cards_removed: 0,
+      total_point_refunded: 0,
+      total_free_draw_tickets_granted: 0,
+      high_value_cards_refunded: 0,
+      ticket_compensated_cards: 0,
+      cancelled_trades: 0,
+      cancelled_listings: 0,
+      refunded_market_bid_points: 0,
+      cancelled_trade_participant_ids: [],
+      market_bid_refunds: [],
+      users: []
+    });
   });
 
   it('경량 probe에서 OPEN인 오프라인 채널을 같은 주기 전체 프로필 폴링으로 승격한다', async () => {

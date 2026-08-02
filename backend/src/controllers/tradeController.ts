@@ -394,6 +394,12 @@ export const createTrade = async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (err: any) {
     console.error('[TradeController] createTrade 에러:', err);
+    if (err?.message === 'STREAMER_NOT_FOUND') {
+      return res.status(409).json({
+        error: 'StreamerRemoved',
+        message: '교환에 포함된 카드가 삭제되어 제안을 생성할 수 없습니다. 카드 목록을 새로고침해 주세요.'
+      });
+    }
     return res.status(500).json({ error: 'InternalServerError', message: '교환 제안 생성에 실패했습니다.', details: IS_PRODUCTION ? undefined : err.message });
   }
 };

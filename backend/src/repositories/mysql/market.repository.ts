@@ -5,6 +5,7 @@ import { fuzzyMatch } from '../../utils/search';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee } from '../../utils/marketFee';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent } from '../../services/assetEventLog';
+import { lockEconomyChannels } from '../../services/economyChannelLock';
 import { parseMysqlDateTimeMs, toSqlDateTime } from './dateUtils';
 
 export class MysqlMarketRepository implements IMarketRepository {
@@ -234,12 +235,21 @@ export class MysqlMarketRepository implements IMarketRepository {
     const now = toSqlDateTime(new Date(), getSqlDialect());
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
+      const candidate = await tx.get(
+        'SELECT channel_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0',
+        listing.user_card_id,
+        listing.seller_id
+      );
+      if (!candidate?.channel_id) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+      const existingChannels = await lockEconomyChannels(tx, [String(candidate.channel_id)]);
+      if (existingChannels.length !== 1) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+
       const card = await tx.get(
         'SELECT channel_id, serial_number, COALESCE(star, 0) AS star, border_item_id, name_effect_item_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0 FOR UPDATE',
         listing.user_card_id,
         listing.seller_id
       );
-      if (!card) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+      if (!card || String(card.channel_id) !== String(candidate.channel_id)) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
 
       if (!listing.with_cosmetics) {
         if (card?.border_item_id) {

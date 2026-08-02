@@ -62,15 +62,29 @@ export class SqliteTradeRepository implements ITradeRepository {
   }
 
   async create(trade: Pick<Trade, 'sender_id' | 'receiver_id' | 'sender_offer' | 'receiver_offer'>): Promise<Trade> {
-    const result = this.getDb().prepare(
-      `INSERT INTO trades (sender_id, receiver_id, sender_offer, receiver_offer, status)
-       VALUES (?, ?, ?, ?, 'PENDING')`
-    ).run(
-      trade.sender_id,
-      trade.receiver_id,
-      JSON.stringify(trade.sender_offer),
-      JSON.stringify(trade.receiver_offer)
-    );
+    const channelIds = [...new Set([
+      ...(trade.sender_offer?.cards || []),
+      ...(trade.receiver_offer?.cards || [])
+    ].map((card) => String(card?.channel_id || '').trim()).filter(Boolean))].sort();
+    const db = this.getDb();
+    const result = db.transaction(() => {
+      if (channelIds.length > 0) {
+        const placeholders = channelIds.map(() => '?').join(',');
+        const row = db.prepare(
+          `SELECT COUNT(*) AS count FROM streamers WHERE channel_id IN (${placeholders})`
+        ).get(...channelIds) as { count: number };
+        if (Number(row?.count || 0) !== channelIds.length) throw new Error('STREAMER_NOT_FOUND');
+      }
+      return db.prepare(
+        `INSERT INTO trades (sender_id, receiver_id, sender_offer, receiver_offer, status)
+         VALUES (?, ?, ?, ?, 'PENDING')`
+      ).run(
+        trade.sender_id,
+        trade.receiver_id,
+        JSON.stringify(trade.sender_offer),
+        JSON.stringify(trade.receiver_offer)
+      );
+    })();
     return {
       id: Number(result.lastInsertRowid),
       ...trade,
@@ -169,10 +183,12 @@ export class SqliteTradeRepository implements ITradeRepository {
     if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
     const receiverOffer = JSON.parse(row.receiver_offer);
     receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
-    this.getDb()
-      .prepare("UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ?")
-      .run(JSON.stringify(receiverOffer), id);
-    return { ok: true, reason: 'OK' };
+    const updated = this.getDb()
+      .prepare("UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ? AND status = 'PENDING' AND receiver_id = ?")
+      .run(JSON.stringify(receiverOffer), id, actorId);
+    return updated.changes === 1
+      ? { ok: true, reason: 'OK' }
+      : { ok: false, reason: 'NOT_PENDING' };
   }
 
   // 2단계: 제안자 최종 승인 및 원자적 체결 (CONFIRMED → ACCEPTED)

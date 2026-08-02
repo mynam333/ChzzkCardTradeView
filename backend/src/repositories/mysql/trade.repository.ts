@@ -1,6 +1,7 @@
 import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { ensureMysqlAssetEventLogReady, recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
+import { lockEconomyChannels } from '../../services/economyChannelLock';
 import { AdminTradeListOptions, AdminTradeListResult, ITradeRepository, Trade } from '../interfaces';
 
 export class MysqlTradeRepository implements ITradeRepository {
@@ -52,15 +53,26 @@ export class MysqlTradeRepository implements ITradeRepository {
   }
 
   async create(trade: Pick<Trade, 'sender_id' | 'receiver_id' | 'sender_offer' | 'receiver_offer'>): Promise<Trade> {
-    const result = await this.getDb().run(
-      `INSERT INTO trades (sender_id, receiver_id, sender_offer, receiver_offer, status)
-       VALUES (?, ?, ?, ?, 'PENDING')`,
-      trade.sender_id,
-      trade.receiver_id,
-      JSON.stringify(trade.sender_offer),
-      JSON.stringify(trade.receiver_offer)
-    );
-    return { id: Number(result.insertId), ...trade, status: 'PENDING' };
+    const channelIds = [...new Set([
+      ...(trade.sender_offer?.cards || []),
+      ...(trade.receiver_offer?.cards || [])
+    ].map((card) => String(card?.channel_id || '').trim()).filter(Boolean))].sort();
+
+    const insertId = await this.getDb().transaction(async (tx) => {
+      const existingChannels = await lockEconomyChannels(tx, channelIds);
+      if (existingChannels.length !== channelIds.length) throw new Error('STREAMER_NOT_FOUND');
+
+      const result = await tx.run(
+        `INSERT INTO trades (sender_id, receiver_id, sender_offer, receiver_offer, status)
+         VALUES (?, ?, ?, ?, 'PENDING')`,
+        trade.sender_id,
+        trade.receiver_id,
+        JSON.stringify(trade.sender_offer),
+        JSON.stringify(trade.receiver_offer)
+      );
+      return Number(result.insertId);
+    });
+    return { id: insertId, ...trade, status: 'PENDING' };
   }
 
   async findById(id: number): Promise<Trade | null> {
@@ -150,18 +162,23 @@ export class MysqlTradeRepository implements ITradeRepository {
   }
 
   async confirm(id: number, actorId: string, options: { receiverWithCosmetics?: boolean } = {}): Promise<{ ok: boolean; reason: string }> {
-    const row = await this.getDb().get('SELECT * FROM trades WHERE id = ?', id);
-    if (!row) return { ok: false, reason: 'NOT_FOUND' };
-    if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
-    if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
-    const receiverOffer = this.parseJsonValue(row.receiver_offer, { cards: [], point: 0 } as any);
-    receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
-    await this.getDb().run(
-      "UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ?",
-      JSON.stringify(receiverOffer),
-      id
-    );
-    return { ok: true, reason: 'OK' };
+    return this.getDb().transaction(async (tx) => {
+      const row = await tx.get('SELECT * FROM trades WHERE id = ? FOR UPDATE', id);
+      if (!row) return { ok: false, reason: 'NOT_FOUND' };
+      if (row.status !== 'PENDING') return { ok: false, reason: 'NOT_PENDING' };
+      if (row.receiver_id !== actorId) return { ok: false, reason: 'FORBIDDEN' };
+      const receiverOffer = this.parseJsonValue(row.receiver_offer, { cards: [], point: 0 } as any);
+      receiverOffer.with_cosmetics = options.receiverWithCosmetics === true;
+      const updated = await tx.run(
+        "UPDATE trades SET receiver_offer = ?, status = 'CONFIRMED' WHERE id = ? AND status = 'PENDING' AND receiver_id = ?",
+        JSON.stringify(receiverOffer),
+        id,
+        actorId
+      );
+      return Number(updated.changes || 0) === 1
+        ? { ok: true, reason: 'OK' }
+        : { ok: false, reason: 'NOT_PENDING' };
+    });
   }
 
   async finalize(id: number, actorId: string): Promise<{ ok: boolean; reason: string }> {

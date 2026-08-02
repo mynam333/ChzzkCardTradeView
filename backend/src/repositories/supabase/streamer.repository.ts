@@ -21,6 +21,7 @@ import {
   AppNotification
 } from '../interfaces';
 import { STAR_IMAGE_COLUMNS, withStarImages } from "./shared";
+import { randomUUID } from 'node:crypto';
 
 export class SupabaseStreamerRepository implements IStreamerRepository {
   private static readonly SCHEDULE_APPLY_CHUNK_SIZE = 80;
@@ -141,7 +142,7 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
   async save(streamer: Streamer): Promise<void> {
     const { error } = await this.getClient()
       .from('streamers')
-      .upsert(streamer);
+      .upsert({ ...streamer, lifecycle_id: streamer.lifecycle_id || randomUUID() });
 
     if (error) throw error;
   }
