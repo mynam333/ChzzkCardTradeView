@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import {
-  decodeAuthSessionToken,
-  getRequestSessionToken
+  getRequestSessionToken,
+  verifyAuthSessionToken
 } from '../services/authSessionService';
 
 export type MinigameImageAuthenticatedRequest = Request & {
@@ -9,11 +9,10 @@ export type MinigameImageAuthenticatedRequest = Request & {
 };
 
 /**
- * Verifies only the signed session JWT for a short-lived, user-bound image token.
- * The image token expires within seconds, so avoiding the normal session/user DB
- * lookups keeps the five-round game from adding database traffic per image.
+ * Verifies the signed session JWT and its server-side revocation state before a
+ * protected clue can mutate the authoritative round deadline.
  */
-export const minigameImageAuthMiddleware = (
+export const minigameImageAuthMiddleware = async (
   req: MinigameImageAuthenticatedRequest,
   res: Response,
   next: NextFunction
@@ -28,7 +27,7 @@ export const minigameImageAuthMiddleware = (
   }
 
   try {
-    req.minigameImageUserId = decodeAuthSessionToken(token).id;
+    req.minigameImageUserId = (await verifyAuthSessionToken(token)).id;
     return next();
   } catch {
     return res.status(401).json({ error: 'Unauthorized', message: '만료되었거나 손상된 로그인 정보입니다.' });

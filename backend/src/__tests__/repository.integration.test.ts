@@ -618,6 +618,121 @@ describe('MinigameRepository authoritative paid sessions', () => {
     expect((await minigameRepository.findSessionById('missing-round-deadline-session'))?.progress_revision).toBe(0);
   });
 
+  it('arms each paid crop round once and leaves the following round unarmed until its image is ready', async () => {
+    seedUser(db, 'crop-round-arm-user');
+    const firstDeadline = new Date(Date.now() + 60_000).toISOString();
+    const attemptedExtension = new Date(Date.now() + 120_000).toISOString();
+    const secondDeadline = new Date(Date.now() + 90_000).toISOString();
+    expect((await minigameRepository.startSession({
+      id: 'crop-round-arm-session',
+      user_id: 'crop-round-arm-user',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      target_data: JSON.stringify({
+        practice_mode: false,
+        rounds: [{ round: 0 }, { round: 1 }]
+      }),
+      validation_version: 1,
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: null,
+        round_image_armed_round: null
+      }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const answerBeforeImage = await minigameRepository.recordRoundOutcome(
+      'crop-round-arm-session', 'crop-round-arm-user', 0, 'answer-0', null
+    );
+    const timeoutBeforeImage = await minigameRepository.recordRoundOutcome(
+      'crop-round-arm-session', 'crop-round-arm-user', 0, null, null
+    );
+    expect(answerBeforeImage).toMatchObject({ ok: false });
+    expect(timeoutBeforeImage).toMatchObject({ ok: false });
+    expect(answerBeforeImage.reason).toMatch(/준비|시작/);
+    expect((await minigameRepository.findSessionById('crop-round-arm-session'))?.progress_revision).toBe(0);
+
+    const firstArm = await minigameRepository.armCropDetectiveRoundDeadline(
+      'crop-round-arm-session', 'crop-round-arm-user', 0, firstDeadline
+    );
+    const repeatedArm = await minigameRepository.armCropDetectiveRoundDeadline(
+      'crop-round-arm-session', 'crop-round-arm-user', 0, attemptedExtension
+    );
+    expect(firstArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
+    expect(repeatedArm).toEqual(expect.objectContaining({ ok: true, armedNow: false }));
+
+    const afterRepeatedArm = await minigameRepository.findSessionById('crop-round-arm-session');
+    expect(JSON.parse(afterRepeatedArm?.progress_data || '{}')).toEqual({
+      round_outcomes: [],
+      round_deadline_at: firstDeadline,
+      round_image_armed_round: 0
+    });
+    expect(afterRepeatedArm?.progress_revision).toBe(1);
+
+    const firstOutcome = await minigameRepository.recordRoundOutcome(
+      'crop-round-arm-session', 'crop-round-arm-user', 0, 'answer-0', null
+    );
+    expect(firstOutcome).toEqual(expect.objectContaining({ ok: true, duplicate: false }));
+    const nextRoundUnarmed = await minigameRepository.findSessionById('crop-round-arm-session');
+    expect(JSON.parse(nextRoundUnarmed?.progress_data || '{}')).toEqual({
+      round_outcomes: [{ round: 0, selected_channel_id: 'answer-0' }],
+      round_deadline_at: null,
+      round_image_armed_round: null
+    });
+    expect(nextRoundUnarmed?.progress_revision).toBe(2);
+
+    const secondArm = await minigameRepository.armCropDetectiveRoundDeadline(
+      'crop-round-arm-session', 'crop-round-arm-user', 1, secondDeadline
+    );
+    expect(secondArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
+    const secondRoundArmed = await minigameRepository.findSessionById('crop-round-arm-session');
+    expect(JSON.parse(secondRoundArmed?.progress_data || '{}')).toEqual({
+      round_outcomes: [{ round: 0, selected_channel_id: 'answer-0' }],
+      round_deadline_at: secondDeadline,
+      round_image_armed_round: 1
+    });
+    expect(secondRoundArmed?.progress_revision).toBe(3);
+  });
+
+  it('replaces a legacy markerless crop deadline exactly once when the image becomes ready', async () => {
+    seedUser(db, 'legacy-crop-arm-user');
+    const staleDeadline = new Date(Date.now() - 30_000).toISOString();
+    const armedDeadline = new Date(Date.now() + 60_000).toISOString();
+    const attemptedExtension = new Date(Date.now() + 120_000).toISOString();
+    expect((await minigameRepository.startSession({
+      id: 'legacy-crop-arm-session',
+      user_id: 'legacy-crop-arm-user',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      target_data: JSON.stringify({ practice_mode: false, rounds: [{ round: 0 }] }),
+      validation_version: 1,
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: staleDeadline
+      }),
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 180_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    const firstArm = await minigameRepository.armCropDetectiveRoundDeadline(
+      'legacy-crop-arm-session', 'legacy-crop-arm-user', 0, armedDeadline
+    );
+    const repeatedArm = await minigameRepository.armCropDetectiveRoundDeadline(
+      'legacy-crop-arm-session', 'legacy-crop-arm-user', 0, attemptedExtension
+    );
+
+    expect(firstArm).toEqual(expect.objectContaining({ ok: true, armedNow: true }));
+    expect(repeatedArm).toEqual(expect.objectContaining({ ok: true, armedNow: false }));
+    const stored = await minigameRepository.findSessionById('legacy-crop-arm-session');
+    expect(JSON.parse(stored?.progress_data || '{}')).toEqual({
+      round_outcomes: [],
+      round_deadline_at: armedDeadline,
+      round_image_armed_round: 0
+    });
+    expect(stored?.progress_revision).toBe(1);
+  });
+
   it('rejects arbitrary rewards and credits a versioned paid session only once', async () => {
     seedUser(db, 'reward-lock-user');
     const start = await minigameRepository.startSession({

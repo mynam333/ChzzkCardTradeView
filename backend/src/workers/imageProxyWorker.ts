@@ -77,6 +77,21 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`[ImageProxyWorker] 이미지 프록시 worker가 http://localhost:${port} 에서 실행 중입니다.`);
+const start = async () => {
+  const [{ initDatabaseConnection }, { initRepositories }] = await Promise.all([
+    import('../services/db'),
+    import('../repositories')
+  ]);
+  // The API/migrator owns compatibility DDL. Image replicas only need a live
+  // connection and repositories, avoiding migration locks on every restart.
+  await initDatabaseConnection({ runCompatibilityMigrations: false });
+  initRepositories();
+  app.listen(port, () => {
+    console.log(`[ImageProxyWorker] 이미지 프록시 worker가 http://localhost:${port} 에서 실행 중입니다.`);
+  });
+};
+
+void start().catch((err) => {
+  console.error('[ImageProxyWorker] 시작 실패:', err?.message || err);
+  process.exitCode = 1;
 });

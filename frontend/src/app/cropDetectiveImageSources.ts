@@ -24,12 +24,14 @@ export const CROP_DETECTIVE_IMAGE_REQUEST_PROFILES = {
   choice: {
     width: 360,
     quality: 82,
+    /** Total budget for the complete network fallback chain. */
     timeoutMs: 3_000,
     retainResolved: true
   },
   preview: {
     width: 768,
     quality: 92,
+    /** Total budget for the complete network fallback chain. */
     timeoutMs: 6_000,
     retainResolved: false
   }

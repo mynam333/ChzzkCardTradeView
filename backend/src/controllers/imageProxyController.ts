@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { IS_PRODUCTION } from '../config';
+import { IS_PRODUCTION, isConfiguredCorsOriginAllowed, normalizeOrigin } from '../config';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -16,6 +16,7 @@ import {
   MinigameImageTokenError,
   openMinigameImageToken
 } from '../services/minigameImageToken';
+import { minigameRepository } from '../repositories';
 
 /**
  * 이미지 프록시 — 치지직 CDN/외부 이미지를 동일 출처(+CORS 허용)로 우회 제공.
@@ -72,6 +73,9 @@ const MINIGAME_CROP_OUTPUT_SIZE = 320;
 // keeps enough detail for the zoom clue while bounding both network and Sharp
 // work; the widely available f240 derivative is a last-resort CDN fallback.
 const MINIGAME_CROP_PSTATIC_TYPE = 'w640';
+const MINIGAME_CROP_ROUND_TIME_MS = 10_000;
+const MINIGAME_CROP_SUBMISSION_GRACE_MS = 2_000;
+const MINIGAME_FALLBACK_CACHE_TTL_MS = 60_000;
 
 export const normalizeImageProxyMaxInFlight = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -383,6 +387,28 @@ const sendProxyImage = (
   return res.status(200).send(entry.body);
 };
 
+const enableCredentialedMinigameImageCors = (req: Request, res: Response) => {
+  const rawOrigin = Array.isArray(req.headers?.origin) ? req.headers.origin[0] : req.headers?.origin;
+  const origin = normalizeOrigin(rawOrigin);
+  if (!origin || !isConfiguredCorsOriginAllowed(origin)) return;
+
+  // The standalone image worker installs generic `cors('*')` for public image
+  // proxy traffic. Overwrite it here because credentialed browser fetches need
+  // the exact allow-listed origin rather than a wildcard.
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'X-Minigame-Image-Fallback, X-Minigame-Round-Deadline, X-Minigame-Server-Now'
+  );
+  const existingVary = String(res.getHeader('Vary') || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!existingVary.some((value) => value.toLowerCase() === 'origin')) existingVary.push('Origin');
+  res.setHeader('Vary', existingVary.join(', '));
+};
+
 const sendImageProxyOverloaded = (res: Response) => {
   res.setHeader('Retry-After', '1');
   return res.status(503).json({
@@ -459,19 +485,20 @@ const throwUnsupportedProxyImage = (): never => {
 const sanitizeAndResizeImageForProxy = async (
   body: Buffer,
   contentType: string,
-  transform: ProxyTransform
+  transform: ProxyTransform,
+  trustedInternalSvg = false
 ): Promise<{ body: Buffer; contentType: string }> => {
   const normalizedContentType = contentType.split(';', 1)[0].trim().toLowerCase();
-  if (
+  if (!trustedInternalSvg && (
     normalizedContentType.includes('svg') ||
     normalizedContentType.includes('xml') ||
     isActiveImageDocument(body)
-  ) {
+  )) {
     throwUnsupportedProxyImage();
   }
 
-  const signature = detectRasterSignature(body);
-  if (!signature) throwUnsupportedProxyImage();
+  const signature = trustedInternalSvg ? null : detectRasterSignature(body);
+  if (!trustedInternalSvg && !signature) throwUnsupportedProxyImage();
 
   return transformLimiter.run(async () => {
     try {
@@ -482,7 +509,11 @@ const sanitizeAndResizeImageForProxy = async (
       }).rotate();
       const metadata = await pipeline.metadata();
       const expectedFormats: string[] = signature === 'avif' ? ['avif', 'heif'] : [signature as RasterSignature];
-      if (!metadata.format || !expectedFormats.includes(metadata.format)) throwUnsupportedProxyImage();
+      if (
+        !metadata.format ||
+        (!trustedInternalSvg && !expectedFormats.includes(metadata.format)) ||
+        (trustedInternalSvg && metadata.format !== 'svg')
+      ) throwUnsupportedProxyImage();
       if (!metadata.width || !metadata.height || metadata.width * metadata.height > IMAGE_PROXY_MAX_INPUT_PIXELS) {
         throwUnsupportedProxyImage();
       }
@@ -781,6 +812,236 @@ const createMinigameTransform = (payload: MinigameImagePayload): ProxyTransform 
   };
 };
 
+type PreparedMinigameCrop = {
+  entry: ProxyCacheEntry;
+  cacheStatus: 'HIT' | 'MISS';
+  deterministicFallback: boolean;
+};
+
+const deterministicFallbackInFlight = createImageProxyInFlightLimiter<ProxyCacheEntry>(
+  Math.max(2, Math.min(16, IMAGE_PROXY_MAX_IN_FLIGHT))
+);
+
+// Kept byte-for-byte equivalent in shape/color rules with the browser's
+// createCropDetectiveFallbackDataUrl(). The protected clue receives a crop of
+// this artwork while the matching choice displays the complete 5:8 artwork.
+const hashCropFallbackSeed = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const createDeterministicCropFallbackSvg = (seedValue: string): Buffer => {
+  const seed = hashCropFallbackSeed(seedValue || 'chikapo-crop-detective');
+  const color = (offset: number) => `hsl(${(seed + offset) % 360} 72% 52%)`;
+  const primary = color(0);
+  const secondary = color(83);
+  const accent = color(191);
+  const rotation = seed % 180;
+  const circleX = 90 + (seed % 320);
+  const circleY = 150 + ((seed >>> 7) % 420);
+  const circleRadius = 70 + ((seed >>> 15) % 95);
+  const lineOffset = 24 + ((seed >>> 21) % 72);
+  const mark = (seed % 997).toString().padStart(3, '0');
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="500" height="800" viewBox="0 0 500 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${primary}"/><stop offset="1" stop-color="${secondary}"/></linearGradient><pattern id="p" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(${rotation})"><path d="M0 ${lineOffset}H96M${lineOffset} 0V96" stroke="rgba(255,255,255,.16)" stroke-width="12"/></pattern></defs><rect width="500" height="800" fill="url(#g)"/><rect width="500" height="800" fill="url(#p)"/><circle cx="${circleX}" cy="${circleY}" r="${circleRadius}" fill="${accent}" fill-opacity=".78"/><circle cx="${500 - circleX}" cy="${800 - circleY}" r="${Math.round(circleRadius * 0.58)}" fill="none" stroke="rgba(255,255,255,.58)" stroke-width="24"/><path d="M42 690L178 514l104 92 176-244v396H42z" fill="rgba(9,9,11,.34)"/><text x="250" y="746" text-anchor="middle" fill="rgba(255,255,255,.86)" font-family="system-ui,sans-serif" font-size="38" font-weight="800" letter-spacing="8">${mark}</text></svg>`, 'utf8');
+};
+
+const prepareDeterministicCropFallback = async (
+  payload: MinigameImagePayload,
+  transform: ProxyTransform
+): Promise<PreparedMinigameCrop> => {
+  const fallbackCacheKey = `minigame-crop-fallback:${crypto.createHash('sha256').update(payload.sourceUrl).digest('hex')}${transformCacheSuffix(transform)}`;
+  const cached = getCachedProxyImage(fallbackCacheKey);
+  if (cached) return { entry: cached, cacheStatus: 'HIT', deterministicFallback: true };
+
+  const admission = deterministicFallbackInFlight.getOrStart(fallbackCacheKey, async () => {
+    const rendered = await sanitizeAndResizeImageForProxy(
+      createDeterministicCropFallbackSvg(payload.sourceUrl),
+      'image/svg+xml',
+      transform,
+      true
+    );
+    const entry: ProxyCacheEntry = {
+      body: rendered.body,
+      contentType: rendered.contentType,
+      expiresAt: Date.now() + MINIGAME_FALLBACK_CACHE_TTL_MS,
+      size: rendered.body.length
+    };
+    setCachedProxyImage(fallbackCacheKey, entry);
+    return entry;
+  });
+  if (!admission) throw new Error('MINIGAME_FALLBACK_OVERLOADED');
+  return { entry: await admission.request, cacheStatus: 'MISS', deterministicFallback: true };
+};
+
+const prepareLocalMinigameCrop = async (
+  resolvedPath: string,
+  stat: fs.Stats,
+  contentType: string,
+  transform: ProxyTransform
+): Promise<PreparedMinigameCrop> => {
+  if (stat.size > IMAGE_PROXY_MAX_BYTES) throw new Error('IMAGE_TOO_LARGE');
+  const normalizedPath = process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath;
+  const cacheKey = `local:${normalizedPath}|mtime=${stat.mtimeMs}|bytes=${stat.size}${transformCacheSuffix(transform)}`;
+  const cached = getCachedProxyImage(cacheKey);
+  if (cached) return { entry: cached, cacheStatus: 'HIT', deterministicFallback: false };
+
+  const admission = inFlight.getOrStart(cacheKey, async () => {
+    const rawBody = await fs.promises.readFile(resolvedPath);
+    if (rawBody.byteLength > IMAGE_PROXY_MAX_BYTES) throw new Error('IMAGE_TOO_LARGE');
+    const transformed = await sanitizeAndResizeImageForProxy(rawBody, contentType, transform);
+    const entry: ProxyCacheEntry = {
+      body: transformed.body,
+      contentType: transformed.contentType,
+      expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
+      size: transformed.body.length
+    };
+    setCachedProxyImage(cacheKey, entry);
+    return entry;
+  });
+  if (!admission) throw new Error('IMAGE_PROXY_OVERLOADED');
+  return { entry: await admission.request, cacheStatus: 'MISS', deterministicFallback: false };
+};
+
+const prepareProtectedCropImage = async (
+  payload: MinigameImagePayload,
+  transform: ProxyTransform
+): Promise<PreparedMinigameCrop> => {
+  try {
+    const raw = payload.sourceUrl;
+    if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
+      const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;
+      let decodedPath: string;
+      try {
+        decodedPath = decodeURIComponent(cleanPath);
+      } catch {
+        decodedPath = cleanPath;
+      }
+      const resolvedPath = resolveLocalUploadPath(decodedPath);
+      const stat = resolvedPath ? getLocalFileStat(resolvedPath) : null;
+      if (!resolvedPath || !stat) throw new Error('LOCAL_IMAGE_NOT_FOUND');
+      return await prepareLocalMinigameCrop(resolvedPath, stat, getLocalContentType(resolvedPath), transform);
+    }
+
+    const target = new URL(raw);
+    const localPath = getSelfHostedUploadPath(target);
+    if (localPath) {
+      const stat = getLocalFileStat(localPath);
+      if (!stat) throw new Error('LOCAL_IMAGE_NOT_FOUND');
+      return await prepareLocalMinigameCrop(localPath, stat, getLocalContentType(localPath), transform);
+    }
+    if (
+      (target.protocol !== 'http:' && target.protocol !== 'https:') ||
+      !isAllowedHost(target.hostname) ||
+      !isAllowedImagePort(target)
+    ) throw new Error('UNSAFE_MINIGAME_IMAGE_SOURCE');
+
+    const cacheKey = `${getUpstreamImageUrl(target, transform).toString()}${transformCacheSuffix(transform)}`;
+    const cached = getCachedProxyImage(cacheKey);
+    if (cached) return { entry: cached, cacheStatus: 'HIT', deterministicFallback: false };
+    if ((negativeCache.get(cacheKey) || 0) > Date.now()) {
+      return await prepareDeterministicCropFallback(payload, transform);
+    }
+    negativeCache.delete(cacheKey);
+
+    const admission = inFlight.getOrStart(cacheKey, () => (
+      fetchRemoteImage(target, transform)
+        .then((entry) => {
+          setCachedProxyImage(cacheKey, entry);
+          negativeCache.delete(cacheKey);
+          return entry;
+        })
+        .catch((err) => {
+          cleanupNegativeCache();
+          negativeCache.set(cacheKey, Date.now() + IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS);
+          throw err;
+        })
+    ));
+    if (!admission) throw new Error('IMAGE_PROXY_OVERLOADED');
+    return { entry: await admission.request, cacheStatus: 'MISS', deterministicFallback: false };
+  } catch {
+    // The fallback is generated locally from the exact same source-URL seed as
+    // the candidate tile, so upstream 4xx/5xx, timeouts, oversized inputs, and
+    // worker pressure do not turn a paid round into an unusable screen.
+    return prepareDeterministicCropFallback(payload, transform);
+  }
+};
+
+type CachedCropRoundArm = { deadline: string; expiresAt: number };
+const CROP_ROUND_ARM_CACHE_MAX_ENTRIES = 2_048;
+const cropRoundArmCache = new Map<string, CachedCropRoundArm>();
+const cropRoundArmInFlight = new Map<string, Promise<{ deadline: string; armedNow: boolean } | null>>();
+
+const getCropRoundArmKey = (payload: MinigameImagePayload) =>
+  crypto.createHash('sha256')
+    .update(`${payload.userId}\u0000${payload.sessionId}\u0000${payload.round}\u0000${payload.sourceUrl}`, 'utf8')
+    .digest('hex');
+
+const cacheCropRoundArm = (key: string, deadline: string) => {
+  const expiresAt = Date.parse(deadline);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
+  cropRoundArmCache.delete(key);
+  cropRoundArmCache.set(key, { deadline, expiresAt });
+  while (cropRoundArmCache.size > CROP_ROUND_ARM_CACHE_MAX_ENTRIES) {
+    const oldestKey = cropRoundArmCache.keys().next().value;
+    if (!oldestKey) break;
+    cropRoundArmCache.delete(oldestKey);
+  }
+};
+
+const armPreparedCropRound = async (payload: MinigameImagePayload) => {
+  const armKey = getCropRoundArmKey(payload);
+  const cached = cropRoundArmCache.get(armKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    cropRoundArmCache.delete(armKey);
+    cropRoundArmCache.set(armKey, cached);
+    return { deadline: cached.deadline, armedNow: false };
+  }
+  if (cached) cropRoundArmCache.delete(armKey);
+
+  const existing = cropRoundArmInFlight.get(armKey);
+  if (existing) {
+    const armed = await existing;
+    return armed ? { ...armed, armedNow: false } : null;
+  }
+
+  const request = (async () => {
+    const proposedDeadline = new Date(
+      Date.now() + MINIGAME_CROP_ROUND_TIME_MS + MINIGAME_CROP_SUBMISSION_GRACE_MS
+    ).toISOString();
+    const result = await minigameRepository.armCropDetectiveRoundDeadline(
+      payload.sessionId,
+      payload.userId,
+      payload.round,
+      proposedDeadline
+    );
+    if (!result.ok || !result.session) return null;
+    const progress = (() => {
+      try {
+        return JSON.parse(String(result.session?.progress_data || '{}'));
+      } catch {
+        return {};
+      }
+    })();
+    const deadline = typeof progress.round_deadline_at === 'string'
+      ? progress.round_deadline_at
+      : null;
+    if (!deadline || !Number.isFinite(new Date(deadline).getTime())) return null;
+    const armed = { deadline, armedNow: result.armedNow === true };
+    cacheCropRoundArm(armKey, deadline);
+    return armed;
+  })();
+  cropRoundArmInFlight.set(armKey, request);
+  try {
+    return await request;
+  } finally {
+    if (cropRoundArmInFlight.get(armKey) === request) cropRoundArmInFlight.delete(armKey);
+  }
+};
+
 const constantTimeStringEqual = (left: string, right: string): boolean => {
   const leftHash = crypto.createHash('sha256').update(left, 'utf8').digest();
   const rightHash = crypto.createHash('sha256').update(right, 'utf8').digest();
@@ -822,14 +1083,24 @@ const sendMinigameProxyFailure = (res: Response, err: any) => {
 
 /**
  * Authenticated paid-minigame image renderer. The caller supplies the user id
- * from verified session claims; this handler performs no database reads.
+ * from verified session claims. Crop clues atomically arm their current round
+ * only after a real or deterministic fallback image has been prepared.
  */
 export const proxyMinigameImage = async (req: Request, res: Response, userId: string) => {
+  enableCredentialedMinigameImageCors(req, res);
   const queryKeys = Object.keys(req.query || {});
-  if (queryKeys.length !== 1 || queryKeys[0] !== 'mg' || typeof req.query.mg !== 'string') {
+  const forceDeterministicFallback = req.query.fallback === 'deterministic';
+  const validQueryKeys = queryKeys.every((key) => key === 'mg' || key === 'fallback');
+  if (
+    !validQueryKeys ||
+    !queryKeys.includes('mg') ||
+    queryKeys.length > 2 ||
+    typeof req.query.mg !== 'string' ||
+    (queryKeys.includes('fallback') && !forceDeterministicFallback)
+  ) {
     return res.status(400).json({
       error: 'BadRequest',
-      message: 'mg 파라미터만 사용할 수 있습니다.'
+      message: 'mg와 허용된 fallback 파라미터만 사용할 수 있습니다.'
     });
   }
 
@@ -845,9 +1116,50 @@ export const proxyMinigameImage = async (req: Request, res: Response, userId: st
   if (typeof userId !== 'string' || !constantTimeStringEqual(payload.userId, userId)) {
     return res.status(403).json({ error: 'Forbidden', message: '이 이미지에 접근할 권한이 없습니다.' });
   }
+  if (forceDeterministicFallback && payload.kind !== 'crop') {
+    return res.status(400).json({ error: 'BadRequest', message: 'fallback 모드는 카드 확대 탐정에서만 사용할 수 있습니다.' });
+  }
 
   const raw = payload.sourceUrl;
   const transform = createMinigameTransform(payload);
+
+  if (payload.kind === 'crop') {
+    let prepared: PreparedMinigameCrop;
+    try {
+      prepared = forceDeterministicFallback
+        ? await prepareDeterministicCropFallback(payload, transform)
+        : await prepareProtectedCropImage(payload, transform);
+    } catch (err: any) {
+      return sendMinigameProxyFailure(res, err);
+    }
+
+    // Do not start a paid round if the requester disappeared while its clue was
+    // being prepared. Once armed, the existing deadline is immutable.
+    if (req.destroyed || res.destroyed) return;
+
+    let armed: Awaited<ReturnType<typeof armPreparedCropRound>>;
+    try {
+      armed = await armPreparedCropRound(payload);
+    } catch (err: any) {
+      console.warn('[ImageProxy] crop round arm failed:', err?.message || err);
+      armed = null;
+    }
+    if (!armed) {
+      res.setHeader('Retry-After', '1');
+      return res.status(503).json({
+        error: 'MinigameRoundNotReady',
+        message: '확대 이미지 라운드를 안전하게 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+      });
+    }
+
+    res.setHeader('X-Minigame-Round-Deadline', armed.deadline);
+    res.setHeader('X-Minigame-Server-Now', new Date().toISOString());
+    res.setHeader('X-Minigame-Round-Armed', armed.armedNow ? 'new' : 'existing');
+    if (prepared.deterministicFallback) {
+      res.setHeader('X-Minigame-Image-Fallback', 'deterministic');
+    }
+    return sendProxyImage(res, prepared.entry, prepared.cacheStatus, 'minigame');
+  }
 
   if (raw.startsWith('/uploads/') || raw.startsWith('uploads/')) {
     const cleanPath = raw.startsWith('/') ? raw : `/${raw}`;

@@ -1329,14 +1329,19 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
 /**
  * 데이터베이스 연결 상태를 감지하고 모드를 초기화합니다.
  */
-export const initDatabaseConnection = async (): Promise<void> => {
+export const initDatabaseConnection = async (
+  options: { runCompatibilityMigrations?: boolean } = {}
+): Promise<void> => {
+  const runCompatibilityMigrations = options.runCompatibilityMigrations !== false;
   const configuredDbMode = getConfiguredDbMode();
   if (configuredDbMode === 'mysql') {
     const db = createMysqlDb();
     mysqlDb = db;
     await db.get('SELECT 1 AS ok');
-    await ensureMysqlCompatibilityMigrations(db);
-    await ensureArenaV2MysqlSchema(db);
+    if (runCompatibilityMigrations) {
+      await ensureMysqlCompatibilityMigrations(db);
+      await ensureArenaV2MysqlSchema(db);
+    }
     dbMode = 'MYSQL';
     sqlDialect = 'mysql';
     console.log('[DB] MySQL 데이터베이스와 연동되었습니다. (MYSQL MODE)');
@@ -1346,8 +1351,10 @@ export const initDatabaseConnection = async (): Promise<void> => {
   if (configuredDbMode === 'postgres') {
     mysqlDb = createPostgresDb();
     await mysqlDb.get('SELECT 1 AS ok');
-    await ensurePostgresCompatibilityMigrations(mysqlDb as PostgresDb);
-    await ensureArenaV2MysqlSchema(mysqlDb as PostgresDb);
+    if (runCompatibilityMigrations) {
+      await ensurePostgresCompatibilityMigrations(mysqlDb as PostgresDb);
+      await ensureArenaV2MysqlSchema(mysqlDb as PostgresDb);
+    }
     dbMode = 'MYSQL';
     sqlDialect = 'postgres';
     console.log('[DB] PostgreSQL 데이터베이스와 연동되었습니다. (POSTGRES MODE, SQL repository layer)');

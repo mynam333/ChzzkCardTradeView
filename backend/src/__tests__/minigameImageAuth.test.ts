@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/authSessionService', () => ({
   getRequestSessionToken: vi.fn(),
-  decodeAuthSessionToken: vi.fn()
+  verifyAuthSessionToken: vi.fn()
 }));
 
 import {
-  decodeAuthSessionToken,
-  getRequestSessionToken
+  getRequestSessionToken,
+  verifyAuthSessionToken
 } from '../services/authSessionService';
 import {
   minigameImageAuthMiddleware,
@@ -16,7 +16,7 @@ import {
 } from '../middlewares/minigameImageAuth';
 
 const getSessionToken = vi.mocked(getRequestSessionToken);
-const decodeSessionToken = vi.mocked(decodeAuthSessionToken);
+const verifySessionToken = vi.mocked(verifyAuthSessionToken);
 
 const createResponse = () => {
   const response: any = {
@@ -33,28 +33,28 @@ const createResponse = () => {
 describe('minigameImageAuthMiddleware', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('binds the image request to the signed JWT user without a database lookup', () => {
+  it('binds the image request only after the server-side session remains valid', async () => {
     getSessionToken.mockReturnValue('signed-session');
-    decodeSessionToken.mockReturnValue({ id: 'user-1', jti: 'session-1' } as any);
+    verifySessionToken.mockResolvedValue({ id: 'user-1', jti: 'session-1' } as any);
     const request = { headers: {}, cookies: {} } as unknown as MinigameImageAuthenticatedRequest;
     const response = createResponse();
     const next = vi.fn() as NextFunction;
 
-    minigameImageAuthMiddleware(request, response, next);
+    await minigameImageAuthMiddleware(request, response, next);
 
-    expect(decodeSessionToken).toHaveBeenCalledWith('signed-session');
+    expect(verifySessionToken).toHaveBeenCalledWith('signed-session');
     expect(request.minigameImageUserId).toBe('user-1');
     expect(next).toHaveBeenCalledOnce();
     expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
     expect(response.setHeader).toHaveBeenCalledWith('Cross-Origin-Resource-Policy', 'same-site');
   });
 
-  it('fails closed when the cookie is missing or its signature is invalid', () => {
+  it('fails closed when the cookie is missing, invalid, expired, or revoked', async () => {
     const responseWithoutToken = createResponse();
     const nextWithoutToken = vi.fn() as NextFunction;
     getSessionToken.mockReturnValue(undefined);
 
-    minigameImageAuthMiddleware(
+    await minigameImageAuthMiddleware(
       { headers: {}, cookies: {} } as unknown as MinigameImageAuthenticatedRequest,
       responseWithoutToken,
       nextWithoutToken
@@ -66,9 +66,9 @@ describe('minigameImageAuthMiddleware', () => {
     const responseInvalid = createResponse();
     const nextInvalid = vi.fn() as NextFunction;
     getSessionToken.mockReturnValue('invalid-session');
-    decodeSessionToken.mockImplementation(() => { throw new Error('invalid'); });
+    verifySessionToken.mockRejectedValue(new Error('invalid or revoked'));
 
-    minigameImageAuthMiddleware(
+    await minigameImageAuthMiddleware(
       { headers: {}, cookies: {} } as unknown as MinigameImageAuthenticatedRequest,
       responseInvalid,
       nextInvalid

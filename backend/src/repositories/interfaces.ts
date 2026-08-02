@@ -677,6 +677,14 @@ export type MinigameRoundOutcomeResult = {
   duplicate?: boolean;
 };
 
+export type MinigameRoundDeadlineArmResult = {
+  ok: boolean;
+  reason?: string;
+  session?: MinigameSession;
+  /** True only when this call armed the previously unarmed current round. */
+  armedNow?: boolean;
+};
+
 export type MinigameCompletionResult =
   | {
       ok: true;
@@ -707,6 +715,13 @@ export interface IMinigameRepository {
     /** 다음 라운드의 서버 마감 시각. 마지막 라운드는 null을 명시합니다. */
     nextRoundDeadlineAt: string | null
   ): Promise<MinigameRoundOutcomeResult>;
+  armCropDetectiveRoundDeadline(
+    sessionId: string,
+    userId: string,
+    round: number,
+    /** Server-generated absolute deadline. Existing armed deadlines are never replaced. */
+    roundDeadlineAt: string
+  ): Promise<MinigameRoundDeadlineArmResult>;
   completeSession(
     sessionId: string,
     earnedPoints: number,

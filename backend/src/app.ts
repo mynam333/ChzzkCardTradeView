@@ -178,8 +178,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // 미들웨어 설정
 // CORS: /api/image-proxy 요청에 대해서는 전역 cors 미들웨어를 완전히 우회(Skip)시킵니다.
-// 이미지 프록시 컨트롤러(imageProxyController.ts) 자체에서 Access-Control-Allow-Origin: * 및 CORP 헤더를 단독 관리하므로,
-// 이 미들웨어를 건너뜀으로써 헤더 중복 설정(ACAO: *, *) 및 자격증명(credentials) 충돌 현상을 해결하여 이미지 깨짐을 예방합니다.
+// 이미지 프록시 컨트롤러가 공개 이미지에는 ACAO: *, 인증 미니게임 이미지에는 허용된 정확한 Origin을
+// 단독 설정하므로, 헤더 중복 및 자격증명(credentials) 충돌을 방지하기 위해 여기서는 건너뜁니다.
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/api/image-proxy')) {
     return next();

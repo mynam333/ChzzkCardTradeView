@@ -516,6 +516,10 @@ const getStoredRoundOutcomes = (session: MinigameSession): StoredRoundOutcome[] 
 
 const getStoredRoundDeadline = (session: MinigameSession): string | null => {
   const progress = parseDbJson<any>(session.progress_data, {});
+  if (session.game_type === 'crop_detective') {
+    const outcomes = Array.isArray(progress?.round_outcomes) ? progress.round_outcomes : [];
+    if (progress?.round_image_armed_round !== outcomes.length) return null;
+  }
   const rawDeadline = String(progress?.round_deadline_at || '').trim();
   return rawDeadline && Number.isFinite(new Date(rawDeadline).getTime()) ? rawDeadline : null;
 };
@@ -1297,13 +1301,20 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     targetData.practice_mode = practiceMode;
     targetData.validation_version = MINIGAME_VALIDATION_VERSION;
 
+    // A paid crop round is armed only by the protected image renderer, after a
+    // real clue (or its deterministic fallback) is ready and immediately before
+    // bytes are sent. This prevents image preparation time from consuming play.
     const initialRoundDeadlineAt = !practiceMode && isRoundGameType(game_type)
-      ? createRoundDeadline(game_type, true)
+      ? game_type === 'crop_detective' ? null : createRoundDeadline(game_type, true)
       : null;
     if (!practiceMode && isRoundGameType(game_type)) {
       const rounds = Array.isArray(targetData.rounds) ? targetData.rounds : [];
       const firstRound = buildPublicRound(game_type, rounds[0], sessionId, userId);
-      if (!firstRound || rounds.length !== 5 || !initialRoundDeadlineAt) {
+      if (
+        !firstRound ||
+        rounds.length !== 5 ||
+        (game_type !== 'crop_detective' && !initialRoundDeadlineAt)
+      ) {
         return res.status(500).json({
           error: 'InternalServerError',
           message: '서버가 첫 라운드를 안전하게 발급하지 못했습니다.'
@@ -1326,7 +1337,12 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       validation_version: MINIGAME_VALIDATION_VERSION,
       progress_data: JSON.stringify({
         round_outcomes: [],
-        ...(initialRoundDeadlineAt ? { round_deadline_at: initialRoundDeadlineAt } : {})
+        ...(!practiceMode && isRoundGameType(game_type)
+          ? {
+              round_deadline_at: initialRoundDeadlineAt,
+              ...(game_type === 'crop_detective' ? { round_image_armed_round: null } : {})
+            }
+          : {})
       }),
       progress_revision: 0,
       expires_at: new Date(Date.now() + getGameSubmitAllowanceMs(game_type as DailyMinigameType)).toISOString(),
@@ -1784,7 +1800,7 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
       ? buildPublicRound(session.game_type, rounds[round + 1], session.id, userId)
       : null;
     const nextRoundDeadlineAt = !practiceMode && hasNextRound
-      ? createRoundDeadline(session.game_type)
+      ? session.game_type === 'crop_detective' ? null : createRoundDeadline(session.game_type)
       : null;
     if (hasNextRound && !nextPublicRound) {
       return res.status(500).json({

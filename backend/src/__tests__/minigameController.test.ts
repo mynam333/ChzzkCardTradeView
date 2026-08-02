@@ -11,6 +11,7 @@ vi.mock('../repositories', () => ({
     expireSessions: vi.fn(),
     findSessionById: vi.fn(),
     findActiveStartedSession: vi.fn(),
+    armCropDetectiveRoundDeadline: vi.fn(),
     recordRoundOutcome: vi.fn(),
     completeSession: vi.fn()
   },
@@ -675,6 +676,65 @@ describe('round-based minigames', () => {
     expect(responseBody.next_round.image_url).not.toContain('quiz-answer-1');
   });
 
+  it('reveals the next paid crop round unarmed until its protected clue image is ready', async () => {
+    const currentDeadline = new Date(Date.now() + 5_000).toISOString();
+    const session = {
+      id: 'paid-crop-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective' as const,
+      status: 'STARTED' as const,
+      validation_version: 1,
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: currentDeadline,
+        round_image_armed_round: 0
+      }),
+      progress_revision: 1,
+      created_at: new Date(Date.now() - 10_000).toISOString()
+    };
+    findSessionById.mockResolvedValue(session);
+    recordRoundOutcome.mockResolvedValue({
+      ok: true,
+      duplicate: false,
+      session: {
+        ...session,
+        progress_data: JSON.stringify({
+          round_outcomes: [{ round: 0, selected_channel_id: 'answer-0' }],
+          round_deadline_at: null,
+          round_image_armed_round: null
+        }),
+        progress_revision: 2
+      }
+    });
+    const response = createResponse();
+
+    await checkMinigameRoundAnswer({
+      user: { id: 'user-1' },
+      body: {
+        session_id: session.id,
+        payload: { round: 0, selected_channel_id: 'answer-0' }
+      }
+    } as AuthenticatedRequest, response);
+
+    expect(recordRoundOutcome).toHaveBeenCalledWith(
+      session.id,
+      'user-1',
+      0,
+      'answer-0',
+      null
+    );
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      correct: true,
+      next_round: expect.objectContaining({ round: 1 }),
+      next_round_deadline_at: null,
+      server_now: expect.any(String)
+    }));
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(responseBody.next_round.source_image_url).toMatch(/^minigame-image:v1:/);
+  });
+
   it('does not reveal an alternate paid answer after the round was resolved', async () => {
     findSessionById.mockResolvedValue({
       id: 'paid-quiz-session',
@@ -1305,6 +1365,32 @@ describe('daily minigame selection', () => {
     expect(progress.round_deadline_at).toBe(body.game_data.round_deadline_at);
   });
 
+  it('issues a paid crop round unarmed so image preparation cannot consume its timer', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z')); // crop detective day
+    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
+    startSession.mockResolvedValue({ ok: true });
+    const response = createResponse();
+
+    await startMinigame({
+      user: { id: 'user-1' },
+      body: { game_type: 'crop_detective', practice_mode: false }
+    } as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    const body = vi.mocked(response.json).mock.calls[0][0] as any;
+    expect(body.game_data).toEqual(expect.objectContaining({
+      total_rounds: 5,
+      round_deadline_at: null
+    }));
+    expect(body.game_data.rounds).toHaveLength(1);
+    const issuedProgress = JSON.parse(startSession.mock.calls[0][0].progress_data || '{}');
+    expect(issuedProgress).toEqual({
+      round_outcomes: [],
+      round_deadline_at: null,
+      round_image_armed_round: null
+    });
+  });
+
   it.each([
     { label: 'omitted', practiceMode: undefined },
     { label: 'string true', practiceMode: 'true' },
@@ -1422,7 +1508,8 @@ describe('daily minigame selection', () => {
       target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
       progress_data: JSON.stringify({
         round_outcomes: [{ round: 0, selected_channel_id: 'answer-0' }],
-        round_deadline_at: roundDeadlineAt
+        round_deadline_at: roundDeadlineAt,
+        round_image_armed_round: 1
       }),
       progress_revision: 1,
       created_at: new Date(Date.now() - 15_000).toISOString()
@@ -1467,6 +1554,39 @@ describe('daily minigame selection', () => {
       expect(openMinigameImageReference(round.source_fallback_image_url).sourceUrl)
         .toBe(`https://example.com/answer-${round.round}-fallback.png`);
     }
+  });
+
+  it('resumes a pre-marker crop session unarmed so its stale deadline can be replaced exactly once by the image route', async () => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
+    findActiveStartedSession.mockResolvedValue({
+      id: 'crop-pre-marker-session',
+      user_id: 'user-1',
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      ticket_spent_type: 'BASE',
+      validation_version: 1,
+      target_data: JSON.stringify({ practice_mode: false, rounds: cropDetectiveRounds }),
+      progress_data: JSON.stringify({
+        round_outcomes: [],
+        round_deadline_at: new Date(Date.now() - 1_000).toISOString()
+      }),
+      progress_revision: 0,
+      created_at: new Date(Date.now() - 15_000).toISOString()
+    });
+    const response = createResponse();
+
+    await getActiveMinigameSession({
+      user: { id: 'user-1' },
+      query: { game_type: 'crop_detective' }
+    } as unknown as AuthenticatedRequest, response);
+
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json).toHaveBeenCalledWith({
+      active_session: expect.objectContaining({
+        round_progress: expect.objectContaining({ round_deadline_at: null })
+      })
+    });
+    expect(completeSession).not.toHaveBeenCalled();
   });
 
   it('does not resume an expired crop detective session', async () => {

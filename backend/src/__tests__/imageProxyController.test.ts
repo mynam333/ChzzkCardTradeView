@@ -5,6 +5,13 @@ import fsp from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../repositories', () => ({
+  minigameRepository: {
+    armCropDetectiveRoundDeadline: vi.fn()
+  }
+}));
+
 import {
   IMAGE_PROXY_MAX_BYTES,
   IMAGE_PROXY_MAX_IN_FLIGHT,
@@ -21,6 +28,9 @@ import {
   MINIGAME_IMAGE_REFERENCE_PREFIX
 } from '../services/minigameImageToken';
 import { getUploadsDir } from '../services/storagePaths';
+import { minigameRepository } from '../repositories';
+
+const armCropDetectiveRoundDeadline = vi.mocked(minigameRepository.armCropDetectiveRoundDeadline);
 
 const VALID_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
@@ -90,7 +100,8 @@ const createRequest = (url: string, query: Record<string, string> = {}) => ({
 const createMinigameRequest = (
   sourceUrl: string,
   kind: 'quiz' | 'crop' = 'quiz',
-  overrides: Record<string, string> = {}
+  overrides: Record<string, string> = {},
+  origin?: string
 ) => {
   const reference = createMinigameImageReference({
     userId: 'user-1',
@@ -101,6 +112,7 @@ const createMinigameRequest = (
     ...(kind === 'crop' ? { crop: { x: 0.5, y: 0.5, size: 0.1, rotation: 15 } } : {})
   });
   return {
+    headers: origin ? { origin } : {},
     query: {
       mg: reference.slice(MINIGAME_IMAGE_REFERENCE_PREFIX.length),
       ...overrides
@@ -139,9 +151,27 @@ const createResponse = () => {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.spyOn(dns, 'lookup').mockResolvedValue([
     { address: '93.184.216.34', family: 4 }
   ] as any);
+  armCropDetectiveRoundDeadline.mockImplementation(async (
+    sessionId,
+    userId,
+    _round,
+    roundDeadlineAt
+  ) => ({
+    ok: true,
+    armedNow: true,
+    session: {
+      id: sessionId,
+      user_id: userId,
+      game_type: 'crop_detective',
+      status: 'STARTED',
+      target_data: '{}',
+      progress_data: JSON.stringify({ round_outcomes: [], round_deadline_at: roundDeadlineAt })
+    }
+  }));
 });
 
 afterEach(() => {
@@ -178,8 +208,117 @@ describe('protected minigame image proxy', () => {
     await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
 
     expect(response.statusCode).toBe(200);
+    expect(armCropDetectiveRoundDeadline).toHaveBeenCalledWith(
+      'session-1',
+      'user-1',
+      0,
+      expect.any(String)
+    );
+    expect(response.getHeader('X-Minigame-Round-Armed')).toBe('new');
+    expect(Date.parse(String(response.getHeader('X-Minigame-Round-Deadline') || ''))).toBeGreaterThan(Date.now());
     const metadata = await sharp(response.body as Buffer).metadata();
     expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+  });
+
+  it('returns a bounded deterministic crop and still arms the round when every upstream request fails', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-offline-fallback';
+    const fetchMock = vi.fn().mockResolvedValueOnce(failedResponse(503));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(sourceUrl, 'crop', {}, 'http://localhost:3000'),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(armCropDetectiveRoundDeadline).toHaveBeenCalledTimes(1);
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBe('deterministic');
+    expect(response.getHeader('Access-Control-Allow-Origin')).toBe('http://localhost:3000');
+    expect(response.getHeader('Access-Control-Allow-Credentials')).toBe('true');
+    expect(response.getHeader('Access-Control-Expose-Headers')).toBe(
+      'X-Minigame-Image-Fallback, X-Minigame-Round-Deadline, X-Minigame-Server-Now'
+    );
+    expect(Date.parse(String(response.getHeader('X-Minigame-Server-Now') || ''))).toBeGreaterThan(0);
+    expect(response.getHeader('Vary')).toBe('Origin');
+    const metadata = await sharp(response.body as Buffer).metadata();
+    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+  });
+
+  it('honors an explicit deterministic crop mode without contacting the upstream image', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-client-fallback';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(sourceUrl, 'crop', { fallback: 'deterministic' }),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBe('deterministic');
+    expect(armCropDetectiveRoundDeadline).toHaveBeenCalledTimes(1);
+    const metadata = await sharp(response.body as Buffer).metadata();
+    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+  });
+
+  it('reuses the immutable armed deadline without another database transaction', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-arm-cache';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const firstResponse = createResponse();
+    const secondResponse = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), firstResponse, 'user-1');
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), secondResponse, 'user-1');
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(armCropDetectiveRoundDeadline).toHaveBeenCalledTimes(1);
+    expect(secondResponse.getHeader('X-Minigame-Round-Armed')).toBe('existing');
+    expect(secondResponse.getHeader('X-Minigame-Round-Deadline')).toBe(
+      firstResponse.getHeader('X-Minigame-Round-Deadline')
+    );
+  });
+
+  it('never enables credentialed protected-image CORS for an unconfigured origin', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-cors-denied';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(imageResponse()));
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(sourceUrl, 'crop', {}, 'https://attacker.invalid'),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.getHeader('Access-Control-Allow-Origin')).toBeUndefined();
+    expect(response.getHeader('Access-Control-Allow-Credentials')).toBeUndefined();
+    expect(response.getHeader('Access-Control-Expose-Headers')).toBeUndefined();
+  });
+
+  it('does not disclose prepared crop bytes when the authoritative deadline cannot be armed', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-arm-rejected';
+    const fetchMock = vi.fn().mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    armCropDetectiveRoundDeadline.mockResolvedValueOnce({
+      ok: false,
+      reason: '현재 순서의 라운드만 준비할 수 있습니다.'
+    });
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.send).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({ error: 'MinigameRoundNotReady' });
   });
 
   it('uses a bounded pstatic derivative for crop clues instead of a multi-megabyte original', async () => {

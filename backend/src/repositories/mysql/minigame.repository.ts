@@ -6,6 +6,7 @@ import {
   MinigameSession,
   MinigameType,
   MinigameRoundOutcomeResult,
+  MinigameRoundDeadlineArmResult,
   MinigameCompletionResult
 } from '../interfaces';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
@@ -265,6 +266,108 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     });
   }
 
+  async armCropDetectiveRoundDeadline(
+    sessionId: string,
+    userId: string,
+    round: number,
+    roundDeadlineAt: string
+  ): Promise<MinigameRoundDeadlineArmResult> {
+    if (!Number.isInteger(round) || round < 0) return { ok: false, reason: '라운드 번호가 올바르지 않습니다.' };
+    const normalizedDeadline = normalizeRoundDeadline(roundDeadlineAt);
+    if (!normalizedDeadline.ok || !normalizedDeadline.value) {
+      return { ok: false, reason: '라운드 마감 정보가 올바르지 않습니다.' };
+    }
+    if (new Date(normalizedDeadline.value).getTime() <= Date.now()) {
+      return { ok: false, reason: '새 라운드 마감 시간은 미래여야 합니다.' };
+    }
+
+    return this.getDb().transaction(async (tx): Promise<MinigameRoundDeadlineArmResult> => {
+      const row = await tx.get(
+        'SELECT * FROM minigame_sessions WHERE id = ? AND user_id = ? FOR UPDATE',
+        sessionId,
+        userId
+      );
+      if (!row) return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
+      if (row.status !== 'STARTED') return { ok: false, reason: '이미 종료되었거나 만료된 세션입니다.' };
+      if (
+        row.game_type !== 'crop_detective' ||
+        !['BASE', 'BONUS'].includes(String(row.ticket_spent_type || 'NONE'))
+      ) {
+        return { ok: false, reason: '보상형 카드 확대 탐정 세션이 아닙니다.' };
+      }
+
+      const expiresAtMs = row.expires_at ? new Date(row.expires_at).getTime() : NaN;
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+        await tx.run(
+          "UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND user_id = ? AND status = 'STARTED'",
+          formatKstDbTime(), sessionId, userId
+        );
+        return { ok: false, reason: '미니게임 세션이 만료되었습니다.' };
+      }
+
+      const progress = normalizeProgressData(row.progress_data);
+      const outcomes = Array.isArray(progress.round_outcomes) ? progress.round_outcomes : [];
+      const validStoredOutcomes = outcomes.every((outcome: any, index: number) =>
+        outcome && Number(outcome.round) === index &&
+        (outcome.selected_channel_id === null || typeof outcome.selected_channel_id === 'string')
+      );
+      if (!validStoredOutcomes) return { ok: false, reason: '저장된 미니게임 진행 상태가 올바르지 않습니다.' };
+      if (round !== outcomes.length) return { ok: false, reason: '현재 순서의 라운드만 준비할 수 있습니다.' };
+
+      const target = parseDbJson<any>(row.target_data, {});
+      const rounds = Array.isArray(target?.rounds) ? target.rounds : [];
+      if (!rounds[round] || Number(rounds[round]?.round) !== round) {
+        return { ok: false, reason: '존재하지 않는 라운드입니다.' };
+      }
+
+      const armedRound = progress.round_image_armed_round;
+      if (armedRound != null && (!Number.isInteger(armedRound) || armedRound < 0)) {
+        return { ok: false, reason: '저장된 확대 이미지 준비 상태가 올바르지 않습니다.' };
+      }
+      const storedDeadlineRaw = progress.round_deadline_at;
+      const storedDeadlineMs = typeof storedDeadlineRaw === 'string'
+        ? new Date(storedDeadlineRaw).getTime()
+        : NaN;
+      if (armedRound === round) {
+        if (!Number.isFinite(storedDeadlineMs)) {
+          return { ok: false, reason: '저장된 라운드 마감 정보가 올바르지 않습니다.' };
+        }
+        if (storedDeadlineMs <= Date.now()) {
+          return { ok: false, reason: '이미 마감된 라운드는 다시 준비할 수 없습니다.' };
+        }
+        return { ok: true, armedNow: false, session: this.mapSession(row) };
+      }
+      if (armedRound != null) {
+        return { ok: false, reason: '현재 라운드와 확대 이미지 준비 상태가 일치하지 않습니다.' };
+      }
+
+      const currentRevision = Math.max(0, Math.floor(Number(row.progress_revision ?? 0)));
+      const nextProgressData = JSON.stringify({
+        ...progress,
+        round_outcomes: outcomes,
+        round_deadline_at: normalizedDeadline.value,
+        round_image_armed_round: round
+      });
+      const updateResult = await tx.run(`
+        UPDATE minigame_sessions
+        SET progress_data = ?, progress_revision = progress_revision + 1
+        WHERE id = ? AND user_id = ? AND status = 'STARTED' AND progress_revision = ?
+      `, nextProgressData, sessionId, userId, currentRevision);
+      if (Number(updateResult.affectedRows ?? updateResult.changes ?? 0) !== 1) {
+        return { ok: false, reason: '미니게임 진행 상태가 변경되었습니다. 다시 시도해 주세요.' };
+      }
+      return {
+        ok: true,
+        armedNow: true,
+        session: this.mapSession({
+          ...row,
+          progress_data: nextProgressData,
+          progress_revision: currentRevision + 1
+        })
+      };
+    });
+  }
+
   async recordRoundOutcome(
     sessionId: string,
     userId: string,
@@ -315,6 +418,12 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       const currentDeadlineMs = typeof progress.round_deadline_at === 'string'
         ? new Date(progress.round_deadline_at).getTime()
         : NaN;
+      if (
+        row.game_type === 'crop_detective' &&
+        (progress.round_image_armed_round !== round || !Number.isFinite(currentDeadlineMs))
+      ) {
+        return { ok: false, reason: '확대 이미지 준비가 끝나지 않아 라운드가 아직 시작되지 않았습니다.' };
+      }
       if (normalizedSelection !== null) {
         if (!Number.isFinite(currentDeadlineMs)) {
           return { ok: false, reason: '서버 라운드 마감 정보가 없어 답안을 처리할 수 없습니다.' };
@@ -332,7 +441,8 @@ export class MysqlMinigameRepository implements IMinigameRepository {
       const nextProgress = {
         ...progress,
         round_outcomes: [...outcomes, { round, selected_channel_id: normalizedSelection }],
-        round_deadline_at: nextDeadline.value
+        round_deadline_at: nextDeadline.value,
+        ...(row.game_type === 'crop_detective' ? { round_image_armed_round: null } : {})
       };
       const nextProgressData = JSON.stringify(nextProgress);
       const updateResult = await tx.run(`

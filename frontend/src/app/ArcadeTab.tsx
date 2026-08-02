@@ -19,8 +19,7 @@ import {
   CalendarClock,
   Eye,
   Flag,
-  UserRound,
-  AlertTriangle
+  UserRound
 } from 'lucide-react';
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
@@ -206,7 +205,7 @@ type RoundAnswerResponse = {
 
 type PendingPaidRound = {
   roundIndex: number;
-  localDeadlineAt: number;
+  localDeadlineAt: number | null;
 };
 
 const GAME_TYPES: GameType[] = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'];
@@ -1231,7 +1230,9 @@ const parsePaidRoundContract = (
   let progress: ParsedServerRoundProgress | null = null;
   let currentRoundIndex = 0;
   let complete = false;
-  let rawDeadline: unknown = data.game_data.round_deadline_at ?? data.round_deadline_at;
+  let rawDeadline: unknown = Object.prototype.hasOwnProperty.call(data.game_data, 'round_deadline_at')
+    ? data.game_data.round_deadline_at
+    : data.round_deadline_at;
   let expectedDisclosedRounds = 1;
 
   if (resumed) {
@@ -1241,7 +1242,9 @@ const parsePaidRoundContract = (
     currentRoundIndex = progress.nextRound;
     complete = progress.complete;
     expectedDisclosedRounds = complete ? totalRounds : currentRoundIndex + 1;
-    rawDeadline = data.round_progress?.round_deadline_at ?? rawDeadline;
+    rawDeadline = Object.prototype.hasOwnProperty.call(data.round_progress || {}, 'round_deadline_at')
+      ? data.round_progress?.round_deadline_at
+      : rawDeadline;
   } else if (data.round_progress !== undefined) {
     return null;
   }
@@ -1250,7 +1253,12 @@ const parsePaidRoundContract = (
   if (!hasValidDisclosedRounds(gameType, rounds, expectedDisclosedRounds)) return null;
 
   const localDeadlineAt = getLocalRoundDeadline(rawDeadline, clockOffsetMs);
-  if (!complete && localDeadlineAt === null) return null;
+  // A paid crop round is intentionally issued without a deadline. The image
+  // renderer arms it exactly once, immediately before serving the protected
+  // clue, so a failed or still-loading image cannot consume play time.
+  if (!complete && localDeadlineAt === null) {
+    if (gameType !== 'crop_detective' || rawDeadline !== null) return null;
+  }
 
   return {
     rounds,
@@ -1615,28 +1623,52 @@ const useCropDetectiveImageSource = (
   useEffect(() => {
     let cancelled = false;
     let timeoutId: number | null = null;
+    const deadlineAt = Date.now() + Math.max(0, timeoutMs);
 
     const trySource = async (sourceIndex: number): Promise<void> => {
       if (cancelled) return;
       const source = sources[sourceIndex] || sources[sources.length - 1];
       if (!source) return;
 
-      const timeout = new Promise<null>((resolve) => {
-        timeoutId = window.setTimeout(() => resolve(null), timeoutMs);
-      });
-      const image = await Promise.race([preloadCropDetectiveImage(source.url, retainResolved), timeout]);
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      timeoutId = null;
-      if (cancelled) return;
-
-      if (image || source.guaranteed) {
+      // A deterministic data URL has no network dependency, but it still has to
+      // decode successfully before the round can be revealed and timed.
+      if (source.guaranteed) {
+        const image = await preloadCropDetectiveImage(source.url, true);
+        if (cancelled || !image) return;
         setLoadedState({
           generationKey,
           sourceSignature,
           loaded: {
             url: source.url,
             image,
-            usedLocalFallback: source.guaranteed
+            usedLocalFallback: true
+          }
+        });
+        return;
+      }
+
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        await trySource(sourceIndex + 1);
+        return;
+      }
+
+      const timeout = new Promise<null>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(null), remainingMs);
+      });
+      const image = await Promise.race([preloadCropDetectiveImage(source.url, retainResolved), timeout]);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = null;
+      if (cancelled) return;
+
+      if (image) {
+        setLoadedState({
+          generationKey,
+          sourceSignature,
+          loaded: {
+            url: source.url,
+            image,
+            usedLocalFallback: false
           }
         });
         return;
@@ -1750,79 +1782,139 @@ const CardImageTile: React.FC<{
 type CropPreviewProps = {
   round: CropDetectiveRound;
   revealed: boolean;
-  onPrepared?: (roundKey: string) => void;
+  forceDeterministicFallback?: boolean;
+  onPrepared?: (roundKey: string, options?: {
+    forceLocalFallback?: boolean;
+    localDeadlineAt?: number;
+  }) => void;
   onLoadFailed?: (roundKey: string) => Promise<boolean>;
 };
 
-const ProtectedCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrepared, onLoadFailed }) => {
+const ProtectedCropPreview: React.FC<CropPreviewProps> = ({
+  round,
+  revealed,
+  forceDeterministicFallback = false,
+  onPrepared,
+  onLoadFailed
+}) => {
   const roundKey = getCropDetectiveRoundKey(round);
   const primaryUrl = resolveMinigameImage(round.source_image_url);
-  const fallbackUrl = round.source_fallback_image_url
-    ? resolveMinigameImage(round.source_fallback_image_url)
-    : '/icon.png';
-  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'recovering' | 'failed'>('loading');
+  const requestUrl = forceDeterministicFallback && primaryUrl && primaryUrl !== '/icon.png'
+    ? `${primaryUrl}${primaryUrl.includes('?') ? '&' : '?'}fallback=deterministic`
+    : primaryUrl;
+  const [displayUrl, setDisplayUrl] = useState('');
+  const [forceLocalFallback, setForceLocalFallback] = useState(false);
+  const [localDeadlineAt, setLocalDeadlineAt] = useState<number | null>(null);
+  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'recovering'>(() =>
+    !requestUrl || requestUrl === '/icon.png' ? 'recovering' : 'loading'
+  );
+  const [recoveryAttempt, setRecoveryAttempt] = useState(0);
+
+  // Fetching the already-cropped image lets the browser read the server's
+  // non-sensitive fallback-mode header. When the worker had to synthesize the
+  // clue, all four candidate tiles switch to their matching deterministic
+  // artwork, so an upstream outage can never create a clue with no valid answer.
+  useEffect(() => {
+    if (!requestUrl || requestUrl === '/icon.png') return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    let objectUrl = '';
+    const timeout = window.setTimeout(() => controller.abort(), 8_000);
+    void fetch(requestUrl, {
+      credentials: 'include',
+      cache: 'no-store',
+      signal: controller.signal
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`protected crop ${response.status}`);
+      const serverDeadlineMs = Date.parse(response.headers.get('X-Minigame-Round-Deadline') || '');
+      const serverNowMs = Date.parse(response.headers.get('X-Minigame-Server-Now') || '');
+      if (!Number.isFinite(serverDeadlineMs) || !Number.isFinite(serverNowMs)) {
+        throw new Error('protected crop timing headers are missing');
+      }
+      const responseLocalDeadlineAt = Date.now() + Math.max(0, serverDeadlineMs - serverNowMs);
+      const responseUsesDeterministicFallback =
+        response.headers.get('X-Minigame-Image-Fallback') === 'deterministic';
+      if (forceDeterministicFallback && !responseUsesDeterministicFallback) {
+        throw new Error('protected crop fallback mode mismatch');
+      }
+      const blob = await response.blob();
+      if (!blob.type.startsWith('image/')) throw new Error('protected crop is not an image');
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(blob);
+      setForceLocalFallback(responseUsesDeterministicFallback);
+      setLocalDeadlineAt(responseLocalDeadlineAt);
+      setDisplayUrl(objectUrl);
+    }).catch(() => {
+      if (!cancelled) setLoadState('recovering');
+    }).finally(() => window.clearTimeout(timeout));
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [forceDeterministicFallback, requestUrl]);
+
+  useEffect(() => {
+    if (loadState !== 'recovering' || !onLoadFailed) return;
+    let cancelled = false;
+    const retryDelayMs = recoveryAttempt === 0
+      ? 0
+      : Math.min(10_000, 750 * (2 ** Math.min(recoveryAttempt - 1, 4)));
+    const timeout = window.setTimeout(() => {
+      void onLoadFailed(roundKey)
+        .then((recovered) => {
+          if (!cancelled && !recovered) setRecoveryAttempt((attempt) => attempt + 1);
+        })
+        .catch(() => {
+          if (!cancelled) setRecoveryAttempt((attempt) => attempt + 1);
+        });
+    }, retryDelayMs);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [loadState, onLoadFailed, recoveryAttempt, roundKey]);
 
   return (
     <div
       role="img"
-      aria-label={loadState === 'failed' ? '확대 이미지 로딩 실패' : '확대된 카드 이미지 조각'}
+      aria-label="확대된 카드 이미지 조각"
       aria-busy={loadState === 'loading' || loadState === 'recovering'}
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => event.preventDefault()}
     >
-      {/* Authenticated short-lived image URLs must load in the user's browser so
-          the httpOnly session cookie is sent; Next/Image's server optimizer cannot. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={primaryUrl}
-        alt=""
-        className={`absolute inset-0 h-full w-full object-cover transition-opacity ${revealed && loadState === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
-        draggable={false}
-        onLoad={(event) => {
-          const element = event.currentTarget;
-          if (element.dataset.loadExhausted === 'true' || element.src.endsWith('/icon.png')) return;
-          if (element.dataset.prepared !== 'true') {
-            element.dataset.prepared = 'true';
+      {displayUrl ? (
+        // The protected response was fetched with the httpOnly session cookie;
+        // a local object URL prevents a second network request before reveal.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={displayUrl}
+          alt=""
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity ${revealed && loadState === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+          draggable={false}
+          onLoad={() => {
+            if (localDeadlineAt === null) {
+              setLoadState('recovering');
+              return;
+            }
             setLoadState('loaded');
-            onPrepared?.(roundKey);
-          }
-        }}
-        onError={(event) => {
-          const element = event.currentTarget;
-          if (
-            element.dataset.fallbackApplied !== 'true' &&
-            fallbackUrl !== '/icon.png' &&
-            fallbackUrl !== primaryUrl
-          ) {
-            element.dataset.fallbackApplied = 'true';
-            setLoadState('loading');
-            element.src = fallbackUrl;
-            return;
-          }
-          element.dataset.loadExhausted = 'true';
-          if (!onLoadFailed) {
-            setLoadState('failed');
-            return;
-          }
-          setLoadState('recovering');
-          void onLoadFailed(roundKey)
-            .then((recovered) => {
-              if (!recovered) setLoadState('failed');
-            })
-            .catch(() => setLoadState('failed'));
-        }}
-      />
-      {loadState === 'failed' ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(244,63,94,0.16),rgba(9,9,11,0.98)_70%)] px-5 text-center text-white">
-          <AlertTriangle className="h-7 w-7 text-rose-300" aria-hidden="true" />
-          <span className="text-xs font-black text-white/90">확대 이미지를 불러오지 못했습니다</span>
-          <span className="text-[10px] font-bold text-white/60">게임 화면을 다시 열면 현재 라운드부터 이어집니다.</span>
-        </div>
-      ) : loadState === 'recovering' ? (
+            onPrepared?.(roundKey, { forceLocalFallback, localDeadlineAt });
+          }}
+          onError={() => {
+            URL.revokeObjectURL(displayUrl);
+            setDisplayUrl('');
+            setLoadState('recovering');
+          }}
+        />
+      ) : null}
+      {loadState === 'recovering' ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] px-5 text-center text-white">
           <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
-          <span className="text-xs font-black text-white/90">확대 이미지 연결 복구 중</span>
-          <span className="text-[10px] font-bold text-white/60">현재 라운드의 새 보호 이미지를 요청하고 있습니다.</span>
+          <span className="text-xs font-black text-white/90">확대 이미지 자동 복구 중</span>
+          <span className="text-[10px] font-bold text-white/60">연결을 확인한 뒤 현재 라운드를 안전하게 이어갑니다.</span>
         </div>
       ) : !revealed ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] text-white">
@@ -2022,7 +2114,12 @@ const CropDetectiveChoiceTile: React.FC<{
   disabled: boolean;
   imageBlindEnabled: boolean;
   hideImageUntilRevealed: boolean;
-  onSettled: (assetId: string, settledRoundKey: string) => void;
+  forceLocalFallback: boolean;
+  onSettled: (
+    assetId: string,
+    settledRoundKey: string,
+    options: { deterministic: boolean; usedLocalFallback: boolean }
+  ) => void;
   onClick: () => void;
 }> = ({
   roundKey,
@@ -2033,6 +2130,7 @@ const CropDetectiveChoiceTile: React.FC<{
   disabled,
   imageBlindEnabled,
   hideImageUntilRevealed,
+  forceLocalFallback,
   onSettled,
   onClick
 }) => {
@@ -2043,18 +2141,41 @@ const CropDetectiveChoiceTile: React.FC<{
     [card.fallback_image_url, card.image_url]
   );
   const loadedSource = useCropDetectiveImageSource(generationKey, sources);
+  const localFallbackSources = useMemo(
+    () => sources.length > 0 ? [sources[sources.length - 1]] : [],
+    [sources]
+  );
+  const localLoadedSource = useCropDetectiveImageSource(
+    `${generationKey}:deterministic`,
+    localFallbackSources,
+    CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.timeoutMs,
+    true
+  );
+  const effectiveLoadedSource = forceLocalFallback ? localLoadedSource : loadedSource;
+  const effectiveGenerationKey = `${generationKey}:${forceLocalFallback ? 'deterministic' : 'normal'}`;
+  const localFallbackUrl = localLoadedSource?.url || sources[sources.length - 1]?.url || '/icon.png';
   const lastSettledGenerationRef = useRef('');
 
   useEffect(() => {
-    if (!loadedSource || lastSettledGenerationRef.current === generationKey) return;
-    lastSettledGenerationRef.current = generationKey;
-    onSettled(assetId, roundKey);
-  }, [assetId, generationKey, loadedSource, onSettled, roundKey]);
+    if (!effectiveLoadedSource || lastSettledGenerationRef.current === effectiveGenerationKey) return;
+    lastSettledGenerationRef.current = effectiveGenerationKey;
+    onSettled(assetId, roundKey, {
+      deterministic: forceLocalFallback,
+      usedLocalFallback: effectiveLoadedSource.usedLocalFallback
+    });
+  }, [
+    assetId,
+    effectiveGenerationKey,
+    effectiveLoadedSource,
+    forceLocalFallback,
+    onSettled,
+    roundKey
+  ]);
 
   return (
     <CardImageTile
       card={card}
-      imageUrlOverride={loadedSource?.url || sources[sources.length - 1]?.url || '/icon.png'}
+      imageUrlOverride={effectiveLoadedSource?.url || localFallbackUrl}
       selected={selected}
       correct={correct}
       wrong={wrong}
@@ -2075,7 +2196,8 @@ const CropDetectiveChoices: React.FC<{
   gameBusy: boolean;
   isGameOver: boolean;
   countdownLeft: number | null;
-  onRoundReady: (roundKey: string) => void;
+  skipProtectedImage: boolean;
+  onRoundReady: (roundKey: string, options?: { localDeadlineAt?: number }) => void;
   onRoundImageFailed: (roundKey: string) => Promise<boolean>;
   onChoice: (channelId: string) => void;
 }> = ({
@@ -2085,52 +2207,152 @@ const CropDetectiveChoices: React.FC<{
   gameBusy,
   isGameOver,
   countdownLeft,
+  skipProtectedImage,
   onRoundReady,
   onRoundImageFailed,
   onChoice
 }) => {
   const roundKey = getCropDetectiveRoundKey(round);
-  const requiredAssetIds = useMemo(
-    () => ['crop', ...round.choices.map((choice) => `choice:${choice.channel_id}`)],
+  const requiredChoiceAssetIds = useMemo(
+    () => round.choices.map((choice) => `choice:${choice.channel_id}`),
     [round.choices]
   );
   const [settledState, setSettledState] = useState<{
     roundKey: string;
     assetIds: string[];
-  }>({ roundKey: '', assetIds: [] });
-  const settledAssetIds = settledState.roundKey === roundKey ? settledState.assetIds : [];
-  const allImagesReady = areCropDetectiveAssetsSettled(requiredAssetIds, settledAssetIds);
+    deterministicAssetIds: string[];
+    localFallbackDetected: boolean;
+  }>({ roundKey: '', assetIds: [], deterministicAssetIds: [], localFallbackDetected: false });
+  const [cropFallbackState, setCropFallbackState] = useState<{
+    roundKey: string;
+    forceLocalFallback: boolean;
+  }>({ roundKey: '', forceLocalFallback: false });
+  const [cropDeadlineState, setCropDeadlineState] = useState<{
+    roundKey: string;
+    localDeadlineAt: number | null;
+  }>({ roundKey: '', localDeadlineAt: null });
+  const currentSettledState: {
+    assetIds: string[];
+    deterministicAssetIds: string[];
+    localFallbackDetected: boolean;
+  } = settledState.roundKey === roundKey
+    ? settledState
+    : { assetIds: [], deterministicAssetIds: [], localFallbackDetected: false };
+  const cropUsesLocalFallback =
+    cropFallbackState.roundKey === roundKey && cropFallbackState.forceLocalFallback;
+  const forceDeterministicClue = currentSettledState.localFallbackDetected;
+  const forceLocalFallback = forceDeterministicClue || cropUsesLocalFallback;
+  const choiceSettlementIds = forceLocalFallback
+    ? currentSettledState.deterministicAssetIds
+    : currentSettledState.assetIds;
+  const choicesReady = areCropDetectiveAssetsSettled(requiredChoiceAssetIds, choiceSettlementIds);
+  const cropReady = currentSettledState.assetIds.includes('crop');
+  const protectedRound = isProtectedMinigameImage(round.source_image_url);
+  const completedResume = roundFeedback?.locked === true;
+  const allImagesReady = choicesReady && (completedResume || skipProtectedImage || cropReady);
+  const canRequestProtectedCrop =
+    choicesReady &&
+    !skipProtectedImage &&
+    !roundChecking &&
+    !roundFeedback &&
+    (countdownLeft === null || countdownLeft <= 0);
   const selectedId = roundFeedback?.selected_channel_id || null;
   const correctIds = roundFeedback?.correct_channel_ids || [];
 
-  const handleAssetSettled = useCallback((assetId: string, settledRoundKey: string) => {
+  const handleAssetSettled = useCallback((
+    assetId: string,
+    settledRoundKey: string,
+    options: { deterministic?: boolean; usedLocalFallback?: boolean } = {}
+  ) => {
     if (settledRoundKey !== roundKey) return;
     setSettledState((previous) => {
-      const currentIds = previous.roundKey === roundKey ? previous.assetIds : [];
-      if (currentIds.includes(assetId)) return previous;
-      return { roundKey, assetIds: [...currentIds, assetId] };
+      const current = previous.roundKey === roundKey
+        ? previous
+        : { roundKey, assetIds: [], deterministicAssetIds: [], localFallbackDetected: false };
+      const assetIds = current.assetIds.includes(assetId)
+        ? current.assetIds
+        : [...current.assetIds, assetId];
+      const deterministicAssetIds = options.deterministic && !current.deterministicAssetIds.includes(assetId)
+        ? [...current.deterministicAssetIds, assetId]
+        : current.deterministicAssetIds;
+      const localFallbackDetected = current.localFallbackDetected || (
+        assetId.startsWith('choice:') && options.usedLocalFallback === true
+      );
+      if (
+        assetIds === current.assetIds &&
+        deterministicAssetIds === current.deterministicAssetIds &&
+        localFallbackDetected === current.localFallbackDetected
+      ) return previous;
+      return { roundKey, assetIds, deterministicAssetIds, localFallbackDetected };
     });
   }, [roundKey]);
-  const handleCropSettled = useCallback((settledRoundKey: string) => {
+  const handleCropSettled = useCallback((
+    settledRoundKey: string,
+    options?: { forceLocalFallback?: boolean; localDeadlineAt?: number }
+  ) => {
+    if (settledRoundKey === roundKey) {
+      setCropFallbackState({
+        roundKey,
+        forceLocalFallback: options?.forceLocalFallback === true
+      });
+      setCropDeadlineState({
+        roundKey,
+        localDeadlineAt: Number.isFinite(options?.localDeadlineAt)
+          ? Number(options?.localDeadlineAt)
+          : null
+      });
+    }
     handleAssetSettled('crop', settledRoundKey);
-  }, [handleAssetSettled]);
+  }, [handleAssetSettled, roundKey]);
 
   useEffect(() => {
-    if (allImagesReady) onRoundReady(roundKey);
-  }, [allImagesReady, onRoundReady, roundKey]);
+    if (allImagesReady && !completedResume && !skipProtectedImage) {
+      onRoundReady(roundKey, {
+        localDeadlineAt: cropDeadlineState.roundKey === roundKey
+          ? cropDeadlineState.localDeadlineAt ?? undefined
+          : undefined
+      });
+    }
+  }, [allImagesReady, completedResume, cropDeadlineState, onRoundReady, roundKey, skipProtectedImage]);
 
   const hideImages = !roundFeedback && !allImagesReady;
   const choiceDisabled = hideImages || Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0);
 
   return (
     <div className="contents" data-crop-detective-ready={allImagesReady ? 'true' : 'false'}>
-      <CropPreview
-        key={roundKey}
-        round={round}
-        revealed={allImagesReady || Boolean(roundFeedback)}
-        onPrepared={handleCropSettled}
-        onLoadFailed={onRoundImageFailed}
-      />
+      {completedResume || skipProtectedImage ? (
+        <div
+          role="img"
+          aria-label={completedResume ? '저장된 확대 탐정 라운드' : '시간 초과 처리 중인 확대 탐정 라운드'}
+          className="relative flex aspect-square w-[min(20rem,58vw)] flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] border border-emerald-300/45 bg-zinc-950 text-white shadow-[0_18px_45px_rgba(16,185,129,0.16)]"
+        >
+          <Gamepad2 className="h-8 w-8 text-emerald-300" aria-hidden="true" />
+          <span className="text-xs font-black text-white/90">
+            {completedResume ? '저장된 라운드 확인 완료' : '시간 초과 결과 저장 중'}
+          </span>
+        </div>
+      ) : !protectedRound || canRequestProtectedCrop ? (
+        <CropPreview
+          key={roundKey}
+          round={round}
+          revealed={allImagesReady || Boolean(roundFeedback)}
+          forceDeterministicFallback={forceDeterministicClue}
+          onPrepared={handleCropSettled}
+          onLoadFailed={onRoundImageFailed}
+        />
+      ) : (
+        <div
+          role="img"
+          aria-label="확대 이미지 준비 중"
+          aria-busy="true"
+          className="relative flex aspect-square w-[min(20rem,58vw)] flex-col items-center justify-center gap-2 overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 text-white shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
+        >
+          <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
+          <span className="text-[10px] font-black tracking-wide text-white/75">
+            {choicesReady ? '게임 시작 준비 중' : '후보 이미지 준비 중'}
+          </span>
+        </div>
+      )}
 
       {!allImagesReady && !roundFeedback ? (
         <p role="status" className="text-center text-[10px] font-black text-fuchsia-700 dark:text-fuchsia-300">
@@ -2154,6 +2376,7 @@ const CropDetectiveChoices: React.FC<{
               disabled={choiceDisabled}
               imageBlindEnabled={Boolean(roundFeedback)}
               hideImageUntilRevealed={hideImages}
+              forceLocalFallback={forceLocalFallback}
               onSettled={handleAssetSettled}
               onClick={() => onChoice(choice.channel_id)}
             />
@@ -2270,7 +2493,6 @@ export const ArcadeTab: React.FC = () => {
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [pendingPaidRound, setPendingPaidRound] = useState<PendingPaidRound | null>(null);
   const [cropDetectiveReadyKey, setCropDetectiveReadyKey] = useState('');
-  const cropImageRecoveryAttemptsRef = useRef<Map<string, number>>(new Map());
   const [imageBlindMenu, setImageBlindMenu] = useState<{ x: number; y: number; imageUrl: string } | null>(null);
   const currentCropDetectiveRound = activeGame === 'crop_detective'
     ? gameData?.rounds?.[roundIndex]
@@ -2279,18 +2501,22 @@ export const ArcadeTab: React.FC = () => {
     ? getCropDetectiveRoundKey(currentCropDetectiveRound)
     : '';
   const cropImageRecoveryRequestRef = useRef(0);
+  const cropImageRecoveryAttemptsRef = useRef<Map<string, number>>(new Map());
+  const autoSubmittedCompletedSessionsRef = useRef<Set<string>>(new Set());
   const cropImageRecoveryContextRef = useRef({
     activeGame,
     sessionId,
     roundIndex,
     roundKey: currentCropDetectiveRoundKey
   });
-  cropImageRecoveryContextRef.current = {
-    activeGame,
-    sessionId,
-    roundIndex,
-    roundKey: currentCropDetectiveRoundKey
-  };
+  useEffect(() => {
+    cropImageRecoveryContextRef.current = {
+      activeGame,
+      sessionId,
+      roundIndex,
+      roundKey: currentCropDetectiveRoundKey
+    };
+  }, [activeGame, currentCropDetectiveRoundKey, roundIndex, sessionId]);
   const cropDetectiveRoundReady = Boolean(
     currentCropDetectiveRoundKey && cropDetectiveReadyKey === currentCropDetectiveRoundKey
   );
@@ -2303,9 +2529,21 @@ export const ArcadeTab: React.FC = () => {
     cropImageRecoveryRequestRef.current += 1;
   }, []);
 
-  const handleCropDetectiveRoundReady = useCallback((roundKey: string) => {
+  const handleCropDetectiveRoundReady = useCallback((
+    roundKey: string,
+    options: { localDeadlineAt?: number } = {}
+  ) => {
+    if (roundKey !== currentCropDetectiveRoundKey) return;
+    if (!isPracticeMode) {
+      const localDeadlineAt = Number(options.localDeadlineAt);
+      if (!Number.isFinite(localDeadlineAt)) return;
+      roundDeadlineRef.current = localDeadlineAt;
+      setRoundDeadlineSyncAt(localDeadlineAt);
+      setRoundTimeLeft(getVisibleRoundTimeLeft(localDeadlineAt));
+    }
+    cropImageRecoveryAttemptsRef.current.delete(`${sessionId || ''}:${roundIndex}`);
     setCropDetectiveReadyKey((previousKey) => previousKey === roundKey ? previousKey : roundKey);
-  }, []);
+  }, [currentCropDetectiveRoundKey, isPracticeMode, roundIndex, sessionId]);
 
   useEffect(() => {
     const userId = user?.id;
@@ -2416,8 +2654,15 @@ export const ArcadeTab: React.FC = () => {
         }
       : null;
     const restoredTimeLeft = contract.localDeadlineAt === null
-      ? 0
+      ? ROUND_GAME_ROUND_SECONDS
       : getVisibleRoundTimeLeft(contract.localDeadlineAt);
+    const restoredRound = contract.rounds[restoredRoundIndex];
+    const expiredRoundKey = !contract.complete &&
+      contract.localDeadlineAt !== null &&
+      restoredTimeLeft <= 0 &&
+      isCropDetectiveRound(restoredRound)
+        ? getCropDetectiveRoundKey(restoredRound)
+        : '';
     submitInFlightRef.current = false;
     setRoundSubmissionKey(null);
     setSubmitRetry(null);
@@ -2445,7 +2690,9 @@ export const ArcadeTab: React.FC = () => {
     setRoundTimeoutRetryAttempt(0);
     setRoundDeadlineSyncAt(contract.localDeadlineAt);
     setRoundTimeLeft(restoredTimeLeft);
-    setCropDetectiveReadyKey('');
+    // An already-armed expired round must submit its authoritative timeout
+    // without requesting (and repeatedly failing to re-arm) the clue image.
+    setCropDetectiveReadyKey(expiredRoundKey);
     puzzleMovesRef.current = [];
     setPuzzleMoves([]);
     setPuzzleUsesServerLayout(false);
@@ -2469,14 +2716,25 @@ export const ArcadeTab: React.FC = () => {
       failedRoundKey !== currentCropDetectiveRoundKey
     ) return false;
 
-    const recoveryKey = `${sessionId}:${roundIndex}`;
-    const previousAttempts = cropImageRecoveryAttemptsRef.current.get(recoveryKey) || 0;
-    if (previousAttempts >= 1) {
-      toast('확대 이미지를 다시 불러오지 못했습니다. 게임 화면을 다시 열어 현재 라운드를 이어가 주세요.', 'error');
-      return false;
-    }
-    cropImageRecoveryAttemptsRef.current.set(recoveryKey, previousAttempts + 1);
     const recoveryRequestId = ++cropImageRecoveryRequestRef.current;
+    const recoveryKey = `${sessionId}:${roundIndex}`;
+    const recoveryAttempt = cropImageRecoveryAttemptsRef.current.get(recoveryKey) || 0;
+    cropImageRecoveryAttemptsRef.current.set(recoveryKey, recoveryAttempt + 1);
+    const retryDelayMs = recoveryAttempt === 0
+      ? 0
+      : Math.min(10_000, 750 * (2 ** Math.min(recoveryAttempt - 1, 4)));
+    if (retryDelayMs > 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelayMs));
+    }
+
+    const contextBeforeFetch = cropImageRecoveryContextRef.current;
+    if (
+      recoveryRequestId !== cropImageRecoveryRequestRef.current ||
+      contextBeforeFetch.activeGame !== 'crop_detective' ||
+      contextBeforeFetch.sessionId !== sessionId ||
+      contextBeforeFetch.roundIndex !== roundIndex ||
+      contextBeforeFetch.roundKey !== failedRoundKey
+    ) return false;
 
     const activeSession = await fetchActiveCropDetectiveSession();
     const latestContext = cropImageRecoveryContextRef.current;
@@ -2488,7 +2746,6 @@ export const ArcadeTab: React.FC = () => {
       latestContext.roundKey !== failedRoundKey
     ) return false;
     if (!activeSession || activeSession.session_id !== sessionId) {
-      toast('현재 확대 탐정 세션을 다시 확인하지 못했습니다. 잠시 후 게임 화면을 다시 열어 주세요.', 'error');
       return false;
     }
     return restoreCropDetectiveSession(activeSession, { silent: true });
@@ -2499,12 +2756,13 @@ export const ArcadeTab: React.FC = () => {
     isPracticeMode,
     restoreCropDetectiveSession,
     roundIndex,
-    sessionId,
-    toast
+    sessionId
   ]);
 
   const resetGameView = useCallback(() => {
     cropImageRecoveryRequestRef.current += 1;
+    cropImageRecoveryAttemptsRef.current.clear();
+    autoSubmittedCompletedSessionsRef.current.clear();
     submitInFlightRef.current = false;
     setRoundSubmissionKey(null);
     setSubmitRetry(null);
@@ -2601,6 +2859,8 @@ export const ArcadeTab: React.FC = () => {
     if (!sessionId) return;
     if (submitInFlightRef.current) return;
     const isTerminalSuccess = payload.success === true && (activeGame === 'puzzle' || activeGame === 'match');
+    const isRoundSettlement = isRoundGame(activeGame) && Array.isArray(payload.answers);
+    const shouldRetrySettlement = isTerminalSuccess || isRoundSettlement;
     if (isTerminalSuccess) {
       setIsGameOver(true);
     }
@@ -2629,14 +2889,14 @@ export const ArcadeTab: React.FC = () => {
         setGameResult(data as MinigameResult);
         if (activeGame === 'crop_detective') clearCropDetectiveProgress(currentUserId, sessionId);
         if (!data.practice_mode) refreshUserData(); // 일반 게임에서만 보유 자산 갱신
-      } else if (isTerminalSuccess && res.status >= 500) {
+      } else if (shouldRetrySettlement && res.status >= 500) {
         setSubmitRetry(prev => ({ payload, attempt: (prev?.attempt || 0) + 1 }));
       } else {
         toast(data.message || '결과 처리 중 에러가 발생했습니다.', 'error');
         handleExitGame();
       }
     } catch {
-      if (isTerminalSuccess) {
+      if (shouldRetrySettlement) {
         setSubmitRetry(prev => ({ payload, attempt: (prev?.attempt || 0) + 1 }));
         return;
       }
@@ -2650,6 +2910,33 @@ export const ArcadeTab: React.FC = () => {
       setGameBusy(false);
     }
   }, [activeGame, currentUserId, gameTimeLeft, handleExitGame, puzzleTimeLeft, refreshUserData, restoreActiveTimer, sessionId, toast]);
+
+  // If all five authoritative outcomes were stored before a refresh or response
+  // loss, finish the idempotent settlement automatically instead of requiring a
+  // clue fetch or another button click that could strand the consumed ticket.
+  useEffect(() => {
+    if (
+      activeGame !== 'crop_detective' ||
+      isPracticeMode ||
+      !sessionId ||
+      !roundFeedback?.locked ||
+      roundIndex < roundTotalRounds - 1 ||
+      gameResult
+    ) return;
+    if (autoSubmittedCompletedSessionsRef.current.has(sessionId)) return;
+    autoSubmittedCompletedSessionsRef.current.add(sessionId);
+    void submitResult({ answers: roundAnswers });
+  }, [
+    activeGame,
+    gameResult,
+    isPracticeMode,
+    roundAnswers,
+    roundFeedback?.locked,
+    roundIndex,
+    roundTotalRounds,
+    sessionId,
+    submitResult
+  ]);
 
   const submitRoundAnswer = useCallback(async (
     selectedChannelId: string | null,
@@ -2756,7 +3043,11 @@ export const ArcadeTab: React.FC = () => {
           Number.isInteger(responseTotalRounds) &&
           responseTotalRounds === roundTotalRounds &&
           (hasNextRound
-            ? validNextRound && nextLocalDeadline !== null
+            ? validNextRound && (
+                activeGame === 'crop_detective'
+                  ? data.next_round_deadline_at === null && nextLocalDeadline === null
+                  : nextLocalDeadline !== null
+              )
             : data.next_round === null);
 
         if (!validProtocol) {
@@ -2766,7 +3057,7 @@ export const ArcadeTab: React.FC = () => {
           return;
         }
 
-        if (nextRound && nextLocalDeadline !== null) {
+        if (nextRound) {
           setServerClockOffsetMs(nextServerClockOffsetMs);
           setGameData((previousData) => {
             if (!previousData) return previousData;
@@ -2809,7 +3100,10 @@ export const ArcadeTab: React.FC = () => {
     setRoundTimeoutRetryAttempt(0);
     setRoundFeedback(null);
     setRoundDeadlineSyncAt(pendingRound.localDeadlineAt);
-    setRoundTimeLeft(getVisibleRoundTimeLeft(pendingRound.localDeadlineAt));
+    roundDeadlineRef.current = pendingRound.localDeadlineAt;
+    setRoundTimeLeft(pendingRound.localDeadlineAt === null
+      ? ROUND_GAME_ROUND_SECONDS
+      : getVisibleRoundTimeLeft(pendingRound.localDeadlineAt));
     if (activeGame === 'crop_detective') setCropDetectiveReadyKey('');
     if (activeGame === 'quiz') {
       setQuizStartTime(Date.now());
@@ -3079,7 +3373,6 @@ export const ArcadeTab: React.FC = () => {
   }, [activeGame, countdownLeft, gameBusy, quizStartTime, gameResult, roundFeedback]);
 
   // 연습 카드 확대 탐정은 이미지가 모두 준비된 뒤에만 로컬 제한 시간을 시작합니다.
-  // 보상형 게임은 이미지 준비 여부와 무관하게 서버 마감시간을 그대로 따릅니다.
   useEffect(() => {
     if (
       activeGame !== 'crop_detective' ||
@@ -3117,7 +3410,22 @@ export const ArcadeTab: React.FC = () => {
   // 시세 듀얼 / 카드 확대 탐정 라운드 타이머 구동
   useEffect(() => {
     if (!isRoundGame(activeGame) || gameBusy || roundChecking || gameResult || isGameOver || roundFeedback || (countdownLeft !== null && countdownLeft > 0)) return;
-    if (activeGame === 'crop_detective' && isPracticeMode && !cropDetectiveRoundReady) return;
+    // A refreshed paid crop round may already be expired. Its timeout is still
+    // server-valid, while attempting to fetch the clue would correctly fail to
+    // re-arm and could otherwise leave the UI in a recovery loop.
+    if (
+      activeGame === 'crop_detective' &&
+      !isPracticeMode &&
+      roundDeadlineRef.current !== null &&
+      roundTimeLeft <= 0
+    ) {
+      const timeout = window.setTimeout(() => {
+        void submitRoundAnswer(null, true);
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+    if (activeGame === 'crop_detective' && !cropDetectiveRoundReady) return;
+    if (activeGame === 'crop_detective' && !isPracticeMode && roundDeadlineRef.current === null) return;
 
     if (roundTimeLeft <= 0) {
       const timeout = window.setTimeout(() => {
@@ -3196,7 +3504,6 @@ export const ArcadeTab: React.FC = () => {
     setRoundTimeoutRetryAttempt(0);
     setRoundDeadlineSyncAt(null);
     setCropDetectiveReadyKey('');
-    cropImageRecoveryAttemptsRef.current.clear();
     puzzleDeadlineRef.current = null;
     matchDeadlineRef.current = null;
     roundDeadlineRef.current = null;
@@ -3324,6 +3631,16 @@ export const ArcadeTab: React.FC = () => {
         const restoredTimeLeft = authoritativeDeadline === null
           ? (paidRoundContract?.complete ? 0 : ROUND_GAME_ROUND_SECONDS)
           : getVisibleRoundTimeLeft(authoritativeDeadline);
+        const restoredRound = paidRoundContract?.rounds[restoredRoundIndex];
+        const expiredCropRoundKey =
+          type === 'crop_detective' &&
+          paidRoundContract !== null &&
+          !paidRoundContract.complete &&
+          authoritativeDeadline !== null &&
+          restoredTimeLeft <= 0 &&
+          isCropDetectiveRound(restoredRound)
+            ? getCropDetectiveRoundKey(restoredRound)
+            : '';
 
         setRoundIndex(restoredRoundIndex);
         setRoundTotalRounds(totalRounds);
@@ -3336,7 +3653,7 @@ export const ArcadeTab: React.FC = () => {
         setRoundTimeoutRetryAttempt(0);
         setRoundDeadlineSyncAt(authoritativeDeadline);
         setRoundTimeLeft(restoredTimeLeft);
-        setCropDetectiveReadyKey('');
+        setCropDetectiveReadyKey(expiredCropRoundKey);
         roundDeadlineRef.current = authoritativeDeadline;
       }
 
@@ -4580,6 +4897,9 @@ export const ArcadeTab: React.FC = () => {
                   gameBusy={gameBusy}
                   isGameOver={isGameOver}
                   countdownLeft={countdownLeft}
+                  skipProtectedImage={
+                    !isPracticeMode && roundDeadlineSyncAt !== null && roundTimeLeft <= 0
+                  }
                   onRoundReady={handleCropDetectiveRoundReady}
                   onRoundImageFailed={handleCropDetectiveImageFailure}
                   onChoice={handleRoundChoice}
