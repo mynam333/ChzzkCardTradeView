@@ -7,7 +7,9 @@
     "build": "next build && node scripts/copy-cloudflare-pages-files.mjs",
     "start": "next start",
     "lint": "eslint",
+    "test:cosmetics": "vitest run src/lib/cosmetics.test.ts",
     "test:arena-assets": "node --experimental-strip-types --test src/lib/arenaAssetUrl.test.mjs",
+    "test:arena-card-editor": "node --experimental-strip-types --test src/lib/arenaCardEditor.test.mjs",
     "test:arena-replay": "node --experimental-strip-types --test src/app/arena/matches/arenaReplay.test.mjs"
   },
   "dependencies": {
@@ -38,6 +40,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }

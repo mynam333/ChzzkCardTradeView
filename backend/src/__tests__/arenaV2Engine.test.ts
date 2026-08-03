@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ARENA_V2_CARD_BUDGET_BY_COST,
+  ARENA_V2_CARD_STAT_LIMITS_BY_COST,
   ARENA_V2_DECK_MAX_CARD_COUNT,
   ARENA_V2_DECK_MIN_CARD_COUNT,
   evaluateArenaV2CardBudget,
@@ -24,26 +26,51 @@ describe('arena v2 card editor budget', () => {
     ...overrides
   });
 
+  it('uses the v2 budget curve and balanced stat ceilings for costs 1 through 9', () => {
+    expect(ARENA_V2_CARD_BUDGET_BY_COST).toEqual({
+      1: 6, 2: 9, 3: 14, 4: 18, 5: 24, 6: 31, 7: 39, 8: 48, 9: 59
+    });
+    expect(ARENA_V2_CARD_STAT_LIMITS_BY_COST).toEqual({
+      1: { attackMax: 1, healthMax: 6 },
+      2: { attackMax: 2, healthMax: 8 },
+      3: { attackMax: 4, healthMax: 10 },
+      4: { attackMax: 5, healthMax: 12 },
+      5: { attackMax: 6, healthMax: 14 },
+      6: { attackMax: 7, healthMax: 16 },
+      7: { attackMax: 8, healthMax: 18 },
+      8: { attackMax: 9, healthMax: 21 },
+      9: { attackMax: 10, healthMax: 25 }
+    });
+  });
+
   it('returns the same itemized total used by card validation', () => {
     const card = makeCard({
       cardClass: 'charge',
       attack: 4,
-      health: 6,
-      keywords: [{ type: 'pierce' }, { type: 'pursuit', value: 1 }]
+      health: 14,
+      keywords: [{ type: 'pierce' }, { type: 'weakpoint' }]
     });
     const budget = evaluateArenaV2CardBudget(card);
 
     expect(budget).toMatchObject({
-      budgetLimit: 34,
+      budgetLimit: 39,
       attackCost: 12,
-      healthCost: 6,
+      healthCost: 14,
       keywordCost: 11,
-      comboCost: 5,
-      totalCost: 34,
+      comboCost: 2,
+      totalCost: 39,
       remaining: 0,
       isOverBudget: false
     });
     expect(validateArenaV2CardVersionDefinition(card).valid).toBe(true);
+  });
+
+  it('rejects keywords whose combat rules are still pending', () => {
+    const validation = validateArenaV2CardVersionDefinition(makeCard({
+      keywords: [{ type: 'pursuit', value: 1 }]
+    }));
+
+    expect(validation.errors.map((error) => error.code)).toContain('ArenaV2CardKeywordRulePending');
   });
 
   it('rejects duplicate keyword selections', () => {
@@ -59,19 +86,19 @@ describe('arena v2 card editor budget', () => {
       cardClass: 'specter',
       cost: 9,
       attack: 0,
-      health: 12,
+      health: 23,
       keywords: [{ type: 'revive' }, { type: 'grave_recover', limit: 'cost_2' }]
     });
     const budget = evaluateArenaV2CardBudget(card);
 
     expect(budget).toMatchObject({
-      budgetLimit: 51,
+      budgetLimit: 59,
       attackCost: 0,
-      healthCost: 12,
+      healthCost: 23,
       keywordCost: 26,
       comboCost: 10,
-      totalCost: 48,
-      remaining: 3,
+      totalCost: 59,
+      remaining: 0,
       isOverBudget: false
     });
     expect(validateArenaV2CardVersionDefinition(card).valid).toBe(true);
@@ -228,7 +255,7 @@ describe('arena v2 turn action validation', () => {
 });
 
 describe('arena v2 turn resolution', () => {
-  const runtimeCard = (id: string, seatNo: number, attack = 2, health = 3, cardClass = 'charge', keywords: Array<{ type: string; value?: number }> = []) => ({
+  const runtimeCard = (id: string, seatNo: number, attack = 2, health = 3, cardClass = 'vanilla', keywords: Array<{ type: string; value?: number; limit?: string }> = []) => ({
     id,
     ownerSeatNo: seatNo,
     cardVersionId: `version-${id}`,
@@ -294,8 +321,24 @@ describe('arena v2 turn resolution', () => {
     expect(turnStart?.payload.replayVersion).toBe(2);
     expect(turnStart?.payload.combatSnapshot).toEqual({
       players: [
-        { seatNo: 0, playerHealth: 30, boardState: [{ cardInstanceId: 'p-hand', position: { row: 'front', column: 0 }, createdTurn: 1 }] },
-        { seatNo: 1, playerHealth: 30, boardState: [] }
+        {
+          seatNo: 0,
+          playerHealth: 30,
+          fatigueCount: 0,
+          handCount: 0,
+          deckCount: 1,
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'p-hand', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1,
+          playerHealth: 30,
+          fatigueCount: 0,
+          handCount: 0,
+          deckCount: 1,
+          graveyardCardInstanceIds: [],
+          boardState: []
+        }
       ],
       cardInstances: [{ id: 'p-hand', ownerSeatNo: 0, position: { row: 'front', column: 0 }, currentAttack: 2, currentHealth: 3, damageTaken: 0 }]
     });
@@ -753,7 +796,7 @@ describe('arena v2 turn resolution', () => {
       actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
     });
 
-    expect(result.cardInstances.find((card) => card.id === 'back-target')?.damageTaken).toBe(4);
+    expect(result.cardInstances.find((card) => card.id === 'back-target')?.damageTaken).toBe(5);
   });
 
   it('blocks normal overflow from a defeated specter front row card', () => {
@@ -831,7 +874,7 @@ describe('arena v2 turn resolution', () => {
       ],
       cardInstances: [
         runtimeCard('attacker', 0, 4, 6),
-        runtimeCard('shield-target', 1, 0, 5, 'guardian', [{ type: 'shield', value: 3 }]),
+        runtimeCard('shield-target', 1, 0, 5, 'sniper', [{ type: 'shield', value: 3 }]),
         runtimeCard('left-draw', 0),
         runtimeCard('right-draw', 1)
       ],
@@ -1051,6 +1094,40 @@ describe('arena v2 turn resolution', () => {
     });
   });
 
+  it('does not let a front-row card attack again after push moves it to the back row', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-push-single-attack',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'pusher', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'pushed', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('pusher', 0, 1, 20, 'sniper', [{ type: 'push' }]),
+        runtimeCard('pushed', 1, 2, 20, 'sniper')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    const pushedAttacks = result.replayEvents.filter((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'pushed'
+    ));
+    expect(pushedAttacks).toHaveLength(1);
+    expect(pushedAttacks[0]?.payload.row).toBe('front');
+    expect(result.players.find((player) => player.seatNo === 1)?.boardState[0]?.position)
+      .toEqual({ row: 'back', column: 0 });
+  });
+
   it('runs defeat effects for vengeance, spirit damage, residue shield, and graveyard recovery', () => {
     const oldGrave = runtimeCard('old-grave', 1);
     oldGrave.zone = 'graveyard';
@@ -1117,6 +1194,294 @@ describe('arena v2 turn resolution', () => {
       targetSeatNo: 1,
       targetPosition: { row: 'back', column: 1 }
     });
+  });
+
+  it('keeps grudge separate from vengeance and honors the canonical grave recovery limit', () => {
+    const highCostGrave = runtimeCard('high-cost-grave', 1);
+    highCostGrave.zone = 'graveyard';
+    highCostGrave.card.cost = 5;
+    const lowCostGrave = runtimeCard('low-cost-grave', 1);
+    lowCostGrave.zone = 'graveyard';
+    lowCostGrave.card.cost = 2;
+
+    const result = resolveArenaV2Turn({
+      matchId: 'match-canonical-defeat-keywords',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'attacker', position: { row: 'front', column: 1 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: ['high-cost-grave', 'low-cost-grave'],
+          boardState: [{ cardInstanceId: 'grudge-target', position: { row: 'front', column: 1 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('attacker', 0, 3, 8),
+        runtimeCard('grudge-target', 1, 0, 1, 'specter', [
+          { type: 'grudge', value: 2 },
+          { type: 'grave_recover', limit: 'cost_2' }
+        ]),
+        highCostGrave,
+        lowCostGrave,
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.players.find((player) => player.seatNo === 0)?.playerHealth).toBe(28);
+    expect(result.cardInstances.find((card) => card.id === 'attacker')?.damageTaken).toBe(0);
+    expect(result.players.find((player) => player.seatNo === 1)?.handCardInstanceIds).toContain('low-cost-grave');
+    expect(result.players.find((player) => player.seatNo === 1)?.handCardInstanceIds).not.toContain('high-cost-grave');
+    expect(result.replayEvents.map((event) => event.eventType)).toContain('spirit_damage');
+    expect(result.replayEvents.map((event) => event.eventType)).not.toContain('vengeance');
+    expect(result.replayEvents.find((event) => event.eventType === 'graveyard_recover')?.payload).toMatchObject({
+      sourceCardInstanceId: 'grudge-target',
+      recoveredCardInstanceId: 'low-cost-grave'
+    });
+  });
+
+  it('applies shields before consuming limited damage reduction uses', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-damage-reduction-order',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'line-attacker', position: { row: 'front', column: 0 }, createdTurn: 1 },
+            { cardInstanceId: 'area-attacker', position: { row: 'front', column: 1 }, createdTurn: 1 }
+          ]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'reducer', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('line-attacker', 0, 2, 6),
+        runtimeCard('area-attacker', 0, 0, 6, 'tech', [{ type: 'aoe_damage', value: 2 }]),
+        runtimeCard('reducer', 1, 0, 8, 'guardian', [
+          { type: 'shield', value: 1 },
+          { type: 'damage_reduction', value: 2 }
+        ]),
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'reducer')?.damageTaken).toBe(1);
+    expect(result.replayEvents.filter((event) => event.eventType === 'damage_reduction')).toHaveLength(2);
+    expect(result.replayEvents.find((event) => event.eventType === 'shield_absorb')?.payload).toMatchObject({
+      targetCardInstanceId: 'reducer',
+      damage: 1
+    });
+  });
+
+  it('adds backline, weakpoint, and direct pressure damage only when their conditions match', () => {
+    const damagedBackline = runtimeCard('damaged-backline', 1, 0, 10);
+    damagedBackline.damageTaken = 1;
+    const result = resolveArenaV2Turn({
+      matchId: 'match-pressure-keywords',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'card-pressure', position: { row: 'front', column: 0 }, createdTurn: 1 },
+            { cardInstanceId: 'direct-pressure', position: { row: 'front', column: 1 }, createdTurn: 1 }
+          ]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'damaged-backline', position: { row: 'back', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('card-pressure', 0, 2, 8, 'sniper', [
+          { type: 'backline_pressure' },
+          { type: 'weakpoint' }
+        ]),
+        runtimeCard('direct-pressure', 0, 3, 8, 'charge', [{ type: 'direct_pressure', value: 2 }]),
+        damagedBackline,
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'damaged-backline')?.damageTaken).toBe(5);
+    expect(result.players.find((player) => player.seatNo === 1)?.playerHealth).toBe(25);
+    expect(result.replayEvents.find((event) => event.eventType === 'line_attack' && event.payload.cardInstanceId === 'card-pressure')?.payload).toMatchObject({
+      damage: 4,
+      backlinePressureDamage: 1,
+      weakpointDamage: 1
+    });
+    expect(result.replayEvents.find((event) => event.eventType === 'direct_attack' && event.payload.cardInstanceId === 'direct-pressure')?.payload).toMatchObject({
+      damage: 5,
+      directPressureDamage: 2
+    });
+  });
+
+  it('resolves combat-start draw, heal, guard support, and one-use attack support', () => {
+    const supportedAlly = runtimeCard('supported-ally', 0, 2, 7, 'sniper', [{ type: 'emergency_heal', value: 2 }]);
+    supportedAlly.damageTaken = 2;
+    const result = resolveArenaV2Turn({
+      matchId: 'match-support-keywords',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['battle-drawn', 'left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'supported-ally', position: { row: 'front', column: 0 }, createdTurn: 1 },
+            { cardInstanceId: 'support-source', position: { row: 'back', column: 0 }, createdTurn: 1 }
+          ]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'enemy', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        supportedAlly,
+        runtimeCard('support-source', 0, 0, 7, 'sniper', [
+          { type: 'guard_support' },
+          { type: 'attack_support' },
+          { type: 'battle_draw' }
+        ]),
+        runtimeCard('enemy', 1, 2, 10),
+        runtimeCard('battle-drawn', 0),
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.players.find((player) => player.seatNo === 0)?.handCardInstanceIds).toContain('battle-drawn');
+    expect(result.cardInstances.find((card) => card.id === 'supported-ally')?.damageTaken).toBe(1);
+    expect(result.cardInstances.find((card) => card.id === 'enemy')?.damageTaken).toBe(3);
+    expect(result.replayEvents.map((event) => event.eventType)).toEqual(expect.arrayContaining([
+      'battle_draw',
+      'emergency_heal',
+      'guard_support',
+      'attack_support',
+      'shield_absorb'
+    ]));
+    expect(result.replayEvents.find((event) => event.eventType === 'line_attack' && event.payload.cardInstanceId === 'supported-ally')?.payload).toMatchObject({
+      damage: 3,
+      attackSupportDamage: 1
+    });
+  });
+
+  it('deals area damage once to every other living enemy field card', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-area-damage',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0,
+          userId: 'user-1',
+          deckId: 'deck-1',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['left-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'area-source', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1,
+          userId: 'user-2',
+          deckId: 'deck-2',
+          playerHealth: 30,
+          handCardInstanceIds: [],
+          deckCardInstanceIds: ['right-draw'],
+          graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'primary-target', position: { row: 'front', column: 0 }, createdTurn: 1 },
+            { cardInstanceId: 'area-target-front', position: { row: 'front', column: 1 }, createdTurn: 1 },
+            { cardInstanceId: 'area-target-back', position: { row: 'back', column: 2 }, createdTurn: 1 }
+          ]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('area-source', 0, 1, 8, 'tech', [{ type: 'aoe_damage', value: 1 }]),
+        runtimeCard('primary-target', 1, 0, 8),
+        runtimeCard('area-target-front', 1, 0, 8),
+        runtimeCard('area-target-back', 1, 0, 8),
+        runtimeCard('left-draw', 0),
+        runtimeCard('right-draw', 1)
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'primary-target')?.damageTaken).toBe(1);
+    expect(result.cardInstances.find((card) => card.id === 'area-target-front')?.damageTaken).toBe(1);
+    expect(result.cardInstances.find((card) => card.id === 'area-target-back')?.damageTaken).toBe(1);
+    expect(result.replayEvents.filter((event) => event.eventType === 'aoe_damage').map((event) => event.payload.targetCardInstanceId)).toEqual([
+      'area-target-front',
+      'area-target-back'
+    ]);
   });
 
   it('increments fatigue damage by each empty-deck draw attempt', () => {
@@ -1229,6 +1594,275 @@ describe('arena v2 turn resolution', () => {
 
     expect(result.nextStatus).toBe('completed');
     expect(result.winnerUserId).toBe('user-1');
+  });
+
+  it('applies charge and guardian class passives to the first front-row card hit', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-charge-guardian',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'charge', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'guardian', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('charge', 0, 2, 8, 'charge'),
+        runtimeCard('guardian', 1, 0, 8, 'guardian')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'guardian')?.damageTaken).toBe(2);
+    expect(result.replayEvents.find((event) => event.eventType === 'line_attack' && event.payload.cardInstanceId === 'charge')?.payload)
+      .toMatchObject({ damage: 3, chargePassiveDamage: 1, healthDamage: 2, damageReduction: 1 });
+    expect(result.replayEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: 'damage_reduction', payload: expect.objectContaining({ reason: 'guardian_passive' }) })
+    ]));
+  });
+
+  it('keeps aim valuable while sniper adds one damage only to its first back-row card hit', () => {
+    const resolveSniperAttack = (keywords: Array<{ type: string }>) => resolveArenaV2Turn({
+      matchId: `match-class-sniper-${keywords.length ? 'aim' : 'plain'}`,
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'sniper', position: { row: 'back', column: 1 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'front-target', position: { row: 'front', column: 1 }, createdTurn: 1 },
+            { cardInstanceId: 'back-target', position: { row: 'back', column: 1 }, createdTurn: 1 }
+          ]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('sniper', 0, 2, 8, 'sniper', keywords),
+        runtimeCard('front-target', 1, 0, 8, 'sniper'),
+        runtimeCard('back-target', 1, 0, 8, 'sniper')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    const plainAttack = resolveSniperAttack([]).replayEvents.find((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'sniper'
+    ));
+    expect(plainAttack?.payload).toMatchObject({
+      targetCardInstanceId: 'front-target',
+      damage: 2,
+      sniperPassiveDamage: 0
+    });
+
+    const aimedAttack = resolveSniperAttack([{ type: 'aim' }]).replayEvents.find((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'sniper'
+    ));
+    expect(aimedAttack?.payload).toMatchObject({
+      targetCardInstanceId: 'back-target',
+      damage: 3,
+      sniperPassiveDamage: 1
+    });
+  });
+
+  it('redirects the first same-line ally health damage to a support class card', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-support',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'attacker', position: { row: 'front', column: 1 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'protected', position: { row: 'front', column: 1 }, createdTurn: 1 },
+            { cardInstanceId: 'support', position: { row: 'back', column: 1 }, createdTurn: 1 }
+          ]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('attacker', 0, 3, 8, 'sniper'),
+        runtimeCard('protected', 1, 0, 8, 'sniper'),
+        runtimeCard('support', 1, 0, 8, 'support')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'protected')?.damageTaken).toBe(2);
+    expect(result.cardInstances.find((card) => card.id === 'support')?.damageTaken).toBe(1);
+    expect(result.replayEvents.find((event) => event.eventType === 'support_redirect')?.payload)
+      .toMatchObject({
+        sourceCardInstanceId: 'attacker',
+        protectedCardInstanceId: 'protected',
+        targetCardInstanceId: 'support',
+        healthDamage: 1
+      });
+    const lineAttackIndex = result.replayEvents.findIndex((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'attacker'
+    ));
+    const redirectIndex = result.replayEvents.findIndex((event) => event.eventType === 'support_redirect');
+    expect(lineAttackIndex).toBeGreaterThanOrEqual(0);
+    expect(redirectIndex).toBeGreaterThan(lineAttackIndex);
+  });
+
+  it('counts support-redirected health damage as actual card damage for lifesteal', () => {
+    const lifestealAttacker = runtimeCard('lifesteal-attacker', 0, 1, 8, 'sniper', [{ type: 'lifesteal', value: 1 }]);
+    lifestealAttacker.damageTaken = 1;
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-support-lifesteal',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'lifesteal-attacker', position: { row: 'front', column: 1 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [
+            { cardInstanceId: 'protected', position: { row: 'front', column: 1 }, createdTurn: 1 },
+            { cardInstanceId: 'support', position: { row: 'back', column: 1 }, createdTurn: 1 }
+          ]
+        }
+      ],
+      cardInstances: [
+        lifestealAttacker,
+        runtimeCard('protected', 1, 0, 8, 'sniper'),
+        runtimeCard('support', 1, 0, 8, 'support')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.cardInstances.find((card) => card.id === 'protected')?.damageTaken).toBe(0);
+    expect(result.cardInstances.find((card) => card.id === 'support')?.damageTaken).toBe(1);
+    expect(result.cardInstances.find((card) => card.id === 'lifesteal-attacker')?.damageTaken).toBe(0);
+    expect(result.replayEvents.find((event) => event.eventType === 'drain')?.payload)
+      .toMatchObject({ cardInstanceId: 'lifesteal-attacker', heal: 1 });
+  });
+
+  it('makes a trick class first hit weaken a same-line back-row attacker', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-trick',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'trick', position: { row: 'front', column: 2 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'back-attacker', position: { row: 'back', column: 2 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('trick', 0, 1, 8, 'trick'),
+        runtimeCard('back-attacker', 1, 2, 8, 'sniper')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    const trickHitIndex = result.replayEvents.findIndex((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'trick'
+    ));
+    const trickPassiveIndex = result.replayEvents.findIndex((event) => event.eventType === 'trick_passive');
+    expect(trickPassiveIndex).toBeGreaterThan(trickHitIndex);
+    expect(result.cardInstances.find((card) => card.id === 'trick')?.damageTaken).toBe(1);
+    expect(result.replayEvents.find((event) => event.eventType === 'line_attack' && event.payload.cardInstanceId === 'back-attacker')?.payload.damage).toBe(1);
+  });
+
+  it('lets a tech class card block the first control keyword and receive the next one', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-tech',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'controller', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'tech', position: { row: 'front', column: 0 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('controller', 0, 1, 8, 'trick', [{ type: 'silence' }, { type: 'stun' }]),
+        runtimeCard('tech', 1, 1, 8, 'tech')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    expect(result.replayEvents.find((event) => event.eventType === 'tech_passive')?.payload)
+      .toMatchObject({ targetCardInstanceId: 'tech', blockedEffect: 'silence' });
+    expect(result.replayEvents.find((event) => event.eventType === 'silence' && event.payload.targetCardInstanceId === 'tech')).toBeUndefined();
+    expect(result.replayEvents.find((event) => event.eventType === 'stun' && event.payload.targetCardInstanceId === 'tech')).toBeDefined();
+    expect(result.replayEvents.find((event) => event.eventType === 'stun_skip' && event.payload.cardInstanceId === 'tech')).toBeDefined();
+  });
+
+  it('lets a tech class card block a trick class first-hit weaken after the hit animation', () => {
+    const result = resolveArenaV2Turn({
+      matchId: 'match-class-tech-trick',
+      mode: 'quick',
+      turnNo: 3,
+      seed: 'seed',
+      players: [
+        {
+          seatNo: 0, userId: 'user-1', deckId: 'deck-1', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'trick', position: { row: 'front', column: 2 }, createdTurn: 1 }]
+        },
+        {
+          seatNo: 1, userId: 'user-2', deckId: 'deck-2', playerHealth: 30,
+          handCardInstanceIds: [], deckCardInstanceIds: [], graveyardCardInstanceIds: [],
+          boardState: [{ cardInstanceId: 'tech', position: { row: 'back', column: 2 }, createdTurn: 1 }]
+        }
+      ],
+      cardInstances: [
+        runtimeCard('trick', 0, 1, 8, 'trick'),
+        runtimeCard('tech', 1, 2, 8, 'tech')
+      ],
+      actionsBySeatNo: { 0: [{ type: 'end' }], 1: [{ type: 'end' }] }
+    });
+
+    const trickHitIndex = result.replayEvents.findIndex((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'trick'
+    ));
+    const techPassiveIndex = result.replayEvents.findIndex((event) => (
+      event.eventType === 'tech_passive' && event.payload.blockedEffect === 'weaken'
+    ));
+    expect(techPassiveIndex).toBeGreaterThan(trickHitIndex);
+    expect(result.replayEvents.find((event) => event.eventType === 'trick_passive')).toBeUndefined();
+    expect(result.replayEvents.find((event) => (
+      event.eventType === 'line_attack' && event.payload.cardInstanceId === 'tech'
+    ))?.payload.damage).toBe(2);
   });
 
   it('uses larger direct attack damage as the sudden death loss candidate when both players are hit', () => {

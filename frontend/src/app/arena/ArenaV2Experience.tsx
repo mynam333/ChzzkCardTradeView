@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import type { ArenaV2MatchViewDto } from '@chikapo/arena-contract';
 import {
   Activity,
   AlertTriangle,
@@ -11,10 +12,12 @@ import {
   Check,
   Clock3,
   Crown,
+  Flag,
   Gauge,
   Hand,
   HeartPulse,
   Layers3,
+  LogIn,
   Move,
   Plus,
   RefreshCw,
@@ -66,6 +69,7 @@ import {
 } from './ArenaCard';
 import { ArenaEmotePieMenu } from './ArenaEmotePieMenu';
 import { ArenaQuickMatchFlow } from './ArenaQuickMatchFlow';
+import { ArenaSurrenderDialog } from './matches/ArenaSurrenderDialog';
 import { ArenaStreamerCardEditor } from './ArenaStreamerCardEditor';
 import { ArenaTooltip } from './ArenaTooltip';
 import type { ArenaSiteTab } from './types';
@@ -392,6 +396,18 @@ const formatMode = (mode: ArenaV2Deck['modeScope']) => {
   return '전체';
 };
 
+const arenaMatchStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    created: '경기 준비 중',
+    mulligan: '시작 손패 선택',
+    turn_planning: '행동 선택 중',
+    action_locked: '상대 행동 대기',
+    combat_resolving: '전투 진행 중',
+    turn_result: '전투 결과 확인'
+  };
+  return labels[String(status || '')] || '진행 중';
+};
+
 const seasonStatusLabel = (status?: string) => {
   const labels: Record<string, string> = {
     draft: '준비 중',
@@ -586,6 +602,9 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const [rewardState, setRewardState] = React.useState<any>(null);
   const [myStreamerCard, setMyStreamerCard] = React.useState<ArenaV2MyStreamerCard | null>(null);
   const [queueStatus, setQueueStatus] = React.useState<{ quick?: any; battleRoyale?: any }>({});
+  const [activeMatch, setActiveMatch] = React.useState<ArenaV2MatchViewDto | null>(null);
+  const [surrenderDialogOpen, setSurrenderDialogOpen] = React.useState(false);
+  const [surrenderingMatchId, setSurrenderingMatchId] = React.useState('');
   const [arenaCosmetics, setArenaCosmetics] = React.useState<ArenaCosmeticItem[]>([]);
   const [arenaAdminCosmeticItems, setArenaAdminCosmeticItems] = React.useState<ArenaCosmeticItem[]>([]);
   const [arenaCosmeticCounts, setArenaCosmeticCounts] = React.useState<Record<number, number>>({});
@@ -615,15 +634,19 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     name: '',
     startsAt: '',
     endsAt: '',
-    cardPoolVersion: 'cards-v1',
-    balanceVersion: 'balance-v1'
+    cardPoolVersion: 'cards-v2',
+    balanceVersion: 'balance-v2'
   });
 
   const boardCards = cards.slice(0, 6);
   const deckCount = selectedCardIds.length;
   const deckReady = deckCount >= 14 && deckCount <= 20;
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
+  const activeMatchSelf = activeMatch?.players.find((player) => player.seatNo === activeMatch.selfSeatNo);
+  const activeMatchOpponent = activeMatch?.players.find((player) => player.seatNo !== activeMatch.selfSeatNo);
+  const activeMatchCanSurrender = activeMatch?.mode === 'bot' || activeMatch?.mode === 'quick';
   const cardLoadSentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const activeMatchRequestIdRef = React.useRef(0);
   const deferredInventorySearch = React.useDeferredValue(inventorySearch);
   const selectedCardIdSet = React.useMemo(() => new Set(selectedCardIds), [selectedCardIds]);
   const availableInventoryClasses = React.useMemo(() => {
@@ -752,6 +775,21 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     setLoading(true);
     setNotice('');
     try {
+      const activeMatchRequestId = ++activeMatchRequestIdRef.current;
+      if (!user) {
+        setActiveMatch(null);
+      } else {
+        void fetchArenaJson('/arena/matches/active', 8_000)
+          .then((activeMatchJson) => {
+            if (activeMatchRequestIdRef.current === activeMatchRequestId) {
+              setActiveMatch(activeMatchJson?.match || null);
+            }
+          })
+          .catch(() => {
+            if (activeMatchRequestIdRef.current === activeMatchRequestId) setActiveMatch(null);
+          });
+      }
+
       const seasonJson = await fetchArenaJson('/arena/season/current');
       const nextSeason: ArenaV2Season | null = seasonJson?.season || null;
       setSeason(nextSeason);
@@ -970,6 +1008,10 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   };
 
   const startBotMatch = async () => {
+    if (activeMatch) {
+      setNotice('진행 중인 경기에 재접속하거나 항복한 뒤 새 대전을 시작할 수 있습니다.');
+      return;
+    }
     if (!selectedDeckId) {
       setNotice('봇전을 시작하려면 먼저 유효한 공식 덱이 필요합니다.');
       return;
@@ -995,7 +1037,33 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     }
   };
 
+  const surrenderActiveMatch = async () => {
+    if (!activeMatch || !activeMatchCanSurrender || surrenderingMatchId) return;
+    const matchId = activeMatch.id;
+    setSurrenderingMatchId(matchId);
+    try {
+      const res = await apiFetch(`/arena/matches/${encodeURIComponent(matchId)}/surrender`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'arena_home_surrender' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '항복을 처리하지 못했습니다.');
+      setSurrenderDialogOpen(false);
+      setActiveMatch(null);
+      toast('경기를 항복했습니다.', 'info');
+      await loadArenaV2();
+    } catch (error: unknown) {
+      toast(error instanceof Error ? error.message : '항복 처리 중 문제가 발생했습니다.', 'error');
+    } finally {
+      setSurrenderingMatchId('');
+    }
+  };
+
   const joinQueue = async (queue: 'quick' | 'battle_royale_8') => {
+    if (activeMatch) {
+      setNotice('진행 중인 경기에 재접속하거나 항복한 뒤 새 대전을 시작할 수 있습니다.');
+      return;
+    }
     if (!selectedDeckId) {
       setNotice('대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.');
       return;
@@ -1498,12 +1566,71 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
             </button>
           </ArenaTooltip>
           <ArenaTooltip data={arenaCoreTooltips.botMode} side="bottom">
-            <button type="button" onClick={startBotMatch} className="arena-v2-primary-button">
+            <button type="button" onClick={startBotMatch} className="arena-v2-primary-button" disabled={Boolean(activeMatch)}>
               <Bot className="h-4 w-4" /> 연습전 시작
             </button>
           </ArenaTooltip>
         </div>
       </section>
+
+      {activeMatch ? (
+        <section className="arena-v2-active-match" aria-label="진행 중인 경기">
+          <div className="arena-v2-active-match-icon" aria-hidden="true">
+            <Activity />
+          </div>
+          <div className="arena-v2-active-match-copy" aria-live="polite">
+            <span><i aria-hidden="true" /> 진행 중인 경기</span>
+            <h3>{formatMode(activeMatch.mode)}에 다시 들어갈 수 있습니다</h3>
+            <p>
+              {activeMatch.mode === 'battle_royale_8'
+                ? '진행 중인 8인전으로 돌아가 현재 라운드를 이어서 플레이하세요.'
+                : '이어서 플레이하거나 항복을 확정한 뒤 새 대전을 시작할 수 있습니다.'}
+            </p>
+          </div>
+          <div className="arena-v2-active-match-stats" aria-label="경기 상태">
+            <div>
+              <span>현재 단계</span>
+              <strong>{arenaMatchStatusLabel(activeMatch.status)}</strong>
+            </div>
+            <div>
+              <span>{activeMatch.mode === 'battle_royale_8' ? '라운드' : '진행 턴'}</span>
+              <strong>{activeMatch.mode === 'battle_royale_8' ? Math.max(1, activeMatch.roundNo) : Math.max(1, activeMatch.turnNo)}</strong>
+            </div>
+            <div>
+              <span>현재 체력</span>
+              <strong>나 {activeMatchSelf?.playerHealth ?? 30} · 상대 {activeMatchOpponent?.playerHealth ?? 30}</strong>
+            </div>
+          </div>
+          <div className="arena-v2-active-match-actions">
+            <button
+              type="button"
+              className="arena-v2-primary-button"
+              onClick={() => router.push(getArenaMatchHref(activeMatch.id))}
+            >
+              <LogIn className="h-4 w-4" /> 게임 재접속
+            </button>
+            {activeMatchCanSurrender ? (
+              <button
+                type="button"
+                className="arena-v2-danger-button"
+                onClick={() => setSurrenderDialogOpen(true)}
+              >
+                <Flag className="h-4 w-4" /> 항복
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {activeMatch && activeMatch.mode !== 'battle_royale_8' ? (
+        <ArenaSurrenderDialog
+          open={surrenderDialogOpen}
+          mode={activeMatch.mode}
+          busy={surrenderingMatchId === activeMatch.id}
+          onCancel={() => setSurrenderDialogOpen(false)}
+          onConfirm={() => void surrenderActiveMatch()}
+        />
+      ) : null}
 
       {notice ? (
         <div className="arena-v2-notice" role="status">
@@ -1591,12 +1718,18 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 seasonId={season?.id}
                 initialStatus={queueStatus.quick}
                 onMissingDeck={() => setNotice('빠른대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.')}
-                onBeforeSearch={() => releaseArenaQueueLocks({ quick: false, battleRoyale: true, reason: 'start_quick_match' })}
+                onBeforeSearch={() => {
+                  if (activeMatch) {
+                    setNotice('진행 중인 경기에 재접속하거나 항복한 뒤 새 대전을 시작할 수 있습니다.');
+                    return false;
+                  }
+                  return releaseArenaQueueLocks({ quick: false, battleRoyale: true, reason: 'start_quick_match' });
+                }}
                 onMatch={(matchId) => router.push(getArenaMatchHref(matchId))}
                 notify={(message, tone) => toast(message, tone)}
               />
               <ArenaTooltip data={arenaCoreTooltips.battleRoyaleMode} side="left">
-                <button type="button" onClick={() => joinQueue('battle_royale_8')}><Users className="h-4 w-4" /> 8인전</button>
+                <button type="button" onClick={() => joinQueue('battle_royale_8')} disabled={Boolean(activeMatch)}><Users className="h-4 w-4" /> 8인전</button>
               </ArenaTooltip>
             </div>
           </div>

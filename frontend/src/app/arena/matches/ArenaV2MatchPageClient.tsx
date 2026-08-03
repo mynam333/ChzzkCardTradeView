@@ -11,6 +11,7 @@ import {
   Clock3,
   Eye,
   FileClock,
+  Flag,
   Hand,
   Lock,
   Move,
@@ -36,6 +37,7 @@ import { ArenaTooltip } from '../ArenaTooltip';
 import type { ArenaSiteTab } from '../types';
 import styles from '../ArenaV2Experience.module.css';
 import { ArenaMatchResultModal } from './ArenaMatchResultModal';
+import { ArenaSurrenderDialog } from './ArenaSurrenderDialog';
 import {
   buildReplayPresentationMatch,
   calculateArenaTurnActionCost,
@@ -232,6 +234,8 @@ const replayEventDuration = (event?: ReplayEvent) => {
   if (!event) return 0;
   if (event.eventType === 'line_attack' || event.eventType === 'direct_attack' || event.eventType === 'card_attack') return 820;
   if (event.eventType === 'card_defeated' || event.eventType === 'revive') return 720;
+  if (event.eventType === 'damage_reduction') return 620;
+  if (['battle_draw', 'emergency_heal', 'guard_support', 'attack_support', 'graveyard_recover'].includes(event.eventType)) return 720;
   if (event.eventType === 'fatigue') return 620;
   return 620;
 };
@@ -263,14 +267,15 @@ const getReplayEventCardIds = (replayEvent: ReplayEvent) => {
   const payload = replayEvent.payload || {};
   const isTargetOnlyEvent = replayEvent.eventType === 'card_defeated'
     || replayEvent.eventType === 'revive'
-    || replayEvent.eventType === 'drain';
+    || replayEvent.eventType === 'drain'
+    || replayEvent.eventType === 'damage_reduction';
   return {
     attackerId: isTargetOnlyEvent
       ? ''
       : replayPayloadString(payload, ['attackerCardInstanceId', 'sourceCardInstanceId', 'attackerInstanceId', 'cardInstanceId']),
     targetId: isTargetOnlyEvent
       ? replayPayloadString(payload, ['targetCardInstanceId', 'targetInstanceId', 'defeatedCardInstanceId', 'cardInstanceId'])
-      : replayPayloadString(payload, ['targetCardInstanceId', 'targetInstanceId', 'defeatedCardInstanceId'])
+      : replayPayloadString(payload, ['targetCardInstanceId', 'supportedCardInstanceId', 'targetInstanceId', 'defeatedCardInstanceId'])
   };
 };
 
@@ -360,7 +365,17 @@ const eventLabel = (eventType?: string) => {
     direct_attack: '직접 타격',
     card_attack: '카드 공격',
     shield_absorb: '보호막 흡수',
+    damage_reduction: '피해 감소',
+    aoe_damage: '광역 피해',
+    battle_draw: '전투 드로우',
+    emergency_heal: '응급 회복',
+    guard_support: '보호 지원',
+    attack_support: '공격 지원',
+    support_redirect: '지원 피해 분담',
+    trick_passive: '기만 약화',
+    tech_passive: '기술 방해 무효',
     card_defeated: '카드 처치',
+    graveyard_recover: '묘지 회수',
     turn_start: '턴 시작',
     turn_end: '턴 종료',
     fatigue: '피로 피해',
@@ -561,11 +576,13 @@ const PixiBattleLayer: React.FC<{
         const { attackerId, targetId } = getReplayEventCardIds(replayEvent);
         const sourceCard = attackerId ? cardPositionsRef.current[attackerId] : undefined;
         const targetCard = targetId ? cardPositionsRef.current[targetId] : undefined;
-        const targetSeatNo = payloadOptionalNumber(payload, ['targetSeatNo', 'seatNo'])
-          ?? targetCard?.ownerSeatNo;
+        const explicitTargetSeatNo = payloadOptionalNumber(payload, ['targetSeatNo', 'seatNo']);
         const sourceSeatNo = payloadOptionalNumber(payload, ['attackerSeatNo', 'sourceSeatNo'])
           ?? sourceCard?.ownerSeatNo
-          ?? (targetSeatNo === 0 ? 1 : targetSeatNo === 1 ? 0 : undefined);
+          ?? (explicitTargetSeatNo === 0 ? 1 : explicitTargetSeatNo === 1 ? 0 : undefined);
+        const targetSeatNo = explicitTargetSeatNo
+          ?? targetCard?.ownerSeatNo
+          ?? (replayEvent.eventType === 'battle_draw' ? sourceSeatNo : undefined);
         const sourcePosition = payloadPosition(payload, ['sourcePosition', 'attackerPosition'])
           ?? ((payload.row === 'front' || payload.row === 'back') && Number.isInteger(Number(payload.column))
             ? { row: payload.row, column: Number(payload.column) as ArenaV2BoardPositionDto['column'] }
@@ -675,10 +692,11 @@ const PixiBattleLayer: React.FC<{
           ? 0.9
           : Math.max(0, Math.min(1, age / 0.1, (1 - age) / 0.16));
         const pulse = prefersReducedMotion ? 0.86 : 0.72 + Math.sin(age * Math.PI * 4) * 0.18;
-        const isPositive = ['drain', 'revive', 'residue', 'graveyard_recover'].includes(replayEvent.eventType);
+        const isPositive = ['drain', 'revive', 'residue', 'graveyard_recover', 'battle_draw', 'emergency_heal', 'attack_support'].includes(replayEvent.eventType);
         const isDefeat = replayEvent.eventType === 'card_defeated';
-        const isShield = replayEvent.eventType === 'shield_absorb' || replayEvent.eventType === 'residue';
-        const color = isPositive ? 0x27ae60 : isDefeat ? 0xff456b : isShield ? 0x00a7c7 : replayEvent.eventType === 'direct_attack' ? 0xff8a34 : 0xff456b;
+        const isShield = ['shield_absorb', 'residue', 'guard_support', 'damage_reduction'].includes(replayEvent.eventType);
+        const isControl = ['trick_passive', 'tech_passive'].includes(replayEvent.eventType);
+        const color = isPositive ? 0x27ae60 : isDefeat ? 0xff456b : isShield ? 0x00a7c7 : isControl ? 0x7657d6 : replayEvent.eventType === 'direct_attack' ? 0xff8a34 : 0xff456b;
 
         if (from && to) {
           const vectorX = to.x - from.x;
@@ -995,6 +1013,8 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const [serverClockOffsetMs, setServerClockOffsetMs] = React.useState(0);
   const [fallbackPlanningStartsAt, setFallbackPlanningStartsAt] = React.useState<number | null>(null);
   const [notice, setNotice] = React.useState('');
+  const [surrenderDialogOpen, setSurrenderDialogOpen] = React.useState(false);
+  const [surrendering, setSurrendering] = React.useState(false);
   const [emoteSlots, setEmoteSlots] = React.useState<Array<ArenaEmoteItem | null>>(Array(8).fill(null));
   const [emoteLoadoutStatus, setEmoteLoadoutStatus] = React.useState<ArenaEmoteLoadoutStatus>('loading');
   const [emoteWheel, setEmoteWheel] = React.useState<ArenaEmoteWheel>(null);
@@ -1007,6 +1027,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const resolvedMatchIdRef = React.useRef(resolvedMatchId);
   const matchRef = React.useRef<ArenaV2MatchViewDto | null>(null);
   const botAbandonRequestRef = React.useRef('');
+  const surrenderRequestRef = React.useRef('');
 
   React.useLayoutEffect(() => {
     if (resolvedMatchIdRef.current === resolvedMatchId) return;
@@ -1192,6 +1213,41 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const leaveMatchToArenaPlay = React.useCallback(async () => {
     if (await abandonBotMatch('leave_match')) router.push('/arena/play');
   }, [abandonBotMatch, router]);
+
+  const surrenderMatch = React.useCallback(async () => {
+    const current = matchRef.current;
+    if (
+      mode !== 'match'
+      || !current
+      || (current.mode !== 'bot' && current.mode !== 'quick')
+      || current.status === 'completed'
+      || current.status === 'cancelled'
+      || surrenderRequestRef.current === current.id
+    ) return;
+
+    surrenderRequestRef.current = current.id;
+    setSurrendering(true);
+    setNotice('');
+    try {
+      const res = await apiFetch(`/arena/matches/${encodeURIComponent(current.id)}/surrender`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'in_match_surrender' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '항복을 처리하지 못했습니다.');
+      if (!json?.match) throw new Error('종료된 경기 정보를 확인하지 못했습니다.');
+
+      matchRef.current = json.match;
+      setMatch(json.match);
+      setSurrenderDialogOpen(false);
+      toast('항복했습니다. 경기 결과를 확인해 주세요.', 'info');
+    } catch (error: unknown) {
+      surrenderRequestRef.current = '';
+      setNotice(errorMessage(error, '항복을 처리하지 못했습니다.'));
+    } finally {
+      setSurrendering(false);
+    }
+  }, [mode, toast]);
 
   React.useEffect(() => () => {
     const current = matchRef.current;
@@ -1704,6 +1760,11 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
 
   const handIds = canMulligan ? (self?.handCardInstanceIds || []) : virtualSelf.hand;
   const hand = handIds.map((id) => instanceById.get(id)).filter(Boolean) as CardInstance[];
+  const canSurrenderMatch = mode === 'match'
+    && Boolean(match)
+    && (match?.mode === 'bot' || match?.mode === 'quick')
+    && match?.status !== 'completed'
+    && match?.status !== 'cancelled';
   const title = mode === 'spectate' ? '아레나 관전' : mode === 'settings' ? '아레나 관리' : '아레나 매치';
   const subtitle = mode === 'spectate'
     ? '진행된 전투 흐름을 한눈에 확인합니다.'
@@ -1786,6 +1847,26 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
                   aria-label="이모트 파이 메뉴 열기"
                 >
                   <Sparkles className="h-4 w-4" /> 이모트
+                </button>
+              </ArenaTooltip>
+            ) : null}
+            {canSurrenderMatch ? (
+              <ArenaTooltip data={{
+                eyebrow: '경기 종료',
+                title: '항복',
+                description: match?.mode === 'quick'
+                  ? '현재 경기를 패배로 끝내고 상대의 승리와 빠른대전 점수를 즉시 확정합니다.'
+                  : '진행 중인 연습전을 즉시 패배로 종료합니다.',
+                note: '확인 창에서 항복을 확정하기 전에는 경기가 계속 진행됩니다.',
+                tone: 'coral'
+              }} side="bottom">
+                <button
+                  type="button"
+                  className="arena-v2-danger-button"
+                  onClick={() => setSurrenderDialogOpen(true)}
+                  aria-label="경기 항복"
+                >
+                  <Flag className="h-4 w-4" /> 항복
                 </button>
               </ArenaTooltip>
             ) : null}
@@ -2006,6 +2087,15 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
             }) : <p>현재 표시할 손패가 없습니다.</p>}
           </div>
         </section>
+        {match && (match.mode === 'bot' || match.mode === 'quick') ? (
+          <ArenaSurrenderDialog
+            open={surrenderDialogOpen}
+            mode={match.mode}
+            busy={surrendering}
+            onCancel={() => setSurrenderDialogOpen(false)}
+            onConfirm={() => void surrenderMatch()}
+          />
+        ) : null}
         <ArenaMatchResultModal
           open={replayResultReady}
           outcome={resultOutcome}

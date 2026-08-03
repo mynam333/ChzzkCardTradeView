@@ -1,7 +1,9 @@
 /* ============================================================
-   낙엽 (Autumn) — 단풍/참나무 잎 프레임 + 2겹 가장자리 낙엽 + 따뜻한 광택
+   동판 식물표본 (Autumn Copper Herbarium)
+   - 산화 동판과 압인 식물표본, 말린 단풍·참나무 잎·도토리
+   - 가장자리 파티클은 160px 타일과 경계 쌍으로 무단절 순환
+   - SVG/SMIL의 엽맥 열광·잎 회전·호박 불씨와 CSS 낙엽 순환을 결합
    적용 클래스: cb-autumn
-   ▶ 파티클은 --em 마스크로 가장자리에 모여, 카드 중앙~상단(얼굴)을 비웁니다.
    ============================================================ */
 .cb-autumn {
   position: absolute;
@@ -10,43 +12,117 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+
+  --autumn-edge-mask: radial-gradient(77% 68% at 50% 45%, transparent 43%, rgba(0, 0, 0, .28) 59%, #000 81%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  /* 가장자리 가중 마스크: 중앙 상단을 비우고 테두리 쪽만 남김 */
-  --em: radial-gradient(78% 70% at 50% 36%, transparent 40%, #000 80%);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ag' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f6c062'/%3E%3Cstop offset='.5' stop-color='%23c1622a'/%3E%3Cstop offset='1' stop-color='%237f3413'/%3E%3C/linearGradient%3E%3CradialGradient id='glow' cx='50%25' cy='100%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23ffb55a' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23ffb55a' stop-opacity='0'/%3E%3C/radialGradient%3E%3Cg id='mp'%3E%3Cpath d='M0,-9 L1.6,-3.6 L6,-5.2 L3.4,-0.8 L8,0.8 L3.4,1.6 L5,7 L1,3.6 L0,8.4 L-1,3.6 L-5,7 L-3.4,1.6 L-8,0.8 L-3.4,-0.8 L-6,-5.2 L-1.6,-3.6 Z'/%3E%3Crect x='-0.4' y='8' width='0.8' height='3.6'/%3E%3Cg stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.45'%3E%3Cpath d='M0,7 L0,-7'/%3E%3Cpath d='M0,0 L4.6,-1.2'/%3E%3Cpath d='M0,0 L-4.6,-1.2'/%3E%3Cpath d='M0,3.4 L3,5.4'/%3E%3Cpath d='M0,3.4 L-3,5.4'/%3E%3C/g%3E%3C/g%3E%3Cg id='oak'%3E%3Cpath d='M0,-8 C2,-7 2,-5 1,-4 C3,-4 3,-2 1,-1 C3,-1 3,1 1,2 C2,3 2,5 0,7 C-2,5 -2,3 -1,2 C-3,1 -3,-1 -1,-1 C-3,-2 -3,-4 -1,-4 C-2,-5 -2,-7 0,-8 Z'/%3E%3Cpath d='M0,6 L0,-6' stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.4'/%3E%3C/g%3E%3C/defs%3E%3Crect x='0' y='0' width='100' height='160' fill='url(%23glow)'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23ag)' stroke-width='3'/%3E%3Crect x='7' y='7' width='86' height='146' rx='1' ry='1' fill='none' stroke='%23e0973f' stroke-width='.9' opacity='.65'/%3E%3Cuse href='%23mp' transform='translate(13,13) rotate(-28) scale(1.2)' fill='%23d2691e'/%3E%3Cuse href='%23oak' transform='translate(24,11) rotate(30) scale(.9)' fill='%23b8541c'/%3E%3Cuse href='%23mp' transform='translate(87,13) rotate(34) scale(1.1)' fill='%23c1622a'/%3E%3Cuse href='%23oak' transform='translate(76,12) rotate(-26) scale(.85)' fill='%23a8431a'/%3E%3Cuse href='%23mp' transform='translate(13,147) rotate(206) scale(1.05)' fill='%23cf7a2d'/%3E%3Cuse href='%23mp' transform='translate(87,147) rotate(150) scale(1.15)' fill='%23a8431a'/%3E%3C/svg%3E");
-  box-shadow: 0 0 13px rgba(193,98,42,.45), inset 0 -14px 18px rgba(255,150,60,.22), inset 0 0 12px rgba(120,55,22,.3);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='aut-copper' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23261717'/%3E%3Cstop offset='.16' stop-color='%23d89a58'/%3E%3Cstop offset='.34' stop-color='%23733c25'/%3E%3Cstop offset='.58' stop-color='%23f2bd70'/%3E%3Cstop offset='.8' stop-color='%238b4528'/%3E%3Cstop offset='1' stop-color='%23311c19'/%3E%3C/linearGradient%3E%3ClinearGradient id='aut-patina' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop stop-color='%23c7b98a'/%3E%3Cstop offset='.2' stop-color='%234f887a'/%3E%3Cstop offset='.46' stop-color='%23213f3b'/%3E%3Cstop offset='.72' stop-color='%23a86f42'/%3E%3Cstop offset='1' stop-color='%234b2820'/%3E%3C/linearGradient%3E%3ClinearGradient id='aut-maple-fill' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23f3b34f'/%3E%3Cstop offset='.28' stop-color='%23b85027'/%3E%3Cstop offset='.68' stop-color='%23682020'/%3E%3Cstop offset='1' stop-color='%23d17832'/%3E%3C/linearGradient%3E%3ClinearGradient id='aut-oak-fill' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23d8a34b'/%3E%3Cstop offset='.38' stop-color='%23876a2c'/%3E%3Cstop offset='.72' stop-color='%234e5c2d'/%3E%3Cstop offset='1' stop-color='%23a95a2e'/%3E%3C/linearGradient%3E%3CradialGradient id='aut-acorn-fill' cx='.32' cy='.22' r='.82'%3E%3Cstop stop-color='%23f4c982'/%3E%3Cstop offset='.34' stop-color='%23a9602f'/%3E%3Cstop offset='1' stop-color='%23401e18'/%3E%3C/radialGradient%3E%3Cg id='aut-maple'%3E%3Cpath d='M0-10L2.1-4.6 6.4-6.3 4.3-1.8 9-.4 4.8 1.2 6.3 6.1 1.7 3.2 0 9-1.7 3.2-6.3 6.1-4.8 1.2-9-.4-4.3-1.8-6.4-6.3-2.1-4.6Z' fill='url(%23aut-maple-fill)' stroke='%2350201c' stroke-width='.72' stroke-linejoin='round'/%3E%3Cpath d='M0 8.8V-8.2M0 1.2L5.3-4.7M0 1.2L-5.3-4.7M0 3.1L5.1 4.8M0 3.1L-5.1 4.8' fill='none' stroke='%23f0bd72' stroke-width='.42' stroke-linecap='round' opacity='.62'/%3E%3Cpath d='M0 8.5L.25 12.1' fill='none' stroke='%23552a21' stroke-width='.9' stroke-linecap='round'/%3E%3C/g%3E%3Cg id='aut-oak'%3E%3Cpath d='M0-10C3-9 4-7 2.2-5.8 5-5.3 5.8-2.8 3.1-1.4 6-.1 5.6 2.5 2.7 3.2 4.3 5.2 2.6 8 0 9-2.6 8-4.3 5.2-2.7 3.2-5.6 2.5-6-.1-3.1-1.4-5.8-2.8-5-5.3-2.2-5.8-4-7-3-9 0-10Z' fill='url(%23aut-oak-fill)' stroke='%23442b1b' stroke-width='.7'/%3E%3Cpath d='M0 9V-8.5M0-4.8L2.7-6.3M0-2L-3.3-3.7M0 1L3.6-.8M0 4L-3.1 2.4' fill='none' stroke='%23e8b85f' stroke-width='.4' stroke-linecap='round' opacity='.58'/%3E%3Cpath d='M0 8.4L-.3 11.4' fill='none' stroke='%23432a1b' stroke-width='.86' stroke-linecap='round'/%3E%3C/g%3E%3Cg id='aut-acorn'%3E%3Cpath d='M-3.8-1.2C-3.4-5.6 3.2-5.9 3.8-1.2 3.5 4.2 1.2 7 0 8.2-1.3 7-3.6 4.1-3.8-1.2Z' fill='url(%23aut-acorn-fill)' stroke='%23452218' stroke-width='.72'/%3E%3Cpath d='M-4.4-1.5Q0-5 4.4-1.5L3.4.8Q0-1.1-3.4.8Z' fill='%23604727' stroke='%23351e18' stroke-width='.58'/%3E%3Cpath d='M-3.1-1.7L-1.8-.1M-.8-3L.4-.7M1.6-2.9L2.8-.8' fill='none' stroke='%23d8a65c' stroke-width='.38' opacity='.72'/%3E%3Cpath d='M.4-4.2C.2-6.1 1.3-7.4 2.2-8.1' fill='none' stroke='%2342281d' stroke-width='.8' stroke-linecap='round'/%3E%3C/g%3E%3C/defs%3E%3Crect x='1.1' y='1.1' width='97.8' height='157.8' rx='4.26' ry='4.26' fill='none' stroke='%23211617' stroke-width='3.1'/%3E%3Crect x='2.2' y='2.2' width='95.6' height='155.6' rx='3.16' ry='3.16' fill='none' stroke='url(%23aut-copper)' stroke-width='2.2'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.36' ry='2.36' fill='none' stroke='url(%23aut-patina)' stroke-width='.9'/%3E%3Crect x='4.7' y='4.7' width='90.6' height='150.6' rx='.66' ry='.66' fill='none' stroke='%234a2b22' stroke-width='1.7'/%3E%3Crect x='5.15' y='5.15' width='89.7' height='149.7' rx='.21' ry='.21' fill='none' stroke='%23e0ac65' stroke-width='.3' opacity='.7' stroke-dasharray='1.2 1.6'/%3E%3Cpath d='M5.4 25L11.2 18.4 17.8 5.4M94.6 26L88.8 19.3 82.1 5.4M5.4 135L11.2 141.6 17.8 154.6M94.6 134L88.8 140.7 82.1 154.6' fill='none' stroke='url(%23aut-copper)' stroke-width='1.05'/%3E%3Cpath d='M5.5 37H10.2M5.5 51H9.1M5.5 65H10.2M5.5 95H10.2M5.5 109H9.1M5.5 123H10.2M94.5 37H89.8M94.5 51H90.9M94.5 65H89.8M94.5 95H89.8M94.5 109H90.9M94.5 123H89.8' stroke='%23966a43' stroke-width='.52' opacity='.78'/%3E%3Cuse href='%23aut-maple' transform='translate(14.5 15.5) rotate(-24) scale(.7)'/%3E%3Cuse href='%23aut-oak' transform='translate(87 15.5) rotate(26) scale(.6)'/%3E%3Cuse href='%23aut-oak' transform='translate(13.3 144.2) rotate(158) scale(.55)'/%3E%3Cuse href='%23aut-maple' transform='translate(86.3 144.2) rotate(204) scale(.62)'/%3E%3Cg transform='translate(89 131) rotate(17) scale(.62)'%3E%3Cuse href='%23aut-acorn' transform='translate(-3 0) rotate(-16)'/%3E%3Cuse href='%23aut-acorn' transform='translate(3.5 2.6) rotate(18) scale(.82)'/%3E%3Cpath d='M-1-7C-1-10-4-11-6-12M1-7C3-10 5-10 7-11' fill='none' stroke='%23533625' stroke-width='.8' stroke-linecap='round'/%3E%3C/g%3E%3Cpath d='M3.1 79.9L7.1 76.7 10.7 80 7.1 83.3ZM96.9 79.9L92.9 76.7 89.3 80 92.9 83.3ZM46.4 3L50 7.1 53.6 3 50 .8ZM46.4 157L50 152.9 53.6 157 50 159.2Z' fill='%23c99050' stroke='%23321e1a' stroke-width='.58'/%3E%3Cpath d='M8 31C14 27 17 22 18 17M92 129C86 133 83 138 82 143' fill='none' stroke='%234b6b4f' stroke-width='.7' stroke-linecap='round' opacity='.72'/%3E%3Cg aria-hidden='true' pointer-events='none'%3E%3Cpath d='M5.4 25.5C8.1 21.8 10.8 19.2 15 17.4M8.2 23.7l-1.5-4.1M11.2 20.8l3.5 1.2' fill='none' stroke='%23ffd88a' stroke-width='.44' stroke-linecap='round' opacity='.62'%3E%3Canimate id='autumn-smil-vein-glow' attributeName='stroke-opacity' values='.12;1;.12' dur='4.8s' begin='-.7s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3Canimate id='autumn-smil-vein-width' attributeName='stroke-width' values='.44;.82;.44' dur='6.1s' begin='-2.2s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3C/path%3E%3Cg transform='translate(89 15) scale(.32)' opacity='.76'%3E%3Cpath d='M0 7C-5.6 3.5-7.2-2.2-2.7-8.1L0-12l2.7 3.9C7.2-2.2 5.6 3.5 0 7Z' fill='%23b96a20' stroke='%23ffe2a0' stroke-width='.8'/%3E%3Cpath d='M0 6V-9M0-2l-3-3M0 1l3-3' fill='none' stroke='%23ffd98b' stroke-width='.55'/%3E%3CanimateTransform id='autumn-smil-leaf-burnished-turn' attributeName='transform' type='rotate' additive='sum' values='-16 0 0;18 0 0;-16 0 0' dur='6.4s' begin='-2.1s' calcMode='spline' keyTimes='0;.5;1' keySplines='.42 .02 .58 .98;.42 .02 .58 .98' repeatCount='indefinite'/%3E%3Canimate id='autumn-smil-leaf-light' attributeName='opacity' values='.5;1;.5' dur='5.2s' begin='-3.4s' calcMode='spline' keyTimes='0;.5;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3C/g%3E%3Cpath d='M7 136l3.2-2.5 3.5 1.7-1.2 4.1-3.8.8Z' fill='%23f0a13d' stroke='%23ffe0a0' stroke-width='.38' opacity='.5'%3E%3Canimate id='autumn-smil-amber-spark' attributeName='fill-opacity' values='.08;1;.08' dur='3.6s' begin='-1.4s' calcMode='spline' keyTimes='0;.46;1' keySplines='.36 .05 .64 .95;.36 .05 .64 .95' repeatCount='indefinite'/%3E%3Canimate id='autumn-smil-amber-color' attributeName='fill' values='%23d85f1e;%23ffd36f;%23d85f1e' dur='5.3s' begin='-2.7s' calcMode='spline' keyTimes='0;.5;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3C/path%3E%3Cpath d='M94.2 51.5C90.8 58.2 91.8 66.7 94.4 73.1M93.5 56.1l-2.3 2.6M93.2 65.8l2 2.4' fill='none' stroke='%23dc8b35' stroke-width='.52' stroke-linecap='round' stroke-dasharray='2.6 2.1' opacity='.58'%3E%3Canimate id='autumn-smil-copper-heat-trace' attributeName='stroke-dashoffset' values='0;-11.2;0' dur='7.2s' begin='-3.2s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3Canimate id='autumn-smil-copper-trace-light' attributeName='stroke-opacity' values='.16;1;.16' dur='5.9s' begin='-1.3s' calcMode='spline' keyTimes='0;.5;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3C/path%3E%3C/g%3E%3C/svg%3E");
+
+  box-shadow:
+    0 0 11px rgba(177, 92, 43, .32),
+    0 0 22px rgba(79, 122, 102, .13),
+    inset 0 0 9px rgba(238, 178, 98, .2),
+    inset 0 0 19px rgba(38, 18, 16, .58);
+  animation: autumn-copper-breathe 7.1s ease-in-out infinite;
 }
-/* 가까운 낙엽 (크고 빠름) */
-.cb-autumn::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-repeat: repeat;
-  background-size: 100% 220px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 220'%3E%3Cdefs%3E%3Cg id='l'%3E%3Cpath d='M0,-9 L1.6,-3.6 L6,-5.2 L3.4,-0.8 L8,0.8 L3.4,1.6 L5,7 L1,3.6 L0,8.4 L-1,3.6 L-5,7 L-3.4,1.6 L-8,0.8 L-3.4,-0.8 L-6,-5.2 L-1.6,-3.6 Z'/%3E%3Cpath d='M0,7 L0,-7' stroke='%235a2a10' stroke-width='.5' fill='none' opacity='.4'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23l' transform='translate(10,28) rotate(18) scale(1.05)' fill='%23d2691e'/%3E%3Cuse href='%23l' transform='translate(90,66) rotate(-40) scale(.9)' fill='%23b8541c'/%3E%3Cuse href='%23l' transform='translate(7,128) rotate(65) scale(1.05)' fill='%23e0973f'/%3E%3Cuse href='%23l' transform='translate(93,104) rotate(150) scale(.85)' fill='%23a8431a'/%3E%3Cuse href='%23l' transform='translate(14,186) rotate(-12) scale(1)' fill='%23cf7a2d'/%3E%3Cuse href='%23l' transform='translate(86,200) rotate(205) scale(.82)' fill='%23c1622a'/%3E%3C/svg%3E");
-  animation: autumn-fall 8.5s linear infinite, autumn-sway 2.8s ease-in-out infinite alternate;
-}
-/* 먼 낙엽 (작고 느림, 흐림) */
+
 .cb-autumn::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
-  opacity: .5;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-repeat: repeat;
-  background-size: 100% 260px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 260'%3E%3Cdefs%3E%3Cpath id='lf' d='M0,-7 L1.2,-2.8 L4.6,-4 L2.6,-0.6 L6.2,0.6 L2.6,1.2 L3.8,5.4 L0.8,2.8 L0,6.4 L-0.8,2.8 L-3.8,5.4 L-2.6,1.2 L-6.2,0.6 L-2.6,-0.6 L-4.6,-4 L-1.2,-2.8 Z'/%3E%3C/defs%3E%3Cuse href='%23lf' transform='translate(12,24) rotate(80) scale(.6)' fill='%23b8541c'/%3E%3Cuse href='%23lf' transform='translate(90,72) rotate(-60) scale(.55)' fill='%23cf7a2d'/%3E%3Cuse href='%23lf' transform='translate(8,138) rotate(15) scale(.6)' fill='%23a8431a'/%3E%3Cuse href='%23lf' transform='translate(94,196) rotate(130) scale(.5)' fill='%23d2691e'/%3E%3Cuse href='%23lf' transform='translate(16,224) rotate(-30) scale(.58)' fill='%23c1622a'/%3E%3C/svg%3E");
-  animation: autumn-fall-far 13s linear infinite, autumn-sway-far 4.4s ease-in-out infinite alternate;
+  -webkit-mask: var(--autumn-edge-mask);
+  mask: var(--autumn-edge-mask);
+  mix-blend-mode: soft-light;
+  background-repeat: no-repeat;
+  background-size: 54% 47%, 49% 44%, 48% 48%, 52% 46%, 100% 100%;
+  background-position: 4% 12%, 97% 18%, 2% 91%, 96% 86%, 50% 48%;
+  background-image:
+    radial-gradient(ellipse, rgba(207, 87, 35, .62) 0, rgba(104, 34, 25, .2) 46%, transparent 74%),
+    radial-gradient(ellipse, rgba(74, 142, 119, .54) 0, rgba(25, 74, 68, .18) 47%, transparent 74%),
+    radial-gradient(ellipse, rgba(239, 162, 66, .5) 0, rgba(116, 61, 26, .15) 46%, transparent 73%),
+    radial-gradient(ellipse, rgba(112, 43, 39, .48) 0, rgba(73, 30, 32, .14) 47%, transparent 74%),
+    conic-gradient(from 206deg at 50% 49%, transparent 0 55deg, rgba(226, 157, 82, .11) 78deg, transparent 106deg 194deg, rgba(58, 125, 105, .1) 226deg, transparent 257deg 326deg, rgba(169, 70, 39, .09) 344deg, transparent 360deg);
+  opacity: .62;
+  filter: saturate(1.16) contrast(1.08);
+  transform-origin: 49% 48%;
+  animation: autumn-patina-current 18.4s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-@keyframes autumn-fall { from { background-position-y: 0; } to { background-position-y: 220px; } }
-@keyframes autumn-sway { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
-@keyframes autumn-fall-far { from { background-position-y: 0; } to { background-position-y: 260px; } }
-@keyframes autumn-sway-far { from { transform: translateX(4%); } to { transform: translateX(-4%); } }
+
+.cb-autumn::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--autumn-edge-mask);
+  mask: var(--autumn-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: repeat;
+  background-size: 100% 160px;
+  background-position: 0 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3Cg id='aut-fall-maple'%3E%3Cpath d='M0-9L1.9-4.1 5.8-5.7 3.9-1.6 8-.3 4.2 1 5.7 5.4 1.5 2.8 0 8-1.5 2.8-5.7 5.4-4.2 1-8-.3-3.9-1.6-5.8-5.7-1.9-4.1Z' fill='%23c4582d' stroke='%23662622' stroke-width='.7'/%3E%3Cpath d='M0 7V-7M0 .8L4.7-4M0 .8L-4.7-4M0 2.8L4.2 4.1M0 2.8L-4.2 4.1' fill='none' stroke='%23f3bd70' stroke-width='.42' opacity='.7'/%3E%3Cpath d='M0 7L.2 10' stroke='%23652f24' stroke-width='.8'/%3E%3C/g%3E%3Cg id='aut-fall-oak'%3E%3Cpath d='M0-8C2.5-7.4 3.2-5.5 1.8-4.5 4.1-4.1 4.6-2 2.4-1 4.8 0 4.4 2.1 2.1 2.6 3.4 4.2 2 6.4 0 7.2-2 6.4-3.4 4.2-2.1 2.6-4.4 2.1-4.8 0-2.4-1-4.6-2-4.1-4.1-1.8-4.5-3.2-5.5-2.5-7.4 0-8Z' fill='%238c6f31' stroke='%23452d20' stroke-width='.65'/%3E%3Cpath d='M0 7V-6.7M0-3.6L2.4-4.8M0-.8L-2.7-2M0 2L2.6.7M0 4.3L-2.3 3.2' fill='none' stroke='%23e9b45e' stroke-width='.38' opacity='.66'/%3E%3C/g%3E%3Cg id='aut-fall-acorn'%3E%3Cpath d='M-3-1C-2.8-4.4 2.6-4.5 3-1 2.7 3.1 1 5.6 0 6.5-1 5.6-2.8 3.1-3-1Z' fill='%23b56a34' stroke='%2341251d' stroke-width='.65'/%3E%3Cpath d='M-3.5-1.2Q0-4 3.5-1.2L2.7.7Q0-.8-2.7.7Z' fill='%2369562c' stroke='%23342119' stroke-width='.5'/%3E%3Cpath d='M-2.4-1.4L-1.2-.1M-.4-2.5L.6-.5M1.4-2.2L2.3-.6' stroke='%23e0ad64' stroke-width='.34'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23aut-fall-maple' transform='translate(8 0) rotate(18) scale(.28)'/%3E%3Cuse href='%23aut-fall-maple' transform='translate(8 160) rotate(18) scale(.28)'/%3E%3Cuse href='%23aut-fall-oak' transform='translate(92 27) rotate(-32) scale(.24)'/%3E%3Cuse href='%23aut-fall-maple' transform='translate(6 53) rotate(61) scale(.36)'/%3E%3Cuse href='%23aut-fall-acorn' transform='translate(93 82) rotate(24) scale(.28)'/%3E%3Cuse href='%23aut-fall-oak' transform='translate(8 112) rotate(138) scale(.31)'/%3E%3Cuse href='%23aut-fall-maple' transform='translate(94 140) rotate(207) scale(.22)'/%3E%3Cuse href='%23aut-fall-acorn' transform='translate(6 147) rotate(-22) scale(.2)'/%3E%3Cg aria-hidden='true' pointer-events='none'%3E%3Cg transform='translate(8 34) scale(.27)' opacity='.72'%3E%3Cpath d='M0-8L2.1-2.7 7-1 2.5 1.8.8 7-1.8 2.7-6.5 1-2.4-1.9Z' fill='%23f6a843' stroke='%23ffe4a2' stroke-width='.7'/%3E%3CanimateTransform id='autumn-smil-particle-ember-turn' attributeName='transform' type='rotate' additive='sum' values='-22 0 0;24 0 0;-22 0 0' dur='5.7s' begin='-1.8s' calcMode='spline' keyTimes='0;.5;1' keySplines='.42 .03 .58 .97;.42 .03 .58 .97' repeatCount='indefinite'/%3E%3CanimateTransform id='autumn-smil-particle-ember-fold' attributeName='transform' type='scale' additive='sum' values='1 1;1.14 .82;1 1' dur='4.6s' begin='-2.6s' calcMode='spline' keyTimes='0;.5;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3C/g%3E%3Cpath d='M89 71l2.8-3.7 3.1 2.6-1.2 4.4-3.8.5Z' fill='%23d97b26' stroke='%23ffe09a' stroke-width='.42' opacity='.55'%3E%3Canimate id='autumn-smil-particle-amber-pulse' attributeName='opacity' values='.08;1;.08' dur='4.1s' begin='-2.3s' calcMode='spline' keyTimes='0;.44;1' keySplines='.38 .04 .62 .96;.38 .04 .62 .96' repeatCount='indefinite'/%3E%3C/path%3E%3Cg transform='translate(11 126) scale(.23)' opacity='.62'%3E%3Cpath d='M0 5C-4 1.9-4.9-2.7 0-7.5 4.9-2.7 4 1.9 0 5ZM0 4V-5M0-1l-2.4-2M0 1.2l2.5-2.1' fill='%23a8501c' stroke='%23ffc76c' stroke-width='.62'/%3E%3CanimateTransform id='autumn-smil-particle-leaf-flutter' attributeName='transform' type='skewX' additive='sum' values='-14;15;-14' dur='6.8s' begin='-.9s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3Canimate id='autumn-smil-particle-leaf-light' attributeName='opacity' values='.42;1;.42' dur='5.4s' begin='-3.1s' calcMode='spline' keyTimes='0;.5;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  opacity: .82;
+  transform-origin: 50% 50%;
+  animation: autumn-herbarium-fall 10.2s linear infinite;
+}
+
+@keyframes autumn-copper-breathe {
+  0%, 100% {
+    filter: brightness(.94) saturate(1.01) drop-shadow(0 0 1px rgba(209, 138, 70, .2));
+  }
+  46% {
+    filter: brightness(1.14) saturate(1.23) drop-shadow(0 0 6px rgba(239, 137, 58, .5));
+  }
+  73% {
+    filter: brightness(1.04) saturate(1.13) drop-shadow(0 0 4px rgba(70, 154, 126, .34));
+  }
+}
+
+@keyframes autumn-patina-current {
+  0%, 100% {
+    background-position: 4% 12%, 97% 18%, 2% 91%, 96% 86%, 50% 48%;
+    transform: perspective(520px) rotateX(2deg) rotateY(-4.6deg) rotateZ(-.8deg) translate3d(-3.5px, -1.5px, 0);
+    opacity: .48;
+  }
+  34% {
+    background-position: 10% 17%, 91% 13%, 0 85%, 91% 92%, 53% 45%;
+    transform: perspective(520px) rotateX(-3.8deg) rotateY(7.2deg) rotateZ(1.6deg) translate3d(4.5px, -4px, 9px);
+    opacity: .8;
+  }
+  68% {
+    background-position: 1% 16%, 99% 24%, 8% 96%, 99% 81%, 47% 52%;
+    transform: perspective(520px) rotateX(4.2deg) rotateY(2deg) rotateZ(-1.5deg) translate3d(2px, 3px, 5px);
+    opacity: .66;
+  }
+}
+
+@keyframes autumn-herbarium-fall {
+  0% {
+    background-position: 0 0;
+    transform: perspective(480px) rotateX(3.5deg) rotateY(-8deg) rotateZ(-1.1deg) translateX(-6px);
+  }
+  50% {
+    background-position: 0 80px;
+    transform: perspective(480px) rotateX(-5deg) rotateY(13deg) rotateZ(2.2deg) translateX(7px);
+  }
+  100% {
+    background-position: 0 160px;
+    transform: perspective(480px) rotateX(3.5deg) rotateY(-8deg) rotateZ(-1.1deg) translateX(-6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-autumn::before, .cb-autumn::after { animation: none; }
+  .cb-autumn,
+  .cb-autumn::before,
+  .cb-autumn::after {
+    animation: none;
+  }
+
+  .cb-autumn::before,
+  .cb-autumn::after {
+    transform: none;
+  }
 }

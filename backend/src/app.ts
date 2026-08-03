@@ -9,7 +9,7 @@ import type { Server as NetServer } from 'net';
 
 import { initDatabaseConnection } from './services/db';
 import { initRepositories } from './repositories';
-import apiRouter from './routes/api';
+import apiRouter, { shouldDeferAdminShopItemBodyParsing } from './routes/api';
 import { startPushNotificationScheduler, initVapid } from './controllers/pushController';
 import { IS_PRODUCTION, isConfiguredCorsOriginAllowed } from './config';
 import { csrfOriginGuard } from './middlewares/csrf';
@@ -240,8 +240,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use(express.json({ limit: BODY_SIZE_LIMIT }));
-app.use(express.urlencoded({ limit: BODY_SIZE_LIMIT, extended: true }));
+const defaultJsonBodyParser = express.json({ limit: BODY_SIZE_LIMIT });
+const defaultUrlencodedBodyParser = express.urlencoded({ limit: BODY_SIZE_LIMIT, extended: true });
+
+// 정교한 카드 테두리 CSS/SVG는 일반 API의 2MB 한도를 넘을 수 있습니다.
+// 관리자 상점 아이템 생성/수정만 전역 파싱을 건너뛰고, 라우트의 인증·관리자 검증 뒤에서 큰 한도로 파싱합니다.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (shouldDeferAdminShopItemBodyParsing(req.method, req.path)) return next();
+  return defaultJsonBodyParser(req, res, next);
+});
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (shouldDeferAdminShopItemBodyParsing(req.method, req.path)) return next();
+  return defaultUrlencodedBodyParser(req, res, next);
+});
 app.use(cookieParser());
 app.use(csrfOriginGuard);
 

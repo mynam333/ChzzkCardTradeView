@@ -1906,6 +1906,13 @@ html.easter-egg-mode .card-star {
   transform-style: flat;
 }
 
+/* 화면 밖이거나 동시 SVG 모션 예산에서 빠진 개별 프레임은 바깥 CSS 타임라인도 정지합니다. */
+.cosmetic-frame[data-cosmetic-motion-paused="true"],
+.cosmetic-frame[data-cosmetic-motion-paused="true"]::before,
+.cosmetic-frame[data-cosmetic-motion-paused="true"]::after {
+  animation-play-state: paused !important;
+}
+
 .card-star,
 .card-star::before,
 .card-star::after {

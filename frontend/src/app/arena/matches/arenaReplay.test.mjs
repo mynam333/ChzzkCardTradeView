@@ -367,6 +367,275 @@ test('흡혈은 재생 전 피해량으로 돌아갔다가 이벤트 완료 후 
   assert.equal(instanceFor(afterDrain, 'attacker')?.damageTaken, 1);
 });
 
+test('광역 피해는 각 대상 카드의 실제 체력 피해만 리플레이 상태에 반영한다', () => {
+  const postMatch = makeMatch();
+  const defender = instanceFor(postMatch, 'defender');
+  defender.zone = 'board';
+  defender.position = { row: 'front', column: 0 };
+  defender.damageTaken = 2;
+  postMatch.players[1].boardState = [{ cardInstanceId: 'defender', position: { row: 'front', column: 0 }, createdTurn: 1 }];
+  postMatch.players[1].graveyardCardInstanceIds = [];
+  const replayEvents = [
+    event(1, 3, 'aoe_damage', {
+      sourceCardInstanceId: 'attacker',
+      targetCardInstanceId: 'defender',
+      damage: 3,
+      shieldDamage: 1,
+      healthDamage: 2
+    })
+  ];
+
+  const beforeDamage = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterDamage = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(instanceFor(beforeDamage, 'defender')?.damageTaken, 0);
+  assert.equal(instanceFor(afterDamage, 'defender')?.damageTaken, 2);
+});
+
+test('응급 회복은 애니메이션 완료 시 대상 카드의 누적 피해를 회복한다', () => {
+  const postMatch = makeMatch();
+  instanceFor(postMatch, 'attacker').damageTaken = 1;
+  const replayEvents = [
+    event(1, 3, 'emergency_heal', {
+      sourceCardInstanceId: 'attacker',
+      targetCardInstanceId: 'attacker',
+      heal: 2
+    })
+  ];
+
+  const beforeHeal = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterHeal = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(instanceFor(beforeHeal, 'attacker')?.damageTaken, 3);
+  assert.equal(instanceFor(afterHeal, 'attacker')?.damageTaken, 1);
+});
+
+test('전투 드로우는 해당 장면이 끝난 뒤에만 덱과 손패 상태를 갱신한다', () => {
+  const postMatch = makeMatch();
+  postMatch.players[0].handCardInstanceIds.push('battle-drawn');
+  postMatch.players[0].handCount = 2;
+  postMatch.players[0].deckCount = 3;
+  postMatch.cardInstances.push({
+    id: 'battle-drawn',
+    ownerSeatNo: 0,
+    cardVersionId: 'card-battle-drawn',
+    zone: 'hand',
+    position: null,
+    currentAttack: 1,
+    currentHealth: 2,
+    damageTaken: 0,
+    statusEffects: [],
+    createdTurn: 0
+  });
+  const replayEvents = [
+    event(1, 3, 'turn_start', {
+      combatSnapshot: {
+        players: [
+          {
+            seatNo: 0,
+            playerHealth: 30,
+            handCount: 1,
+            deckCount: 4,
+            graveyardCardInstanceIds: [],
+            boardState: postMatch.players[0].boardState
+          },
+          {
+            seatNo: 1,
+            playerHealth: 27,
+            handCount: 3,
+            deckCount: 4,
+            graveyardCardInstanceIds: ['defender'],
+            boardState: []
+          }
+        ],
+        cardInstances: []
+      }
+    }),
+    event(2, 3, 'battle_draw', {
+      sourceCardInstanceId: 'attacker',
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 0 },
+      cardInstanceId: 'battle-drawn',
+      result: 'drawn',
+      handCount: 2,
+      deckCount: 3
+    })
+  ];
+
+  const beforeDraw = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterDraw = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(beforeDraw.players[0].handCount, 1);
+  assert.equal(beforeDraw.players[0].deckCount, 4);
+  assert.equal(beforeDraw.players[0].handCardInstanceIds.includes('battle-drawn'), false);
+  assert.equal(instanceFor(beforeDraw, 'battle-drawn')?.zone, 'deck');
+  assert.equal(afterDraw.players[0].handCount, 2);
+  assert.equal(afterDraw.players[0].deckCount, 3);
+  assert.equal(afterDraw.players[0].handCardInstanceIds.includes('battle-drawn'), true);
+});
+
+test('다음 턴 일반 드로우 카드는 전투 재생이 끝나기 전까지 덱에 남는다', () => {
+  const postMatch = makeMatch();
+  postMatch.players[0].handCardInstanceIds.push('turn-drawn');
+  postMatch.players[0].handCount = 2;
+  postMatch.players[0].deckCount = 3;
+  postMatch.cardInstances.push({
+    id: 'turn-drawn',
+    ownerSeatNo: 0,
+    cardVersionId: 'card-turn-drawn',
+    zone: 'hand',
+    position: null,
+    currentAttack: 1,
+    currentHealth: 2,
+    damageTaken: 0,
+    statusEffects: [],
+    createdTurn: 0
+  });
+  const replayEvents = [
+    event(1, 3, 'turn_start', {
+      combatSnapshot: {
+        players: [{
+          seatNo: 0,
+          playerHealth: 30,
+          handCount: 1,
+          deckCount: 4,
+          graveyardCardInstanceIds: [],
+          boardState: postMatch.players[0].boardState
+        }],
+        cardInstances: []
+      }
+    }),
+    event(2, 3, 'line_attack', {
+      cardInstanceId: 'attacker',
+      targetCardInstanceId: 'defender',
+      healthDamage: 0
+    }),
+    event(3, 4, 'draw', {
+      seatNo: 0,
+      cardInstanceId: 'turn-drawn',
+      handCount: 2,
+      deckCount: 3
+    })
+  ];
+
+  const duringCombat = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterCombat = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(duringCombat.players[0].handCount, 1);
+  assert.equal(duringCombat.players[0].deckCount, 4);
+  assert.equal(duringCombat.players[0].handCardInstanceIds.includes('turn-drawn'), false);
+  assert.equal(instanceFor(duringCombat, 'turn-drawn')?.zone, 'deck');
+  assert.equal(afterCombat.players[0].handCardInstanceIds.includes('turn-drawn'), true);
+  assert.equal(instanceFor(afterCombat, 'turn-drawn')?.zone, 'hand');
+});
+
+test('다음 턴 손패 초과 카드는 전투 재생이 끝나기 전까지 묘지에 노출되지 않는다', () => {
+  const postMatch = makeMatch();
+  postMatch.players[0].handCount = 8;
+  postMatch.players[0].deckCount = 3;
+  postMatch.players[0].graveyardCardInstanceIds.push('turn-overdrawn');
+  postMatch.cardInstances.push({
+    id: 'turn-overdrawn',
+    ownerSeatNo: 0,
+    cardVersionId: 'card-turn-overdrawn',
+    zone: 'graveyard',
+    position: null,
+    currentAttack: 1,
+    currentHealth: 2,
+    damageTaken: 0,
+    statusEffects: [],
+    createdTurn: 0
+  });
+  const replayEvents = [
+    event(1, 3, 'turn_start', {
+      combatSnapshot: {
+        players: [{
+          seatNo: 0,
+          playerHealth: 30,
+          handCount: 8,
+          deckCount: 4,
+          graveyardCardInstanceIds: [],
+          boardState: postMatch.players[0].boardState
+        }],
+        cardInstances: []
+      }
+    }),
+    event(2, 3, 'line_attack', {
+      cardInstanceId: 'attacker',
+      targetCardInstanceId: 'defender',
+      healthDamage: 0
+    }),
+    event(3, 4, 'overdraw', {
+      seatNo: 0,
+      cardInstanceId: 'turn-overdrawn'
+    })
+  ];
+
+  const duringCombat = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterCombat = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(duringCombat.players[0].deckCount, 4);
+  assert.equal(duringCombat.players[0].graveyardCardInstanceIds.includes('turn-overdrawn'), false);
+  assert.equal(instanceFor(duringCombat, 'turn-overdrawn')?.zone, 'deck');
+  assert.equal(afterCombat.players[0].graveyardCardInstanceIds.includes('turn-overdrawn'), true);
+  assert.equal(instanceFor(afterCombat, 'turn-overdrawn')?.zone, 'graveyard');
+});
+
+test('묘지 회수 카드는 회수 장면이 끝난 뒤 묘지에서 손패로 이동한다', () => {
+  const postMatch = makeMatch();
+  postMatch.players[0].handCardInstanceIds.push('recovered');
+  postMatch.players[0].handCount = 2;
+  postMatch.cardInstances.push({
+    id: 'recovered',
+    ownerSeatNo: 0,
+    cardVersionId: 'card-recovered',
+    zone: 'hand',
+    position: null,
+    currentAttack: 2,
+    currentHealth: 3,
+    damageTaken: 0,
+    statusEffects: [],
+    createdTurn: 0
+  });
+  const replayEvents = [
+    event(1, 3, 'turn_start', {
+      combatSnapshot: {
+        players: [
+          {
+            seatNo: 0,
+            playerHealth: 30,
+            handCount: 1,
+            deckCount: 4,
+            graveyardCardInstanceIds: ['recovered'],
+            boardState: postMatch.players[0].boardState
+          }
+        ],
+        cardInstances: []
+      }
+    }),
+    event(2, 3, 'graveyard_recover', {
+      sourceCardInstanceId: 'attacker',
+      sourceSeatNo: 0,
+      sourcePosition: { row: 'front', column: 0 },
+      recoveredCardInstanceId: 'recovered',
+      seatNo: 0,
+      handCount: 2,
+      graveyardCount: 0
+    })
+  ];
+
+  const beforeRecover = buildReplayPresentationMatch(postMatch, replayEvents, 0);
+  const afterRecover = buildReplayPresentationMatch(postMatch, replayEvents, 1);
+
+  assert.equal(beforeRecover.players[0].handCount, 1);
+  assert.equal(beforeRecover.players[0].handCardInstanceIds.includes('recovered'), false);
+  assert.equal(beforeRecover.players[0].graveyardCardInstanceIds.includes('recovered'), true);
+  assert.equal(instanceFor(beforeRecover, 'recovered')?.zone, 'graveyard');
+  assert.equal(afterRecover.players[0].handCount, 2);
+  assert.equal(afterRecover.players[0].handCardInstanceIds.includes('recovered'), true);
+  assert.equal(afterRecover.players[0].graveyardCardInstanceIds.includes('recovered'), false);
+});
+
 test('완료된 8인전은 순위나 다음 경기 확정 전까지만 결과 동기화를 계속한다', () => {
   const pending = {
     ...makeMatch(),

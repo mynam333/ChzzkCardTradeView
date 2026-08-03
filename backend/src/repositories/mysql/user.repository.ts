@@ -235,6 +235,9 @@ export class MysqlUserRepository implements IUserRepository {
   }
 
   async deleteAccount(id: string): Promise<void> {
+    const accountDeletionAuditKeySql = getSqlDialect() === 'postgres'
+      ? "CONCAT('account_deleted:', ml.id, ':', CAST(? AS TEXT))"
+      : "CONCAT('account_deleted:', ml.id, ':', ?)";
     await this.getDb().transaction(async (tx) => {
       const deletingUser = await tx.get<{
         username?: string | null;
@@ -247,7 +250,7 @@ export class MysqlUserRepository implements IUserRepository {
            user_card_id, channel_id, serial_number, star, price, status, listing_type, current_bid,
            bid_reserved, fee, settled_amount, listing_created_at, listing_updated_at)
         SELECT
-          CONCAT('account_deleted:', ml.id, ':', ?),
+          ${accountDeletionAuditKeySql},
           ml.id,
           'account_deleted',
           ?,

@@ -1,0 +1,141 @@
+/* ============================================================
+   스테인드 글라스 녹턴 (Stained Glass Nocturne)
+   - 산화 은빛 납선, 비대칭 장미창, 보석색 유리 패싯
+   - 단순 셔머 대신 가장자리 굴절광과 160px 무단절 패싯 글린트
+   - 장미창 회전·납선 굴절·보석색 광류 SMIL과 CSS 모션을 저진폭으로 결합
+   적용 클래스: cb-stained-glass-nocturne
+   ============================================================ */
+.cb-stained-glass-nocturne {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: 3.43px;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+
+  --stained-glass-nocturne-edge-mask: radial-gradient(76% 68% at 50% 47%, transparent 42%, rgba(0, 0, 0, .3) 59%, #000 80%);
+
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20160'%20preserveAspectRatio%3D'none'%3E%3Cdefs%3E%3ClinearGradient%20id%3D'sgn-iron'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%2305060b'%2F%3E%3Cstop%20offset%3D'.24'%20stop-color%3D'%237b8391'%2F%3E%3Cstop%20offset%3D'.43'%20stop-color%3D'%23141820'%2F%3E%3Cstop%20offset%3D'.7'%20stop-color%3D'%23d7dce5'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%2310141d'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'sgn-lead'%20x1%3D'0'%20y1%3D'0'%20x2%3D'0'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23f1ece2'%2F%3E%3Cstop%20offset%3D'.18'%20stop-color%3D'%23656b78'%2F%3E%3Cstop%20offset%3D'.52'%20stop-color%3D'%2310151e'%2F%3E%3Cstop%20offset%3D'.82'%20stop-color%3D'%239ca3af'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23202530'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'sgn-ruby'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Canimate%20attributeName%3D'x2'%20values%3D'1%3B.52%3B1'%20dur%3D'9.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cstop%20stop-color%3D'%23ff91b0'%2F%3E%3Cstop%20offset%3D'.26'%20stop-color%3D'%23d51d58'%2F%3E%3Cstop%20offset%3D'.72'%20stop-color%3D'%2365082c'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23ff4d82'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'sgn-amber'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23fff0a4'%2F%3E%3Cstop%20offset%3D'.3'%20stop-color%3D'%23f19b24'%2F%3E%3Cstop%20offset%3D'.72'%20stop-color%3D'%237e2d0b'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23ffd36b'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'sgn-cyan'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Canimate%20attributeName%3D'x1'%20values%3D'0%3B.34%3B0'%20dur%3D'11.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cstop%20stop-color%3D'%23bffcff'%2F%3E%3Cstop%20offset%3D'.3'%20stop-color%3D'%231eb6d2'%2F%3E%3Cstop%20offset%3D'.72'%20stop-color%3D'%23084466'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%2362e4e7'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'sgn-violet'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23eadcff'%2F%3E%3Cstop%20offset%3D'.26'%20stop-color%3D'%239565ef'%2F%3E%3Cstop%20offset%3D'.7'%20stop-color%3D'%23342176'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23c68cff'%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D'sgn-gem'%20cx%3D'.32'%20cy%3D'.24'%20r%3D'.78'%3E%3Canimate%20attributeName%3D'cx'%20values%3D'.32%3B.62%3B.32'%20dur%3D'7.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cstop%20stop-color%3D'%23ffffff'%2F%3E%3Cstop%20offset%3D'.18'%20stop-color%3D'%23bffcff'%2F%3E%3Cstop%20offset%3D'.48'%20stop-color%3D'%237c3aed'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23150c35'%2F%3E%3C%2FradialGradient%3E%3Cg%20id%3D'sgn-petal'%3E%3Cpath%20d%3D'M0%2C-7.7%20C2.2%2C-6.2%202.75%2C-3.05%200%2C0%20C-2.75%2C-3.05%20-2.2%2C-6.2%200%2C-7.7Z'%2F%3E%3Cpath%20d%3D'M0%2C-6.5%20C.65%2C-4.5%20.7%2C-2.3%200%2C-.8'%20fill%3D'none'%20stroke%3D'%23fff7ed'%20stroke-width%3D'.34'%20opacity%3D'.54'%2F%3E%3C%2Fg%3E%3Cg%20id%3D'sgn-lancet'%3E%3Cpath%20d%3D'M0%2C8%20C-2.55%2C3.5%20-2.7%2C-3.8%200%2C-8%20C2.7%2C-3.8%202.55%2C3.5%200%2C8Z'%2F%3E%3Cpath%20d%3D'M0%2C-6.4%20L0%2C6.2%20M-1.7%2C2.6%20L0%2C.5%20L1.7%2C2.6'%20fill%3D'none'%20stroke%3D'%23f8fafc'%20stroke-width%3D'.28'%20opacity%3D'.48'%2F%3E%3C%2Fg%3E%3C%2Fdefs%3E%3Crect%20x%3D'1.1'%20y%3D'1.1'%20width%3D'97.8'%20height%3D'157.8'%20rx%3D'4.26'%20ry%3D'4.26'%20fill%3D'none'%20stroke%3D'%2303060b'%20stroke-width%3D'3.2'%20opacity%3D'.94'%2F%3E%3Crect%20x%3D'2'%20y%3D'2'%20width%3D'96'%20height%3D'156'%20rx%3D'3.36'%20ry%3D'3.36'%20fill%3D'none'%20stroke%3D'url(%23sgn-iron)'%20stroke-width%3D'2.1'%2F%3E%3Crect%20x%3D'3'%20y%3D'3'%20width%3D'94'%20height%3D'154'%20rx%3D'2.36'%20ry%3D'2.36'%20fill%3D'none'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'1.18'%2F%3E%3Crect%20x%3D'4.6'%20y%3D'4.6'%20width%3D'90.8'%20height%3D'150.8'%20rx%3D'.76'%20ry%3D'.76'%20fill%3D'none'%20stroke%3D'%23090c14'%20stroke-width%3D'2.2'%2F%3E%3Crect%20x%3D'5.15'%20y%3D'5.15'%20width%3D'89.7'%20height%3D'149.7'%20rx%3D'.21'%20ry%3D'.21'%20fill%3D'none'%20stroke%3D'%23d9e2ef'%20stroke-width%3D'.34'%20opacity%3D'.72'%2F%3E%3Cpath%20d%3D'M5.2%205.2H94.8L90.2%2010.4H9.8ZM5.2%20154.8H94.8L90.2%20149.6H9.8ZM5.2%205.2V154.8L10.1%20146.7V13.3ZM94.8%205.2V154.8L89.9%20146.7V13.3Z'%20fill%3D'%23070a12'%20fill-rule%3D'evenodd'%20opacity%3D'.93'%2F%3E%3Cg%20stroke%3D'%23101520'%20stroke-width%3D'.7'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M9.5%205.4L18.4%205.4%2012.5%2012.6%209.6%2022.8Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M18.4%205.4H31L23.9%2010.6%2012.5%2012.6Z'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cpath%20d%3D'M31%205.4H43.6L38.7%2012.1%2023.9%2010.6Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M43.6%205.4H56.5L50%2012.8%2038.7%2012.1Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M56.5%205.4H69L61.4%2011.8%2050%2012.8Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M69%205.4H82.2L76.5%2012.4%2061.4%2011.8Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M82.2%205.4H90.5L90.4%2022.9%2076.5%2012.4Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M9.6%2022.8L12.5%2012.6%2015%2026.8%209.7%2038.3Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M9.7%2038.3L15%2026.8%2013.2%2048.4%209.7%2058.8Z'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cpath%20d%3D'M9.7%2058.8L13.2%2048.4%2015.1%2071.6%209.8%2079.8Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M9.8%2079.8L15.1%2071.6%2013.6%2094.2%209.8%20104.6Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M9.8%20104.6L13.6%2094.2%2015.2%20118.2%209.7%20127.8Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M9.7%20127.8L15.2%20118.2%2012.7%20146.8%209.6%20137.4Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M90.4%2022.9L84.7%2028.4%2087.1%2045.6%2090.3%2038.4Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M90.3%2038.4L87.1%2045.6%2084.9%2065.8%2090.2%2058.8Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M90.2%2058.8L84.9%2065.8%2086.8%2082.4%2090.2%2079.9Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M90.2%2079.9L86.8%2082.4%2084.7%20104.2%2090.2%20101.7Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M90.2%20101.7L84.7%20104.2%2087%20124.1%2090.3%20118.8Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M90.3%20118.8L87%20124.1%2084.6%20143.6%2090.4%20137.3Z'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cpath%20d%3D'M9.6%20137.4L12.7%20146.8%2025.2%20149.8%2018.6%20154.6%209.6%20154.6Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M25.2%20149.8L39%20147.2%2043.8%20154.6H18.6Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M39%20147.2L50%20150.1%2056.3%20154.6H43.8Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cpath%20d%3D'M50%20150.1L62.2%20147.4%2070.3%20154.6H56.3Z'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cpath%20d%3D'M62.2%20147.4L76.4%20149.8%2081.5%20154.6H70.3Z'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cpath%20d%3D'M76.4%20149.8L84.6%20143.6%2090.4%20137.3V154.6H81.5Z'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'none'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.86'%20stroke-linejoin%3D'round'%20opacity%3D'.98'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.98%3B.56%3B.98'%20dur%3D'7.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M9.5%205.4L18.4%205.4%2012.5%2012.6%209.6%2022.8M18.4%205.4L23.9%2010.6%2031%205.4M23.9%2010.6L38.7%2012.1%2043.6%205.4M38.7%2012.1L50%2012.8%2056.5%205.4M50%2012.8L61.4%2011.8%2069%205.4M61.4%2011.8L76.5%2012.4%2082.2%205.4M76.5%2012.4L90.4%2022.9M9.6%2022.8L15%2026.8%209.7%2038.3%2013.2%2048.4%209.7%2058.8%2015.1%2071.6%209.8%2079.8%2013.6%2094.2%209.8%20104.6%2015.2%20118.2%209.7%20127.8%2012.7%20146.8M90.4%2022.9L84.7%2028.4%2087.1%2045.6%2084.9%2065.8%2086.8%2082.4%2084.7%20104.2%2087%20124.1%2084.6%20143.6M9.6%20137.4L25.2%20149.8%2039%20147.2%2050%20150.1%2062.2%20147.4%2076.4%20149.8%2090.4%20137.3'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(14%2015)'%20stroke%3D'%23080b12'%20stroke-width%3D'.72'%20stroke-linejoin%3D'round'%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20additive%3D'sum'%20values%3D'0%3B9%3B0'%20dur%3D'14.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.62%3B1%3B.62'%20dur%3D'6.1s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(45)'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(90)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(135)'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(180)'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(225)'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(270)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(315)'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cellipse%20rx%3D'2.6'%20ry%3D'2.6'%20fill%3D'url(%23sgn-gem)'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.8'%2F%3E%3Cpath%20d%3D'M-9%200H9M0-9V9M-6.4-6.4L6.4%206.4M6.4-6.4L-6.4%206.4'%20fill%3D'none'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.7'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(87.8%20140.8)%20scale(.72)'%20stroke%3D'%23080b12'%20stroke-width%3D'.82'%20stroke-linejoin%3D'round'%20opacity%3D'.92'%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20additive%3D'sum'%20values%3D'0%3B-7.5%3B0'%20dur%3D'16.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.58%3B1%3B.58'%20dur%3D'6.9s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(45)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(90)'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(135)'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(180)'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(225)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(270)'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cuse%20href%3D'%23sgn-petal'%20transform%3D'rotate(315)'%20fill%3D'url(%23sgn-amber)'%2F%3E%3Cellipse%20rx%3D'2.4'%20ry%3D'2.4'%20fill%3D'url(%23sgn-gem)'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.8'%2F%3E%3Cpath%20d%3D'M-8.6%200H8.6M0-8.6V8.6M-6.1-6.1L6.1%206.1M6.1-6.1L-6.1%206.1'%20fill%3D'none'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.72'%2F%3E%3C%2Fg%3E%3Cg%20stroke%3D'%23080b12'%20stroke-width%3D'.55'%20stroke-linejoin%3D'round'%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(91%2031)%20scale(.62%201)'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(91%2050)%20scale(.62%201)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(91%2069)%20scale(.62%201)'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(9%2092)%20scale(.62%201)'%20fill%3D'url(%23sgn-violet)'%2F%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(9%20111)%20scale(.62%201)'%20fill%3D'url(%23sgn-cyan)'%2F%3E%3Cuse%20href%3D'%23sgn-lancet'%20transform%3D'translate(9%20130)%20scale(.62%201)'%20fill%3D'url(%23sgn-ruby)'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'none'%20stroke%3D'%23fff8e7'%20stroke-width%3D'.26'%20opacity%3D'.48'%3E%3Cpath%20d%3D'M19.5%206.4L23.9%2010.6%2028.8%206.2M45.5%206.4L50%2012.8%2054.5%206.4M71.2%206.3L76.5%2012.4%2080.2%206.2M10.5%2042.5L13.2%2048.4%2010.4%2054M10.5%2073.8L15.1%2071.6%2010.4%2077.8M89.5%2043L87.1%2045.6%2089.4%2049.6M89.5%2099L84.7%20104.2%2089.4%20108M21.2%20153.5L25.2%20149.8%2030%20152.8M72.8%20152.7L76.4%20149.8%2082.2%20153.5'%2F%3E%3C%2Fg%3E%3Cpath%20d%3D'M46.3%204.7L50%2010.9%2053.7%204.7%2050%201.8Z%20M46.5%20155.3L50%20149.4%2053.5%20155.3%2050%20158.2Z%20M4.7%2076.7L8.7%2080%204.7%2083.3%201.8%2080Z%20M95.3%2076.7L91.3%2080%2095.3%2083.3%2098.2%2080Z'%20fill%3D'url(%23sgn-gem)'%20stroke%3D'url(%23sgn-lead)'%20stroke-width%3D'.62'%2F%3E%3C%2Fsvg%3E");
+
+  box-shadow:
+    0 0 14px rgba(102, 184, 244, .34),
+    0 0 26px rgba(224, 30, 111, .25),
+    0 0 8px rgba(255, 184, 69, .22),
+    inset 0 0 9px rgba(224, 231, 255, .28),
+    inset 0 0 18px rgba(5, 8, 18, .66);
+  animation: stained-glass-nocturne-frame-breathe 5.8s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+.cb-stained-glass-nocturne::before {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--stained-glass-nocturne-edge-mask);
+  mask: var(--stained-glass-nocturne-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: no-repeat;
+  background-size: 54% 45%, 48% 42%, 48% 48%, 52% 44%, 100% 100%;
+  background-position: 8% 13%, 94% 18%, 4% 92%, 96% 88%, 50% 48%;
+  background-image:
+    radial-gradient(ellipse, rgba(255, 49, 112, .72) 0, rgba(137, 19, 66, .25) 43%, transparent 72%),
+    radial-gradient(ellipse, rgba(65, 226, 255, .7) 0, rgba(26, 96, 160, .23) 45%, transparent 73%),
+    radial-gradient(ellipse, rgba(255, 183, 58, .62) 0, rgba(150, 58, 15, .19) 46%, transparent 72%),
+    radial-gradient(ellipse, rgba(177, 116, 255, .7) 0, rgba(81, 40, 164, .22) 45%, transparent 73%),
+    conic-gradient(from 217deg at 50% 48%, transparent 0 42deg, rgba(92, 225, 255, .16) 66deg, transparent 95deg 151deg, rgba(255, 84, 151, .18) 178deg, transparent 210deg 276deg, rgba(255, 191, 82, .15) 302deg, transparent 337deg);
+  opacity: .64;
+  filter: saturate(1.25) brightness(1.03) contrast(1.04);
+  transform-origin: 50% 48%;
+  animation: stained-glass-nocturne-caustic-orbit 17.6s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+.cb-stained-glass-nocturne::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--stained-glass-nocturne-edge-mask);
+  mask: var(--stained-glass-nocturne-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: repeat;
+  background-size: 100% 160px;
+  background-position: 0 0;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20160'%20preserveAspectRatio%3D'none'%3E%3Cdefs%3E%3Cg%20id%3D'sgn-facet'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.38%3B1%3B.38'%20dur%3D'4.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M0-7L1.05-1.2%205.6%200%201.05%201.2%200%207-1.05%201.2-5.6%200-1.05-1.2Z'%20fill%3D'%23f8fbff'%2F%3E%3Cpath%20d%3D'M0-4.6L.52-.64%203.1%200%20.52.64%200%204.6-.52.64-3.1%200-.52-.64Z'%20fill%3D'%238ff3ff'%2F%3E%3Cpath%20d%3D'M-2.8-.25L2.8.25'%20stroke%3D'%23ff76bd'%20stroke-width%3D'.42'%2F%3E%3C%2Fg%3E%3Cg%20id%3D'sgn-chip'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.28%3B1%3B.28'%20dur%3D'6.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M0-4.2L2.7-.8%201.2%203.8-2.4%202.1-2.8-1.5Z'%20fill%3D'%23dbeafe'%2F%3E%3Cpath%20d%3D'M0-3.1L1.5-.7.7%201.8-1.2.9Z'%20fill%3D'%23ffffff'%2F%3E%3Cpath%20d%3D'M-1.9%202L1.8-1.4'%20stroke%3D'%23a78bfa'%20stroke-width%3D'.5'%2F%3E%3C%2Fg%3E%3C%2Fdefs%3E%3Cuse%20href%3D'%23sgn-facet'%20transform%3D'translate(8%200)%20scale(.25)'%2F%3E%3Cuse%20href%3D'%23sgn-facet'%20transform%3D'translate(8%20160)%20scale(.25)'%2F%3E%3Cuse%20href%3D'%23sgn-facet'%20transform%3D'translate(92%2039)%20rotate(20)%20scale(.18)'%2F%3E%3Cuse%20href%3D'%23sgn-chip'%20transform%3D'translate(6%2072)%20rotate(-24)%20scale(.22)'%2F%3E%3Cuse%20href%3D'%23sgn-facet'%20transform%3D'translate(94%20105)%20rotate(12)%20scale(.28)'%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20additive%3D'sum'%20values%3D'0%3B45%3B0'%20dur%3D'8.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.3%3B1%3B.3'%20dur%3D'5.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%2F%3E%3C%2Fuse%3E%3Cuse%20href%3D'%23sgn-chip'%20transform%3D'translate(11%20138)%20rotate(31)%20scale(.17)'%2F%3E%3Cuse%20href%3D'%23sgn-facet'%20transform%3D'translate(89%20148)%20rotate(-18)%20scale(.2)'%2F%3E%3Cuse%20href%3D'%23sgn-chip'%20transform%3D'translate(5%2024)%20rotate(12)%20scale(.16)'%2F%3E%3C%2Fsvg%3E");
+  opacity: .7;
+  filter: brightness(1.13) saturate(1.22) drop-shadow(0 0 2px rgba(174, 237, 255, .4));
+  transform-origin: 50% 50%;
+  animation:
+    stained-glass-nocturne-facet-drift 11.4s linear infinite,
+    stained-glass-nocturne-facet-glimmer 4.7s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+@keyframes stained-glass-nocturne-frame-breathe {
+  0%, 100% {
+    filter: brightness(.95) saturate(1.02) drop-shadow(0 0 1px rgba(163, 193, 255, .2));
+  }
+  37% {
+    filter: brightness(1.18) saturate(1.3) drop-shadow(0 0 6px rgba(255, 79, 151, .48));
+  }
+  70% {
+    filter: brightness(1.12) saturate(1.34) drop-shadow(0 0 6px rgba(73, 224, 255, .46));
+  }
+}
+
+@keyframes stained-glass-nocturne-caustic-orbit {
+  0%, 100% {
+    background-position: 8% 13%, 94% 18%, 4% 92%, 96% 88%, 50% 48%;
+    transform: perspective(520px) rotateX(1.8deg) rotateY(-3.1deg) rotateZ(-.8deg) translate3d(-2.5px, -1.5px, 0);
+    filter: brightness(.95) contrast(1.04) saturate(1.12);
+    opacity: .54;
+  }
+  34% {
+    background-position: 15% 20%, 86% 11%, 0 84%, 89% 95%, 55% 43%;
+    transform: perspective(520px) rotateX(-2.6deg) rotateY(5.4deg) rotateZ(1.35deg) translate3d(3px, -3.5px, 8px);
+    filter: brightness(1.24) contrast(1.09) saturate(1.34);
+    opacity: .82;
+  }
+  68% {
+    background-position: 2% 15%, 100% 25%, 11% 98%, 100% 81%, 45% 54%;
+    transform: perspective(520px) rotateX(3.3deg) rotateY(1.3deg) rotateZ(-1.25deg) translate3d(1.5px, 2.5px, 4px);
+    filter: brightness(1.13) contrast(1.06) saturate(1.42);
+    opacity: .72;
+  }
+}
+
+@keyframes stained-glass-nocturne-facet-drift {
+  0% {
+    background-position: 0 0;
+    transform: perspective(480px) rotateX(1.4deg) rotateY(-4deg) translateX(-2.8px);
+  }
+  50% {
+    background-position: 0 80px;
+    transform: perspective(480px) rotateX(-2.6deg) rotateY(6deg) translateX(3.8px);
+  }
+  100% {
+    background-position: 0 160px;
+    transform: perspective(480px) rotateX(1.4deg) rotateY(-4deg) translateX(-2.8px);
+  }
+}
+
+@keyframes stained-glass-nocturne-facet-glimmer {
+  0%, 100% { opacity: .48; filter: brightness(.9) saturate(1.02); }
+  34% { opacity: .96; filter: brightness(1.42) saturate(1.34); }
+  67% { opacity: .66; filter: brightness(1.12) saturate(1.48); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-stained-glass-nocturne,
+  .cb-stained-glass-nocturne::before,
+  .cb-stained-glass-nocturne::after {
+    animation: none;
+  }
+
+  .cb-stained-glass-nocturne::before,
+  .cb-stained-glass-nocturne::after {
+    transform: none;
+  }
+}

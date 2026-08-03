@@ -1,0 +1,129 @@
+/* ============================================================
+   심연의 성물함 (Abyssal Reliquary)
+   - 흑진주, 산화 은, 격실이 새겨진 앵무조개, 화석 산호
+   - 파도 대신 심해 굴절 호흡과 160px 무단절 생물발광 상승
+   - 흑진주 간섭색·앵무조개 호흡·생물발광 SMIL과 CSS 상승 루프를 결합
+   적용 클래스: cb-abyssal-reliquary
+   ============================================================ */
+.cb-abyssal-reliquary {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: 3.43px;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+
+  --abyssal-reliquary-edge-mask: radial-gradient(ellipse 74% 69% at 50% 47%, transparent 0 48%, rgba(0, 0, 0, .22) 61%, #000 81%);
+
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20160'%20preserveAspectRatio%3D'none'%20shape-rendering%3D'geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient%20id%3D'ar-pearl'%20x1%3D'0'%20y1%3D'0'%20x2%3D'100'%20y2%3D'160'%20gradientUnits%3D'userSpaceOnUse'%3E%3Canimate%20attributeName%3D'x1'%20values%3D'0%3B28%3B0'%20dur%3D'10.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'y2'%20values%3D'160%3B122%3B160'%20dur%3D'12.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cstop%20stop-color%3D'%23050a10'%2F%3E%3Cstop%20offset%3D'.15'%20stop-color%3D'%23496c75'%2F%3E%3Cstop%20offset%3D'.23'%20stop-color%3D'%23d4e8e4'%2F%3E%3Cstop%20offset%3D'.31'%20stop-color%3D'%2317323a'%2F%3E%3Cstop%20offset%3D'.62'%20stop-color%3D'%23040910'%2F%3E%3Cstop%20offset%3D'.82'%20stop-color%3D'%2386adb1'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%2307121a'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'ar-silver'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%2324363b'%2F%3E%3Cstop%20offset%3D'.2'%20stop-color%3D'%23cfe0de'%2F%3E%3Cstop%20offset%3D'.36'%20stop-color%3D'%235b7478'%2F%3E%3Cstop%20offset%3D'.58'%20stop-color%3D'%23101b22'%2F%3E%3Cstop%20offset%3D'.78'%20stop-color%3D'%23a6bfbe'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23203238'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'ar-nacre'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Canimate%20attributeName%3D'x2'%20values%3D'1%3B.3%3B1'%20dur%3D'8.9s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'y1'%20values%3D'0%3B.3%3B0'%20dur%3D'10.1s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cstop%20stop-color%3D'%23eefbf7'%2F%3E%3Cstop%20offset%3D'.19'%20stop-color%3D'%239ac7cd'%2F%3E%3Cstop%20offset%3D'.39'%20stop-color%3D'%238f83c9'%2F%3E%3Cstop%20offset%3D'.58'%20stop-color%3D'%23304f68'%2F%3E%3Cstop%20offset%3D'.78'%20stop-color%3D'%236de0d7'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23121d31'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'ar-indigo'%20x1%3D'0'%20y1%3D'0'%20x2%3D'0'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23152b3c'%2F%3E%3Cstop%20offset%3D'.35'%20stop-color%3D'%2307111f'%2F%3E%3Cstop%20offset%3D'.7'%20stop-color%3D'%231d1941'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23030a12'%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D'ar-coral'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%234d4851'%2F%3E%3Cstop%20offset%3D'.34'%20stop-color%3D'%23c7bbb0'%2F%3E%3Cstop%20offset%3D'.58'%20stop-color%3D'%2377676c'%2F%3E%3Cstop%20offset%3D'.82'%20stop-color%3D'%239b86e8'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23353648'%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D'ar-gem'%20cx%3D'.32'%20cy%3D'.24'%20r%3D'.78'%3E%3Cstop%20stop-color%3D'%23ffffff'%2F%3E%3Cstop%20offset%3D'.16'%20stop-color%3D'%2396fff0'%2F%3E%3Cstop%20offset%3D'.38'%20stop-color%3D'%234e90bf'%2F%3E%3Cstop%20offset%3D'.68'%20stop-color%3D'%233b2f72'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%2303070d'%2F%3E%3C%2FradialGradient%3E%3Cg%20id%3D'ar-shell'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.58%3B1%3B.58'%20dur%3D'6.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'scale'%20additive%3D'sum'%20values%3D'1%201%3B1.085%20.92%3B1%201'%20dur%3D'7.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M9%200C9%207.2%203.2%2012-3.7%2011.6-10.4%2011.2-14.1%205.9-13.1-.6-12-7.1-5.6-11%201.1-9.5%207.7-8%2010.6-2.2%209%200Z'%20fill%3D'url(%23ar-nacre)'%20stroke%3D'%23283b43'%20stroke-width%3D'1.3'%2F%3E%3Cpath%20d%3D'M8.5%200C8.5%206.7%203.5%2011.4-3%2011.2-9.1%2011-12.7%206.5-12.2%201-11.7-4.6-7.1-8.3-1.8-8.1%203.5-7.9%206.5-4%206.2.1%205.9%204%202.8%206.5-.8%206.3-4.1%206.1-6.1%203.7-5.8%201-5.6-1.4-3.7-3-1.6-2.9.4-2.8%201.6-1.4%201.5.1%201.4%201.5.4%202.3-.8%202.2'%20fill%3D'none'%20stroke%3D'%23d7f0eb'%20stroke-width%3D'.8'%2F%3E%3Cpath%20d%3D'M-9.8-4.5L-5.2-.2M-5.9-7.4L-2.8-2.4M-1.2-8.6L.2-3.1M3.1-7L2.3-2.2M6-3.8L3.2-.8M7.3%201L3.4%201.8M5.6%205.6L1.8%203.8M2.1%208.8L-.7%205.5M-2.3%2010L-3.1%206.1M-6.6%208.8L-5.4%204.5'%20fill%3D'none'%20stroke%3D'%23496876'%20stroke-width%3D'.58'%20opacity%3D'.92'%2F%3E%3Cpath%20d%3D'M-10.2-3.5C-6.6-5.2-2.7-6.2%201.1-5.5M-10.8%203.2C-7.6%205.3-4.1%206.7-.5%207.1M1.9-7.3C5-4.9%206.6-1.7%206.3%201.5'%20fill%3D'none'%20stroke%3D'%23ffffff'%20stroke-width%3D'.3'%20opacity%3D'.46'%2F%3E%3C%2Fg%3E%3Cpath%20id%3D'ar-coral-branches'%20d%3D'M0%200C-.2-5.2%201.4-9.2.3-14.1M.1-7.2C-3.2-9.6-4.3-12.9-4.9-16.2M-2.7-11C-5.7-12.3-7.2-14.4-8.2-17.1M-4.5-15.2C-5.8-17.7-5.6-19.8-5.2-22M.3-13.5C3-15.4%204.1-18%204.7-21M2.8-17.1C5.3-18.4%206.7-20.3%207.6-22.9M.2-5.2C3.6-7%205.1-9.9%206.2-13.2M4.8-10.3C7.3-11.4%208.7-13.3%209.4-15.7M-.1-3.6C-3.1-5.3-5-7.7-6.4-10.3M-5.2-8.2C-7.5-9-8.9-10.6-10-12.5'%2F%3E%3Cg%20id%3D'ar-coral'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.42%3B1%3B.42'%20dur%3D'5.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cuse%20href%3D'%23ar-coral-branches'%20fill%3D'none'%20stroke%3D'%23212931'%20stroke-width%3D'2.2'%2F%3E%3Cuse%20href%3D'%23ar-coral-branches'%20fill%3D'none'%20stroke%3D'url(%23ar-coral)'%20stroke-width%3D'.92'%2F%3E%3Cg%20fill%3D'url(%23ar-gem)'%20stroke%3D'%2396d7d0'%20stroke-width%3D'.28'%3E%3Cpath%20d%3D'M-1.2-14.1L.3-15.7%201.7-14.1.3-12.7Z'%2F%3E%3Cpath%20d%3D'M-6.4-16.3L-4.9-18-3.5-16.3-4.9-14.9Z'%2F%3E%3Cpath%20d%3D'M-9.7-17.2L-8.2-18.8-6.8-17.2-8.2-15.8Z'%2F%3E%3Cpath%20d%3D'M-6.7-22L-5.2-23.7-3.8-22-5.2-20.6Z'%2F%3E%3Cpath%20d%3D'M3.3-21L4.7-22.7%206.1-21%204.7-19.6Z'%2F%3E%3Cpath%20d%3D'M6.2-22.9L7.6-24.6%209-22.9%207.6-21.5Z'%2F%3E%3Cpath%20d%3D'M4.8-13.2L6.2-14.9%207.6-13.2%206.2-11.8Z'%2F%3E%3Cpath%20d%3D'M8-15.7L9.4-17.4%2010.8-15.7%209.4-14.3Z'%2F%3E%3Cpath%20d%3D'M-7.8-10.3L-6.4-12-5-10.3-6.4-8.9Z'%2F%3E%3Cpath%20d%3D'M-11.4-12.5L-10-14.2-8.6-12.5-10-11.1Z'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C%2Fdefs%3E%3Crect%20x%3D'.7'%20y%3D'.7'%20width%3D'98.6'%20height%3D'158.6'%20rx%3D'4.66'%20ry%3D'4.66'%20fill%3D'none'%20stroke%3D'%23010509'%20stroke-width%3D'3'%20opacity%3D'.96'%2F%3E%3Crect%20x%3D'1.2'%20y%3D'1.2'%20width%3D'97.6'%20height%3D'157.6'%20rx%3D'4.16'%20ry%3D'4.16'%20fill%3D'none'%20stroke%3D'url(%23ar-pearl)'%20stroke-width%3D'2.2'%2F%3E%3Crect%20x%3D'3'%20y%3D'3'%20width%3D'94'%20height%3D'154'%20rx%3D'2.36'%20ry%3D'2.36'%20fill%3D'none'%20stroke%3D'url(%23ar-silver)'%20stroke-width%3D'1.55'%2F%3E%3Crect%20x%3D'4.4'%20y%3D'4.4'%20width%3D'91.2'%20height%3D'151.2'%20rx%3D'.96'%20ry%3D'.96'%20fill%3D'none'%20stroke%3D'%23d4e8e4'%20stroke-width%3D'.55'%20opacity%3D'.83'%2F%3E%3Crect%20x%3D'5.35'%20y%3D'5.35'%20width%3D'89.3'%20height%3D'149.3'%20rx%3D'.01'%20ry%3D'.01'%20fill%3D'none'%20stroke%3D'%23172b31'%20stroke-width%3D'2.15'%2F%3E%3Cpath%20d%3D'M5.5%205.5H94.5L90.6%2011.3H9.4ZM5.5%20154.5H94.5L90.6%20148.7H9.4ZM5.5%205.5V154.5L10.4%20146.5V13.5ZM94.5%205.5V154.5L89.6%20146.5V13.5Z'%20fill%3D'url(%23ar-indigo)'%20fill-rule%3D'evenodd'%20opacity%3D'.98'%2F%3E%3Cg%20fill%3D'none'%20stroke-linecap%3D'round'%3E%3Cpath%20d%3D'M8.8%2035C11.6%2027.5%2010.6%2019.2%2015.4%2012.1M8.6%2046.2C12.6%2040.7%2010.4%2035.6%2013.2%2030.1M91.2%2037C88.5%2030%2090.1%2023.5%2085.6%2016.1M91.3%20120C88%20127.4%2090.2%20134.3%2085.3%20142.9M8.8%20120C11.7%20127.4%209.8%20134.2%2014.4%20142.8'%20stroke%3D'%2353777b'%20stroke-width%3D'.48'%20opacity%3D'.7'%2F%3E%3Cpath%20d%3D'M9.1%2035C11%2027.9%2010.3%2021.5%2014.1%2015.4M90.9%2037C89.1%2030.7%2090%2025.4%2086.7%2019.2M90.9%20120C89.1%20127%2090%20133%2086%20139.8'%20stroke%3D'%23b9d3d0'%20stroke-width%3D'.22'%20opacity%3D'.48'%2F%3E%3Cpath%20d%3D'M21.5%205.8C27.4%208.9%2032.4%208.5%2037.7%205.8M62.3%205.8C67.6%208.5%2072.6%208.9%2078.5%205.8M21.5%20154.2C27.4%20151.1%2032.4%20151.5%2037.7%20154.2M62.3%20154.2C67.6%20151.5%2072.6%20151.1%2078.5%20154.2'%20stroke%3D'%2384a4a6'%20stroke-width%3D'.4'%20opacity%3D'.62'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(14.2%2016.2)%20scale(.72)'%3E%3Cuse%20href%3D'%23ar-shell'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(87.1%20144.2)%20rotate(180)%20scale(.78)'%3E%3Cuse%20href%3D'%23ar-shell'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(91%2037)%20rotate(180)%20scale(.46)'%20opacity%3D'.72'%3E%3Cuse%20href%3D'%23ar-shell'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(10.5%20151)%20scale(.64)'%3E%3Cuse%20href%3D'%23ar-coral'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(91%2029)%20rotate(180)%20scale(.43)'%20opacity%3D'.88'%3E%3Cuse%20href%3D'%23ar-coral'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(91.3%20126)%20scale(.37)'%20opacity%3D'.68'%3E%3Cuse%20href%3D'%23ar-coral'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'none'%20stroke%3D'%235c7378'%20stroke-width%3D'.3'%20opacity%3D'.62'%3E%3Cpath%20d%3D'M5.8%2053C9.7%2049.7%2012.4%2050.6%2014.1%2054.2S18.4%2060.1%2021.6%2057.8'%2F%3E%3Cpath%20d%3D'M94.2%2061C90.4%2057.1%2087.5%2058.4%2085.9%2062.2S81.8%2067.6%2078.4%2065.4'%2F%3E%3Cpath%20d%3D'M5.8%20104C9.1%20100.6%2012.3%20101.6%2014.1%20105.1S18.2%20110.5%2021.2%20108.1'%2F%3E%3Cpath%20d%3D'M94.2%2098C90.7%2094.4%2087.8%2095.5%2086%2099.3S81.8%20104.9%2078.7%20102.4'%2F%3E%3Cpath%20d%3D'M26%205.7Q33%2010.2%2040%205.8T54%205.8T68%205.8'%2F%3E%3Cpath%20d%3D'M30%20154.3Q37%20150.1%2044%20154.2T58%20154.2T72%20154.2'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'url(%23ar-gem)'%20stroke%3D'url(%23ar-silver)'%20stroke-width%3D'.54'%3E%3Cpath%20d%3D'M50%201.6L53.5%205.2%2050%209%2046.5%205.2Z'%2F%3E%3Cpath%20d%3D'M50%20151L53.5%20154.8%2050%20158.4%2046.5%20154.8Z'%2F%3E%3Cpath%20d%3D'M1.6%2080L5.2%2076.5%209%2080%205.2%2083.5Z'%2F%3E%3Cpath%20d%3D'M91%2080L94.8%2076.5%2098.4%2080%2094.8%2083.5Z'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'none'%20stroke%3D'%23d7ece8'%20stroke-width%3D'.28'%20opacity%3D'.68'%3E%3Cpath%20d%3D'M50%202.4V7.7M47.4%205.2H52.6M50%20152V157.5M47.4%20154.8H52.6M2.4%2080H7.7M5.2%2077.4V82.6M92.3%2080H97.5M94.8%2077.4V82.6'%2F%3E%3C%2Fg%3E%3Cg%20fill%3D'%2362f1d7'%20stroke%3D'%23dffff8'%20stroke-width%3D'.2'%20opacity%3D'.75'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.24%3B1%3B.24'%20dur%3D'4.8s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M10%2045L11.1%2046.4%2010%2047.8%208.9%2046.4Z'%2F%3E%3Cpath%20d%3D'M90%2052L91.2%2053.5%2090%2055%2088.8%2053.5Z'%2F%3E%3Cpath%20d%3D'M9.7%2096L10.9%2097.5%209.7%2099%208.5%2097.5Z'%2F%3E%3Cpath%20d%3D'M90.2%20111L91.4%20112.5%2090.2%20114%2089%20112.5Z'%2F%3E%3Cpath%20d%3D'M28%206L29%207.2%2028%208.4%2027%207.2Z'%2F%3E%3Cpath%20d%3D'M70%20153L71%20154.2%2070%20155.4%2069%20154.2Z'%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+
+  box-shadow:
+    0 0 12px rgba(65, 215, 205, .38),
+    0 0 4px rgba(145, 220, 235, .48),
+    0 0 25px rgba(105, 88, 235, .2),
+    inset 0 0 8px rgba(1, 10, 16, .64);
+  animation: abyssal-reliquary-frame-breathe 7.2s cubic-bezier(.42, 0, .58, 1) infinite;
+}
+
+.cb-abyssal-reliquary::before {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--abyssal-reliquary-edge-mask);
+  mask: var(--abyssal-reliquary-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 48% 48%, 46% 46%, 52% 42%, 48% 48%;
+  background-position: center, 0 10%, 100% 24%, 0 94%, 100% 87%;
+  background-image:
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20160'%20preserveAspectRatio%3D'none'%3E%3Cg%20fill%3D'none'%20stroke-linecap%3D'round'%3E%3Cpath%20d%3D'M7%20155C4%20138%2012%20129%207%20112S10%2083%207%2067%2012%2035%207%205M93%20155C96%20140%2088%20130%2093%20113S89%2084%2093%2065%2088%2031%2093%205'%20stroke%3D'%2332c8bd'%20stroke-width%3D'.88'%20stroke-dasharray%3D'3.4%205.6'%20opacity%3D'.42'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.18%3B.92%3B.18'%20dur%3D'8.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-18%3B0'%20dur%3D'11.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M8%20146C13%20139%2011%20132%2015%20126M8%20115C3%20108%205%20101%202%2095M8%2079C13%2072%2011%2064%2016%2058M8%2042C3%2035%205%2028%202%2022M92%20143C87%20137%2089%20129%2084%20123M92%20109C97%20102%2095%2095%2098%2088M92%2075C87%2068%2089%2061%2084%2055M92%2038C97%2031%2095%2024%2098%2018'%20stroke%3D'%239b86e8'%20stroke-width%3D'.58'%20stroke-dasharray%3D'2.2%206.8'%20opacity%3D'.48'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.22%3B.88%3B.22'%20dur%3D'9.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B18%3B0'%20dur%3D'13.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M6.6%20132C9.7%20126%209.4%20121%207.4%20116M93.4%20128C90.5%20122%2090.9%20117%2092.8%20112M6.7%2057C9.8%2051%209.3%2046%207.5%2041M93.2%2060C90.3%2054%2090.7%2049%2092.6%2044'%20stroke%3D'%23bffff3'%20stroke-width%3D'.4'%20stroke-dasharray%3D'1.4%204.2'%20opacity%3D'.56'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.25%3B1%3B.25'%20dur%3D'7.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-11.2%3B0'%20dur%3D'8.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3C%2Fpath%3E%3C%2Fg%3E%3C%2Fsvg%3E"),
+    radial-gradient(ellipse, rgba(66, 244, 222, .6) 0, rgba(15, 115, 122, .18) 45%, transparent 72%),
+    radial-gradient(ellipse, rgba(97, 169, 255, .5) 0, rgba(28, 68, 133, .17) 44%, transparent 72%),
+    radial-gradient(ellipse, rgba(145, 116, 240, .55) 0, rgba(61, 43, 126, .17) 46%, transparent 74%),
+    radial-gradient(ellipse, rgba(64, 225, 210, .5) 0, rgba(10, 75, 83, .15) 45%, transparent 72%);
+  opacity: .54;
+  transform-origin: 50% 48%;
+  animation: abyssal-reliquary-depth-breathe 10.8s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+.cb-abyssal-reliquary::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--abyssal-reliquary-edge-mask);
+  mask: var(--abyssal-reliquary-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: center 160px;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20160'%20preserveAspectRatio%3D'none'%3E%3Cdefs%3E%3ClinearGradient%20id%3D'ar-mote-fill'%20x1%3D'0'%20y1%3D'0'%20x2%3D'1'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23eaffff'%2F%3E%3Cstop%20offset%3D'.26'%20stop-color%3D'%2362f1d7'%2F%3E%3Cstop%20offset%3D'.66'%20stop-color%3D'%2358a9ff'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23452c88'%2F%3E%3C%2FlinearGradient%3E%3Cg%20id%3D'ar-mote'%20stroke-linecap%3D'round'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.3%3B1%3B.3'%20dur%3D'5.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'scale'%20additive%3D'sum'%20values%3D'.9%201.08%3B1.12%20.9%3B.9%201.08'%20dur%3D'5.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M0-6C3-3.4%203.2%201.8%200%205.6-3.2%201.8-3-3.4%200-6Z'%20fill%3D'url(%23ar-mote-fill)'%20stroke%3D'%23b9fff0'%20stroke-width%3D'.55'%2F%3E%3Cpath%20d%3D'M-1.1-3.7C.2-4.6%201.2-3.1%201-1.7'%20fill%3D'none'%20stroke%3D'%23ffffff'%20stroke-width%3D'.48'%20opacity%3D'.7'%2F%3E%3Cpath%20d%3D'M-.6%205.1C-1.1%207-.7%208.2-1.7%209.6M.6%205.1C1.1%207%20.7%208.2%201.7%209.6'%20fill%3D'none'%20stroke%3D'%2362f1d7'%20stroke-width%3D'.35'%2F%3E%3C%2Fg%3E%3Cg%20id%3D'ar-plankton'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.18%3B1%3B.18'%20dur%3D'4.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20additive%3D'sum'%20values%3D'-22%200%200%3B22%200%200%3B-22%200%200'%20dur%3D'6.2s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M0-5L1.2-1.4%204.8%200%201.2%201.4%200%205-1.2%201.4-4.8%200-1.2-1.4Z'%20fill%3D'%239b86e8'%20stroke%3D'%23dcfdf7'%20stroke-width%3D'.45'%2F%3E%3Cpath%20d%3D'M0-3.2V3.2M-3.1%200H3.1'%20stroke%3D'%2362f1d7'%20stroke-width%3D'.36'%2F%3E%3C%2Fg%3E%3Cg%20id%3D'ar-comb'%20stroke-linecap%3D'round'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.28%3B1%3B.28'%20dur%3D'5.6s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'scale'%20additive%3D'sum'%20values%3D'1%201%3B1.14%20.84%3B1%201'%20dur%3D'6.4s'%20repeatCount%3D'indefinite'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%2F%3E%3Cpath%20d%3D'M-4.2%201.8C-4.2-2.6-2.2-5.3%200-5.6%202.2-5.3%204.2-2.6%204.2%201.8%202.2%203.2-2.2%203.2-4.2%201.8Z'%20fill%3D'url(%23ar-mote-fill)'%20stroke%3D'%23cafff5'%20stroke-width%3D'.5'%2F%3E%3Cpath%20d%3D'M-2.2-2.4V1.9M0-3.7V2.3M2.2-2.4V1.9'%20stroke%3D'%23ffffff'%20stroke-width%3D'.34'%20opacity%3D'.6'%2F%3E%3Cpath%20d%3D'M-2.2%202.5C-2.8%204.5-1.7%205.8-2.7%207.2M2.2%202.5C2.8%204.5%201.7%205.8%202.7%207.2'%20fill%3D'none'%20stroke%3D'%239b86e8'%20stroke-width%3D'.34'%2F%3E%3C%2Fg%3E%3Cg%20id%3D'ar-bubble'%3E%3Cellipse%20rx%3D'4.1'%20ry%3D'5.4'%20fill%3D'%23102034'%20fill-opacity%3D'.22'%20stroke%3D'%239cefe5'%20stroke-width%3D'.58'%2F%3E%3Cpath%20d%3D'M-2.4-2.2C-1.2-4%20.3-4.3%201.2-3.4M2.8%201.6C2.2%203.2%201.2%203.9.2%204.1'%20fill%3D'none'%20stroke%3D'%23ffffff'%20stroke-width%3D'.55'%20stroke-linecap%3D'round'%20opacity%3D'.75'%2F%3E%3Cpath%20d%3D'M-3.2.9C-1.6%202.3.6%202.5%202.4%201.4'%20fill%3D'none'%20stroke%3D'%2358a9ff'%20stroke-width%3D'.32'%20opacity%3D'.6'%2F%3E%3C%2Fg%3E%3C%2Fdefs%3E%3Cuse%20href%3D'%23ar-mote'%20transform%3D'translate(18%200)%20rotate(-12)%20scale(.36)'%2F%3E%3Cuse%20href%3D'%23ar-mote'%20transform%3D'translate(18%20160)%20rotate(-12)%20scale(.36)'%2F%3E%3Cuse%20href%3D'%23ar-comb'%20transform%3D'translate(83%2024)%20rotate(9)%20scale(.24)'%2F%3E%3Cuse%20href%3D'%23ar-plankton'%20transform%3D'translate(14%2045)%20rotate(18)%20scale(.2)'%2F%3E%3Cuse%20href%3D'%23ar-bubble'%20transform%3D'translate(87%2067)%20rotate(-8)%20scale(.3)'%2F%3E%3Cuse%20href%3D'%23ar-mote'%20transform%3D'translate(11%2091)%20rotate(17)%20scale(.31)'%2F%3E%3Cuse%20href%3D'%23ar-plankton'%20transform%3D'translate(84%20113)%20rotate(-21)%20scale(.23)'%2F%3E%3Cuse%20href%3D'%23ar-comb'%20transform%3D'translate(16%20136)%20rotate(-12)%20scale(.22)'%2F%3E%3Cuse%20href%3D'%23ar-bubble'%20transform%3D'translate(91%20149)%20rotate(11)%20scale(.25)'%2F%3E%3Cuse%20href%3D'%23ar-plankton'%20transform%3D'translate(7%20119)%20rotate(27)%20scale(.16)'%2F%3E%3C%2Fsvg%3E");
+  opacity: .7;
+  transform-origin: 50% 50%;
+  animation:
+    abyssal-reliquary-rise 12.8s linear infinite,
+    abyssal-reliquary-plankton-sway 6.8s cubic-bezier(.42, 0, .58, 1) infinite;
+}
+
+@keyframes abyssal-reliquary-frame-breathe {
+  0%, 100% { filter: brightness(.93) saturate(.9); opacity: .96; }
+  50% { filter: brightness(1.17) saturate(1.2); opacity: 1; }
+}
+
+@keyframes abyssal-reliquary-depth-breathe {
+  0%, 100% {
+    background-position: center, 0 10%, 100% 24%, 0 94%, 100% 87%;
+    transform: perspective(520px) translate3d(-1.5%, .8%, 0) rotateX(1.1deg) rotateY(-2deg) scale(1.028);
+    opacity: .32;
+  }
+  50% {
+    background-position: center, 4% 14%, 96% 20%, 4% 90%, 96% 91%;
+    transform: perspective(520px) translate3d(1.5%, -1%, 8px) rotateX(-1.1deg) rotateY(2deg) scale(1.052);
+    opacity: .74;
+  }
+}
+
+@keyframes abyssal-reliquary-rise {
+  from { background-position: center 160px; }
+  to { background-position: center 0; }
+}
+
+@keyframes abyssal-reliquary-plankton-sway {
+  0%, 100% {
+    transform: perspective(500px) translate3d(-1.7px, 0, 0) rotateY(-4deg) rotateZ(-.45deg);
+    opacity: .56;
+  }
+  50% {
+    transform: perspective(500px) translate3d(1.7px, 0, 7px) rotateY(4deg) rotateZ(.45deg);
+    opacity: .86;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-abyssal-reliquary,
+  .cb-abyssal-reliquary::before,
+  .cb-abyssal-reliquary::after {
+    animation: none;
+  }
+
+  .cb-abyssal-reliquary {
+    filter: brightness(1.02) saturate(1);
+    opacity: 1;
+  }
+
+  .cb-abyssal-reliquary::before {
+    transform: none;
+    opacity: .44;
+  }
+
+  .cb-abyssal-reliquary::after {
+    transform: none;
+    background-position: center 42px;
+    opacity: .52;
+  }
+}

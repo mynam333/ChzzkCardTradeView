@@ -1,7 +1,9 @@
 /* ============================================================
-   프리즘 홀로 (Prism) — 흐르는 무지개 보더 + 가장자리 홀로 밴드/스파클 + 광택
+   분광 광학 실험기 (Prism Spectral Instrument)
+   - 티타늄 계측 프레임, 렌즈 셀, 각면 분광 결정, 국소 색수차
+   - 무지개 띠/단순 대각선 셔머 없이 실제 광학 장치처럼 연출
+   - 정교한 SVG SMIL 광학 모션과 CSS 외곽 모션을 서로 다른 주기로 구성
    적용 클래스: cb-prism
-   ▶ 홀로 밴드/스파클은 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-prism {
   position: absolute;
@@ -10,38 +12,103 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
-  padding: 3px;
-  --em: radial-gradient(82% 74% at 50% 36%, transparent 44%, #000 84%);
-  background:
-    linear-gradient(120deg, #ff6ec4, #f9d423, #3ee6c4, #5b8def, #b06ef9, #ff6ec4) border-box;
-  background-size: 300% 300%;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  box-shadow: 0 0 16px rgba(180,110,249,.5);
-  animation: prism-flow 6s linear infinite;
+  isolation: isolate;
+
+  --prism-optics-edge-mask: radial-gradient(ellipse 75% 69% at 50% 40%, transparent 0 51%, rgba(0, 0, 0, .18) 64%, #000 82%);
+
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='po-titanium' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23131b24'/%3E%3Cstop offset='.18' stop-color='%238aa0af'/%3E%3Cstop offset='.32' stop-color='%23eef7fa'/%3E%3Cstop offset='.45' stop-color='%23556571'/%3E%3Cstop offset='.62' stop-color='%23c9d8df'/%3E%3Cstop offset='.8' stop-color='%23323f4b'/%3E%3Cstop offset='1' stop-color='%230d141c'/%3E%3C/linearGradient%3E%3ClinearGradient id='po-glass' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2306d7ee' stop-opacity='.25'/%3E%3Cstop offset='.24' stop-color='%23dffcff' stop-opacity='.82'/%3E%3Cstop offset='.43' stop-color='%238268ff' stop-opacity='.5'/%3E%3Cstop offset='.64' stop-color='%23ff5fc8' stop-opacity='.48'/%3E%3Cstop offset='.82' stop-color='%23ffd875' stop-opacity='.52'/%3E%3Cstop offset='1' stop-color='%23114467' stop-opacity='.28'/%3E%3C/linearGradient%3E%3ClinearGradient id='po-cyan' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop stop-color='%23044c5e'/%3E%3Cstop offset='.4' stop-color='%2318e9ff'/%3E%3Cstop offset='.56' stop-color='%23edffff'/%3E%3Cstop offset='1' stop-color='%23045f79'/%3E%3C/linearGradient%3E%3ClinearGradient id='po-violet' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop stop-color='%233b236f'/%3E%3Cstop offset='.42' stop-color='%239d7cff'/%3E%3Cstop offset='.58' stop-color='%23f0e9ff'/%3E%3Cstop offset='1' stop-color='%2359239d'/%3E%3C/linearGradient%3E%3CradialGradient id='po-lens' cx='.34' cy='.3' r='.74'%3E%3Cstop stop-color='%23ffffff'/%3E%3Cstop offset='.17' stop-color='%2389f6ff'/%3E%3Cstop offset='.39' stop-color='%235a82d8'/%3E%3Cstop offset='.64' stop-color='%232b1d68'/%3E%3Cstop offset='.82' stop-color='%230c2037'/%3E%3Cstop offset='1' stop-color='%23050a10'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='.7' y='.7' width='98.6' height='158.6' rx='4.66' ry='4.66' fill='none' stroke='%23070d13' stroke-width='2.8'/%3E%3Crect x='1' y='1' width='98' height='158' rx='4.36' ry='4.36' fill='none' stroke='url(%23po-titanium)' stroke-width='3.1'/%3E%3Crect x='2' y='2' width='96' height='156' rx='3.36' ry='3.36' fill='none' stroke='%23d9e8ee' stroke-width='.68' opacity='.9'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.36' ry='2.36' fill='none' stroke='url(%23po-glass)' stroke-width='.42'/%3E%3Crect x='4.15' y='4.15' width='91.7' height='151.7' rx='1.21' ry='1.21' fill='none' stroke='%23131e28' stroke-width='2.15'/%3E%3Crect x='5.05' y='5.05' width='89.9' height='149.9' rx='.31' ry='.31' fill='none' stroke='url(%23po-titanium)' stroke-width='.45' opacity='.88'/%3E%3Cpath d='M5.2 5.2H94.8L90.2 11H26L21.2 15.1H10.4V43L5.2 48.5ZM94.8 5.2V59L89.7 64.2V17.8L84.3 11H78.4ZM5.2 154.8V102L10.3 96.7V141.7L15.7 149H41.5L46.2 154.8ZM94.8 154.8H53.6L58.2 149H78.4L83.2 144.7H89.6V118L94.8 112.4Z' fill='%23101922' opacity='.97'/%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.2 51H10.5L14.3 47.2V30.4L18.1 26.6H30.8' stroke='url(%23po-cyan)' stroke-width='.6'/%3E%3Cpath d='M93.8 67H89.5L85.5 71V89L81.3 93.2H72.7' stroke='url(%23po-violet)' stroke-width='.58'/%3E%3Cpath d='M6.1 113H10.4L14.5 117.1V133.4L18.3 137.2H31.5' stroke='%23d4e8ef' stroke-width='.44' opacity='.78'/%3E%3Cpath d='M93.9 107H89.2L85.2 103V97.5L81.6 93.9' stroke='%23ff75cf' stroke-width='.36' opacity='.72'/%3E%3Cpath d='M31 5.4V9.8L35 13.8H48L51.8 17.6H62.4' stroke='%2388efff' stroke-width='.38' opacity='.8'/%3E%3Cpath d='M36 154.6V150.5L40.1 146.4H51.2L55.1 142.5H66.5' stroke='%23b79aff' stroke-width='.4' opacity='.78'/%3E%3C/g%3E%3Cg stroke='url(%23po-titanium)' stroke-linejoin='round'%3E%3Cpath d='M7.6 8.5L11.1 5.9H24.2L27 9.2V20.7L23.2 24H10.9L7.6 20.6Z' fill='%230a1118' stroke-width='.68'/%3E%3Cpath d='M76.8 136L80.7 132.1H92.6L96 135.5V150.4L92.2 154H80.5L76.8 150.2Z' fill='%230a1118' stroke-width='.68'/%3E%3C/g%3E%3Cg stroke-linejoin='round'%3E%3Cpath d='M10.2 19.4L16.4 8.9 23.5 19.4Z' fill='url(%23po-glass)' stroke='%23dffcff' stroke-width='.72'/%3E%3Cpath d='M16.4 8.9L16.1 19.4M10.2 19.4L16.1 15.3 23.5 19.4' fill='none' stroke='%2383eefd' stroke-width='.38'/%3E%3Cpath d='M80.2 148.5L86.1 135.8 92.7 148.5Z' fill='url(%23po-glass)' stroke='%23eeeaff' stroke-width='.72'/%3E%3Cpath d='M86.1 135.8L86.3 148.5M80.2 148.5L86.3 143.5 92.7 148.5' fill='none' stroke='%23b89bff' stroke-width='.38'/%3E%3C/g%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M23.4 18.6L31.7 15.8 39.7 16.9' stroke='%2300eaff' stroke-width='.42'/%3E%3Cpath d='M23.5 19.2L32 19.2 40.5 21.1' stroke='%23ff66cd' stroke-width='.38'/%3E%3Cpath d='M23.1 19.8L31.2 22.4 38.7 25.7' stroke='%23ffd773' stroke-width='.34'/%3E%3Cpath d='M72.2 137.8L79.8 141.2' stroke='%2300eaff' stroke-width='.36'/%3E%3Cpath d='M70.6 141.3L80.1 143.5' stroke='%23ff66cd' stroke-width='.36'/%3E%3Cpath d='M71.8 145L80.2 145.6' stroke='%23ffd773' stroke-width='.32'/%3E%3C/g%3E%3Cg fill='%23070d13' stroke='url(%23po-titanium)' stroke-width='.58'%3E%3Cellipse cx='92.2' cy='16.5' rx='4.6' ry='5.8'/%3E%3Cellipse cx='8.4' cy='143' rx='4.5' ry='5.7'/%3E%3C/g%3E%3Cg fill='url(%23po-lens)' stroke='%23c9f7ff' stroke-width='.46'%3E%3Cellipse cx='92.2' cy='16.5' rx='2.9' ry='3.7'/%3E%3Cellipse cx='8.4' cy='143' rx='2.8' ry='3.6'/%3E%3C/g%3E%3Cg fill='none' stroke='%23d4e3e8' stroke-linecap='round'%3E%3Cpath d='M31 2.2v3.4M36 2.5v2.2M41 2.5v2.2M46 2.2v3.4M54 2.2v3.4M59 2.5v2.2M64 2.5v2.2M69 2.2v3.4' stroke-width='.3'/%3E%3Cpath d='M31 157.8v-3.4M36 157.5v-2.2M41 157.5v-2.2M46 157.8v-3.4M54 157.8v-3.4M59 157.5v-2.2M64 157.5v-2.2M69 157.8v-3.4' stroke-width='.3'/%3E%3Cpath d='M2.3 59h3.2M2.6 64h2.1M2.6 69h2.1M2.3 74h3.2M97.7 86h-3.2M97.4 91h-2.1M97.4 96h-2.1M97.7 101h-3.2' stroke-width='.28'/%3E%3C/g%3E%3Cg fill='%23e7f5f8' stroke='%234e6470' stroke-width='.22'%3E%3Cpath d='M28.2 7.1l1.35.8v1.6l-1.35.8-1.35-.8V7.9Z'/%3E%3Cpath d='M72.1 7.1l1.35.8v1.6l-1.35.8-1.35-.8V7.9Z'/%3E%3Cpath d='M28.2 149.7l1.35.8v1.6l-1.35.8-1.35-.8v-1.6Z'/%3E%3Cpath d='M72.1 149.7l1.35.8v1.6l-1.35.8-1.35-.8v-1.6Z'/%3E%3C/g%3E%3Cg%20id%3D'po-smil-optics'%20fill%3D'none'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cg%20transform%3D'translate(92.2%2016.5)'%3E%3Cpath%20d%3D'M0-2.35L2.04-1.18%202.04%201.18%200%202.35-2.04%201.18-2.04-1.18Z'%20stroke%3D'%23e8fdff'%20stroke-width%3D'.28'%20opacity%3D'.72'%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B72%3B0'%20dur%3D'8.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.38%3B1%3B.38'%20dur%3D'8.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.36%20.04%20.64%20.96%3B.36%20.04%20.64%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3C%2Fg%3E%3Cpath%20d%3D'M23.4%2018.6L31.7%2015.8%2039.7%2016.9'%20stroke%3D'%2319edff'%20stroke-width%3D'.24'%20stroke-dasharray%3D'1.2%202.8'%20opacity%3D'.78'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-8%3B0'%20dur%3D'5.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M23.5%2019.2L32%2019.2%2040.5%2021.1'%20stroke%3D'%23ff70d1'%20stroke-width%3D'.22'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.12%3B.98%3B.12'%20dur%3D'4.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M23.1%2019.8L31.2%2022.4%2038.7%2025.7'%20stroke%3D'%23ffd978'%20stroke-width%3D'.2'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.1%3B.92%3B.1'%20dur%3D'6.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M31%202.2H69'%20stroke%3D'%23f2feff'%20stroke-width%3D'.16'%20stroke-dasharray%3D'.45%202.1'%20opacity%3D'.62'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B10.2%3B0'%20dur%3D'7.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cellipse%20cx%3D'8.4'%20cy%3D'143'%20rx%3D'2.8'%20ry%3D'3.6'%20stroke%3D'%23c8f7ff'%20stroke-width%3D'.2'%20opacity%3D'.52'%3E%3Canimate%20attributeName%3D'stroke-width'%20values%3D'.18%3B.82%3B.18'%20dur%3D'6.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.28%3B1%3B.28'%20dur%3D'6.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.36%20.04%20.64%20.96%3B.36%20.04%20.64%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fellipse%3E%3C%2Fg%3E%3C/svg%3E");
+
+  filter: saturate(1.07) brightness(1.04);
+  box-shadow:
+    0 0 15px rgba(123, 232, 247, .46),
+    0 0 30px rgba(136, 104, 255, .23),
+    inset 0 0 18px rgba(8, 15, 25, .5),
+    inset 0 0 9px rgba(255, 101, 205, .25);
+  animation: prism-optics-frame-breathe 7.8s cubic-bezier(.42, 0, .58, 1) -4.2s infinite;
 }
-/* 전면 홀로 밴드 + 스파클 (가장자리) */
-.cb-prism::before {
+
+.cb-prism::before,
+.cb-prism::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
-  mix-blend-mode: screen;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-image:
-    repeating-linear-gradient(115deg, rgba(255,0,160,.12) 0 7%, rgba(255,210,0,.12) 7% 14%, rgba(0,230,180,.12) 14% 21%, rgba(60,140,255,.12) 21% 28%, rgba(180,90,255,.12) 28% 35%),
-    radial-gradient(1.6px 1.6px at 18px 30px, rgba(255,255,255,.95), transparent 60%),
-    radial-gradient(1.3px 1.3px at 84px 92px, rgba(255,255,255,.85), transparent 60%),
-    radial-gradient(1.7px 1.7px at 38px 150px, rgba(255,255,255,.9), transparent 60%);
-  background-repeat: repeat, repeat, repeat, repeat;
-  background-size: 220% 220%, 100% 100%, 100% 100%, 100% 100%;
-  animation: prism-holo 7s linear infinite, prism-spark 2.6s ease-in-out infinite;
+  -webkit-mask: var(--prism-optics-edge-mask);
+  mask: var(--prism-optics-edge-mask);
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
 }
-@keyframes prism-flow { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
-@keyframes prism-holo { 0% { background-position: 0% 0%, 0 0, 0 0, 0 0; } 100% { background-position: 220% 220%, 0 0, 0 0, 0 0; } }
-@keyframes prism-spark { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+
+/* 렌즈와 결정 사이에 머무는 국소 색수차 굴절장 */
+.cb-prism::before {
+  z-index: 1;
+  mix-blend-mode: screen;
+  opacity: .6;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image:
+    radial-gradient(ellipse 21% 29% at 8% 17%, rgba(40, 232, 255, .62), transparent 70%),
+    radial-gradient(ellipse 19% 24% at 93% 18%, rgba(137, 108, 255, .52), transparent 72%),
+    radial-gradient(ellipse 23% 27% at 91% 86%, rgba(255, 87, 198, .56), transparent 72%),
+    radial-gradient(ellipse 25% 18% at 16% 94%, rgba(255, 208, 103, .47), transparent 73%),
+    conic-gradient(from 201deg at 50% 48%, transparent 0 55deg, rgba(53, 225, 255, .2) 78deg, transparent 105deg 191deg, rgba(172, 111, 255, .19) 215deg, transparent 242deg 303deg, rgba(255, 188, 91, .16) 323deg, transparent 350deg);
+  animation: prism-optics-caustic-orbit 15.2s cubic-bezier(.445, .05, .55, .95) -8.9s infinite;
+}
+
+/* 전경 분광 결정 표본: 삼각 면과 내부 광로를 가진 정밀 파티클 */
+.cb-prism::after {
+  z-index: 2;
+  mix-blend-mode: screen;
+  opacity: .86;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: 0 160px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='pop-shard' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2312e7f5' stop-opacity='.35'/%3E%3Cstop offset='.25' stop-color='%23f3ffff' stop-opacity='.88'/%3E%3Cstop offset='.48' stop-color='%238e7cff' stop-opacity='.57'/%3E%3Cstop offset='.7' stop-color='%23ff63c8' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23ffc965' stop-opacity='.34'/%3E%3C/linearGradient%3E%3Cg id='pop-crystal' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0-10.2L7.8 6.6-7.2 6.6Z' fill='url(%23pop-shard)' stroke='%23eaffff' stroke-width='.92'/%3E%3Cpath d='M0-10.2L.35 6.6M-7.2 6.6L.15 1.4 7.8 6.6M0-10.2L-2.5 2.9.35 6.6' fill='none' stroke='%238feeff' stroke-width='.48'/%3E%3Cpath d='M-8.6-1.4L-3.4.2M3.1 1L10.2-1.1M3.6 2.5L10 3.8M3.2 4.1L8.7 7' fill='none' stroke-width='.52'/%3E%3Cpath d='M-8.6-1.4L-3.4.2' stroke='%23f8ffff'/%3E%3Cpath d='M3.1 1L10.2-1.1' stroke='%231ee9ff'/%3E%3Cpath d='M3.6 2.5L10 3.8' stroke='%23ff66cb'/%3E%3Cpath d='M3.2 4.1L8.7 7' stroke='%23ffd16a'/%3E%3Cpath d='M-9.8-2.3l1.35.9-1.1 1.05-1.35-.85ZM10.5-2l1.35.9-1.1 1.05-1.35-.85ZM9 6.5l1.35.9-1.1 1.05-1.35-.85Z' fill='%23eaffff' stroke='none'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23pop-crystal' transform='translate(9 0) rotate(-21) scale(.35)'/%3E%3Cuse href='%23pop-crystal' transform='translate(9 160) rotate(-21) scale(.35)'/%3E%3Cuse href='%23pop-crystal' transform='translate(92 27) rotate(34) scale(.39)'/%3E%3Cuse href='%23pop-crystal' transform='translate(7 59) rotate(-49) scale(.27)' opacity='.75'/%3E%3Cuse href='%23pop-crystal' transform='translate(94 96) rotate(19) scale(.33)'/%3E%3Cuse href='%23pop-crystal' transform='translate(14 131) rotate(-13) scale(.24)' opacity='.7'/%3E%3Cuse href='%23pop-crystal' transform='translate(86 148) rotate(51) scale(.2)' opacity='.62'/%3E%3Cg%20id%3D'pop-smil-facets'%20fill%3D'none'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M88.8%2023.8L92%2017.6%2095.1%2024.2%2092%2027.2Z'%20stroke%3D'%23eaffff'%20stroke-width%3D'.28'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.16%3B1%3B.16'%20dur%3D'4.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M4.8%2059L9.2%2057.7%2013.4%2059.3'%20stroke%3D'%23ff72d3'%20stroke-width%3D'.36'%20stroke-dasharray%3D'.8%201.6'%20opacity%3D'.82'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-4.8%3B0'%20dur%3D'4.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.24%3B1%3B.24'%20dur%3D'4.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.36%20.04%20.64%20.96%3B.36%20.04%20.64%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(86%20148)%20scale(.2)'%3E%3Cpath%20d%3D'M0-5L4.4-2.5V2.5L0%205-4.4%202.5V-2.5Z'%20stroke%3D'%23ffda79'%20stroke-width%3D'1.1'%20opacity%3D'.72'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B64%3B0'%20dur%3D'7.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+  filter: drop-shadow(0 0 2px rgba(99, 231, 255, .54)) drop-shadow(0 0 2.7px rgba(185, 118, 255, .34));
+  animation: prism-optics-crystal-rise 11.4s linear -6.2s infinite;
+}
+
+@keyframes prism-optics-frame-breathe {
+  0%, 100% { filter: saturate(1.01) brightness(.96); opacity: .96; }
+  46% { filter: saturate(1.2) brightness(1.16); opacity: 1; }
+  73% { filter: saturate(1.08) brightness(1.05); opacity: .985; }
+}
+
+@keyframes prism-optics-caustic-orbit {
+  0%, 100% { transform: perspective(650px) translate3d(-1.8px, 0, 0) rotateX(1.8deg) rotateY(-4.2deg) rotateZ(0deg); opacity: .34; }
+  34% { transform: perspective(650px) translate3d(3.4px, -2.8px, 8px) rotateX(-3deg) rotateY(8deg) rotateZ(1.65deg); opacity: .76; }
+  67% { transform: perspective(650px) translate3d(1.2px, 3.2px, 3px) rotateX(3.8deg) rotateY(2.6deg) rotateZ(-1.2deg); opacity: .55; }
+}
+
+@keyframes prism-optics-crystal-rise {
+  0% { background-position: 0 160px; transform: perspective(560px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .84; }
+  12.5% { background-position: 0 140px; transform: perspective(560px) translate3d(-2.1px, 0, 2px) rotateX(2.6deg) rotateY(-6.5deg) rotateZ(-.65deg); opacity: .77; }
+  25% { background-position: 0 120px; transform: perspective(560px) translate3d(-3px, 0, 5px) rotateX(4deg) rotateY(-12deg) rotateZ(-1.1deg); opacity: .7; }
+  37.5% { background-position: 0 100px; transform: perspective(560px) translate3d(-2.1px, 0, 2px) rotateX(2.6deg) rotateY(-6.5deg) rotateZ(-.65deg); opacity: .77; }
+  50% { background-position: 0 80px; transform: perspective(560px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .84; }
+  62.5% { background-position: 0 60px; transform: perspective(560px) translate3d(2.1px, 0, 3px) rotateX(-.6deg) rotateY(6.5deg) rotateZ(.65deg); opacity: .91; }
+  75% { background-position: 0 40px; transform: perspective(560px) translate3d(3px, 0, 7px) rotateX(-2.4deg) rotateY(12deg) rotateZ(1.1deg); opacity: 1; }
+  87.5% { background-position: 0 20px; transform: perspective(560px) translate3d(2.1px, 0, 3px) rotateX(-.6deg) rotateY(6.5deg) rotateZ(.65deg); opacity: .91; }
+  100% { background-position: 0 0; transform: perspective(560px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .84; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-prism, .cb-prism::before { animation: none; }
+  .cb-prism,
+  .cb-prism::before,
+  .cb-prism::after {
+    animation: none !important;
+  }
+
+  .cb-prism::before,
+  .cb-prism::after {
+    transform: none;
+  }
+
+  .cb-prism::after {
+    background-position: 0 58px;
+  }
 }

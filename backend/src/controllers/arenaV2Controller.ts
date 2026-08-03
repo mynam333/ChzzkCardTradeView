@@ -14,6 +14,7 @@ import {
   createArenaV2StreamerRightRequest,
   grantArenaV2SeasonRewardsAdmin,
   getArenaV2CurrentSeason,
+  getActiveArenaV2MatchForUser,
   getArenaV2BattleRoyaleQueueStatus,
   getArenaV2CardVersion,
   getArenaV2BattleRoyale,
@@ -47,6 +48,7 @@ import {
   saveArenaV2Deck,
   submitArenaV2Mulligan,
   submitArenaV2TurnActions,
+  surrenderArenaV2MatchForUser,
   transitionArenaV2SeasonAdmin,
   updateMyArenaV2StreamerCard,
   updateArenaV2SeasonAdmin,
@@ -424,6 +426,13 @@ export const cancelMyArenaV2BattleRoyaleQueueController = async (req: Authentica
   return res.status(200).json(result);
 };
 
+export const getActiveArenaV2MatchController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const match = await getActiveArenaV2MatchForUser(user.id);
+  return res.status(200).json({ match });
+};
+
 export const getArenaV2MatchController = async (req: AuthenticatedRequest, res: Response) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -514,6 +523,28 @@ export const abandonArenaV2BotMatchController = async (req: AuthenticatedRequest
     if (message === 'ArenaV2MatchForbidden') return res.status(403).json({ error: message, message: '이 매치에 접근할 수 없습니다.' });
     if (message === 'ArenaV2MatchNotBot') return res.status(409).json({ error: message, message: '연습전만 나가기 즉시 종료할 수 있습니다.' });
     if (message === 'ArenaV2MatchAlreadyCancelled') return res.status(409).json({ error: message, message: '이미 취소된 매치입니다.' });
+    throw err;
+  }
+};
+
+export const surrenderArenaV2MatchController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const matchId = assertBodyString(req.params?.match_id);
+  if (!matchId) {
+    return res.status(400).json({ error: 'ArenaV2MatchInvalid', message: 'matchId가 필요합니다.' });
+  }
+
+  try {
+    const match = await surrenderArenaV2MatchForUser(matchId, user.id);
+    return res.status(200).json({ match });
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2MatchNotFound') return res.status(404).json({ error: message, message: '경기를 찾을 수 없습니다.' });
+    if (message === 'ArenaV2MatchForbidden') return res.status(403).json({ error: message, message: '참가한 경기만 항복할 수 있습니다.' });
+    if (message === 'ArenaV2MatchSurrenderUnavailable') return res.status(409).json({ error: message, message: '8인전은 현재 경기에서 항복할 수 없습니다.' });
+    if (message === 'ArenaV2MatchAlreadyCancelled') return res.status(409).json({ error: message, message: '이미 취소된 경기입니다.' });
+    if (message === 'ArenaV2MatchOpponentMissing') return res.status(409).json({ error: message, message: '상대 정보를 확인할 수 없어 항복을 처리하지 못했습니다.' });
     throw err;
   }
 };
@@ -634,6 +665,8 @@ export const transitionArenaV2SeasonAdminController = async (req: AuthenticatedR
     const message = String(err?.message || '');
     if (message === 'ArenaV2SeasonNotFound') return res.status(404).json({ error: message, message: '시즌을 찾을 수 없습니다.' });
     if (message === 'ArenaV2SeasonTransitionInvalid') return res.status(409).json({ error: message, message: '허용되지 않는 시즌 전환입니다.' });
+    if (message === 'ArenaV2SeasonCardSyncRequired') return res.status(409).json({ error: message, message: '카드 리밸런싱 동기화가 완료된 뒤 시즌을 시작할 수 있습니다.' });
+    if (message === 'ArenaV2SeasonTransitionConflict') return res.status(409).json({ error: message, message: '시즌 상태가 변경되었습니다. 새로고침 후 다시 시도해 주세요.' });
     throw err;
   }
 };

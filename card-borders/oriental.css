@@ -1,7 +1,8 @@
 /* ============================================================
-   동양풍 (Oriental) — 금빛 운문 프레임 + 낙관(붉은 인장) + 가장자리 금가루 + 금빛 광택
+   묵빛 금동 장석 (Ink & Gilt-Bronze Fittings)
+   - 한국 고가구의 금동 경첩, 절제된 운문과 당초 음각, 먹빛·녹청
+   - 단청색·연화·낙관을 배제해 한옥 연화 테두리와 분리
    적용 클래스: cb-oriental
-   ▶ 금가루는 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-oriental {
   position: absolute;
@@ -10,33 +11,128 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+
+  --oriental-bronze-edge-mask: radial-gradient(ellipse 75% 70% at 50% 47%, transparent 0 51%, rgba(0, 0, 0, .2) 64%, #000 83%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  --em: radial-gradient(80% 72% at 50% 36%, transparent 42%, #000 82%);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='au' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fff1bd'/%3E%3Cstop offset='.5' stop-color='%23e8c66a'/%3E%3Cstop offset='1' stop-color='%23a8842a'/%3E%3C/linearGradient%3E%3Cg id='cl' fill='none' stroke='url(%23au)' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M0,0 C-3.4,0 -3.4,-4.4 1,-4.4 C5,-4.4 5,1.6 0.4,1.6 C-2.4,1.6 -2.4,-1.2 0.4,-1.2'/%3E%3Cpath d='M6,-5 C9,-5 9,-1.4 6,-1.4'/%3E%3C/g%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23au)' stroke-width='2.8'/%3E%3Crect x='7.4' y='7.4' width='85.2' height='145.2' rx='1' ry='1' fill='none' stroke='%23b8451f' stroke-width='1.1'/%3E%3Crect x='10.4' y='10.4' width='79.2' height='139.2' rx='0.5' ry='0.5' fill='none' stroke='url(%23au)' stroke-width='.5' opacity='.6'/%3E%3Cuse href='%23cl' transform='translate(11,11)'/%3E%3Cuse href='%23cl' transform='translate(89,11) rotate(90)'/%3E%3Cuse href='%23cl' transform='translate(89,149) rotate(180)'/%3E%3Cuse href='%23cl' transform='translate(11,149) rotate(270)'/%3E%3Ccircle cx='50' cy='6' r='2.6' fill='none' stroke='url(%23au)' stroke-width='1'/%3E%3Ccircle cx='50' cy='6' r='1' fill='%23b8451f'/%3E%3Ccircle cx='50' cy='154' r='2.6' fill='none' stroke='url(%23au)' stroke-width='1'/%3E%3Ccircle cx='50' cy='154' r='1' fill='%23b8451f'/%3E%3Cg transform='translate(85,142)'%3E%3Crect x='-5' y='-5' width='10' height='10' rx='1.4' fill='%23c0341f' stroke='%238a1f12' stroke-width='.5'/%3E%3Cg fill='none' stroke='%23ffe7d8' stroke-width='.8'%3E%3Cpath d='M-2.6,-2.6 L2.6,-2.6 L2.6,2.6 L-2.6,2.6 Z'/%3E%3Cpath d='M0,-2.6 L0,2.6'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: inset 0 0 14px rgba(184,69,31,.35), 0 0 14px rgba(232,198,106,.42);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='ori-bronze' x1='0' y1='0' x2='100' y2='160' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%2322160b'/%3E%3Cstop offset='.12' stop-color='%239c7438'/%3E%3Cstop offset='.22' stop-color='%23edca7c'/%3E%3Cstop offset='.34' stop-color='%23755129'/%3E%3Cstop offset='.58' stop-color='%23180f09'/%3E%3Cstop offset='.78' stop-color='%23b28d4d'/%3E%3Cstop offset='1' stop-color='%23382716'/%3E%3C/linearGradient%3E%3ClinearGradient id='ori-ink' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23141614'/%3E%3Cstop offset='.35' stop-color='%23070908'/%3E%3Cstop offset='.64' stop-color='%231a1d19'/%3E%3Cstop offset='1' stop-color='%23030404'/%3E%3C/linearGradient%3E%3ClinearGradient id='ori-patina' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23a7c8b5'/%3E%3Cstop offset='.3' stop-color='%235f9280'/%3E%3Cstop offset='.7' stop-color='%232a5a51'/%3E%3Cstop offset='1' stop-color='%238da994'/%3E%3C/linearGradient%3E%3CradialGradient id='ori-stud-fill' cx='.34' cy='.28' r='.76'%3E%3Cstop stop-color='%23f1d999'/%3E%3Cstop offset='.22' stop-color='%23a7854d'/%3E%3Cstop offset='.62' stop-color='%234b3922'/%3E%3Cstop offset='1' stop-color='%23100d09'/%3E%3C/radialGradient%3E%3Cg id='ori-stud' stroke-linejoin='round'%3E%3Cpath d='M0-2.2L1.9-1.1 1.9 1.1 0 2.2-1.9 1.1-1.9-1.1Z' fill='url(%23ori-stud-fill)' stroke='%23251c11' stroke-width='.42'/%3E%3Cpath d='M-.75-.95L.55-.9 1 .25.2 1-.9.55Z' fill='none' stroke='%23ead395' stroke-width='.26' opacity='.62'/%3E%3C/g%3E%3Cg id='ori-cloud' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M-9 1.2C-7.8-1.4-5.6-2.1-3.5-.8-2.8-4.1 2.1-4.5 3.1-1.2 5.9-2.5 8.4-.9 8.2 1.5 8 3.9 5.1 4.4 3.7 2.8 2.8 5.2-.7 5.4-1.8 3.1-3.2 4.9-6 4.2-6 2.3-7.1 3-8.5 2.5-9 1.2Z' stroke='url(%23ori-bronze)' stroke-width='.88'/%3E%3Cpath d='M-6.2.9C-4.4-.1-2.3.8-2.7 2.4M-.4-.7C1.4-1.7 3.7-.4 3.1 1.5M3.4 2C4.7.9 6.2 1.4 6.5 2.5' stroke='%23d7bd7a' stroke-width='.28' opacity='.62'/%3E%3C/g%3E%3Cg id='ori-dangcho' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0 0C5.8.4 8-4.3 6-8.3 4.4-11.5.8-11.1.7-8.4.6-6.6 2.8-6 3.7-7.4' stroke='url(%23ori-bronze)' stroke-width='.78'/%3E%3Cpath d='M3.4-2.2C5.8-.7 8.2-.8 9.8-2.8M2.2-5.4C.1-3.9-.7-1.8.1.2' stroke='%237b927f' stroke-width='.38'/%3E%3Cpath d='M7.7-2.7C8.8-4 10.3-4.1 11.4-3.2 10.2-2.1 9-1.7 7.7-2.7ZM1.4-4.8C-.2-5.6-1.6-5.1-2.2-3.9-.7-3.4.5-3.6 1.4-4.8Z' fill='url(%23ori-patina)' stroke='%23a98e58' stroke-width='.22'/%3E%3C/g%3E%3Cg id='ori-hinge' stroke-linejoin='round'%3E%3Cpath d='M-10-3.2H-5.1L-2.8-5.2H2.8L5.1-3.2H10V3.2H5.1L2.8 5.2H-2.8L-5.1 3.2H-10Z' fill='url(%23ori-bronze)' stroke='%2318120b' stroke-width='.72'/%3E%3Cpath d='M-8-1.8H-4.3L-2.1-3.7H2.1L4.3-1.8H8V1.8H4.3L2.1 3.7H-2.1L-4.3 1.8H-8Z' fill='url(%23ori-ink)' stroke='%23c1a465' stroke-width='.34'/%3E%3Cpath d='M-5.4 0H5.4M0-3.2V3.2' stroke='%237d9a88' stroke-width='.34' opacity='.66'/%3E%3Cuse href='%23ori-stud' transform='translate(-6.6 0) scale(.58)'/%3E%3Cuse href='%23ori-stud' transform='translate(6.6 0) scale(.58)'/%3E%3C/g%3E%3Cg id='ori-corner' stroke-linejoin='round'%3E%3Cpath d='M0 19V5Q0 0 5 0H19L14.2 4.7H7Q4.7 4.7 4.7 7V14.2Z' fill='url(%23ori-ink)' stroke='url(%23ori-bronze)' stroke-width='1.15'/%3E%3Cpath d='M2 15.8V6Q2 2 6 2H15.8L12.9 3.8H7Q3.8 3.8 3.8 7V12.9Z' fill='none' stroke='%23b9995e' stroke-width='.3' opacity='.7'/%3E%3Cuse href='%23ori-stud' transform='translate(5.7 5.7) scale(.68)'/%3E%3C/g%3E%3Cg id='ori-lock' stroke-linejoin='round'%3E%3Cpath d='M-8-2.8L-4.2-5.2H4.2L8-2.8 6.4 5.2 0 8-6.4 5.2Z' fill='url(%23ori-bronze)' stroke='%23241b10' stroke-width='.75'/%3E%3Cpath d='M-5.7-1.8L-3.1-3.5H3.1L5.7-1.8 4.5 3.7 0 5.7-4.5 3.7Z' fill='url(%23ori-ink)' stroke='%23b3985d' stroke-width='.34'/%3E%3Cpath d='M0-2.2L1.1.4.5 3H-.5L-1.1.4Z' fill='url(%23ori-patina)' stroke='%23d4b875' stroke-width='.25'/%3E%3Cpath d='M-3.9 1.2C-2.4-.2-1.2-.2 0 .7 1.2-.2 2.4-.2 3.9 1.2' fill='none' stroke='%2396ab91' stroke-width='.3'/%3E%3C/g%3E%3C/defs%3E%3Crect x='.8' y='.8' width='98.4' height='158.4' rx='4.56' ry='4.56' fill='none' stroke='%23050403' stroke-width='3.1'/%3E%3Crect x='2' y='2' width='96' height='156' rx='3.36' ry='3.36' fill='none' stroke='url(%23ori-bronze)' stroke-width='2.05'/%3E%3Crect x='3.4' y='3.4' width='93.2' height='153.2' rx='1.96' ry='1.96' fill='none' stroke='%23d0ae6b' stroke-width='.58' opacity='.78'/%3E%3Crect x='5' y='5' width='90' height='150' rx='.36' ry='.36' fill='none' stroke='%23111210' stroke-width='2.1'/%3E%3Cpath d='M5.4 5.4H94.6L90.5 10.4H9.5ZM5.4 154.6H94.6L90.5 149.6H9.5ZM5.4 5.4V154.6L10 147V13ZM94.6 5.4V154.6L90 147V13Z' fill='url(%23ori-ink)' fill-rule='evenodd' opacity='.98'/%3E%3Cuse href='%23ori-corner' transform='translate(2.2 2.2)'/%3E%3Cuse href='%23ori-corner' transform='translate(97.8 2.2) scale(-1 1)'/%3E%3Cuse href='%23ori-corner' transform='translate(2.2 157.8) scale(1 -1)'/%3E%3Cuse href='%23ori-corner' transform='translate(97.8 157.8) scale(-1 -1)'/%3E%3Cuse href='%23ori-lock' transform='translate(50 7.3) scale(.72)'/%3E%3Cuse href='%23ori-lock' transform='translate(50 152.7) rotate(180) scale(.64)' opacity='.82'/%3E%3Cuse href='%23ori-hinge' transform='translate(6.2 80) rotate(90) scale(.68)'/%3E%3Cuse href='%23ori-hinge' transform='translate(93.8 80) rotate(-90) scale(.68)'/%3E%3Cuse href='%23ori-cloud' transform='translate(24 6.7) scale(.72)'/%3E%3Cuse href='%23ori-cloud' transform='translate(76 6.7) scale(-.72 .72)'/%3E%3Cuse href='%23ori-cloud' transform='translate(24 153.3) scale(.72 -.72)'/%3E%3Cuse href='%23ori-cloud' transform='translate(76 153.3) scale(-.72 -.72)'/%3E%3Cuse href='%23ori-dangcho' transform='translate(10.2 31) rotate(92) scale(.72)'/%3E%3Cuse href='%23ori-dangcho' transform='translate(89.8 31) rotate(88) scale(-.72 .72)'/%3E%3Cuse href='%23ori-dangcho' transform='translate(10.2 129) rotate(-92) scale(.72)'/%3E%3Cuse href='%23ori-dangcho' transform='translate(89.8 129) rotate(-88) scale(-.72 .72)'/%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M8.7 48C12.2 44.2 14.2 45.6 15.2 48.7S18.1 52.8 21 50.9M91.3 48C87.8 44.2 85.8 45.6 84.8 48.7S81.9 52.8 79 50.9M8.7 112C12.2 115.8 14.2 114.4 15.2 111.3S18.1 107.2 21 109.1M91.3 112C87.8 115.8 85.8 114.4 84.8 111.3S81.9 107.2 79 109.1' stroke='%235d795f' stroke-width='.42' opacity='.66'/%3E%3Cpath d='M9 60V71M9 89V100M91 60V71M91 89V100' stroke='%23b69a60' stroke-width='.38' stroke-dasharray='1.2 2.1' opacity='.58'/%3E%3C/g%3E%3Cg%3E%3Cuse href='%23ori-stud' transform='translate(8 24) scale(.67)'/%3E%3Cuse href='%23ori-stud' transform='translate(92 24) scale(.67)'/%3E%3Cuse href='%23ori-stud' transform='translate(8 136) scale(.67)'/%3E%3Cuse href='%23ori-stud' transform='translate(92 136) scale(.67)'/%3E%3C/g%3E%3Cg%20id%3D'ori-smil-hardware'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M43.2%207.1H56.8'%20fill%3D'none'%20stroke%3D'%23f2db9e'%20stroke-width%3D'.22'%20stroke-dasharray%3D'1%202.5'%20opacity%3D'.66'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-7%3B0'%20dur%3D'7.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M6.3%2073L8.1%2076.2%207.2%2080%208.1%2083.8%206.3%2087'%20fill%3D'none'%20stroke%3D'%236f9c88'%20stroke-width%3D'.3'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.16%3B.94%3B.16'%20dur%3D'6.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M93.7%2073L91.9%2076.2%2092.8%2080%2091.9%2083.8%2093.7%2087'%20fill%3D'none'%20stroke%3D'%23d0ad68'%20stroke-width%3D'.25'%3E%3Canimate%20attributeName%3D'stroke-width'%20values%3D'.2%3B.7%3B.2'%20dur%3D'7.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M16%207C18.3%204.8%2021.5%205.2%2022.6%207.2%2024.8%204.8%2028.2%205.4%2029.1%207.6'%20fill%3D'none'%20stroke%3D'%23d5b671'%20stroke-width%3D'.24'%20stroke-dasharray%3D'.9%201.8'%20opacity%3D'.62'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B5.4%3B0'%20dur%3D'8.6s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M70.8%20152.8C73.1%20150.4%2076.2%20151%2077.4%20152.8%2079.4%20150.7%2082.1%20151.2%2083.4%20153'%20fill%3D'none'%20stroke%3D'%236d9785'%20stroke-width%3D'.24'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.14%3B.9%3B.14'%20dur%3D'9.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'stroke-width'%20values%3D'.18%3B.5%3B.18'%20dur%3D'7.9s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(50%20152.7)%20scale(.18)'%3E%3Cpath%20d%3D'M-6-2H-2L0-4%202-2H6V2H2L0%204-2%202H-6Z'%20fill%3D'%238b6b3c'%20stroke%3D'%23e1c27d'%20stroke-width%3D'1'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B11%3B0'%20dur%3D'7.5s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.42%3B1%3B.42'%20dur%3D'5.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+
+  box-shadow:
+    0 0 15px rgba(176, 132, 61, .4),
+    0 0 6px rgba(238, 202, 124, .36),
+    0 0 22px rgba(73, 137, 116, .19),
+    inset 0 0 11px rgba(4, 7, 5, .72);
+  animation: oriental-bronze-breathe 8.2s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-/* 떠오르는 금가루 (가장자리) */
+
 .cb-oriental::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
+  -webkit-mask: var(--oriental-bronze-edge-mask);
+  mask: var(--oriental-bronze-edge-mask);
   mix-blend-mode: screen;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-repeat: repeat;
-  background-size: 100% 240px;
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 49% 43%, 46% 47%, 48% 44%, 46% 45%;
+  background-position: center, 0 8%, 100% 22%, 0 91%, 100% 83%;
   background-image:
-    radial-gradient(1.6px 1.6px at 14px 220px, rgba(255,228,150,.9), transparent 60%),
-    radial-gradient(1.2px 1.2px at 90px 170px, rgba(255,214,120,.8), transparent 60%),
-    radial-gradient(1.8px 1.8px at 8px 120px, rgba(255,236,170,.85), transparent 60%),
-    radial-gradient(1.1px 1.1px at 92px 90px, rgba(255,210,110,.7), transparent 60%),
-    radial-gradient(1.4px 1.4px at 16px 60px, rgba(255,224,140,.8), transparent 60%);
-  animation: oriental-dust 9s linear infinite, oriental-twinkle 2.6s ease-in-out infinite;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M7 8C11 15 9 22 14 28M7 39C12 45 10 52 15 58M7 103C11 109 9 117 14 123M7 135C12 141 10 147 14 153M93 8C89 15 91 22 86 28M93 39C88 45 90 52 85 58M93 103C89 109 91 117 86 123M93 135C88 141 90 147 86 153' stroke='%23b6955a' stroke-width='.5' opacity='.32'/%3E%3Cpath d='M8 31C10 28 12 29 12.8 31.5M8 73C11 69 13 71 13.4 74M8 119C10 116 12 117 12.8 119.5M92 31C90 28 88 29 87.2 31.5M92 73C89 69 87 71 86.6 74M92 119C90 116 88 117 87.2 119.5' stroke='%236e9685' stroke-width='.36' opacity='.46'/%3E%3C/g%3E%3Cg%20id%3D'orig-smil-scrolls'%20fill%3D'none'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M7%208C11%2015%209%2022%2014%2028'%20stroke%3D'%23d1b06c'%20stroke-width%3D'.24'%20stroke-dasharray%3D'.8%202'%20opacity%3D'.58'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-5.6%3B0'%20dur%3D'7s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M93%20103C89%20109%2091%20117%2086%20123'%20stroke%3D'%2370a08d'%20stroke-width%3D'.24'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.12%3B.94%3B.12'%20dur%3D'6.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(8.5%2073)%20scale(.22)'%3E%3Cpath%20d%3D'M-5-2H-1L0-3%201-2H5V2H1L0%203-1%202H-5Z'%20stroke%3D'%23e1c17c'%20stroke-width%3D'1'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B-12%3B0'%20dur%3D'8.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.4%3B1%3B.4'%20dur%3D'6.3s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E"),
+    radial-gradient(ellipse, rgba(239, 204, 125, .58) 0, rgba(111, 81, 41, .15) 44%, transparent 74%),
+    radial-gradient(ellipse, rgba(103, 178, 151, .5) 0, rgba(26, 68, 61, .15) 46%, transparent 75%),
+    radial-gradient(ellipse, rgba(211, 171, 88, .5) 0, rgba(75, 51, 25, .13) 44%, transparent 74%),
+    radial-gradient(ellipse, rgba(110, 179, 148, .47) 0, rgba(25, 62, 56, .12) 45%, transparent 74%);
+  opacity: .61;
+  filter: brightness(1.04) contrast(1.06) saturate(1.12);
+  transform-origin: 50% 48%;
+  animation: oriental-bronze-patina 15.2s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-@keyframes oriental-dust { from { background-position-y: 0; } to { background-position-y: -240px; } }
-@keyframes oriental-twinkle { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+
+.cb-oriental::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--oriental-bronze-edge-mask);
+  mask: var(--oriental-bronze-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: center 160px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ori-mote-bronze' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23f0d79a'/%3E%3Cstop offset='.34' stop-color='%23b28b4f'/%3E%3Cstop offset='.7' stop-color='%23563d22'/%3E%3Cstop offset='1' stop-color='%2319110b'/%3E%3C/linearGradient%3E%3ClinearGradient id='ori-mote-patina' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23c0dfcc'/%3E%3Cstop offset='.34' stop-color='%236d9f8d'/%3E%3Cstop offset='.72' stop-color='%232b6258'/%3E%3Cstop offset='1' stop-color='%23162f2c'/%3E%3C/linearGradient%3E%3Cg id='ori-mote-cloud' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M-6 1C-5.2-1.2-3.1-1.8-1.5-.6-.7-3.2 3-3 3.4-.4 5.5-.9 6.8.8 5.9 2.5 4.8 4.4 2.1 3.6 1.8 1.9.4 3.8-2.4 3.4-2.6 1.4-4 2.5-5.5 2.2-6 1Z' stroke='url(%23ori-mote-bronze)' stroke-width='.75'/%3E%3Cpath d='M-3.8.8C-2.5-.2-.9.4-1 1.7M.3-.6C1.6-1.2 3-.2 2.6 1' stroke='%23fff0c2' stroke-width='.3' opacity='.66'/%3E%3C/g%3E%3Cg id='ori-mote-flake' stroke-linejoin='round'%3E%3Cpath d='M-4-2.8L.6-4.5 4 0 1.5 4.2-3.7 2.5Z' fill='url(%23ori-mote-patina)' stroke='%23d4d9b8' stroke-width='.42'/%3E%3Cpath d='M-4-2.8L.2-.2.6-4.5M.2-.2L1.5 4.2M.2-.2L4 0' fill='none' stroke='%23e5e0b7' stroke-width='.28' opacity='.58'/%3E%3C/g%3E%3Cg id='ori-mote-leaf' stroke-linejoin='round'%3E%3Cpath d='M0-5C3.6-3.6 4.3-.2 1.3 3.8L0 5-1.3 3.8C-4.3-.2-3.6-3.6 0-5Z' fill='url(%23ori-mote-bronze)' stroke='%23ecd49a' stroke-width='.4'/%3E%3Cpath d='M0-3.8V3.7M0-.3L2.1-1.7M0 1.3L-1.9.1' fill='none' stroke='%233a4f3f' stroke-width='.3'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23ori-mote-cloud' transform='translate(18 0) rotate(-8) scale(.34)'/%3E%3Cuse href='%23ori-mote-cloud' transform='translate(18 160) rotate(-8) scale(.34)'/%3E%3Cuse href='%23ori-mote-flake' transform='translate(84 23) rotate(17) scale(.2)'/%3E%3Cuse href='%23ori-mote-leaf' transform='translate(13 46) rotate(-21) scale(.22)'/%3E%3Cuse href='%23ori-mote-cloud' transform='translate(87 68) rotate(12) scale(.26)'/%3E%3Cuse href='%23ori-mote-flake' transform='translate(11 90) rotate(28) scale(.18)'/%3E%3Cuse href='%23ori-mote-leaf' transform='translate(84 111) rotate(-17) scale(.23)'/%3E%3Cuse href='%23ori-mote-cloud' transform='translate(14 134) rotate(9) scale(.25)'/%3E%3Cuse href='%23ori-mote-flake' transform='translate(89 148) rotate(-24) scale(.19)'/%3E%3Cg%20id%3D'ori-mote-smil'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M81%2066C82.2%2063.8%2085.4%2063.6%2086.4%2065.8%2088.2%2064.4%2090.4%2065.8%2089.6%2068.1%2088.7%2070.2%2085.8%2069.7%2085.2%2067.8%2083.8%2069.8%2081.4%2068.8%2081%2066Z'%20fill%3D'none'%20stroke%3D'%23d8ba77'%20stroke-width%3D'.25'%20stroke-dasharray%3D'.8%201.7'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B5%3B0'%20dur%3D'6.7s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M7.5%2087L11%2085.7%2013.4%2089%2011.7%2092%208%2090.8Z'%20fill%3D'%235c8c7a'%20stroke%3D'%23d7c68e'%20stroke-width%3D'.2'%3E%3Canimate%20attributeName%3D'fill-opacity'%20values%3D'.18%3B.98%3B.18'%20dur%3D'5.6s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(84%20111)%20scale(.2)'%3E%3Cpath%20d%3D'M0-5C3.6-3.6%204.3-.2%201.3%203.8L0%205-1.3%203.8C-4.3-.2-3.6-3.6%200-5Z'%20fill%3D'%23b18b50'%20stroke%3D'%23efd8a0'%20stroke-width%3D'.8'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B16%3B0'%20dur%3D'7.3s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.36%3B1%3B.36'%20dur%3D'5.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+  opacity: .64;
+  filter: brightness(1.08) saturate(1.15) drop-shadow(0 0 1.8px rgba(228, 198, 126, .3));
+  transform-origin: 50% 50%;
+  animation:
+    oriental-bronze-rise 15.9s linear infinite,
+    oriental-bronze-drift 8.1s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+@keyframes oriental-bronze-breathe {
+  0%, 100% {
+    filter: brightness(.95) saturate(.98) drop-shadow(0 0 1px rgba(212, 177, 102, .2));
+    opacity: .98;
+  }
+  38% {
+    filter: brightness(1.15) saturate(1.18) drop-shadow(0 0 5px rgba(238, 201, 119, .42));
+    opacity: 1;
+  }
+  70% {
+    filter: brightness(1.07) saturate(1.28) drop-shadow(0 0 4px rgba(95, 171, 143, .38));
+    opacity: 1;
+  }
+}
+
+@keyframes oriental-bronze-patina {
+  0%, 100% {
+    background-position: center, 0 8%, 100% 22%, 0 91%, 100% 83%;
+    transform: perspective(540px) translate3d(-1.1%, .7%, 0) rotateX(.8deg) rotateY(-1.2deg) scale(1.034);
+    filter: brightness(.94) contrast(1.07) saturate(1.02);
+    opacity: .48;
+  }
+  41% {
+    background-position: center, 6% 13%, 94% 16%, 2% 85%, 98% 90%;
+    transform: perspective(540px) translate3d(1.2%, -.8%, 6px) rotateX(-.8deg) rotateY(1.3deg) scale(1.052);
+    filter: brightness(1.2) contrast(1.1) saturate(1.16);
+    opacity: .75;
+  }
+  73% {
+    background-position: center, 1% 10%, 99% 25%, 6% 94%, 94% 80%;
+    transform: perspective(540px) translate3d(.25%, .5%, 3px) rotateX(.55deg) rotateY(.45deg) scale(1.044);
+    filter: brightness(1.06) contrast(1.08) saturate(1.34);
+    opacity: .65;
+  }
+}
+
+@keyframes oriental-bronze-rise {
+  from { background-position: center 160px; }
+  to { background-position: center 0; }
+}
+
+@keyframes oriental-bronze-drift {
+  0%, 100% {
+    transform: perspective(520px) translate3d(-1px, 0, 0) rotateY(-2.5deg) rotateZ(-.28deg);
+    filter: brightness(.94) saturate(1.02);
+    opacity: .52;
+  }
+  50% {
+    transform: perspective(520px) translate3d(1px, 0, 5px) rotateY(2.5deg) rotateZ(.28deg);
+    filter: brightness(1.22) saturate(1.3);
+    opacity: .77;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-oriental::before { animation: none; }
+  .cb-oriental,
+  .cb-oriental::before,
+  .cb-oriental::after {
+    animation: none;
+  }
+
+  .cb-oriental { filter: brightness(1.02) saturate(1.06); opacity: 1; }
+  .cb-oriental::before { transform: none; opacity: .51; }
+  .cb-oriental::after { transform: none; background-position: center 51px; opacity: .54; }
 }

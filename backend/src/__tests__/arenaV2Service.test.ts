@@ -10,11 +10,13 @@ import {
   createArenaV2SeasonAdmin,
   deleteArenaV2DeckForUser,
   enableMyArenaV2StreamerCard,
+  getActiveArenaV2MatchForUser,
   getArenaV2BattleRoyaleQueueStatus,
   getArenaV2BattleRoyale,
   getArenaV2CardVersion,
   getArenaV2CurrentSeason,
   getArenaV2MatchForUser,
+  getArenaV2PreparationSeasonForGeneratedCardSync,
   getArenaV2QuickQueueStatus,
   getArenaV2Replay,
   getMyArenaV2StreamerCard,
@@ -32,10 +34,12 @@ import {
   revalidateArenaV2DeckForUser,
   saveArenaV2Deck,
   submitArenaV2Mulligan,
+  surrenderArenaV2MatchForUser,
   submitArenaV2TurnActions,
   syncArenaV2MatchForUser,
   syncArenaV2CardsFromOwnedCards,
   syncArenaV2CardsFromRegisteredStreamers,
+  transitionArenaV2SeasonAdmin,
   updateMyArenaV2StreamerCard,
   validateArenaV2DeckForSeason
 } from '../services/arenaV2Service';
@@ -290,6 +294,20 @@ const makeExecutor = () => ({
     return [];
   },
   get: (sql: string, params: any[] = []) => {
+    if (sql.includes('SELECT m.id') && sql.includes('FROM arena_v2_match_players p') && sql.includes('ORDER BY CASE m.mode')) {
+      const priority: Record<string, number> = { quick: 0, battle_royale_8: 1, bot: 2 };
+      const activeMatches = rows.matchPlayers
+        .filter((player) => player.user_id === params[0])
+        .map((player) => rows.matches.find((match) => match.id === player.match_id))
+        .filter((match): match is Row => match != null && !['completed', 'cancelled'].includes(String(match.status)))
+        .sort((left, right) => (
+          (priority[String(left.mode)] ?? 3) - (priority[String(right.mode)] ?? 3)
+          || String(right.updated_at || '').localeCompare(String(left.updated_at || ''))
+          || String(right.created_at || '').localeCompare(String(left.created_at || ''))
+          || String(right.id).localeCompare(String(left.id))
+        ));
+      return activeMatches[0] ? { id: activeMatches[0].id } : undefined;
+    }
     if (sql.includes('active_participation')) {
       const userId = params[0];
       const now = String(params[1]);
@@ -338,6 +356,13 @@ const makeExecutor = () => ({
       return rows.quickQueue.find((ticket) => ticket.season_id === params[0] && ticket.user_id === params[1]
         && ticket.proposal_id === params[2] && ['matched', 'accept_timeout', 'declined'].includes(ticket.status));
     }
+    if (sql.includes('SELECT 1 AS missing') && sql.includes('FROM streamers s') && sql.includes('FROM arena_v2_card_versions cv')) {
+      const missing = rows.streamers.some((streamer) => Number(streamer.is_image_banned || 0) === 0
+        && !rows.cards.some((card) => card.season_id === params[0]
+          && card.streamer_id === streamer.channel_id
+          && card.status === 'active'));
+      return missing ? { missing: 1 } : undefined;
+    }
     if (sql.includes('FROM arena_v2_seasons')) {
       if (sql.includes('WHERE id = ?')) {
         return rows.seasons.find((season) => season.id === params[0] && (!params[1] || season.status === params[1]));
@@ -347,6 +372,24 @@ const makeExecutor = () => ({
         return rows.seasons
           .filter((season) => season.status in statusOrder)
           .sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || String(b.starts_at).localeCompare(String(a.starts_at)))[0];
+      }
+      if (sql.includes("status IN ('draft', 'scheduled')")) {
+        const statusOrder: Record<string, number> = { scheduled: 0, draft: 1 };
+        return rows.seasons
+          .filter((season) => ['draft', 'scheduled'].includes(String(season.status)))
+          .filter((season) => {
+            if (!sql.includes('card_pool_version <> ?')) return true;
+            const versionPending = season.card_pool_version !== params[0]
+              || season.balance_version !== params[1];
+            const hasMissingCard = rows.streamers.some((streamer) => Number(streamer.is_image_banned || 0) === 0
+              && !rows.cards.some((card) => card.season_id === season.id
+                && card.streamer_id === streamer.channel_id
+                && card.status === 'active'));
+            return versionPending || hasMissingCard;
+          })
+          .sort((a, b) => statusOrder[a.status] - statusOrder[b.status]
+            || String(a.starts_at).localeCompare(String(b.starts_at))
+            || String(a.id).localeCompare(String(b.id)))[0];
       }
       return rows.seasons.find((season) => season.status === 'active');
     }
@@ -545,6 +588,30 @@ const makeExecutor = () => ({
         rows.quickSlots = rows.quickSlots.filter((slot) => !terminalIds.has(slot.ticket_id));
       }
       return { changes: before - rows.quickSlots.length };
+    }
+    if (sql.includes('UPDATE arena_v2_seasons') && sql.includes('SET card_pool_version = ?')) {
+      const season = rows.seasons.find((item) => item.id === params[2] && ['draft', 'scheduled'].includes(item.status));
+      if (!season) return { changes: 0 };
+      season.card_pool_version = params[0];
+      season.balance_version = params[1];
+      season.updated_at = 'now';
+      return { changes: 1 };
+    }
+    if (sql.includes('UPDATE arena_v2_seasons') && sql.includes('SET status = ?')) {
+      const season = rows.seasons.find((item) => item.id === params[1] && item.status === params[2]);
+      if (!season) return { changes: 0 };
+      if (sql.includes('card_pool_version = ?')
+        && (season.card_pool_version !== params[3] || season.balance_version !== params[4])) return { changes: 0 };
+      if (sql.includes('FROM streamers s')) {
+        const hasMissingCard = rows.streamers.some((streamer) => Number(streamer.is_image_banned || 0) === 0
+          && !rows.cards.some((card) => card.season_id === params[5]
+            && card.streamer_id === streamer.channel_id
+            && card.status === 'active'));
+        if (hasMissingCard) return { changes: 0 };
+      }
+      season.status = params[0];
+      season.updated_at = 'now';
+      return { changes: 1 };
     }
     if (sql.includes('INSERT INTO arena_v2_seasons')) {
       rows.seasons.push({
@@ -817,7 +884,15 @@ const makeExecutor = () => ({
       if (index >= 0) rows.decks.splice(index, 1);
     }
     if (sql.includes('UPDATE arena_v2_match_players')) {
-      if (sql.includes('SET mulligan_state = ?')) {
+      if (sql.includes('SET final_rank = CASE WHEN seat_no = ?')) {
+        const players = rows.matchPlayers.filter((item) => item.match_id === params[2]);
+        for (const player of players) {
+          const surrendered = Number(player.seat_no) === Number(params[0]);
+          player.final_rank = surrendered ? 2 : 1;
+          if (surrendered) player.player_health = 0;
+        }
+        return { changes: players.length };
+      } else if (sql.includes('SET mulligan_state = ?')) {
         const player = rows.matchPlayers.find((item) => item.match_id === params[1] && item.seat_no === params[2]);
         if (!player) return { changes: 0 };
         player.mulligan_state = params[0];
@@ -899,6 +974,16 @@ const makeExecutor = () => ({
           match.status = 'action_locked';
           match.result_summary = params[0];
         }
+      } else if (sql.includes("SET status = 'completed'") && sql.includes('winner_user_id = ?')) {
+        const match = rows.matches.find((item) => item.id === params[4] && !['completed', 'cancelled'].includes(item.status));
+        if (!match) return { changes: 0 };
+        match.status = 'completed';
+        match.winner_user_id = params[0];
+        match.finished_at = params[1];
+        match.replay_expires_at = params[2];
+        match.result_summary = params[3];
+        match.updated_at = 'now';
+        return { changes: 1 };
       } else if (sql.includes('finished_at')) {
         const match = rows.matches.find((item) => item.id === params[6]);
         if (match) {
@@ -1116,8 +1201,8 @@ const insertSeason = (overrides: Row = {}) => {
     starts_at: '2026-07-01T00:00:00Z',
     ends_at: '2026-08-01T00:00:00Z',
     modes_enabled: '{"quick":true,"bot":true,"battle_royale_8":true}',
-    card_pool_version: 'cards-v1',
-    balance_version: 'balance-v1',
+    card_pool_version: 'cards-v2',
+    balance_version: 'balance-v2',
     reward_table: '[]',
     mmr_tier_table: '[]',
     replay_retention_days: 7,
@@ -1345,7 +1430,7 @@ describe('arena v2 service', () => {
   });
 
   it('rebuilds an existing active generated card in place with the current generation rules', async () => {
-    insertSeason();
+    insertSeason({ status: 'draft' });
     rows.streamers.push({
       channel_id: 'existing-generated-streamer',
       name: '기존 자동 생성 스트리머',
@@ -1399,7 +1484,7 @@ describe('arena v2 service', () => {
   });
 
   it('rebuilds a legacy generated card in place without changing its referenced id', async () => {
-    insertSeason();
+    insertSeason({ status: 'draft' });
     const streamerId = 'legacy-generated-streamer';
     rows.streamers.push({
       channel_id: streamerId,
@@ -1450,6 +1535,207 @@ describe('arena v2 service', () => {
     expect(budget).toMatchObject({ totalCost: budget.budgetLimit, remaining: 0, isOverBudget: false });
   });
 
+  it('upgrades a preparation season to v2 before rebuilding its generated cards', async () => {
+    insertSeason({ status: 'draft', card_pool_version: 'cards-v1', balance_version: 'balance-v1' });
+    const streamerId = 'preseason-rebalance-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '프리시즌 리밸런싱 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const generated = rows.cards[0];
+    const budget = evaluateArenaV2CardBudget({
+      id: generated.id,
+      streamerId: generated.streamer_id,
+      seasonId: generated.season_id,
+      status: generated.status,
+      cardClass: generated.card_class,
+      cost: generated.cost,
+      attack: generated.attack,
+      health: generated.health,
+      keywords: JSON.parse(generated.keywords),
+      validationResult: JSON.parse(generated.validation_result)
+    });
+
+    expect(sync).toMatchObject({ created: 1, updated: 0 });
+    expect(rows.seasons[0]).toMatchObject({ card_pool_version: 'cards-v2', balance_version: 'balance-v2' });
+    expect(budget).toMatchObject({ totalCost: budget.budgetLimit, remaining: 0, isOverBudget: false });
+  });
+
+  it('selects only an unfinished preparation season for worker card synchronization', async () => {
+    insertSeason({
+      id: 'season-synced',
+      status: 'scheduled',
+      starts_at: '2026-07-01T00:00:00Z',
+      card_pool_version: 'cards-v2',
+      balance_version: 'balance-v2'
+    });
+    insertSeason({
+      id: 'season-pending',
+      status: 'draft',
+      starts_at: '2026-08-01T00:00:00Z',
+      card_pool_version: 'cards-v1',
+      balance_version: 'balance-v1'
+    });
+
+    expect(await getArenaV2PreparationSeasonForGeneratedCardSync()).toMatchObject({ id: 'season-pending' });
+
+    rows.seasons.find((season) => season.id === 'season-pending')!.card_pool_version = 'cards-v2';
+    rows.seasons.find((season) => season.id === 'season-pending')!.balance_version = 'balance-v2';
+    expect(await getArenaV2PreparationSeasonForGeneratedCardSync()).toBeNull();
+  });
+
+  it('selects a v2 preparation season when an eligible streamer card is still missing', async () => {
+    insertSeason({ status: 'draft' });
+    rows.streamers.push({
+      channel_id: 'v2-empty-season-streamer',
+      name: '빈 시즌 동기화 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: 'v2-empty-season-streamer'
+    });
+
+    expect(await getArenaV2PreparationSeasonForGeneratedCardSync()).toMatchObject({ id: 'season-v2' });
+
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    expect(rows.cards).toHaveLength(1);
+    expect(await getArenaV2PreparationSeasonForGeneratedCardSync()).toBeNull();
+  });
+
+  it('rejects season activation until every eligible streamer has a synchronized v2 card', async () => {
+    insertSeason({
+      status: 'scheduled',
+      card_pool_version: 'cards-v1',
+      balance_version: 'balance-v1'
+    });
+    rows.streamers.push(
+      {
+        channel_id: 'season-activation-streamer-a',
+        name: '시즌 활성화 스트리머 A',
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 2400,
+        base_value: 900,
+        is_image_banned: 0,
+        registered_by: 'season-activation-streamer-a'
+      },
+      {
+        channel_id: 'season-activation-streamer-b',
+        name: '시즌 활성화 스트리머 B',
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 4200,
+        base_value: 1200,
+        is_image_banned: 0,
+        registered_by: 'season-activation-streamer-b'
+      }
+    );
+
+    await expect(transitionArenaV2SeasonAdmin('season-v2', 'active', 'season-open'))
+      .rejects.toThrow('ArenaV2SeasonCardSyncRequired');
+    expect(rows.seasons[0].status).toBe('scheduled');
+
+    rows.seasons[0].card_pool_version = 'cards-v2';
+    rows.seasons[0].balance_version = 'balance-v2';
+
+    await expect(transitionArenaV2SeasonAdmin('season-v2', 'active', 'season-open'))
+      .rejects.toThrow('ArenaV2SeasonCardSyncRequired');
+
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    rows.cards = rows.cards.filter((card) => card.streamer_id !== 'season-activation-streamer-b');
+
+    await expect(transitionArenaV2SeasonAdmin('season-v2', 'active', 'season-open'))
+      .rejects.toThrow('ArenaV2SeasonCardSyncRequired');
+
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    const transition = await transitionArenaV2SeasonAdmin('season-v2', 'active', 'season-open');
+
+    expect(rows.cards.filter((card) => card.status === 'active')).toHaveLength(2);
+    expect(transition.season?.status).toBe('active');
+    expect(rows.seasons[0].status).toBe('active');
+  });
+
+  it('keeps existing generated rows immutable after a v2 season becomes active', async () => {
+    insertSeason({ status: 'draft', card_pool_version: 'cards-v1', balance_version: 'balance-v1' });
+    const streamerId = 'active-v2-immutable-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '활성 시즌 자동 카드 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+
+    await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+    rows.seasons[0].status = 'active';
+    const generated = rows.cards[0];
+    generated.attack = Math.max(0, Number(generated.attack) - 1);
+    generated.balance_score = Number(generated.balance_score) - 2;
+    const before = { ...generated };
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    expect(sync).toMatchObject({ scanned: 1, created: 0, updated: 0, skipped: 1 });
+    expect(rows.cards[0]).toEqual(before);
+    expect(rows.seasons[0]).toMatchObject({
+      status: 'active',
+      card_pool_version: 'cards-v2',
+      balance_version: 'balance-v2'
+    });
+  });
+
+  it('does not rewrite generated cards from locked or completed historical seasons', async () => {
+    insertSeason({ status: 'closed', card_pool_version: 'cards-v1', balance_version: 'balance-v1' });
+    const streamerId = 'historical-generated-streamer';
+    rows.streamers.push({
+      channel_id: streamerId,
+      name: '과거 시즌 스트리머',
+      logo_url: null,
+      custom_image_url: null,
+      follower_count: 2400,
+      base_value: 900,
+      is_image_banned: 0,
+      registered_by: streamerId
+    });
+    rows.cards.push({
+      id: `arena_v2_card_season-v2_${streamerId}`,
+      streamer_id: streamerId,
+      display_name: '과거 시즌 스트리머',
+      season_id: 'season-v2',
+      version: 1,
+      card_class: 'charge',
+      cost: 2,
+      attack: 1,
+      health: 4,
+      keywords: '[]',
+      balance_score: 7,
+      validation_result: JSON.stringify({ valid: true, issues: [] }),
+      art_asset_id: null,
+      status: 'active'
+    });
+    const before = { ...rows.cards[0] };
+
+    const sync = await syncArenaV2CardsFromRegisteredStreamers('season-v2');
+
+    expect(sync).toMatchObject({ scanned: 0, created: 0, updated: 0, skipped: 0 });
+    expect(rows.cards[0]).toEqual(before);
+    expect(rows.seasons[0]).toMatchObject({ card_pool_version: 'cards-v1', balance_version: 'balance-v1' });
+  });
+
   it('keeps a streamer-authored active version unchanged during generated-card refresh', async () => {
     insertSeason();
     rows.streamers.push({
@@ -1487,7 +1773,7 @@ describe('arena v2 service', () => {
   });
 
   it('fully spends the budget before re-enabling a disabled generated card', async () => {
-    insertSeason();
+    insertSeason({ status: 'draft' });
     const streamerId = 'disabled-generated-streamer';
     rows.streamers.push({
       channel_id: streamerId,
@@ -1512,6 +1798,38 @@ describe('arena v2 service', () => {
     expect(result.card?.id).toBe(generated.id);
     expect(result.card?.status).toBe('active');
     expect(budget).toMatchObject({ totalCost: budget.budgetLimit, remaining: 0, isOverBudget: false });
+  });
+
+  it('creates only the requested streamer card when enabling without card history', async () => {
+    insertSeason({ status: 'active', card_pool_version: 'cards-v2', balance_version: 'balance-v2' });
+    rows.streamers.push(
+      {
+        channel_id: 'enable-target-streamer',
+        name: '활성화 대상 스트리머',
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 2400,
+        base_value: 900,
+        is_image_banned: 0,
+        registered_by: 'enable-target-streamer'
+      },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        channel_id: `unrelated-enable-streamer-${index}`,
+        name: `무관한 스트리머 ${index}`,
+        logo_url: null,
+        custom_image_url: null,
+        follower_count: 1000,
+        base_value: 500 - index,
+        is_image_banned: 0,
+        registered_by: `unrelated-enable-streamer-${index}`
+      }))
+    );
+
+    const result = await enableMyArenaV2StreamerCard('enable-target-streamer');
+
+    expect(result.card?.streamerId).toBe('enable-target-streamer');
+    expect(rows.cards).toHaveLength(1);
+    expect(rows.cards[0].streamer_id).toBe('enable-target-streamer');
   });
 
   it('does not rewrite a disabled streamer-authored card when re-enabling it', async () => {
@@ -1559,6 +1877,7 @@ describe('arena v2 service', () => {
     const profiles = new Set<string>();
     const keywordCounts = new Set<number>();
     const signatures = new Set<string>();
+    const signaturesByCost = new Map<number, Set<string>>();
     const costClassPairs = new Set<string>();
 
     for (let index = 0; index < sampleSize; index += 1) {
@@ -1585,12 +1904,17 @@ describe('arena v2 service', () => {
       expect(budget.isOverBudget).toBe(false);
       expect(budget.totalCost).toBe(budget.budgetLimit);
       expect(budget.remaining).toBe(0);
+      expect(generated.keywords.every((keyword) => !['pursuit', 'grave_buff'].includes(keyword.type))).toBe(true);
       costCounts.set(generated.cost, (costCounts.get(generated.cost) || 0) + 1);
       costClassPairs.add(`${generated.cost}:${generated.cardClass}`);
       classes.add(generated.cardClass);
       profiles.add(generated.profile);
       keywordCounts.add(generated.keywords.length);
-      signatures.add(`${generated.cardClass}:${generated.cost}:${generated.attack}:${generated.health}:${JSON.stringify(generated.keywords)}`);
+      const signature = `${generated.cardClass}:${generated.cost}:${generated.attack}:${generated.health}:${JSON.stringify(generated.keywords)}`;
+      signatures.add(signature);
+      const costSignatures = signaturesByCost.get(generated.cost) || new Set<string>();
+      costSignatures.add(signature);
+      signaturesByCost.set(generated.cost, costSignatures);
     }
 
     const expectedPercentages: Record<number, number> = { 1: 9, 2: 13, 3: 15, 4: 15, 5: 14, 6: 12, 7: 10, 8: 7, 9: 5 };
@@ -1602,7 +1926,13 @@ describe('arena v2 service', () => {
     expect(costClassPairs.size).toBe(63);
     expect(profiles).toEqual(new Set(['aggressive', 'durable', 'tactical', 'balanced']));
     expect(keywordCounts).toEqual(new Set([0, 1, 2, 3]));
-    expect(signatures.size).toBeGreaterThan(150);
+    const minimumSignaturesByCost: Record<number, number> = {
+      1: 50, 2: 100, 3: 170, 4: 230, 5: 220, 6: 230, 7: 190, 8: 130, 9: 110
+    };
+    for (const [costText, minimum] of Object.entries(minimumSignaturesByCost)) {
+      expect(signaturesByCost.get(Number(costText))?.size || 0).toBeGreaterThanOrEqual(minimum);
+    }
+    expect(signatures.size).toBeGreaterThan(1700);
   });
 
   it('syncs arena owned cards from the user chikapo inventory', async () => {
@@ -2208,6 +2538,112 @@ describe('arena v2 service', () => {
     expect(match.self.handCardInstanceIds).toHaveLength(5);
     expect(match.self.deckCount).toBe(9);
     expect(match.opponent.handCount).toBe(5);
+  });
+
+  it('finds an active match without depending on a current-season request', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'active-user',
+      seasonId: 'season-v2',
+      name: '재접속 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'active-user', mode: 'bot', deckId: deck.id });
+    rows.seasons[0].status = 'ended';
+
+    const active = await getActiveArenaV2MatchForUser('active-user');
+    expect(active?.id).toBe(created.matchId);
+
+    rows.matches.find((match) => match.id === created.matchId)!.status = 'completed';
+    expect(await getActiveArenaV2MatchForUser('active-user')).toBeNull();
+  });
+
+  it('finishes a surrendered bot match as a player loss', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'bot-surrender-user',
+      seasonId: 'season-v2',
+      name: '연습전 항복 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'bot-surrender-user', mode: 'bot', deckId: deck.id });
+
+    const completed = await surrenderArenaV2MatchForUser(created.matchId, 'bot-surrender-user');
+    const self = completed?.players.find((player) => player.userId === 'bot-surrender-user');
+
+    expect(completed?.status).toBe('completed');
+    expect(completed?.viewerResult?.outcome).toBe('loss');
+    expect(self).toMatchObject({ playerHealth: 0, finalRank: 2 });
+    expect(completed?.resultSummary).toMatchObject({
+      completedReason: 'player_surrendered',
+      surrenderedBySeatNo: self?.seatNo
+    });
+  });
+
+  it('rejects surrender requests from users who did not join the match', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'surrender-owner',
+      seasonId: 'season-v2',
+      name: '참가자 확인 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'surrender-owner', mode: 'bot', deckId: deck.id });
+
+    await expect(surrenderArenaV2MatchForUser(created.matchId, 'surrender-outsider'))
+      .rejects.toThrow('ArenaV2MatchForbidden');
+    expect(rows.matches.find((match) => match.id === created.matchId)?.status).not.toBe('completed');
+  });
+
+  it('applies a quick-match surrender rating exactly once', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'quick-loser',
+      seasonId: 'season-v2',
+      name: '빠른대전 항복 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'quick-loser', mode: 'bot', deckId: deck.id });
+    const storedMatch = rows.matches.find((match) => match.id === created.matchId)!;
+    const opponent = rows.matchPlayers.find((player) => player.match_id === created.matchId && player.seat_no === 1)!;
+    storedMatch.mode = 'quick';
+    opponent.user_id = 'quick-winner';
+
+    const first = await surrenderArenaV2MatchForUser(created.matchId, 'quick-loser');
+    const ratingsAfterFirst = rows.ratings.map((rating) => ({ ...rating }));
+    const second = await surrenderArenaV2MatchForUser(created.matchId, 'quick-loser');
+
+    expect(first?.winnerUserId).toBe('quick-winner');
+    expect(first?.viewerResult).toMatchObject({ outcome: 'loss', mmrBefore: 1000, mmrAfter: 975, mmrDelta: -25 });
+    expect(rows.ratings.find((rating) => rating.user_id === 'quick-loser')).toMatchObject({ mmr: 975, wins: 0, losses: 1 });
+    expect(rows.ratings.find((rating) => rating.user_id === 'quick-winner')).toMatchObject({ mmr: 1025, wins: 1, losses: 0 });
+    expect(rows.ratings).toEqual(ratingsAfterFirst);
+    expect(second?.viewerResult).toMatchObject({ outcome: 'loss', mmrAfter: 975 });
+  });
+
+  it('keeps battle royale surrender unavailable until tournament withdrawal is defined', async () => {
+    insertSeason();
+    insertCards(14);
+    const deck = await saveArenaV2Deck({
+      userId: 'battle-user',
+      seasonId: 'season-v2',
+      name: '8인전 재접속 덱',
+      modeScope: 'bot',
+      cardVersionIds: Array.from({ length: 14 }, (_, index) => `card-${index + 1}`)
+    });
+    const created = await createArenaV2Match({ userId: 'battle-user', mode: 'bot', deckId: deck.id });
+    rows.matches.find((match) => match.id === created.matchId)!.mode = 'battle_royale_8';
+
+    await expect(surrenderArenaV2MatchForUser(created.matchId, 'battle-user'))
+      .rejects.toThrow('ArenaV2MatchSurrenderUnavailable');
   });
 
   it('reads a v2 match snapshot and resolves a valid bot turn after mulligan', async () => {

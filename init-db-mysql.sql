@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
     name VARCHAR(191) NOT NULL,
     description TEXT,
     price BIGINT NOT NULL DEFAULT 0,
-    style_json MEDIUMTEXT,
+    style_json LONGTEXT,
     font_url TEXT,
     font_family VARCHAR(191),
     active TINYINT DEFAULT 1,

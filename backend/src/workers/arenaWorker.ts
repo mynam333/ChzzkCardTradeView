@@ -17,6 +17,7 @@ const QUICK_MATCHMAKING_INTERVAL_MS = parseInterval(process.env.ARENA_V2_QUICK_M
 const BATTLE_ROYALE_RECOVERY_INTERVAL_MS = parseInterval(process.env.ARENA_V2_BR_RECOVERY_INTERVAL_MS, 15_000, 5_000, 120_000);
 const QUEUE_EXPIRY_SCAN_INTERVAL_MS = parseInterval(process.env.ARENA_V2_QUEUE_EXPIRY_SCAN_INTERVAL_MS, 60_000, 15_000, 300_000);
 const REPLAY_PRUNE_INTERVAL_MS = parseInterval(process.env.ARENA_V2_REPLAY_PRUNE_INTERVAL_MS, 3_600_000, 300_000, 86_400_000);
+const CARD_SYNC_INTERVAL_MS = parseInterval(process.env.ARENA_V2_CARD_SYNC_INTERVAL_MS, 300_000, 60_000, 3_600_000);
 const WORKER_STARTED_AT = new Date().toISOString();
 
 let jobTimer: NodeJS.Timeout | null = null;
@@ -27,12 +28,14 @@ let battleRoyaleRecoveryTimer: NodeJS.Timeout | null = null;
 let queueExpiryTimer: NodeJS.Timeout | null = null;
 let quickMatchmakingTimer: NodeJS.Timeout | null = null;
 let replayPruneTimer: NodeJS.Timeout | null = null;
+let cardSyncTimer: NodeJS.Timeout | null = null;
 let jobInFlight = false;
 let staleResetInFlight = false;
 let turnTimeoutInFlight = false;
 let battleRoyaleRecoveryInFlight = false;
 let queueExpiryInFlight = false;
 let replayPruneInFlight = false;
+let cardSyncInFlight = false;
 
 let quickMatchmakingInFlight = false;
 const start = async () => {
@@ -175,6 +178,25 @@ const start = async () => {
     }
   };
 
+  const syncPreparationCards = async () => {
+    if (cardSyncInFlight) return;
+    cardSyncInFlight = true;
+    try {
+      const season = await arenaV2Service.getArenaV2PreparationSeasonForGeneratedCardSync();
+      if (!season?.id) return;
+      const result = await arenaV2Service.syncArenaV2CardsFromRegisteredStreamers(season.id);
+      const changed = Number((result as any).created || 0) + Number((result as any).updated || 0);
+      console.log(
+        `[ArenaWorker] ${arenaV2Service.ARENA_V2_CARD_POOL_VERSION}/${arenaV2Service.ARENA_V2_BALANCE_VERSION} 카드 동기화: `
+        + `season=${season.id} scanned=${(result as any).scanned || 0} changed=${changed} skipped=${(result as any).skipped || 0}`
+      );
+    } catch (err) {
+      console.error('[ArenaWorker] v2 준비 시즌 자동 생성 카드 동기화 실패:', (err as any)?.message || err);
+    } finally {
+      cardSyncInFlight = false;
+    }
+  };
+
   const resetStaleJobs = async () => {
     if (staleResetInFlight) return;
     staleResetInFlight = true;
@@ -208,8 +230,10 @@ const start = async () => {
   queueExpiryTimer = setInterval(() => void processQueueExpiry(), QUEUE_EXPIRY_SCAN_INTERVAL_MS);
   battleRoyaleRecoveryTimer = setInterval(() => void processBattleRoyaleRecovery(), BATTLE_ROYALE_RECOVERY_INTERVAL_MS);
   replayPruneTimer = setInterval(() => void pruneReplayEvents(), REPLAY_PRUNE_INTERVAL_MS);
+  cardSyncTimer = setInterval(() => void syncPreparationCards(), CARD_SYNC_INTERVAL_MS);
 
   quickMatchmakingTimer = setInterval(() => void processQuickMatchmaking(), QUICK_MATCHMAKING_INTERVAL_MS);
+  void syncPreparationCards();
   console.log(`[ArenaWorker] 치카포 아레나 v2 worker가 시작되었습니다. jobPoll=${JOB_POLL_INTERVAL_MS}ms quickMatchmaking=${QUICK_MATCHMAKING_INTERVAL_MS}ms turnTimeoutScan=${TURN_TIMEOUT_SCAN_INTERVAL_MS}ms brRecovery=${BATTLE_ROYALE_RECOVERY_INTERVAL_MS}ms queueExpiry=${QUEUE_EXPIRY_SCAN_INTERVAL_MS}ms replayPrune=${REPLAY_PRUNE_INTERVAL_MS}ms`);
 };
 
@@ -222,6 +246,7 @@ const shutdown = () => {
   if (replayPruneTimer) clearInterval(replayPruneTimer);
   if (quickMatchmakingTimer) clearInterval(quickMatchmakingTimer);
   if (battleRoyaleRecoveryTimer) clearInterval(battleRoyaleRecoveryTimer);
+  if (cardSyncTimer) clearInterval(cardSyncTimer);
   console.log('[ArenaWorker] 종료 신호를 받아 타이머를 정리했습니다.');
   process.exit(0);
 };

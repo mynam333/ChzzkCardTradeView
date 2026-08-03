@@ -1,7 +1,8 @@
 /* ============================================================
-   중세풍 (Medieval) — 베벨 강철 + 금장 인레이 + 리벳 + 방패/교차검 + 횃불 글로우 + 광택
+   흑철 문장갑 (Blackened Heraldic Plate)
+   - 검게 산화된 강철, 심홍/남청 에나멜 문장, 팔각 리벳, 체인메일
+   - SVG SMIL 에나멜·강철 글린트와 CSS 모션을 끊김 없는 닫힌 루프로 구성
    적용 클래스: cb-medieval
-   ▶ 횃불 글로우는 상단 양 코너에만 켜져 중앙~상단(얼굴)을 가리지 않습니다.
    ============================================================ */
 .cb-medieval {
   position: absolute;
@@ -10,25 +11,128 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+
+  --medieval-edge-mask: radial-gradient(ellipse 74% 70% at 50% 47%, transparent 0 50%, rgba(0, 0, 0, .22) 63%, #000 82%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='steel' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f4f7fb'/%3E%3Cstop offset='.45' stop-color='%23aab2bd'/%3E%3Cstop offset='1' stop-color='%2358606e'/%3E%3C/linearGradient%3E%3ClinearGradient id='gold2' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffe9a8'/%3E%3Cstop offset='.5' stop-color='%23d9b25a'/%3E%3Cstop offset='1' stop-color='%238a6a22'/%3E%3C/linearGradient%3E%3CradialGradient id='rivet' cx='38%25' cy='34%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23ffffff'/%3E%3Cstop offset='.5' stop-color='%23c4ccd6'/%3E%3Cstop offset='1' stop-color='%236f7682'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='2.9' ry='2.9' fill='none' stroke='url(%23steel)' stroke-width='4.6'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='2.9' ry='2.9' fill='none' stroke='%23414753' stroke-width='1'/%3E%3Crect x='7' y='7' width='86' height='146' rx='1' ry='1' fill='none' stroke='url(%23gold2)' stroke-width='1.5'/%3E%3Cg fill='url(%23rivet)' stroke='%236b7280' stroke-width='.4'%3E%3Ccircle cx='8' cy='8' r='2.6'/%3E%3Ccircle cx='92' cy='8' r='2.6'/%3E%3Ccircle cx='8' cy='152' r='2.6'/%3E%3Ccircle cx='92' cy='152' r='2.6'/%3E%3Ccircle cx='8' cy='80' r='2'/%3E%3Ccircle cx='92' cy='80' r='2'/%3E%3C/g%3E%3Cg transform='translate(50,8)'%3E%3Cpath d='M-6,-4 L6,-4 L6,2 L0,7 L-6,2 Z' fill='url(%23gold2)' stroke='%238a6a22' stroke-width='.6'/%3E%3Cpath d='M0,-3 L0,5 M-4,0 L4,0' stroke='%238a3b16' stroke-width='.8'/%3E%3C/g%3E%3Cg transform='translate(50,152)' stroke='url(%23steel)' stroke-width='1.4' stroke-linecap='round'%3E%3Cline x1='-7' y1='-5' x2='7' y2='5'/%3E%3Cline x1='7' y1='-5' x2='-7' y2='5'/%3E%3Cline x1='-8' y1='-6' x2='-5.5' y2='-3.5' stroke='url(%23gold2)' stroke-width='2'/%3E%3Cline x1='8' y1='-6' x2='5.5' y2='-3.5' stroke='url(%23gold2)' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: inset 0 0 10px rgba(0,0,0,.5), 0 0 9px rgba(200,205,214,.4);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='med-steel' x1='0' y1='0' x2='100' y2='160' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%2303070a'/%3E%3Cstop offset='.13' stop-color='%234b5a61'/%3E%3Cstop offset='.21' stop-color='%23c6d0d1'/%3E%3Cstop offset='.3' stop-color='%23303a40'/%3E%3Cstop offset='.57' stop-color='%23080d10'/%3E%3Cstop offset='.78' stop-color='%2379878b'/%3E%3Cstop offset='1' stop-color='%2310181d'/%3E%3C/linearGradient%3E%3ClinearGradient id='med-edge' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%238d9a9c'/%3E%3Cstop offset='.28' stop-color='%23242e33'/%3E%3Cstop offset='.6' stop-color='%23060a0d'/%3E%3Cstop offset='.82' stop-color='%23616f73'/%3E%3Cstop offset='1' stop-color='%2310181b'/%3E%3C/linearGradient%3E%3ClinearGradient id='med-enamel-red' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23a3474a'/%3E%3Cstop offset='.32' stop-color='%236d2029'/%3E%3Cstop offset='.72' stop-color='%23270b12'/%3E%3Cstop offset='1' stop-color='%23742a31'/%3E%3C/linearGradient%3E%3ClinearGradient id='med-enamel-blue' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23546e7f'/%3E%3Cstop offset='.34' stop-color='%2321384a'/%3E%3Cstop offset='.72' stop-color='%230a1724'/%3E%3Cstop offset='1' stop-color='%23334d61'/%3E%3C/linearGradient%3E%3CradialGradient id='med-rivet' cx='.32' cy='.26' r='.78'%3E%3Cstop stop-color='%23eef3ef'/%3E%3Cstop offset='.22' stop-color='%239aa8aa'/%3E%3Cstop offset='.58' stop-color='%233d484d'/%3E%3Cstop offset='1' stop-color='%23070b0e'/%3E%3C/radialGradient%3E%3Cg id='med-rivet-g' stroke-linejoin='round'%3E%3Cpath d='M0-2.3L1.65-1.65 2.3 0 1.65 1.65 0 2.3-1.65 1.65-2.3 0-1.65-1.65Z' fill='url(%23med-rivet)' stroke='%23151d21' stroke-width='.46'/%3E%3Cpath d='M-.9-.85L.25-1.35 1.15-.35.55.75-.75.9-1.15-.15Z' fill='none' stroke='%23d7e0de' stroke-width='.28' opacity='.62'/%3E%3C/g%3E%3Cg id='med-mail' fill='none' stroke-linecap='round'%3E%3Cpath d='M-3 0C-3-2.2 1-2.2 1 0S-3 2.2-3 0M1 0C1-2.2 5-2.2 5 0S1 2.2 1 0' stroke='%2358686c' stroke-width='.78'/%3E%3Cpath d='M-2.5-.55C-1.5.55-.5.55.5-.55M1.5-.55C2.5.55 3.5.55 4.5-.55' stroke='%23c2ccca' stroke-width='.26' opacity='.68'/%3E%3C/g%3E%3Cg id='med-corner' stroke-linejoin='round'%3E%3Cpath d='M0 18V5Q0 0 5 0H18L13.4 4.8H7Q4.8 4.8 4.8 7V13.4Z' fill='%23060a0d' stroke='url(%23med-steel)' stroke-width='1.35'/%3E%3Cpath d='M2.2 15.2V6.2Q2.2 2.2 6.2 2.2H15.2L12.6 4H7Q4 4 4 7V12.6Z' fill='none' stroke='%2379888b' stroke-width='.34' opacity='.72'/%3E%3Cuse href='%23med-rivet-g' transform='translate(5.8 5.8) scale(.72)'/%3E%3C/g%3E%3Cg id='med-crest' stroke-linejoin='round'%3E%3Cpath d='M0-8L8-5.1V1.4C8 7.1 4.5 11.4 0 13.6-4.5 11.4-8 7.1-8 1.4V-5.1Z' fill='%23050a0d' stroke='url(%23med-steel)' stroke-width='1.25'/%3E%3Cpath d='M0-6.2L6.1-4V1.1C6.1 5.2 3.7 8.5 0 10.5-3.7 8.5-6.1 5.2-6.1 1.1V-4Z' fill='url(%23med-enamel-red)' stroke='%23929e9e' stroke-width='.42'/%3E%3Cpath d='M0-6.2L6.1-4V1.1C6.1 5.2 3.7 8.5 0 10.5Z' fill='url(%23med-enamel-blue)' opacity='.98'/%3E%3Cpath d='M-5 2.4L0-2 5 2.4 3.6 4.3 0 1.2-3.6 4.3Z' fill='%23a38243' stroke='%23e1c47b' stroke-width='.35'/%3E%3Cpath d='M0-5.4L1.25-2.5.55-.8H-.55L-1.25-2.5Z' fill='%23d3dcda' stroke='%23434e51' stroke-width='.3'/%3E%3Cpath d='M-3.8 6.2C-1.5 7.2 1.5 7.2 3.8 6.2M-4.8-3.2L4.8 5.2' fill='none' stroke='%23eff5f1' stroke-width='.28' opacity='.54'/%3E%3C/g%3E%3Cg id='med-clasp' stroke-linejoin='round'%3E%3Cpath d='M-7-3.8L0-6.4 7-3.8 5.7 4.4 0 7-5.7 4.4Z' fill='%23070c0f' stroke='url(%23med-steel)' stroke-width='1'/%3E%3Cpath d='M-3.8-2.5L0-4 3.8-2.5 2.8 2.7 0 4.1-2.8 2.7Z' fill='url(%23med-enamel-red)' stroke='%238c9696' stroke-width='.32'/%3E%3Cpath d='M0-3V3.1M-2.7 0H2.7' stroke='%23c2a76c' stroke-width='.56'/%3E%3C/g%3E%3C/defs%3E%3Crect x='.8' y='.8' width='98.4' height='158.4' rx='4.56' ry='4.56' fill='none' stroke='%23010507' stroke-width='3.2'/%3E%3Crect x='2' y='2' width='96' height='156' rx='3.36' ry='3.36' fill='none' stroke='url(%23med-steel)' stroke-width='2.2'/%3E%3Crect x='3.4' y='3.4' width='93.2' height='153.2' rx='1.96' ry='1.96' fill='none' stroke='%23798688' stroke-width='.62' opacity='.82'/%3E%3Crect x='5' y='5' width='90' height='150' rx='.36' ry='.36' fill='none' stroke='%23090e12' stroke-width='2.15'/%3E%3Cpath d='M5.4 5.4H94.6L90.2 11H9.8ZM5.4 154.6H94.6L90.2 149H9.8ZM5.4 5.4V154.6L10.2 147V13ZM94.6 5.4V154.6L89.8 147V13Z' fill='url(%23med-edge)' fill-rule='evenodd' opacity='.96'/%3E%3Cuse href='%23med-corner' transform='translate(2.2 2.2)'/%3E%3Cuse href='%23med-corner' transform='translate(97.8 2.2) scale(-1 1)'/%3E%3Cuse href='%23med-corner' transform='translate(2.2 157.8) scale(1 -1)'/%3E%3Cuse href='%23med-corner' transform='translate(97.8 157.8) scale(-1 -1)'/%3E%3Cg opacity='.86'%3E%3Cuse href='%23med-mail' transform='translate(5.1 35) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(5.1 49) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(5.1 63) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(5.1 77) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(5.1 91) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(5.1 105) rotate(90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 35) rotate(-90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 49) rotate(-90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 63) rotate(-90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 77) rotate(-90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 91) rotate(-90) scale(.68)'/%3E%3Cuse href='%23med-mail' transform='translate(94.9 105) rotate(-90) scale(.68)'/%3E%3C/g%3E%3Cuse href='%23med-crest' transform='translate(50 10.2) scale(.88)'/%3E%3Cuse href='%23med-clasp' transform='translate(50 151.5) scale(.75)'/%3E%3Cg%3E%3Cuse href='%23med-rivet-g' transform='translate(8.2 27) scale(.76)'/%3E%3Cuse href='%23med-rivet-g' transform='translate(91.8 27) scale(.76)'/%3E%3Cuse href='%23med-rivet-g' transform='translate(8.2 80) scale(.76)'/%3E%3Cuse href='%23med-rivet-g' transform='translate(91.8 80) scale(.76)'/%3E%3Cuse href='%23med-rivet-g' transform='translate(8.2 133) scale(.76)'/%3E%3Cuse href='%23med-rivet-g' transform='translate(91.8 133) scale(.76)'/%3E%3C/g%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M12 31L15.8 27.4M11.4 48L16.2 44.8M11.6 113L16 116.5M88 31L84.2 27.4M88.6 48L83.8 44.8M88.4 113L84 116.5' stroke='%23b8c4c4' stroke-width='.35' opacity='.46'/%3E%3Cpath d='M25 5.8L31 8.1 37 5.8M63 5.8L69 8.1 75 5.8M27 154.2L34 151.8 41 154.2M59 154.2L66 151.8 73 154.2' stroke='%2359676b' stroke-width='.42' opacity='.7'/%3E%3C/g%3E%3Cg%20id%3D'med-smil-forge'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M26%203.1H45'%20fill%3D'none'%20stroke%3D'%23edf3f1'%20stroke-width%3D'.22'%20stroke-dasharray%3D'1.1%202.7'%20opacity%3D'.72'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-7.6%3B0'%20dur%3D'6.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M55%20156.9H74'%20fill%3D'none'%20stroke%3D'%23aebcbd'%20stroke-width%3D'.2'%20stroke-dasharray%3D'.9%202.4'%20opacity%3D'.64'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B6.6%3B0'%20dur%3D'8.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M50%205.2L52.4%208.2%2050%2011.2%2047.6%208.2Z'%20fill%3D'%237c2630'%20stroke%3D'%23c3ccca'%20stroke-width%3D'.24'%3E%3Canimate%20attributeName%3D'fill-opacity'%20values%3D'.28%3B1%3B.28'%20dur%3D'6.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M50%20148.7L52.2%20151.7%2050%20154.7%2047.8%20151.7Z'%20fill%3D'%2328455b'%20stroke%3D'%23afbdc0'%20stroke-width%3D'.22'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.26%3B.98%3B.26'%20dur%3D'7s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Ccircle%20cx%3D'7.2'%20cy%3D'80'%20r%3D'1.45'%20fill%3D'none'%20stroke%3D'%23d4ddda'%20stroke-width%3D'.16'%20opacity%3D'.58'%3E%3Canimate%20attributeName%3D'stroke-width'%20values%3D'.12%3B.62%3B.12'%20dur%3D'5.6s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.38%3B1%3B.38'%20dur%3D'4.7s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fcircle%3E%3Cg%20transform%3D'translate(92.4%2072)%20scale(.32)'%3E%3Cpath%20d%3D'M-4%200C-4-2.5%200-2.5%200%200S-4%202.5-4%200M0%200C0-2.5%204-2.5%204%200S0%202.5%200%200'%20fill%3D'none'%20stroke%3D'%238e9b9b'%20stroke-width%3D'1'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B12%3B0'%20dur%3D'6.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.44%3B1%3B.44'%20dur%3D'5.3s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+
+  box-shadow:
+    0 0 13px rgba(105, 126, 132, .34),
+    0 0 5px rgba(214, 226, 225, .3),
+    0 0 19px rgba(121, 31, 43, .13),
+    inset 0 0 11px rgba(0, 3, 5, .78);
+  animation: medieval-blacksteel-breathe 6.8s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-/* 상단 양 코너 횃불 글로우 (깜빡임) */
+
 .cb-medieval::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
+  -webkit-mask: var(--medieval-edge-mask);
+  mask: var(--medieval-edge-mask);
   mix-blend-mode: screen;
-  background:
-    radial-gradient(42% 28% at 7% 3%, rgba(255,168,72,.45), transparent 70%),
-    radial-gradient(42% 28% at 93% 3%, rgba(255,168,72,.45), transparent 70%);
-  animation: medieval-torch 2.6s ease-in-out infinite;
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 46% 45%, 43% 42%, 48% 46%, 44% 42%;
+  background-position: center, 0 5%, 100% 19%, 0 91%, 100% 84%;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M6 9L12 16M5 32L10 27M7 55L13 49M5 84L11 91M7 111L12 105M5 143L11 136M94 9L88 16M95 32L90 27M93 55L87 49M95 84L89 91M93 111L88 105M95 143L89 136' stroke='%23d6e0de' stroke-width='.42' opacity='.34'/%3E%3Cpath d='M7 22L10 24M6 69L11 66M7 124L12 128M93 22L90 24M94 69L89 66M93 124L88 128' stroke='%239e3d46' stroke-width='.5' opacity='.34'/%3E%3C/g%3E%3Cg%20id%3D'medg-smil-glints'%20fill%3D'none'%20stroke-linecap%3D'round'%3E%3Cpath%20d%3D'M7%2014V38'%20stroke%3D'%23e4ece9'%20stroke-width%3D'.22'%20stroke-dasharray%3D'.8%202.2'%20opacity%3D'.58'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-6%3B0'%20dur%3D'6.3s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.22%3B.96%3B.22'%20dur%3D'5.7s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M93%20122V146'%20stroke%3D'%239daaad'%20stroke-width%3D'.22'%20opacity%3D'.5'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.12%3B.94%3B.12'%20dur%3D'7.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Ccircle%20cx%3D'7.4'%20cy%3D'80'%20r%3D'1.25'%20stroke%3D'%23c5d0ce'%20stroke-width%3D'.16'%20opacity%3D'.55'%3E%3Canimate%20attributeName%3D'stroke-width'%20values%3D'.1%3B.6%3B.1'%20dur%3D'5.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fcircle%3E%3C%2Fg%3E%3C/svg%3E"),
+    radial-gradient(ellipse, rgba(225, 242, 240, .58) 0, rgba(84, 105, 112, .16) 43%, transparent 73%),
+    radial-gradient(ellipse, rgba(102, 151, 184, .48) 0, rgba(20, 41, 54, .14) 45%, transparent 74%),
+    radial-gradient(ellipse, rgba(179, 48, 61, .48) 0, rgba(63, 18, 25, .13) 46%, transparent 75%),
+    radial-gradient(ellipse, rgba(205, 222, 220, .47) 0, rgba(44, 58, 63, .13) 43%, transparent 72%);
+  opacity: .54;
+  filter: brightness(1.04) contrast(1.08) saturate(1.08);
+  transform-origin: 50% 48%;
+  animation: medieval-blacksteel-reflect 11.8s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-@keyframes medieval-torch { 0%,100% { opacity: .5; } 45% { opacity: .95; } 60% { opacity: .7; } }
+
+.cb-medieval::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  pointer-events: none;
+  -webkit-mask: var(--medieval-edge-mask);
+  mask: var(--medieval-edge-mask);
+  mix-blend-mode: screen;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: center 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='med-spark-fill' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23ffffff'/%3E%3Cstop offset='.28' stop-color='%23b8c9ca'/%3E%3Cstop offset='.62' stop-color='%235c7180'/%3E%3Cstop offset='1' stop-color='%23212a31'/%3E%3C/linearGradient%3E%3ClinearGradient id='med-chip-fill' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23c86a6e'/%3E%3Cstop offset='.42' stop-color='%236c232c'/%3E%3Cstop offset='1' stop-color='%231a1017'/%3E%3C/linearGradient%3E%3Cg id='med-spark' stroke-linejoin='round'%3E%3Cpath d='M0-6L1.3-1.4 5 0 1.3 1.4 0 6-1.3 1.4-5 0-1.3-1.4Z' fill='url(%23med-spark-fill)' stroke='%23eef7f5' stroke-width='.48'/%3E%3Cpath d='M0-3.7V3.7M-3.2 0H3.2' stroke='%23ffffff' stroke-width='.32' opacity='.78'/%3E%3C/g%3E%3Cg id='med-chip' stroke-linejoin='round'%3E%3Cpath d='M-4-3L2.2-4.8 4.5.6 1.1 4.6-3.8 2.3Z' fill='url(%23med-chip-fill)' stroke='%23d7b1aa' stroke-width='.42'/%3E%3Cpath d='M-4-3L1.1.1 2.2-4.8M1.1.1L1.1 4.6M1.1.1L4.5.6' fill='none' stroke='%23f3d0c4' stroke-width='.3' opacity='.58'/%3E%3C/g%3E%3Cg id='med-flake'%3E%3Cpath d='M0-4L3-1.7 2.1 3.5-2.3 3-3-1.6Z' fill='%234e6066' stroke='%23d5dfdc' stroke-width='.38'/%3E%3Cpath d='M0-2.5L.8.1-.5 2.2' fill='none' stroke='%23ffffff' stroke-width='.28' opacity='.62'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23med-spark' transform='translate(17 0) rotate(11) scale(.34)'/%3E%3Cuse href='%23med-spark' transform='translate(17 160) rotate(11) scale(.34)'/%3E%3Cuse href='%23med-flake' transform='translate(84 21) rotate(-16) scale(.22)'/%3E%3Cuse href='%23med-chip' transform='translate(12 43) rotate(19) scale(.2)'/%3E%3Cuse href='%23med-spark' transform='translate(87 65) rotate(-14) scale(.28)'/%3E%3Cuse href='%23med-flake' transform='translate(14 88) rotate(24) scale(.19)'/%3E%3Cuse href='%23med-chip' transform='translate(83 108) rotate(-23) scale(.23)'/%3E%3Cuse href='%23med-spark' transform='translate(11 132) rotate(17) scale(.25)'/%3E%3Cuse href='%23med-flake' transform='translate(88 147) rotate(-9) scale(.18)'/%3E%3Cg%20id%3D'medp-smil-armory'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M83%2019.2L85%2018.4%2087%2019.2%2087.8%2021.2%2087%2023.2%2085%2024%2083%2023.2%2082.2%2021.2Z'%20fill%3D'%2359666b'%20stroke%3D'%23e0e6e2'%20stroke-width%3D'.22'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.18%3B1%3B.18'%20dur%3D'5.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M7%2088C5.2%2085.8%208.4%2083.4%2010.1%2085.7S8.7%2090.3%207%2088M10.1%2085.7C8.5%2083.4%2011.8%2081.2%2013.4%2083.5'%20fill%3D'none'%20stroke%3D'%23b7c2c1'%20stroke-width%3D'.28'%20stroke-dasharray%3D'.9%201.4'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-4.6%3B0'%20dur%3D'6s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(14%20134)%20scale(.2)'%3E%3Cpath%20d%3D'M0-6L5-3.7V.6C5%204.1%202.8%206.9%200%208.3-2.8%206.9-5%204.1-5%20.6V-3.7Z'%20fill%3D'%2377232e'%20stroke%3D'%23d0d8d6'%20stroke-width%3D'.8'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B-15%3B0'%20dur%3D'7.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.38%3B1%3B.38'%20dur%3D'5.9s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+  opacity: .58;
+  filter: brightness(1.08) saturate(1.06) drop-shadow(0 0 1.6px rgba(222, 235, 232, .35));
+  transform-origin: 50% 50%;
+  animation:
+    medieval-blacksteel-fall 14.8s linear infinite,
+    medieval-blacksteel-drift 7.1s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+
+@keyframes medieval-blacksteel-breathe {
+  0%, 100% {
+    filter: brightness(.91) saturate(.86) drop-shadow(0 0 1px rgba(174, 195, 198, .18));
+    opacity: .98;
+  }
+  34% {
+    filter: brightness(1.12) saturate(1.12) drop-shadow(0 0 4px rgba(217, 232, 230, .42));
+    opacity: 1;
+  }
+  68% {
+    filter: brightness(1.04) saturate(1.18) drop-shadow(0 0 3px rgba(166, 47, 59, .34));
+    opacity: 1;
+  }
+}
+
+@keyframes medieval-blacksteel-reflect {
+  0%, 100% {
+    background-position: center, 0 5%, 100% 19%, 0 91%, 100% 84%;
+    transform: perspective(520px) translate3d(-1.1%, .7%, 0) rotateX(.9deg) rotateY(-1.35deg) scale(1.034);
+    filter: brightness(.94) contrast(1.08) saturate(.92);
+    opacity: .42;
+  }
+  42% {
+    background-position: center, 5% 12%, 95% 13%, 2% 84%, 98% 91%;
+    transform: perspective(520px) translate3d(1.3%, -.8%, 6px) rotateX(-.9deg) rotateY(1.5deg) scale(1.052);
+    filter: brightness(1.22) contrast(1.13) saturate(1.08);
+    opacity: .7;
+  }
+  72% {
+    background-position: center, 1% 7%, 99% 24%, 6% 94%, 94% 80%;
+    transform: perspective(520px) translate3d(.3%, .5%, 3px) rotateX(.65deg) rotateY(.45deg) scale(1.044);
+    filter: brightness(1.08) contrast(1.1) saturate(1.2);
+    opacity: .59;
+  }
+}
+
+@keyframes medieval-blacksteel-fall {
+  from { background-position: center 0; }
+  to { background-position: center 160px; }
+}
+
+@keyframes medieval-blacksteel-drift {
+  0%, 100% {
+    transform: perspective(500px) translate3d(-1.1px, 0, 0) rotateY(-2.8deg) rotateZ(-.3deg);
+    filter: brightness(.92) saturate(.9);
+    opacity: .47;
+  }
+  50% {
+    transform: perspective(500px) translate3d(1.1px, 0, 5px) rotateY(2.8deg) rotateZ(.3deg);
+    filter: brightness(1.24) saturate(1.14);
+    opacity: .72;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-medieval::before { animation: none; }
+  .cb-medieval,
+  .cb-medieval::before,
+  .cb-medieval::after {
+    animation: none;
+  }
+
+  .cb-medieval { filter: brightness(1.01) saturate(.98); opacity: 1; }
+  .cb-medieval::before { transform: none; opacity: .43; }
+  .cb-medieval::after { transform: none; background-position: center 46px; opacity: .47; }
 }

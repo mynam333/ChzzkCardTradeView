@@ -1,7 +1,9 @@
 /* ============================================================
-   화산 (Volcano) — 갈라진 흑요석 + 발광 용암 균열(블룸) + 가장자리 불씨 + 하단 적열
+   흑요석 화산 성소 (Volcano Obsidian Reliquary)
+   - 현무암 절리, 검은 용암 유리, 층진 균열광, 제단형 코너 세공
+   - 단순 원형 점이 아닌 외피/핵/꼬리를 가진 정교한 불씨 조각
+   - SVG SMIL 마그마 호흡·불씨 모션과 CSS 외곽 모션을 유기적으로 결합
    적용 클래스: cb-volcano
-   ▶ 불씨는 --em 마스크로 가장자리에 모이고, 글로우는 하단에 집중 → 중앙~상단 비움.
    ============================================================ */
 .cb-volcano {
   position: absolute;
@@ -10,47 +12,103 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+
+  --volcano-reliquary-edge-mask: radial-gradient(ellipse 73% 67% at 50% 38%, transparent 0 49%, rgba(0, 0, 0, .2) 62%, #000 80%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  --em: radial-gradient(80% 72% at 50% 36%, transparent 42%, #000 82%);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ob' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233a302b'/%3E%3Cstop offset='.5' stop-color='%23181310'/%3E%3Cstop offset='1' stop-color='%23322822'/%3E%3C/linearGradient%3E%3ClinearGradient id='lava' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fff0a0'/%3E%3Cstop offset='.5' stop-color='%23ff7a1f'/%3E%3Cstop offset='1' stop-color='%23e2240a'/%3E%3C/linearGradient%3E%3Cfilter id='bloom' x='-40%25' y='-40%25' width='180%25' height='180%25'%3E%3CfeGaussianBlur stdDeviation='1.6'/%3E%3C/filter%3E%3Cpath id='cracks' d='M5,40 L3,52 L6,60 L3,74 M97,46 L95,58 L98,70 L95,86 M30,4 L38,2.5 L46,4 M58,156 L66,157.5 L74,156 M5,104 L3,116 L6,128 M95,104 L98,118'/%3E%3C/defs%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='2.9' ry='2.9' fill='none' stroke='url(%23ob)' stroke-width='4.4'/%3E%3Crect x='2.5' y='2.5' width='95' height='155' rx='2.9' ry='2.9' fill='none' stroke='%23000' stroke-width='1' opacity='.5'/%3E%3Cuse href='%23cracks' fill='none' stroke='url(%23lava)' stroke-width='2.6' stroke-linecap='round' filter='url(%23bloom)' opacity='.9'/%3E%3Cuse href='%23cracks' fill='none' stroke='%23ffd76a' stroke-width='.9' stroke-linecap='round'/%3E%3Cg fill='%23ffce6a' filter='url(%23bloom)'%3E%3Ccircle cx='3' cy='52' r='1.4'/%3E%3Ccircle cx='97' cy='58' r='1.4'/%3E%3Ccircle cx='38' cy='2.5' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 16px rgba(255,90,31,.55), inset 0 0 12px rgba(255,60,0,.4);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='vr-obsidian' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23020102'/%3E%3Cstop offset='.16' stop-color='%23181b20'/%3E%3Cstop offset='.31' stop-color='%23333b45'/%3E%3Cstop offset='.43' stop-color='%23060608'/%3E%3Cstop offset='.62' stop-color='%231d1518'/%3E%3Cstop offset='.8' stop-color='%230b0c0f'/%3E%3Cstop offset='1' stop-color='%23010001'/%3E%3C/linearGradient%3E%3ClinearGradient id='vr-basalt' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%230a0b0d'/%3E%3Cstop offset='.28' stop-color='%23313a42'/%3E%3Cstop offset='.48' stop-color='%23131519'/%3E%3Cstop offset='.7' stop-color='%23404951'/%3E%3Cstop offset='1' stop-color='%23060709'/%3E%3C/linearGradient%3E%3ClinearGradient id='vr-lava' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop stop-color='%237e1008'/%3E%3Cstop offset='.2' stop-color='%23e3330d'/%3E%3Cstop offset='.46' stop-color='%23ff8c22'/%3E%3Cstop offset='.62' stop-color='%23ffe18a'/%3E%3Cstop offset='.75' stop-color='%23ff6b16'/%3E%3Cstop offset='1' stop-color='%23700a06'/%3E%3C/linearGradient%3E%3CradialGradient id='vr-glass' cx='.34' cy='.25' r='.8'%3E%3Cstop stop-color='%23fff0ac'/%3E%3Cstop offset='.18' stop-color='%23ff9a28'/%3E%3Cstop offset='.42' stop-color='%23c5250b'/%3E%3Cstop offset='.67' stop-color='%23200b0b'/%3E%3Cstop offset='1' stop-color='%23020203'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='.7' y='.7' width='98.6' height='158.6' rx='4.66' ry='4.66' fill='none' stroke='%23010001' stroke-width='2.9'/%3E%3Crect x='1' y='1' width='98' height='158' rx='4.36' ry='4.36' fill='none' stroke='url(%23vr-obsidian)' stroke-width='3.35'/%3E%3Crect x='2' y='2' width='96' height='156' rx='3.36' ry='3.36' fill='none' stroke='%23515b62' stroke-width='.66' opacity='.72'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.36' ry='2.36' fill='none' stroke='url(%23vr-lava)' stroke-width='.45' opacity='.88'/%3E%3Crect x='4.2' y='4.2' width='91.6' height='151.6' rx='1.16' ry='1.16' fill='none' stroke='%23070709' stroke-width='2.3'/%3E%3Crect x='5.1' y='5.1' width='89.8' height='149.8' rx='.26' ry='.26' fill='none' stroke='%236d1b10' stroke-width='.42' opacity='.86'/%3E%3Cpath d='M4.8 4.8H95.2L90.4 11.2H72.5L67.8 15.1H32L27.4 11.2H9.7ZM4.8 155.2H95.2L90.2 148.6H72.8L67.9 144.8H32.1L27.1 148.6H9.8ZM4.8 4.8V155.2L10.2 146.2V109L14 103.8V56.2L10.2 51V13.7ZM95.2 4.8V155.2L89.8 146.2V117L86 111.8V48.2L89.8 43V13.7Z' fill='url(%23vr-obsidian)' fill-rule='evenodd' opacity='.98'/%3E%3Cg fill='url(%23vr-basalt)' stroke='%23434b51' stroke-width='.42' stroke-linejoin='round'%3E%3Cpath d='M5.2 9.5L10.4 5.4 18.5 6.1 21.8 13.1 18 20.8 10.2 22.7 5.5 17.2Z'/%3E%3Cpath d='M20.1 5.4L29.4 5.5 33.2 11.8 28.1 16.1 21.8 13.1Z'/%3E%3Cpath d='M94.8 7.9L89.6 5.4 82.1 6.1 78.5 13.6 82.8 20.6 90.8 22.3 94.5 16.4Z'/%3E%3Cpath d='M79.8 5.4L70.8 5.5 67 11.8 72 16.2 78.5 13.6Z'/%3E%3Cpath d='M5.3 137.2L10.1 133.2 18.4 136.2 21.1 144.2 16.8 153.6 9.3 154.6 5.4 148.2Z'/%3E%3Cpath d='M20.7 144.2L28.4 148.4 31.8 154.6H17.1Z'/%3E%3Cpath d='M94.7 136L89.7 132.8 81.5 135.9 78.8 144.1 83.2 153.6 90.7 154.6 94.6 148Z'/%3E%3Cpath d='M79.2 144.1L71.5 148.4 68.2 154.6H82.9Z'/%3E%3Cpath d='M5.4 29.2L10.2 23.4 14.3 28.8 12.6 39.7 8.8 45.6 5.3 42Z'/%3E%3Cpath d='M94.6 31L89.8 23.4 85.9 29.1 87.5 40 91.2 45.8 94.7 41.9Z'/%3E%3Cpath d='M5.3 115.8L9.1 110.2 12.9 116.3 14.1 128.1 9.9 134 5.4 130.5Z'/%3E%3Cpath d='M94.7 116.8L90.9 110.5 87.1 116.5 85.9 128.2 90.1 134 94.6 130.3Z'/%3E%3C/g%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.1 50.5L9.4 46.2 8.1 40.4 12.6 35.6 11.5 29.4 16.2 24.2 15.4 18.5 20 14.6' stroke='%2376170d' stroke-width='1.45' opacity='.68'/%3E%3Cpath d='M5.1 50.5L9.4 46.2 8.1 40.4 12.6 35.6 11.5 29.4 16.2 24.2 15.4 18.5 20 14.6' stroke='url(%23vr-lava)' stroke-width='.5'/%3E%3Cpath d='M94.9 60L90.7 56.3 92 50.1 87.4 45.2 88.6 38.8 84.1 34.5 85 28.7 80.4 24.3' stroke='%2376170d' stroke-width='1.4' opacity='.67'/%3E%3Cpath d='M94.9 60L90.7 56.3 92 50.1 87.4 45.2 88.6 38.8 84.1 34.5 85 28.7 80.4 24.3' stroke='url(%23vr-lava)' stroke-width='.48'/%3E%3Cpath d='M5.1 103.5L9.5 107.4 8.2 114.2 12.8 119 11.6 125.7 16.3 130.2 15.5 136.9 20.4 142.5' stroke='%2376170d' stroke-width='1.45' opacity='.68'/%3E%3Cpath d='M5.1 103.5L9.5 107.4 8.2 114.2 12.8 119 11.6 125.7 16.3 130.2 15.5 136.9 20.4 142.5' stroke='url(%23vr-lava)' stroke-width='.5'/%3E%3Cpath d='M94.9 98.2L90.6 102.2 91.8 108.5 87.3 113.4 88.5 120.1 83.9 124.5 84.8 131 80.1 136' stroke='%2376170d' stroke-width='1.4' opacity='.67'/%3E%3Cpath d='M94.9 98.2L90.6 102.2 91.8 108.5 87.3 113.4 88.5 120.1 83.9 124.5 84.8 131 80.1 136' stroke='url(%23vr-lava)' stroke-width='.48'/%3E%3Cpath d='M31.5 5.1L35.2 9.2 40.1 8.1 44.8 12.4 49.5 10.7 54.2 13.1 59.1 9 64.3 10.4 68.5 5.1' stroke='%2376170d' stroke-width='1.2' opacity='.62'/%3E%3Cpath d='M31.5 5.1L35.2 9.2 40.1 8.1 44.8 12.4 49.5 10.7 54.2 13.1 59.1 9 64.3 10.4 68.5 5.1' stroke='url(%23vr-lava)' stroke-width='.4'/%3E%3Cpath d='M32 154.9L36.2 150.6 41 151.8 45.5 147.3 50 149.2 54.8 146.8 59.2 151.1 64.1 149.7 68 154.9' stroke='%2376170d' stroke-width='1.25' opacity='.64'/%3E%3Cpath d='M32 154.9L36.2 150.6 41 151.8 45.5 147.3 50 149.2 54.8 146.8 59.2 151.1 64.1 149.7 68 154.9' stroke='url(%23vr-lava)' stroke-width='.42'/%3E%3C/g%3E%3Cg fill='none' stroke='%23808a8f' stroke-width='.32' opacity='.56'%3E%3Cpath d='M10.4 7.8L14.2 12.6 12.8 18.6M19.8 7L17.2 13.2 19.1 18.4M89.6 7.8L85.8 12.6 87.2 18.6M80.2 7L82.8 13.2 80.9 18.4M10 137.8L14.2 142.2 12.4 150.4M90 137.8L85.8 142.2 87.6 150.4'/%3E%3C/g%3E%3Cg fill='url(%23vr-glass)' stroke='%23ffad41' stroke-width='.36'%3E%3Cpath d='M48.2 3.2L50 1.8l1.8 1.4-.5 2.8L50 7l-1.3-1Z'/%3E%3Cpath d='M47.8 156.8L50 153l2.2 3.8-2.2 1.5Z'/%3E%3Cpath d='M2.2 78L4.5 75.3 6.4 78.7 4 82Z'/%3E%3Cpath d='M97.8 81.5L95.4 78.7 93.6 82.2 96 85.2Z'/%3E%3C/g%3E%3Cg fill='%23353c42' stroke='%23050607' stroke-width='.25'%3E%3Cpath d='M24 7l1.7-.9 1.8 1-.2 1.8-1.9.7-1.6-1.1Z'/%3E%3Cpath d='M75.8 7.3l1.7-.9 1.8 1-.3 1.8-1.8.7-1.6-1.1Z'/%3E%3Cpath d='M24 151.9l1.7-.9 1.8 1-.2 1.8-1.9.7-1.6-1.1Z'/%3E%3Cpath d='M75.8 151.7l1.7-.9 1.8 1-.3 1.8-1.8.7-1.6-1.1Z'/%3E%3C/g%3E%3Cg%20id%3D'vr-smil-magma'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M5.1%2050.5L9.4%2046.2%208.1%2040.4%2012.6%2035.6%2011.5%2029.4%2016.2%2024.2%2015.4%2018.5%2020%2014.6'%20fill%3D'none'%20stroke%3D'%23ff8a22'%20stroke-width%3D'.42'%20stroke-dasharray%3D'1.1%202.3'%20opacity%3D'.86'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-6.8%3B0'%20dur%3D'5.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.42%200%20.58%201%3B.42%200%20.58%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.3%3B1%3B.3'%20dur%3D'5.1s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.34%20.04%20.66%20.96%3B.34%20.04%20.66%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M94.9%2098.2L90.6%20102.2%2091.8%20108.5%2087.3%20113.4%2088.5%20120.1%2083.9%20124.5%2084.8%20131%2080.1%20136'%20fill%3D'none'%20stroke%3D'%23ffd56f'%20stroke-width%3D'.38'%20stroke-dasharray%3D'.8%202.5'%20opacity%3D'.82'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B6.6%3B0'%20dur%3D'5.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.24%3B.96%3B.24'%20dur%3D'5.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.34%20.04%20.66%20.96%3B.34%20.04%20.66%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M48.2%203.2L50%201.8%2051.8%203.2%2051.3%206%2050%207%2048.7%206Z'%20fill%3D'%23ffb33b'%20stroke%3D'%23ffe69a'%20stroke-width%3D'.18'%3E%3Canimate%20attributeName%3D'fill-opacity'%20values%3D'.18%3B1%3B.18'%20dur%3D'4.4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M47.8%20156.8L50%20153%2052.2%20156.8%2050%20158.3Z'%20fill%3D'%23e84311'%20stroke%3D'%23ffbd4a'%20stroke-width%3D'.18'%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.14%3B.96%3B.14'%20dur%3D'5.6s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(10.8%2063)%20scale(.22)'%3E%3Cpath%20d%3D'M0-6L2.8-2.1%201.7%202.8%200%205-2.1%202.1-2.8-1.4Z'%20fill%3D'%23ff8c20'%20stroke%3D'%23ffd978'%20stroke-width%3D'.7'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'translate'%20values%3D'0%200%3B1.6%20-2.7%3B0%200'%20dur%3D'4s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.35%200%20.65%201%3B.35%200%20.65%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3C%2Fg%3E%3Cg%20transform%3D'translate(89%2092)%20scale(.19)'%3E%3Cpath%20d%3D'M0-5.5L3-1.8%201.9%203.2-1.2%204.7-3-1.1Z'%20fill%3D'%23ffd15c'%20stroke%3D'%23ff7a17'%20stroke-width%3D'.8'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'rotate'%20values%3D'0%3B-22%3B0'%20dur%3D'4.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+
+  filter: saturate(1.08) brightness(1.03);
+  box-shadow:
+    0 0 15px rgba(235, 62, 15, .48),
+    0 0 27px rgba(255, 132, 31, .23),
+    inset 0 0 19px rgba(14, 3, 3, .68),
+    inset 0 -10px 19px rgba(190, 37, 9, .3);
+  animation: volcano-reliquary-frame-breathe 5.8s cubic-bezier(.42, 0, .58, 1) -2.6s infinite;
 }
-/* 하단 적열 글로우 (맥동) — 중앙 상단은 비움 */
-.cb-volcano::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  mix-blend-mode: screen;
-  background:
-    radial-gradient(130% 65% at 50% 114%, rgba(255,90,20,.6), rgba(255,60,0,0) 70%),
-    radial-gradient(90% 42% at 50% 118%, rgba(255,185,65,.5), rgba(255,120,0,0) 64%);
-  animation: volcano-glow 2.2s ease-in-out infinite;
-}
-/* 가장자리 불씨 (위로 피어오름) */
+
+.cb-volcano::before,
 .cb-volcano::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
-  mix-blend-mode: screen;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-repeat: repeat;
-  background-size: 100% 220px;
-  background-image:
-    radial-gradient(2.6px 2.6px at 12px 200px, rgba(255,180,70,.98), transparent 60%),
-    radial-gradient(1.7px 1.7px at 90px 158px, rgba(255,120,30,.9), transparent 60%),
-    radial-gradient(2.1px 2.1px at 8px 118px, rgba(255,210,100,.95), transparent 60%),
-    radial-gradient(1.5px 1.5px at 92px 178px, rgba(255,90,20,.85), transparent 60%),
-    radial-gradient(2.3px 2.3px at 16px 70px, rgba(255,150,50,.9), transparent 60%),
-    radial-gradient(1.4px 1.4px at 88px 96px, rgba(255,200,90,.85), transparent 60%);
-  animation: volcano-rise 3.2s linear infinite, volcano-sway 2s ease-in-out infinite alternate;
+  -webkit-mask: var(--volcano-reliquary-edge-mask);
+  mask: var(--volcano-reliquary-edge-mask);
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
 }
-@keyframes volcano-glow { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
-@keyframes volcano-rise { from { background-position-y: 0; } to { background-position-y: -220px; } }
-@keyframes volcano-sway { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
+
+/* 현무암 아래의 용암 저장층: 하단과 균열 주변에서만 느리게 호흡 */
+.cb-volcano::before {
+  z-index: 1;
+  mix-blend-mode: screen;
+  opacity: .64;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image:
+    radial-gradient(ellipse 78% 30% at 50% 104%, rgba(255, 88, 16, .7), transparent 72%),
+    radial-gradient(ellipse 24% 35% at 7% 71%, rgba(235, 52, 10, .52), transparent 72%),
+    radial-gradient(ellipse 23% 31% at 94% 34%, rgba(255, 121, 24, .5), transparent 73%),
+    radial-gradient(ellipse 34% 13% at 50% 4%, rgba(255, 174, 53, .34), transparent 72%),
+    conic-gradient(from 233deg at 50% 72%, transparent 0 48deg, rgba(255, 75, 12, .18) 70deg, transparent 96deg 204deg, rgba(255, 161, 45, .15) 225deg, transparent 250deg 360deg);
+  animation: volcano-reliquary-magma-breathe 7.2s cubic-bezier(.445, .05, .55, .95) -4.1s infinite;
+}
+
+/* 외피·핵·꼬리의 세 겹으로 그린 전경 불씨 조각 */
+.cb-volcano::after {
+  z-index: 2;
+  mix-blend-mode: screen;
+  opacity: .9;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: 0 160px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='vre-shell' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop stop-color='%23730b06'/%3E%3Cstop offset='.3' stop-color='%23e62f09'/%3E%3Cstop offset='.57' stop-color='%23ff982a'/%3E%3Cstop offset='.78' stop-color='%23ffd978'/%3E%3Cstop offset='1' stop-color='%23a41407'/%3E%3C/linearGradient%3E%3Cg id='vre-ember' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0-10.5L4.1-5.2 7.2-2.7 5.5 2.8 1.9 7.4-3.5 6.2-7 2-5.2-3.2-2.8-5.9Z' fill='url(%23vre-shell)' stroke='%238b1608' stroke-width='.85'/%3E%3Cpath d='M-.2-6.8L2.8-3.7 4.2-.6 2.2 3.9-.9 5-3.8 2.1-2.7-1.5Z' fill='%23ffd86f' stroke='%23ff7b18' stroke-width='.55'/%3E%3Cpath d='M-.5-4.9L1.5-2.5 1.9.1.1 2.4-1.8.8Z' fill='%23fff3b0' stroke='none'/%3E%3Cpath d='M-2.8-5.9L-1.4-9.4.2-12.8 1.4-9.1 3.2-7.2M-5.2-3.2L-7.8-5.8-7.1-2.1' fill='none' stroke='%23ff9a29' stroke-width='.72'/%3E%3Cpath d='M-8.2-6.3l1.25.4-.45 1.25-1.35-.25ZM.1-13.5l1.2.5-.55 1.2-1.3-.35Z' fill='%23ffd978' stroke='none'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23vre-ember' transform='translate(12 0) rotate(-18) scale(.35)'/%3E%3Cuse href='%23vre-ember' transform='translate(12 160) rotate(-18) scale(.35)'/%3E%3Cuse href='%23vre-ember' transform='translate(91 28) rotate(32) scale(.39)'/%3E%3Cuse href='%23vre-ember' transform='translate(7 61) rotate(-47) scale(.28)' opacity='.78'/%3E%3Cuse href='%23vre-ember' transform='translate(94 99) rotate(19) scale(.34)'/%3E%3Cuse href='%23vre-ember' transform='translate(14 132) rotate(-12) scale(.24)' opacity='.7'/%3E%3Cuse href='%23vre-ember' transform='translate(86 149) rotate(53) scale(.19)' opacity='.63'/%3E%3Cg%20id%3D'vre-smil-embers'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M89.4%2022.4L91.5%2018.2%2093.4%2022.7%2091.4%2026Z'%20fill%3D'%23ffb52f'%20stroke%3D'%23ffe78e'%20stroke-width%3D'.24'%3E%3Canimate%20attributeName%3D'fill-opacity'%20values%3D'.16%3B1%3B.16'%20dur%3D'3.8s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.45%200%20.55%201%3B.45%200%20.55%201'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cpath%20d%3D'M4.8%2061L8.2%2057.8%2011.4%2060.4'%20fill%3D'none'%20stroke%3D'%23ff8b1e'%20stroke-width%3D'.4'%20stroke-dasharray%3D'.7%201.5'%20opacity%3D'.84'%3E%3Canimate%20attributeName%3D'stroke-dashoffset'%20values%3D'0%3B-4.4%3B0'%20dur%3D'4.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.4%200%20.6%201%3B.4%200%20.6%201'%20repeatCount%3D'indefinite'%2F%3E%3Canimate%20attributeName%3D'opacity'%20values%3D'.26%3B1%3B.26'%20dur%3D'4.2s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.34%20.04%20.66%20.96%3B.34%20.04%20.66%20.96'%20repeatCount%3D'indefinite'%2F%3E%3C%2Fpath%3E%3Cg%20transform%3D'translate(86%20149)%20scale(.18)'%3E%3Cpath%20d%3D'M0-7L3.1-2.6%202.1%203.3%200%206-2.8%202.4-3.2-2.1Z'%20fill%3D'%23ffd66a'%20stroke%3D'%23ff7c18'%20stroke-width%3D'1'%2F%3E%3CanimateTransform%20attributeName%3D'transform'%20type%3D'translate'%20values%3D'0%200%3B1.7%20-3.2%3B0%200'%20dur%3D'3.9s'%20calcMode%3D'spline'%20keyTimes%3D'0%3B.5%3B1'%20keySplines%3D'.35%200%20.65%201%3B.35%200%20.65%201'%20repeatCount%3D'indefinite'%20additive%3D'sum'%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C/svg%3E");
+  filter: drop-shadow(0 0 2.2px rgba(255, 220, 120, .66)) drop-shadow(0 0 3px rgba(255, 62, 10, .48));
+  animation: volcano-reliquary-ember-rise 5.4s linear -3.3s infinite;
+}
+
+@keyframes volcano-reliquary-frame-breathe {
+  0%, 100% { filter: saturate(1.01) brightness(.94); opacity: .96; }
+  45% { filter: saturate(1.24) brightness(1.17); opacity: 1; }
+  72% { filter: saturate(1.1) brightness(1.05); opacity: .985; }
+}
+
+@keyframes volcano-reliquary-magma-breathe {
+  0%, 100% { transform: perspective(620px) translate3d(0, 1.4px, 0) rotateX(1.6deg) rotateY(-2.8deg) scale(.992); opacity: .34; }
+  36% { transform: perspective(620px) translate3d(2.8px, -2.2px, 7px) rotateX(-2.5deg) rotateY(6.2deg) scale(1.02); opacity: .8; }
+  68% { transform: perspective(620px) translate3d(-2px, .9px, 3px) rotateX(3.4deg) rotateY(-4.4deg) scale(1.008); opacity: .56; }
+}
+
+@keyframes volcano-reliquary-ember-rise {
+  0% { background-position: 0 160px; transform: perspective(520px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .88; }
+  12.5% { background-position: 0 140px; transform: perspective(520px) translate3d(-2.4px, 0, 3px) rotateX(2.8deg) rotateY(-6.5deg) rotateZ(-.7deg); opacity: .8; }
+  25% { background-position: 0 120px; transform: perspective(520px) translate3d(-3.5px, 0, 6px) rotateX(4.2deg) rotateY(-12deg) rotateZ(-1.2deg); opacity: .72; }
+  37.5% { background-position: 0 100px; transform: perspective(520px) translate3d(-2.4px, 0, 3px) rotateX(2.8deg) rotateY(-6.5deg) rotateZ(-.7deg); opacity: .8; }
+  50% { background-position: 0 80px; transform: perspective(520px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .88; }
+  62.5% { background-position: 0 60px; transform: perspective(520px) translate3d(2.4px, 0, 3px) rotateX(-.8deg) rotateY(6.5deg) rotateZ(.7deg); opacity: .94; }
+  75% { background-position: 0 40px; transform: perspective(520px) translate3d(3.5px, 0, 8px) rotateX(-2.8deg) rotateY(12deg) rotateZ(1.2deg); opacity: 1; }
+  87.5% { background-position: 0 20px; transform: perspective(520px) translate3d(2.4px, 0, 3px) rotateX(-.8deg) rotateY(6.5deg) rotateZ(.7deg); opacity: .94; }
+  100% { background-position: 0 0; transform: perspective(520px) translate3d(0, 0, 0) rotateX(1.2deg) rotateY(0deg) rotateZ(0deg); opacity: .88; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-volcano, .cb-volcano::before, .cb-volcano::after { animation: none; }
+  .cb-volcano,
+  .cb-volcano::before,
+  .cb-volcano::after {
+    animation: none !important;
+  }
+
+  .cb-volcano::before,
+  .cb-volcano::after {
+    transform: none;
+  }
+
+  .cb-volcano::after {
+    background-position: 0 54px;
+  }
 }

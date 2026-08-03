@@ -25,10 +25,9 @@
 ### 층위 구조 (z-index 레이아웃)
 정교한 렌더링을 위해 앱 내부의 카드 레이어는 다음과 같은 순서로 겹쳐 있습니다:
 1. **카드 이미지** (`z-0`)
-2. **코스메틱 오버레이** (`z-5`)
-3. **카드 테두리** (`z-10 !important`)
-4. **하단 그라데이션 가독성 오버레이** (`z-15`) - 테두리 하단도 자연스럽게 덮어 씌우는 효과
-5. **텍스트 및 별 등급, 숫자 등 콘텐츠** (`z-20`)
+2. **코스메틱/테두리 오버레이** (`z-5`)
+3. **하단 그라데이션 가독성 오버레이** (`z-15`) - 테두리 하단도 자연스럽게 덮어 씌우는 효과
+4. **텍스트 및 별 등급, 숫자 등 콘텐츠** (`z-20`)
 
 ### 오버레이가 기본 제공하는 것
 앱이 오버레이에 `.cosmetic-frame` 기본 레이아웃(절대배치·전체크기·모서리 둥글기·overflow 숨김·z-index)을 미리 적용합니다.
@@ -63,7 +62,7 @@
   position: absolute;
   inset: 0;
   z-index: 5;
-  border-radius: 3.43px;     /* scale 확대 배율을 고려한 오버레이 자체 곡률 고정 */
+  border-radius: 3.43px;     /* 64px 논리 폭 기준 곡률; 런타임이 실제 카드 폭에 맞게 변환 */
   pointer-events: none;
   overflow: hidden;           /* 파티클/장식을 카드 안으로 클립 */
 
@@ -110,8 +109,9 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 치카포의 카드 모서리 둥글기는 Tailwind CSS 기준 **`rounded-xl` (`border-radius: 12px`)**로 규격화되어 있습니다. 테두리 곡선이 카드의 외곽 모서리와 틈 없이 완벽하게 들어맞으려면 SVG의 모서리 반경(`rx`, `ry`) 계산 공식을 지켜야 합니다.
 
 > 💡 **중요 — 모서리 잘림 버그 방지 (border-radius: 3.43px)**
-> 카드 테두리는 가로 `64px` 기준에서 제작된 오버레이(`.cosmetic-frame`)를 부모 카드 크기(예: `224px`)에 맞춰 `3.5배` 등 `scale`로 비례 확대하는 방식으로 동작합니다. 
-> 만약 오버레이 엘리먼트 자체에 `border-radius: inherit;`을 상속할 경우, 확대된 최종 둥글기가 `12px * 3.5 = 42px`로 지나치게 둥글게 깎여나가는 치명적인 **모서리 클리핑 버그**가 생깁니다. 이를 방지하고자 앱 전역에서 오버레이의 둥글기는 **`3.43px`로 고정**되어 3.5배 확대 시 정확히 화면상 `12px`가 되도록 매핑되어 있습니다.
+> 카드 테두리 CSS의 URL 바깥 `px` 값은 **카드 가로 `64px`를 기준으로 한 논리 단위**입니다. 런타임은 CSS를 주입하기 전에 data URI 같은 `url(...)` 토큰을 보호한 뒤, 나머지 `Npx`를 `calc(var(--cosmetic-frame-unit) * N)`으로 바꿉니다. 이때 `--cosmetic-frame-unit`은 `calc(100cqw / 64)`입니다.
+>
+> `.cosmetic-frame` 자체는 처음부터 카드 전체 크기이며 전역 스타일에서 `transform: none !important`를 사용합니다. 즉 **64px짜리 엘리먼트를 `transform: scale(...)`로 확대하지 않습니다.** 예를 들어 카드 폭이 `224px`이면 논리 `3.43px`는 `3.43 × (224 / 64) ≈ 12px`로 직접 렌더링되고, 다른 카드 크기에서도 같은 비율로 변합니다. 따라서 `border-radius: inherit`이나 화면 기준 `12px`를 직접 쓰지 말고, 논리 반경 **`3.43px`**를 유지하세요.
 
 - **기본 곡률 반경**: 카드 너비 100 기준 외곽선 곡률은 **`5.36` (약 `5.4`)**입니다.
 - **안쪽 오프셋 반영 공식**: 테두리 선이 카드 가장자리에서 안쪽으로 `d`만큼 들어와서 그려질 경우, 평행한 곡선을 유지하기 위해 둥글기 반경을 줄여야 합니다.
@@ -132,8 +132,8 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 1. 보기 좋게 일반 SVG로 먼저 그립니다:
    ```svg
    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 160" preserveAspectRatio="none">
-     <rect x="3" y="3" width="94" height="154" rx="8" fill="none" stroke="#e8c66a" stroke-width="2.6"/>
-     <rect x="7.5" y="7.5" width="85" height="145" rx="5" fill="none" stroke="#b8451f" stroke-width="1.1"/>
+     <rect x="3" y="3" width="94" height="154" rx="2.36" ry="2.36" fill="none" stroke="#e8c66a" stroke-width="2.6"/>
+     <rect x="4.6" y="4.6" width="90.8" height="150.8" rx="0.76" ry="0.76" fill="none" stroke="#b8451f" stroke-width="1.1"/>
      <!-- 코너 구름 장식 -->
      <path d="M3,24 C18,21 20,8 17,3" fill="none" stroke="#e8c66a" stroke-width="1.3"/>
    </svg>
@@ -144,10 +144,10 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
    - path 좌표는 공백 대신 **쉼표**로 구분 권장 (`M3,24 C18,21 ...`)
 3. 결과:
    ```css
-   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='8' fill='none' stroke='%23e8c66a' stroke-width='2.6'/%3E%3C/svg%3E");
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Crect x='3' y='3' width='94' height='154' rx='2.36' ry='2.36' fill='none' stroke='%23e8c66a' stroke-width='2.6'/%3E%3Crect x='4.6' y='4.6' width='90.8' height='150.8' rx='.76' ry='.76' fill='none' stroke='%23b8451f' stroke-width='1.1'/%3E%3C/svg%3E");
    ```
 
-### 4.3 완성도를 높이는 디테일
+### 4.4 완성도를 높이는 디테일
 - **이중/삼중 프레임**: 굵은 금속선 + 얇은 보조선 + 점선 패턴으로 깊이를 줍니다.
 - **코너 장식**: 네 모서리에 구름·덩굴·기어·보석 등 모티프를 배치하면 "스킨" 느낌이 확 삽니다.
 - **모서리 비대칭**: 한쪽 코너를 더 화려하게(예: 사이버펑크 L자 브래킷) 두면 시선이 살아납니다.
@@ -221,7 +221,7 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 3. **가속 및 감속 물리 (Natural Ease)**: 선형적인 `linear` 스크롤뿐만 아니라, `cubic-bezier(0.445, 0.05, 0.55, 0.95)` 등 감속 곡선을 활용한 흔들림이나 다중 입자 레이어의 원근 격차(Parallax Depth)를 연동하면 마치 카메라 렌즈 안에 깊이가 생긴 듯한 가상 3D 공간이 탄생합니다.
 
 > 🔍 **[검증 절차] 3D 자연스러움과 배율 체크**
-> 작성된 3D 궤적 애니메이션이 꺾이는 반환점에서 움직임이 딱딱하게 덜컥거리지 않는지 브라우저에서 반드시 여러 차례 검증하세요. `ease-in-out` 또는 부드러운 cubic-bezier 가속도를 활용하고, 다른 부모 카드 크기( scale 비율 2배~4배 )에서도 파티클 모션이 튀어나오거나 이음매 끊김이 생기지 않는지 여러 배율에서 교차 테스트해야 합니다.
+> 작성된 3D 궤적 애니메이션이 꺾이는 반환점에서 움직임이 딱딱하게 덜컥거리지 않는지 브라우저에서 반드시 여러 차례 검증하세요. `ease-in-out` 또는 부드러운 cubic-bezier 가속도를 활용하고, **64px 논리 폭 대비 실제 카드 크기가 2×~4×인 환경**에서도 파티클 모션이 튀어나오거나 이음매가 끊기지 않는지 교차 테스트해야 합니다.
 
 
 ```css
@@ -250,20 +250,52 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
   transform-origin: 50% 50%;
   animation: mytheme-spin 9s linear infinite;
 }
-@keyframes mytheme-spin { to { transform: rotate(360deg); } }
+@keyframes mytheme-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); } /* 0deg와 시각적으로 동일한 폐쇄 종점 */
+}
 ```
 
-### 5.4 색상 순환 / 홀로그램
+### 5.5 색상 순환 / 홀로그램
 ```css
 .cb-mytheme::before { animation: mytheme-hue 8s linear infinite; }
-@keyframes mytheme-hue { to { filter: hue-rotate(360deg); } }   /* 0=360 → 완벽 루프 */
+@keyframes mytheme-hue {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); } /* 0deg와 시각적으로 동일한 폐쇄 종점 */
+}
 ```
 
-### 5.5 글로우 맥박
+### 5.6 글로우 맥박
 ```css
 .cb-mytheme { animation: mytheme-glow 2.4s ease-in-out infinite; }
 @keyframes mytheme-glow { 0%,100% { opacity: .85; } 50% { opacity: 1; } }
 ```
+
+### 5.7 SVG 내부 SMIL — 재질 자체가 움직이는 프리미엄 연출
+CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담당하고, SVG 내부 SMIL은 **보석 면의 굴절, 금속 각인의 열광, 회로 노드, 유약 반사, 꽃잎·기어 같은 개별 조형**을 움직이는 데 사용합니다. 둘을 역할별로 나누면 프레임 전체가 한꺼번에 점멸하는 값싼 효과를 피하면서 훨씬 풍부한 움직임을 만들 수 있습니다.
+
+```svg
+<path d="M5 5H95V155H5Z" fill="none" stroke="#7ff9ff"
+      stroke-width=".45" stroke-dasharray="2 7" opacity=".38">
+  <animate attributeName="stroke-dashoffset"
+           values="0;-18;0" keyTimes="0;.5;1"
+           dur="8.4s" repeatCount="indefinite"/>
+  <animate attributeName="opacity"
+           values=".28;.82;.28" keyTimes="0;.5;1"
+           calcMode="spline" keySplines=".45 .05 .55 .95;.45 .05 .55 .95"
+           dur="5.7s" repeatCount="indefinite"/>
+</path>
+```
+
+- 허용 요소는 기본적으로 `<animate>`, `<animateTransform>`, `<animateMotion>`, `<set>`입니다. `<script>`, SVG 내부 `<style>`, 이벤트 핸들러(`onbegin` 등), 외부 URL·폰트·이미지는 사용하지 않습니다.
+- 한 SVG에는 SMIL 타임라인을 **최대 8개**까지만 두고, 동일 속성을 수십 개 도형에 따로 걸기보다 상위 `<g>`나 대표 하이라이트 패스를 움직입니다.
+- 반복 애니메이션은 `repeatCount="indefinite"`와 **동일한 첫값·끝값**을 사용합니다. 회전만 `0→360`처럼 시각적으로 동일한 종점을 허용합니다.
+- 왕복 운동은 `keyTimes`와 `calcMode="spline"`/`keySplines`를 사용하고, 기본 주기는 **2.8초 이상**으로 잡아 급격한 점멸을 피합니다.
+- 기존 `transform`이 있는 `<g>`/`<use>`에 `<animateTransform>`을 추가할 때는 `additive="sum"`으로 정적 배치가 사라지지 않게 합니다.
+- 시그니처 모션은 실제 카드 2× 배율에서도 한 주기 안에 식별되어야 합니다. 대표 하이라이트는 밝기·불투명도 차이를 충분히 확보하고, 회전·굴절·파동은 해당 재질이 인지될 만큼의 진폭을 주되 전체 프레임을 동시에 번쩍이게 만들지는 않습니다. 최소 두 종류의 재질 모션을 서로 다른 주기로 엇갈리게 배치해 정지 화면처럼 보이는 구간을 줄입니다.
+- SMIL을 제거해도 아름다운 **정적 base state**가 반드시 남아야 합니다. 런타임은 `prefers-reduced-motion: reduce`일 때 data SVG의 SMIL 요소를 제거해 다시 주입하고, 테마의 미디어 쿼리는 바깥 CSS 애니메이션을 함께 중지합니다.
+- 카드 크기 자체에는 상한을 두지 않습니다. 대신 런타임은 화면에 보이는 서로 다른 SMIL 테마 중 **최대 3종·복잡도 가중 합산 가시 면적 90,000 CSS px²**만 동시에 재생합니다. 테마당 약 7개 SMIL 타임라인을 가중치 1로 보고, 그보다 정교한 테마는 타임라인 수에 비례해 예산을 더 사용하므로 밀집 화면에서는 가벼운 테마 3종 또는 고밀도 테마 1~2종이 자연스럽게 활성화됩니다. 예산 밖 테마와 화면에 보이는 인스턴스가 하나도 없는 테마는 SMIL을 제거한 정적 SVG로 다시 주입합니다. 같은 테마가 화면 안팎에 동시에 존재하면 공유 SVG는 유지하되 화면 밖 개별 프레임의 바깥 CSS를 정지하고 브라우저의 오프스크린 페인트 컬링을 활용합니다. 카드가 화면 중앙에 가까워지거나 hover/focus되면 즉시 우선권을 넘깁니다. **화면에 한 장만 보이는 큰 카드**는 면적이 예산을 넘어도 최소 1종을 재생하므로 상세 화면과 임의의 확대 배율에는 크기 제한이 생기지 않습니다. 반대로 동일 테마가 여러 장 보이면 그 면적을 합산하고 단일 카드 예외를 적용하지 않아, 반복 인스턴스가 예산을 우회하지 못하게 합니다.
+- 전체 프레임의 불투명도를 빠르게 깜빡이거나 중앙을 가로지르는 대형 발광은 금지합니다. 움직임은 테두리·코너·장식물에 집중합니다.
 
 > **부드러운 루프 3원칙**
 > 1) 셔머·입자는 **양끝이 화면 밖**이거나 **타일이 정확히 반복**되게.
@@ -283,13 +315,25 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 - [ ] 레이어는 **3겹(본체+::before+::after)** 안에서 해결했는가
 - [ ] 애니메이션은 `transform`/`opacity`/`filter`/`background-position` 위주(레이아웃 리플로우 없음)인가
 - [ ] `@media (prefers-reduced-motion: reduce)` 로 애니메이션을 끄는 규칙을 넣었는가
+- [ ] SVG 내부 SMIL도 정적 base state가 완성되어 있고 감소 모션 런타임에서 제거되는가
+- [ ] SVG당 SMIL 8개 이하, 주기 2.8초 이상, 첫값·끝값 동일 규칙을 지켰는가
+- [ ] 2× 카드에서 시그니처 모션이 명확히 보이면서도 프레임 전체가 한꺼번에 점멸하지 않는가
+- [ ] 모든 CSS `@keyframes`의 0%·100%가 동일하거나 정확한 160px 타일/360° 등가 종점인가
+- [ ] SVG에 `<script>`·내부 `<style>`·이벤트 핸들러·외부 리소스가 없는가
+- [ ] 밀집 목록에서 동시 모션 예산 전환 후에도 정적 상태가 완성도 있게 보이고, hover/focus 카드가 자연스럽게 활성화되는가
 - [ ] 클래스명·`@keyframes` 이름에 **고유 접두어**를 붙였는가
 - [ ] 한 화면에 10장 떠도 과하지 않은 **밝기/채도**인가
 - [ ] 글자(이름/시세) 가독성을 해치지 않는가(테두리는 가장자리에)
 - [ ] 단순 1차원적인 좌→우 슬라이드 광택 셔머를 피하고 깊이 있는 공간감을 살렸는가
 - [ ] 파티클은 `circle` 등 정체불명의 투박한 형상이 아닌, 디테일이 살아있는 고품질 SVG와 다중 그라데이션으로 구현되었는가
 - [ ] 대형 파티클이 `scale(0.4)` 이하의 규격을 만족하여 카드 중요 정보를 가리지 않는가
-- [ ] 3D 반환점 감속 곡선 및 다른 카드 확대 비율(scale 배율)에서의 동작을 여러 번 검증했는가
+- [ ] 3D 반환점 감속 곡선 및 64px 논리 폭 대비 카드 크기 2×~4× 환경에서의 동작을 여러 번 검증했는가
+
+프로젝트 예시 13종은 다음 명령으로 PostCSS 파싱, data SVG 안전성, 정적 렌더, SMIL 개수·주기·무단절 종점과 CSS keyframe의 폐쇄 종점을 한 번에 검사할 수 있습니다.
+
+```bash
+node scripts/validate-card-border-smil.mjs
+```
 
 
 ---
@@ -301,6 +345,8 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 4. 이름·가격·활성화 설정 후 **추가**. 유저가 상점에서 구매해 카드에 장착할 수 있습니다.
 
 > 별도 빌드·배포 없이, 입력한 CSS가 그대로 사이트에 주입되어 적용됩니다.
+>
+> **파일 크기 정책:** CSS나 그 안의 상세 SVG 문자열만을 별도로 잘라내는 인위적 파일 크기 제한은 두지 않습니다. 관리자 상점 상품 등록·수정 요청의 전송 한도는 `ADMIN_SHOP_ITEM_BODY_SIZE_LIMIT`이며 기본값은 `50mb`이고 환경 변수로 조정할 수 있습니다. 일반 API의 `API_BODY_SIZE_LIMIT` 기본값은 보안을 위해 `2mb`로 유지합니다. MySQL의 `shop_items.style_json`은 `LONGTEXT`로 생성되며 기존 `TEXT`/`MEDIUMTEXT` 컬럼도 서버 시작 마이그레이션에서 `LONGTEXT`로 확장됩니다. 관리자 전용 한도에 걸리면 작품의 SVG 디테일을 축약하기보다 서버 환경의 전송 한도와, 필요하면 MySQL `max_allowed_packet`을 함께 조정하세요.
 
 ---
 
@@ -309,17 +355,24 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 
 | 파일 | 테마 | 핵심 연출 |
 |---|---|---|
-| `oriental.css`  | 동양풍 금장      | 금빛 이중 프레임 + 구름 코너 + 광택 |
-| `medieval.css`  | 중세 강철 문장   | 강철·금장 + 리벳 + 방패 + 금속 광택 |
-| `steampunk.css` | 스팀펑크         | 황동 프레임 + 회전 기어 2개 |
-| `cyberpunk.css` | 사이버펑크       | 네온 회로 + 스캔라인 + 글로우 펄스 |
-| `sakura.css`    | 벚꽃             | 분홍 프레임 + 떨어지는 꽃잎 |
-| `beach.css`     | 여름 해변        | 청록 프레임 + 태양 + 움직이는 물결 |
-| `autumn.css`    | 낙엽             | 단풍 프레임 + 떨어지는 낙엽 |
-| `snow.css`      | 눈꽃             | 얼음 결정 + 내리는 눈 + 반짝임 |
-| `royal.css`     | 로얄 골드        | 정교한 금장 + 보석 + 광택 |
-| `galaxy.css`    | 갤럭시           | 성운(색 순환) + 반짝이는 별 |
-| `volcano.css`   | 화산             | 흑요석 + 피어오르는 불씨 + 적열 |
-| `prism.css`     | 프리즘 홀로      | 무지개 보더(흐름) + 광택 |
+| `abyssal-reliquary.css` | 심연의 성물함 | 흑진주·산화 은 + 앵무조개·화석 산호 + 생물발광 상승 |
+| `autumn.css` | 동판 식물표본 | 산화 동판 + 압인 표본 + 단풍·참나무 잎·도토리 |
+| `beach.css` | 여름 해변 | 코너 태양·야자수·갈매기 + 깊이가 다른 3겹 파도 |
+| `cheese-fondue.css` | 크리미 치즈 퐁듀 | 시그니처 옐로우 + 에멘탈 조형 + 소형 3D 치즈 파티클 |
+| `cyberpunk.css` | 사이버펑크 야간 PCB | 흑연 회로판 + 비대칭 신호 노드 + 3D 회로 룬 패킷 |
+| `galaxy.css` | 갤럭시 아스트랄 오러리 | 다중 금속·성운 + 고리 행성·별자리 + 3D 별밭 |
+| `ginkgo-lacquer-wind.css` | 은행 옻칠 바람 | 흑적색 옻칠 + 금박 은행잎 + 전·후경 무단절 낙엽 |
+| `goryeo-celadon.css` | 고려청자 상감 | 비취·회청 유약 + 백흑 상감 당초·연화 + 학·구름과 미세 빙렬 |
+| `hanok-yeonhwa-border-wind.optimized.css` | 한옥 연화 바람 | 한옥 처마·창살 + 연화·노리개 + 무단절 바람 흔들림 |
+| `heart-pop.css` | 하트 팝 | 핑크·로즈 이중 프레임 + 상승 하트 + 코너 클러스터 바운스 |
+| `medieval.css` | 흑철 문장갑 | 산화 강철 + 심홍·남청 에나멜 문장 + 팔각 리벳·체인메일 |
+| `oriental.css` | 묵빛 금동 장석 | 먹빛 고가구 + 금동 경첩 + 운문·당초 음각·녹청 |
+| `prism.css` | 분광 광학 실험기 | 티타늄 계측 레일 + 렌즈 셀 + 분광 결정·국소 색수차 |
+| `royal.css` | 백금 왕실 성물 | 백금·샴페인 골드 + 실크 자수 + 왕관·정교한 컷 젬 |
+| `sakura.css` | 칠기 비단 겹벚꽃 | 흑자주 칠기 + 자개 비단선 + 수묵 가지·무단절 겹꽃잎 |
+| `snow.css` | 빙하 결정학 | 프로스트 은세공 + 육각 격자 + 정교한 가지형 눈 결정 |
+| `stained-glass-nocturne.css` | 스테인드 글라스 녹턴 | 산화 은빛 납선 + 비대칭 장미창 + 가장자리 굴절광 |
+| `steampunk.css` | 스팀펑크 | 황동 배관 프레임 + 3단 회전 기어 + 입체 분출 증기 |
+| `volcano.css` | 흑요석 화산 성소 | 현무암 절리 + 용암 유리·균열광 + 정교한 불씨 상승 |
 
 이 예시들을 **출발점**으로 삼되, 항상 한 단계 더 — **이미지 카드 스킨에 견줄 만한 완성도**를 목표로 다듬어 주세요. ✨

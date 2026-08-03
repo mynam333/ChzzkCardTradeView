@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import multer from 'multer';
 import { subscribeRealtimeStream } from '../services/realtimeStream';
 import { getRuntimeStats } from '../services/runtimeStats';
@@ -228,6 +228,7 @@ import {
   grantArenaV2SeasonRewardsAdminController,
   getArenaV2CardDetailController,
   getArenaV2CurrentSeasonController,
+  getActiveArenaV2MatchController,
   getArenaV2MatchController,
   getArenaV2ReplayController,
   getArenaV2BattleRoyaleController,
@@ -250,6 +251,7 @@ import {
   saveArenaV2DeckController,
   submitArenaV2MulliganController,
   submitArenaV2TurnActionsController,
+  surrenderArenaV2MatchController,
   transitionArenaV2SeasonAdminController,
   updateMyArenaV2StreamerCardController,
   updateArenaV2DeckController,
@@ -266,6 +268,20 @@ import { shouldServeImageProxyInApi } from '../services/processRole';
 import { bytesToWholeMb, readBytesEnv, readIntegerEnv } from '../utils/env';
 
 const router = Router();
+
+const ADMIN_SHOP_ITEM_BODY_SIZE_LIMIT = process.env.ADMIN_SHOP_ITEM_BODY_SIZE_LIMIT || '50mb';
+const adminShopItemJsonParser = express.json({ limit: ADMIN_SHOP_ITEM_BODY_SIZE_LIMIT });
+const adminShopItemUrlencodedParser = express.urlencoded({
+  limit: ADMIN_SHOP_ITEM_BODY_SIZE_LIMIT,
+  extended: true
+});
+
+/**
+ * 정교한 카드 테두리 CSS/SVG payload를 인증 전에 메모리에 파싱하지 않도록 전역 parser를 지연합니다.
+ * 생성 경로와 숫자 ID 수정 경로만 허용하며 reset-purchases 등 하위 경로는 일반 2MB 제한을 유지합니다.
+ */
+export const shouldDeferAdminShopItemBodyParsing = (method: string, pathname: string): boolean =>
+  method.toUpperCase() === 'POST' && /^\/api\/admin\/shop\/items(?:\/\d+)?\/?$/.test(pathname);
 
 router.post('/analytics/events', collectSiteInsightEvent);
 router.use(maintenanceCheckMiddleware);
@@ -479,9 +495,23 @@ router.post('/cards/:card_id/equip', authMiddleware, banCheckMiddleware, equipTo
 router.post('/cards/:card_id/unequip', authMiddleware, banCheckMiddleware, unequipFromCard);
 // 관리자 상점 관리
 router.get('/admin/shop/items', authMiddleware, adminMiddleware, adminGetShopItems);
-router.post('/admin/shop/items', authMiddleware, adminMiddleware, adminCreateShopItem);
+router.post(
+  '/admin/shop/items',
+  authMiddleware,
+  adminMiddleware,
+  adminShopItemJsonParser,
+  adminShopItemUrlencodedParser,
+  adminCreateShopItem
+);
 router.post('/admin/shop/items/:id/reset-purchases', authMiddleware, adminMiddleware, adminResetPurchases);
-router.post('/admin/shop/items/:id', authMiddleware, adminMiddleware, adminUpdateShopItem);
+router.post(
+  '/admin/shop/items/:id',
+  authMiddleware,
+  adminMiddleware,
+  adminShopItemJsonParser,
+  adminShopItemUrlencodedParser,
+  adminUpdateShopItem
+);
 
 // 신규 스트리머 검색 및 카드 등록 API
 router.get('/streamers/search', authMiddleware, banCheckMiddleware, searchLimiter, searchChzzkStreamer);
@@ -636,12 +666,14 @@ router.get('/arena/matchmaking/quick/events', authMiddleware, banCheckMiddleware
 router.post('/arena/matchmaking/quick/cancel', authMiddleware, banCheckMiddleware, arenaQuickCancelLimiter, cancelMyArenaV2QuickQueueController);
 router.post('/arena/matches', authMiddleware, banCheckMiddleware, arenaBotMatchLimiter, createArenaV2MatchController);
 router.post('/arena/bot-matches', authMiddleware, banCheckMiddleware, arenaBotMatchLimiter, createArenaV2BotMatchController);
+router.get('/arena/matches/active', authMiddleware, banCheckMiddleware, arenaReadLimiter, getActiveArenaV2MatchController);
 router.get('/arena/matches/recent', authMiddleware, banCheckMiddleware, arenaReadLimiter, arenaV2LegacyEndpointRemoved);
 router.post('/arena/matches/:match_id/mulligan', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2MulliganController);
 router.post('/arena/matches/:match_id/turn-action', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
 router.post('/arena/matches/:match_id/actions', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
 router.post('/arena/matches/:match_id/emotes', authMiddleware, banCheckMiddleware, arenaCosmeticWriteLimiter, sendArenaEmote);
 router.post('/arena/matches/:match_id/abandon-bot', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, abandonArenaV2BotMatchController);
+router.post('/arena/matches/:match_id/surrender', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, surrenderArenaV2MatchController);
 router.post('/arena/matches/:match_id/rounds/commit', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, arenaV2LegacyEndpointRemoved);
 router.get('/arena/matches/:match_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2MatchController);
 router.get('/arena/matches/:match_id/replay', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2ReplayController);

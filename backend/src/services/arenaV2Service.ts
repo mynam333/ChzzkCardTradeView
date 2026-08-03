@@ -203,16 +203,26 @@ const ARENA_V2_REPLAY_EVENT_DURATION_MS: Record<string, number> = {
   card_defeated: 720,
   revive: 720,
   shield_absorb: 620,
+  damage_reduction: 620,
   overflow_damage: 620,
+  aoe_damage: 620,
   counter: 620,
   silence: 620,
   stun: 620,
   push: 620,
   pull: 620,
   drain: 620,
+  battle_draw: 720,
+  emergency_heal: 720,
+  guard_support: 720,
+  attack_support: 720,
+  support_redirect: 620,
+  trick_passive: 620,
+  tech_passive: 620,
   vengeance: 620,
   residue: 620,
   spirit_damage: 620,
+  graveyard_recover: 720,
   fatigue: 620
 };
 
@@ -300,6 +310,8 @@ const stableShuffle = <T extends { id: string }>(items: T[], seed: string): T[] 
   [...items].sort((a, b) => stableHash(`${seed}:${a.id}`).localeCompare(stableHash(`${seed}:${b.id}`)));
 
 const ARENA_V2_CARD_CLASSES: ArenaV2CardClassDto[] = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
+export const ARENA_V2_CARD_POOL_VERSION = 'cards-v2';
+export const ARENA_V2_BALANCE_VERSION = 'balance-v2';
 
 type ArenaV2GeneratedKeyword = { type: string; value?: number; limit?: string };
 type ArenaV2GeneratedProfile = 'aggressive' | 'durable' | 'tactical' | 'balanced';
@@ -331,8 +343,10 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
   charge: [
     [generatedKeyword('pierce')], [generatedKeyword('pursuit', 1)], [generatedKeyword('pursuit', 2)],
     [generatedKeyword('direct_pressure', 1)], [generatedKeyword('direct_pressure', 2)], [generatedKeyword('backline_pressure')],
-    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)], [generatedKeyword('lifesteal', 1)],
+    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)], [generatedKeyword('aoe_damage', 2)],
+    [generatedKeyword('lifesteal', 1)], [generatedKeyword('lifesteal', 2)],
     [generatedKeyword('pierce'), generatedKeyword('weakpoint')],
+    [generatedKeyword('pierce'), generatedKeyword('pursuit', 1)],
     [generatedKeyword('pursuit', 1), generatedKeyword('weakpoint')],
     [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
     [generatedKeyword('lifesteal', 1), generatedKeyword('weakpoint')],
@@ -340,9 +354,10 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
     [generatedKeyword('pierce'), generatedKeyword('aoe_damage', 1), generatedKeyword('weakpoint')]
   ],
   guardian: [
-    [generatedKeyword('taunt')], [generatedKeyword('shield', 3)], [generatedKeyword('shield', 5)],
+    [generatedKeyword('taunt')], [generatedKeyword('shield', 3)], [generatedKeyword('shield', 4)], [generatedKeyword('shield', 5)],
     [generatedKeyword('damage_reduction', 1)], [generatedKeyword('damage_reduction', 2)],
-    [generatedKeyword('counter', 1)], [generatedKeyword('counter', 2)], [generatedKeyword('lifesteal', 1)],
+    [generatedKeyword('counter', 1)], [generatedKeyword('counter', 2)],
+    [generatedKeyword('lifesteal', 1)], [generatedKeyword('lifesteal', 2)],
     [generatedKeyword('revive')], [generatedKeyword('taunt'), generatedKeyword('shield', 1)],
     [generatedKeyword('damage_reduction', 1), generatedKeyword('counter', 1)],
     [generatedKeyword('shield', 3), generatedKeyword('counter', 1)],
@@ -351,11 +366,13 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
   sniper: [
     [generatedKeyword('aim')], [generatedKeyword('backline_pressure')], [generatedKeyword('weakpoint')],
     [generatedKeyword('pursuit', 1)], [generatedKeyword('pursuit', 2)], [generatedKeyword('silence')],
-    [generatedKeyword('stun')], [generatedKeyword('direct_pressure', 1)], [generatedKeyword('aoe_damage', 1)],
+    [generatedKeyword('stun')], [generatedKeyword('direct_pressure', 1)],
+    [generatedKeyword('aoe_damage', 1)], [generatedKeyword('aoe_damage', 2)],
     [generatedKeyword('aim'), generatedKeyword('backline_pressure')],
     [generatedKeyword('aim'), generatedKeyword('weakpoint')],
     [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
     [generatedKeyword('direct_pressure', 1), generatedKeyword('weakpoint')],
+    [generatedKeyword('pursuit', 2), generatedKeyword('weakpoint')],
     [generatedKeyword('aim'), generatedKeyword('backline_pressure'), generatedKeyword('weakpoint')],
     [generatedKeyword('backline_pressure'), generatedKeyword('weakpoint'), generatedKeyword('pursuit', 1)]
   ],
@@ -363,20 +380,24 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
     [generatedKeyword('guard_support')], [generatedKeyword('attack_support')], [generatedKeyword('emergency_heal', 1)],
     [generatedKeyword('emergency_heal', 2)], [generatedKeyword('shield', 3)], [generatedKeyword('battle_draw')],
     [generatedKeyword('grave_buff')], [generatedKeyword('guard_support'), generatedKeyword('attack_support')],
+    [generatedKeyword('battle_draw'), generatedKeyword('guard_support')],
     [generatedKeyword('emergency_heal', 1), generatedKeyword('shield', 2)],
     [generatedKeyword('guard_support'), generatedKeyword('shield', 2)],
     [generatedKeyword('battle_draw'), generatedKeyword('attack_support')],
     [generatedKeyword('grave_buff'), generatedKeyword('emergency_heal', 1)],
+    [generatedKeyword('emergency_heal', 2), generatedKeyword('attack_support')],
     [generatedKeyword('guard_support'), generatedKeyword('attack_support'), generatedKeyword('shield', 2)],
     [generatedKeyword('emergency_heal', 1), generatedKeyword('guard_support'), generatedKeyword('shield', 2)]
   ],
   trick: [
     [generatedKeyword('weaken', 1)], [generatedKeyword('weaken', 2)], [generatedKeyword('silence')],
     [generatedKeyword('stun')], [generatedKeyword('push')], [generatedKeyword('pull')], [generatedKeyword('aim')],
-    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)],
+    [generatedKeyword('weakpoint')], [generatedKeyword('aoe_damage', 1)], [generatedKeyword('aoe_damage', 2)],
     [generatedKeyword('weaken', 1), generatedKeyword('push')],
     [generatedKeyword('weaken', 1), generatedKeyword('pull')],
     [generatedKeyword('silence'), generatedKeyword('push')],
+    [generatedKeyword('silence'), generatedKeyword('pull')],
+    [generatedKeyword('weaken', 2), generatedKeyword('push')],
     [generatedKeyword('aim'), generatedKeyword('weaken', 1)],
     [generatedKeyword('weaken', 1), generatedKeyword('push'), generatedKeyword('pull')],
     [generatedKeyword('silence'), generatedKeyword('weaken', 1), generatedKeyword('push')]
@@ -385,9 +406,12 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
     [generatedKeyword('remnant', 1)], [generatedKeyword('remnant', 2)], [generatedKeyword('vengeance', 1)],
     [generatedKeyword('vengeance', 2)], [generatedKeyword('grudge', 1)], [generatedKeyword('grudge', 2)],
     [generatedKeyword('grave_buff')], [generatedKeyword('grave_recover', undefined, 'cost_2')],
-    [generatedKeyword('grave_recover', undefined, 'specter')], [generatedKeyword('revive')],
+    [generatedKeyword('grave_recover', undefined, 'specter')],
+    [generatedKeyword('grave_recover', undefined, 'same_class')],
+    [generatedKeyword('grave_recover', undefined, 'cost_4')], [generatedKeyword('revive')],
     [generatedKeyword('remnant', 1), generatedKeyword('vengeance', 1)],
     [generatedKeyword('remnant', 1), generatedKeyword('grave_buff')],
+    [generatedKeyword('remnant', 2), generatedKeyword('vengeance', 1)],
     [generatedKeyword('vengeance', 1), generatedKeyword('grave_recover', undefined, 'cost_2')],
     [generatedKeyword('remnant', 1), generatedKeyword('vengeance', 1), generatedKeyword('grave_buff')],
     [generatedKeyword('remnant', 1), generatedKeyword('grudge', 1), generatedKeyword('shield', 2)]
@@ -395,10 +419,14 @@ const generatedKeywordBundlesByClass: Record<ArenaV2CardClassDto, ArenaV2Generat
   tech: [
     [generatedKeyword('battle_draw')], [generatedKeyword('guard_support')], [generatedKeyword('attack_support')],
     [generatedKeyword('push')], [generatedKeyword('pull')], [generatedKeyword('weakpoint')],
-    [generatedKeyword('shield', 3)], [generatedKeyword('damage_reduction', 1)], [generatedKeyword('grave_buff')],
-    [generatedKeyword('aoe_damage', 1)], [generatedKeyword('battle_draw'), generatedKeyword('attack_support')],
+    [generatedKeyword('shield', 3)], [generatedKeyword('shield', 4)],
+    [generatedKeyword('damage_reduction', 1)], [generatedKeyword('damage_reduction', 2)], [generatedKeyword('grave_buff')],
+    [generatedKeyword('aoe_damage', 1)], [generatedKeyword('aoe_damage', 2)],
+    [generatedKeyword('battle_draw'), generatedKeyword('attack_support')],
+    [generatedKeyword('battle_draw'), generatedKeyword('push')],
     [generatedKeyword('guard_support'), generatedKeyword('attack_support')],
     [generatedKeyword('push'), generatedKeyword('pull')],
+    [generatedKeyword('attack_support'), generatedKeyword('weakpoint')],
     [generatedKeyword('shield', 3), generatedKeyword('damage_reduction', 1)],
     [generatedKeyword('battle_draw'), generatedKeyword('attack_support'), generatedKeyword('shield', 1)],
     [generatedKeyword('guard_support'), generatedKeyword('push'), generatedKeyword('weakpoint')]
@@ -418,6 +446,7 @@ const generatedCostBuckets = [
 ] as const;
 
 const generatedCandidateCache = new Map<string, ArenaV2GeneratedCandidate[]>();
+const generatedKeywordTypesAwaitingRules = new Set(['pursuit', 'grave_buff']);
 
 const normalizeArenaV2KeywordList = (value: unknown): Array<{ type: string; value?: number; limit?: string }> => {
   if (!Array.isArray(value)) return [];
@@ -468,7 +497,8 @@ const generatedCandidatesFor = (cost: number, cardClass: ArenaV2CardClassDto): A
 
   const limits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
   const budgetLimit = ARENA_V2_CARD_BUDGET_BY_COST[cost];
-  const bundles = [...commonGeneratedKeywordBundles, ...generatedKeywordBundlesByClass[cardClass]];
+  const bundles = [...commonGeneratedKeywordBundles, ...generatedKeywordBundlesByClass[cardClass]]
+    .filter((bundle) => bundle.every((keyword) => !generatedKeywordTypesAwaitingRules.has(keyword.type)));
   const uniqueCandidates = new Map<string, ArenaV2GeneratedCandidate>();
 
   for (const bundle of bundles) {
@@ -533,11 +563,11 @@ export const generateArenaV2DefaultCardCombatDefinition = (streamerIdInput: stri
   const cardClass = defaultArenaV2CardClassForStreamer(streamerId);
   const cost = defaultArenaV2CardCostForStreamer(streamerId);
   const profiles: ArenaV2GeneratedProfile[] = ['aggressive', 'durable', 'tactical', 'balanced'];
-  const profile = profiles[stableNumber(`arena-v2-profile:${streamerId}`, profiles.length)];
+  const profile = profiles[stableNumber(`arena-v2-profile:${ARENA_V2_CARD_POOL_VERSION}:${streamerId}`, profiles.length)];
   const maximumKeywordCount = cost <= 2 ? 1 : cost <= 6 ? 2 : 3;
   const minimumKeywordCount = profile === 'tactical' ? 1 : 0;
   const keywordCount = minimumKeywordCount
-    + stableNumber(`arena-v2-keyword-count:${streamerId}`, maximumKeywordCount - minimumKeywordCount + 1);
+    + stableNumber(`arena-v2-keyword-count:${ARENA_V2_CARD_POOL_VERSION}:${streamerId}`, maximumKeywordCount - minimumKeywordCount + 1);
   const allCandidates = generatedCandidatesFor(cost, cardClass);
   const keywordCandidates = allCandidates.filter((candidate) => candidate.keywords.length === keywordCount);
   const profileCandidates = (keywordCandidates.length ? keywordCandidates : allCandidates)
@@ -552,7 +582,7 @@ export const generateArenaV2DefaultCardCombatDefinition = (streamerIdInput: stri
     throw new Error(`ArenaV2GeneratedCardExactBudgetCandidateMissing:${cost}:${cardClass}`);
   }
 
-  const selected = selectable[stableNumber(`arena-v2-candidate:${streamerId}`, selectable.length)];
+  const selected = selectable[stableNumber(`arena-v2-candidate:${ARENA_V2_CARD_POOL_VERSION}:${streamerId}`, selectable.length)];
   return {
     cardClass,
     cost: selected.cost,
@@ -780,8 +810,8 @@ const defaultArenaV2PreparationSeasonInput = (): ArenaV2AdminSeasonInput => {
     startsAt: now.toISOString(),
     endsAt: endsAt.toISOString(),
     modesEnabled: { quick: false, bot: false, battle_royale_8: false },
-    cardPoolVersion: 'cards-v1',
-    balanceVersion: 'balance-v1',
+    cardPoolVersion: ARENA_V2_CARD_POOL_VERSION,
+    balanceVersion: ARENA_V2_BALANCE_VERSION,
     rewardTable: [],
     mmrTierTable: [],
     createdBy: 'system'
@@ -905,6 +935,99 @@ export const getArenaV2SeasonById = async (seasonId: string) => {
   return serializeArenaV2Season(row);
 };
 
+type ArenaV2GeneratedCardSyncMode = 'full' | 'missing_only';
+
+const generatedCardSyncModeForSeason = (
+  season: NonNullable<ReturnType<typeof serializeArenaV2Season>>
+): ArenaV2GeneratedCardSyncMode | null => {
+  if (season.status === 'draft' || season.status === 'scheduled') return 'full';
+  // 시작된 v2 시즌은 누락 카드만 복구하며 기존 카드 정의는 절대 다시 쓰지 않습니다.
+  if (
+    season.status === 'active'
+    && season.cardPoolVersion === ARENA_V2_CARD_POOL_VERSION
+    && season.balanceVersion === ARENA_V2_BALANCE_VERSION
+  ) return 'missing_only';
+  return null;
+};
+
+export const getArenaV2PreparationSeasonForGeneratedCardSync = async () => {
+  const db = getExecutor();
+  if (!db) return null;
+  const row = await queryGet<ArenaV2SeasonRow>(
+    db,
+    `
+      SELECT *
+        FROM arena_v2_seasons season
+       WHERE season.status IN ('draft', 'scheduled')
+         AND (
+           season.card_pool_version <> ?
+           OR season.balance_version <> ?
+           OR EXISTS (
+             SELECT 1
+               FROM streamers s
+              WHERE COALESCE(s.is_image_banned, 0) = 0
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM arena_v2_card_versions cv
+                   WHERE cv.season_id = season.id
+                     AND cv.streamer_id = s.channel_id
+                     AND cv.status = 'active'
+                )
+           )
+         )
+       ORDER BY CASE status WHEN 'scheduled' THEN 0 ELSE 1 END,
+                 starts_at ASC,
+                 id ASC
+       LIMIT 1
+    `,
+    [ARENA_V2_CARD_POOL_VERSION, ARENA_V2_BALANCE_VERSION]
+  );
+  return serializeArenaV2Season(row);
+};
+
+const hasMissingArenaV2PreparationCards = async (db: SqlExecutor, seasonId: string): Promise<boolean> => Boolean(
+  await queryGet(
+    db,
+    `
+      SELECT 1 AS missing
+        FROM streamers s
+       WHERE COALESCE(s.is_image_banned, 0) = 0
+         AND NOT EXISTS (
+           SELECT 1
+             FROM arena_v2_card_versions cv
+            WHERE cv.season_id = ?
+              AND cv.streamer_id = s.channel_id
+              AND cv.status = 'active'
+         )
+       LIMIT 1
+    `,
+    [seasonId]
+  )
+);
+
+const finalizeArenaV2PreparationSeasonGeneratedCardSync = async (db: SqlExecutor, seasonId: string) => {
+  const updateResult = await runSql(
+    db,
+    `
+      UPDATE arena_v2_seasons
+         SET card_pool_version = ?,
+             balance_version = ?,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status IN ('draft', 'scheduled')
+    `,
+    [ARENA_V2_CARD_POOL_VERSION, ARENA_V2_BALANCE_VERSION, seasonId]
+  );
+  if (affectedRows(updateResult) > 0) return;
+  const current = await getArenaV2SeasonById(seasonId);
+  if (
+    current
+    && (current.status === 'draft' || current.status === 'scheduled')
+    && current.cardPoolVersion === ARENA_V2_CARD_POOL_VERSION
+    && current.balanceVersion === ARENA_V2_BALANCE_VERSION
+  ) return;
+  throw new Error('ArenaV2PreparationSeasonFinalizeConflict');
+};
+
 export const updateArenaV2SeasonAdmin = async (seasonId: string, patch: Partial<ArenaV2AdminSeasonInput> & { status?: string }) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
@@ -958,16 +1081,50 @@ export const transitionArenaV2SeasonAdmin = async (seasonId: string, toStatus: s
     settling: ['closed']
   };
   if (!allowed[existing.status]?.includes(toStatus)) throw new Error('ArenaV2SeasonTransitionInvalid');
-  await runSql(
+  const activatesSeason = existing.status === 'scheduled' && toStatus === 'active';
+  if (
+    activatesSeason
+    && (
+      existing.cardPoolVersion !== ARENA_V2_CARD_POOL_VERSION
+      || existing.balanceVersion !== ARENA_V2_BALANCE_VERSION
+    )
+  ) {
+    throw new Error('ArenaV2SeasonCardSyncRequired');
+  }
+  if (activatesSeason && await hasMissingArenaV2PreparationCards(db, seasonId)) {
+    throw new Error('ArenaV2SeasonCardSyncRequired');
+  }
+  const transitionResult = await runSql(
     db,
     `
       UPDATE arena_v2_seasons
          SET status = ?,
              updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?
+       WHERE id = ? AND status = ?
+         ${activatesSeason ? 'AND card_pool_version = ? AND balance_version = ?' : ''}
+         ${activatesSeason ? `AND NOT EXISTS (
+           SELECT 1
+             FROM streamers s
+            WHERE COALESCE(s.is_image_banned, 0) = 0
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM arena_v2_card_versions cv
+                 WHERE cv.season_id = ?
+                   AND cv.streamer_id = s.channel_id
+                   AND cv.status = 'active'
+              )
+         )` : ''}
     `,
-    [toStatus, seasonId]
+    activatesSeason
+      ? [toStatus, seasonId, existing.status, ARENA_V2_CARD_POOL_VERSION, ARENA_V2_BALANCE_VERSION, seasonId]
+      : [toStatus, seasonId, existing.status]
   );
+  if (affectedRows(transitionResult) <= 0) {
+    if (activatesSeason && await hasMissingArenaV2PreparationCards(db, seasonId)) {
+      throw new Error('ArenaV2SeasonCardSyncRequired');
+    }
+    throw new Error('ArenaV2SeasonTransitionConflict');
+  }
   return { season: await getArenaV2SeasonById(seasonId), transition: { fromStatus: existing.status, toStatus, reason } };
 };
 
@@ -1039,7 +1196,7 @@ const buildDefaultArenaV2CardVersionForStreamer = (seasonId: string, streamer: a
       cardClass: 'charge' as ArenaV2CardClassDto,
       cost: 2,
       attack: 1,
-      health: 5,
+      health: 6,
       keywords: [] as Array<{ type: string; value?: number; limit?: string }>
     };
     const fallbackValidation = validateArenaV2CardVersionDefinition(fallback);
@@ -1084,16 +1241,21 @@ const syncGeneratedArenaV2CardForStreamer = async (
   db: SqlExecutor,
   seasonId: string,
   streamer: any,
-  existing?: any
+  existing?: any,
+  allowExistingUpdate = true
 ): Promise<ArenaV2GeneratedCardSyncOutcome> => {
   const streamerId = String(streamer.channel_id || '').trim();
   if (!streamerId) return 'skipped';
+  if (existing && !allowExistingUpdate) return 'skipped';
   const generated = buildDefaultArenaV2CardVersionForStreamer(seasonId, streamer);
 
   if (existing) {
     // 자동 생성 카드만 제자리 갱신합니다. 스트리머가 직접 만든 새 버전은 덮어쓰지 않습니다.
-    if (!isArenaV2GeneratedCardId(existing.id, seasonId, streamerId) || generatedArenaV2CombatMatches(existing, generated)) return 'skipped';
-    await runSql(
+    if (
+      !isArenaV2GeneratedCardId(existing.id, seasonId, streamerId)
+      || generatedArenaV2CombatMatches(existing, generated)
+    ) return 'skipped';
+    const updateResult = await runSql(
       db,
       `
         UPDATE arena_v2_card_versions
@@ -1119,6 +1281,7 @@ const syncGeneratedArenaV2CardForStreamer = async (
         seasonId
       ]
     );
+    if (affectedRows(updateResult) <= 0) return 'skipped';
     existing.card_class = generated.cardClass;
     existing.cost = generated.cost;
     existing.attack = generated.attack;
@@ -1175,8 +1338,14 @@ const runArenaV2GeneratedCardSyncBatch = async (
 export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
-  const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
-  if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const targetSeason = seasonId
+    ? await getArenaV2SeasonById(seasonId)
+    : await getArenaV2PreparationSeasonForGeneratedCardSync();
+  if (!targetSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const syncMode = generatedCardSyncModeForSeason(targetSeason);
+  if (!syncMode) {
+    return { seasonId: targetSeason.id, scanned: 0, created: 0, updated: 0, skipped: 0 };
+  }
   const pageSize = 500;
   const totals = { scanned: 0, created: 0, updated: 0, skipped: 0 };
   let cursorBaseValue: number | null = null;
@@ -1214,7 +1383,7 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
            WHERE season_id = ? AND status = 'active' AND streamer_id IN (${placeholders})
            ORDER BY streamer_id ASC, version DESC, updated_at DESC
         `,
-        [activeSeason.id, ...streamerIds]
+        [targetSeason.id, ...streamerIds]
       );
       for (const row of existingRows) {
         const streamerId = String(row.streamer_id || '').trim();
@@ -1224,7 +1393,13 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
 
     const pageTotals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer: any) => () => {
       const streamerId = String(streamer.channel_id || '').trim();
-      return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
+      return syncGeneratedArenaV2CardForStreamer(
+        db,
+        targetSeason.id,
+        streamer,
+        existingByStreamerId.get(streamerId),
+        syncMode === 'full'
+      );
     }));
     totals.scanned += streamers.length;
     totals.created += pageTotals.created;
@@ -1238,7 +1413,10 @@ export const syncArenaV2CardsFromRegisteredStreamers = async (seasonId?: string)
     if (!cursorChannelId) break;
   }
 
-  return { seasonId: activeSeason.id, ...totals };
+  if (syncMode === 'full') {
+    await finalizeArenaV2PreparationSeasonGeneratedCardSync(db, targetSeason.id);
+  }
+  return { seasonId: targetSeason.id, ...totals };
 };
 
 export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: string, options: { limit?: number } = {}) => {
@@ -1246,6 +1424,10 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
   if (!db) throw new Error('ArenaV2SqlDbRequired');
   const activeSeason = seasonId ? await getArenaV2SeasonById(seasonId) : await getArenaV2CurrentSeason();
   if (!activeSeason?.id) throw new Error('ArenaV2SeasonNotFound');
+  const syncMode = generatedCardSyncModeForSeason(activeSeason);
+  if (!syncMode) {
+    return { seasonId: activeSeason.id, scanned: 0, created: 0, updated: 0, skipped: 0 };
+  }
   const syncLimit = Math.min(Math.max(Math.floor(Number(options.limit || 500)), 1), 1000);
   const streamers = await queryAll<any>(
     db,
@@ -1286,24 +1468,35 @@ export const syncArenaV2CardsFromOwnedCards = async (userId: string, seasonId?: 
   const existingByStreamerId = new Map(existingRows.map((row) => [String(row.streamer_id), row]));
   const totals = await runArenaV2GeneratedCardSyncBatch(streamers.map((streamer) => () => {
     const streamerId = String(streamer.channel_id || '').trim();
-    return syncGeneratedArenaV2CardForStreamer(db, activeSeason.id, streamer, existingByStreamerId.get(streamerId));
+    return syncGeneratedArenaV2CardForStreamer(
+      db,
+      activeSeason.id,
+      streamer,
+      existingByStreamerId.get(streamerId),
+      syncMode === 'full'
+    );
   }));
 
   return { seasonId: activeSeason.id, scanned: streamers.length, ...totals };
 };
 
-const ensureArenaV2CardsForSeason = async (_db: SqlExecutor, seasonId: string) => {
-  if (arenaV2GeneratedCardSyncCompleted.has(seasonId)) return;
-  const activeCount = await queryGet<{ count: number }>(
-    _db,
-    'SELECT COUNT(*) AS count FROM arena_v2_card_versions WHERE season_id = ? AND status = ?',
-    [seasonId, 'active']
-  );
-  const mustWaitForInitialCards = Number(activeCount?.count || 0) === 0;
+const ensureArenaV2CardsForSeason = async (
+  _db: SqlExecutor,
+  seasonId: string
+): Promise<ArenaV2GeneratedCardSyncMode | null> => {
+  const season = await getArenaV2SeasonById(seasonId);
+  if (!season) return null;
+  const syncMode = generatedCardSyncModeForSeason(season);
+  if (!syncMode) return null;
+
+  // 전체 풀 재생성은 worker 소유 작업입니다. API 요청은 페이지/소유 카드 단위 복구만 수행해
+  // 빈 시즌에서도 수천 장 동기화를 기다리며 504가 발생하지 않게 합니다.
+  if (!testExecutor) return syncMode;
+  if (arenaV2GeneratedCardSyncCompleted.has(seasonId)) return syncMode;
   const existingSync = arenaV2GeneratedCardSyncInFlight.get(seasonId);
   if (existingSync) {
-    if (mustWaitForInitialCards || testExecutor) await existingSync;
-    return;
+    await existingSync;
+    return syncMode;
   }
   const sync = syncArenaV2CardsFromRegisteredStreamers(seasonId)
     .then(() => {
@@ -1316,8 +1509,8 @@ const ensureArenaV2CardsForSeason = async (_db: SqlExecutor, seasonId: string) =
       arenaV2GeneratedCardSyncInFlight.delete(seasonId);
     });
   arenaV2GeneratedCardSyncInFlight.set(seasonId, sync);
-  // 기존 카드가 있으면 전체 갱신은 요청과 분리합니다. 빈 시즌의 최초 생성과 테스트만 완료를 기다립니다.
-  if (mustWaitForInitialCards || testExecutor) await sync;
+  await sync;
+  return syncMode;
 };
 
 export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => {
@@ -1326,7 +1519,7 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
   const activeSeason = filters.seasonId ? null : await getArenaV2CurrentSeason();
   const seasonId = filters.seasonId || activeSeason?.id;
   if (!seasonId) return [];
-  await ensureArenaV2CardsForSeason(db, seasonId);
+  const generatedCardSyncMode = await ensureArenaV2CardsForSeason(db, seasonId);
 
   const where = ['cv.season_id = ?', "cv.status = 'active'"];
   const params: any[] = [seasonId];
@@ -1377,17 +1570,20 @@ export const listArenaV2Cards = async (filters: ArenaV2CardListFilters = {}) => 
     params
   );
 
-  await runArenaV2GeneratedCardSyncBatch(rows.map((row) => () => syncGeneratedArenaV2CardForStreamer(
-    db,
-    seasonId,
-    {
-      channel_id: row.streamer_id,
-      name: row.streamer_name || row.display_name,
-      logo_url: row.streamer_logo,
-      custom_image_url: row.streamer_custom_image
-    },
-    row
-  )));
+  if (generatedCardSyncMode) {
+    await runArenaV2GeneratedCardSyncBatch(rows.map((row) => () => syncGeneratedArenaV2CardForStreamer(
+      db,
+      seasonId,
+      {
+        channel_id: row.streamer_id,
+        name: row.streamer_name || row.display_name,
+        logo_url: row.streamer_logo,
+        custom_image_url: row.streamer_custom_image
+      },
+      row,
+      generatedCardSyncMode === 'full'
+    )));
+  }
 
   return rows.map(serializeArenaV2CardVersionRow);
 };
@@ -1566,13 +1762,19 @@ export const getMyArenaV2StreamerCard = async (userId: string, seasonId?: string
     };
   }
 
-  await ensureArenaV2CardsForSeason(db, season.id);
+  const generatedCardSyncMode = await ensureArenaV2CardsForSeason(db, season.id);
   let row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
-  if (!row) {
+  if (!row && generatedCardSyncMode) {
     await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer);
     row = await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id, true);
-  } else if (row.status === 'active') {
-    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, row);
+  } else if (row?.status === 'active' && generatedCardSyncMode) {
+    await syncGeneratedArenaV2CardForStreamer(
+      db,
+      season.id,
+      streamer,
+      row,
+      generatedCardSyncMode === 'full'
+    );
   }
   if (row) {
     row.art_asset_id = await arenaV2ArtAssetForOwnedStreamer(db, userId, streamer);
@@ -1721,10 +1923,16 @@ export const enableMyArenaV2StreamerCard = async (userId: string) => {
       [latest.id]
     );
     latest.status = 'active';
-    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, latest);
+    const syncMode = generatedCardSyncModeForSeason(season);
+    if (syncMode) {
+      await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, latest, syncMode === 'full');
+    }
     return { enabled: true, card: await getArenaV2CardVersion(latest.id) };
   }
-  await syncArenaV2CardsFromRegisteredStreamers(season.id);
+  const syncMode = generatedCardSyncModeForSeason(season);
+  if (syncMode) {
+    await syncGeneratedArenaV2CardForStreamer(db, season.id, streamer, undefined, syncMode === 'full');
+  }
   return { enabled: true, card: await getLatestArenaV2StreamerCardRow(db, season.id, streamer.channel_id).then((row) => row ? serializeArenaV2CardVersionRow(row) : null) };
 };
 
@@ -4664,14 +4872,69 @@ export const syncArenaV2MatchForUser = async (
   return getArenaV2MatchForUser(matchId, userId, battleRoyaleId);
 };
 
-export const abandonArenaV2BotMatchForUser = async (matchId: string, userId: string) => {
+const activeArenaV2MatchStatuses = new Set([
+  'created',
+  'mulligan',
+  'turn_planning',
+  'action_locked',
+  'combat_resolving',
+  'turn_result'
+]);
+
+export const getActiveArenaV2MatchForUser = async (userId: string) => {
+  const db = getExecutor();
+  if (!db) return null;
+
+  // A read-repair can complete an expired match, so retry once to find any remaining active participation.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const active = await queryGet<{ id: string }>(
+      db,
+      `
+        SELECT m.id
+          FROM arena_v2_match_players p
+          JOIN arena_v2_matches m ON m.id = p.match_id
+         WHERE p.user_id = ?
+           AND m.status NOT IN ('completed', 'cancelled')
+         ORDER BY CASE m.mode
+                    WHEN 'quick' THEN 0
+                    WHEN 'battle_royale_8' THEN 1
+                    ELSE 2
+                  END ASC,
+                  m.updated_at DESC,
+                  m.created_at DESC,
+                  m.id DESC
+         LIMIT 1
+      `,
+      [userId]
+    );
+    if (!active?.id) return null;
+
+    const match = await syncArenaV2MatchForUser(active.id, userId);
+    if (match && activeArenaV2MatchStatuses.has(String(match.status))) return match;
+  }
+
+  return null;
+};
+
+type ArenaV2SurrenderOptions = {
+  allowedModes: ReadonlySet<string>;
+  completedReason: 'bot_match_abandoned' | 'player_surrendered';
+  unsupportedModeError: 'ArenaV2MatchNotBot' | 'ArenaV2MatchSurrenderUnavailable';
+};
+
+const finishArenaV2MatchBySurrender = async (
+  matchId: string,
+  userId: string,
+  options: ArenaV2SurrenderOptions
+) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');
+
   await withArenaV2Transaction(async (tx) => {
     const match = await queryGet<any>(
       tx,
       `
-        SELECT id, mode, status, turn_no, result_summary
+        SELECT id, season_id, mode, status, turn_no, result_summary
           FROM arena_v2_matches
          WHERE id = ?
          LIMIT 1
@@ -4680,10 +4943,11 @@ export const abandonArenaV2BotMatchForUser = async (matchId: string, userId: str
       [matchId]
     );
     if (!match) throw new Error('ArenaV2MatchNotFound');
+
     const players = await queryAll<any>(
       tx,
       `
-        SELECT user_id, seat_no
+        SELECT user_id, seat_no, player_health
           FROM arena_v2_match_players
          WHERE match_id = ?
          ORDER BY seat_no ASC
@@ -4691,55 +4955,100 @@ export const abandonArenaV2BotMatchForUser = async (matchId: string, userId: str
       `,
       [matchId]
     );
-    const self = players.find((player) => player.user_id === userId);
+    const self = players.find((player) => String(player.user_id || '') === userId);
     if (!self) throw new Error('ArenaV2MatchForbidden');
-    if (match.mode !== 'bot') throw new Error('ArenaV2MatchNotBot');
+    if (!options.allowedModes.has(String(match.mode))) throw new Error(options.unsupportedModeError);
     if (String(match.status) === 'completed') return;
     if (String(match.status) === 'cancelled') throw new Error('ArenaV2MatchAlreadyCancelled');
 
-    const bot = players.find((player) => !player.user_id);
-    const finishedAt = new Date().toISOString();
-    const replayExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { phaseTiming: _phaseTiming, ...summary } = parseArenaV2StoredSummary(match.result_summary);
+    const winner = players.find((player) => Number(player.seat_no) !== Number(self.seat_no));
+    if (!winner) throw new Error('ArenaV2MatchOpponentMissing');
+
+    const finishedAtMs = Date.now();
+    const finishedAt = new Date(finishedAtMs).toISOString();
+    const replayExpiresAt = new Date(finishedAtMs + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { phaseTiming: _phaseTiming, viewerResultsByUser: _viewerResultsByUser, ...summary } =
+      parseArenaV2StoredSummary(match.result_summary);
     const resultSummary: ArenaV2StoredSummary = {
       ...summary,
       status: 'completed',
       result: 'win',
-      winnerSeatNo: bot ? Number(bot.seat_no) : null,
+      winnerSeatNo: Number(winner.seat_no),
       loserSeatNo: Number(self.seat_no),
-      completedReason: 'bot_match_abandoned',
-      abandonedBySeatNo: Number(self.seat_no),
-      abandonedAt: finishedAt
+      completedReason: options.completedReason,
+      surrenderedBySeatNo: Number(self.seat_no),
+      surrenderedAt: finishedAt,
+      ...(options.completedReason === 'bot_match_abandoned'
+        ? { abandonedBySeatNo: Number(self.seat_no), abandonedAt: finishedAt }
+        : {})
     };
+
+    if (String(match.mode) === 'quick') {
+      const runtime = await loadArenaV2RuntimeMatch(tx, matchId);
+      const ratingResolution: ArenaV2TurnResolutionResult = {
+        nextStatus: 'completed',
+        nextTurnNo: Number(match.turn_no || 1),
+        winnerSeatNo: Number(winner.seat_no),
+        winnerUserId: winner.user_id ? String(winner.user_id) : null,
+        result: 'win',
+        summary: resultSummary,
+        players: runtime.players.map((player) => (
+          player.seatNo === Number(self.seat_no) ? { ...player, playerHealth: 0 } : player
+        )),
+        cardInstances: runtime.cardInstances,
+        replayEvents: []
+      };
+      resultSummary.viewerResultsByUser = await updateArenaV2QuickRatings(
+        tx,
+        String(match.season_id),
+        matchId,
+        ratingResolution
+      );
+    }
 
     await runSql(
       tx,
       `
         UPDATE arena_v2_match_players
-           SET final_rank = CASE WHEN user_id = ? THEN 2 ELSE 1 END,
-               player_health = CASE WHEN user_id = ? THEN 0 ELSE player_health END,
+           SET final_rank = CASE WHEN seat_no = ? THEN 2 ELSE 1 END,
+               player_health = CASE WHEN seat_no = ? THEN 0 ELSE player_health END,
                updated_at = CURRENT_TIMESTAMP
          WHERE match_id = ?
       `,
-      [userId, userId, matchId]
+      [Number(self.seat_no), Number(self.seat_no), matchId]
     );
     await runSql(
       tx,
       `
         UPDATE arena_v2_matches
            SET status = 'completed',
-               winner_user_id = NULL,
+               winner_user_id = ?,
                finished_at = ?,
                replay_expires_at = ?,
                result_summary = ?,
                updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND status NOT IN ('completed', 'cancelled')
       `,
-      [finishedAt, replayExpiresAt, JSON.stringify(resultSummary), matchId]
+      [winner.user_id || null, finishedAt, replayExpiresAt, JSON.stringify(resultSummary), matchId]
     );
   });
+
   return getArenaV2MatchForUser(matchId, userId);
 };
+
+export const abandonArenaV2BotMatchForUser = async (matchId: string, userId: string) =>
+  finishArenaV2MatchBySurrender(matchId, userId, {
+    allowedModes: new Set(['bot']),
+    completedReason: 'bot_match_abandoned',
+    unsupportedModeError: 'ArenaV2MatchNotBot'
+  });
+
+export const surrenderArenaV2MatchForUser = async (matchId: string, userId: string) =>
+  finishArenaV2MatchBySurrender(matchId, userId, {
+    allowedModes: new Set(['bot', 'quick']),
+    completedReason: 'player_surrendered',
+    unsupportedModeError: 'ArenaV2MatchSurrenderUnavailable'
+  });
 
 export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) => {
   const db = getExecutor();

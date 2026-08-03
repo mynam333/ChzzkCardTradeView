@@ -29,30 +29,31 @@ export type ArenaCardKeywordDefinition = {
   target: string;
   duration: string;
   variants: ArenaCardKeywordVariant[];
+  availableForSelection?: boolean;
 };
 
 export const arenaCardBudgetByCost: Record<number, number> = {
-  1: 5,
-  2: 8,
-  3: 12,
-  4: 16,
-  5: 21,
-  6: 27,
-  7: 34,
-  8: 42,
-  9: 51
+  1: 6,
+  2: 9,
+  3: 14,
+  4: 18,
+  5: 24,
+  6: 31,
+  7: 39,
+  8: 48,
+  9: 59
 };
 
 export const arenaCardStatLimitsByCost: Record<number, { attackMax: number; healthMax: number }> = {
-  1: { attackMax: 1, healthMax: 4 },
-  2: { attackMax: 2, healthMax: 6 },
-  3: { attackMax: 3, healthMax: 8 },
-  4: { attackMax: 4, healthMax: 10 },
-  5: { attackMax: 5, healthMax: 12 },
-  6: { attackMax: 6, healthMax: 14 },
-  7: { attackMax: 7, healthMax: 16 },
-  8: { attackMax: 8, healthMax: 18 },
-  9: { attackMax: 9, healthMax: 20 }
+  1: { attackMax: 1, healthMax: 6 },
+  2: { attackMax: 2, healthMax: 8 },
+  3: { attackMax: 4, healthMax: 10 },
+  4: { attackMax: 5, healthMax: 12 },
+  5: { attackMax: 6, healthMax: 14 },
+  6: { attackMax: 7, healthMax: 16 },
+  7: { attackMax: 8, healthMax: 18 },
+  8: { attackMax: 9, healthMax: 21 },
+  9: { attackMax: 10, healthMax: 25 }
 };
 
 export const arenaCardClassDefinitions = {
@@ -76,12 +77,12 @@ export const arenaCardClassDefinitions = {
   },
   sniper: {
     label: '저격',
-    description: '상대 전열이 비어 있는 라인에서 후열의 핵심 카드를 먼저 노리는 정밀 공격 클래스입니다.',
+    description: '후열에서 상대 후열을 정확히 타격할 때 첫 기본 공격을 강화하는 정밀 공격 클래스입니다.',
     playstyle: '정밀한 후열 제거',
-    passive: '후열에 있고 같은 라인의 상대 전열이 비어 있으면 상대 후열 카드를 우선 공격합니다.',
-    trigger: '공격 대상 결정 시',
-    condition: '후열 배치 · 같은 라인의 상대 전열이 비어 있음',
-    note: '같은 라인 안에서만 작동하며 직접 공격 피해는 늘리지 않습니다.'
+    passive: '후열에서 상대 후열 카드에 주는 이번 전투 첫 기본 공격 피해가 1 증가합니다.',
+    trigger: '전투마다 첫 후열 카드 기본 공격 1회',
+    condition: '후열 배치 · 상대 후열 카드 대상 피해',
+    note: '전열을 우회하지 않으며 플레이어 직접 공격에는 적용되지 않습니다. 전열을 무시하려면 조준 키워드가 필요합니다.'
   },
   support: {
     label: '지원',
@@ -90,7 +91,7 @@ export const arenaCardClassDefinitions = {
     passive: '같은 라인의 아군 카드가 이번 전투 처음 받는 체력 피해 중 1을 대신 받습니다.',
     trigger: '전투마다 아군의 첫 체력 피해 1회',
     condition: '같은 라인 · 지원 카드가 전투 가능 상태',
-    note: '대신 받은 피해로 지원 카드가 전투불능이 될 수 있습니다.'
+    note: '대신 받은 피해는 지원 카드의 보호막·피해 감소로 다시 줄이지 않으며, 이 피해로 전투불능이 될 수 있습니다.'
   },
   trick: {
     label: '기만',
@@ -136,22 +137,22 @@ export const arenaCardKeywordDefinitions: ArenaCardKeywordDefinition[] = [
   { type: 'lifesteal', label: '흡혈', description: '카드에게 실제 체력 피해를 준 뒤 자신의 누적 피해를 X만큼 회복합니다. 피해를 주지 못하면 발동하지 않습니다.', category: 'defense', timing: '카드 체력 피해 적용 후', target: '이 카드', duration: '발동 즉시', variants: [{ label: '1 회복', value: 1, cost: 6 }, { label: '2 회복', value: 2, cost: 10 }] },
   { type: 'revive', label: '부활', description: '전투불능이 되는 대신 체력 1로 생존합니다. 한 전투에서 한 번만 발동합니다.', category: 'defense', timing: '전투불능 대체', target: '이 카드', duration: '전투마다 1회', variants: fixed('1회', 18) },
   { type: 'pierce', label: '관통', description: '기본 공격으로 전열을 쓰러뜨리면 남은 피해 전부를 같은 라인의 후열 카드까지 전달합니다. 플레이어에게는 넘어가지 않습니다.', category: 'offense', timing: '전열 전투불능 후', target: '같은 라인의 후열 카드', duration: '해당 공격', variants: fixed('기본', 6) },
-  { type: 'pursuit', label: '추격', description: '이 카드가 적 카드를 전투불능으로 만든 직후 선택한 단계의 후속 효과가 발동합니다.', category: 'offense', timing: '적 카드 전투불능 직후', target: '추격 조건으로 정해진 대상', duration: '발동 즉시', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 9 }] },
+  { type: 'pursuit', label: '추격', description: '후속 효과 규칙을 확정 중인 보류 키워드입니다. 기존 카드 표시는 유지하지만 신규 카드에는 선택할 수 없습니다.', category: 'offense', timing: '규칙 확정 전', target: '신규 선택 불가', duration: '규칙 확정 전', variants: [{ label: '1단계', value: 1, cost: 5 }, { label: '2단계', value: 2, cost: 9 }], availableForSelection: false },
   { type: 'direct_pressure', label: '직접 압박', description: '같은 라인의 상대 전열과 후열이 모두 비어 플레이어를 직접 공격할 때 피해가 X 증가합니다.', category: 'offense', timing: '플레이어 직접 공격 피해 전', target: '상대 플레이어', duration: '해당 직접 공격', variants: [{ label: '피해 +1', value: 1, cost: 7 }, { label: '피해 +2', value: 2, cost: 12 }] },
   { type: 'backline_pressure', label: '후열 압박', description: '상대 후열 카드를 공격할 때 그 카드에게 주는 피해가 1 증가합니다.', category: 'offense', timing: '후열 카드 공격 피해 전', target: '상대 후열 카드', duration: '해당 공격', variants: fixed('피해 +1', 5) },
   { type: 'weakpoint', label: '약점 공격', description: '이미 체력 피해를 받은 카드를 공격할 때 그 카드에게 주는 피해가 1 증가합니다.', category: 'offense', timing: '카드 공격 피해 전', target: '피해를 받은 카드', duration: '해당 공격', variants: fixed('피해 +1', 5) },
-  { type: 'aoe_damage', label: '광역 피해', description: '한 공격 단계에 한 번, 기본 공격과 함께 X의 광역 피해를 처리합니다.', category: 'offense', timing: '기본 공격 단계', target: '광역 피해 적용 대상', duration: '공격 단계마다 1회', variants: [{ label: '1 피해', value: 1, cost: 8 }, { label: '2 피해', value: 2, cost: 14 }] },
+  { type: 'aoe_damage', label: '광역 피해', description: '기본 공격을 처리한 뒤 주 대상 외의 생존한 상대 필드 카드 모두에게 X 피해를 줍니다.', category: 'offense', timing: '기본 공격 직후', target: '주 대상 외의 상대 필드 카드 전체', duration: '기본 공격마다 1회', variants: [{ label: '1 피해', value: 1, cost: 8 }, { label: '2 피해', value: 2, cost: 14 }] },
   { type: 'aim', label: '조준', description: '공격 대상 결정 시 같은 라인의 상대 후열 카드를 우선 대상으로 선택합니다.', category: 'control', timing: '공격 대상 결정', target: '같은 라인의 상대 후열', duration: '해당 공격', variants: fixed('기본', 8) },
   { type: 'silence', label: '침묵', description: '같은 라인 대상의 키워드 효과를 이번 전투 동안 사용할 수 없게 합니다.', category: 'control', timing: '제어 효과 적용 시', target: '같은 라인의 상대 카드', duration: '이번 전투', variants: fixed('기본', 8) },
   { type: 'stun', label: '기절', description: '같은 라인 대상이 이번 공격 단계에서 행동하지 못하게 합니다.', category: 'control', timing: '공격 행동 전', target: '같은 라인의 상대 카드', duration: '이번 공격 단계', variants: fixed('1회', 10) },
   { type: 'push', label: '밀치기', description: '같은 라인의 상대 전열 카드를 후열로 밉니다. 후열 칸이 차 있으면 실패합니다.', category: 'control', timing: '위치 제어 적용 시', target: '같은 라인의 상대 전열', duration: '배치가 바뀔 때까지', variants: fixed('기본', 6) },
   { type: 'pull', label: '끌어오기', description: '같은 라인의 상대 후열 카드를 전열로 당깁니다. 전열 칸이 차 있으면 실패합니다.', category: 'control', timing: '위치 제어 적용 시', target: '같은 라인의 상대 후열', duration: '배치가 바뀔 때까지', variants: fixed('기본', 7) },
   { type: 'weaken', label: '약화', description: '같은 라인 대상의 공격력을 이번 전투 동안 X 낮춥니다. 전투 종료 시 원래 수치로 돌아옵니다.', category: 'control', timing: '피해 적용 후 또는 효과 적용 시', target: '같은 라인의 상대 카드', duration: '이번 전투', variants: [{ label: '공격력 -1', value: 1, cost: 5 }, { label: '공격력 -2', value: 2, cost: 9 }] },
-  { type: 'battle_draw', label: '전투 드로우', description: '전투 중 덱에서 카드 1장을 뽑습니다. 손패 최대 8장 제한을 그대로 적용합니다.', category: 'support', timing: '전투 중 자원 효과 처리', target: '내 덱과 손패', duration: '발동 즉시', variants: fixed('카드 1장', 6) },
-  { type: 'emergency_heal', label: '응급 회복', description: '효과가 지정한 필드 카드의 누적 체력 피해를 X만큼 회복합니다. 최대 체력을 넘길 수 없습니다.', category: 'support', timing: '회복 효과 처리 시', target: '필드 카드', duration: '발동 즉시', variants: [{ label: '1 회복', value: 1, cost: 7 }, { label: '2 회복', value: 2, cost: 12 }] },
+  { type: 'battle_draw', label: '전투 드로우', description: '전투 시작 시 덱에서 카드 1장을 뽑습니다. 손패가 8장이면 뽑은 카드는 묘지로 이동하며, 덱이 비어 있어도 피로 피해는 받지 않습니다.', category: 'support', timing: '전투 시작', target: '내 덱과 손패', duration: '전투마다 1회', variants: fixed('카드 1장', 6) },
+  { type: 'emergency_heal', label: '응급 회복', description: '전투 시작 시 누적 피해가 가장 큰 아군 필드 카드의 피해를 X 회복합니다. 동률이면 같은 라인 아군을 우선하며 최대 체력을 넘지 않습니다.', category: 'support', timing: '전투 시작', target: '누적 피해가 가장 큰 아군 필드 카드', duration: '전투마다 1회', variants: [{ label: '1 회복', value: 1, cost: 7 }, { label: '2 회복', value: 2, cost: 12 }] },
   { type: 'guard_support', label: '보호 지원', description: '전투 시작 시 같은 라인의 아군 카드 1장에게 보호막 1을 부여합니다.', category: 'support', timing: '전투 시작', target: '같은 라인의 아군 카드', duration: '이번 전투', variants: fixed('보호막 1', 4) },
   { type: 'attack_support', label: '공격 지원', description: '같은 라인 아군 카드가 이번 전투 처음 주는 카드 피해를 1 증가시킵니다.', category: 'support', timing: '전투 시작 · 아군 첫 피해 전', target: '같은 라인의 아군 카드', duration: '전투마다 1회', variants: fixed('피해 +1', 5) },
-  { type: 'grave_buff', label: '묘지 강화', description: '내 묘지 카드 수 조건을 만족하면 이 카드의 전투 능력이 강화됩니다.', category: 'support', timing: '묘지 수 조건 확인 시', target: '이 카드', duration: '조건을 만족한 전투', variants: fixed('기본', 6) },
+  { type: 'grave_buff', label: '묘지 강화', description: '강화 조건과 수치 규칙을 확정 중인 보류 키워드입니다. 기존 카드 표시는 유지하지만 신규 카드에는 선택할 수 없습니다.', category: 'support', timing: '규칙 확정 전', target: '신규 선택 불가', duration: '규칙 확정 전', variants: fixed('기본', 6), availableForSelection: false },
   {
     type: 'grave_recover',
     label: '묘지 회수',
@@ -327,6 +328,9 @@ export const evaluateArenaCardEditor = (form: ArenaCardEditorForm) => {
     ...(form.attack > statLimits.attackMax ? [`${form.cost}코스트 카드의 공격력은 최대 ${statLimits.attackMax}입니다. 공격력을 낮춰주세요.`] : []),
     ...(form.health > statLimits.healthMax ? [`${form.cost}코스트 카드의 체력은 최대 ${statLimits.healthMax}입니다. 체력을 낮춰주세요.`] : []),
     ...(new Set(form.keywords.map((keyword) => keyword.type)).size !== form.keywords.length ? ['같은 키워드는 한 번만 선택할 수 있습니다. 중복 키워드를 변경해주세요.'] : []),
+    ...(form.keywords.some((keyword) => getArenaCardKeywordDefinition(keyword.type)?.availableForSelection === false)
+      ? ['아직 전투 규칙이 확정되지 않은 보류 키워드는 새 카드에 저장할 수 없습니다. 다른 키워드를 선택해주세요.']
+      : []),
     ...(form.keywords.length > 3 ? ['키워드는 최대 3개까지 선택할 수 있습니다.'] : []),
     ...forbiddenComboMessages(form),
     ...(remaining < 0 ? [`현재 예산을 ${Math.abs(remaining)}만큼 초과했습니다. 능력치나 키워드를 조정해주세요.`] : [])

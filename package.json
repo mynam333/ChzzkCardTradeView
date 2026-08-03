@@ -27,6 +27,7 @@
     "migrate:mysql-to-postgres": "node scripts/mysql-to-postgres.js",
     "postgres:tune": "node scripts/postgres-tune.js",
     "arena:readiness": "node scripts/arena-service-readiness.mjs",
+    "validate:card-borders": "node scripts/validate-card-border-smil.mjs",
     "arena:balance": "npm run arena:balance --workspace=backend"
   },
   "devDependencies": {

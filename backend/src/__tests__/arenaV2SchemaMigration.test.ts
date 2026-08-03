@@ -25,6 +25,7 @@ describe('arena v2 schema migration', () => {
     expect(schemaSql).toContain("uniq_arena_v2_match_queue_waiting");
     expect(schemaSql).toContain("WHERE status = 'waiting'");
     expect(schemaSql).toContain('idx_arena_v2_matches_timeout_scan ON arena_v2_matches(status, updated_at)');
+    expect(schemaSql).toContain('idx_arena_v2_match_players_user_match ON arena_v2_match_players(user_id, match_id)');
     expect(schemaSql).toContain('arena_v2_replay_holds');
     expect(schemaSql).toContain('idx_arena_v2_replay_holds_match');
   });

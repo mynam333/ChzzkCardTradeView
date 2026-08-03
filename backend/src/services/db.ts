@@ -300,6 +300,27 @@ const ensureMysqlColumn = async (db: MysqlDb, table: string, column: string, ddl
   await db.run(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 };
 
+export const ensureMysqlLongTextColumn = async (
+  db: Pick<MysqlDb, 'get' | 'run'>,
+  table: string,
+  column: string
+): Promise<void> => {
+  const existing = await db.get<{ data_type: string }>(
+    `SELECT data_type
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1`,
+    table,
+    column
+  );
+  if (!existing || String(existing.data_type).toLowerCase() === 'longtext') return;
+
+  console.log(`[DB Migration] MySQL ${table}.${column}을 LONGTEXT로 확장합니다. (현재: ${existing.data_type})`);
+  await db.run(`ALTER TABLE ${table} MODIFY COLUMN ${column} LONGTEXT NULL`);
+};
+
 const ensureMysqlIndex = async (db: MysqlDb, table: string, indexName: string, ddl: string) => {
   const existing = await db.get<{ present: number }>(
     `SELECT 1 AS present
@@ -393,6 +414,7 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlColumn(db, 'streamers', 'lifecycle_id', 'lifecycle_id VARCHAR(64) NULL AFTER registered_by');
   await db.run("UPDATE streamers SET lifecycle_id = UUID() WHERE lifecycle_id IS NULL OR lifecycle_id = ''");
   await ensureMysqlColumn(db, 'coupons', 'rewards', 'rewards JSON NULL AFTER reward_quantity');
+  await ensureMysqlLongTextColumn(db, 'shop_items', 'style_json');
   await ensureMysqlColumn(db, 'shop_items', 'sale_start_at', 'sale_start_at DATETIME NULL AFTER purchase_limit');
   await ensureMysqlColumn(db, 'shop_items', 'sale_end_at', 'sale_end_at DATETIME NULL AFTER sale_start_at');
   await ensureMysqlColumn(db, 'shop_items', 'limited_total_quantity', 'limited_total_quantity INT NOT NULL DEFAULT 0 AFTER sale_end_at');

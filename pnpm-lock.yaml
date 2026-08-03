@@ -189,6 +189,9 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.8(@types/node@20.19.42)(vite@8.0.16(@types/node@20.19.42)(jiti@2.7.0))
 
   packages/arena-contract: {}
 

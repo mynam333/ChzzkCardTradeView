@@ -215,7 +215,8 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_arena_v2_match_player_seat (match_id, seat_no),
-      INDEX idx_arena_v2_match_players_user (match_id, user_id)
+      INDEX idx_arena_v2_match_players_user (match_id, user_id),
+      INDEX idx_arena_v2_match_players_user_match (user_id, match_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
@@ -419,6 +420,11 @@ export const ensureArenaV2MysqlSchema = async (db: SqlRunner) => {
     await db.run('ALTER TABLE arena_v2_matches ADD INDEX idx_arena_v2_matches_timeout_scan (status, updated_at)');
   } catch {
     // Existing v2 databases may already have this index.
+  }
+  try {
+    await db.run('ALTER TABLE arena_v2_match_players ADD INDEX idx_arena_v2_match_players_user_match (user_id, match_id)');
+  } catch {
+    // Existing v2 databases may already have this active-match lookup index.
   }
   try {
     await db.run('ALTER TABLE arena_v2_match_players ADD COLUMN fatigue_count INT NOT NULL DEFAULT 0');
@@ -640,6 +646,7 @@ export const ensureArenaV2SqliteSchema = (db: Database.Database) => {
       UNIQUE(match_id, seat_no)
     );
     CREATE INDEX IF NOT EXISTS idx_arena_v2_match_players_user ON arena_v2_match_players(match_id, user_id);
+    CREATE INDEX IF NOT EXISTS idx_arena_v2_match_players_user_match ON arena_v2_match_players(user_id, match_id);
 
     CREATE TABLE IF NOT EXISTS arena_v2_card_instances (
       id TEXT PRIMARY KEY,

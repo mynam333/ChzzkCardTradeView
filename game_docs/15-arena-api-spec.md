@@ -603,6 +603,14 @@ UX 기준:
 
 ## 9. 매치 및 리플레이 API
 
+### GET `/api/arena/matches/active`
+
+로그인한 유저가 참가 중인 완료되지 않은 매치를 직접 조회한다. 현재 시즌 상태나 큐 티켓 보존 여부와 무관하게 재접속 가능한 match를 반환하며, 없으면 `match: null`을 반환한다.
+
+### POST `/api/arena/matches/{match_id}/surrender`
+
+빠른대전 또는 연습전 참가자가 명시적으로 항복한다. 서버는 참가자 권한과 매치 상태를 잠근 뒤 상대 승리와 본인 패배를 확정한다. 빠른대전 MMR은 일반 종료와 동일하게 멱등 반영한다. 8인전 개별 매치는 이 API를 허용하지 않는다.
+
 ### GET `/api/arena/matches/{match_id}`
 
 매치 요약을 조회한다.

@@ -1,0 +1,280 @@
+.backdrop {
+  --arena-surface: #ffffff;
+  --arena-surface-soft: #fff5f4;
+  --arena-text: #172033;
+  --arena-muted: #697386;
+  --arena-line: #e7e5e7;
+  --arena-line-strong: #d9d7da;
+  --arena-coral: #f24661;
+  --arena-coral-deep: #bd2745;
+  --arena-coral-soft: #fff0f2;
+  --arena-cyan: #0799b4;
+  --arena-gold: #d48b16;
+  --arena-danger: #d92d4d;
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(14 18 28 / 0.66);
+  backdrop-filter: blur(9px);
+  color: var(--arena-text);
+  font-family: var(--font-ui), Pretendard, Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  animation: surrenderBackdropIn 180ms ease-out both;
+}
+
+:global(.dark) .backdrop {
+  --arena-surface: #2b1d21;
+  --arena-surface-soft: #352328;
+  --arena-text: #fff7f7;
+  --arena-muted: #c2b4b7;
+  --arena-line: #4b3339;
+  --arena-line-strong: #65434b;
+  --arena-coral: #ff8898;
+  --arena-coral-deep: #ffb0bb;
+  --arena-coral-soft: #43242b;
+  --arena-cyan: #5dd9ea;
+  --arena-gold: #f5c66a;
+  --arena-danger: #ff93a2;
+}
+
+.backdrop,
+.backdrop *,
+.backdrop *::before,
+.backdrop *::after {
+  box-sizing: border-box;
+}
+
+.backdrop button {
+  font: inherit;
+}
+
+.dialog {
+  position: relative;
+  display: grid;
+  width: min(100%, 430px);
+  gap: 10px;
+  padding: 28px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--arena-coral) 30%, var(--arena-line));
+  border-radius: 8px;
+  background: var(--arena-surface);
+  box-shadow: 0 28px 90px rgb(7 11 20 / 0.34);
+  color: var(--arena-text);
+  text-align: center;
+  animation: surrenderDialogIn 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.dialog::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  background: var(--arena-coral);
+  content: "";
+}
+
+.dialog:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--arena-cyan) 44%, transparent);
+  outline-offset: 3px;
+}
+
+.closeButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--arena-line);
+  border-radius: 8px;
+  background: var(--arena-surface-soft);
+  color: var(--arena-muted);
+  cursor: pointer;
+}
+
+.closeButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin: 2px auto 0;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--arena-coral) 32%, var(--arena-line));
+  border-radius: 50%;
+  background: var(--arena-coral-soft);
+  color: var(--arena-coral-deep);
+}
+
+.icon svg {
+  width: 25px;
+  height: 25px;
+}
+
+.eyebrow {
+  color: var(--arena-coral-deep);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.dialog h2 {
+  margin: 0;
+  color: var(--arena-text);
+  font-family: var(--font-display), var(--font-ui), Pretendard, sans-serif;
+  font-size: 1.45rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.dialog p {
+  max-width: 350px;
+  margin: 0 auto;
+  color: var(--arena-muted);
+  font-size: 0.85rem;
+  font-weight: 650;
+  line-height: 1.65;
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--arena-gold) 34%, var(--arena-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--arena-gold) 8%, var(--arena-surface));
+  color: var(--arena-text);
+  text-align: left;
+}
+
+.warning svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin-top: 2px;
+  color: var(--arena-gold);
+}
+
+.warning span {
+  font-size: 0.75rem;
+  font-weight: 760;
+  line-height: 1.5;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+.actions button {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.actions button:disabled,
+.closeButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.actions button:focus-visible,
+.closeButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--arena-cyan) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.cancelButton {
+  border: 1px solid var(--arena-line-strong);
+  background: var(--arena-surface);
+  color: var(--arena-text);
+}
+
+.cancelButton:hover:not(:disabled) {
+  border-color: var(--arena-cyan);
+  background: var(--arena-cyan-soft);
+  transform: translateY(-1px);
+}
+
+.confirmButton {
+  border: 1px solid transparent;
+  background: var(--arena-danger);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--arena-danger) 24%, transparent);
+  color: #ffffff;
+}
+
+.confirmButton:hover:not(:disabled) {
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--arena-danger) 32%, transparent);
+  transform: translateY(-1px);
+}
+
+.confirmButton svg {
+  width: 17px;
+  height: 17px;
+}
+
+.spinner {
+  animation: surrenderSpin 760ms linear infinite;
+}
+
+@media (max-width: 520px) {
+  .backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .dialog {
+    width: 100%;
+    padding: 25px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .dialog,
+  .spinner {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}
+
+@keyframes surrenderBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes surrenderDialogIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes surrenderSpin {
+  to { transform: rotate(360deg); }
+}

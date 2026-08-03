@@ -294,7 +294,7 @@ export const ArenaStreamerCardEditor: React.FC<ArenaStreamerCardEditorProps> = (
                           <option
                             key={option.type}
                             value={option.type}
-                            disabled={form.keywords.some((keyword, keywordIndex) => keywordIndex !== index && keyword.type === option.type)}
+                            disabled={option.availableForSelection === false || form.keywords.some((keyword, keywordIndex) => keywordIndex !== index && keyword.type === option.type)}
                           >
                             {option.label}
                           </option>
@@ -348,7 +348,10 @@ export const ArenaStreamerCardEditor: React.FC<ArenaStreamerCardEditorProps> = (
                   type="button"
                   className="arena-v2-card-keyword-add"
                   onClick={() => {
-                    const nextDefinition = arenaCardKeywordDefinitions.find((definition) => !form.keywords.some((keyword) => keyword.type === definition.type));
+                    const nextDefinition = arenaCardKeywordDefinitions.find((definition) => (
+                      definition.availableForSelection !== false
+                      && !form.keywords.some((keyword) => keyword.type === definition.type)
+                    ));
                     if (nextDefinition) patchForm({ keywords: [...form.keywords, createArenaCardKeywordSelection(nextDefinition.type)] });
                   }}
                   disabled={!canEdit}

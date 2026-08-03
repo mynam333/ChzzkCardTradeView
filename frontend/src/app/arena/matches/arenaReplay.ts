@@ -62,18 +62,28 @@ const replayVisualEventTypes = new Set([
   'direct_attack',
   'card_attack',
   'shield_absorb',
+  'damage_reduction',
   'overflow_damage',
+  'aoe_damage',
   'counter',
   'silence',
   'stun',
   'push',
   'pull',
   'drain',
+  'battle_draw',
+  'emergency_heal',
+  'guard_support',
+  'attack_support',
+  'support_redirect',
+  'trick_passive',
+  'tech_passive',
   'card_defeated',
   'revive',
   'vengeance',
   'residue',
   'spirit_damage',
+  'graveyard_recover',
   'fatigue'
 ]);
 
@@ -81,6 +91,8 @@ const cardDamageEventTypes = new Set([
   'line_attack',
   'card_attack',
   'overflow_damage',
+  'aoe_damage',
+  'support_redirect',
   'counter',
   'vengeance'
 ]);
@@ -328,6 +340,89 @@ const applyDrain = (match: ArenaV2MatchViewDto, event: ArenaReplayEvent, directi
   instance.damageTaken = Math.max(0, instance.damageTaken - heal * direction);
 };
 
+const isCardOnBoard = (match: ArenaV2MatchViewDto, cardInstanceId: string) => (
+  match.players.some((player) => player.boardState.some((slot) => slot.cardInstanceId === cardInstanceId))
+);
+
+const applyBattleDraw = (match: ArenaV2MatchViewDto, event: ArenaReplayEvent, direction: 1 | -1) => {
+  const seatNo = payloadNumber(event.payload, ['sourceSeatNo', 'seatNo']);
+  const player = findPlayer(match, seatNo);
+  if (!player) return;
+  const result = payloadString(event.payload, ['result']);
+  const cardInstanceId = payloadString(event.payload, ['cardInstanceId']);
+  const instance = cardInstanceId ? findCardInstance(match, cardInstanceId) : undefined;
+  const handCountAfter = payloadNumber(event.payload, ['handCount']);
+  const deckCountAfter = payloadNumber(event.payload, ['deckCount']);
+
+  if (direction === 1) {
+    if (typeof handCountAfter === 'number') player.handCount = Math.max(0, handCountAfter);
+    if (typeof deckCountAfter === 'number') player.deckCount = Math.max(0, deckCountAfter);
+    if (!cardInstanceId) return;
+    player.handCardInstanceIds = player.handCardInstanceIds.filter((id) => id !== cardInstanceId);
+    player.graveyardCardInstanceIds = player.graveyardCardInstanceIds.filter((id) => id !== cardInstanceId);
+    if (result === 'drawn') {
+      if (instance) player.handCardInstanceIds.push(cardInstanceId);
+      if (instance) {
+        instance.zone = 'hand';
+        instance.position = null;
+      }
+    } else if (result === 'overdraw') {
+      if (!player.graveyardCardInstanceIds.includes(cardInstanceId)) player.graveyardCardInstanceIds.push(cardInstanceId);
+      if (instance) {
+        instance.zone = 'graveyard';
+        instance.position = null;
+      }
+    }
+    return;
+  }
+
+  if (typeof handCountAfter === 'number') {
+    player.handCount = Math.max(0, handCountAfter - (result === 'drawn' ? 1 : 0));
+  }
+  if (typeof deckCountAfter === 'number') {
+    player.deckCount = Math.max(0, deckCountAfter + (result === 'empty_deck' ? 0 : 1));
+  }
+  if (!cardInstanceId) return;
+  player.handCardInstanceIds = player.handCardInstanceIds.filter((id) => id !== cardInstanceId);
+  player.graveyardCardInstanceIds = player.graveyardCardInstanceIds.filter((id) => id !== cardInstanceId);
+  if (instance && !isCardOnBoard(match, cardInstanceId)) {
+    instance.zone = 'deck';
+    instance.position = null;
+  }
+};
+
+const applyGraveyardRecover = (match: ArenaV2MatchViewDto, event: ArenaReplayEvent, direction: 1 | -1) => {
+  const seatNo = payloadNumber(event.payload, ['seatNo', 'sourceSeatNo']);
+  const player = findPlayer(match, seatNo);
+  const cardInstanceId = payloadString(event.payload, ['recoveredCardInstanceId']);
+  if (!player || !cardInstanceId) return;
+  const instance = findCardInstance(match, cardInstanceId);
+  const handCountAfter = payloadNumber(event.payload, ['handCount']);
+
+  player.handCardInstanceIds = player.handCardInstanceIds.filter((id) => id !== cardInstanceId);
+  player.graveyardCardInstanceIds = player.graveyardCardInstanceIds.filter((id) => id !== cardInstanceId);
+  if (direction === 1) {
+    if (typeof handCountAfter === 'number') player.handCount = Math.max(0, handCountAfter);
+    if (instance) player.handCardInstanceIds.push(cardInstanceId);
+    if (instance) {
+      instance.zone = 'hand';
+      instance.position = null;
+      instance.damageTaken = 0;
+    }
+    return;
+  }
+
+  if (typeof handCountAfter === 'number') player.handCount = Math.max(0, handCountAfter - 1);
+  if (!isCardOnBoard(match, cardInstanceId)) {
+    player.graveyardCardInstanceIds.push(cardInstanceId);
+    if (instance) {
+      instance.zone = 'graveyard';
+      instance.position = null;
+      instance.damageTaken = Math.max(instance.currentHealth, instance.damageTaken);
+    }
+  }
+};
+
 const applyPlayerDamage = (match: ArenaV2MatchViewDto, event: ArenaReplayEvent, direction: 1 | -1) => {
   const seatNo = payloadNumber(event.payload, ['targetSeatNo', 'seatNo']);
   const player = findPlayer(match, seatNo);
@@ -405,8 +500,16 @@ const applyVisualEvent = (match: ArenaV2MatchViewDto, event: ArenaReplayEvent, d
     applyPlayerDamage(match, event, direction);
     return;
   }
-  if (event.eventType === 'drain') {
+  if (event.eventType === 'drain' || event.eventType === 'emergency_heal') {
     applyDrain(match, event, direction);
+    return;
+  }
+  if (event.eventType === 'battle_draw') {
+    applyBattleDraw(match, event, direction);
+    return;
+  }
+  if (event.eventType === 'graveyard_recover') {
+    applyGraveyardRecover(match, event, direction);
     return;
   }
   if (event.eventType === 'push' || event.eventType === 'pull') {
@@ -468,6 +571,13 @@ const buildMatchFromCombatSnapshot = (
       if (Number.isFinite(playerHealth)) player.playerHealth = Math.max(0, playerHealth);
       const fatigueCount = Number(value.fatigueCount);
       if (Number.isFinite(fatigueCount)) player.fatigueCount = fatigueCount;
+      const handCount = Number(value.handCount);
+      if (Number.isFinite(handCount)) player.handCount = Math.max(0, handCount);
+      const deckCount = Number(value.deckCount);
+      if (Number.isFinite(deckCount)) player.deckCount = Math.max(0, deckCount);
+      if (Array.isArray(value.graveyardCardInstanceIds)) {
+        player.graveyardCardInstanceIds = value.graveyardCardInstanceIds.filter((id): id is string => typeof id === 'string');
+      }
       const boardState = parseSnapshotBoardState(value.boardState ?? value.board);
       if (!boardState) continue;
       player.boardState = boardState;
@@ -541,6 +651,31 @@ const buildMatchFromCombatSnapshot = (
   return match;
 };
 
+const rewindSnapshotResourceMembership = (match: ArenaV2MatchViewDto, replayEvents: ArenaReplayEvent[]) => {
+  for (const event of replayEvents) {
+    const isBattleDraw = event.eventType === 'battle_draw';
+    const isTurnDraw = event.eventType === 'draw' || event.eventType === 'overdraw';
+    const isGraveRecover = event.eventType === 'graveyard_recover';
+    if (!isBattleDraw && !isTurnDraw && !isGraveRecover) continue;
+    const seatNo = payloadNumber(event.payload, isBattleDraw ? ['sourceSeatNo', 'seatNo'] : ['seatNo', 'sourceSeatNo']);
+    const player = findPlayer(match, seatNo);
+    const cardInstanceId = payloadString(event.payload, isGraveRecover ? ['recoveredCardInstanceId'] : ['cardInstanceId']);
+    if (!player || !cardInstanceId) continue;
+    player.handCardInstanceIds = player.handCardInstanceIds.filter((id) => id !== cardInstanceId);
+    const instance = findCardInstance(match, cardInstanceId);
+    if (!instance || isCardOnBoard(match, cardInstanceId)) continue;
+    instance.position = null;
+    if (isBattleDraw || isTurnDraw) {
+      player.graveyardCardInstanceIds = player.graveyardCardInstanceIds.filter((id) => id !== cardInstanceId);
+      instance.zone = 'deck';
+    } else {
+      if (!player.graveyardCardInstanceIds.includes(cardInstanceId)) player.graveyardCardInstanceIds.push(cardInstanceId);
+      instance.zone = 'graveyard';
+      instance.damageTaken = Math.max(instance.currentHealth, instance.damageTaken);
+    }
+  }
+};
+
 const buildLegacyReplayStartMatch = (
   postCombatMatch: ArenaV2MatchViewDto,
   visualEvents: ArenaReplayEvent[]
@@ -575,6 +710,7 @@ export const buildReplayPresentationMatch = (
   const presentationMatch = snapshot
     ? buildMatchFromCombatSnapshot(postCombatMatch, snapshot)
     : buildLegacyReplayStartMatch(postCombatMatch, visualEvents);
+  if (snapshot) rewindSnapshotResourceMembership(presentationMatch, orderedEvents);
   for (let index = 0; index < completedCount; index += 1) {
     applyVisualEvent(presentationMatch, visualEvents[index], 1);
   }

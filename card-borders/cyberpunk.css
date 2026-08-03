@@ -1,7 +1,9 @@
 /* ============================================================
-   사이버펑크 (Cyberpunk) — 네온 회로(블룸) + 브래킷 + 글로우 펄스 + 가장자리 스캔라인 + 데이터 광택
+   사이버펑크 야간 PCB (Cyberpunk Nocturne PCB)
+   - 비대칭 흑연 회로 기판, 홀로그램 신호 노드, 회로 룬 패킷
+   - 스캔라인/단순 셔머 없이 국소 광장과 3D 신호 흐름으로 연출
+   - SVG/SMIL의 회로 패킷·노드 맥박·스캔 신호와 CSS 네온 흐름을 결합
    적용 클래스: cb-cyberpunk
-   ▶ 스캔라인은 --em 마스크로 가장자리에 모여 중앙~상단을 비웁니다.
    ============================================================ */
 .cb-cyberpunk {
   position: absolute;
@@ -10,31 +12,103 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+
+  --cyberpunk-pcb-edge-mask: radial-gradient(ellipse 74% 68% at 50% 39%, transparent 0 50%, rgba(0, 0, 0, .2) 63%, #000 81%);
+
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  --em: radial-gradient(82% 74% at 50% 36%, transparent 44%, #000 84%);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3Cfilter id='ng' x='-30%25' y='-30%25' width='160%25' height='160%25'%3E%3CfeGaussianBlur stdDeviation='1.3'/%3E%3C/filter%3E%3Cg id='net'%3E%3Crect x='2' y='2' width='96' height='156' rx='3.4' fill='none' stroke='%2300eaff' stroke-width='1.2'/%3E%3Cpath d='M2,30 L2,5.4 Q2,2 5.4,2 L36,2' fill='none' stroke='%23ff2bd6' stroke-width='2.4'/%3E%3Cpath d='M98,130 L98,154.6 Q98,158 94.6,158 L64,158' fill='none' stroke='%23ff2bd6' stroke-width='2.4'/%3E%3Cpath d='M98,30 L98,5.4 Q98,2 94.6,2 L70,2' fill='none' stroke='%2300eaff' stroke-width='1.4'/%3E%3Cpath d='M2,130 L2,154.6 Q2,158 5.4,158 L30,158' fill='none' stroke='%2300eaff' stroke-width='1.4'/%3E%3Cpath d='M14,2 L14,10 L24,10 L24,16 M86,158 L86,150 L76,150 L76,144 M2,70 L9,70 L9,80 M98,90 L91,90 L91,80' fill='none' stroke='%2300eaff' stroke-width='.7' opacity='.85'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23net' filter='url(%23ng)' opacity='.75'/%3E%3Cuse href='%23net'/%3E%3Cg fill='%23ff2bd6'%3E%3Crect x='22' y='15' width='3' height='3'/%3E%3Crect x='75' y='142' width='3' height='3'/%3E%3C/g%3E%3Cg fill='%2300eaff'%3E%3Ccircle cx='9' cy='80' r='1.4'/%3E%3Ccircle cx='91' cy='80' r='1.4'/%3E%3Ccircle cx='6' cy='154' r='1.4'/%3E%3Ccircle cx='94' cy='6' r='1.4'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 13px rgba(0,234,255,.55), inset 0 0 13px rgba(255,43,214,.3);
-  animation: cyberpunk-glow 2.4s ease-in-out infinite;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='cp-metal' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2302060a'/%3E%3Cstop offset='.18' stop-color='%23111a25'/%3E%3Cstop offset='.34' stop-color='%23233340'/%3E%3Cstop offset='.49' stop-color='%23050a10'/%3E%3Cstop offset='.73' stop-color='%23172331'/%3E%3Cstop offset='1' stop-color='%23010407'/%3E%3C/linearGradient%3E%3ClinearGradient id='cp-cyan' x1='0' y1='0' x2='1' y2='.2'%3E%3Cstop stop-color='%23004150'/%3E%3Cstop offset='.25' stop-color='%2300bccc'/%3E%3Cstop offset='.5' stop-color='%23b9ffff'/%3E%3Cstop offset='.69' stop-color='%2300e9ff'/%3E%3Cstop offset='1' stop-color='%23005b73'/%3E%3C/linearGradient%3E%3ClinearGradient id='cp-magenta' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop stop-color='%23540958'/%3E%3Cstop offset='.34' stop-color='%23ff2bd6'/%3E%3Cstop offset='.53' stop-color='%23ffd2fb'/%3E%3Cstop offset='.72' stop-color='%23a92aa8'/%3E%3Cstop offset='1' stop-color='%23330949'/%3E%3C/linearGradient%3E%3ClinearGradient id='cp-violet' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23221766'/%3E%3Cstop offset='.48' stop-color='%238d68ff'/%3E%3Cstop offset='.7' stop-color='%23e7dcff'/%3E%3Cstop offset='1' stop-color='%23411ba0'/%3E%3C/linearGradient%3E%3CradialGradient id='cp-node' cx='.34' cy='.28' r='.8'%3E%3Cstop stop-color='%23efffff'/%3E%3Cstop offset='.21' stop-color='%2300efff'/%3E%3Cstop offset='.56' stop-color='%23006d88'/%3E%3Cstop offset='1' stop-color='%23000913'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='.7' y='.7' width='98.6' height='158.6' rx='4.66' ry='4.66' fill='none' stroke='%23000307' stroke-width='2.8'/%3E%3Crect x='1' y='1' width='98' height='158' rx='4.36' ry='4.36' fill='none' stroke='url(%23cp-metal)' stroke-width='3.2'/%3E%3Crect x='2' y='2' width='96' height='156' rx='3.36' ry='3.36' fill='none' stroke='url(%23cp-cyan)' stroke-width='.72'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.36' ry='2.36' fill='none' stroke='url(%23cp-magenta)' stroke-width='.34' opacity='.86'/%3E%3Crect x='4.2' y='4.2' width='91.6' height='151.6' rx='1.16' ry='1.16' fill='none' stroke='%2307131d' stroke-width='2.25'/%3E%3Cpath d='M4.7 4.7H95.3L91.5 10.2H26.5L22 14H9.7V42L5.2 47ZM95.3 4.7V74L91 78.5V25.5L86.5 21V10.2ZM4.7 155.3V86L9 81.5V134.5L13.5 139H78L82.8 155.3ZM95.3 155.3H84.7L81 150.3H90.2V118L94.8 113Z' fill='url(%23cp-metal)' opacity='.98'/%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.3 49H9.7L13.2 45.5V31.5L17.5 27.2H24.8L29.1 22.9H38.6' stroke='url(%23cp-cyan)' stroke-width='.72'/%3E%3Cpath d='M5.4 65H10.6L14.2 61.4V53.5L18.1 49.6H25.5' stroke='%2300ddea' stroke-width='.38' opacity='.82'/%3E%3Cpath d='M5.4 91.5H10L14.3 95.8V107L18.4 111.1H26.7' stroke='url(%23cp-violet)' stroke-width='.55'/%3E%3Cpath d='M94.7 39H90.2L86.4 42.8V55L82.6 58.8H75.2' stroke='url(%23cp-magenta)' stroke-width='.68'/%3E%3Cpath d='M94.6 73H89.4L85.7 76.7V90.5L81.7 94.5H75.8' stroke='%23ff4cde' stroke-width='.4' opacity='.84'/%3E%3Cpath d='M94.6 105.4H90L86.2 109.2V123L81.8 127.4H72.5' stroke='url(%23cp-cyan)' stroke-width='.72'/%3E%3Cpath d='M30 5.3V9.8L34 13.8H46.5L50 17.3H59.5' stroke='url(%23cp-violet)' stroke-width='.54'/%3E%3Cpath d='M42.5 154.7V150.3L46.7 146.1H59L62.8 142.3H70.5' stroke='url(%23cp-magenta)' stroke-width='.54'/%3E%3C/g%3E%3Cg fill='%2304070b' stroke='url(%23cp-cyan)' stroke-width='.55'%3E%3Cpath d='M7.2 8.5L10.7 5.7H21.1L24.1 8.7V18.9L20.7 22.4H10.3L7.2 19.1Z'/%3E%3Cpath d='M79.8 136.8L83.4 132.9H93L96 136V150.6L92.2 154H82.7L79.8 150.8Z' stroke='url(%23cp-magenta)'/%3E%3C/g%3E%3Cg fill='none' stroke-linecap='square'%3E%3Cpath d='M10.5 10H19.7L21.4 11.8V16.2L19.2 18.5H11.2L9.4 16.7V12.1Z' stroke='url(%23cp-violet)' stroke-width='.62'/%3E%3Cpath d='M12 12.1H18.3M12 14.3H16.4M12 16.5H18.3' stroke='%2300efff' stroke-width='.34'/%3E%3Cpath d='M83 137H91.3L93 139V147.7L90.7 150H83.4L81.8 148.2V139.3Z' stroke='url(%23cp-cyan)' stroke-width='.62'/%3E%3Cpath d='M84 140H90.7M84 143H88.3M84 146H90.7' stroke='%23ff4cde' stroke-width='.34'/%3E%3C/g%3E%3Cg fill='url(%23cp-node)' stroke='%23bfffff' stroke-width='.2'%3E%3Cpath d='M24.8 25.8l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3Cpath d='M39 21.45l1.45 1.45L39 24.35l-1.45-1.45Z'/%3E%3Cpath d='M25.8 48.15l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3Cpath d='M26.9 109.65l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3Cpath d='M74.9 57.35l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3Cpath d='M75.5 93.05l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3Cpath d='M72.3 125.95l1.45 1.45-1.45 1.45-1.45-1.45Z'/%3E%3C/g%3E%3Cg fill='none' stroke='%237d67ff' stroke-linecap='round'%3E%3Cpath d='M5.2 116h3.5l2-2v-5M5.2 122h5.5l2.2-2.2v-4.6M94.8 84h-3.6l-2-2v-5M94.8 90h-5.4l-2.3-2.3v-4.4' stroke-width='.34'/%3E%3Cpath d='M32.5 5.2v2.2h3M65 154.8v-2.3h3.2' stroke='%23ff2bd6' stroke-width='.3'/%3E%3C/g%3E%3Cg fill='%23162635' stroke='%237fdfff' stroke-width='.25'%3E%3Cpath d='M2.4 31.5l2-1.2 2 1.2v2.3l-2 1.2-2-1.2Z'/%3E%3Cpath d='M93.6 65l2-1.2 2 1.2v2.3l-2 1.2-2-1.2Z'/%3E%3Cpath d='M2.4 132l2-1.2 2 1.2v2.3l-2 1.2-2-1.2Z'/%3E%3C/g%3E%3Cg aria-hidden='true' pointer-events='none'%3E%3Cpath d='M5.4 31H10l3.2-3.2V20l4-4h9.4l3.1-3.1H39' fill='none' stroke='%2320efff' stroke-width='.56' stroke-linecap='round' stroke-dasharray='2.8 2.1' opacity='.68'%3E%3Canimate id='cyberpunk-smil-circuit-packet' attributeName='stroke-dashoffset' values='0;-11.6;0' dur='4.6s' begin='-1.2s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3Canimate id='cyberpunk-smil-circuit-current' attributeName='opacity' values='.38;1;.38' dur='4.6s' begin='-1.2s' calcMode='spline' keyTimes='0;.5;1' keySplines='.36 .04 .64 .96;.36 .04 .64 .96' repeatCount='indefinite'/%3E%3C/path%3E%3Cpath d='M89 8l3.2 3.2-3.2 3.2-3.2-3.2Z' fill='%2300eaff' stroke='%23e9ffff' stroke-width='.52' opacity='.92'%3E%3Canimate id='cyberpunk-smil-node-pulse' attributeName='fill-opacity' values='.12;1;.12' dur='3.2s' begin='-.8s' calcMode='spline' keyTimes='0;.42;1' keySplines='.34 .04 .66 .96;.34 .04 .66 .96' repeatCount='indefinite'/%3E%3C/path%3E%3Cg transform='translate(88 144) scale(.32)' opacity='.9'%3E%3Cpath d='M0-8L6-4.5 7 2 2.5 7-4 6.4-7.2 1-5.6-5Z' fill='%23071624' stroke='%23ff48dd' stroke-width='.82'/%3E%3Cpath d='M-3.5-3H1.5L4-1V2.5L1.3 4.5H-2.8L-4.4 2.5V-.4M-1.7-.8H2.3M-1.7 1.5H1.2' fill='none' stroke='%23dfffff' stroke-width='.54'/%3E%3CanimateTransform id='cyberpunk-smil-packet-tilt' attributeName='transform' type='rotate' additive='sum' values='-14 0 0;18 0 0;-14 0 0' dur='5.4s' begin='-3.2s' calcMode='spline' keyTimes='0;.5;1' keySplines='.42 .02 .58 .98;.42 .02 .58 .98' repeatCount='indefinite'/%3E%3C/g%3E%3Cpath d='M5.2 61.5h4.3l2.5 2.5v8l-2.5 2.5H5.2' fill='none' stroke='%23a56cff' stroke-width='.76' stroke-linecap='square' stroke-dasharray='1.8 1.5' opacity='.8'%3E%3Canimate id='cyberpunk-smil-edge-scan-signal' attributeName='stroke' values='%23a56cff;%2300efff;%23ff38da;%23a56cff' dur='6.4s' begin='-4.6s' calcMode='spline' keyTimes='0;.33;.67;1' keySplines='.4 .03 .6 .97;.4 .03 .6 .97;.4 .03 .6 .97' repeatCount='indefinite'/%3E%3Canimate id='cyberpunk-smil-edge-scan-gate' attributeName='opacity' values='.3;1;.3' dur='6.4s' begin='-4.6s' calcMode='spline' keyTimes='0;.5;1' keySplines='.36 .04 .64 .96;.36 .04 .64 .96' repeatCount='indefinite'/%3E%3C/path%3E%3C/g%3E%3C/svg%3E");
+
+  filter: saturate(1.08) brightness(1.04);
+  box-shadow:
+    0 0 14px rgba(0, 235, 255, .5),
+    0 0 27px rgba(129, 79, 255, .24),
+    inset 0 0 16px rgba(0, 13, 22, .62),
+    inset 0 0 9px rgba(255, 43, 214, .3);
+  animation: cyberpunk-pcb-frame-breathe 6.8s cubic-bezier(.42, 0, .58, 1) -2.8s infinite;
 }
-.cb-cyberpunk::before {
+
+.cb-cyberpunk::before,
+.cb-cyberpunk::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -15px;
   pointer-events: none;
-  -webkit-mask: var(--em); mask: var(--em);
-  background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,234,255,.12) 2px 3px);
-  background-size: 100% 14px;
-  background-repeat: repeat;
+  -webkit-mask: var(--cyberpunk-pcb-edge-mask);
+  mask: var(--cyberpunk-pcb-edge-mask);
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+}
+
+/* PCB 아래에서 새어 나오는 국소 홀로그램 신호장 */
+.cb-cyberpunk::before {
+  z-index: 1;
   mix-blend-mode: screen;
-  animation: cyberpunk-scan 1.2s linear infinite;
+  opacity: .62;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  background-image:
+    radial-gradient(ellipse 20% 26% at 8% 18%, rgba(0, 239, 255, .62), transparent 72%),
+    radial-gradient(ellipse 18% 29% at 93% 74%, rgba(255, 43, 214, .58), transparent 73%),
+    radial-gradient(ellipse 26% 16% at 73% 6%, rgba(129, 89, 255, .5), transparent 72%),
+    radial-gradient(ellipse 23% 17% at 20% 95%, rgba(0, 210, 238, .44), transparent 74%),
+    conic-gradient(from 214deg at 50% 46%, transparent 0 42deg, rgba(0, 233, 255, .19) 68deg, transparent 102deg 186deg, rgba(255, 43, 214, .18) 218deg, transparent 256deg 360deg);
+  animation: cyberpunk-pcb-signal-field 14.4s cubic-bezier(.445, .05, .55, .95) -7.4s infinite;
 }
-@keyframes cyberpunk-glow {
-  0%,100% { box-shadow: 0 0 11px rgba(0,234,255,.45), inset 0 0 11px rgba(255,43,214,.25); }
-  50%     { box-shadow: 0 0 18px rgba(0,234,255,.7),  inset 0 0 16px rgba(255,43,214,.4); }
+
+/* 전경 회로 룬 패킷: 상세 glyph가 정확히 160px 타일로 순환 */
+.cb-cyberpunk::after {
+  z-index: 2;
+  mix-blend-mode: screen;
+  opacity: .88;
+  background-repeat: repeat-y;
+  background-size: 100% 160px;
+  background-position: 0 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='cpp-signal' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2300eaff'/%3E%3Cstop offset='.42' stop-color='%23d9ffff'/%3E%3Cstop offset='.58' stop-color='%23a674ff'/%3E%3Cstop offset='1' stop-color='%23ff36db'/%3E%3C/linearGradient%3E%3Cg id='cpp-packet' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0-8.5L6-5.2 7.5 1 3.4 6.7-3.2 7.4-7.2 2.1-6-4.8Z' stroke='url(%23cpp-signal)' stroke-width='1.05'/%3E%3Cpath d='M-3.8-3.9H1.8L4.1-1.6V2.4L1.9 4.4H-2.8L-4.5 2.7V-.5M-1.8-1.8H1.5M-1.8.3H2.8M-1.8 2.4H.8' stroke='%23d9ffff' stroke-width='.62'/%3E%3Cpath d='M-6-4.8L-8.6-6.4M7.5 1L10.2.2M-3.2 7.4L-4.2 10' stroke='%23ff36db' stroke-width='.7'/%3E%3Cpath d='M-9.5-7.2l1.2.8-1 .95-1.2-.75ZM10.7-.7l1.2.8-1 .95-1.2-.75ZM-4.8 10.2l1.2.8-1 .95-1.2-.75Z' fill='%2300efff' stroke='none'/%3E%3C/g%3E%3C/defs%3E%3Cuse href='%23cpp-packet' transform='translate(10 0) rotate(-18) scale(.36)'/%3E%3Cuse href='%23cpp-packet' transform='translate(10 160) rotate(-18) scale(.36)'/%3E%3Cuse href='%23cpp-packet' transform='translate(91 29) rotate(31) scale(.39)'/%3E%3Cuse href='%23cpp-packet' transform='translate(7 62) rotate(-43) scale(.27)' opacity='.76'/%3E%3Cuse href='%23cpp-packet' transform='translate(94 101) rotate(54) scale(.32)'/%3E%3Cuse href='%23cpp-packet' transform='translate(14 135) rotate(-12) scale(.23)' opacity='.7'/%3E%3Cuse href='%23cpp-packet' transform='translate(87 149) rotate(73) scale(.19)' opacity='.62'/%3E%3Cg aria-hidden='true' pointer-events='none'%3E%3Cg transform='translate(8 39) scale(.34)' opacity='.9'%3E%3Cpath d='M0-7L5-4 6.6 1.4 2.6 6.3-3.1 6.8-6.5 2-5.3-4.4Z' fill='%23071824' stroke='%2317efff' stroke-width='.8'/%3E%3Cpath d='M-3-2.8H1.7L3.6-.9v3L1.2 4h-3.8L-4 2.4V0' fill='none' stroke='%23e5ffff' stroke-width='.54'/%3E%3CanimateTransform id='cyberpunk-smil-particle-packet-turn' attributeName='transform' type='rotate' additive='sum' values='-16 0 0;22 0 0;-16 0 0' dur='5.2s' begin='-2.1s' calcMode='spline' keyTimes='0;.5;1' keySplines='.42 .03 .58 .97;.42 .03 .58 .97' repeatCount='indefinite'/%3E%3C/g%3E%3Cpath d='M89.3 78l3.1-3.1 3.1 3.1-3.1 3.1Z' fill='%23ff40d8' stroke='%23ffeaff' stroke-width='.38' opacity='.52'%3E%3Canimate id='cyberpunk-smil-particle-node-beat' attributeName='opacity' values='.14;1;.14' dur='3.2s' begin='-1.5s' calcMode='spline' keyTimes='0;.44;1' keySplines='.35 .04 .65 .96;.35 .04 .65 .96' repeatCount='indefinite'/%3E%3C/path%3E%3Cpath d='M5.8 126h4.1l2.6 2.6h4.8' fill='none' stroke='%2300eaff' stroke-width='.68' stroke-dasharray='2.2 1.7' opacity='.78'%3E%3Canimate id='cyberpunk-smil-particle-scan-packet' attributeName='stroke-dashoffset' values='0;-9;0' dur='4.4s' begin='-.7s' calcMode='spline' keyTimes='0;.5;1' keySplines='.45 .05 .55 .95;.45 .05 .55 .95' repeatCount='indefinite'/%3E%3Canimate id='cyberpunk-smil-particle-scan-flare' attributeName='opacity' values='.28;1;.28' dur='4.4s' begin='-.7s' calcMode='spline' keyTimes='0;.5;1' keySplines='.36 .04 .64 .96;.36 .04 .64 .96' repeatCount='indefinite'/%3E%3C/path%3E%3C/g%3E%3C/svg%3E");
+  filter: drop-shadow(0 0 2px rgba(0, 238, 255, .62)) drop-shadow(0 0 2.8px rgba(255, 43, 214, .4));
+  animation: cyberpunk-pcb-packet-drift 9.6s linear -5.1s infinite;
 }
-@keyframes cyberpunk-scan { from { background-position-y: 0; } to { background-position-y: 14px; } }
+
+@keyframes cyberpunk-pcb-frame-breathe {
+  0%, 100% { filter: saturate(1.02) brightness(.96); opacity: .96; }
+  44% { filter: saturate(1.26) brightness(1.16); opacity: 1; }
+  72% { filter: saturate(1.1) brightness(1.04); opacity: .985; }
+}
+
+@keyframes cyberpunk-pcb-signal-field {
+  0%, 100% { transform: perspective(620px) translate3d(-1.6px, 0, 0) rotateX(1.6deg) rotateY(-3.8deg) rotateZ(0deg); opacity: .36; }
+  33% { transform: perspective(620px) translate3d(3.4px, -2.4px, 7px) rotateX(-2.8deg) rotateY(7.5deg) rotateZ(1.5deg); opacity: .76; }
+  66% { transform: perspective(620px) translate3d(1.4px, 3px, 3px) rotateX(3.4deg) rotateY(2.8deg) rotateZ(-1.1deg); opacity: .54; }
+}
+
+@keyframes cyberpunk-pcb-packet-drift {
+  0% { background-position: 0 0; transform: perspective(540px) translate3d(0, 0, 0) rotateX(1deg) rotateY(0deg) rotateZ(0deg); opacity: .86; }
+  12.5% { background-position: 0 20px; transform: perspective(540px) translate3d(2.2px, 0, 3px) rotateX(-.7deg) rotateY(6.5deg) rotateZ(.65deg); opacity: .93; }
+  25% { background-position: 0 40px; transform: perspective(540px) translate3d(3.2px, 0, 6px) rotateX(-2.4deg) rotateY(12deg) rotateZ(1.1deg); opacity: 1; }
+  37.5% { background-position: 0 60px; transform: perspective(540px) translate3d(2.2px, 0, 3px) rotateX(-.7deg) rotateY(6.5deg) rotateZ(.65deg); opacity: .93; }
+  50% { background-position: 0 80px; transform: perspective(540px) translate3d(0, 0, 0) rotateX(1deg) rotateY(0deg) rotateZ(0deg); opacity: .86; }
+  62.5% { background-position: 0 100px; transform: perspective(540px) translate3d(-2.2px, 0, -1px) rotateX(2.6deg) rotateY(-6.5deg) rotateZ(-.65deg); opacity: .79; }
+  75% { background-position: 0 120px; transform: perspective(540px) translate3d(-3.2px, 0, -4px) rotateX(4deg) rotateY(-12deg) rotateZ(-1.1deg); opacity: .72; }
+  87.5% { background-position: 0 140px; transform: perspective(540px) translate3d(-2.2px, 0, -1px) rotateX(2.6deg) rotateY(-6.5deg) rotateZ(-.65deg); opacity: .79; }
+  100% { background-position: 0 160px; transform: perspective(540px) translate3d(0, 0, 0) rotateX(1deg) rotateY(0deg) rotateZ(0deg); opacity: .86; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-cyberpunk, .cb-cyberpunk::before { animation: none; }
+  .cb-cyberpunk,
+  .cb-cyberpunk::before,
+  .cb-cyberpunk::after {
+    animation: none !important;
+  }
+
+  .cb-cyberpunk::before,
+  .cb-cyberpunk::after {
+    transform: none;
+  }
+
+  .cb-cyberpunk::after {
+    background-position: 0 46px;
+  }
 }

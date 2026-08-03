@@ -126,6 +126,12 @@ type BoardMap = Map<string, MutableBoardSlot>;
 interface ArenaV2CombatContext {
   directDamageTakenBySeatNo: Map<number, number>;
   shieldByInstanceId: Map<string, number>;
+  damageReductionUsesByInstanceId: Map<string, number>;
+  attackSupportSourcesByInstanceId: Map<string, string[]>;
+  classPassiveUses: Set<string>;
+  classAttackPenaltyByInstanceId: Map<string, number>;
+  classSupportSourcesByTargetId: Map<string, ArenaV2RuntimeCardInstance[]>;
+  attackedInstanceIds: Set<string>;
   stunnedInstanceIds: Set<string>;
   silencedInstanceIds: Set<string>;
   revivedInstanceIds: Set<string>;
@@ -151,27 +157,27 @@ const result = (errors: ArenaV2ValidationIssueDto[], warnings: ArenaV2Validation
 });
 
 export const ARENA_V2_CARD_BUDGET_BY_COST: Record<number, number> = {
-  1: 5,
-  2: 8,
-  3: 12,
-  4: 16,
-  5: 21,
-  6: 27,
-  7: 34,
-  8: 42,
-  9: 51
+  1: 6,
+  2: 9,
+  3: 14,
+  4: 18,
+  5: 24,
+  6: 31,
+  7: 39,
+  8: 48,
+  9: 59
 };
 
 export const ARENA_V2_CARD_STAT_LIMITS_BY_COST: Record<number, { attackMax: number; healthMax: number }> = {
-  1: { attackMax: 1, healthMax: 4 },
-  2: { attackMax: 2, healthMax: 6 },
-  3: { attackMax: 3, healthMax: 8 },
-  4: { attackMax: 4, healthMax: 10 },
-  5: { attackMax: 5, healthMax: 12 },
-  6: { attackMax: 6, healthMax: 14 },
-  7: { attackMax: 7, healthMax: 16 },
-  8: { attackMax: 8, healthMax: 18 },
-  9: { attackMax: 9, healthMax: 20 }
+  1: { attackMax: 1, healthMax: 6 },
+  2: { attackMax: 2, healthMax: 8 },
+  3: { attackMax: 4, healthMax: 10 },
+  4: { attackMax: 5, healthMax: 12 },
+  5: { attackMax: 6, healthMax: 14 },
+  6: { attackMax: 7, healthMax: 16 },
+  7: { attackMax: 8, healthMax: 18 },
+  8: { attackMax: 9, healthMax: 21 },
+  9: { attackMax: 10, healthMax: 25 }
 };
 
 const ARENA_V2_CARD_CLASSES = new Set(['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech']);
@@ -216,6 +222,8 @@ const normalizeKeywordType = (type: unknown): string => {
     '묘지 회수': 'grave_recover',
     묘지회수: 'grave_recover',
     graveyard_recover: 'grave_recover',
+    graveyardrecover: 'grave_recover',
+    graverecover: 'grave_recover',
     부활: 'revive',
     흡혈: 'lifesteal',
     drain: 'lifesteal',
@@ -223,6 +231,7 @@ const normalizeKeywordType = (type: unknown): string => {
     원한: 'vengeance',
     원혼: 'grudge',
     spirit: 'grudge',
+    haunt: 'grudge',
     잔재: 'remnant',
     residue: 'remnant',
     망령: 'specter'
@@ -443,6 +452,9 @@ export function validateArenaV2CardVersionDefinition(card: ArenaV2DeckCardVersio
   const normalizedKeywordTypes = keywords.map((keyword) => normalizeKeywordType(keyword.type));
   if (new Set(normalizedKeywordTypes).size !== normalizedKeywordTypes.length) {
     errors.push(issue('ArenaV2CardDuplicateKeyword', '같은 키워드는 한 번만 선택할 수 있습니다.'));
+  }
+  if (normalizedKeywordTypes.some((type) => type === 'pursuit' || type === 'grave_buff')) {
+    errors.push(issue('ArenaV2CardKeywordRulePending', '전투 규칙이 확정되지 않은 보류 키워드는 신규 카드에 저장할 수 없습니다.'));
   }
 
   const statLimits = ARENA_V2_CARD_STAT_LIMITS_BY_COST[cost];
@@ -681,6 +693,12 @@ export function resolveArenaV2Turn(input: ArenaV2TurnResolutionInput): ArenaV2Tu
   const combatContext: ArenaV2CombatContext = {
     directDamageTakenBySeatNo: new Map(),
     shieldByInstanceId: new Map(),
+    damageReductionUsesByInstanceId: new Map(),
+    attackSupportSourcesByInstanceId: new Map(),
+    classPassiveUses: new Set(),
+    classAttackPenaltyByInstanceId: new Map(),
+    classSupportSourcesByTargetId: new Map(),
+    attackedInstanceIds: new Set(),
     stunnedInstanceIds: new Set(),
     silencedInstanceIds: new Set(),
     revivedInstanceIds: new Set()
@@ -706,6 +724,9 @@ export function resolveArenaV2Turn(input: ArenaV2TurnResolutionInput): ArenaV2Tu
   syncBoardInstancePositions(players, instanceById);
   turnStartEvent.payload.combatSnapshot = buildPublicCombatSnapshot(players, instanceById);
   combatContext.shieldByInstanceId = initializeCombatShields(players, instanceById);
+  initializeDamageReductionUses(players, instanceById, combatContext);
+  initializeClassPassiveTargets(players, instanceById, combatContext);
+  applyCombatStartKeywords(players, instanceById, input.turnNo, replayEvents, combatContext);
 
   resolveCombatPhase('front', input.mode, input.turnNo, players, instanceById, replayEvents, combatContext);
   moveDefeatedCards(players, instanceById, input.turnNo, replayEvents, combatContext);
@@ -887,6 +908,10 @@ function buildPublicCombatSnapshot(
     .map((player) => ({
       seatNo: player.seatNo,
       playerHealth: player.playerHealth,
+      fatigueCount: player.fatigueCount,
+      handCount: player.handCardInstanceIds.length,
+      deckCount: player.deckCardInstanceIds.length,
+      graveyardCardInstanceIds: [...player.graveyardCardInstanceIds],
       boardState: [...player.boardState]
         .sort((a, b) => (
           (a.position.row === b.position.row ? 0 : a.position.row === 'front' ? -1 : 1)
@@ -1023,6 +1048,12 @@ function resolveCombatPhase(
     targetCard?: ArenaV2RuntimeCardInstance;
     targetPosition?: ArenaV2BoardPositionDto;
     damage: number;
+    backlinePressureDamage: number;
+    weakpointDamage: number;
+    directPressureDamage: number;
+    chargePassiveDamage: number;
+    sniperPassiveDamage: number;
+    attackSupportSourceIds: string[];
   }> = [];
 
   for (const column of [0, 1, 2] as const) {
@@ -1038,10 +1069,48 @@ function resolveCombatPhase(
         }
         continue;
       }
+      if (combatContext.attackedInstanceIds.has(attackerSlot.instance.id)) continue;
+      combatContext.attackedInstanceIds.add(attackerSlot.instance.id);
       const target = pickLineTarget(targetPlayer, instances, column, attackerSlot.instance, combatContext);
-      const rawAttack = getEffectiveAttack(attackerSlot.instance, targetPlayer, instances, combatContext);
-      const directAttackDamage = row === 'back' ? Math.max(0, rawAttack - 1) : rawAttack;
-      const damage = target ? rawAttack : mode === 'battle_royale_8' && turnNo >= 10
+      const rawAttack = getEffectiveAttack(
+        attackerSlot.instance,
+        targetPlayer,
+        instances,
+        combatContext,
+        replayEvents,
+        turnNo
+      );
+      const backlinePressureDamage = target?.position.row === 'back'
+        ? getKeywordValue(attackerSlot.instance, ['backline_pressure'], combatContext, 1)
+        : 0;
+      const weakpointDamage = target && Number(target.instance.damageTaken || 0) > 0
+        ? getKeywordValue(attackerSlot.instance, ['weakpoint'], combatContext, 1)
+        : 0;
+      const attackSupportSourceIds = target
+        ? [...(combatContext.attackSupportSourcesByInstanceId.get(attackerSlot.instance.id) || [])]
+        : [];
+      if (attackSupportSourceIds.length) {
+        combatContext.attackSupportSourcesByInstanceId.delete(attackerSlot.instance.id);
+      }
+      const directPressureDamage = target
+        ? 0
+        : getKeywordValue(attackerSlot.instance, ['direct_pressure'], combatContext, 1);
+      const chargePassiveDamage = target
+        && row === 'front'
+        && attackerSlot.instance.card?.cardClass === 'charge'
+        && consumeClassPassive(combatContext, 'charge', attackerSlot.instance.id)
+        ? 1
+        : 0;
+      const sniperPassiveDamage = target?.position.row === 'back'
+        && row === 'back'
+        && attackerSlot.instance.card?.cardClass === 'sniper'
+        && consumeClassPassive(combatContext, 'sniper', attackerSlot.instance.id)
+        ? 1
+        : 0;
+      const cardAttackDamage = rawAttack + backlinePressureDamage + weakpointDamage
+        + attackSupportSourceIds.length + chargePassiveDamage + sniperPassiveDamage;
+      const directAttackDamage = (row === 'back' ? Math.max(0, rawAttack - 1) : rawAttack) + directPressureDamage;
+      const damage = target ? cardAttackDamage : mode === 'battle_royale_8' && turnNo >= 10
         ? Math.floor(directAttackDamage * 1.25) : directAttackDamage;
       attackPlans.push({
         attacker: attackerSlot.instance,
@@ -1051,7 +1120,13 @@ function resolveCombatPhase(
         targetPlayer,
         targetCard: target?.instance,
         targetPosition: target?.position,
-        damage
+        damage,
+        backlinePressureDamage,
+        weakpointDamage,
+        directPressureDamage,
+        chargePassiveDamage,
+        sniperPassiveDamage,
+        attackSupportSourceIds
       });
     }
   }
@@ -1060,6 +1135,17 @@ function resolveCombatPhase(
     if (plan.targetCard) {
       const targetPosition = applyMovementKeyword(plan, instances, replayEvents, turnNo, combatContext) || plan.targetPosition;
       const remainingTargetHealth = getRemainingHealth(plan.targetCard);
+      for (const sourceCardInstanceId of plan.attackSupportSourceIds) {
+        replayEvents.push(event(turnNo, 'attack_support', {
+          sourceCardInstanceId,
+          sourceSeatNo: plan.attackerSeatNo,
+          supportedCardInstanceId: plan.attacker.id,
+          supportedCardPosition: plan.attackerPosition,
+          attackTargetCardInstanceId: plan.targetCard.id,
+          attackTargetPosition: targetPosition,
+          damage: 1
+        }));
+      }
       const damageResult = applyCardDamage(plan.targetCard, plan.damage, combatContext, replayEvents, turnNo, {
         sourceCardInstanceId: plan.attacker.id,
         sourceSeatNo: plan.attackerSeatNo,
@@ -1076,14 +1162,36 @@ function resolveCombatPhase(
         targetCardInstanceId: plan.targetCard.id,
         targetPosition,
         damage: plan.damage,
+        backlinePressureDamage: plan.backlinePressureDamage,
+        weakpointDamage: plan.weakpointDamage,
+        attackSupportDamage: plan.attackSupportSourceIds.length,
+        chargePassiveDamage: plan.chargePassiveDamage,
+        sniperPassiveDamage: plan.sniperPassiveDamage,
         healthDamage: damageResult.healthDamage,
         shieldDamage: damageResult.shieldDamage,
+        damageReduction: damageResult.damageReduction,
         hp_before: damageResult.hpBefore,
         hp_after: damageResult.hpAfter,
         alive_after: damageResult.aliveAfter
       }));
+      if (damageResult.supportRedirectEvent) replayEvents.push(damageResult.supportRedirectEvent);
+      applyTrickClassPassive(
+        plan.attacker,
+        plan.targetCard,
+        damageResult.healthDamage,
+        replayEvents,
+        turnNo,
+        combatContext,
+        plan.attackerSeatNo,
+        plan.targetPlayer.seatNo,
+        plan.attackerPosition,
+        targetPosition
+      );
+      const actualCardHealthDamage = damageResult.healthDamage + damageResult.supportRedirectDamage;
+      if (actualCardHealthDamage > 0) {
+        applyDrain(plan.attacker, actualCardHealthDamage, turnNo, replayEvents, combatContext);
+      }
       if (damageResult.healthDamage > 0) {
-        applyDrain(plan.attacker, damageResult.healthDamage, turnNo, replayEvents, combatContext);
         applyCounter(plan.targetCard, plan.attacker, targetPosition, turnNo, replayEvents, combatContext);
       }
       const overflow = row === 'front' && targetPosition?.row === 'front'
@@ -1112,13 +1220,16 @@ function resolveCombatPhase(
               damage: spillDamage,
               healthDamage: spillResult.healthDamage,
               shieldDamage: spillResult.shieldDamage,
+              damageReduction: spillResult.damageReduction,
               hp_before: spillResult.hpBefore,
               hp_after: spillResult.hpAfter,
               alive_after: spillResult.aliveAfter
             }));
+            if (spillResult.supportRedirectEvent) replayEvents.push(spillResult.supportRedirectEvent);
           }
         }
       }
+      applyAreaDamage(plan, plan.targetCard.id, instances, replayEvents, turnNo, combatContext);
       continue;
     }
 
@@ -1139,6 +1250,7 @@ function resolveCombatPhase(
       cardInstanceId: plan.attacker.id,
       sourcePosition: plan.attackerPosition,
       damage: plan.damage,
+      directPressureDamage: plan.directPressureDamage,
       targetHealth: plan.targetPlayer.playerHealth,
       targetPosition: { row: 'back', column: plan.attackerPosition.column },
       playerHealthBefore: hpBefore,
@@ -1147,6 +1259,49 @@ function resolveCombatPhase(
       hp_after: hpAfter,
       alive_after: plan.targetPlayer.playerHealth > 0
     }));
+    applyAreaDamage(plan, undefined, instances, replayEvents, turnNo, combatContext);
+  }
+}
+
+function applyAreaDamage(
+  plan: {
+    attacker: ArenaV2RuntimeCardInstance;
+    attackerPosition: ArenaV2BoardPositionDto;
+    attackerSeatNo: number;
+    targetPlayer: ArenaV2RuntimePlayer;
+  },
+  primaryTargetCardInstanceId: string | undefined,
+  instances: Map<string, ArenaV2RuntimeCardInstance>,
+  replayEvents: ArenaV2ReplayEvent[],
+  turnNo: number,
+  combatContext: ArenaV2CombatContext
+) {
+  const areaDamage = getKeywordValue(plan.attacker, ['aoe_damage'], combatContext, 1);
+  if (areaDamage <= 0) return;
+  for (const target of orderedLivingBoardSlots(plan.targetPlayer, instances)) {
+    if (target.instance.id === primaryTargetCardInstanceId) continue;
+    const result = applyCardDamage(target.instance, areaDamage, combatContext, replayEvents, turnNo, {
+      sourceCardInstanceId: plan.attacker.id,
+      sourceSeatNo: plan.attackerSeatNo,
+      sourcePosition: plan.attackerPosition,
+      reason: 'aoe_damage'
+    });
+    replayEvents.push(event(turnNo, 'aoe_damage', {
+      sourceCardInstanceId: plan.attacker.id,
+      sourceSeatNo: plan.attackerSeatNo,
+      sourcePosition: plan.attackerPosition,
+      targetCardInstanceId: target.instance.id,
+      targetSeatNo: plan.targetPlayer.seatNo,
+      targetPosition: target.position,
+      damage: areaDamage,
+      healthDamage: result.healthDamage,
+      shieldDamage: result.shieldDamage,
+      damageReduction: result.damageReduction,
+      hp_before: result.hpBefore,
+      hp_after: result.hpAfter,
+      alive_after: result.aliveAfter
+    }));
+    if (result.supportRedirectEvent) replayEvents.push(result.supportRedirectEvent);
   }
 }
 
@@ -1204,8 +1359,8 @@ function isDefeated(instance: ArenaV2RuntimeCardInstance): boolean {
 function hasKeyword(instance: ArenaV2RuntimeCardInstance | undefined, types: string[], combatContext?: ArenaV2CombatContext): boolean {
   if (instance && combatContext?.silencedInstanceIds.has(instance.id)) return false;
   if (!instance?.card?.keywords?.length) return false;
-  const expected = new Set(types.map((type) => type.toLocaleLowerCase()));
-  return instance.card.keywords.some((keyword) => expected.has(String(keyword?.type || '').toLocaleLowerCase()));
+  const expected = new Set(types.map(normalizeKeywordType));
+  return instance.card.keywords.some((keyword) => expected.has(normalizeKeywordType(keyword?.type)));
 }
 
 function getKeywordValue(
@@ -1216,11 +1371,21 @@ function getKeywordValue(
 ): number {
   if (instance && combatContext?.silencedInstanceIds.has(instance.id)) return 0;
   if (!instance?.card?.keywords?.length) return 0;
-  const expected = new Set(types.map((type) => type.toLocaleLowerCase()));
-  const keyword = instance.card.keywords.find((item) => expected.has(String(item?.type || '').toLocaleLowerCase()));
+  const expected = new Set(types.map(normalizeKeywordType));
+  const keyword = instance.card.keywords.find((item) => expected.has(normalizeKeywordType(item?.type)));
   if (!keyword) return 0;
   const value = Number(keyword.value ?? fallback);
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
+}
+
+function getKeywordSelection(
+  instance: ArenaV2RuntimeCardInstance | undefined,
+  type: string,
+  combatContext?: ArenaV2CombatContext
+): ArenaV2KeywordDto | undefined {
+  if (instance && combatContext?.silencedInstanceIds.has(instance.id)) return undefined;
+  const canonicalType = normalizeKeywordType(type);
+  return instance?.card?.keywords?.find((keyword) => normalizeKeywordType(keyword?.type) === canonicalType);
 }
 
 function calculateOverflowSpillDamage(
@@ -1250,6 +1415,228 @@ function initializeCombatShields(
   return shields;
 }
 
+function orderedLivingBoardSlots(
+  player: ArenaV2RuntimePlayer,
+  instances: Map<string, ArenaV2RuntimeCardInstance>
+): ArenaV2BoardSlot[] {
+  return player.boardState
+    .map((boardCard) => {
+      const instance = instances.get(boardCard.cardInstanceId);
+      return instance && !isDefeated(instance)
+        ? { instance, position: { ...boardCard.position } }
+        : undefined;
+    })
+    .filter((slot): slot is ArenaV2BoardSlot => Boolean(slot))
+    .sort((left, right) => (
+      (left.position.row === right.position.row ? 0 : left.position.row === 'front' ? -1 : 1)
+      || left.position.column - right.position.column
+      || left.instance.id.localeCompare(right.instance.id)
+    ));
+}
+
+function initializeDamageReductionUses(
+  players: ArenaV2RuntimePlayer[],
+  instances: Map<string, ArenaV2RuntimeCardInstance>,
+  combatContext: ArenaV2CombatContext
+) {
+  for (const player of players) {
+    for (const slot of orderedLivingBoardSlots(player, instances)) {
+      const uses = getKeywordValue(slot.instance, ['damage_reduction'], undefined, 1);
+      if (uses > 0) combatContext.damageReductionUsesByInstanceId.set(slot.instance.id, uses);
+    }
+  }
+}
+
+function applyBattleDraw(
+  source: ArenaV2BoardSlot,
+  player: ArenaV2RuntimePlayer,
+  instances: Map<string, ArenaV2RuntimeCardInstance>,
+  turnNo: number,
+  replayEvents: ArenaV2ReplayEvent[]
+) {
+  const drawnId = player.deckCardInstanceIds.shift();
+  if (!drawnId) {
+    replayEvents.push(event(turnNo, 'battle_draw', {
+      sourceCardInstanceId: source.instance.id,
+      sourceSeatNo: player.seatNo,
+      sourcePosition: source.position,
+      result: 'empty_deck',
+      handCount: player.handCardInstanceIds.length,
+      deckCount: 0
+    }));
+    return;
+  }
+  const drawn = instances.get(drawnId);
+  if (!drawn) {
+    replayEvents.push(event(turnNo, 'battle_draw', {
+      sourceCardInstanceId: source.instance.id,
+      sourceSeatNo: player.seatNo,
+      sourcePosition: source.position,
+      cardInstanceId: drawnId,
+      result: 'missing_instance',
+      handCount: player.handCardInstanceIds.length,
+      deckCount: player.deckCardInstanceIds.length
+    }));
+    return;
+  }
+  if (player.handCardInstanceIds.length >= ARENA_V2_MAX_HAND_SIZE) {
+    drawn.zone = 'graveyard';
+    drawn.position = null;
+    if (!player.graveyardCardInstanceIds.includes(drawnId)) player.graveyardCardInstanceIds.push(drawnId);
+    replayEvents.push(event(turnNo, 'battle_draw', {
+      sourceCardInstanceId: source.instance.id,
+      sourceSeatNo: player.seatNo,
+      sourcePosition: source.position,
+      cardInstanceId: drawnId,
+      result: 'overdraw',
+      handCount: player.handCardInstanceIds.length,
+      deckCount: player.deckCardInstanceIds.length
+    }));
+    return;
+  }
+  drawn.zone = 'hand';
+  drawn.position = null;
+  player.handCardInstanceIds.push(drawnId);
+  replayEvents.push(event(turnNo, 'battle_draw', {
+    sourceCardInstanceId: source.instance.id,
+    sourceSeatNo: player.seatNo,
+    sourcePosition: source.position,
+    cardInstanceId: drawnId,
+    result: 'drawn',
+    handCount: player.handCardInstanceIds.length,
+    deckCount: player.deckCardInstanceIds.length
+  }));
+}
+
+const classPassiveKey = (passive: string, cardInstanceId: string) => `${passive}:${cardInstanceId}`;
+
+function consumeClassPassive(
+  combatContext: ArenaV2CombatContext,
+  passive: string,
+  cardInstanceId: string
+): boolean {
+  const key = classPassiveKey(passive, cardInstanceId);
+  if (combatContext.classPassiveUses.has(key)) return false;
+  combatContext.classPassiveUses.add(key);
+  return true;
+}
+
+function initializeClassPassiveTargets(
+  players: ArenaV2RuntimePlayer[],
+  instances: Map<string, ArenaV2RuntimeCardInstance>,
+  combatContext: ArenaV2CombatContext
+) {
+  for (const player of players) {
+    const slots = orderedLivingBoardSlots(player, instances);
+    for (const source of slots) {
+      if (source.instance.card?.cardClass !== 'support') continue;
+      for (const target of slots) {
+        if (target.instance.id === source.instance.id || target.position.column !== source.position.column) continue;
+        const sources = combatContext.classSupportSourcesByTargetId.get(target.instance.id) || [];
+        sources.push(source.instance);
+        combatContext.classSupportSourcesByTargetId.set(target.instance.id, sources);
+      }
+    }
+  }
+}
+
+function blockTechClassControl(
+  target: ArenaV2RuntimeCardInstance,
+  effect: string,
+  replayEvents: ArenaV2ReplayEvent[],
+  turnNo: number,
+  combatContext: ArenaV2CombatContext,
+  input: {
+    sourceCardInstanceId: string;
+    sourceSeatNo?: number;
+    sourcePosition?: ArenaV2BoardPositionDto | null;
+    targetSeatNo?: number;
+    targetPosition?: ArenaV2BoardPositionDto | null;
+  }
+) {
+  if (target.card?.cardClass !== 'tech' || !consumeClassPassive(combatContext, 'tech', target.id)) return false;
+  replayEvents.push(event(turnNo, 'tech_passive', {
+    ...input,
+    targetCardInstanceId: target.id,
+    blockedEffect: effect
+  }));
+  return true;
+}
+
+function applyCombatStartKeywords(
+  players: ArenaV2RuntimePlayer[],
+  instances: Map<string, ArenaV2RuntimeCardInstance>,
+  turnNo: number,
+  replayEvents: ArenaV2ReplayEvent[],
+  combatContext: ArenaV2CombatContext
+) {
+  for (const player of [...players].sort((left, right) => left.seatNo - right.seatNo)) {
+    const slots = orderedLivingBoardSlots(player, instances);
+    for (const source of slots) {
+      const sameLineAllies = slots.filter((slot) => (
+        slot.instance.id !== source.instance.id
+        && slot.position.column === source.position.column
+      ));
+
+      if (hasKeyword(source.instance, ['guard_support'], combatContext)) {
+        const target = sameLineAllies[0];
+        if (target) {
+          const totalShield = (combatContext.shieldByInstanceId.get(target.instance.id) || 0) + 1;
+          combatContext.shieldByInstanceId.set(target.instance.id, totalShield);
+          replayEvents.push(event(turnNo, 'guard_support', {
+            sourceCardInstanceId: source.instance.id,
+            sourceSeatNo: player.seatNo,
+            sourcePosition: source.position,
+            targetCardInstanceId: target.instance.id,
+            targetSeatNo: player.seatNo,
+            targetPosition: target.position,
+            shield: 1,
+            totalShield
+          }));
+        }
+      }
+
+      if (hasKeyword(source.instance, ['attack_support'], combatContext)) {
+        const target = sameLineAllies[0];
+        if (target) {
+          const sources = combatContext.attackSupportSourcesByInstanceId.get(target.instance.id) || [];
+          sources.push(source.instance.id);
+          combatContext.attackSupportSourcesByInstanceId.set(target.instance.id, sources);
+        }
+      }
+
+      const emergencyHeal = getKeywordValue(source.instance, ['emergency_heal'], combatContext, 1);
+      if (emergencyHeal > 0) {
+        const target = [...slots]
+          .filter((slot) => Number(slot.instance.damageTaken || 0) > 0)
+          .sort((left, right) => (
+            Number(right.instance.damageTaken || 0) - Number(left.instance.damageTaken || 0)
+            || Number(right.position.column === source.position.column) - Number(left.position.column === source.position.column)
+            || left.instance.id.localeCompare(right.instance.id)
+          ))[0];
+        if (target) {
+          const healed = Math.min(emergencyHeal, Math.max(0, Number(target.instance.damageTaken || 0)));
+          target.instance.damageTaken -= healed;
+          replayEvents.push(event(turnNo, 'emergency_heal', {
+            sourceCardInstanceId: source.instance.id,
+            sourceSeatNo: player.seatNo,
+            sourcePosition: source.position,
+            targetCardInstanceId: target.instance.id,
+            targetSeatNo: player.seatNo,
+            targetPosition: target.position,
+            heal: healed,
+            damageTaken: target.instance.damageTaken
+          }));
+        }
+      }
+
+      if (hasKeyword(source.instance, ['battle_draw'], combatContext)) {
+        applyBattleDraw(source, player, instances, turnNo, replayEvents);
+      }
+    }
+  }
+}
+
 function applyPhaseControlKeywords(
   row: ArenaV2BoardRowDto,
   turnNo: number,
@@ -1266,28 +1653,46 @@ function applyPhaseControlKeywords(
       const target = pickLineTarget(targetPlayer, instances, column, attackerSlot.instance, combatContext);
       if (!target) continue;
       if (hasKeyword(attackerSlot.instance, ['silence', '침묵'], combatContext)) {
-        combatContext.silencedInstanceIds.add(target.instance.id);
-        replayEvents.push(event(turnNo, 'silence', {
+        const blocked = blockTechClassControl(target.instance, 'silence', replayEvents, turnNo, combatContext, {
           sourceCardInstanceId: attackerSlot.instance.id,
           sourceSeatNo: attackerPlayer.seatNo,
           sourcePosition: attackerSlot.position,
-          targetCardInstanceId: target.instance.id,
           targetSeatNo: targetPlayer.seatNo,
-          targetPosition: target.position,
-          column
-        }));
+          targetPosition: target.position
+        });
+        if (!blocked) {
+          combatContext.silencedInstanceIds.add(target.instance.id);
+          replayEvents.push(event(turnNo, 'silence', {
+            sourceCardInstanceId: attackerSlot.instance.id,
+            sourceSeatNo: attackerPlayer.seatNo,
+            sourcePosition: attackerSlot.position,
+            targetCardInstanceId: target.instance.id,
+            targetSeatNo: targetPlayer.seatNo,
+            targetPosition: target.position,
+            column
+          }));
+        }
       }
       if (hasKeyword(attackerSlot.instance, ['stun', '기절'], combatContext)) {
-        combatContext.stunnedInstanceIds.add(target.instance.id);
-        replayEvents.push(event(turnNo, 'stun', {
+        const blocked = blockTechClassControl(target.instance, 'stun', replayEvents, turnNo, combatContext, {
           sourceCardInstanceId: attackerSlot.instance.id,
           sourceSeatNo: attackerPlayer.seatNo,
           sourcePosition: attackerSlot.position,
-          targetCardInstanceId: target.instance.id,
           targetSeatNo: targetPlayer.seatNo,
-          targetPosition: target.position,
-          column
-        }));
+          targetPosition: target.position
+        });
+        if (!blocked) {
+          combatContext.stunnedInstanceIds.add(target.instance.id);
+          replayEvents.push(event(turnNo, 'stun', {
+            sourceCardInstanceId: attackerSlot.instance.id,
+            sourceSeatNo: attackerPlayer.seatNo,
+            sourcePosition: attackerSlot.position,
+            targetCardInstanceId: target.instance.id,
+            targetSeatNo: targetPlayer.seatNo,
+            targetPosition: target.position,
+            column
+          }));
+        }
       }
     }
   }
@@ -1297,7 +1702,9 @@ function getEffectiveAttack(
   attacker: ArenaV2RuntimeCardInstance,
   targetPlayer: ArenaV2RuntimePlayer,
   instances: Map<string, ArenaV2RuntimeCardInstance>,
-  combatContext: ArenaV2CombatContext
+  combatContext: ArenaV2CombatContext,
+  replayEvents: ArenaV2ReplayEvent[],
+  turnNo: number
 ): number {
   const column = attacker.position?.column;
   let attack = Math.max(0, Number(attacker.currentAttack || 0));
@@ -1308,10 +1715,60 @@ function getEffectiveAttack(
     ];
     for (const source of weakenSources) {
       if (!source || isDefeated(source)) continue;
-      attack -= getKeywordValue(source, ['weaken', 'weakness', '약화'], combatContext, 1);
+      const weaken = getKeywordValue(source, ['weaken', 'weakness', '약화'], combatContext, 1);
+      if (weaken <= 0) continue;
+      if (blockTechClassControl(attacker, 'weaken', replayEvents, turnNo, combatContext, {
+        sourceCardInstanceId: source.id,
+        sourceSeatNo: source.ownerSeatNo,
+        sourcePosition: source.position,
+        targetSeatNo: attacker.ownerSeatNo,
+        targetPosition: attacker.position
+      })) continue;
+      attack -= weaken;
     }
   }
+  attack -= combatContext.classAttackPenaltyByInstanceId.get(attacker.id) || 0;
   return Math.max(0, attack);
+}
+
+function applyTrickClassPassive(
+  attacker: ArenaV2RuntimeCardInstance,
+  target: ArenaV2RuntimeCardInstance,
+  healthDamage: number,
+  replayEvents: ArenaV2ReplayEvent[],
+  turnNo: number,
+  combatContext: ArenaV2CombatContext,
+  sourceSeatNo: number,
+  targetSeatNo: number,
+  sourcePosition: ArenaV2BoardPositionDto,
+  targetPosition?: ArenaV2BoardPositionDto
+) {
+  if (
+    healthDamage <= 0
+    || attacker.card?.cardClass !== 'trick'
+    || sourcePosition.column !== targetPosition?.column
+  ) return;
+  if (!consumeClassPassive(combatContext, 'trick', attacker.id)) return;
+  if (blockTechClassControl(target, 'weaken', replayEvents, turnNo, combatContext, {
+    sourceCardInstanceId: attacker.id,
+    sourceSeatNo,
+    sourcePosition,
+    targetSeatNo,
+    targetPosition
+  })) return;
+  combatContext.classAttackPenaltyByInstanceId.set(
+    target.id,
+    (combatContext.classAttackPenaltyByInstanceId.get(target.id) || 0) + 1
+  );
+  replayEvents.push(event(turnNo, 'trick_passive', {
+    sourceCardInstanceId: attacker.id,
+    sourceSeatNo,
+    sourcePosition,
+    targetCardInstanceId: target.id,
+    targetSeatNo,
+    targetPosition,
+    attackReduction: 1
+  }));
 }
 
 function applyCardDamage(
@@ -1331,7 +1788,30 @@ function applyCardDamage(
   const hpBefore = Math.max(0, getRemainingHealth(target));
   const shield = combatContext.shieldByInstanceId.get(target.id) || 0;
   const shieldDamage = Math.min(shield, damage);
-  const healthDamage = Math.max(0, damage - shieldDamage);
+  const pendingHealthDamage = Math.max(0, damage - shieldDamage);
+  const guardianReduction = pendingHealthDamage > 0
+    && target.card?.cardClass === 'guardian'
+    && target.position?.row === 'front'
+    && consumeClassPassive(combatContext, 'guardian', target.id)
+    ? 1
+    : 0;
+  const damageAfterGuardian = Math.max(0, pendingHealthDamage - guardianReduction);
+  const reductionUses = combatContext.damageReductionUsesByInstanceId.get(target.id) || 0;
+  const keywordDamageReduction = damageAfterGuardian > 0
+    && reductionUses > 0
+    && hasKeyword(target, ['damage_reduction'], combatContext)
+    ? Math.min(1, damageAfterGuardian)
+    : 0;
+  const damageAfterReduction = Math.max(0, damageAfterGuardian - keywordDamageReduction);
+  const supportSource = damageAfterReduction > 0
+    ? (combatContext.classSupportSourcesByTargetId.get(target.id) || []).find((source) => (
+        getRemainingHealth(source) > 0
+        && consumeClassPassive(combatContext, 'support', source.id)
+      ))
+    : undefined;
+  const supportRedirectDamage = supportSource ? 1 : 0;
+  const healthDamage = Math.max(0, damageAfterReduction - supportRedirectDamage);
+  const damageReduction = guardianReduction + keywordDamageReduction;
   if (shieldDamage > 0) {
     const nextShield = shield - shieldDamage;
     if (nextShield > 0) combatContext.shieldByInstanceId.set(target.id, nextShield);
@@ -1348,11 +1828,65 @@ function applyCardDamage(
       remainingShield: nextShield
     }));
   }
+  if (guardianReduction > 0) {
+    replayEvents.push(event(turnNo, 'damage_reduction', {
+      sourceCardInstanceId: target.id,
+      sourceSeatNo: target.ownerSeatNo,
+      sourcePosition: target.position,
+      targetCardInstanceId: target.id,
+      targetSeatNo: target.ownerSeatNo,
+      targetPosition: target.position,
+      reason: 'guardian_passive',
+      damage: guardianReduction,
+      remainingUses: 0
+    }));
+  }
+  if (keywordDamageReduction > 0) {
+    const remainingUses = Math.max(0, reductionUses - 1);
+    if (remainingUses > 0) combatContext.damageReductionUsesByInstanceId.set(target.id, remainingUses);
+    else combatContext.damageReductionUsesByInstanceId.delete(target.id);
+    replayEvents.push(event(turnNo, 'damage_reduction', {
+      sourceCardInstanceId: target.id,
+      sourceSeatNo: target.ownerSeatNo,
+      sourcePosition: target.position,
+      targetCardInstanceId: target.id,
+      targetSeatNo: target.ownerSeatNo,
+      targetPosition: target.position,
+      reason: input.reason,
+      damage: keywordDamageReduction,
+      remainingUses
+    }));
+  }
+  let supportRedirectEvent: ArenaV2ReplayEvent | undefined;
+  if (supportSource) {
+    const supportHpBefore = Math.max(0, getRemainingHealth(supportSource));
+    supportSource.damageTaken += supportRedirectDamage;
+    const supportHpAfter = Math.max(0, getRemainingHealth(supportSource));
+    supportRedirectEvent = event(turnNo, 'support_redirect', {
+      sourceCardInstanceId: input.sourceCardInstanceId,
+      sourceSeatNo: input.sourceSeatNo,
+      sourcePosition: input.sourcePosition,
+      protectedCardInstanceId: target.id,
+      protectedSeatNo: target.ownerSeatNo,
+      protectedPosition: target.position,
+      targetCardInstanceId: supportSource.id,
+      targetSeatNo: supportSource.ownerSeatNo,
+      targetPosition: supportSource.position,
+      damage: supportRedirectDamage,
+      healthDamage: supportRedirectDamage,
+      hp_before: supportHpBefore,
+      hp_after: supportHpAfter,
+      alive_after: supportHpAfter > 0
+    });
+  }
   target.damageTaken += healthDamage;
   const hpAfter = Math.max(0, getRemainingHealth(target));
   return {
     healthDamage,
     shieldDamage,
+    damageReduction,
+    supportRedirectDamage,
+    supportRedirectEvent,
     hpBefore,
     hpAfter,
     aliveAfter: hpAfter > 0
@@ -1407,10 +1941,12 @@ function applyCounter(
     damage: counter,
     healthDamage: result.healthDamage,
     shieldDamage: result.shieldDamage,
+    damageReduction: result.damageReduction,
     hp_before: result.hpBefore,
     hp_after: result.hpAfter,
     alive_after: result.aliveAfter
   }));
+  if (result.supportRedirectEvent) replayEvents.push(result.supportRedirectEvent);
 }
 
 function applyMovementKeyword(
@@ -1431,6 +1967,13 @@ function applyMovementKeyword(
   const fromPosition = { ...plan.targetPosition };
   if (plan.targetPosition.row === 'front' && hasKeyword(plan.attacker, ['push', '밀치기'], combatContext)) {
     if (!getBoardInstanceAt(plan.targetPlayer, instances, { row: 'back', column })) {
+      if (blockTechClassControl(plan.targetCard, 'push', replayEvents, turnNo, combatContext, {
+        sourceCardInstanceId: plan.attacker.id,
+        sourceSeatNo: plan.attackerPlayer.seatNo,
+        sourcePosition: plan.attacker.position,
+        targetSeatNo: plan.targetPlayer.seatNo,
+        targetPosition: plan.targetPosition
+      })) return plan.targetPosition;
       moveBoardCard(plan.targetPlayer, plan.targetCard.id, { row: 'back', column });
       plan.targetCard.position = { row: 'back', column };
       replayEvents.push(event(turnNo, 'push', {
@@ -1448,6 +1991,13 @@ function applyMovementKeyword(
   }
   if (plan.targetPosition.row === 'back' && hasKeyword(plan.attacker, ['pull', '끌어오기', '끌기'], combatContext)) {
     if (!getBoardInstanceAt(plan.targetPlayer, instances, { row: 'front', column })) {
+      if (blockTechClassControl(plan.targetCard, 'pull', replayEvents, turnNo, combatContext, {
+        sourceCardInstanceId: plan.attacker.id,
+        sourceSeatNo: plan.attackerPlayer.seatNo,
+        sourcePosition: plan.attacker.position,
+        targetSeatNo: plan.targetPlayer.seatNo,
+        targetPosition: plan.targetPosition
+      })) return plan.targetPosition;
       moveBoardCard(plan.targetPlayer, plan.targetCard.id, { row: 'front', column });
       plan.targetCard.position = { row: 'front', column };
       replayEvents.push(event(turnNo, 'pull', {
@@ -1539,7 +2089,7 @@ function applyDefeatedCardEffects(
   for (const record of ordered) {
     if (combatContext.silencedInstanceIds.has(record.instance.id)) continue;
     const opponent = players.find((player) => player.seatNo !== record.player.seatNo);
-    const vengeance = getKeywordValue(record.instance, ['vengeance', 'grudge', '원한'], combatContext, 1);
+    const vengeance = getKeywordValue(record.instance, ['vengeance'], combatContext, 1);
     if (opponent && vengeance > 0) {
       const target = pickLineTarget(opponent, instances, record.position.column, undefined, combatContext);
       if (target) {
@@ -1559,10 +2109,12 @@ function applyDefeatedCardEffects(
           damage: vengeance,
           healthDamage: result.healthDamage,
           shieldDamage: result.shieldDamage,
+          damageReduction: result.damageReduction,
           hp_before: result.hpBefore,
           hp_after: result.hpAfter,
           alive_after: result.aliveAfter
         }));
+        if (result.supportRedirectEvent) replayEvents.push(result.supportRedirectEvent);
       }
     }
   }
@@ -1590,7 +2142,7 @@ function applyDefeatedCardEffects(
 
   for (const record of ordered) {
     if (combatContext.silencedInstanceIds.has(record.instance.id)) continue;
-    const spirit = getKeywordValue(record.instance, ['spirit', 'haunt', '원혼'], combatContext, 1);
+    const spirit = getKeywordValue(record.instance, ['grudge'], combatContext, 1);
     const opponent = players.find((player) => player.seatNo !== record.player.seatNo);
     if (opponent && spirit > 0) {
       const hpBefore = Math.max(0, Number(opponent.playerHealth || 0));
@@ -1612,8 +2164,21 @@ function applyDefeatedCardEffects(
 
   for (const record of ordered) {
     if (combatContext.silencedInstanceIds.has(record.instance.id)) continue;
-    if (!hasKeyword(record.instance, ['graveyard_recover', 'graveyardRecover', '묘지 회수'], combatContext)) continue;
-    const recoverId = record.player.graveyardCardInstanceIds.find((id) => id !== record.instance.id);
+    const graveRecover = getKeywordSelection(record.instance, 'grave_recover', combatContext);
+    if (!graveRecover) continue;
+    const limit = keywordLimit(graveRecover);
+    const recoverId = record.player.graveyardCardInstanceIds.find((id) => {
+      if (id === record.instance.id) return false;
+      const candidate = instances.get(id);
+      if (!candidate) return false;
+      const cost = Number(candidate.card?.cost || 0);
+      if (limit === 'cost_2' || limit === '2_cost_or_less' || limit === 'low_cost_2') return cost > 0 && cost <= 2;
+      if (limit === 'specter') return candidate.card?.cardClass === 'specter';
+      if (limit === 'same_class') return candidate.card?.cardClass === record.instance.card?.cardClass;
+      if (limit === 'cost_4' || limit === '4_cost_or_less') return cost > 0 && cost <= 4;
+      if (limit === 'self_cost') return cost > 0 && cost <= Number(record.instance.card?.cost || 0);
+      return limit === '' || limit === 'any' || limit === 'unlimited';
+    });
     if (!recoverId || record.player.handCardInstanceIds.length >= ARENA_V2_MAX_HAND_SIZE) continue;
     const recovered = instances.get(recoverId);
     if (!recovered) continue;
@@ -1624,8 +2189,12 @@ function applyDefeatedCardEffects(
     recovered.damageTaken = 0;
     replayEvents.push(event(turnNo, 'graveyard_recover', {
       sourceCardInstanceId: record.instance.id,
+      sourceSeatNo: record.player.seatNo,
+      sourcePosition: record.position,
       recoveredCardInstanceId: recoverId,
-      seatNo: record.player.seatNo
+      seatNo: record.player.seatNo,
+      handCount: record.player.handCardInstanceIds.length,
+      graveyardCount: record.player.graveyardCardInstanceIds.length
     }));
   }
 }
