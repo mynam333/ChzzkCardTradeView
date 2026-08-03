@@ -6,6 +6,15 @@ const source = readFileSync(new URL('./ArcadeTab.tsx', import.meta.url), 'utf8')
 const protectedPreviewStart = source.indexOf('const ProtectedCropPreview');
 const protectedPreviewEnd = source.indexOf('const ClientCropPreview');
 const protectedPreview = source.slice(protectedPreviewStart, protectedPreviewEnd);
+const paidAdvanceStart = source.indexOf('const advanceToPaidRound');
+const paidAdvanceEnd = source.indexOf('if (!submitRetry', paidAdvanceStart);
+const paidAdvanceFlow = source.slice(paidAdvanceStart, paidAdvanceEnd);
+const continueStart = source.indexOf('const handleRoundContinue');
+const continueEnd = source.indexOf('// 로그인 체크', continueStart);
+const continueFlow = source.slice(continueStart, continueEnd);
+const cropViewStart = source.indexOf('게임 5: 카드 확대 탐정');
+const cropViewEnd = source.indexOf('게임 3: 짝맞추기 뒤집기', cropViewStart);
+const cropView = source.slice(cropViewStart, cropViewEnd);
 
 test('protected crop only settles after a real protected image loads', () => {
   assert.ok(protectedPreviewStart >= 0 && protectedPreviewEnd > protectedPreviewStart);
@@ -55,6 +64,19 @@ test('paid crop accepts an unarmed server contract while other paid round games 
   assert.match(source, /gameType !== 'crop_detective' \|\| rawDeadline !== null/);
   assert.match(source, /data\.next_round_deadline_at === null && nextLocalDeadline === null/);
   assert.match(source, /roundDeadlineRef\.current = pendingRound\.localDeadlineAt/);
+});
+
+test('paid crop keeps answer feedback visible until the next-question button is clicked', () => {
+  assert.ok(paidAdvanceStart >= 0 && paidAdvanceEnd > paidAdvanceStart);
+  assert.ok(continueStart >= 0 && continueEnd > continueStart);
+  assert.ok(cropViewStart >= 0 && cropViewEnd > cropViewStart);
+  assert.match(
+    paidAdvanceFlow,
+    /if \(activeGame !== 'quiz' \|\| isPracticeMode[\s\S]*window\.setTimeout\(\(\) => advanceToPaidRound/
+  );
+  assert.match(continueFlow, /advanceToPaidRound\(pendingPaidRound\)/);
+  assert.match(cropView, /onClick=\{handleRoundContinue\}/);
+  assert.match(cropView, /'다음 문제'/);
 });
 
 test('expired and completed resumed rounds advance without re-arming the clue', () => {

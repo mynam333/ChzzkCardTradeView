@@ -3145,7 +3145,7 @@ export const ArcadeTab: React.FC = () => {
   }, [activeGame, gameData?.rounds, toast]);
 
   useEffect(() => {
-    if (activeGame === 'value_duel' || isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
+    if (activeGame !== 'quiz' || isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
     const timer = window.setTimeout(() => advanceToPaidRound(pendingPaidRound), 450);
     return () => window.clearTimeout(timer);
   }, [activeGame, advanceToPaidRound, isGameOver, isPracticeMode, pendingPaidRound, roundFeedback]);
