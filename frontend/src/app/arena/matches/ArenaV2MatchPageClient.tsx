@@ -1005,6 +1005,8 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
   const replayRequestIdRef = React.useRef(0);
   const matchRequestGenerationRef = React.useRef(0);
   const resolvedMatchIdRef = React.useRef(resolvedMatchId);
+  const matchRef = React.useRef<ArenaV2MatchViewDto | null>(null);
+  const botAbandonRequestRef = React.useRef('');
 
   React.useLayoutEffect(() => {
     if (resolvedMatchIdRef.current === resolvedMatchId) return;
@@ -1012,6 +1014,10 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
     replayRequestIdRef.current += 1;
     resolvedMatchIdRef.current = resolvedMatchId;
   }, [resolvedMatchId]);
+
+  React.useEffect(() => {
+    matchRef.current = match;
+  }, [match]);
 
   const isCurrentMatchRequest = React.useCallback((
     requestGeneration: number,
@@ -1151,6 +1157,51 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
       controller.abort();
     };
   }, [loadMatch]);
+
+  const shouldAbandonBotMatch = React.useCallback((candidate: ArenaV2MatchViewDto | null): candidate is ArenaV2MatchViewDto => (
+    mode === 'match'
+    && candidate?.mode === 'bot'
+    && candidate.status !== 'completed'
+    && candidate.status !== 'cancelled'
+  ), [mode]);
+
+  const abandonBotMatch = React.useCallback(async (reason: string) => {
+    const current = matchRef.current;
+    if (!shouldAbandonBotMatch(current)) return true;
+    if (botAbandonRequestRef.current === current.id) return true;
+    botAbandonRequestRef.current = current.id;
+    try {
+      const res = await apiFetch(`/arena/matches/${encodeURIComponent(current.id)}/abandon-bot`, {
+        method: 'POST',
+        body: JSON.stringify({ reason })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || '연습전을 종료하지 못했습니다.');
+      if (json?.match) {
+        matchRef.current = json.match;
+        setMatch(json.match);
+      }
+      return true;
+    } catch (error: unknown) {
+      botAbandonRequestRef.current = '';
+      setNotice(errorMessage(error, '연습전을 종료하지 못했습니다.'));
+      return false;
+    }
+  }, [shouldAbandonBotMatch]);
+
+  const leaveMatchToArenaPlay = React.useCallback(async () => {
+    if (await abandonBotMatch('leave_match')) router.push('/arena/play');
+  }, [abandonBotMatch, router]);
+
+  React.useEffect(() => () => {
+    const current = matchRef.current;
+    if (!shouldAbandonBotMatch(current)) return;
+    void apiFetch(`/arena/matches/${encodeURIComponent(current.id)}/abandon-bot`, {
+      method: 'POST',
+      keepalive: true,
+      body: JSON.stringify({ reason: 'match_page_disposed' })
+    }).catch(() => undefined);
+  }, [shouldAbandonBotMatch]);
 
   React.useEffect(() => {
     if (mode === 'spectate' && resolvedMatchIdRef.current !== requestedMatchId) {
@@ -1684,7 +1735,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
       <div className={`arena-v2-shell arena-v2-battle-shell arena-v2-page is-match ${styles.arenaV2Scope}`}>
         <section className="arena-v2-topbar arena-v2-battle-topbar">
           <div className="arena-v2-battle-brand min-w-0">
-            <button type="button" className="arena-v2-icon-button" onClick={() => router.push('/arena/play')} aria-label="아레나 플레이로 돌아가기">
+            <button type="button" className="arena-v2-icon-button" onClick={() => void leaveMatchToArenaPlay()} aria-label="아레나 플레이로 돌아가기">
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div className="arena-v2-battle-brand-copy">
@@ -1969,7 +2020,7 @@ export const ArenaV2MatchPageClient: React.FC<{ matchId?: string | null; mode?: 
           round={match?.roundNo}
           canSpectate={Boolean(viewerResult?.canSpectate && resultBattleRoyaleId)}
           hasNextMatch={Boolean(nextMatchId)}
-          onExit={() => router.push('/arena/play')}
+          onExit={() => void leaveMatchToArenaPlay()}
           onContinue={nextMatchId
             ? () => router.push(`/arena/matches/${encodeURIComponent(nextMatchId)}`)
             : undefined}

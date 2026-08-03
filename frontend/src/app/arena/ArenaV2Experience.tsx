@@ -925,12 +925,58 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     }
   };
 
+  const isBlockingArenaQueue = (status: unknown) => {
+    if (!status || typeof status !== 'object') return false;
+    const record = status as Record<string, unknown>;
+    const normalized = String(record.status || record.phase || record.rawStatus || '').toLowerCase();
+    return ['waiting', 'searching', 'queued', 'matching', 'proposed', 'proposal', 'accepted', 'matched'].includes(normalized)
+      || Boolean(record.queueId || record.ticketId || record.proposalId);
+  };
+
+  const releaseArenaQueueLocks = async (options: { quick?: boolean; battleRoyale?: boolean; reason: string }) => {
+    const requests: Array<Promise<{ queue: 'quick' | 'battle_royale_8'; json: any }>> = [];
+    if (options.quick !== false && isBlockingArenaQueue(queueStatus.quick)) {
+      requests.push(apiFetch('/arena/matchmaking/quick/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ seasonId: season?.id, reason: options.reason })
+      }).then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.message || '빠른대전 대기열을 정리하지 못했습니다.');
+        return { queue: 'quick' as const, json };
+      }));
+    }
+    if (options.battleRoyale !== false && isBlockingArenaQueue(queueStatus.battleRoyale)) {
+      requests.push(apiFetch('/arena/battle-royales/queue/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ seasonId: season?.id, reason: options.reason })
+      }).then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.message || '8인전 대기열을 정리하지 못했습니다.');
+        return { queue: 'battle_royale_8' as const, json };
+      }));
+    }
+    if (!requests.length) return true;
+
+    const results = await Promise.all(requests);
+    const matched = results.find((result) => result.json?.matchId || result.json?.ticket?.matchedMatchId);
+    const matchedMatchId = matched?.json?.matchId || matched?.json?.ticket?.matchedMatchId;
+    if (matchedMatchId) {
+      router.push(getArenaMatchHref(matchedMatchId));
+      return false;
+    }
+    await loadArenaV2();
+    toast('이전 대기열을 정리했습니다.', 'info');
+    return true;
+  };
+
   const startBotMatch = async () => {
     if (!selectedDeckId) {
       setNotice('봇전을 시작하려면 먼저 유효한 공식 덱이 필요합니다.');
       return;
     }
     try {
+      const canStart = await releaseArenaQueueLocks({ quick: true, battleRoyale: true, reason: 'start_bot_match' });
+      if (!canStart) return;
       const res = await apiFetch('/arena/matches', {
         method: 'POST',
         body: JSON.stringify({ mode: 'bot', deckId: selectedDeckId, seasonId: season?.id, botDifficulty: 'normal' })
@@ -954,8 +1000,14 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setNotice('대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.');
       return;
     }
-    const endpoint = queue === 'quick' ? '/arena/matchmaking/quick/join' : '/arena/battle-royales/join';
+    const endpoint = queue === 'quick' ? '/arena/matchmaking/quick/join' : '/arena/battle-royales/queue/join';
     try {
+      const canJoin = await releaseArenaQueueLocks({
+        quick: queue !== 'quick',
+        battleRoyale: queue !== 'battle_royale_8',
+        reason: `join_${queue}`
+      });
+      if (!canJoin) return;
       const res = await apiFetch(endpoint, {
         method: 'POST',
         body: JSON.stringify({ deckId: selectedDeckId, seasonId: season?.id })
@@ -1539,6 +1591,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                 seasonId={season?.id}
                 initialStatus={queueStatus.quick}
                 onMissingDeck={() => setNotice('빠른대전을 시작하려면 먼저 대전 가능한 덱이 필요합니다.')}
+                onBeforeSearch={() => releaseArenaQueueLocks({ quick: false, battleRoyale: true, reason: 'start_quick_match' })}
                 onMatch={(matchId) => router.push(getArenaMatchHref(matchId))}
                 notify={(message, tone) => toast(message, tone)}
               />

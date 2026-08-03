@@ -4664,6 +4664,83 @@ export const syncArenaV2MatchForUser = async (
   return getArenaV2MatchForUser(matchId, userId, battleRoyaleId);
 };
 
+export const abandonArenaV2BotMatchForUser = async (matchId: string, userId: string) => {
+  const db = getExecutor();
+  if (!db) throw new Error('ArenaV2SqlDbRequired');
+  await withArenaV2Transaction(async (tx) => {
+    const match = await queryGet<any>(
+      tx,
+      `
+        SELECT id, mode, status, turn_no, result_summary
+          FROM arena_v2_matches
+         WHERE id = ?
+         LIMIT 1
+         ${arenaV2ForUpdateClause()}
+      `,
+      [matchId]
+    );
+    if (!match) throw new Error('ArenaV2MatchNotFound');
+    const players = await queryAll<any>(
+      tx,
+      `
+        SELECT user_id, seat_no
+          FROM arena_v2_match_players
+         WHERE match_id = ?
+         ORDER BY seat_no ASC
+         ${arenaV2ForUpdateClause()}
+      `,
+      [matchId]
+    );
+    const self = players.find((player) => player.user_id === userId);
+    if (!self) throw new Error('ArenaV2MatchForbidden');
+    if (match.mode !== 'bot') throw new Error('ArenaV2MatchNotBot');
+    if (String(match.status) === 'completed') return;
+    if (String(match.status) === 'cancelled') throw new Error('ArenaV2MatchAlreadyCancelled');
+
+    const bot = players.find((player) => !player.user_id);
+    const finishedAt = new Date().toISOString();
+    const replayExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { phaseTiming: _phaseTiming, ...summary } = parseArenaV2StoredSummary(match.result_summary);
+    const resultSummary: ArenaV2StoredSummary = {
+      ...summary,
+      status: 'completed',
+      result: 'win',
+      winnerSeatNo: bot ? Number(bot.seat_no) : null,
+      loserSeatNo: Number(self.seat_no),
+      completedReason: 'bot_match_abandoned',
+      abandonedBySeatNo: Number(self.seat_no),
+      abandonedAt: finishedAt
+    };
+
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_match_players
+           SET final_rank = CASE WHEN user_id = ? THEN 2 ELSE 1 END,
+               player_health = CASE WHEN user_id = ? THEN 0 ELSE player_health END,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE match_id = ?
+      `,
+      [userId, userId, matchId]
+    );
+    await runSql(
+      tx,
+      `
+        UPDATE arena_v2_matches
+           SET status = 'completed',
+               winner_user_id = NULL,
+               finished_at = ?,
+               replay_expires_at = ?,
+               result_summary = ?,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status NOT IN ('completed', 'cancelled')
+      `,
+      [finishedAt, replayExpiresAt, JSON.stringify(resultSummary), matchId]
+    );
+  });
+  return getArenaV2MatchForUser(matchId, userId);
+};
+
 export const submitArenaV2Mulligan = async (input: ArenaV2SubmitMulliganInput) => {
   const db = getExecutor();
   if (!db) throw new Error('ArenaV2SqlDbRequired');

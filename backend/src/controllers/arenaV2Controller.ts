@@ -4,6 +4,7 @@ import { streamerRepository } from '../repositories';
 import {
   arenaV2TargetExists,
   acceptArenaV2QuickQueue,
+  abandonArenaV2BotMatchForUser,
   cancelArenaV2BattleRoyaleQueue,
   cancelArenaV2QuickQueue,
   createArenaV2ReplayHoldAdmin,
@@ -493,6 +494,26 @@ export const submitArenaV2MulliganController = async (req: AuthenticatedRequest,
     if (message === 'ArenaV2MulliganCardInvalid') return res.status(400).json({ error: message, message: '손패에 없는 카드는 멀리건할 수 없습니다.' });
     if (message === 'ArenaV2MulliganTooManyCards') return res.status(400).json({ error: message, message: '멀리건은 최대 3장까지 가능합니다.' });
     if (message === 'ArenaV2MulliganAlreadyDone') return res.status(409).json({ error: message, message: '이미 멀리건을 제출했습니다.' });
+    throw err;
+  }
+};
+
+export const abandonArenaV2BotMatchController = async (req: AuthenticatedRequest, res: Response) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const matchId = assertBodyString(req.params?.match_id);
+  if (!matchId) {
+    return res.status(400).json({ error: 'ArenaV2MatchInvalid', message: 'matchId가 필요합니다.' });
+  }
+  try {
+    const match = await abandonArenaV2BotMatchForUser(matchId, user.id);
+    return res.status(200).json({ match });
+  } catch (err: any) {
+    const message = String(err?.message || '');
+    if (message === 'ArenaV2MatchNotFound') return res.status(404).json({ error: message, message: '아레나 v2 매치를 찾을 수 없습니다.' });
+    if (message === 'ArenaV2MatchForbidden') return res.status(403).json({ error: message, message: '이 매치에 접근할 수 없습니다.' });
+    if (message === 'ArenaV2MatchNotBot') return res.status(409).json({ error: message, message: '연습전만 나가기 즉시 종료할 수 있습니다.' });
+    if (message === 'ArenaV2MatchAlreadyCancelled') return res.status(409).json({ error: message, message: '이미 취소된 매치입니다.' });
     throw err;
   }
 };

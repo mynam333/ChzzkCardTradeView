@@ -27,11 +27,13 @@ type ArenaQuickMatchFlowProps = {
   seasonId?: string;
   initialStatus?: unknown;
   onMissingDeck: () => void;
+  onBeforeSearch?: () => Promise<boolean> | boolean;
   onMatch: (matchId: string) => void;
   notify?: (message: string, tone: NoticeTone) => void;
 };
 
 const pollablePhases = new Set(['searching', 'proposal', 'accepted']);
+const serverQueuePhases = new Set(['joining', 'searching', 'proposal', 'accepted']);
 const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const getErrorMessage = (value: unknown, fallback: string) => {
@@ -259,7 +261,7 @@ const ArenaQuickMatchDialog: React.FC<{
   );
 };
 
-export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId, seasonId, initialStatus, onMissingDeck, onMatch, notify }) => {
+export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId, seasonId, initialStatus, onMissingDeck, onBeforeSearch, onMatch, notify }) => {
   const [open, setOpen] = React.useState(false);
   const [snapshot, setSnapshot] = React.useState<ArenaQuickMatchSnapshot>(() => createIdleArenaQuickMatchSnapshot());
   const [busyAction, setBusyAction] = React.useState<BusyAction>(null);
@@ -280,9 +282,11 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
   const soundedProposalRef = React.useRef<string | null>(null);
   const navigatedMatchRef = React.useRef<string | null>(null);
   const initialStatusRef = React.useRef<unknown>(null);
+  const seasonIdRef = React.useRef(seasonId);
   const onMatchRef = React.useRef(onMatch);
   const notifyRef = React.useRef(notify);
 
+  React.useEffect(() => { seasonIdRef.current = seasonId; }, [seasonId]);
   React.useEffect(() => { onMatchRef.current = onMatch; }, [onMatch]);
   React.useEffect(() => { notifyRef.current = notify; }, [notify]);
 
@@ -305,6 +309,15 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
 
   const restartPolling = React.useCallback(() => {
     setPollGeneration((generation) => generation + 1);
+  }, []);
+
+  const cancelServerQueueSilently = React.useCallback((reason: string) => {
+    const activeSeasonId = seasonIdRef.current;
+    void apiFetch('/arena/matchmaking/quick/cancel', {
+      method: 'POST',
+      keepalive: true,
+      body: JSON.stringify({ seasonId: activeSeasonId, reason })
+    }).catch(() => undefined);
   }, []);
 
   const unlockAudio = React.useCallback(async () => {
@@ -408,6 +421,10 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
       return;
     }
     if (busyActionRef.current) return;
+    if (onBeforeSearch) {
+      const canSearch = await onBeforeSearch();
+      if (!canSearch || busyActionRef.current) return;
+    }
     const { controller, operationEpoch, requestId } = beginAction('join');
     void unlockAudio();
     const startedAtMs = Date.now();
@@ -438,7 +455,7 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
     } finally {
       if (isCurrentArenaQuickMatchOperation(requestId, actionRequestRef.current, operationEpoch, operationEpochRef.current)) setBusy(null);
     }
-  }, [applyResponse, beginAction, deckId, onMissingDeck, seasonId, setBusy, unlockAudio]);
+  }, [applyResponse, beginAction, deckId, onBeforeSearch, onMissingDeck, seasonId, setBusy, unlockAudio]);
 
   const acceptProposal = React.useCallback(async () => {
     const current = snapshotRef.current;
@@ -592,6 +609,10 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
   }, [applyResponse, open, pollGeneration, seasonId, snapshot.phase]);
 
   React.useEffect(() => () => {
+    const current = snapshotRef.current;
+    if (!navigatedMatchRef.current && serverQueuePhases.has(current.phase)) {
+      cancelServerQueueSilently('quick_match_flow_disposed');
+    }
     actionRequestRef.current += 1;
     operationEpochRef.current += 1;
     pollRequestRef.current += 1;
@@ -602,7 +623,7 @@ export const ArenaQuickMatchFlow: React.FC<ArenaQuickMatchFlowProps> = ({ deckId
       audioContext.onstatechange = null;
       void audioContext.close();
     }
-  }, []);
+  }, [cancelServerQueueSilently]);
 
   return (
     <>

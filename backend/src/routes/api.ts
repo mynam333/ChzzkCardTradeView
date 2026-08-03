@@ -218,6 +218,7 @@ import {
 } from '../controllers/minigameController';
 import {
   acceptMyArenaV2QuickQueueController,
+  abandonArenaV2BotMatchController,
   cancelMyArenaV2BattleRoyaleQueueController,
   cancelMyArenaV2QuickQueueController,
   createArenaV2BotMatchController,
@@ -640,6 +641,7 @@ router.post('/arena/matches/:match_id/mulligan', authMiddleware, banCheckMiddlew
 router.post('/arena/matches/:match_id/turn-action', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
 router.post('/arena/matches/:match_id/actions', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, submitArenaV2TurnActionsController);
 router.post('/arena/matches/:match_id/emotes', authMiddleware, banCheckMiddleware, arenaCosmeticWriteLimiter, sendArenaEmote);
+router.post('/arena/matches/:match_id/abandon-bot', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, abandonArenaV2BotMatchController);
 router.post('/arena/matches/:match_id/rounds/commit', authMiddleware, banCheckMiddleware, arenaRoundCommitLimiter, arenaV2LegacyEndpointRemoved);
 router.get('/arena/matches/:match_id', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2MatchController);
 router.get('/arena/matches/:match_id/replay', authMiddleware, banCheckMiddleware, arenaReadLimiter, getArenaV2ReplayController);
