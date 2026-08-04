@@ -686,9 +686,6 @@ const buildPublicRound = (gameType: string, rawRound: any, sessionId: string, us
     const y = Number(crop.y);
     const size = Number(crop.size);
     const sourceImageUrl = String(rawRound?.source_image_url || '').trim();
-    const fallbackSourceImageUrl = String(
-      rawRound?.source_fallback_image_url || sourceImageUrl
-    ).trim() || sourceImageUrl;
     const choices = Array.isArray(rawRound?.choices) ? rawRound.choices.map(stripCardValue) : [];
     if (
       !sourceImageUrl || !Number.isFinite(x) || !Number.isFinite(y) ||
@@ -697,27 +694,17 @@ const buildPublicRound = (gameType: string, rawRound: any, sessionId: string, us
     ) return null;
     try {
       const protectedCrop = { x, y, size, rotation };
-      const createProtectedCropReference = (sourceUrl: string) => createMinigameImageReference({
+      const sourceImageReference = createMinigameImageReference({
         userId,
         sessionId,
         round,
-        sourceUrl,
+        sourceUrl: sourceImageUrl,
         kind: 'crop',
         crop: protectedCrop
       });
-      const sourceImageReference = createProtectedCropReference(sourceImageUrl);
-      let fallbackImageReference: string;
-      try {
-        fallbackImageReference = createProtectedCropReference(fallbackSourceImageUrl);
-      } catch {
-        // A malformed legacy fallback must not invalidate an otherwise playable
-        // round. A separately randomized reference also keeps response shape fixed.
-        fallbackImageReference = createProtectedCropReference(sourceImageUrl);
-      }
       return {
         round,
         source_image_url: sourceImageReference,
-        source_fallback_image_url: fallbackImageReference,
         // The real crop geometry is encrypted into the image reference. The
         // browser receives only the already-rendered square clue.
         crop: { x: 0.5, y: 0.5, size: 1, rotation: 0 },
@@ -1309,7 +1296,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     targetData.validation_version = MINIGAME_VALIDATION_VERSION;
 
     // A paid crop round is armed only by the protected image renderer, after a
-    // real clue (or its deterministic fallback) is ready and immediately before
+    // real clue is ready and immediately before
     // bytes are sent. This prevents image preparation time from consuming play.
     const initialRoundDeadlineAt = !practiceMode && isRoundGameType(game_type)
       ? game_type === 'crop_detective' ? null : createRoundDeadline(game_type, true)

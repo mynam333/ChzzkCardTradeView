@@ -6,7 +6,10 @@ export const MINIGAME_IMAGE_REFERENCE_PREFIX = 'minigame-image:v1:';
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
-const TOKEN_TTL_MS = 30_000;
+// Round references can be issued while answer feedback is visible. Keep them
+// valid for the same bounded window as a started round-game session so an
+// intentional pause before "next question" does not manufacture a 410.
+export const MINIGAME_IMAGE_TOKEN_TTL_MS = 3 * 60_000;
 const MAX_CLOCK_SKEW_MS = 5_000;
 // 5,600 encrypted plaintext bytes produce a 7,504-character base64url token
 // (including the IV/tag but excluding the short marker), leaving room beneath
@@ -164,7 +167,7 @@ const normalizePayload = (value: unknown, now: number): MinigameImagePayload => 
     payload.notBefore < payload.issuedAt ||
     payload.notBefore > now + MAX_CLOCK_SKEW_MS ||
     payload.expiresAt <= payload.issuedAt ||
-    payload.expiresAt - payload.issuedAt > TOKEN_TTL_MS
+    payload.expiresAt - payload.issuedAt > MINIGAME_IMAGE_TOKEN_TTL_MS
   ) return invalidToken();
   if (payload.expiresAt <= now) throw new MinigameImageTokenError('EXPIRED');
 
@@ -222,7 +225,7 @@ export const createMinigameImageReference = (
     ...(input.kind === 'crop' ? { crop: input.crop } : {}),
     issuedAt: now,
     notBefore: now,
-    expiresAt: now + TOKEN_TTL_MS
+    expiresAt: now + MINIGAME_IMAGE_TOKEN_TTL_MS
   }, now);
   const plaintext = encodeFixedEnvelope(payload);
 

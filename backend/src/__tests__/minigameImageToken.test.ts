@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMinigameImageReference,
+  MINIGAME_IMAGE_TOKEN_TTL_MS,
   MINIGAME_IMAGE_REFERENCE_PREFIX,
   MinigameImageTokenError,
   openMinigameImageReference,
@@ -99,9 +100,12 @@ describe('minigame image reference encryption', () => {
     expect(() => openMinigameImageToken(tampered)).toThrowError(MinigameImageTokenError);
   });
 
-  it('rejects expired references after the 30-second validity window', () => {
+  it('keeps feedback-delayed references valid but rejects them after the session window', () => {
     const opaque = issueQuizReference().slice(MINIGAME_IMAGE_REFERENCE_PREFIX.length);
-    vi.setSystemTime(new Date(issuedAt.getTime() + 30_001));
+    vi.setSystemTime(new Date(issuedAt.getTime() + 31_000));
+    expect(openMinigameImageToken(opaque)).toMatchObject({ round: 2, kind: 'quiz' });
+
+    vi.setSystemTime(new Date(issuedAt.getTime() + MINIGAME_IMAGE_TOKEN_TTL_MS + 1));
 
     try {
       openMinigameImageToken(opaque);

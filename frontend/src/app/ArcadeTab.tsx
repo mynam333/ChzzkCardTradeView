@@ -29,8 +29,17 @@ import {
   areCropDetectiveAssetsSettled,
   createCropDetectiveCssCropGeometry,
   createCropDetectiveImageSourceChain,
+  createCropDetectiveVerificationCandidates,
+  resolveCropDetectiveImageSource,
+  selectCropDetectiveVerificationCandidate,
   type CropDetectiveImageSource
 } from './cropDetectiveImageSources';
+import {
+  CROP_DETECTIVE_RECOVERY_POLICY,
+  canAutomaticallyRefreshCropDetectiveSession,
+  runAbortableTaskWithTimeout,
+  waitForAbortableDelay
+} from './cropDetectiveRecovery';
 
 type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
 type QuizChoice = {
@@ -1330,65 +1339,9 @@ const CROP_ALPHA_THRESHOLD = 40;
 const CROP_MIN_OPAQUE_RATIO = 0.82;
 const CROP_MIN_DETAIL_SCORE = 0.16;
 const CROP_GOOD_CONTENT_SCORE = 0.52;
-const CROP_ALPHA_CANDIDATE_COUNT = 64;
 const CROP_IMAGE_BACKEND_RETRY_VARIANT = 2;
 const CROP_IMAGE_PRELOAD_CACHE_LIMIT = 80;
-
-const hashStringToSeed = (value: string) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-};
-
-const createSeededRandom = (seed: number) => {
-  let state = seed || 1;
-  return () => {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    return ((state >>> 0) / 4294967296);
-  };
-};
-
-const buildCropCandidates = (
-  baseX: number,
-  baseY: number,
-  bounds: { minX: number; maxX: number; minY: number; maxY: number },
-  seedSource: string
-) => {
-  const clampX = (value: number) => clampCropValue(value, bounds.minX, bounds.maxX);
-  const clampY = (value: number) => clampCropValue(value, bounds.minY, bounds.maxY);
-  const random = createSeededRandom(hashStringToSeed(seedSource));
-  const candidates: Array<{ x: number; y: number }> = [{ x: baseX, y: baseY }];
-  const rangeX = Math.max(0, bounds.maxX - bounds.minX);
-  const rangeY = Math.max(0, bounds.maxY - bounds.minY);
-  const range = Math.max(rangeX, rangeY);
-  const pushCandidate = (x: number, y: number) => {
-    const candidate = { x: clampX(x), y: clampY(y) };
-    const exists = candidates.some(item => Math.abs(item.x - candidate.x) < 0.001 && Math.abs(item.y - candidate.y) < 0.001);
-    if (!exists) candidates.push(candidate);
-  };
-
-  for (const radiusRatio of [0.18, 0.32, 0.46]) {
-    for (let step = 0; step < 6; step += 1) {
-      const angle = random() * Math.PI * 2;
-      const radius = range * radiusRatio * (0.55 + random() * 0.45);
-      pushCandidate(baseX + Math.cos(angle) * radius, baseY + Math.sin(angle) * radius);
-    }
-  }
-
-  let randomAttempts = 0;
-  while (candidates.length < CROP_ALPHA_CANDIDATE_COUNT && randomAttempts < CROP_ALPHA_CANDIDATE_COUNT * 8) {
-    pushCandidate(bounds.minX + random() * rangeX, bounds.minY + random() * rangeY);
-    randomAttempts += 1;
-  }
-
-  pushCandidate(0.5, 0.5);
-  return candidates;
-};
+const CROP_IMAGE_PRELOAD_HARD_TIMEOUT_MS = 8_000;
 
 type CropContentScore = {
   opaqueRatio: number;
@@ -1539,7 +1492,8 @@ const getCropDetectiveImageSources = (
   fallbackUrl?: string | null,
   profile: { readonly width: number; readonly quality: number } = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice
 ): CropDetectiveImageSource[] => {
-  const rawUrl = String(url || '/icon.png').trim() || '/icon.png';
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) return [];
   const originalProxyUrl = proxiedImage(rawUrl) || rawUrl;
   const isRelativeLocalUpload = /^\/?uploads\//i.test(rawUrl);
   let isAbsoluteLocalUpload = false;
@@ -1560,16 +1514,19 @@ const getCropDetectiveImageSources = (
     backendFallbackUrl: fallbackUrl
       ? getCropDetectiveStillImage(fallbackUrl, profile.width, profile.quality)
       : withCropDetectiveRetryToken(originalProxyUrl, CROP_IMAGE_BACKEND_RETRY_VARIANT),
-    fallbackSeed: rawUrl,
     preferOriginal: profile === CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview && (isRelativeLocalUpload || isAbsoluteLocalUpload)
   });
 };
 
 type LoadedCropDetectiveImage = {
   url: string;
-  image: HTMLImageElement | null;
-  usedLocalFallback: boolean;
+  image: HTMLImageElement;
 };
+
+type CropDetectiveImageLoadResult =
+  | { status: 'loading'; loaded: null }
+  | { status: 'loaded'; loaded: LoadedCropDetectiveImage }
+  | { status: 'failed'; loaded: null };
 
 const cropDetectiveImagePreloadCache = new Map<string, Promise<HTMLImageElement | null>>();
 
@@ -1580,9 +1537,11 @@ const preloadCropDetectiveImage = (url: string, retainResolved = true) => {
   const request = new Promise<HTMLImageElement | null>((resolve) => {
     const image = new Image();
     let settled = false;
+    let timeoutId: number | null = null;
     const finish = (result: HTMLImageElement | null) => {
       if (settled) return;
       settled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       image.onload = null;
       image.onerror = null;
       resolve(result);
@@ -1599,7 +1558,15 @@ const preloadCropDetectiveImage = (url: string, retainResolved = true) => {
       image.decode().then(finishLoaded).catch(finishLoaded);
     };
     image.onerror = () => finish(null);
-    image.src = url;
+    timeoutId = window.setTimeout(() => {
+      finish(null);
+      image.src = '';
+    }, CROP_IMAGE_PRELOAD_HARD_TIMEOUT_MS);
+    try {
+      image.src = url;
+    } catch {
+      finish(null);
+    }
   });
 
   cropDetectiveImagePreloadCache.set(url, request);
@@ -1620,83 +1587,42 @@ const useCropDetectiveImageSource = (
   sources: readonly CropDetectiveImageSource[],
   timeoutMs: number = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.timeoutMs,
   retainResolved: boolean = CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.retainResolved
-): LoadedCropDetectiveImage | null => {
+): CropDetectiveImageLoadResult => {
   const sourceSignature = sources.map((source) => `${source.kind}:${source.url}`).join('\u0001');
   const [loadedState, setLoadedState] = useState<{
     generationKey: string;
     sourceSignature: string;
-    loaded: LoadedCropDetectiveImage | null;
-  }>({ generationKey: '', sourceSignature: '', loaded: null });
-  const currentLoaded = loadedState.generationKey === generationKey && loadedState.sourceSignature === sourceSignature
-    ? loadedState.loaded
-    : null;
+    result: CropDetectiveImageLoadResult;
+  }>({ generationKey: '', sourceSignature: '', result: { status: 'loading', loaded: null } });
+  const currentResult = loadedState.generationKey === generationKey && loadedState.sourceSignature === sourceSignature
+    ? loadedState.result
+    : { status: 'loading' as const, loaded: null };
 
   useEffect(() => {
     let cancelled = false;
-    let timeoutId: number | null = null;
-    const deadlineAt = Date.now() + Math.max(0, timeoutMs);
-
-    const trySource = async (sourceIndex: number): Promise<void> => {
+    void resolveCropDetectiveImageSource<HTMLImageElement>({
+      sources,
+      timeoutMs,
+      load: (source) => preloadCropDetectiveImage(source.url, retainResolved)
+    }).then((resolved) => {
       if (cancelled) return;
-      const source = sources[sourceIndex] || sources[sources.length - 1];
-      if (!source) return;
-
-      // A deterministic data URL has no network dependency, but it still has to
-      // decode successfully before the round can be revealed and timed.
-      if (source.guaranteed) {
-        const image = await preloadCropDetectiveImage(source.url, true);
-        if (cancelled || !image) return;
-        setLoadedState({
-          generationKey,
-          sourceSignature,
-          loaded: {
-            url: source.url,
-            image,
-            usedLocalFallback: true
-          }
-        });
-        return;
-      }
-
-      const remainingMs = deadlineAt - Date.now();
-      if (remainingMs <= 0) {
-        await trySource(sourceIndex + 1);
-        return;
-      }
-
-      const timeout = new Promise<null>((resolve) => {
-        timeoutId = window.setTimeout(() => resolve(null), remainingMs);
+      setLoadedState({
+        generationKey,
+        sourceSignature,
+        result: resolved
+          ? {
+              status: 'loaded',
+              loaded: { url: resolved.source.url, image: resolved.value }
+            }
+          : { status: 'failed', loaded: null }
       });
-      const image = await Promise.race([preloadCropDetectiveImage(source.url, retainResolved), timeout]);
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      timeoutId = null;
-      if (cancelled) return;
-
-      if (image) {
-        setLoadedState({
-          generationKey,
-          sourceSignature,
-          loaded: {
-            url: source.url,
-            image,
-            usedLocalFallback: false
-          }
-        });
-        return;
-      }
-
-      // Each asset advances independently; one failed card never poisons the round.
-      await trySource(sourceIndex + 1);
-    };
-
-    void trySource(0);
+    });
     return () => {
       cancelled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [generationKey, retainResolved, sourceSignature, sources, timeoutMs]);
 
-  return currentLoaded;
+  return currentResult;
 };
 
 const CardImageTile: React.FC<{
@@ -1711,6 +1637,9 @@ const CardImageTile: React.FC<{
   showStarLabel?: boolean;
   freezeImage?: boolean;
   hideImageUntilRevealed?: boolean;
+  imageUnavailable?: boolean;
+  onImageLoad?: () => void;
+  onImageError?: () => void;
   onClick?: () => void;
 }> = ({
   card,
@@ -1724,6 +1653,9 @@ const CardImageTile: React.FC<{
   showStarLabel = true,
   freezeImage = false,
   hideImageUntilRevealed = false,
+  imageUnavailable = false,
+  onImageLoad,
+  onImageError,
   onClick
 }) => {
   const imageUrl = imageUrlOverride || (
@@ -1732,7 +1664,7 @@ const CardImageTile: React.FC<{
       : card.image_url || '/icon.png'
   );
   const nativeDisabled = disabled && !imageBlindEnabled;
-  const shouldHideImage = hideImageUntilRevealed && !correct && !wrong;
+  const shouldHideImage = (hideImageUntilRevealed || imageUnavailable) && !correct && !wrong;
 
   return (
     <button
@@ -1767,7 +1699,12 @@ const CardImageTile: React.FC<{
           decoding="async"
           draggable={false}
           imageBlindMenuEnabled={imageBlindEnabled}
+          onLoad={onImageLoad}
           onError={(event) => {
+            if (onImageError) {
+              onImageError();
+              return;
+            }
             if (!event.currentTarget.src.endsWith('/icon.png')) {
               event.currentTarget.src = '/icon.png';
             }
@@ -1775,8 +1712,10 @@ const CardImageTile: React.FC<{
         />
         {shouldHideImage ? (
           <div className="absolute inset-0 flex h-full w-full flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_25%,rgba(232,121,249,0.22),rgba(24,24,27,0.96)_68%)] px-3 text-center text-white">
-            <RefreshCw className="h-6 w-6 animate-spin opacity-80" aria-hidden="true" />
-            <span className="text-[10px] font-black text-white/80">후보 이미지 로딩</span>
+            <RefreshCw className={`h-6 w-6 opacity-80 ${imageUnavailable ? '' : 'animate-spin'}`} aria-hidden="true" />
+            <span className="text-[10px] font-black text-white/80">
+              {imageUnavailable ? '후보 이미지 표시 실패' : '후보 이미지 로딩'}
+            </span>
           </div>
         ) : null}
       </div>
@@ -1793,107 +1732,175 @@ const CardImageTile: React.FC<{
 type CropPreviewProps = {
   round: CropDetectiveRound;
   revealed: boolean;
-  forceDeterministicFallback?: boolean;
   onPrepared?: (roundKey: string, options?: {
-    forceLocalFallback?: boolean;
     localDeadlineAt?: number;
   }) => void;
-  onLoadFailed?: (roundKey: string) => Promise<boolean>;
+  onLoadFailed?: (roundKey: string, signal: AbortSignal) => Promise<boolean>;
+  onRecoveryStateChange?: (roundKey: string, retryable: boolean) => void;
 };
 
 const ProtectedCropPreview: React.FC<CropPreviewProps> = ({
   round,
   revealed,
-  forceDeterministicFallback = false,
   onPrepared,
-  onLoadFailed
+  onLoadFailed,
+  onRecoveryStateChange
 }) => {
   const roundKey = getCropDetectiveRoundKey(round);
   const primaryUrl = resolveMinigameImage(round.source_image_url);
-  const requestUrl = forceDeterministicFallback && primaryUrl && primaryUrl !== '/icon.png'
-    ? `${primaryUrl}${primaryUrl.includes('?') ? '&' : '?'}fallback=deterministic`
-    : primaryUrl;
+  const [requestNonce, setRequestNonce] = useState(0);
+  const [completedSessionRefreshes, setCompletedSessionRefreshes] = useState(0);
+  const requestUrl = primaryUrl;
   const [displayUrl, setDisplayUrl] = useState('');
-  const [forceLocalFallback, setForceLocalFallback] = useState(false);
+  const displayObjectUrlRef = useRef('');
+  const preparedDisplayUrlRef = useRef('');
   const [localDeadlineAt, setLocalDeadlineAt] = useState<number | null>(null);
-  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'recovering'>(() =>
+  const [loadState, setLoadState] = useState<
+    'loading' | 'displaying' | 'loaded' | 'recovering' | 'refreshing' | 'retryable'
+  >(() =>
     !requestUrl || requestUrl === '/icon.png' ? 'recovering' : 'loading'
   );
-  const [recoveryAttempt, setRecoveryAttempt] = useState(0);
 
-  // Fetching the already-cropped image lets the browser read the server's
-  // non-sensitive fallback-mode header. When the worker had to synthesize the
-  // clue, all four candidate tiles switch to their matching deterministic
-  // artwork, so an upstream outage can never create a clue with no valid answer.
+  const revokeDisplayedImage = useCallback(() => {
+    const objectUrl = displayObjectUrlRef.current;
+    displayObjectUrlRef.current = '';
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    setDisplayUrl('');
+    setLocalDeadlineAt(null);
+  }, []);
+
+  const advanceAfterRequestFailure = useCallback(() => {
+    revokeDisplayedImage();
+    setLoadState('refreshing');
+  }, [revokeDisplayedImage]);
+
+  // Fetch the protected real crop once. A legacy server-generated fallback is
+  // rejected so generated artwork can never enter a Crop Detective round.
   useEffect(() => {
-    if (!requestUrl || requestUrl === '/icon.png') return;
+    let cancelled = false;
+    if (!requestUrl || requestUrl === '/icon.png') {
+      queueMicrotask(() => {
+        if (!cancelled) advanceAfterRequestFailure();
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const controller = new AbortController();
-    let cancelled = false;
     let objectUrl = '';
-    const timeout = window.setTimeout(() => controller.abort(), 8_000);
-    void fetch(requestUrl, {
-      credentials: 'include',
-      cache: 'no-store',
-      signal: controller.signal
-    }).then(async (response) => {
-      if (!response.ok) throw new Error(`protected crop ${response.status}`);
-      const serverDeadlineMs = Date.parse(response.headers.get('X-Minigame-Round-Deadline') || '');
-      const serverNowMs = Date.parse(response.headers.get('X-Minigame-Server-Now') || '');
-      if (!Number.isFinite(serverDeadlineMs) || !Number.isFinite(serverNowMs)) {
-        throw new Error('protected crop timing headers are missing');
-      }
-      const responseLocalDeadlineAt = Date.now() + Math.max(0, serverDeadlineMs - serverNowMs);
-      const responseUsesDeterministicFallback =
-        response.headers.get('X-Minigame-Image-Fallback') === 'deterministic';
-      if (forceDeterministicFallback && !responseUsesDeterministicFallback) {
-        throw new Error('protected crop fallback mode mismatch');
-      }
-      const blob = await response.blob();
-      if (!blob.type.startsWith('image/')) throw new Error('protected crop is not an image');
+    queueMicrotask(() => {
       if (cancelled) return;
-      objectUrl = URL.createObjectURL(blob);
-      setForceLocalFallback(responseUsesDeterministicFallback);
-      setLocalDeadlineAt(responseLocalDeadlineAt);
-      setDisplayUrl(objectUrl);
-    }).catch(() => {
-      if (!cancelled) setLoadState('recovering');
-    }).finally(() => window.clearTimeout(timeout));
+      revokeDisplayedImage();
+      setLoadState('loading');
+    });
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      CROP_DETECTIVE_RECOVERY_POLICY.primaryRequestTimeoutMs
+    );
+    void (async () => {
+      try {
+        const response = await fetch(requestUrl, {
+          credentials: 'include',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`protected crop ${response.status}`);
+        const fallbackMode = response.headers.get('X-Minigame-Image-Fallback');
+        if (fallbackMode && !['source', 'source-fallback', 'last-attempt'].includes(fallbackMode)) {
+          throw new Error('generated protected crop is not allowed');
+        }
+        const serverDeadlineMs = Date.parse(response.headers.get('X-Minigame-Round-Deadline') || '');
+        const serverNowMs = Date.parse(response.headers.get('X-Minigame-Server-Now') || '');
+        if (!Number.isFinite(serverDeadlineMs) || !Number.isFinite(serverNowMs)) {
+          throw new Error('protected crop timing headers are missing');
+        }
+        const responseLocalDeadlineAt = Date.now() + Math.max(0, serverDeadlineMs - serverNowMs);
+        const blob = await response.blob();
+        if (!blob.type.startsWith('image/') || blob.size <= 0) {
+          throw new Error('protected crop is not an image');
+        }
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        displayObjectUrlRef.current = objectUrl;
+        setLocalDeadlineAt(responseLocalDeadlineAt);
+        setDisplayUrl(objectUrl);
+        setLoadState('displaying');
+      } catch {
+        if (!cancelled) advanceAfterRequestFailure();
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    })();
 
     return () => {
       cancelled = true;
       controller.abort();
       window.clearTimeout(timeout);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl && displayObjectUrlRef.current === objectUrl) {
+        displayObjectUrlRef.current = '';
+        URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [forceDeterministicFallback, requestUrl]);
+  }, [advanceAfterRequestFailure, requestNonce, requestUrl, revokeDisplayedImage]);
 
   useEffect(() => {
-    if (loadState !== 'recovering' || !onLoadFailed) return;
+    if (loadState !== 'displaying' || !displayUrl) return;
+    const timeout = window.setTimeout(
+      advanceAfterRequestFailure,
+      CROP_DETECTIVE_RECOVERY_POLICY.blobDecodeTimeoutMs
+    );
+    return () => window.clearTimeout(timeout);
+  }, [advanceAfterRequestFailure, displayUrl, loadState]);
+
+  useEffect(() => {
+    if (loadState !== 'refreshing') return;
     let cancelled = false;
-    const retryDelayMs = recoveryAttempt === 0
-      ? 0
-      : Math.min(10_000, 750 * (2 ** Math.min(recoveryAttempt - 1, 4)));
-    const timeout = window.setTimeout(() => {
-      void onLoadFailed(roundKey)
-        .then((recovered) => {
-          if (!cancelled && !recovered) setRecoveryAttempt((attempt) => attempt + 1);
-        })
-        .catch(() => {
-          if (!cancelled) setRecoveryAttempt((attempt) => attempt + 1);
-        });
-    }, retryDelayMs);
+    if (
+      !onLoadFailed ||
+      !canAutomaticallyRefreshCropDetectiveSession(completedSessionRefreshes)
+    ) {
+      queueMicrotask(() => {
+        if (!cancelled) setLoadState('retryable');
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    void runAbortableTaskWithTimeout(
+      (signal) => onLoadFailed(roundKey, signal),
+      CROP_DETECTIVE_RECOVERY_POLICY.activeSessionRecoveryTimeoutMs
+    ).then((result) => {
+      if (cancelled) return;
+      setCompletedSessionRefreshes((attempts) => attempts + 1);
+      if (result.status === 'completed' && result.value) {
+        setRequestNonce((nonce) => nonce + 1);
+        setLoadState('loading');
+        return;
+      }
+      setLoadState('retryable');
+    });
     return () => {
       cancelled = true;
-      window.clearTimeout(timeout);
     };
-  }, [loadState, onLoadFailed, recoveryAttempt, roundKey]);
+  }, [completedSessionRefreshes, loadState, onLoadFailed, roundKey]);
+
+  useEffect(() => {
+    onRecoveryStateChange?.(roundKey, loadState === 'retryable');
+  }, [loadState, onRecoveryStateChange, roundKey]);
+
+  const handleManualRetry = () => {
+    revokeDisplayedImage();
+    setCompletedSessionRefreshes(0);
+    setRequestNonce((nonce) => nonce + 1);
+    setLoadState('loading');
+  };
 
   return (
     <div
-      role="img"
+      role={loadState === 'retryable' ? 'group' : 'img'}
       aria-label="확대된 카드 이미지 조각"
-      aria-busy={loadState === 'loading' || loadState === 'recovering'}
+      aria-busy={loadState !== 'loaded' && loadState !== 'retryable'}
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -1908,26 +1915,41 @@ const ProtectedCropPreview: React.FC<CropPreviewProps> = ({
           draggable={false}
           onLoad={() => {
             if (localDeadlineAt === null) {
-              setLoadState('recovering');
+              advanceAfterRequestFailure();
               return;
             }
             setLoadState('loaded');
-            onPrepared?.(roundKey, { forceLocalFallback, localDeadlineAt });
+            if (preparedDisplayUrlRef.current === displayUrl) return;
+            preparedDisplayUrlRef.current = displayUrl;
+            onPrepared?.(roundKey, {
+              localDeadlineAt
+            });
           }}
-          onError={() => {
-            URL.revokeObjectURL(displayUrl);
-            setDisplayUrl('');
-            setLoadState('recovering');
-          }}
+          onError={advanceAfterRequestFailure}
         />
       ) : null}
-      {loadState === 'recovering' ? (
+      {loadState === 'retryable' ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(244,63,94,0.16),rgba(9,9,11,0.98)_70%)] px-5 text-center text-white">
+          <RefreshCw className="h-7 w-7 text-rose-300" aria-hidden="true" />
+          <span className="text-xs font-black text-white/90">이미지 연결을 완료하지 못했습니다</span>
+          <span className="text-[10px] font-bold text-white/60">현재 라운드와 기회는 유지됩니다.</span>
+          <button
+            type="button"
+            onClick={handleManualRetry}
+            className="mt-1 rounded-xl bg-white/12 px-3 py-1.5 text-[10px] font-black text-white transition hover:bg-white/20 active:scale-95"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : loadState === 'recovering' || loadState === 'refreshing' ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] px-5 text-center text-white">
           <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
-          <span className="text-xs font-black text-white/90">확대 이미지 자동 복구 중</span>
-          <span className="text-[10px] font-bold text-white/60">연결을 확인한 뒤 현재 라운드를 안전하게 이어갑니다.</span>
+          <span className="text-xs font-black text-white/90">
+            {loadState === 'refreshing' ? '현재 라운드 확인 중' : '확대 이미지 자동 복구 중'}
+          </span>
+          <span className="text-[10px] font-bold text-white/60">실제 카드 이미지만 다시 확인하고 있습니다.</span>
         </div>
-      ) : !revealed ? (
+      ) : loadState !== 'loaded' || !revealed ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] text-white">
           <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
           <span className="text-[10px] font-black tracking-wide text-white/75">확대 이미지 준비 중</span>
@@ -1943,7 +1965,12 @@ const ProtectedCropPreview: React.FC<CropPreviewProps> = ({
   );
 };
 
-const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrepared }) => {
+const ClientCropPreview: React.FC<CropPreviewProps> = ({
+  round,
+  revealed,
+  onPrepared,
+  onRecoveryStateChange
+}) => {
   const size = Math.max(0.04, Math.min(0.5, Number(round.crop?.size || 0.08)));
   const rotation = ((Math.floor(Number(round.crop?.rotation || 0)) % 360) + 360) % 360;
   const cropBounds = getCropDetectiveBounds(size, rotation);
@@ -1951,22 +1978,23 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
   const x = clampCropValue(Number(round.crop?.x || 0.5), minX, maxX);
   const y = clampCropValue(Number(round.crop?.y || 0.5), minY, maxY);
   const roundKey = getCropDetectiveRoundKey(round);
-  const generationKey = `${roundKey}:crop`;
+  const [sourceRetryNonce, setSourceRetryNonce] = useState(0);
+  const generationKey = `${roundKey}:crop:${sourceRetryNonce}`;
   const sources = useMemo(
     () => getCropDetectiveImageSources(
       round.source_image_url,
-      round.source_fallback_image_url,
+      null,
       CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview
     ),
-    [round.source_fallback_image_url, round.source_image_url]
+    [round.source_image_url]
   );
-  const loadedSource = useCropDetectiveImageSource(
+  const sourceResult = useCropDetectiveImageSource(
     generationKey,
     sources,
     CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview.timeoutMs,
     CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.preview.retainResolved
   );
-  const localFallbackUrl = sources[sources.length - 1]?.url || '/icon.png';
+  const loadedSource = sourceResult.loaded;
   const [previewState, setPreviewState] = useState<{
     roundKey: string;
     imageUrl: string;
@@ -1974,11 +2002,21 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
     cropY: number;
   }>({ roundKey: '', imageUrl: '', cropX: 0.5, cropY: 0.5 });
   const currentPreview = previewState.roundKey === roundKey ? previewState : null;
-  const preparedRoundRef = useRef('');
+  const [renderedPreviewState, setRenderedPreviewState] = useState({ roundKey: '', imageUrl: '' });
+  const [retryableRoundKey, setRetryableRoundKey] = useState('');
+  const [renderNonce, setRenderNonce] = useState(0);
+  const preparedPreviewRef = useRef('');
+  const currentPreviewRendered = Boolean(
+    currentPreview &&
+    renderedPreviewState.roundKey === roundKey &&
+    renderedPreviewState.imageUrl === currentPreview.imageUrl
+  );
+  const renderRetryable = retryableRoundKey === roundKey || sourceResult.status === 'failed';
 
-  const notifyPrepared = useCallback(() => {
-    if (preparedRoundRef.current === roundKey) return;
-    preparedRoundRef.current = roundKey;
+  const notifyPrepared = useCallback((imageUrl: string) => {
+    const preparationKey = `${roundKey}:${imageUrl}`;
+    if (preparedPreviewRef.current === preparationKey) return;
+    preparedPreviewRef.current = preparationKey;
     onPrepared?.(roundKey);
   }, [onPrepared, roundKey]);
 
@@ -1994,12 +2032,11 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
           cropX: crop.x,
           cropY: crop.y
         });
-        notifyPrepared();
       });
     };
 
     try {
-      if (!loadedSource.image || typeof document === 'undefined') {
+      if (typeof document === 'undefined') {
         applyDirectPreview({ x, y });
         return () => {
           cancelled = true;
@@ -2014,42 +2051,49 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
 
       drawImageCover(context, loadedSource.image, displayCanvas.width, displayCanvas.height);
       const imageData = context.getImageData(0, 0, displayCanvas.width, displayCanvas.height);
-      const candidates = buildCropCandidates(
-        x,
-        y,
+      const candidates = createCropDetectiveVerificationCandidates(
+        { x, y },
         { minX, maxX, minY, maxY },
         `${round.source_image_url}:${round.round}:${size}:${rotation}:${x}:${y}`
       );
-      let bestCrop = { x, y };
-      let bestScore = getCropContentScore(imageData, bestCrop, size, rotation);
-      let bestGoodCrop: { x: number; y: number } | null = null;
-      let bestGoodScore = -1;
-      for (const candidate of candidates) {
-        const contentScore = getCropContentScore(imageData, candidate, size, rotation);
-        if (contentScore.score > bestScore.score) {
-          bestScore = contentScore;
-          bestCrop = candidate;
-        }
-        if (isCropContentGoodEnough(contentScore) && contentScore.score > bestGoodScore) {
-          bestGoodScore = contentScore.score;
-          bestGoodCrop = candidate;
-        }
-      }
+      const selectedCrop = selectCropDetectiveVerificationCandidate(
+        candidates,
+        (candidate) => isCropContentGoodEnough(
+          getCropContentScore(imageData, candidate, size, rotation)
+        )
+      );
 
-      // Keep the small canvas for content analysis only. Rendering the decoded
-      // high-resolution source directly avoids a 12-24px -> 640px upscale and
-      // a second lossy WebP encoding pass.
-      applyDirectPreview(bestGoodCrop || bestCrop);
+      // The helper checks at most three positions. If none pass, selectedCrop is
+      // deliberately the third position from this same decoded card image.
+      applyDirectPreview(selectedCrop || { x, y });
     } catch {
-      // Canvas can be unavailable or tainted even after a successful image load. The
-      // clipped CSS transform preserves the clue without exposing the full answer.
+      // Canvas inspection can be unavailable because of browser/CORS policy.
+      // Keep the real source and original server-selected crop in that case.
       applyDirectPreview({ x, y });
     }
 
     return () => {
       cancelled = true;
     };
-  }, [loadedSource, maxX, maxY, minX, minY, notifyPrepared, rotation, round.round, round.source_image_url, roundKey, size, x, y]);
+  }, [loadedSource, maxX, maxY, minX, minY, rotation, round.round, round.source_image_url, roundKey, size, x, y]);
+
+  const handleRenderedPreviewFailure = useCallback(() => {
+    if (!currentPreview) return;
+    setRetryableRoundKey(roundKey);
+  }, [currentPreview, roundKey]);
+
+  useEffect(() => {
+    if (!currentPreview || currentPreviewRendered || renderRetryable) return;
+    const timeout = window.setTimeout(
+      handleRenderedPreviewFailure,
+      CROP_DETECTIVE_RECOVERY_POLICY.blobDecodeTimeoutMs
+    );
+    return () => window.clearTimeout(timeout);
+  }, [currentPreview, currentPreviewRendered, handleRenderedPreviewFailure, renderNonce, renderRetryable]);
+
+  useEffect(() => {
+    onRecoveryStateChange?.(roundKey, renderRetryable);
+  }, [onRecoveryStateChange, renderRetryable, roundKey]);
 
   const previewGeometry = createCropDetectiveCssCropGeometry({
     x: currentPreview?.cropX ?? x,
@@ -2060,21 +2104,22 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
   });
   return (
     <div
-      role="img"
+      role={renderRetryable ? 'group' : 'img'}
       aria-label="확대된 카드 이미지 조각"
-      aria-busy={!revealed || !currentPreview}
+      aria-busy={!renderRetryable && (!revealed || !currentPreviewRendered)}
       className="relative aspect-square w-[min(20rem,58vw)] overflow-hidden rounded-[1.75rem] border border-fuchsia-300/45 bg-zinc-950 shadow-[0_18px_45px_rgba(192,38,211,0.2)]"
       onContextMenu={(event) => event.preventDefault()}
     >
       {currentPreview ? (
         <div
-          className={`absolute inset-0 ${revealed ? 'opacity-100' : 'opacity-0'}`}
+          className={`absolute inset-0 ${revealed && currentPreviewRendered ? 'opacity-100' : 'opacity-0'}`}
           style={{
             transform: `rotate(${previewGeometry.rotationDegrees}deg)`,
             transformOrigin: '50% 50%'
           }}
         >
           <img
+            key={`${currentPreview.imageUrl}:${renderNonce}`}
             src={currentPreview.imageUrl}
             alt=""
             className="absolute max-w-none object-cover"
@@ -2086,23 +2131,41 @@ const ClientCropPreview: React.FC<CropPreviewProps> = ({ round, revealed, onPrep
               top: `${previewGeometry.topPercent}%`,
               objectPosition: 'center'
             }}
-            onError={(event) => {
-              const element = event.currentTarget;
-              if (element.dataset.localFallbackApplied === 'true') return;
-              element.dataset.localFallbackApplied = 'true';
-              element.src = localFallbackUrl;
+            onLoad={() => {
+              setRenderedPreviewState({ roundKey, imageUrl: currentPreview.imageUrl });
+              setRetryableRoundKey('');
+              notifyPrepared(currentPreview.imageUrl);
             }}
+            onError={handleRenderedPreviewFailure}
           />
         </div>
       ) : null}
-      {!revealed || !currentPreview ? (
+      {renderRetryable ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(244,63,94,0.16),rgba(9,9,11,0.98)_70%)] px-5 text-center text-white">
+          <RefreshCw className="h-7 w-7 text-rose-300" aria-hidden="true" />
+          <span className="text-xs font-black text-white/90">확대 이미지를 표시하지 못했습니다</span>
+          <button
+            type="button"
+            onClick={() => {
+              setRetryableRoundKey('');
+              setPreviewState({ roundKey: '', imageUrl: '', cropX: 0.5, cropY: 0.5 });
+              setRenderedPreviewState({ roundKey: '', imageUrl: '' });
+              setSourceRetryNonce((nonce) => nonce + 1);
+              setRenderNonce((nonce) => nonce + 1);
+            }}
+            className="rounded-xl bg-white/12 px-3 py-1.5 text-[10px] font-black text-white transition hover:bg-white/20 active:scale-95"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : !revealed || !currentPreview || !currentPreviewRendered ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_32%,rgba(217,70,239,0.2),rgba(9,9,11,0.98)_70%)] text-white">
           <RefreshCw className="h-7 w-7 animate-spin text-fuchsia-300" aria-hidden="true" />
           <span className="text-[10px] font-black tracking-wide text-white/75">확대 영역 분석 중</span>
         </div>
       ) : null}
       <div className="pointer-events-none absolute inset-0 border-[10px] border-white/8" />
-      {revealed && currentPreview ? (
+      {revealed && currentPreviewRendered ? (
         <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-white/20 bg-black/45 px-2 py-1 text-[9px] font-black tracking-[0.14em] text-white/80">
           ZOOM CROP
         </div>
@@ -2125,12 +2188,8 @@ const CropDetectiveChoiceTile: React.FC<{
   disabled: boolean;
   imageBlindEnabled: boolean;
   hideImageUntilRevealed: boolean;
-  forceLocalFallback: boolean;
-  onSettled: (
-    assetId: string,
-    settledRoundKey: string,
-    options: { deterministic: boolean; usedLocalFallback: boolean }
-  ) => void;
+  onSettled: (assetId: string, settledRoundKey: string) => void;
+  onRenderFailed: (assetId: string, failedRoundKey: string) => void;
   onClick: () => void;
 }> = ({
   roundKey,
@@ -2141,8 +2200,8 @@ const CropDetectiveChoiceTile: React.FC<{
   disabled,
   imageBlindEnabled,
   hideImageUntilRevealed,
-  forceLocalFallback,
   onSettled,
+  onRenderFailed,
   onClick
 }) => {
   const assetId = `choice:${card.channel_id}`;
@@ -2151,42 +2210,54 @@ const CropDetectiveChoiceTile: React.FC<{
     () => getCropDetectiveImageSources(card.image_url, card.fallback_image_url),
     [card.fallback_image_url, card.image_url]
   );
-  const loadedSource = useCropDetectiveImageSource(generationKey, sources);
-  const localFallbackSources = useMemo(
-    () => sources.length > 0 ? [sources[sources.length - 1]] : [],
-    [sources]
-  );
-  const localLoadedSource = useCropDetectiveImageSource(
-    `${generationKey}:deterministic`,
-    localFallbackSources,
-    CROP_DETECTIVE_IMAGE_REQUEST_PROFILES.choice.timeoutMs,
-    true
-  );
-  const effectiveLoadedSource = forceLocalFallback ? localLoadedSource : loadedSource;
-  const effectiveGenerationKey = `${generationKey}:${forceLocalFallback ? 'deterministic' : 'normal'}`;
-  const localFallbackUrl = localLoadedSource?.url || sources[sources.length - 1]?.url || '/icon.png';
+  const sourceResult = useCropDetectiveImageSource(generationKey, sources);
+  const loadedSource = sourceResult.loaded;
+  const [renderedGenerationKey, setRenderedGenerationKey] = useState('');
+  const [failedGenerationKey, setFailedGenerationKey] = useState('');
   const lastSettledGenerationRef = useRef('');
+  const abandonedGenerationRef = useRef('');
+  const currentImageRendered = renderedGenerationKey === generationKey;
+  const imageUnavailable = sourceResult.status === 'failed' || failedGenerationKey === generationKey;
 
-  useEffect(() => {
-    if (!effectiveLoadedSource || lastSettledGenerationRef.current === effectiveGenerationKey) return;
-    lastSettledGenerationRef.current = effectiveGenerationKey;
-    onSettled(assetId, roundKey, {
-      deterministic: forceLocalFallback,
-      usedLocalFallback: effectiveLoadedSource.usedLocalFallback
-    });
+  const handleImageLoad = useCallback(() => {
+    if (!loadedSource || abandonedGenerationRef.current === generationKey) return;
+    setRenderedGenerationKey(generationKey);
+    if (lastSettledGenerationRef.current === generationKey) return;
+    lastSettledGenerationRef.current = generationKey;
+    onSettled(assetId, roundKey);
   }, [
     assetId,
-    effectiveGenerationKey,
-    effectiveLoadedSource,
-    forceLocalFallback,
+    generationKey,
+    loadedSource,
     onSettled,
     roundKey
   ]);
 
+  const handleImageFailure = useCallback(() => {
+    abandonedGenerationRef.current = generationKey;
+    setFailedGenerationKey(generationKey);
+    onRenderFailed(assetId, roundKey);
+  }, [assetId, generationKey, onRenderFailed, roundKey]);
+
+  useEffect(() => {
+    if (sourceResult.status !== 'failed') return;
+    onRenderFailed(assetId, roundKey);
+  }, [assetId, onRenderFailed, roundKey, sourceResult.status]);
+
+  useEffect(() => {
+    if (!loadedSource || currentImageRendered || imageUnavailable) return;
+    const timeout = window.setTimeout(
+      handleImageFailure,
+      CROP_DETECTIVE_RECOVERY_POLICY.blobDecodeTimeoutMs
+    );
+    return () => window.clearTimeout(timeout);
+  }, [currentImageRendered, handleImageFailure, imageUnavailable, loadedSource]);
+
   return (
     <CardImageTile
+      key={`${generationKey}:${loadedSource?.url || 'pending'}`}
       card={card}
-      imageUrlOverride={effectiveLoadedSource?.url || localFallbackUrl}
+      imageUrlOverride={loadedSource?.url || '/icon.png'}
       selected={selected}
       correct={correct}
       wrong={wrong}
@@ -2195,6 +2266,9 @@ const CropDetectiveChoiceTile: React.FC<{
       darkImageBackground
       freezeImage
       hideImageUntilRevealed={hideImageUntilRevealed}
+      imageUnavailable={imageUnavailable}
+      onImageLoad={loadedSource ? handleImageLoad : undefined}
+      onImageError={loadedSource ? handleImageFailure : undefined}
       onClick={onClick}
     />
   );
@@ -2209,7 +2283,7 @@ const CropDetectiveChoices: React.FC<{
   countdownLeft: number | null;
   skipProtectedImage: boolean;
   onRoundReady: (roundKey: string, options?: { localDeadlineAt?: number }) => void;
-  onRoundImageFailed: (roundKey: string) => Promise<boolean>;
+  onRoundImageFailed: (roundKey: string, signal: AbortSignal) => Promise<boolean>;
   onChoice: (channelId: string) => void;
 }> = ({
   round,
@@ -2231,38 +2305,38 @@ const CropDetectiveChoices: React.FC<{
   const [settledState, setSettledState] = useState<{
     roundKey: string;
     assetIds: string[];
-    deterministicAssetIds: string[];
-    localFallbackDetected: boolean;
-  }>({ roundKey: '', assetIds: [], deterministicAssetIds: [], localFallbackDetected: false });
-  const [cropFallbackState, setCropFallbackState] = useState<{
-    roundKey: string;
-    forceLocalFallback: boolean;
-  }>({ roundKey: '', forceLocalFallback: false });
+  }>({ roundKey: '', assetIds: [] });
   const [cropDeadlineState, setCropDeadlineState] = useState<{
     roundKey: string;
     localDeadlineAt: number | null;
   }>({ roundKey: '', localDeadlineAt: null });
-  const currentSettledState: {
-    assetIds: string[];
-    deterministicAssetIds: string[];
-    localFallbackDetected: boolean;
-  } = settledState.roundKey === roundKey
-    ? settledState
-    : { assetIds: [], deterministicAssetIds: [], localFallbackDetected: false };
-  const cropUsesLocalFallback =
-    cropFallbackState.roundKey === roundKey && cropFallbackState.forceLocalFallback;
-  const forceDeterministicClue = currentSettledState.localFallbackDetected;
-  const forceLocalFallback = forceDeterministicClue || cropUsesLocalFallback;
-  const choiceSettlementIds = forceLocalFallback
-    ? currentSettledState.deterministicAssetIds
-    : currentSettledState.assetIds;
-  const choicesReady = areCropDetectiveAssetsSettled(requiredChoiceAssetIds, choiceSettlementIds);
-  const cropReady = currentSettledState.assetIds.includes('crop');
+  const [protectedRecoveryState, setProtectedRecoveryState] = useState<{
+    roundKey: string;
+    retryable: boolean;
+  }>({ roundKey: '', retryable: false });
+  const [candidateRenderFailureRoundKey, setCandidateRenderFailureRoundKey] = useState('');
+  const [candidateRenderRetryState, setCandidateRenderRetryState] = useState({
+    roundKey: '',
+    nonce: 0
+  });
+  const currentSettledAssetIds = settledState.roundKey === roundKey ? settledState.assetIds : [];
+  const choicesReady = areCropDetectiveAssetsSettled(requiredChoiceAssetIds, currentSettledAssetIds);
+  const cropReady = currentSettledAssetIds.includes('crop');
   const protectedRound = isProtectedMinigameImage(round.source_image_url);
+  const protectedRetryable =
+    protectedRecoveryState.roundKey === roundKey && protectedRecoveryState.retryable;
+  const candidateRetryable = candidateRenderFailureRoundKey === roundKey;
+  const preparationRetryable = protectedRetryable || candidateRetryable;
+  const candidateRenderRetryNonce = candidateRenderRetryState.roundKey === roundKey
+    ? candidateRenderRetryState.nonce
+    : 0;
   const completedResume = roundFeedback?.locked === true;
-  const allImagesReady = choicesReady && (completedResume || skipProtectedImage || cropReady);
+  const allImagesReady = !preparationRetryable &&
+    choicesReady &&
+    (completedResume || skipProtectedImage || cropReady);
   const canRequestProtectedCrop =
     choicesReady &&
+    !candidateRetryable &&
     !skipProtectedImage &&
     !roundChecking &&
     !roundFeedback &&
@@ -2272,40 +2346,25 @@ const CropDetectiveChoices: React.FC<{
 
   const handleAssetSettled = useCallback((
     assetId: string,
-    settledRoundKey: string,
-    options: { deterministic?: boolean; usedLocalFallback?: boolean } = {}
+    settledRoundKey: string
   ) => {
     if (settledRoundKey !== roundKey) return;
     setSettledState((previous) => {
       const current = previous.roundKey === roundKey
         ? previous
-        : { roundKey, assetIds: [], deterministicAssetIds: [], localFallbackDetected: false };
+        : { roundKey, assetIds: [] };
       const assetIds = current.assetIds.includes(assetId)
         ? current.assetIds
         : [...current.assetIds, assetId];
-      const deterministicAssetIds = options.deterministic && !current.deterministicAssetIds.includes(assetId)
-        ? [...current.deterministicAssetIds, assetId]
-        : current.deterministicAssetIds;
-      const localFallbackDetected = current.localFallbackDetected || (
-        assetId.startsWith('choice:') && options.usedLocalFallback === true
-      );
-      if (
-        assetIds === current.assetIds &&
-        deterministicAssetIds === current.deterministicAssetIds &&
-        localFallbackDetected === current.localFallbackDetected
-      ) return previous;
-      return { roundKey, assetIds, deterministicAssetIds, localFallbackDetected };
+      if (assetIds === current.assetIds) return previous;
+      return { roundKey, assetIds };
     });
   }, [roundKey]);
   const handleCropSettled = useCallback((
     settledRoundKey: string,
-    options?: { forceLocalFallback?: boolean; localDeadlineAt?: number }
+    options?: { localDeadlineAt?: number }
   ) => {
     if (settledRoundKey === roundKey) {
-      setCropFallbackState({
-        roundKey,
-        forceLocalFallback: options?.forceLocalFallback === true
-      });
       setCropDeadlineState({
         roundKey,
         localDeadlineAt: Number.isFinite(options?.localDeadlineAt)
@@ -2315,6 +2374,28 @@ const CropDetectiveChoices: React.FC<{
     }
     handleAssetSettled('crop', settledRoundKey);
   }, [handleAssetSettled, roundKey]);
+
+  const handleRecoveryStateChange = useCallback((settledRoundKey: string, retryable: boolean) => {
+    if (settledRoundKey !== roundKey) return;
+    setProtectedRecoveryState((previous) => (
+      previous.roundKey === roundKey && previous.retryable === retryable
+        ? previous
+        : { roundKey, retryable }
+    ));
+  }, [roundKey]);
+
+  const handleCandidateRenderFailure = useCallback((assetId: string, failedRoundKey: string) => {
+    if (!assetId.startsWith('choice:') || failedRoundKey !== roundKey) return;
+    setCandidateRenderFailureRoundKey(roundKey);
+  }, [roundKey]);
+
+  const handleCandidateRenderRetry = useCallback(() => {
+    setCandidateRenderFailureRoundKey('');
+    setCandidateRenderRetryState((previous) => ({
+      roundKey,
+      nonce: previous.roundKey === roundKey ? previous.nonce + 1 : 1
+    }));
+  }, [roundKey]);
 
   useEffect(() => {
     if (allImagesReady && !completedResume && !skipProtectedImage) {
@@ -2326,12 +2407,34 @@ const CropDetectiveChoices: React.FC<{
     }
   }, [allImagesReady, completedResume, cropDeadlineState, onRoundReady, roundKey, skipProtectedImage]);
 
-  const hideImages = !roundFeedback && !allImagesReady;
-  const choiceDisabled = hideImages || Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0);
+  const hideImages = !roundFeedback && !allImagesReady && !preparationRetryable;
+  const choiceDisabled = !allImagesReady || Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || (countdownLeft !== null && countdownLeft > 0);
 
   return (
-    <div className="contents" data-crop-detective-ready={allImagesReady ? 'true' : 'false'}>
-      {completedResume || skipProtectedImage ? (
+    <div
+      className="contents"
+      data-crop-detective-ready={allImagesReady ? 'true' : 'false'}
+      data-crop-detective-retryable={preparationRetryable ? 'true' : 'false'}
+    >
+      {candidateRetryable ? (
+        <div
+          role="group"
+          aria-label="후보 이미지 표시 재시도"
+          aria-busy="false"
+          className="relative flex aspect-square w-[min(20rem,58vw)] flex-col items-center justify-center gap-3 overflow-hidden rounded-[1.75rem] border border-rose-300/45 bg-zinc-950 px-6 text-center text-white shadow-[0_18px_45px_rgba(244,63,94,0.16)]"
+        >
+          <RefreshCw className="h-8 w-8 text-rose-300" aria-hidden="true" />
+          <span className="text-xs font-black text-white/90">후보 이미지를 표시하지 못했습니다</span>
+          <span className="text-[10px] font-bold text-white/60">현재 라운드와 게임 기회는 그대로 유지됩니다.</span>
+          <button
+            type="button"
+            onClick={handleCandidateRenderRetry}
+            className="rounded-xl bg-white/12 px-3 py-1.5 text-[10px] font-black text-white transition hover:bg-white/20 active:scale-95"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : completedResume || skipProtectedImage ? (
         <div
           role="img"
           aria-label={completedResume ? '저장된 확대 탐정 라운드' : '시간 초과 처리 중인 확대 탐정 라운드'}
@@ -2347,9 +2450,9 @@ const CropDetectiveChoices: React.FC<{
           key={roundKey}
           round={round}
           revealed={allImagesReady || Boolean(roundFeedback)}
-          forceDeterministicFallback={forceDeterministicClue}
           onPrepared={handleCropSettled}
           onLoadFailed={onRoundImageFailed}
+          onRecoveryStateChange={handleRecoveryStateChange}
         />
       ) : (
         <div
@@ -2367,7 +2470,9 @@ const CropDetectiveChoices: React.FC<{
 
       {!allImagesReady && !roundFeedback ? (
         <p role="status" className="text-center text-[10px] font-black text-fuchsia-700 dark:text-fuchsia-300">
-          확대 이미지와 후보 카드 4장을 안전하게 준비하고 있습니다.
+          {preparationRetryable
+            ? '현재 라운드와 기회는 유지됩니다. 이미지 영역에서 다시 시도해 주세요.'
+            : '확대 이미지와 후보 카드 4장을 안전하게 준비하고 있습니다.'}
         </p>
       ) : null}
 
@@ -2378,7 +2483,7 @@ const CropDetectiveChoices: React.FC<{
           const wrong = selected && roundFeedback?.correct === false;
           return (
             <CropDetectiveChoiceTile
-              key={choice.channel_id}
+              key={`${roundKey}:${choice.channel_id}:${candidateRenderRetryNonce}`}
               roundKey={roundKey}
               card={choice}
               selected={selected}
@@ -2387,8 +2492,8 @@ const CropDetectiveChoices: React.FC<{
               disabled={choiceDisabled}
               imageBlindEnabled={Boolean(roundFeedback)}
               hideImageUntilRevealed={hideImages}
-              forceLocalFallback={forceLocalFallback}
               onSettled={handleAssetSettled}
+              onRenderFailed={handleCandidateRenderFailure}
               onClick={() => onChoice(choice.channel_id)}
             />
           );
@@ -2515,7 +2620,7 @@ export const ArcadeTab: React.FC = () => {
     ? getCropDetectiveRoundKey(currentCropDetectiveRound)
     : '';
   const cropImageRecoveryRequestRef = useRef(0);
-  const cropImageRecoveryAttemptsRef = useRef<Map<string, number>>(new Map());
+  const cropImageAutomaticRecoveryKeysRef = useRef<Set<string>>(new Set());
   const autoSubmittedCompletedSessionsRef = useRef<Set<string>>(new Set());
   const cropImageRecoveryContextRef = useRef({
     activeGame,
@@ -2555,9 +2660,8 @@ export const ArcadeTab: React.FC = () => {
       setRoundDeadlineSyncAt(localDeadlineAt);
       setRoundTimeLeft(getVisibleRoundTimeLeft(localDeadlineAt));
     }
-    cropImageRecoveryAttemptsRef.current.delete(`${sessionId || ''}:${roundIndex}`);
     setCropDetectiveReadyKey((previousKey) => previousKey === roundKey ? previousKey : roundKey);
-  }, [currentCropDetectiveRoundKey, isPracticeMode, roundIndex, sessionId]);
+  }, [currentCropDetectiveRoundKey, isPracticeMode]);
 
   useEffect(() => {
     const userId = user?.id;
@@ -2635,15 +2739,30 @@ export const ArcadeTab: React.FC = () => {
     }
   }, []);
 
-  const fetchActiveCropDetectiveSession = useCallback(async (): Promise<StartGameResponse | null> => {
+  const fetchActiveCropDetectiveSession = useCallback(async (
+    signal?: AbortSignal
+  ): Promise<StartGameResponse | null> => {
+    const localController = signal ? null : new AbortController();
+    const requestSignal = signal || localController?.signal;
+    const timeout = localController
+      ? window.setTimeout(
+          () => localController.abort(),
+          CROP_DETECTIVE_RECOVERY_POLICY.activeSessionRecoveryTimeoutMs
+        )
+      : null;
     try {
-      const res = await apiFetch('/minigames/active?game_type=crop_detective');
+      const res = await apiFetch('/minigames/active?game_type=crop_detective', {
+        cache: 'no-store',
+        signal: requestSignal
+      });
       if (!res.ok) return null;
       const data = (await res.json()) as ActiveMinigameSessionResponse;
       return data.active_session || null;
     } catch (err) {
-      console.error('진행 중인 확대 탐정 조회 실패:', err);
+      if (!requestSignal?.aborted) console.error('진행 중인 확대 탐정 조회 실패:', err);
       return null;
+    } finally {
+      if (timeout !== null) window.clearTimeout(timeout);
     }
   }, []);
 
@@ -2722,27 +2841,35 @@ export const ArcadeTab: React.FC = () => {
     return true;
   }, [toast]);
 
-  const handleCropDetectiveImageFailure = useCallback(async (failedRoundKey: string): Promise<boolean> => {
+  const handleCropDetectiveImageFailure = useCallback(async (
+    failedRoundKey: string,
+    signal: AbortSignal
+  ): Promise<boolean> => {
     if (
+      signal.aborted ||
       isPracticeMode ||
       activeGame !== 'crop_detective' ||
       !sessionId ||
       failedRoundKey !== currentCropDetectiveRoundKey
     ) return false;
 
-    const recoveryRequestId = ++cropImageRecoveryRequestRef.current;
-    const recoveryKey = `${sessionId}:${roundIndex}`;
-    const recoveryAttempt = cropImageRecoveryAttemptsRef.current.get(recoveryKey) || 0;
-    cropImageRecoveryAttemptsRef.current.set(recoveryKey, recoveryAttempt + 1);
-    const retryDelayMs = recoveryAttempt === 0
-      ? 0
-      : Math.min(10_000, 750 * (2 ** Math.min(recoveryAttempt - 1, 4)));
-    if (retryDelayMs > 0) {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelayMs));
-    }
+    const stableRecoveryKey = `${sessionId}:${roundIndex}`;
+    if (cropImageAutomaticRecoveryKeysRef.current.has(stableRecoveryKey)) return false;
+    cropImageAutomaticRecoveryKeysRef.current.add(stableRecoveryKey);
 
+    // The image proxy keeps a one-second negative-cache window after an upstream
+    // failure. Waiting just beyond it makes the single automatic recovery perform
+    // a real retry instead of immediately receiving the cached 502 response.
+    const retryWindowElapsed = await waitForAbortableDelay(
+      signal,
+      CROP_DETECTIVE_RECOVERY_POLICY.backendNegativeCacheRetryDelayMs
+    );
+    if (!retryWindowElapsed || signal.aborted) return false;
+
+    const recoveryRequestId = ++cropImageRecoveryRequestRef.current;
     const contextBeforeFetch = cropImageRecoveryContextRef.current;
     if (
+      signal.aborted ||
       recoveryRequestId !== cropImageRecoveryRequestRef.current ||
       contextBeforeFetch.activeGame !== 'crop_detective' ||
       contextBeforeFetch.sessionId !== sessionId ||
@@ -2750,9 +2877,10 @@ export const ArcadeTab: React.FC = () => {
       contextBeforeFetch.roundKey !== failedRoundKey
     ) return false;
 
-    const activeSession = await fetchActiveCropDetectiveSession();
+    const activeSession = await fetchActiveCropDetectiveSession(signal);
     const latestContext = cropImageRecoveryContextRef.current;
     if (
+      signal.aborted ||
       recoveryRequestId !== cropImageRecoveryRequestRef.current ||
       latestContext.activeGame !== 'crop_detective' ||
       latestContext.sessionId !== sessionId ||
@@ -2775,7 +2903,7 @@ export const ArcadeTab: React.FC = () => {
 
   const resetGameView = useCallback(() => {
     cropImageRecoveryRequestRef.current += 1;
-    cropImageRecoveryAttemptsRef.current.clear();
+    cropImageAutomaticRecoveryKeysRef.current.clear();
     autoSubmittedCompletedSessionsRef.current.clear();
     roundStartRequestRef.current += 1;
     roundStartInFlightRef.current = false;

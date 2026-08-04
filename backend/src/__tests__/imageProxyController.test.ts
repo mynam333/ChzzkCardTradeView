@@ -25,6 +25,7 @@ import {
 } from '../controllers/imageProxyController';
 import {
   createMinigameImageReference,
+  MINIGAME_IMAGE_TOKEN_TTL_MS,
   MINIGAME_IMAGE_REFERENCE_PREFIX
 } from '../services/minigameImageToken';
 import { getUploadsDir } from '../services/storagePaths';
@@ -101,7 +102,8 @@ const createMinigameRequest = (
   sourceUrl: string,
   kind: 'quiz' | 'crop' = 'quiz',
   overrides: Record<string, string> = {},
-  origin?: string
+  origin?: string,
+  crop = { x: 0.5, y: 0.5, size: 0.1, rotation: 15 }
 ) => {
   const reference = createMinigameImageReference({
     userId: 'user-1',
@@ -109,7 +111,7 @@ const createMinigameRequest = (
     round: 0,
     sourceUrl,
     kind,
-    ...(kind === 'crop' ? { crop: { x: 0.5, y: 0.5, size: 0.1, rotation: 15 } } : {})
+    ...(kind === 'crop' ? { crop } : {})
   });
   return {
     headers: origin ? { origin } : {},
@@ -220,8 +222,183 @@ describe('protected minigame image proxy', () => {
     expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
   });
 
-  it('returns a bounded deterministic crop and still arms the round when every upstream request fails', async () => {
-    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-offline-fallback';
+  it.each([
+    ['fully transparent', { r: 0, g: 0, b: 0, alpha: 0 }],
+    ['visually uniform', { r: 255, g: 255, b: 255, alpha: 1 }]
+  ])('returns the third real crop when a %s source has no visually useful region', async (_label, background) => {
+    const sourceUrl = `https://api.dicebear.com/9.x/shapes/png?seed=minigame-empty-${_label}`;
+    const emptySource = await sharp({
+      create: {
+        width: 500,
+        height: 800,
+        channels: 4,
+        background
+      }
+    }).png().toBuffer();
+    const fetchMock = vi.fn().mockResolvedValueOnce(rawImageResponse(emptySource, 'image/png'));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(
+        sourceUrl,
+        'crop',
+        {},
+        undefined,
+        { x: 0.15, y: 0.15, size: 0.08, rotation: 0 }
+      ),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBeUndefined();
+    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
+    const stats = await sharp(response.body as Buffer).stats();
+    if (background.alpha === 0) expect(stats.channels[3]?.mean || 0).toBeLessThan(1);
+    else expect(stats.entropy).toBeLessThan(0.02);
+  });
+
+  it('uses the third crop when attempts one and two are empty and attempt three is useful', async () => {
+    const width = 640;
+    const height = 1_024;
+    const pixels = Buffer.alloc(width * height * 4);
+    for (let y = 600; y < 710; y += 1) {
+      for (let x = 265; x < 375; x += 1) {
+        const offset = (y * width + x) * 4;
+        const light = (Math.floor(x / 8) + Math.floor(y / 8)) % 2 === 0;
+        pixels[offset] = light ? 245 : 20;
+        pixels[offset + 1] = light ? 45 : 220;
+        pixels[offset + 2] = light ? 190 : 35;
+        pixels[offset + 3] = 255;
+      }
+    }
+    const source = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer();
+    const fetchMock = vi.fn().mockResolvedValueOnce(rawImageResponse(source, 'image/png'));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(
+        'https://api.dicebear.com/9.x/shapes/png?seed=minigame-third-attempt',
+        'crop',
+        {},
+        undefined,
+        { x: 0.15, y: 0.15, size: 0.08, rotation: 0 }
+      ),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBeUndefined();
+    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
+    const stats = await sharp(response.body as Buffer).stats();
+    expect(stats.entropy).toBeGreaterThan(0.5);
+  });
+
+  it('returns the third real crop when all three visual checks fail', async () => {
+    const width = 640;
+    const height = 1_024;
+    const pixels = Buffer.alloc(width * height * 3);
+    const paintSquare = (centerX: number, centerY: number, color: [number, number, number]) => {
+      for (let y = centerY - 50; y < centerY + 50; y += 1) {
+        for (let x = centerX - 50; x < centerX + 50; x += 1) {
+          const offset = (y * width + x) * 3;
+          pixels[offset] = color[0];
+          pixels[offset + 1] = color[1];
+          pixels[offset + 2] = color[2];
+        }
+      }
+    };
+    paintSquare(Math.round(width * 0.15), Math.round(height * 0.15), [245, 15, 10]);
+    paintSquare(Math.round(width * 0.5), Math.round(height * 0.36), [10, 245, 15]);
+    paintSquare(Math.round(width * 0.5), Math.round(height * 0.64), [15, 10, 245]);
+    const source = await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+    const fetchMock = vi.fn().mockResolvedValueOnce(rawImageResponse(source, 'image/png'));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(
+        'https://api.dicebear.com/9.x/shapes/png?seed=minigame-third-real-crop',
+        'crop',
+        {},
+        undefined,
+        { x: 0.15, y: 0.15, size: 0.08, rotation: 0 }
+      ),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBeUndefined();
+    const stats = await sharp(response.body as Buffer).stats();
+    expect(stats.channels[0].mean).toBeLessThan(30);
+    expect(stats.channels[1].mean).toBeLessThan(30);
+    expect(stats.channels[2].mean).toBeGreaterThan(220);
+    expect(stats.entropy).toBeLessThan(0.05);
+  });
+
+  it('applies crop rotation after extracting the normalized source region', async () => {
+    const width = 500;
+    const height = 800;
+    const pixels = Buffer.alloc(width * height * 3);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 3;
+        const redSide = x < width / 2;
+        pixels[offset] = redSide ? 245 : 10;
+        pixels[offset + 1] = 20;
+        pixels[offset + 2] = redSide ? 10 : 245;
+      }
+    }
+    const source = await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(rawImageResponse(source, 'image/png')));
+    const response = createResponse();
+
+    await proxyMinigameImage(
+      createMinigameRequest(
+        'https://api.dicebear.com/9.x/shapes/png?seed=minigame-rotation-order',
+        'crop',
+        {},
+        undefined,
+        { x: 0.5, y: 0.5, size: 0.4, rotation: 90 }
+      ),
+      response,
+      'user-1'
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBeUndefined();
+    const rendered = await sharp(response.body as Buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const halfMean = (axis: 'x' | 'y', upperHalf: boolean, channel: number) => {
+      let sum = 0;
+      let count = 0;
+      for (let y = 0; y < rendered.info.height; y += 1) {
+        for (let x = 0; x < rendered.info.width; x += 1) {
+          const inHalf = axis === 'x'
+            ? (upperHalf ? x < rendered.info.width / 2 : x >= rendered.info.width / 2)
+            : (upperHalf ? y < rendered.info.height / 2 : y >= rendered.info.height / 2);
+          if (!inHalf) continue;
+          sum += rendered.data[(y * rendered.info.width + x) * rendered.info.channels + channel];
+          count += 1;
+        }
+      }
+      return sum / Math.max(1, count);
+    };
+    const horizontalRedDifference = Math.abs(halfMean('x', true, 0) - halfMean('x', false, 0));
+    const verticalRedDifference = Math.abs(halfMean('y', true, 0) - halfMean('y', false, 0));
+    expect(horizontalRedDifference).toBeLessThan(30);
+    expect(verticalRedDifference).toBeGreaterThan(150);
+  });
+
+  it('returns 502 without arming the round when the source fetch fails', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-offline';
     const fetchMock = vi.fn().mockResolvedValueOnce(failedResponse(503));
     vi.stubGlobal('fetch', fetchMock);
     const response = createResponse();
@@ -232,23 +409,67 @@ describe('protected minigame image proxy', () => {
       'user-1'
     );
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(502);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
-    expect(response.getHeader('X-Minigame-Image-Fallback')).toBe('deterministic');
+    expect(armRoundDeadline).not.toHaveBeenCalled();
+    expect(response.getHeader('X-Minigame-Image-Fallback')).toBeUndefined();
     expect(response.getHeader('Access-Control-Allow-Origin')).toBe('http://localhost:3000');
     expect(response.getHeader('Access-Control-Allow-Credentials')).toBe('true');
     expect(response.getHeader('Access-Control-Expose-Headers')).toBe(
-      'X-Minigame-Image-Fallback, X-Minigame-Round-Deadline, X-Minigame-Server-Now'
+      'X-Minigame-Round-Deadline, X-Minigame-Server-Now'
     );
-    expect(Date.parse(String(response.getHeader('X-Minigame-Server-Now') || ''))).toBeGreaterThan(0);
     expect(response.getHeader('Vary')).toBe('Origin');
-    const metadata = await sharp(response.body as Buffer).metadata();
-    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+    expect(response.body).toMatchObject({ error: 'BadGateway' });
   });
 
-  it('honors an explicit deterministic crop mode without contacting the upstream image', async () => {
-    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-client-fallback';
+  it('returns 502 without arming the round when source image decoding fails', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-invalid-bytes';
+    const invalidPng = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('not-a-decodable-png')
+    ]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(rawImageResponse(invalidPng, 'image/png'));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(armRoundDeadline).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({ error: 'BadGateway' });
+  });
+
+  it('keeps only a short negative-cache window so a paid-round image can be retried', async () => {
+    let now = new Date('2030-07-01T03:00:00.000Z').getTime();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-short-negative-cache';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(failedResponse(503))
+      .mockResolvedValueOnce(imageResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstResponse = createResponse();
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), firstResponse, 'user-1');
+    expect(firstResponse.statusCode).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const blockedResponse = createResponse();
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), blockedResponse, 'user-1');
+    expect(blockedResponse.statusCode).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    now += 1_001;
+    const retryResponse = createResponse();
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), retryResponse, 'user-1');
+
+    expect(retryResponse.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects the removed synthetic fallback query without contacting the source', async () => {
+    const sourceUrl = 'https://api.dicebear.com/9.x/shapes/png?seed=minigame-crop-no-synthetic-fallback';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const response = createResponse();
@@ -259,12 +480,22 @@ describe('protected minigame image proxy', () => {
       'user-1'
     );
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(response.getHeader('X-Minigame-Image-Fallback')).toBe('deterministic');
-    expect(armRoundDeadline).toHaveBeenCalledTimes(1);
-    const metadata = await sharp(response.body as Buffer).metadata();
-    expect(metadata).toMatchObject({ width: 320, height: 320, format: 'webp' });
+    expect(armRoundDeadline).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({ error: 'BadRequest' });
+  });
+
+  it('contains no generated crop fallback implementation or response contract', () => {
+    const controllerSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/controllers/imageProxyController.ts'),
+      'utf8'
+    );
+    expect(controllerSource).not.toContain('createDeterministicCropFallbackSvg');
+    expect(controllerSource).not.toContain('prepareDeterministicCropFallback');
+    expect(controllerSource).not.toContain('X-Minigame-Image-Fallback');
+    expect(controllerSource).not.toContain("req.query.fallback");
+    expect(controllerSource.toLowerCase()).not.toContain('deterministic');
   });
 
   it('reuses the immutable armed deadline without another database transaction', async () => {
@@ -359,6 +590,27 @@ describe('protected minigame image proxy', () => {
     expect(requestedUrls.every((url) => url.toString() !== sourceUrl)).toBe(true);
   });
 
+  it('never requests the same pstatic fallback URL twice when every derivative fails', async () => {
+    const sourceUrl = 'https://nng-phinf.pstatic.net/MjAyNjA4MDJfNzg5/profile.png?type=f240_240_na';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(failedResponse(404))
+      .mockResolvedValueOnce(failedResponse(503));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = createResponse();
+
+    await proxyMinigameImage(createMinigameRequest(sourceUrl, 'crop'), response, 'user-1');
+
+    expect(response.statusCode).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requestedUrls = fetchMock.mock.calls.map((call) => new URL(String(call[0])));
+    expect(requestedUrls.map((url) => url.searchParams.get('type'))).toEqual([
+      'w640',
+      'f240_240_na'
+    ]);
+    expect(new Set(requestedUrls.map((url) => url.toString())).size).toBe(2);
+    expect(armRoundDeadline).not.toHaveBeenCalled();
+  });
+
   it('rejects a different authenticated user before fetching the hidden source', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -380,7 +632,7 @@ describe('protected minigame image proxy', () => {
     const request = createMinigameRequest(
       'https://api.dicebear.com/9.x/shapes/png?seed=minigame-expired'
     );
-    vi.setSystemTime(new Date('2026-08-02T01:00:30.001Z'));
+    vi.setSystemTime(new Date(vi.getMockedSystemTime()!.getTime() + MINIGAME_IMAGE_TOKEN_TTL_MS + 1));
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const response = createResponse();

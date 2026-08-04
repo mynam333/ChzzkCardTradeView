@@ -236,6 +236,35 @@ export const stripSvgSmilAnimationsInCss = (css: string): string => {
   );
 };
 
+/**
+ * 대형 카드에서는 세 SVG 가운데 테마를 가장 선명하게 설명하는 한 레이어만
+ * 동적으로 유지합니다. 선택되지 않은 data SVG는 도형을 그대로 둔 채 SMIL만
+ * 제거하므로 확대 품질과 정적 세공은 손실되지 않습니다.
+ */
+export const stripSvgSmilAnimationsExceptDataSvgIndexInCss = (
+  css: string,
+  dynamicSvgIndex: number
+): string => {
+  const normalized = normalizeSvgInCss(css);
+  if (!normalized || !SVG_SMIL_START.test(normalized)) return normalized;
+
+  let svgIndex = 0;
+  return normalized.replace(
+    SVG_DATA_URI_CSS,
+    (_match, pre: string, quote: string, prefix: string, payload: string, post: string) => {
+      const currentIndex = svgIndex;
+      svgIndex += 1;
+      if (currentIndex === dynamicSvgIndex) {
+        return `${pre}${quote}${prefix}${payload}${quote}${post}`;
+      }
+      const staticPayload = payload
+        .replace(SVG_SMIL_SELF_CLOSING, '')
+        .replace(SVG_SMIL_PAIRED, '');
+      return `${pre}${quote}${prefix}${staticPayload}${quote}${post}`;
+    }
+  );
+};
+
 const CSS_URL_TOKEN = /url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\)/gi;
 const CSS_PX_LENGTH = /(-?\d*\.?\d+)px\b/g;
 
@@ -292,6 +321,41 @@ type CosmeticSvgMotionCandidate = {
 export const MAX_CONCURRENT_SVG_MOTION_THEMES = 3;
 export const MAX_CONCURRENT_SVG_MOTION_AREA = 90_000;
 
+/**
+ * 이 면적부터 초대형 경계 전까지 바깥 CSS 루프를 멈추고, 세 SVG 중
+ * 시그니처 한 장만 동적으로 유지합니다. 나머지는 정적 벡터 세공을 그대로
+ * 보존해 크기를 제한하지 않으면서 대형 표면의 재페인트 비용을 줄입니다.
+ * 4× 논리 카드(256 × 409.6 = 104,857.6px²)는 전체 모션 범위에 남깁니다.
+ */
+export const SVG_SMIL_ONLY_MIN_RENDER_AREA = 120_000;
+
+/**
+ * 512 × 819.2(약 419k)는 시그니처 SMIL 단계에 남기고, 768 × 1228.8
+ * 같은 초대형 카드부터는 SVG를 정적으로 캐시한 채 바깥 CSS 루프만 재생합니다.
+ */
+export const SVG_CSS_ONLY_MIN_RENDER_AREA = 500_000;
+
+/**
+ * base / micro-detail / particle-projection 순서의 0-based SVG 인덱스입니다.
+ * 각 테마의 대형 카드에서 가장 식별력 높은 시그니처 움직임 한 장만 남깁니다.
+ */
+const ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY = new Map<string, number>([
+  ['cb-autumn', 2],
+  ['cb-sakura', 2],
+  ['cb-snow', 2],
+  ['cb-ginkgo-lacquer-wind', 2],
+  ['cb-goryeo-celadon', 2],
+  ['cb-cyberpunk', 2],
+  ['cb-retro-8bit-arcade', 2],
+  ['cb-prism', 1],
+  ['cb-volcano', 0],
+  ['cb-abyssal-reliquary', 2],
+  ['cb-medieval', 2],
+  ['cb-oriental', 0],
+  ['cb-royal', 0],
+  ['cb-stained-glass-nocturne', 0]
+]);
+
 export const selectActiveCosmeticSvgMotionKeys = (
   candidates: readonly CosmeticSvgMotionCandidate[],
   maxThemes: number = MAX_CONCURRENT_SVG_MOTION_THEMES,
@@ -341,21 +405,39 @@ let reducedMotionMediaQuery: MediaQueryList | null = null;
 let cosmeticMotionBudgetInitialized = false;
 let cosmeticMotionBudgetFrame: number | null = null;
 let cosmeticMotionBudgetLimitedKeys = new Set<string>();
+let cosmeticMotionAdaptiveLodKeys = new Set<string>();
+let cosmeticMotionCssOnlyKeys = new Set<string>();
 let cosmeticMotionMutationObserver: MutationObserver | null = null;
 let cosmeticMotionResizeObserver: ResizeObserver | null = null;
+let cosmeticMotionIntersectionObserver: IntersectionObserver | null = null;
+let observedCosmeticMotionElements = new Set<Element>();
 
 const compileCosmeticCss = (source: InjectedCosmeticCssSource): string => {
   let cssText = normalizeSvgInCss(source.css);
   const prefersReducedMotion = !!reducedMotionMediaQuery?.matches;
   const exceedsMotionBudget = source.hasSvgSmil && cosmeticMotionBudgetLimitedKeys.has(source.key);
-  if (prefersReducedMotion || exceedsMotionBudget) {
+  const usesCssOnlyLod = source.hasSvgSmil && cosmeticMotionCssOnlyKeys.has(source.key);
+  if (prefersReducedMotion || exceedsMotionBudget || usesCssOnlyLod) {
     cssText = stripSvgSmilAnimationsInCss(cssText);
+  } else if (source.hasSvgSmil && cosmeticMotionAdaptiveLodKeys.has(source.key)) {
+    const dynamicSvgIndex = ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.get(source.key);
+    if (dynamicSvgIndex !== undefined) {
+      cssText = stripSvgSmilAnimationsExceptDataSvgIndexInCss(cssText, dynamicSvgIndex);
+    }
   }
   if (source.isFrame) {
     cssText = migrateFramePxToContainerUnits(cssText);
   }
   if (source.isFrame && (prefersReducedMotion || exceedsMotionBudget) && source.motionSelector) {
     cssText += `\n${source.motionSelector},${source.motionSelector}::before,${source.motionSelector}::after{animation-play-state:paused!important;}`;
+  }
+  if (
+    source.isFrame
+    && source.motionSelector
+    && ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
+  ) {
+    const smilOnlySelector = `${source.motionSelector}[data-cosmetic-motion-smil-only="true"]`;
+    cssText += `\n${smilOnlySelector},${smilOnlySelector}::before,${smilOnlySelector}::after{animation:none!important;}`;
   }
   return source.fallbackCss ? `${cssText}\n${source.fallbackCss}` : cssText;
 };
@@ -374,6 +456,8 @@ const syncAllInjectedCosmeticCss = (): void => {
 };
 
 const COSMETIC_MOTION_PAUSED_ATTRIBUTE = 'data-cosmetic-motion-paused';
+const COSMETIC_MOTION_SMIL_ONLY_ATTRIBUTE = 'data-cosmetic-motion-smil-only';
+const COSMETIC_MOTION_CSS_ONLY_ATTRIBUTE = 'data-cosmetic-motion-css-only';
 
 const clearCosmeticMotionPausedAttributes = (key: string): void => {
   if (
@@ -382,11 +466,14 @@ const clearCosmeticMotionPausedAttributes = (key: string): void => {
   ) return;
   for (const element of Array.from(document.getElementsByClassName(key))) {
     element.removeAttribute(COSMETIC_MOTION_PAUSED_ATTRIBUTE);
+    element.removeAttribute(COSMETIC_MOTION_SMIL_ONLY_ATTRIBUTE);
+    element.removeAttribute(COSMETIC_MOTION_CSS_ONLY_ATTRIBUTE);
   }
 };
 
 type VisibleCosmeticRect = {
   area: number;
+  renderArea: number;
   centerX: number;
   centerY: number;
 };
@@ -453,9 +540,17 @@ const visibleCosmeticRect = (element: Element): VisibleCosmeticRect | null => {
 
   return {
     area: (right - left) * (bottom - top),
+    renderArea: Math.max(0, rect.width) * Math.max(0, rect.height),
     centerX: (left + right) / 2,
     centerY: (top + bottom) / 2
   };
+};
+
+type CosmeticMotionElements = {
+  all: Element[];
+  visible: Set<Element>;
+  smilOnly: Set<Element>;
+  cssOnly: Set<Element>;
 };
 
 const mutationTouchesCosmeticFrame = (node: Node): boolean => {
@@ -471,6 +566,29 @@ const cosmeticFrameMutationNeedsRefresh = (records: MutationRecord[]): boolean =
     return [...record.addedNodes, ...record.removedNodes].some(mutationTouchesCosmeticFrame);
   });
 
+const syncObservedCosmeticMotionElements = (
+  elementsByKey: ReadonlyMap<string, CosmeticMotionElements>
+): void => {
+  if (!cosmeticMotionIntersectionObserver && !cosmeticMotionResizeObserver) return;
+
+  const nextObservedElements = new Set<Element>();
+  for (const elements of elementsByKey.values()) {
+    for (const element of elements.all) nextObservedElements.add(element);
+  }
+
+  for (const element of observedCosmeticMotionElements) {
+    if (nextObservedElements.has(element)) continue;
+    cosmeticMotionIntersectionObserver?.unobserve(element);
+    cosmeticMotionResizeObserver?.unobserve(element);
+  }
+  for (const element of nextObservedElements) {
+    if (observedCosmeticMotionElements.has(element)) continue;
+    cosmeticMotionIntersectionObserver?.observe(element);
+    cosmeticMotionResizeObserver?.observe(element);
+  }
+  observedCosmeticMotionElements = nextObservedElements;
+};
+
 const refreshCosmeticSvgMotionBudget = (): void => {
   if (
     typeof document === 'undefined'
@@ -479,7 +597,7 @@ const refreshCosmeticSvgMotionBudget = (): void => {
   ) return;
 
   const candidates: CosmeticSvgMotionCandidate[] = [];
-  const elementsByKey = new Map<string, { all: Element[]; visible: Set<Element> }>();
+  const elementsByKey = new Map<string, CosmeticMotionElements>();
   const pageIsHidden = document.visibilityState === 'hidden';
   let order = 0;
   for (const source of injectedCosmeticCssSources.values()) {
@@ -489,7 +607,14 @@ const refreshCosmeticSvgMotionBudget = (): void => {
     let engaged = false;
     const elements = Array.from(document.getElementsByClassName(source.key));
     const visibleElements = new Set<Element>();
-    elementsByKey.set(source.key, { all: elements, visible: visibleElements });
+    const smilOnlyElements = new Set<Element>();
+    const cssOnlyElements = new Set<Element>();
+    elementsByKey.set(source.key, {
+      all: elements,
+      visible: visibleElements,
+      smilOnly: smilOnlyElements,
+      cssOnly: cssOnlyElements
+    });
     if (pageIsHidden) {
       order += 1;
       continue;
@@ -498,6 +623,17 @@ const refreshCosmeticSvgMotionBudget = (): void => {
       const visibleRect = visibleCosmeticRect(element);
       if (!visibleRect) continue;
       visibleElements.add(element);
+      if (
+        ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
+        && visibleRect.renderArea >= SVG_CSS_ONLY_MIN_RENDER_AREA
+      ) {
+        cssOnlyElements.add(element);
+      } else if (
+        ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
+        && visibleRect.renderArea >= SVG_SMIL_ONLY_MIN_RENDER_AREA
+      ) {
+        smilOnlyElements.add(element);
+      }
       visibleArea += visibleRect.area;
       distance = Math.min(
         distance,
@@ -534,7 +670,17 @@ const refreshCosmeticSvgMotionBudget = (): void => {
     ? new Set<string>()
     : selectActiveCosmeticSvgMotionKeys(candidates);
 
+  syncObservedCosmeticMotionElements(elementsByKey);
+
   for (const [key, elements] of elementsByKey) {
+    // data SVG CSS는 key별로 한 style을 공유하므로, 같은 테마의 가시 인스턴스가
+    // 서로 다른 크기라면 가장 높은 LOD를 그 key 전체에 일관되게 적용합니다.
+    const usesCssOnlyTier = activeKeys.has(key) && elements.cssOnly.size > 0;
+    const usesSmilOnlyTier = (
+      activeKeys.has(key)
+      && !usesCssOnlyTier
+      && elements.smilOnly.size > 0
+    );
     for (const element of elements.all) {
       const shouldPause = !activeKeys.has(key) || !elements.visible.has(element);
       if (shouldPause) {
@@ -542,23 +688,67 @@ const refreshCosmeticSvgMotionBudget = (): void => {
       } else {
         element.removeAttribute(COSMETIC_MOTION_PAUSED_ATTRIBUTE);
       }
+      if (!shouldPause && usesSmilOnlyTier) {
+        element.setAttribute(COSMETIC_MOTION_SMIL_ONLY_ATTRIBUTE, 'true');
+      } else {
+        element.removeAttribute(COSMETIC_MOTION_SMIL_ONLY_ATTRIBUTE);
+      }
+      if (!shouldPause && usesCssOnlyTier) {
+        element.setAttribute(COSMETIC_MOTION_CSS_ONLY_ATTRIBUTE, 'true');
+      } else {
+        element.removeAttribute(COSMETIC_MOTION_CSS_ONLY_ATTRIBUTE);
+      }
     }
   }
 
   const nextLimitedKeys = new Set<string>();
+  const nextAdaptiveLodKeys = new Set<string>();
+  const nextCssOnlyKeys = new Set<string>();
   for (const source of injectedCosmeticCssSources.values()) {
     if (source.isFrame && source.hasSvgSmil && !activeKeys.has(source.key)) {
       nextLimitedKeys.add(source.key);
     }
+    const elements = elementsByKey.get(source.key);
+    if (
+      source.isFrame
+      && source.hasSvgSmil
+      && activeKeys.has(source.key)
+      && !elements?.cssOnly.size
+      && !!elements?.smilOnly.size
+    ) {
+      nextAdaptiveLodKeys.add(source.key);
+    } else if (
+      source.isFrame
+      && source.hasSvgSmil
+      && activeKeys.has(source.key)
+      && !!elements?.cssOnly.size
+    ) {
+      nextCssOnlyKeys.add(source.key);
+    }
   }
 
   const previousLimitedKeys = cosmeticMotionBudgetLimitedKeys;
+  const previousAdaptiveLodKeys = cosmeticMotionAdaptiveLodKeys;
+  const previousCssOnlyKeys = cosmeticMotionCssOnlyKeys;
   const changedKeys = new Set(
-    [...previousLimitedKeys, ...nextLimitedKeys].filter(
-      (key) => previousLimitedKeys.has(key) !== nextLimitedKeys.has(key)
+    [
+      ...previousLimitedKeys,
+      ...nextLimitedKeys,
+      ...previousAdaptiveLodKeys,
+      ...nextAdaptiveLodKeys,
+      ...previousCssOnlyKeys,
+      ...nextCssOnlyKeys
+    ].filter(
+      (key) => (
+        previousLimitedKeys.has(key) !== nextLimitedKeys.has(key)
+        || previousAdaptiveLodKeys.has(key) !== nextAdaptiveLodKeys.has(key)
+        || previousCssOnlyKeys.has(key) !== nextCssOnlyKeys.has(key)
+      )
     )
   );
   cosmeticMotionBudgetLimitedKeys = nextLimitedKeys;
+  cosmeticMotionAdaptiveLodKeys = nextAdaptiveLodKeys;
+  cosmeticMotionCssOnlyKeys = nextCssOnlyKeys;
   for (const key of changedKeys) {
     const source = injectedCosmeticCssSources.get(key);
     if (source) syncInjectedCosmeticCss(source);
@@ -630,6 +820,12 @@ const ensureCosmeticSvgMotionBudgetObserver = (): void => {
     cosmeticMotionResizeObserver = new ResizeObserver(scheduleCosmeticSvgMotionBudgetRefresh);
     cosmeticMotionResizeObserver.observe(document.documentElement);
   }
+  if (typeof IntersectionObserver !== 'undefined') {
+    cosmeticMotionIntersectionObserver = new IntersectionObserver(
+      scheduleCosmeticSvgMotionBudgetRefresh,
+      { threshold: [0, 0.001, 0.25, 0.5, 0.75, 1] }
+    );
+  }
   scheduleCosmeticSvgMotionBudgetRefresh();
 };
 
@@ -641,6 +837,61 @@ const ensureReducedMotionObserver = (): void => {
   } else {
     reducedMotionMediaQuery.addListener(syncAllInjectedCosmeticCss);
   }
+};
+
+/** 테스트 모듈 재로딩 사이에 전역 observer와 주입 상태가 남지 않도록 정리합니다. */
+export const __resetCosmeticRuntimeForTests = (): void => {
+  if (typeof window !== 'undefined') {
+    if (cosmeticMotionBudgetFrame !== null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(cosmeticMotionBudgetFrame);
+    }
+    if (cosmeticMotionBudgetInitialized && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', scheduleCosmeticSvgMotionBudgetRefresh);
+      window.removeEventListener('scroll', scheduleCosmeticSvgMotionBudgetRefresh, true);
+    }
+  }
+  if (
+    cosmeticMotionBudgetInitialized
+    && typeof document !== 'undefined'
+    && typeof document.removeEventListener === 'function'
+  ) {
+    document.removeEventListener('pointerover', scheduleCosmeticSvgMotionBudgetRefresh, true);
+    document.removeEventListener('pointerout', scheduleCosmeticSvgMotionBudgetRefresh, true);
+    document.removeEventListener('focusin', scheduleCosmeticSvgMotionBudgetRefresh, true);
+    document.removeEventListener('focusout', scheduleCosmeticSvgMotionBudgetRefresh, true);
+    document.removeEventListener('visibilitychange', handleCosmeticVisibilityChange);
+  }
+
+  for (const element of observedCosmeticMotionElements) {
+    cosmeticMotionIntersectionObserver?.unobserve(element);
+    cosmeticMotionResizeObserver?.unobserve(element);
+  }
+  cosmeticMotionMutationObserver?.disconnect();
+  cosmeticMotionResizeObserver?.disconnect();
+  cosmeticMotionIntersectionObserver?.disconnect();
+
+  if (reducedMotionMediaQuery) {
+    if (typeof reducedMotionMediaQuery.removeEventListener === 'function') {
+      reducedMotionMediaQuery.removeEventListener('change', syncAllInjectedCosmeticCss);
+    } else if (typeof reducedMotionMediaQuery.removeListener === 'function') {
+      reducedMotionMediaQuery.removeListener(syncAllInjectedCosmeticCss);
+    }
+  }
+
+  for (const key of injectedCosmeticCssSources.keys()) clearCosmeticMotionPausedAttributes(key);
+  for (const style of injectedBorderCss.values()) style.remove();
+  injectedBorderCss.clear();
+  injectedCosmeticCssSources.clear();
+  cosmeticMotionBudgetLimitedKeys = new Set<string>();
+  cosmeticMotionAdaptiveLodKeys = new Set<string>();
+  cosmeticMotionCssOnlyKeys = new Set<string>();
+  observedCosmeticMotionElements = new Set<Element>();
+  cosmeticMotionBudgetFrame = null;
+  cosmeticMotionBudgetInitialized = false;
+  cosmeticMotionMutationObserver = null;
+  cosmeticMotionResizeObserver = null;
+  cosmeticMotionIntersectionObserver = null;
+  reducedMotionMediaQuery = null;
 };
 
 /**
@@ -667,6 +918,8 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     }
     injectedCosmeticCssSources.delete(key);
     cosmeticMotionBudgetLimitedKeys.delete(key);
+    cosmeticMotionAdaptiveLodKeys.delete(key);
+    cosmeticMotionCssOnlyKeys.delete(key);
     scheduleCosmeticSvgMotionBudgetRefresh();
     return;
   }
@@ -683,21 +936,34 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     isFrame: key.startsWith('cb-'),
     fallbackCss,
     hasSvgSmil: SVG_SMIL_RAW_OR_ENCODED_START.test(css),
-    // 가이드 기준의 보통 SVG(테마당 약 7개 타임라인)를 1로 보고,
-    // 더 촘촘한 테마는 가시 면적 예산을 비례해 사용합니다.
+    // 7개 타임라인을 비용 1의 기준 단위로 두며, 현재 운영 테마의
+    // 20~24개 SMIL은 약 2.86~3.43배의 가시 면적 예산을 사용합니다.
     svgSmilMotionWeight: Math.max(
       1,
       (css.match(new RegExp(SVG_SMIL_RAW_OR_ENCODED_START.source, 'gi'))?.length ?? 0) / 7
     ),
     motionSelector: cosmeticClassSelector(key)
   };
-  if (!source.hasSvgSmil) {
+  const previousSource = injectedCosmeticCssSources.get(key);
+  const needsSvgMotionBudgetReapproval = source.isFrame && source.hasSvgSmil && (
+    !previousSource
+    || !previousSource.hasSvgSmil
+    || previousSource.css !== source.css
+    || previousSource.svgSmilMotionWeight !== source.svgSmilMotionWeight
+  );
+  if (!source.isFrame || !source.hasSvgSmil) {
     clearCosmeticMotionPausedAttributes(key);
     cosmeticMotionBudgetLimitedKeys.delete(key);
+    cosmeticMotionAdaptiveLodKeys.delete(key);
+    cosmeticMotionCssOnlyKeys.delete(key);
+  } else if (needsSvgMotionBudgetReapproval) {
+    // 신규·정적→동적 전환·동적 CSS/SMIL 비용 변경은 모두 먼저 정적으로
+    // 주입합니다. 동일 CSS의 반복 호출은 현재 승인 상태를 유지합니다.
+    // 다음 rAF에서 실제 DOM 가시 면적을 합산해 승인된 테마만 되살립니다.
+    cosmeticMotionBudgetLimitedKeys.add(key);
   }
   injectedCosmeticCssSources.set(key, source);
   ensureReducedMotionObserver();
-  ensureCosmeticSvgMotionBudgetObserver();
   let el = injectedBorderCss.get(key);
   if (!el) {
     el = document.createElement('style');
@@ -706,6 +972,7 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     injectedBorderCss.set(key, el);
   }
   syncInjectedCosmeticCss(source);
+  if (source.isFrame && source.hasSvgSmil) ensureCosmeticSvgMotionBudgetObserver();
   scheduleCosmeticSvgMotionBudgetRefresh();
 };
 /** 하위 호환 별칭 */

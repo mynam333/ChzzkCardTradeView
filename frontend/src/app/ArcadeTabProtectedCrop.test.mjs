@@ -3,9 +3,17 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('./ArcadeTab.tsx', import.meta.url), 'utf8');
+const imageSourceHelper = readFileSync(new URL('./cropDetectiveImageSources.ts', import.meta.url), 'utf8');
+const recoveryHelper = readFileSync(new URL('./cropDetectiveRecovery.ts', import.meta.url), 'utf8');
 const protectedPreviewStart = source.indexOf('const ProtectedCropPreview');
 const protectedPreviewEnd = source.indexOf('const ClientCropPreview');
 const protectedPreview = source.slice(protectedPreviewStart, protectedPreviewEnd);
+const clientPreviewStart = source.indexOf('const ClientCropPreview');
+const clientPreviewEnd = source.indexOf('const CropPreview');
+const clientPreview = source.slice(clientPreviewStart, clientPreviewEnd);
+const choiceTileStart = source.indexOf('const CropDetectiveChoiceTile');
+const choiceTileEnd = source.indexOf('const CropDetectiveChoices');
+const choiceTile = source.slice(choiceTileStart, choiceTileEnd);
 const paidAdvanceStart = source.indexOf('const advanceToPaidRound');
 const paidAdvanceEnd = source.indexOf('if (!submitRetry', paidAdvanceStart);
 const paidAdvanceFlow = source.slice(paidAdvanceStart, paidAdvanceEnd);
@@ -21,25 +29,66 @@ test('protected crop only settles after a real protected image loads', () => {
   assert.doesNotMatch(protectedPreview, /src=\{['"]\/icon\.png['"]\}/);
   assert.match(protectedPreview, /onLoad=\{\(\) => \{/);
   assert.match(protectedPreview, /setLoadState\('loaded'\)/);
-  assert.match(protectedPreview, /onPrepared\?\.\(roundKey, \{ forceLocalFallback, localDeadlineAt \}\)/);
+  assert.match(protectedPreview, /onPrepared\?\.\(roundKey, \{[\s\S]*localDeadlineAt[\s\S]*\}\)/);
   assert.match(protectedPreview, /X-Minigame-Round-Deadline/);
   assert.match(protectedPreview, /X-Minigame-Server-Now/);
   assert.match(protectedPreview, /responseLocalDeadlineAt/);
 });
 
-test('protected crop has a hung-load timeout and keeps recovering without a terminal error screen', () => {
-  assert.match(protectedPreview, /window\.setTimeout\(\(\) => controller\.abort\(\), 8_000\)/);
+test('protected crop recovery is bounded and ends in a retryable non-busy state', () => {
+  assert.match(protectedPreview, /CROP_DETECTIVE_RECOVERY_POLICY\.primaryRequestTimeoutMs/);
   assert.match(protectedPreview, /credentials: 'include'/);
-  assert.match(protectedPreview, /onLoadFailed\(roundKey\)/);
-  assert.match(protectedPreview, /Math\.min\(10_000/);
-  assert.doesNotMatch(protectedPreview, /'failed'/);
-  assert.doesNotMatch(source, /previousAttempts >= 1/);
-  assert.match(source, /fetchActiveCropDetectiveSession\(\)/);
+  assert.match(protectedPreview, /runAbortableTaskWithTimeout\([\s\S]*onLoadFailed\(roundKey, signal\)/);
+  assert.match(protectedPreview, /canAutomaticallyRefreshCropDetectiveSession\(completedSessionRefreshes\)/);
+  assert.match(protectedPreview, /setLoadState\('retryable'\)/);
+  assert.match(protectedPreview, /aria-busy=\{loadState !== 'loaded' && loadState !== 'retryable'\}/);
+  assert.match(protectedPreview, /onClick=\{handleManualRetry\}/);
+  assert.match(protectedPreview, /현재 라운드와 기회는 유지됩니다/);
+  assert.match(recoveryHelper, /maxAutomaticSessionRefreshes: 1/);
+  assert.match(recoveryHelper, /primaryRequestTimeoutMs: 13_000/);
+  assert.match(recoveryHelper, /backendNegativeCacheRetryDelayMs: 1_100/);
+  assert.match(source, /await waitForAbortableDelay\([\s\S]*backendNegativeCacheRetryDelayMs/);
+  assert.match(source, /fetchActiveCropDetectiveSession\(signal\)/);
+  assert.match(source, /apiFetch\('\/minigames\/active\?game_type=crop_detective', \{[\s\S]*signal: requestSignal/);
   assert.match(source, /recoveryRequestId !== cropImageRecoveryRequestRef\.current/);
   assert.match(source, /latestContext\.roundKey !== failedRoundKey/);
   assert.match(source, /restoreCropDetectiveSession\(activeSession, \{ silent: true \}\)/);
-  assert.match(source, /cropImageRecoveryAttemptsRef/);
-  assert.match(source, /await new Promise<void>\(\(resolve\) => window\.setTimeout\(resolve, retryDelayMs\)\)/);
+  assert.match(source, /cropImageAutomaticRecoveryKeysRef\.current\.has\(stableRecoveryKey\)/);
+  assert.match(source, /cropImageAutomaticRecoveryKeysRef\.current\.add\(stableRecoveryKey\)/);
+  assert.doesNotMatch(source, /cropImageRecoveryAttemptsRef/);
+  assert.doesNotMatch(protectedPreview, /Math\.min\(10_000/);
+});
+
+test('protected blob display also has a hard decode watchdog', () => {
+  assert.match(protectedPreview, /loadState !== 'displaying' \|\| !displayUrl/);
+  assert.match(protectedPreview, /CROP_DETECTIVE_RECOVERY_POLICY\.blobDecodeTimeoutMs/);
+  assert.match(protectedPreview, /advanceAfterRequestFailure/);
+  assert.match(protectedPreview, /loadState !== 'loaded' \|\| !revealed/);
+  assert.match(protectedPreview, /preparedDisplayUrlRef/);
+});
+
+test('crop and candidate readiness follows the rendered DOM image with a finite watchdog', () => {
+  assert.ok(clientPreviewStart >= 0 && clientPreviewEnd > clientPreviewStart);
+  assert.ok(choiceTileStart >= 0 && choiceTileEnd > choiceTileStart);
+  assert.match(clientPreview, /onLoad=\{\(\) => \{[\s\S]*notifyPrepared\(currentPreview\.imageUrl\)/);
+  assert.match(clientPreview, /CROP_DETECTIVE_RECOVERY_POLICY\.blobDecodeTimeoutMs/);
+  assert.match(clientPreview, /setRetryableRoundKey\(roundKey\)/);
+  assert.match(clientPreview, /createCropDetectiveVerificationCandidates/);
+  assert.match(clientPreview, /selectCropDetectiveVerificationCandidate/);
+  assert.match(clientPreview, /applyDirectPreview\(selectedCrop \|\| \{ x, y \}\)/);
+  assert.match(clientPreview, /getCropDetectiveImageSources\([\s\S]*round\.source_image_url,\s*null,/);
+  assert.doesNotMatch(clientPreview, /applyDirectPreview[\s\S]{0,300}notifyPrepared/);
+  assert.match(choiceTile, /onImageLoad=\{loadedSource \? handleImageLoad : undefined\}/);
+  assert.match(choiceTile, /onImageError=\{loadedSource \? handleImageFailure : undefined\}/);
+  assert.match(choiceTile, /CROP_DETECTIVE_RECOVERY_POLICY\.blobDecodeTimeoutMs/);
+  assert.match(choiceTile, /onSettled\(assetId, roundKey\)/);
+  assert.match(choiceTile, /onRenderFailed\(assetId, roundKey\)/);
+  assert.match(choiceTile, /abandonedGenerationRef\.current === generationKey/);
+  assert.match(choiceTile, /sourceResult\.status !== 'failed'/);
+  assert.match(source, /key=\{`\$\{roundKey\}:\$\{choice\.channel_id\}:\$\{candidateRenderRetryNonce\}`\}/);
+  assert.match(source, /const allImagesReady = !preparationRetryable/);
+  assert.match(source, /handleAssetSettled\('crop', settledRoundKey\)/);
+  assert.match(source, /candidateRetryable[\s\S]*후보 이미지를 표시하지 못했습니다[\s\S]*handleCandidateRenderRetry/);
 });
 
 test('paid crop requests the protected clue only after candidates and countdown are ready', () => {
@@ -50,14 +99,12 @@ test('paid crop requests the protected clue only after candidates and countdown 
   assert.match(source, /setRoundTimeLeft\(getVisibleRoundTimeLeft\(localDeadlineAt\)\)/);
 });
 
-test('server deterministic clue fallback switches every candidate to matching local artwork', () => {
-  assert.match(protectedPreview, /response\.headers\.get\('X-Minigame-Image-Fallback'\) === 'deterministic'/);
-  assert.match(protectedPreview, /fallback=deterministic/);
-  assert.match(source, /localFallbackDetected/);
-  assert.match(source, /deterministicAssetIds/);
-  assert.match(source, /effectiveLoadedSource\?\.url \|\| localFallbackUrl/);
-  assert.match(source, /forceLocalFallback=\{forceLocalFallback\}/);
-  assert.match(source, /const image = await preloadCropDetectiveImage\(source\.url, true\)/);
+test('crop detective production code never substitutes generated artwork', () => {
+  assert.doesNotMatch(source, /data:image\/svg|fallback=deterministic|forceLocalFallback|localFallbackDetected|deterministicAssetIds/);
+  assert.doesNotMatch(imageSourceHelper, /data:image\/svg|createCropDetectiveFallbackDataUrl|local-fallback/);
+  assert.match(protectedPreview, /generated protected crop is not allowed/);
+  assert.match(imageSourceHelper, /A failed[\s\S]*chain deliberately returns null/);
+  assert.match(source, /resolveCropDetectiveImageSource<HTMLImageElement>/);
 });
 
 test('paid crop accepts an unarmed server contract while other paid round games still require deadlines', () => {
@@ -88,9 +135,12 @@ test('expired and completed resumed rounds advance without re-arming the clue', 
   assert.match(source, /void submitResult\(\{ answers: roundAnswers \}\)/);
 });
 
-test('candidate fallback timeout is one total budget instead of one budget per source', () => {
-  assert.match(source, /const deadlineAt = Date\.now\(\) \+ Math\.max\(0, timeoutMs\)/);
-  assert.match(source, /const remainingMs = deadlineAt - Date\.now\(\)/);
-  assert.match(source, /window\.setTimeout\(\(\) => resolve\(null\), remainingMs\)/);
-  assert.doesNotMatch(source, /window\.setTimeout\(\(\) => resolve\(null\), timeoutMs\)/);
+test('real image source timeout is one bounded total budget instead of one budget per source', () => {
+  assert.match(imageSourceHelper, /const deadlineAt = Date\.now\(\) \+ finiteTimeoutMs/);
+  assert.match(imageSourceHelper, /const remainingMs = deadlineAt - Date\.now\(\)/);
+  assert.match(imageSourceHelper, /setTimeout\(\(\) => resolve\(null\), remainingMs\)/);
+  assert.match(imageSourceHelper, /return null;/);
+  assert.doesNotMatch(imageSourceHelper, /source\.guaranteed/);
+  assert.match(source, /CROP_IMAGE_PRELOAD_HARD_TIMEOUT_MS/);
+  assert.match(source, /cropDetectiveImagePreloadCache\.delete\(url\)/);
 });

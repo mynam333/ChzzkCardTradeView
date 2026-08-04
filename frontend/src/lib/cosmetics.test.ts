@@ -1,17 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  __resetCosmeticRuntimeForTests,
   ensureCosmeticCss,
   MAX_CONCURRENT_SVG_MOTION_AREA,
   MAX_CONCURRENT_SVG_MOTION_THEMES,
   migrateFramePxToContainerUnits,
   normalizeSvgInCss,
   selectActiveCosmeticSvgMotionKeys,
+  SVG_CSS_ONLY_MIN_RENDER_AREA,
+  SVG_SMIL_ONLY_MIN_RENDER_AREA,
+  stripSvgSmilAnimationsExceptDataSvgIndexInCss,
   stripSvgSmilAnimationsInCss
 } from './cosmetics';
 
 afterEach(() => {
+  __resetCosmeticRuntimeForTests();
   vi.unstubAllGlobals();
 });
+
+const svgMotionCss = (key: string, timelines: number, durationOffset: number = 0): string => {
+  const perLayer = [
+    Math.ceil(timelines / 3),
+    Math.ceil((timelines - Math.ceil(timelines / 3)) / 2),
+    0
+  ];
+  perLayer[2] = timelines - perLayer[0] - perLayer[1];
+  let animationIndex = 0;
+  const svg = (count: number) => {
+    const animations = Array.from({ length: count }, () => {
+      const index = animationIndex;
+      animationIndex += 1;
+      return `%3Canimate id='${key}-motion-${index}' attributeName='opacity' values='.6%3B1%3B.6' dur='${4 + durationOffset + index / 10}s' repeatCount='indefinite'%2F%3E`;
+    }).join('');
+    return `url("data:image/svg+xml,%3Csvg viewBox='0 0 100 160'%3E%3Cpath d='M1 1H99V159H1Z'%2F%3E${animations}%3C%2Fsvg%3E")`;
+  };
+  return `.${key}{background-image:${svg(perLayer[0])}}.${key}::before{background-image:${svg(perLayer[1])};animation:${key}-before 9s ease-in-out infinite}.${key}::after{background-image:${svg(perLayer[2])};animation:${key}-after 11s linear infinite}@keyframes ${key}-before{0%,100%{transform:translate3d(0,0,0);opacity:.7}50%{transform:translate3d(1px,0,0);opacity:.9}}@keyframes ${key}-after{0%,100%{transform:translate3d(0,0,0);opacity:.7}50%{transform:translate3d(-1px,0,0);opacity:.9}}@media(prefers-reduced-motion:reduce){.${key}::before,.${key}::after{animation:none}}`;
+};
 
 describe('cosmetic SVG motion handling', () => {
   it('keeps three small themes active but prioritizes engagement within the visible-area budget', () => {
@@ -25,6 +49,8 @@ describe('cosmetic SVG motion handling', () => {
     expect([...selectActiveCosmeticSvgMotionKeys(smallCandidates)]).toEqual(['a', 'b', 'c']);
     expect(MAX_CONCURRENT_SVG_MOTION_THEMES).toBe(3);
     expect(MAX_CONCURRENT_SVG_MOTION_AREA).toBe(90_000);
+    expect(SVG_SMIL_ONLY_MIN_RENDER_AREA).toBe(120_000);
+    expect(SVG_CSS_ONLY_MIN_RENDER_AREA).toBe(500_000);
 
     const engagedCandidates = [
       { key: 'center', engaged: false, distance: 0, visibleArea: 40_000, order: 0 },
@@ -33,11 +59,11 @@ describe('cosmetic SVG motion handling', () => {
     ];
     expect([...selectActiveCosmeticSvgMotionKeys(engagedCandidates)]).toEqual(['hovered', 'near']);
 
-    const richCandidates = [13, 11, 11].map((timelines, order) => ({
+    const richCandidates = [24, 22, 20].map((timelines, order) => ({
       key: `rich-${order}`,
       engaged: false,
       distance: order,
-      visibleArea: 26_214.4,
+      visibleArea: 10_000,
       motionWeight: timelines / 7,
       order
     }));
@@ -90,6 +116,16 @@ describe('cosmetic SVG motion handling', () => {
     const css = `.x{content:"${encodedSmil}";background:url("data:image/png;base64,${encodedSmil}")}`;
 
     expect(stripSvgSmilAnimationsInCss(css)).toBe(css);
+  });
+
+  it('keeps only the selected data SVG dynamic while preserving every static layer', () => {
+    const css = svgMotionCss('cb-layer-lod', 24);
+    const signatureOnly = stripSvgSmilAnimationsExceptDataSvgIndexInCss(css, 2);
+
+    expect(signatureOnly.match(/%3Canimate\b/g)).toHaveLength(8);
+    expect(signatureOnly.match(/%3Cpath\b/g)).toHaveLength(3);
+    expect(signatureOnly).toContain("id='cb-layer-lod-motion-16'");
+    expect(signatureOnly).not.toContain("id='cb-layer-lod-motion-15'");
   });
 
   it('removes SMIL whose closing slash is percent-encoded like production theme SVGs', () => {
@@ -145,6 +181,18 @@ describe('cosmetic SVG motion handling', () => {
   it('recompiles injected SVGs when the reduced-motion preference changes', () => {
     let prefersReducedMotion = false;
     let notifyPreferenceChange: (() => void) | undefined;
+    let runScheduledFrame: (() => void) | undefined;
+    const frame = {
+      parentElement: null,
+      getBoundingClientRect: () => ({
+        left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100
+      }),
+      checkVisibility: () => true,
+      matches: () => false,
+      contains: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn()
+    };
     const style = {
       textContent: '',
       setAttribute: vi.fn(),
@@ -156,8 +204,31 @@ describe('cosmetic SVG motion handling', () => {
         notifyPreferenceChange = listener;
       })
     };
-    vi.stubGlobal('window', { matchMedia: vi.fn(() => mediaQuery) });
+    vi.stubGlobal('window', {
+      innerWidth: 1280,
+      innerHeight: 800,
+      addEventListener: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: () => void) => {
+        runScheduledFrame = callback;
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      getComputedStyle: vi.fn(() => ({
+        display: 'block',
+        visibility: 'visible',
+        contentVisibility: 'visible',
+        opacity: '1',
+        overflowX: 'visible',
+        overflowY: 'visible'
+      })),
+      matchMedia: vi.fn(() => mediaQuery)
+    });
     vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      activeElement: null,
+      documentElement: {},
+      getElementsByClassName: vi.fn((key: string) => key === 'cb-motion-test' ? [frame] : []),
+      addEventListener: vi.fn(),
       createElement: vi.fn(() => style),
       head: { appendChild: vi.fn() }
     });
@@ -167,6 +238,9 @@ describe('cosmetic SVG motion handling', () => {
       style_json: JSON.stringify({ class: 'cb-motion-test', css })
     });
 
+    // 신규 SMIL 프레임은 실제 DOM 면적을 확인하기 전까지 정적으로 주입됩니다.
+    expect(style.textContent).not.toMatch(/%3Canimate\b/);
+    runScheduledFrame?.();
     expect(style.textContent).toMatch(/%3Canimate\b/);
     expect(style.textContent).toMatch(/var\(--cosmetic-frame-unit\)/);
 
@@ -183,6 +257,7 @@ describe('cosmetic SVG motion handling', () => {
   it('strips motion synchronously when a hidden tab suspends requestAnimationFrame', () => {
     let visibilityState = 'visible';
     let onVisibilityChange: (() => void) | undefined;
+    let runScheduledFrame: (() => void) | undefined;
     const cancelAnimationFrame = vi.fn();
     const frame = {
       parentElement: null,
@@ -204,7 +279,10 @@ describe('cosmetic SVG motion handling', () => {
       innerWidth: 1280,
       innerHeight: 800,
       addEventListener: vi.fn(),
-      requestAnimationFrame: vi.fn(() => 17),
+      requestAnimationFrame: vi.fn((callback: () => void) => {
+        runScheduledFrame = callback;
+        return 17;
+      }),
       cancelAnimationFrame,
       getComputedStyle: vi.fn(() => ({
         display: 'block',
@@ -236,8 +314,16 @@ describe('cosmetic SVG motion handling', () => {
       style_json: JSON.stringify({ class: 'cb-hidden-tab-test', css })
     });
     const style = injectedStyles.at(-1);
+    // 신규 SMIL 테마는 예산 승인 전 정적으로 시작합니다.
+    expect(style?.textContent).not.toMatch(/%3Canimate\b/);
+    runScheduledFrame?.();
     expect(style?.textContent).toMatch(/%3Canimate\b/);
     expect(onVisibilityChange).toBeTypeOf('function');
+
+    // 갱신 예약이 남아 있는 상태에서 탭이 숨겨지는 경로도 검증합니다.
+    ensureCosmeticCss({
+      style_json: JSON.stringify({ class: 'cb-hidden-tab-test', css })
+    });
 
     visibilityState = 'hidden';
     onVisibilityChange?.();
@@ -269,5 +355,462 @@ describe('cosmetic SVG motion handling', () => {
       style_json: JSON.stringify({ class: 'cb-hidden-tab-test' })
     });
     expect(frame.removeAttribute).toHaveBeenCalledWith('data-cosmetic-motion-paused');
+  });
+
+  it('moves an observed frame across full, signature-SMIL, and CSS-only size tiers', () => {
+    const scheduledFrames: Array<() => void> = [];
+    let triggerIntersection: IntersectionObserverCallback | undefined;
+    let triggerResize: ResizeObserverCallback | undefined;
+    const intersectionObserve = vi.fn();
+    const intersectionUnobserve = vi.fn();
+    const intersectionDisconnect = vi.fn();
+    const resizeObserve = vi.fn();
+    const resizeUnobserve = vi.fn();
+    const resizeDisconnect = vi.fn();
+    const mutationObserve = vi.fn();
+    const mutationDisconnect = vi.fn();
+    const removeWindowListener = vi.fn();
+    const removeDocumentListener = vi.fn();
+    const removeMediaListener = vi.fn();
+    let prefersReducedMotion = false;
+    let notifyMediaChange: (() => void) | undefined;
+    const makeFrame = (rect: { left: number; top: number; right: number; bottom: number }) => {
+      const pausedAttributes = new Set<string>();
+      return {
+        parentElement: null,
+        getBoundingClientRect: () => ({
+          ...rect,
+          width: rect.right - rect.left,
+          height: rect.bottom - rect.top
+        }),
+        checkVisibility: () => true,
+        matches: () => false,
+        contains: () => false,
+        setAttribute: vi.fn((name: string) => pausedAttributes.add(name)),
+        removeAttribute: vi.fn((name: string) => pausedAttributes.delete(name)),
+        isMotionPaused: () => pausedAttributes.has('data-cosmetic-motion-paused'),
+        isSmilOnly: () => pausedAttributes.has('data-cosmetic-motion-smil-only'),
+        isCssOnly: () => pausedAttributes.has('data-cosmetic-motion-css-only')
+      };
+    };
+    const heavyRect = { left: 450, top: 350, right: 550, bottom: 450 };
+    const mediumRect = { left: 600, top: 350, right: 700, bottom: 450 };
+    const lightRect = { left: 750, top: 350, right: 850, bottom: 450 };
+    const heavyFrame = makeFrame(heavyRect);
+    const sharedSmallFrame = makeFrame({ left: 450, top: 350, right: 550, bottom: 450 });
+    const mediumFrame = makeFrame(mediumRect);
+    const mediumOffscreenFrame = makeFrame({ left: -200, top: 350, right: -100, bottom: 450 });
+    const lightFrame = makeFrame(lightRect);
+    const documentElement = {};
+    const framesByKey = new Map<string, ReturnType<typeof makeFrame>[]>([
+      ['cb-autumn', [heavyFrame]],
+      ['cb-runtime-22', [mediumFrame, mediumOffscreenFrame]],
+      ['cb-runtime-20', [lightFrame]]
+    ]);
+    const stylesByKey = new Map<string, {
+      textContent: string;
+      setAttribute: ReturnType<typeof vi.fn>;
+      remove: ReturnType<typeof vi.fn>;
+    }>();
+
+    const mediaQuery = {
+      get matches() { return prefersReducedMotion; },
+      addEventListener: vi.fn((_event: string, listener: () => void) => {
+        notifyMediaChange = listener;
+      }),
+      removeEventListener: removeMediaListener
+    } as unknown as MediaQueryList;
+
+    vi.stubGlobal('window', {
+      innerWidth: 1000,
+      innerHeight: 800,
+      addEventListener: vi.fn(),
+      removeEventListener: removeWindowListener,
+      requestAnimationFrame: vi.fn((callback: () => void) => {
+        scheduledFrames.push(callback);
+        return scheduledFrames.length;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      matchMedia: vi.fn(() => mediaQuery),
+      getComputedStyle: vi.fn(() => ({
+        display: 'block',
+        visibility: 'visible',
+        contentVisibility: 'visible',
+        opacity: '1',
+        overflowX: 'visible',
+        overflowY: 'visible'
+      }))
+    });
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      activeElement: null,
+      documentElement,
+      getElementsByClassName: vi.fn((key: string) => framesByKey.get(key) ?? []),
+      addEventListener: vi.fn(),
+      removeEventListener: removeDocumentListener,
+      createElement: vi.fn(() => {
+        const style = { textContent: '', setAttribute: vi.fn(), remove: vi.fn() };
+        style.setAttribute.mockImplementation((name: string, value: string) => {
+          if (name === 'data-cb-css') stylesByKey.set(value, style);
+        });
+        return style;
+      }),
+      head: { appendChild: vi.fn() }
+    });
+    class FakeIntersectionObserver {
+      root = null;
+      rootMargin = '0px';
+      thresholds = [0, 0.001, 0.25, 0.5, 0.75, 1];
+      observe = intersectionObserve;
+      unobserve = intersectionUnobserve;
+      disconnect = intersectionDisconnect;
+      takeRecords = vi.fn(() => []);
+
+      constructor(callback: IntersectionObserverCallback) {
+        triggerIntersection = callback;
+      }
+    }
+    class FakeResizeObserver {
+      observe = resizeObserve;
+      unobserve = resizeUnobserve;
+      disconnect = resizeDisconnect;
+
+      constructor(callback: ResizeObserverCallback) {
+        triggerResize = callback;
+      }
+    }
+    class FakeMutationObserver {
+      observe = mutationObserve;
+      disconnect = mutationDisconnect;
+      takeRecords = vi.fn(() => []);
+    }
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    vi.stubGlobal('MutationObserver', FakeMutationObserver);
+
+    for (const [key, timelines] of [['cb-autumn', 24], ['cb-runtime-22', 22], ['cb-runtime-20', 20]] as const) {
+      ensureCosmeticCss({
+        style_json: JSON.stringify({ class: key, css: svgMotionCss(key, timelines) })
+      });
+      expect(stylesByKey.get(key)?.textContent).not.toMatch(/%3Canimate\b/);
+    }
+    scheduledFrames.shift()?.();
+
+    // 실제 운영 밀도(20~24 SMIL)에서는 면적 가중치 때문에 가까운 두 테마만 승인됩니다.
+    expect(stylesByKey.get('cb-autumn')?.textContent).toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(24);
+    expect(stylesByKey.get('cb-runtime-22')?.textContent).toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-runtime-20')?.textContent).not.toMatch(/%3Canimate\b/);
+    expect(heavyFrame.isMotionPaused()).toBe(false);
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(mediumFrame.isMotionPaused()).toBe(false);
+    expect(mediumOffscreenFrame.isMotionPaused()).toBe(true);
+    expect(lightFrame.isMotionPaused()).toBe(true);
+    expect(resizeObserve).toHaveBeenCalledWith(documentElement);
+    expect(resizeObserve).toHaveBeenCalledWith(heavyFrame);
+    expect(resizeObserve).toHaveBeenCalledWith(mediumFrame);
+    expect(resizeObserve).toHaveBeenCalledWith(mediumOffscreenFrame);
+    expect(resizeObserve).toHaveBeenCalledWith(lightFrame);
+    expect(intersectionObserve).toHaveBeenCalledTimes(4);
+    expect(mutationObserve).toHaveBeenCalledWith(documentElement, expect.objectContaining({
+      childList: true,
+      subtree: true
+    }));
+
+    Object.assign(heavyRect, { left: 350, top: 250, right: 650, bottom: 550 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+
+    // 카드 자체 크기는 제한하지 않습니다. 커진 한 장은 계속 동작하고,
+    // 새 가시 면적 예산을 넘긴 다음 테마가 정지합니다.
+    expect(stylesByKey.get('cb-autumn')?.textContent).toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(24);
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
+      '.cb-autumn[data-cosmetic-motion-smil-only="true"]'
+    );
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain('animation:none!important;');
+    expect(stylesByKey.get('cb-runtime-22')?.textContent).not.toMatch(/%3Canimate\b/);
+    expect(heavyFrame.isMotionPaused()).toBe(false);
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(mediumFrame.isMotionPaused()).toBe(true);
+
+    // 논리 4×(256 × 409.6)는 가이드의 전체 CSS+SMIL 검증 범위에 남습니다.
+    Object.assign(heavyRect, { left: 372, top: 195.2, right: 628, bottom: 604.8 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+
+    Object.assign(heavyRect, { left: 300, top: 250, right: 700, bottom: 549.9975 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+
+    Object.assign(heavyRect, { left: 300, top: 250, right: 700, bottom: 550 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(true);
+    // Autumn의 대형 LOD는 particle/projection SVG의 시그니처 8개만 재생하고,
+    // base와 micro-detail은 같은 정적 세공을 유지합니다.
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(8);
+
+    // 8× 논리 카드(512 × 819.2 ≈ 419k)는 시그니처 SMIL 구간에 남습니다.
+    Object.assign(heavyRect, { left: 244, top: 0, right: 756, bottom: 819.2 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(true);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(8);
+
+    // 500,000px² 바로 아래에서는 중간 tier, 정확한 경계부터 CSS-only입니다.
+    Object.assign(heavyRect, { left: 187.5, top: 0, right: 812.5, bottom: 799.9984 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(true);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(8);
+
+    Object.assign(heavyRect, { left: 187.5, top: 0, right: 812.5, bottom: 800 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(true);
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
+      'animation:cb-autumn-before 9s ease-in-out infinite'
+    );
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
+      'animation:cb-autumn-after 11s linear infinite'
+    );
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toContain(
+      'animation-play-state:paused!important;'
+    );
+
+    // 화면 밖/예산 제한은 CSS-only보다 우선해 바깥 carrier까지 정지합니다.
+    Object.assign(heavyRect, { left: 1100, top: 0, right: 1725, bottom: 800 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isMotionPaused()).toBe(true);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
+      'animation-play-state:paused!important;'
+    );
+
+    Object.assign(heavyRect, { left: 187.5, top: 0, right: 812.5, bottom: 800 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isMotionPaused()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(true);
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toContain(
+      'animation-play-state:paused!important;'
+    );
+
+    // 감소 모션이 초대형 CSS-only보다 우선하며, 복구 후에는 CSS carrier가 재개됩니다.
+    prefersReducedMotion = true;
+    notifyMediaChange?.();
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toMatch(/%3Canimate\b/);
+    expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
+      'animation-play-state:paused!important;'
+    );
+    prefersReducedMotion = false;
+    notifyMediaChange?.();
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toContain(
+      'animation-play-state:paused!important;'
+    );
+
+    // 한 key가 style을 공유하므로, 일부만 보이는 초대형 인스턴스와 작은
+    // 인스턴스가 동시에 예산 안에 들어와도 가장 높은 tier를 둘 다 사용합니다.
+    framesByKey.set('cb-autumn', [heavyFrame, sharedSmallFrame]);
+    Object.assign(heavyRect, { left: 990, top: 0, right: 1615, bottom: 800 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isCssOnly()).toBe(true);
+    expect(sharedSmallFrame.isCssOnly()).toBe(true);
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(sharedSmallFrame.isSmilOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent).not.toMatch(/%3Canimate\b/);
+
+    Object.assign(heavyRect, { left: 990, top: 0, right: 1390, bottom: 300 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(true);
+    expect(sharedSmallFrame.isSmilOnly()).toBe(true);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(sharedSmallFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(8);
+
+    Object.assign(heavyRect, { left: 600, top: 350, right: 700, bottom: 450 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(sharedSmallFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(sharedSmallFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(24);
+
+    framesByKey.set('cb-autumn', [heavyFrame]);
+    triggerIntersection?.([], {} as IntersectionObserver);
+    scheduledFrames.shift()?.();
+    expect(intersectionUnobserve).toHaveBeenCalledWith(sharedSmallFrame);
+    expect(resizeUnobserve).toHaveBeenCalledWith(sharedSmallFrame);
+
+    // 초대형에서 중간 tier로 내려오면 시그니처 SVG가 다시 활성화됩니다.
+    Object.assign(heavyRect, { left: 300, top: 250, right: 700, bottom: 550 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(true);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(8);
+
+    Object.assign(heavyRect, { left: 350, top: 250, right: 650, bottom: 550 });
+    triggerResize?.([], {} as ResizeObserver);
+    scheduledFrames.shift()?.();
+    expect(heavyFrame.isSmilOnly()).toBe(false);
+    expect(heavyFrame.isCssOnly()).toBe(false);
+    expect(stylesByKey.get('cb-autumn')?.textContent.match(/%3Canimate\b/g)).toHaveLength(24);
+
+    // DOM에서 빠진 프레임은 두 요소 observer 모두에서 해제됩니다.
+    framesByKey.set('cb-runtime-22', []);
+    triggerIntersection?.([], {} as IntersectionObserver);
+    scheduledFrames.shift()?.();
+    expect(intersectionUnobserve).toHaveBeenCalledWith(mediumFrame);
+    expect(intersectionUnobserve).toHaveBeenCalledWith(mediumOffscreenFrame);
+    expect(resizeUnobserve).toHaveBeenCalledWith(mediumFrame);
+    expect(resizeUnobserve).toHaveBeenCalledWith(mediumOffscreenFrame);
+
+    __resetCosmeticRuntimeForTests();
+    expect(intersectionUnobserve).toHaveBeenCalledWith(heavyFrame);
+    expect(intersectionUnobserve).toHaveBeenCalledWith(lightFrame);
+    expect(resizeUnobserve).toHaveBeenCalledWith(heavyFrame);
+    expect(resizeUnobserve).toHaveBeenCalledWith(lightFrame);
+    expect(intersectionDisconnect).toHaveBeenCalledTimes(1);
+    expect(resizeDisconnect).toHaveBeenCalledTimes(1);
+    expect(mutationDisconnect).toHaveBeenCalledTimes(1);
+    expect(removeWindowListener).toHaveBeenCalled();
+    expect(removeDocumentListener).toHaveBeenCalled();
+    expect(removeMediaListener).toHaveBeenCalledWith('change', expect.any(Function));
+
+    // teardown은 중복 호출되어도 observer를 다시 건드리지 않습니다.
+    __resetCosmeticRuntimeForTests();
+    expect(intersectionDisconnect).toHaveBeenCalledTimes(1);
+    expect(resizeDisconnect).toHaveBeenCalledTimes(1);
+    expect(mutationDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts changed SMIL frames static while identical CSS keeps its current approval', () => {
+    const scheduledFrames: Array<() => void> = [];
+    const frame = {
+      parentElement: null,
+      getBoundingClientRect: () => ({
+        left: 450, top: 350, right: 550, bottom: 450, width: 100, height: 100
+      }),
+      checkVisibility: () => true,
+      matches: () => false,
+      contains: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn()
+    };
+    const protectedFrame = {
+      parentElement: null,
+      getBoundingClientRect: () => ({
+        left: 100, top: 0, right: 900, bottom: 1000, width: 800, height: 1000
+      }),
+      checkVisibility: () => true,
+      matches: () => true,
+      contains: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn()
+    };
+    const stylesByKey = new Map<string, {
+      textContent: string;
+      setAttribute: ReturnType<typeof vi.fn>;
+      remove: ReturnType<typeof vi.fn>;
+    }>();
+    vi.stubGlobal('window', {
+      innerWidth: 1000,
+      innerHeight: 800,
+      addEventListener: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: () => void) => {
+        scheduledFrames.push(callback);
+        return scheduledFrames.length;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      matchMedia: vi.fn(() => ({ matches: false, addEventListener: vi.fn() })),
+      getComputedStyle: vi.fn(() => ({
+        display: 'block',
+        visibility: 'visible',
+        contentVisibility: 'visible',
+        opacity: '1',
+        overflowX: 'visible',
+        overflowY: 'visible'
+      }))
+    });
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      activeElement: null,
+      documentElement: {},
+      getElementsByClassName: vi.fn((key: string) => {
+        if (key === 'cb-transition') return [frame];
+        if (key === 'cb-galaxy') return [protectedFrame];
+        return [];
+      }),
+      addEventListener: vi.fn(),
+      createElement: vi.fn(() => {
+        const style = { textContent: '', setAttribute: vi.fn(), remove: vi.fn() };
+        style.setAttribute.mockImplementation((name: string, value: string) => {
+          if (name === 'data-cb-css') stylesByKey.set(value, style);
+        });
+        return style;
+      }),
+      head: { appendChild: vi.fn() }
+    });
+
+    const staticCss = '.cb-transition{border:1px solid transparent}';
+    const motion20 = svgMotionCss('cb-transition', 20);
+    const changedMotion20 = `${motion20}\n.cb-transition{outline-color:transparent}`;
+    const motion24 = svgMotionCss('cb-transition', 24, 1);
+
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-transition', css: staticCss }) });
+    scheduledFrames.shift()?.();
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-transition', css: motion20 }) });
+    expect(stylesByKey.get('cb-transition')?.textContent).not.toMatch(/%3Canimate\b/);
+    scheduledFrames.shift()?.();
+    expect(stylesByKey.get('cb-transition')?.textContent).toMatch(/%3Canimate\b/);
+
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-transition', css: motion20 }) });
+    expect(stylesByKey.get('cb-transition')?.textContent).toMatch(/%3Canimate\b/);
+    scheduledFrames.shift()?.();
+
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-transition', css: changedMotion20 }) });
+    expect(stylesByKey.get('cb-transition')?.textContent).not.toMatch(/%3Canimate\b/);
+    scheduledFrames.shift()?.();
+    expect(stylesByKey.get('cb-transition')?.textContent).toMatch(/%3Canimate\b/);
+
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-transition', css: motion24 }) });
+    expect(stylesByKey.get('cb-transition')?.textContent).not.toMatch(/%3Canimate\b/);
+    scheduledFrames.shift()?.();
+    expect(stylesByKey.get('cb-transition')?.textContent.match(/%3Canimate\b/g)).toHaveLength(24);
+
+    // 프레임이 아닌 기존 SVG 코스메틱은 카드 프레임 예산의 영향을 받지 않습니다.
+    const nameCss = svgMotionCss('ne-svg-name', 20);
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'ne-svg-name', css: nameCss }) });
+    expect(stylesByKey.get('ne-svg-name')?.textContent.match(/%3Canimate\b/g)).toHaveLength(20);
+
+    const protectedCss = svgMotionCss('cb-galaxy', 20);
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-galaxy', css: protectedCss }) });
+    scheduledFrames.shift()?.();
+    expect(stylesByKey.get('cb-galaxy')?.textContent.match(/%3Canimate\b/g)).toHaveLength(20);
+    expect(protectedFrame.removeAttribute).toHaveBeenCalledWith('data-cosmetic-motion-paused');
+    expect(protectedFrame.setAttribute).not.toHaveBeenCalledWith(
+      'data-cosmetic-motion-smil-only',
+      'true'
+    );
+    expect(protectedFrame.setAttribute).not.toHaveBeenCalledWith(
+      'data-cosmetic-motion-css-only',
+      'true'
+    );
   });
 });

@@ -1689,12 +1689,9 @@ describe('daily minigame selection', () => {
     for (const round of responseBody.active_session.game_data.rounds) {
       expect(round.source_image_url).toMatch(/^minigame-image:v1:/);
       expect(round.source_image_url).not.toContain('example.com');
-      expect(round.source_fallback_image_url).toMatch(/^minigame-image:v1:/);
-      expect(round.source_fallback_image_url).not.toContain('example.com');
+      expect(round).not.toHaveProperty('source_fallback_image_url');
       expect(openMinigameImageReference(round.source_image_url).sourceUrl)
         .toBe(`https://example.com/answer-${round.round}.png`);
-      expect(openMinigameImageReference(round.source_fallback_image_url).sourceUrl)
-        .toBe(`https://example.com/answer-${round.round}-fallback.png`);
     }
   });
 

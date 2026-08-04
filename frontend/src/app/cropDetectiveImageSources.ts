@@ -2,13 +2,22 @@ export type CropDetectiveImageSourceKind =
   | 'resized-proxy'
   | 'original-proxy'
   | 'raw'
-  | 'backend-fallback'
-  | 'local-fallback';
+  | 'backend-fallback';
 
 export type CropDetectiveImageSource = {
   kind: CropDetectiveImageSourceKind;
   url: string;
-  guaranteed: boolean;
+};
+
+export type ResolvedCropDetectiveImageSource<T> = {
+  source: CropDetectiveImageSource;
+  value: T;
+};
+
+type ResolveCropDetectiveImageSourceInput<T> = {
+  sources: readonly CropDetectiveImageSource[];
+  timeoutMs: number;
+  load: (source: CropDetectiveImageSource) => Promise<T | null> | T | null;
 };
 
 type CropDetectiveImageSourceInput = {
@@ -16,7 +25,6 @@ type CropDetectiveImageSourceInput = {
   originalProxyUrl?: string | null;
   rawUrl?: string | null;
   backendFallbackUrl?: string | null;
-  fallbackSeed: string;
   preferOriginal?: boolean;
 };
 
@@ -25,14 +33,14 @@ export const CROP_DETECTIVE_IMAGE_REQUEST_PROFILES = {
     width: 360,
     quality: 82,
     /** Total budget for the complete network fallback chain. */
-    timeoutMs: 3_000,
+    timeoutMs: 13_000,
     retainResolved: true
   },
   preview: {
     width: 768,
     quality: 92,
     /** Total budget for the complete network fallback chain. */
-    timeoutMs: 6_000,
+    timeoutMs: 13_000,
     retainResolved: false
   }
 } as const;
@@ -74,47 +82,12 @@ export const createCropDetectiveCssCropGeometry = ({
   };
 };
 
-const hashStringToUint32 = (value: string) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-};
-
-const colorFromSeed = (seed: number, offset: number) => {
-  const hue = (seed + offset) % 360;
-  return `hsl(${hue} 72% 52%)`;
-};
-
-/**
- * A self-contained 5:8 image used only after every network source failed.
- * It is deterministic per original URL, so the clue and its matching answer
- * still share the same artwork even during a complete upstream outage.
- */
-export const createCropDetectiveFallbackDataUrl = (seedValue: string) => {
-  const seed = hashStringToUint32(seedValue || 'chikapo-crop-detective');
-  const primary = colorFromSeed(seed, 0);
-  const secondary = colorFromSeed(seed, 83);
-  const accent = colorFromSeed(seed, 191);
-  const rotation = seed % 180;
-  const circleX = 90 + (seed % 320);
-  const circleY = 150 + ((seed >>> 7) % 420);
-  const circleRadius = 70 + ((seed >>> 15) % 95);
-  const lineOffset = 24 + ((seed >>> 21) % 72);
-  const mark = (seed % 997).toString().padStart(3, '0');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="800" viewBox="0 0 500 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${primary}"/><stop offset="1" stop-color="${secondary}"/></linearGradient><pattern id="p" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(${rotation})"><path d="M0 ${lineOffset}H96M${lineOffset} 0V96" stroke="rgba(255,255,255,.16)" stroke-width="12"/></pattern></defs><rect width="500" height="800" fill="url(#g)"/><rect width="500" height="800" fill="url(#p)"/><circle cx="${circleX}" cy="${circleY}" r="${circleRadius}" fill="${accent}" fill-opacity=".78"/><circle cx="${500 - circleX}" cy="${800 - circleY}" r="${Math.round(circleRadius * 0.58)}" fill="none" stroke="rgba(255,255,255,.58)" stroke-width="24"/><path d="M42 690L178 514l104 92 176-244v396H42z" fill="rgba(9,9,11,.34)"/><text x="250" y="746" text-anchor="middle" fill="rgba(255,255,255,.86)" font-family="system-ui,sans-serif" font-size="38" font-weight="800" letter-spacing="8">${mark}</text></svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-};
-
 /** Keeps the requested priority while removing duplicate/empty network URLs. */
 export const createCropDetectiveImageSourceChain = ({
   resizedProxyUrl,
   originalProxyUrl,
   rawUrl,
   backendFallbackUrl,
-  fallbackSeed,
   preferOriginal = false
 }: CropDetectiveImageSourceInput): CropDetectiveImageSource[] => {
   const primaryCandidates: Array<[CropDetectiveImageSourceKind, string | null | undefined]> = preferOriginal
@@ -132,15 +105,137 @@ export const createCropDetectiveImageSourceChain = ({
     const url = String(candidate || '').trim();
     if (!url || seen.has(url)) continue;
     seen.add(url);
-    sources.push({ kind, url, guaranteed: false });
+    sources.push({ kind, url });
   }
 
-  sources.push({
-    kind: 'local-fallback',
-    url: createCropDetectiveFallbackDataUrl(fallbackSeed),
-    guaranteed: true
-  });
   return sources;
+};
+
+export type CropDetectiveCropPoint = { x: number; y: number };
+type CropDetectiveCropBounds = { minX: number; maxX: number; minY: number; maxY: number };
+export const CROP_DETECTIVE_VERIFICATION_ATTEMPTS = 3;
+
+const hashStringToSeed = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const createSeededRandom = (seed: number) => {
+  let state = seed || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 4294967296;
+  };
+};
+
+/** Builds exactly three reproducible positions from the real card image. */
+export const createCropDetectiveVerificationCandidates = (
+  base: CropDetectiveCropPoint,
+  bounds: CropDetectiveCropBounds,
+  seedSource: string
+): CropDetectiveCropPoint[] => {
+  const clampX = (value: number) => Math.max(bounds.minX, Math.min(bounds.maxX, value));
+  const clampY = (value: number) => Math.max(bounds.minY, Math.min(bounds.maxY, value));
+  const random = createSeededRandom(hashStringToSeed(seedSource));
+  const candidates: CropDetectiveCropPoint[] = [{ x: clampX(base.x), y: clampY(base.y) }];
+  const rangeX = Math.max(0, bounds.maxX - bounds.minX);
+  const rangeY = Math.max(0, bounds.maxY - bounds.minY);
+  const range = Math.max(rangeX, rangeY);
+  const pushCandidate = (candidate: CropDetectiveCropPoint) => {
+    const clamped = { x: clampX(candidate.x), y: clampY(candidate.y) };
+    const duplicate = candidates.some((item) => (
+      Math.abs(item.x - clamped.x) < 0.001 && Math.abs(item.y - clamped.y) < 0.001
+    ));
+    if (!duplicate) candidates.push(clamped);
+  };
+
+  let randomAttempts = 0;
+  while (candidates.length < CROP_DETECTIVE_VERIFICATION_ATTEMPTS && randomAttempts < 24) {
+    const retryIndex = candidates.length - 1;
+    const radiusRatio = retryIndex === 0 ? 0.32 : 0.58;
+    const angle = random() * Math.PI * 2;
+    const radius = range * radiusRatio * (0.72 + random() * 0.28);
+    pushCandidate({
+      x: base.x + Math.cos(angle) * radius,
+      y: base.y + Math.sin(angle) * radius
+    });
+    randomAttempts += 1;
+  }
+
+  for (const candidate of [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+    { x: bounds.maxX, y: bounds.minY }
+  ]) {
+    if (candidates.length >= CROP_DETECTIVE_VERIFICATION_ATTEMPTS) break;
+    pushCandidate(candidate);
+  }
+  while (candidates.length < CROP_DETECTIVE_VERIFICATION_ATTEMPTS) {
+    candidates.push({ ...candidates[candidates.length - 1] });
+  }
+  return candidates.slice(0, CROP_DETECTIVE_VERIFICATION_ATTEMPTS);
+};
+
+/** Returns the first acceptable attempt, or the third real crop when all fail. */
+export const selectCropDetectiveVerificationCandidate = <T>(
+  candidates: readonly T[],
+  isAcceptable: (candidate: T, attemptIndex: number) => boolean
+): T | null => {
+  const attempts = candidates.slice(0, CROP_DETECTIVE_VERIFICATION_ATTEMPTS);
+  let selected: T | null = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    selected = attempts[index];
+    if (isAcceptable(selected, index)) break;
+  }
+  return selected;
+};
+
+/**
+ * Resolves the real image source chain within one shared time budget. A failed
+ * chain deliberately returns null: Crop Detective must never replace a card
+ * with generated artwork.
+ */
+export const resolveCropDetectiveImageSource = async <T>({
+  sources,
+  timeoutMs,
+  load
+}: ResolveCropDetectiveImageSourceInput<T>): Promise<ResolvedCropDetectiveImageSource<T> | null> => {
+  const finiteTimeoutMs = Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 0;
+  const deadlineAt = Date.now() + finiteTimeoutMs;
+
+  for (const source of sources) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) break;
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timeoutId = setTimeout(() => resolve(null), remainingMs);
+    });
+    const request = Promise.resolve()
+      .then(() => load(source))
+      .catch(() => null);
+
+    try {
+      const value = await Promise.race([request, timeout]);
+      if (value !== null) {
+        return {
+          source,
+          value
+        };
+      }
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }
+
+  return null;
 };
 
 export const areCropDetectiveAssetsSettled = (
