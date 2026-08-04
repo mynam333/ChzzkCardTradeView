@@ -713,7 +713,7 @@ describe('cosmetic SVG motion handling', () => {
       setAttribute: vi.fn(),
       removeAttribute: vi.fn()
     };
-    const protectedFrame = {
+    const adaptiveFrame = {
       parentElement: null,
       getBoundingClientRect: () => ({
         left: 100, top: 0, right: 900, bottom: 1000, width: 800, height: 1000
@@ -729,6 +729,14 @@ describe('cosmetic SVG motion handling', () => {
       setAttribute: ReturnType<typeof vi.fn>;
       remove: ReturnType<typeof vi.fn>;
     }>();
+    const newlyStandardizedFrameKeys = [
+      'cb-beach',
+      'cb-cheese-fondue',
+      'cb-galaxy',
+      'cb-hanok-yeonhwa',
+      'cb-heart-pop',
+      'cb-steampunk'
+    ];
     vi.stubGlobal('window', {
       innerWidth: 1000,
       innerHeight: 800,
@@ -754,7 +762,7 @@ describe('cosmetic SVG motion handling', () => {
       documentElement: {},
       getElementsByClassName: vi.fn((key: string) => {
         if (key === 'cb-transition') return [frame];
-        if (key === 'cb-galaxy') return [protectedFrame];
+        if (newlyStandardizedFrameKeys.includes(key)) return [adaptiveFrame];
         return [];
       }),
       addEventListener: vi.fn(),
@@ -799,18 +807,23 @@ describe('cosmetic SVG motion handling', () => {
     ensureCosmeticCss({ style_json: JSON.stringify({ class: 'ne-svg-name', css: nameCss }) });
     expect(stylesByKey.get('ne-svg-name')?.textContent.match(/%3Canimate\b/g)).toHaveLength(20);
 
-    const protectedCss = svgMotionCss('cb-galaxy', 20);
-    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-galaxy', css: protectedCss }) });
-    scheduledFrames.shift()?.();
-    expect(stylesByKey.get('cb-galaxy')?.textContent.match(/%3Canimate\b/g)).toHaveLength(20);
-    expect(protectedFrame.removeAttribute).toHaveBeenCalledWith('data-cosmetic-motion-paused');
-    expect(protectedFrame.setAttribute).not.toHaveBeenCalledWith(
-      'data-cosmetic-motion-smil-only',
-      'true'
-    );
-    expect(protectedFrame.setAttribute).not.toHaveBeenCalledWith(
-      'data-cosmetic-motion-css-only',
-      'true'
-    );
+    for (const frameKey of newlyStandardizedFrameKeys) {
+      adaptiveFrame.setAttribute.mockClear();
+      adaptiveFrame.removeAttribute.mockClear();
+      ensureCosmeticCss({
+        style_json: JSON.stringify({ class: frameKey, css: svgMotionCss(frameKey, 20) })
+      });
+      scheduledFrames.shift()?.();
+      expect(stylesByKey.get(frameKey)?.textContent).not.toMatch(/%3Canimate\b/);
+      expect(adaptiveFrame.removeAttribute).toHaveBeenCalledWith('data-cosmetic-motion-paused');
+      expect(adaptiveFrame.setAttribute).not.toHaveBeenCalledWith(
+        'data-cosmetic-motion-smil-only',
+        'true'
+      );
+      expect(adaptiveFrame.setAttribute).toHaveBeenCalledWith(
+        'data-cosmetic-motion-css-only',
+        'true'
+      );
+    }
   });
 });

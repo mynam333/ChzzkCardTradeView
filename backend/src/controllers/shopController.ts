@@ -19,6 +19,24 @@ const publishShopUpdated = (reason: string, extra: Record<string, unknown> = {})
   publishRealtimeEvent('shop', { reason, ...extra });
 };
 
+const SHOP_ITEM_UPDATE_FIELDS = new Set([
+  'type',
+  'name',
+  'description',
+  'price',
+  'style_json',
+  'font_url',
+  'font_family',
+  'active',
+  'purchase_limit',
+  'sale_start_at',
+  'sale_end_at',
+  'limited_total_quantity',
+  'sold_quantity'
+]);
+
+const isShopItemNotFoundError = (err: any) => err?.code === 'SHOP_ITEM_NOT_FOUND';
+
 /** 상점 활성 아이템 목록 (유저) */
 export const getShopItems = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -139,6 +157,7 @@ export const unequipFromCard = async (req: AuthenticatedRequest, res: Response) 
 // ===== 관리자 =====
 export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Response) => {
   try {
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(await shop.getAllItems());
   } catch (err) { return fail(res, '상점 관리 목록 조회 실패', err); }
 };
@@ -146,6 +165,7 @@ export const adminGetShopItems = async (_req: AuthenticatedRequest, res: Respons
 /** 아레나 V2 관리자 전용 치장 카탈로그 */
 export const adminGetArenaCosmetics = async (_req: AuthenticatedRequest, res: Response) => {
   try {
+    res.set('Cache-Control', 'private, no-store');
     const items = (await shop.getAllItems()).filter((item) => shop.isArenaCosmeticType(item.type));
     return res.status(200).json(items);
   } catch (err) { return fail(res, '아레나 치장 관리 목록 조회 실패', err); }
@@ -155,6 +175,9 @@ export const adminCreateShopItem = async (req: AuthenticatedRequest, res: Respon
   const { type, name, description, price, style_json, font_url, font_family, active, purchase_limit, sale_start_at, sale_end_at, limited_total_quantity } = req.body;
   if (!(['border', 'name_effect'].includes(type) || shop.isArenaCosmeticType(type)) || !name) {
     return res.status(400).json({ error: 'BadRequest', message: '지원하는 코스메틱 종류와 이름이 필요합니다.' });
+  }
+  if (active !== undefined && typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'BadRequest', message: '판매 활성 상태는 boolean 값이어야 합니다.' });
   }
   
   let processedStyleJson = style_json;
@@ -213,7 +236,20 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'BadRequest', message: '아이템 ID가 필요합니다.' });
   
-  const updateData = { ...req.body };
+  const updateData = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? { ...req.body } : {};
+  const updateKeys = Object.keys(updateData);
+  const unknownKeys = updateKeys.filter((key) => !SHOP_ITEM_UPDATE_FIELDS.has(key));
+  if (updateKeys.length === 0 || unknownKeys.length > 0) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: unknownKeys.length > 0
+        ? `지원하지 않는 수정 항목입니다: ${unknownKeys.join(', ')}`
+        : '수정할 상점 아이템 항목이 필요합니다.'
+    });
+  }
+  if (updateData.active !== undefined && typeof updateData.active !== 'boolean') {
+    return res.status(400).json({ error: 'BadRequest', message: '판매 활성 상태는 boolean 값이어야 합니다.' });
+  }
   if (updateData.type !== undefined && !(['border', 'name_effect'].includes(updateData.type) || shop.isArenaCosmeticType(updateData.type))) {
     return res.status(400).json({ error: 'BadRequest', message: '지원하지 않는 코스메틱 종류입니다.' });
   }
@@ -233,7 +269,12 @@ export const adminUpdateShopItem = async (req: AuthenticatedRequest, res: Respon
     await shop.updateItem(id, updateData);
     publishShopUpdated('item_updated', { itemId: id });
     return res.status(200).json({ message: '아이템이 수정되었습니다.' });
-  } catch (err) { return fail(res, '아이템 수정 실패', err); }
+  } catch (err) {
+    if (isShopItemNotFoundError(err)) {
+      return res.status(404).json({ error: 'NotFound', message: '상점 아이템을 찾을 수 없습니다.' });
+    }
+    return fail(res, '아이템 수정 실패', err);
+  }
 };
 
 export const adminUpdateArenaCosmetic = async (req: AuthenticatedRequest, res: Response) => {
@@ -305,6 +346,7 @@ export const uploadArenaEmoteAsset = async (req: AuthenticatedRequest, res: Resp
 
 export const getArenaCosmeticShopItems = async (_req: AuthenticatedRequest, res: Response) => {
   try {
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json({ items: await shop.getArenaCosmeticShopItems() });
   } catch (err) { return fail(res, '아레나 상점 조회 실패', err); }
 };

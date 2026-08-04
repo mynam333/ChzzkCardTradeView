@@ -22,7 +22,7 @@ import {
   getUserRankings
 } from '../controllers/playController';
 import { cancelListing, createListing, listMarketHistory } from '../controllers/marketController';
-import { buyItem, createItem, getAllItems, getUserPurchases } from '../services/shopService';
+import { buyItem, createItem, getActiveItems, getAllItems, getUserPurchases, updateItem } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
 
@@ -2211,5 +2211,23 @@ describe('shopService 1인 구매 제한', () => {
     const res = await buyItem('poor', itemId);
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('INSUFFICIENT_POINT');
+  });
+});
+
+describe('shopService 판매 활성 상태', () => {
+  it('비활성 상품을 활성화하면 관리자 목록과 판매 목록에 즉시 반영된다', async () => {
+    await createItem({
+      type: 'border', name: '활성화 테스트 테두리', description: null, price: 1000,
+      style_json: null, font_url: null, font_family: null, purchase_limit: 0, active: false
+    });
+    const [created] = await getAllItems();
+
+    expect(created.active).toBe(false);
+    expect(await getActiveItems()).toEqual([]);
+
+    await updateItem(created.id, { active: true });
+
+    expect((await getAllItems())[0].active).toBe(true);
+    await expect(getActiveItems()).resolves.toMatchObject([{ id: created.id, active: true }]);
   });
 });

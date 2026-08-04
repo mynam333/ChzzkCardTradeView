@@ -1,156 +1,80 @@
 /* ============================================================
-   쫀득쫀득 치즈 퐁듀 (Creamy Cheese Fondue)
-   - 치지직의 시그니처 옐로우 치즈 카드 스킨
-   - 우측 하단에 정교하고 불투명한 대형 에멘탈 치즈 조형 (3~5초 주기로 툭툭 흔들리는 모션)
-   - 가볍고 영롱한 소형 치즈 3D 파티클 (후경 유영)
-   적용 클래스: cb-cheese-fondue
+   치즈 퐁듀 — Copper Caquelon Atelier
+   Motion identity: caquelon-convection / filament-necking / fork-recoil
+   Exact three-layer SVG artwork: base / micro-detail / particle-projection.
    ============================================================ */
 .cb-cheese-fondue {
   position: absolute;
   inset: 0;
   z-index: 5;
-  border-radius: 3.43px;     /* scale 확대 배율을 고려한 오버레이 자체 곡률 고정 */
+  border-radius: 3.43px;
   pointer-events: none;
-  overflow: hidden;           /* 파티클과 장식을 카드 내부에 가두어 클립 */
-
-  /* 오렌지-옐로우 빛 글로우 및 부드러운 치즈 안쪽 음영 */
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.55), inset 0 0 20px rgba(180, 83, 9, 0.28);
-
-  /* 프레임을 카드 전체에 채움 */
+  overflow: hidden;
+  isolation: isolate;
+  --cb-cheese-fondue-edge-mask: radial-gradient(ellipse 73% 69% at 50% 45%, transparent 0 51%, rgba(0,0,0,.2) 64%, #000 82%);
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  
-  /* 본체 프레임: 불필요한 장식 덩어리를 걷어내고 정돈된 퐁듀 그라데이션 선만 유지 */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='ch' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23fef08a'/%3E%3Cstop offset='60%25' stop-color='%23f59e0b'/%3E%3Cstop offset='100%25' stop-color='%23b45309'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23ch)' stroke-width='2'/%3E%3C/svg%3E");
-  
-  animation: cheese-fondue-pulse 2.8s ease-in-out infinite;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3ClinearGradient id%3D%27cheese-base-gold%27 x1%3D%270%27 y1%3D%270%27 x2%3D%271%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fff0b0%27%2F%3E%3Cstop offset%3D%27.25%27 stop-color%3D%27%23c48a2b%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%23ffe7a0%27%2F%3E%3Cstop offset%3D%27.78%27 stop-color%3D%27%2380501e%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23d9a443%27%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient id%3D%27cheese-base-enamel%27 x1%3D%270%27 y1%3D%270%27 x2%3D%270%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fffdf0%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%23f1dfbb%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23b7935f%27%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient id%3D%27cheese-base-rind%27 x1%3D%270%27 y1%3D%270%27 x2%3D%271%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fff078%27%2F%3E%3Cstop offset%3D%27.48%27 stop-color%3D%27%23e0a72b%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%239a5a14%27%2F%3E%3C%2FlinearGradient%3E%3CradialGradient id%3D%27cheese-base-pot%27 cx%3D%27.34%27 cy%3D%27.26%27 r%3D%27.8%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fff4c1%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%23c49145%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23593719%27%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%3Crect x%3D%271.4%27 y%3D%271.4%27 width%3D%2797.2%27 height%3D%27157.2%27 rx%3D%274%27 ry%3D%274%27 fill%3D%27none%27 stroke%3D%27%234a2c15%27 stroke-width%3D%273.1%27%2F%3E%3Crect x%3D%272.8%27 y%3D%272.8%27 width%3D%2794.4%27 height%3D%27154.4%27 rx%3D%272.6%27 ry%3D%272.6%27 fill%3D%27none%27 stroke%3D%27url(%23cheese-base-gold)%27 stroke-width%3D%271.8%27%2F%3E%3Crect x%3D%274.5%27 y%3D%274.5%27 width%3D%2791%27 height%3D%27151%27 rx%3D%271.1%27 ry%3D%271.1%27 fill%3D%27none%27 stroke%3D%27url(%23cheese-base-enamel)%27 stroke-width%3D%272.1%27%2F%3E%3Cpath d%3D%27M6 37L6 13Q6 7 12 7H27Q31 7 34 11C42 9 58 9 66 11Q69 7 73 7H88Q95 7 95 14V31Q95 35 91 39V60C88 67 94 75 91 83V121Q91 126 95 132V147Q95 153 89 153H73Q69 153 66 149H35C31 149 30 154 26 154H12Q5 154 5 147V132Q5 128 9 124V105C12 97 6 90 9 82V42Q9 39 6 37Z%27 fill%3D%27none%27 stroke%3D%27%237d5425%27 stroke-width%3D%27.75%27%2F%3E%3Cpath d%3D%27M7 14L18 6L29 7L31 19L24 29L10 31L6 24Z%27 fill%3D%27%23a86419%27 stroke%3D%27%235b3413%27 stroke-width%3D%27.7%27%2F%3E%3Cpath id%3D%27cheese-base-rind-face%27 d%3D%27M7 13L17 6L29 8L25 21L17 26L7 22Z%27 fill%3D%27url(%23cheese-base-rind)%27 stroke%3D%27%23fff0a1%27 stroke-width%3D%27.55%27%2F%3E%3Cpath d%3D%27M17 6L29 8L25 21L17 26Z%27 fill%3D%27%23cf8d22%27 opacity%3D%27.78%27%2F%3E%3Cellipse cx%3D%2714%27 cy%3D%2714%27 rx%3D%272.7%27 ry%3D%273.6%27 fill%3D%27%239f651c%27 stroke%3D%27%23f5c94f%27 stroke-width%3D%27.35%27%2F%3E%3Cellipse cx%3D%2722%27 cy%3D%2712%27 rx%3D%272.1%27 ry%3D%272.8%27 fill%3D%27%23a3661d%27 stroke%3D%27%23f4ca51%27 stroke-width%3D%27.32%27%2F%3E%3Cellipse cx%3D%2719%27 cy%3D%2721%27 rx%3D%272.5%27 ry%3D%272%27 fill%3D%27%239b5e18%27 stroke%3D%27%23f2c849%27 stroke-width%3D%27.32%27%2F%3E%3Cpath d%3D%27M11 26C12 31 10 34 12 37C14 35 15 32 14 28Z%27 fill%3D%27%23e7ac28%27 stroke%3D%27%238a5117%27 stroke-width%3D%27.35%27%3E%3Canimate id%3D%27cheese-base-filament-necking-rind-drip%27 attributeName%3D%27d%27 values%3D%27M11 26C12 31 10 34 12 37C14 35 15 32 14 28Z%3BM11 26C12 33 10 37 12 41C14 38 15 34 14 28Z%3BM11 26C12 31 10 34 12 37C14 35 15 32 14 28Z%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%279.4s%27 begin%3D%27-3.2s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M5 38L8 35M5 54L8 51M5 70L8 67M5 86L8 83M5 102L8 99M5 118L8 115M92 42L95 39M92 58L95 55M92 74L95 71M92 90L95 87M92 106L95 103M92 122L95 119%27 stroke%3D%27%23b98231%27 stroke-width%3D%27.65%27%2F%3E%3Cpath d%3D%27M8 143C19 148 31 146 42 149M58 149C68 146 76 148 84 143%27 fill%3D%27none%27 stroke%3D%27%23e2c58f%27 stroke-width%3D%27.55%27%2F%3E%3Cpath d%3D%27M8 40C11 37 12 33 11 29C14 33 14 38 11 42C9 45 9 50 11 54C14 58 14 63 11 67C8 71 8 76 11 80C14 84 14 90 11 94C8 98 8 103 11 107C14 111 14 116 11 121%27 fill%3D%27none%27 stroke%3D%27%23c59648%27 stroke-width%3D%27.38%27%2F%3E%3Cpath d%3D%27M92 40C89 37 88 33 89 29C86 33 86 38 89 42C91 45 91 50 89 54C86 58 86 63 89 67C92 71 92 76 89 80C86 84 86 90 89 94C92 98 92 103 89 107C86 111 86 116 89 121%27 fill%3D%27none%27 stroke%3D%27%238b622f%27 stroke-width%3D%27.38%27%2F%3E%3Cpath d%3D%27M28 8C34 11 40 11 46 8C52 5 58 5 64 8C70 11 76 11 82 8C78 13 72 15 66 12C59 9 53 9 47 12C40 15 34 13 28 8Z%27 fill%3D%27none%27 stroke%3D%27%23e8cc8c%27 stroke-width%3D%27.36%27%2F%3E%3Cpath d%3D%27M17 151C24 147 31 147 38 151C45 155 52 155 59 151C66 147 73 147 80 151C72 153 65 152 58 149C51 147 45 148 38 150C31 153 24 153 17 151Z%27 fill%3D%27none%27 stroke%3D%27%23a77738%27 stroke-width%3D%27.36%27%2F%3E%3Cpath d%3D%27M6 33C10 30 12 26 13 21C15 27 13 33 9 37C6 40 5 45 7 49C9 53 9 58 7 62C5 66 5 71 7 75C9 79 9 84 7 88C5 92 5 97 7 101C9 105 9 110 7 114%27 fill%3D%27none%27 stroke%3D%27%23f2dfaa%27 stroke-width%3D%27.3%27%2F%3E%3Cpath d%3D%27M94 34C90 31 88 27 87 22C85 28 87 34 91 38C94 41 95 46 93 50C91 54 91 59 93 63C95 67 95 72 93 76C91 80 91 85 93 89C95 93 95 98 93 102C91 106 91 111 93 115%27 fill%3D%27none%27 stroke%3D%27%236f491f%27 stroke-width%3D%27.3%27%2F%3E%3Cg id%3D%27cheese-base-caquelon%27 transform%3D%27translate(82 145)%27%3E%3Cellipse cx%3D%270%27 cy%3D%275%27 rx%3D%2714%27 ry%3D%273.2%27 fill%3D%27%23674019%27 stroke%3D%27%23e5b85d%27 stroke-width%3D%27.6%27%2F%3E%3Cpath d%3D%27M-8-5C-8-11 8-11 8-5L6 5C4 9-4 9-6 5Z%27 fill%3D%27url(%23cheese-base-pot)%27 stroke%3D%27%235a3518%27 stroke-width%3D%27.75%27%2F%3E%3Cellipse cx%3D%270%27 cy%3D%27-5%27 rx%3D%278%27 ry%3D%272.8%27 fill%3D%27%23f1bd35%27 stroke%3D%27%23fff0a0%27 stroke-width%3D%27.55%27%2F%3E%3Cpath d%3D%27M8-4C14-5 15 1 10 3%27 fill%3D%27none%27 stroke%3D%27%23bd8236%27 stroke-width%3D%271.3%27%2F%3E%3Cpath d%3D%27M-2-8L6-25L8-24L1-6Z%27 fill%3D%27%23b57d34%27 stroke%3D%27%23f2d394%27 stroke-width%3D%27.45%27%3E%3CanimateTransform id%3D%27cheese-base-fork-recoil-utensil%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 0 -6%3B4 0 -6%3B-2 0 -6%3B0 0 -6%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2711.6s%27 begin%3D%27-7.5s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M-5-4C-2-6 2-6 5-4C3-1-2 0-5-4Z%27 fill%3D%27%23fff0a8%27 opacity%3D%27.72%27%3E%3Canimate id%3D%27cheese-base-caquelon-convection-meniscus%27 attributeName%3D%27d%27 values%3D%27M-5-4C-2-6 2-6 5-4C3-1-2 0-5-4Z%3BM-5-4C-1-7 3-5 5-4C2 0-2-1-5-4Z%3BM-5-4C-2-6 2-6 5-4C3-1-2 0-5-4Z%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%277.8s%27 begin%3D%27-4.1s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3C%2Fg%3E%3Ccircle cx%3D%276%27 cy%3D%276%27 r%3D%271%27 fill%3D%27%23f5dda1%27%2F%3E%3Ccircle cx%3D%2794%27 cy%3D%276%27 r%3D%271%27 fill%3D%27%23f5dda1%27%2F%3E%3Ccircle cx%3D%276%27 cy%3D%27154%27 r%3D%271%27 fill%3D%27%23f5dda1%27%2F%3E%3Ccircle cx%3D%2794%27 cy%3D%27154%27 r%3D%271%27 fill%3D%27%23f5dda1%27%2F%3E%3Canimate id%3D%27cheese-base-metal-light-rake%27 attributeName%3D%27x1%27 values%3D%270%3B.7%3B.25%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2715.3s%27 begin%3D%27-9.2s%27 repeatCount%3D%27indefinite%27  href%3D%27%23cheese-base-gold%27%2F%3E%3Canimate id%3D%27cheese-base-enamel-reflection%27 attributeName%3D%27x2%27 values%3D%271%3B.28%3B.76%3B1%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2712.7s%27 begin%3D%27-6.8s%27 repeatCount%3D%27indefinite%27  href%3D%27%23cheese-base-enamel%27%2F%3E%3Canimate id%3D%27cheese-base-rind-caustic%27 attributeName%3D%27opacity%27 values%3D%27.58%3B1%3B.74%3B.58%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2710.3s%27 begin%3D%27-5.5s%27 repeatCount%3D%27indefinite%27  href%3D%27%23cheese-base-rind-face%27%2F%3E%3CanimateTransform id%3D%27cheese-base-caquelon-thermal-rock%27 attributeName%3D%27transform%27 type%3D%27scale%27 values%3D%271 1%3B1.018 .99%3B1 1%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%2713.9s%27 begin%3D%27-8.8s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27  href%3D%27%23cheese-base-caquelon%27%2F%3E%3C%2Fsvg%3E");
+  box-shadow: 0 0 10px rgba(202,148,54,.26), inset 0 0 14px rgba(74,42,18,.5);
 }
 
-/* 파티클: 3배가량 커진 입체 치즈 조각들 (Parallax 3D 유영)
-   - SVG 내부 각 그룹에 독립적인 스폰 딜레이, 3D Pitch/Roll/Yaw 회전 물리 궤적을 심어 다차원 공간 유영 구현
-   - 카드 가독성 보존을 위해 대형 파티클은 scale(0.58 ~ 0.66) 이하로 통제
-*/
-.cb-cheese-fondue::before {
-  content: "";
-  position: absolute;
-  /* 브라우저 GPU 래스터화 시 고해상도 벡터 화질을 확보하기 위한 4배 확대 후 scale 축소 기법 적용 */
-  width: 400%;
-  height: 400%;
-  left: -150%;
-  top: -150%;
-  pointer-events: none;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%; /* 4배 캔버스에 꽉 채우도록 설정 */
-  
-  /* [핵심] 개별 3D 플로팅 애니메이션이 내장된 고화질 치즈 파티클 (3배 확대 및 Parallax Depth 반영) */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160'%3E%3Cdefs%3E%3Cg id='c'%3E%3Cpath fill='%23FAD94E' d='m1.8 24.9 26.1-21.2c0.2-0.2 0.5-0.3 0.8-0.2 2.7 0.1 13 1.2 23.4 9 1.7 1.3 3.4 11.5 2.5 21.5-0.6 5.8-1.7 9.8-4.9 11.7-4.8 2.8-16.2 5.6-35.9 10.9l-10.4 3.3-0.3-6.3c3.6 1.2 6.4-3 2.9-4.2-1.3-0.4-2.5 0.4-3.5 1.1l-0.5-13.6c3 0.7 4-3.1 1.8-3.2-0.6 0.1-1.2 0.5-1.9 1.1l-0.2-9.5c-0.1-0.1 0-0.3 0.1-0.4z'/%3E%3Cpath fill='%23F6C637' d='m1.8 25 50.7-11.6c1.5 2 3 13.7 1.9 21.7-0.6 4.9-1.7 8.7-4.7 10.5-5.1 3.1-16.2 5.7-35.9 11l-10.4 3.3-0.3-6.3c3.6 1.2 6.4-3 2.9-4.2-1.1-0.3-1.9 0.3-3 1l-1-13.5c3 0.7 4-3.1 1.8-3.2-0.5 0-1.2 0.5-1.9 1.1l-0.1-9.8z'/%3E%3Cpath fill='%23E59D25' d='m19.6 11.9c0-2.6 5.9-4 9.5-1.6 4.3 3-0.3 5.5-5.3 4.7-3.2-0.5-4.1-2-4.2-3.1z'/%3E%3Cpath fill='%23E59D25' d='m10.6 17.9c0-2 7-2.8 6.9-0.2-0.2 1.7-6.9 2.3-6.9 0.2z'/%3E%3Cpath fill='%23E59D25' d='m16.1 25.2c0.2-2.7 5.4-5.1 5.7-1.5 0.3 2.9-5.6 5.3-5.7 1.5z'/%3E%3Cpath fill='%23E59D25' d='m20.9 29.4c-0.2-1.2 2.3-2.1 2.4-0.7 0 0.9-2.1 1.9-2.4 0.7z'/%3E%3Cpath fill='%23E59D25' d='m7.9 33.2c0.6-4.3 7.8-8.1 10-3.6 2 4.6-3.5 9-7.5 7.8-2-0.6-2.8-2.6-2.5-4.2z'/%3E%3Cpath fill='%23E59D25' d='m9.2 45.1c0.3-4.4 5.1-7 8.3-4.8 3.3 2.6 2.5 8.7-1.9 10.8-4.2 1.5-6.8-2-6.4-6z'/%3E%3Cpath fill='%23E59D25' d='m20.8 34c0.8-3.1 5.6-5 5.5-0.8-0.2 3.3-5.5 5.2-5.5 0.8z'/%3E%3Cpath fill='%23E59D25' d='m26.3 42.4c1-4 7.4-6.6 8.6-2.8 1 3.9-5.9 7.8-8.3 5.4-0.8-0.7-0.7-1.7-0.3-2.6z'/%3E%3Cpath fill='%23E59D25' d='m33.1 32.6c0.6-2.9 4.6-4.9 5.8-1.8 1.2 3.4-3.1 7.1-5.3 4.4-0.6-0.7-0.7-1.9-0.5-2.6z'/%3E%3Cpath fill='%23E59D25' d='m39.3 25.6c0.6-3 4-4.9 6.3-3.2 2.3 1.9 0.9 6.6-2.7 7.2-2.6 0.1-4-1.8-3.6-4z'/%3E%3Cpath fill='%23E59D25' d='m41 37.4c0.4-1.8 3-3.4 3.7-0.8 0.1 2.2-3.3 4.1-3.7 1.5-0.1-0.2 0-0.4 0-0.7z'/%3E%3C/g%3E%3Cstyle%3E.p1{transform-origin:27px 27px;animation:f1 6.4s linear infinite;}.p2{transform-origin:27px 27px;animation:f2 7.8s linear infinite;animation-delay:-2.5s;}.p3{transform-origin:27px 27px;animation:f3 9.2s linear infinite;animation-delay:-5.0s;}.p4{transform-origin:27px 27px;animation:f4 5.5s linear infinite;animation-delay:-1.2s;}.p5{transform-origin:27px 27px;animation:f5 11.0s linear infinite;animation-delay:-3.8s;}@keyframes f1{0%25{transform:translate(20px,240px) scale(0.66) rotate(0deg) rotateY(0deg);}50%25{transform:translate(12px,80px) scale(0.66) rotate(15deg) rotateY(180deg);}100%25{transform:translate(20px,-80px) scale(0.66) rotate(30deg) rotateY(360deg);}}@keyframes f2{0%25{transform:translate(75px,240px) scale(0.48) rotate(45deg) rotateX(0deg);}50%25{transform:translate(80px,80px) scale(0.48) rotate(90deg) rotateX(180deg);}100%25{transform:translate(75px,-80px) scale(0.48) rotate(135deg) rotateX(360deg);}}@keyframes f3{0%25{transform:translate(45px,240px) scale(0.32) rotate(-20deg) rotate3d(1,1,0,0deg);}50%25{transform:translate(41px,80px) scale(0.32) rotate(10deg) rotate3d(1,1,0,180deg);}100%25{transform:translate(45px,-80px) scale(0.32) rotate(40deg) rotate3d(1,1,0,360deg);}}@keyframes f4{0%25{transform:translate(80px,240px) scale(0.58) rotate(10deg) rotateY(0deg);}50%25{transform:translate(86px,80px) scale(0.58) rotate(-15deg) rotateY(-180deg);}100%25{transform:translate(80px,-80px) scale(0.58) rotate(-40deg) rotateY(-360deg);}}@keyframes f5{0%25{transform:translate(15px,240px) scale(0.28) rotate(-45deg) rotateX(0deg);}50%25{transform:translate(18px,80px) scale(0.24) rotate(0deg) rotateX(-180deg);}100%25{transform:translate(15px,-80px) scale(0.24) rotate(45deg) rotateX(-360deg);}}%3C/style%3E%3C/defs%3E%3Cuse href='%23c' class='p1'/%3E%3Cuse href='%23c' class='p2'/%3E%3Cuse href='%23c' class='p3' opacity='0.5'/%3E%3Cuse href='%23c' class='p4'/%3E%3Cuse href='%23c' class='p5' opacity='0.45'/%3E%3C/svg%3E");
-  
-  mix-blend-mode: screen;
-  transform: scale(0.25);
-}
-
-/* 우측 하단 대형 치즈 데코 단독 레이어:
-   - 본체 프레임에서 분리하여 단독 애니메이션을 줄 수 있도록 구현
-   - 3~5초 간격으로 랜덤하게 0.5~1초 가량 툭툭 회전하듯이 흔들렸다 멈추는 물리 궤적 적용
-   - 투명도 없이 완전히 불투명(opacity: 1)하게 설정
-   리소스: 3d_svg_019e93f0-c469-7d4f-978d-c4fc7b9b96ac.svg
-*/
+.cb-cheese-fondue::before,
 .cb-cheese-fondue::after {
   content: "";
   position: absolute;
-  right: -8%;
-  bottom: -8%;
-  width: 44%;
-  aspect-ratio: 1 / 1;
-  z-index: 10;
+  inset: 0;
   pointer-events: none;
-  opacity: 1 !important;        /* 완전히 불투명하게 강제 고정 */
-  mix-blend-mode: normal !important; /* 주변 반투명 레이어나 부모 합성 모드에 투명해지는 현상 방지 */
-  filter: none !important;           /* 부모의 밝기/필터로 인해 간접 투명화되는 현상 배제 */
-  
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
-  
-  /* 대형 치즈 조각 SVG 인라인 (cls-0 투명 백그라운드 rect는 제거하여 치즈 덩어리 본체만 쨍하게 노출) */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='g1' x1='40.03' x2='41.48' y1='37.99' y2='42.45' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g2' x1='37.65' x2='37.65' y1='49.72' y2='56.89' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g3' x1='61.76' x2='61.76' y1='13.19' y2='19.34' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g4' x1='61.76' x2='61.76' y1='14.36' y2='19.38' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g5' x1='58.61' x2='58.61' y1='36.35' y2='41.09' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g6' x1='58.61' x2='58.61' y1='37.4' y2='41.06' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g7' x1='78.57' x2='78.57' y1='17.7' y2='21.8' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g8' x1='78.61' x2='78.61' y1='18.91' y2='21.78' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g9' x1='84.96' x2='84.96' y1='26.26' y2='37.72' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g10' x1='85.02' x2='85.02' y1='27.45' y2='37.73' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23C97C0B' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g11' x1='70.08' x2='69.26' y1='46.47' y2='59.88' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23DCB23A' offset='.0036'/%3E%3Cstop stop-color='%23F5C239' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g12' x1='69.71' x2='69.71' y1='47.64' y2='59.12' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23E0A423' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g13' x1='13.76' x2='13.76' y1='86.29' y2='103.8' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23F6D75C' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g14' x1='34.14' x2='33.17' y1='74.2' y2='94.52' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g15' x1='33.32' x2='33.32' y1='74.29' y2='93.68' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g16' x1='100.4' x2='99.52' y1='70.8' y2='88.43' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g17' x1='100' x2='100' y1='70.86' y2='87.75' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g18' x1='104.5' x2='104.5' y1='48.22' y2='56.18' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g19' x1='104.1' x2='104.1' y1='48.27' y2='55.51' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g20' x1='27.82' x2='27.43' y1='105.8' y2='113' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g21' x1='27.1' x2='27.1' y1='105.8' y2='112.3' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g22' x1='51.61' x2='51.27' y1='95.4' y2='106' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g23' x1='51.09' x2='51.09' y1='95.38' y2='105.4' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g24' x1='74.21' x2='73.9' y1='73.05' y2='82.91' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g25' x1='73.96' x2='73.96' y1='73.06' y2='82.28' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g26' x1='59.88' x2='59.69' y1='67.44' y2='74.22' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23D18F1E' offset='.0036'/%3E%3Cstop stop-color='%23FBE166' offset='1'/%3E%3C/linearGradient%3E%3ClinearGradient id='g27' x1='59.52' x2='59.52' y1='67.49' y2='73.75' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23C97C0B' offset='.0036'/%3E%3Cstop stop-color='%23EBB839' offset='1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='%23D49920' d='m118.1 34.2c-0.3-2.8-11.6-10.2-19.1-14.8-7.8-4.7-25.4-12.9-35.6-15.9-6-1.7-8.9-2.4-11.4-1.8-1.8 0.4-3.3 1.4-4.1 2.8l-9.6 15.9 0.2 11.3-0.1 0.3c-1.9 0.5-4.4 1-6.8 0.5-0.6-0.1-1.2 0.5-1.4 0.9l-20.9 35.3c-0.9 1.6-0.7 2-0.6 3l0.2 13.7c0.4 1.6 2 1.8 2 1.8 2.3 4.2 0.6 9.4-1.9 13.8-0.4 0.8-0.2 3.1-0.1 9.3l0.2 13.2c0.4 3.2 3.6 3.8 6.6 2.7l97.8-33.3c1.7-0.7 3.5-2.1 3.9-5 1.6-10.7 2.6-28.5 0.7-53.7z'/%3E%3Cpath fill='%23FCE368' d='m10.2 69.9 21.3-36c4.2 0.9 14.1-0.9 14.1-6.8 0-2.8-3.2-5.6-5.8-6.3l9.7-15.8c0.7-1.3 2.7-2.7 5.1-2.4 4.5 0.4 15.9 3.7 22.1 6.2 13.4 5.3 39.9 20.5 40 25.7l0.1 1.4-39.9 13.1-66.8 22.9v-2z'/%3E%3Cpath fill='%23F5C239' d='m10.1 70.4 0.3 14.5c0.3 0.8 1.4 1.5 2.7 1.5 3.3 0.1 6.8 3.6 6.1 8.3-0.6 4.7-5.3 8.7-9 8.2l0.4 20.5c0 2.1 2.1 2.1 3.9 1.5l98.7-33.8c2.1-0.8 2.6-2.5 2.8-4 2.4-16.1 1.6-42.2 0.6-52.6l-37.5 15.9-64.3 22.9c-2.3 0.7-4.8 0.3-4.7-1.7v-1.2z'/%3E%3Cpath fill='%23FDEDA2' d='m14.4 71.8c-1.4 0.4-3.7 0.1-4.3-1l0.1 1.5c0.7 1.5 3 1.5 4.5 1.1l48.2-16.7-1-1.5-47.5 16.6z'/%3E%3Cpath fill='%23FDEDA2' d='m115.9 34.6c0 1.2-1.1 1.2-2 1.6l-35.3 12.6 0.7 1.8 35.7-13.1c2.1-0.8 1.6-3.7 0.9-4.1v1.2z'/%3E%3Cpath fill='%23DC9E22' d='m39.8 21.9v10c2.5-0.9 4.8-2.8 4.7-5.2-0.5-2.1-2.6-4-4.7-4.8z'/%3E%3Cpath fill='url(%23g1)' d='m44.6 40.8c-0.3 2.6-7.1 2.6-7.1-0.6 0-2.7 6.5-3.2 7.1 0v0.6z'/%3E%3Cellipse fill='%23DC9E22' cx='37.4' cy='52.7' rx='6.9' ry='4'/%3E%3Cpath fill='url(%23g2)' d='m37.4 49.7c-3.3 0-6.2 1.6-6.9 3.3 0.2 2.2 2.8 3.9 6.9 3.9 3.6 0 6.9-1.2 7.3-3.5-0.4-2-3.9-3.7-7.3-3.7z'/%3E%3Cellipse fill='url(%23g3)' cx='61.8' cy='16.2' rx='5' ry='3'/%3E%3Cpath fill='url(%23g4)' d='m61.8 14.4c-2.4 0-4.8 1.2-4.9 2.3 0.4 1.7 2.5 2.7 5.1 2.7 1.9 0 4.2-0.7 4.7-2.5-0.3-1.5-2.5-2.5-4.9-2.5z'/%3E%3Cpath fill='url(%23g5)' d='m62.5 38.9c0 2.7-7.8 3.3-7.8-0.4 0-2.9 7.8-3.4 7.8 0.4z'/%3E%3Cpath fill='url(%23g6)' d='m58.6 37.4c-1.7 0-3.4 0.7-3.6 1.7 0.6 1.9 3.3 2 4 1.9 1.1 0 3.3-0.5 3.3-2-0.5-1-2.1-1.6-3.7-1.6z'/%3E%3Cpath fill='url(%23g7)' d='m81.7 19.8c0 2.6-6.2 2.9-6.2 0 0-2.2 5.6-3.2 6.2 0z'/%3E%3Cpath fill='url(%23g8)' d='m78.6 18.9c-1.3 0-3 0.7-2.9 1.6 0.8 1.7 5.5 1.9 5.8-0.1-0.3-0.8-1.5-1.5-2.9-1.5z'/%3E%3Cellipse fill='url(%23g9)' cx='85' cy='32.1' rx='10.4' ry='5.8'/%3E%3Cpath fill='url(%23g10)' d='m85 27.5c-4.8 0-9.8 2.1-10.2 4.7 0.2 3.2 4.1 5.5 10.2 5.5 4.7 0 10.1-1.6 10.5-5.2-0.8-3.1-5.1-5-10.5-5z'/%3E%3Cpath fill='url(%23g11)' d='m79.3 50.4c-0.4-2-3.9-3.9-8.5-3.9-5.2 0-9.5 2.6-9.5 6.7 0 2.8 2.9 6.8 7.9 6.8 5.4 0 10.4-4.4 10.1-9.6z'/%3E%3Cpath fill='url(%23g12)' d='m70.8 47.6c-4.7 0-9.2 2.5-9.4 5.8 0.5 3.3 2.9 5.7 7 5.7 4.9 0 10-3.3 10.2-8.9-1.2-1.6-4.7-2.6-7.8-2.6z'/%3E%3Cpath fill='url(%23g13)' d='m15.2 86.9c2.5 1.3 4.2 4.2 3.8 7.8-0.5 4.3-4.6 8.3-8.8 7.9l0.1 1.1c3.3 0.4 8.6-1.8 9.7-7.8 0.6-4.1-2.1-8.2-4.8-9z'/%3E%3Cpath fill='url(%23g14)' d='m38.4 74.4c-8-1-15 9.3-12.5 15.5 3.6 8.5 17.4 3 17.6-8.2 0.1-4-2.2-7-5.1-7.3z'/%3E%3Cpath fill='url(%23g15)' d='m37.9 74.3c-6.7-0.7-13.8 7.3-12.4 14.5 1.6 6.9 11.7 5.8 15.9-2.9 2-4.4 1.2-10.9-3.5-11.6z'/%3E%3Cpath fill='url(%23g16)' d='m104.6 71.2c-5.9-1.8-13.7 6.7-11.5 13.2 2.3 6.7 13.5 4.2 15-5.5 0.5-3.8-1.2-7-3.5-7.7z'/%3E%3Cpath fill='url(%23g17)' d='m103.6 70.9c-5.6-0.5-11.7 5.8-11 12.1 0.9 6.4 9.3 6.1 13.5-1.4 2-3.9 1.5-10-2.5-10.7z'/%3E%3Cpath fill='%23DC9E22' d='m87.4 57.7c-2.3 0.4-4.4 2.9-4 5.2 0.7 4.2 5.7 4.3 7.5 1.4s0.2-6.9-3.5-6.6z'/%3E%3Cpath fill='url(%23g18)' d='m105.8 48.4c-2.9-1-6.3 3.7-4.2 6.6 3 3.1 8-2.6 5.6-5.6l-1.4-1z'/%3E%3Cpath fill='url(%23g19)' d='m105.4 48.2c-2.8-0.1-5.4 4.2-3.9 6.4 2.9 2.8 7.2-3.6 4.6-6l-0.7-0.4z'/%3E%3Cpath fill='%23FDEDA2' d='m37.7 40.2c0.2 0.3 0.2 0.4 0.2 0.4 0.2-0.7 1.7-1.5 3-1.5 1.2 0 3.2 0.3 3.6 1.5l0.1-0.5c-0.6-2.4-6.5-2.9-6.9 0.1z'/%3E%3Cpath fill='url(%23g20)' d='m29.4 106.1c-2.3-1.1-5.3 1.8-4.7 4.8 1.2 4 7.2 1.5 6.2-3.2l-1.5-1.6z'/%3E%3Cpath fill='url(%23g21)' d='m28.5 105.8c-2.4-0.2-4.5 3.1-3.6 5.6 2.2 2.7 6.5-2.3 4.8-4.8l-1.2-0.8z'/%3E%3Cpath fill='url(%23g22)' d='m54.6 95.7c-3.5-1.7-7.9 2.4-8 6 0.1 6.5 9 5.4 10-1.6 0.3-2.7-0.7-3.4-2-4.4z'/%3E%3Cpath fill='url(%23g23)' d='m53.9 95.4c-3.3-0.8-7.8 3.2-7.2 7.3 1.3 4.9 9.5 2.2 9-4.8-0.1-1-0.8-2.2-1.8-2.5z'/%3E%3Cpath fill='url(%23g24)' d='m77.4 73.2c-3.4-1.3-8.5 2.8-7.9 7 1.1 5 10.4 2.8 10-4.1 0-1.1-1-2.5-2.1-2.9z'/%3E%3Cpath fill='url(%23g25)' d='m76.7 73.1c-3.7-0.5-7.6 3.5-7.2 6.8 0.7 4.7 9.9 0.6 9-5-0.1-0.8-0.9-1.7-1.8-1.8z'/%3E%3Cpath fill='url(%23g26)' d='m61.3 67.5c-2.3-0.6-4.8 2.1-4.2 4.9 1.3 4.1 7.5 0.7 5.6-3.5l-1.4-1.4z'/%3E%3Cpath fill='url(%23g27)' d='m60.9 67.5c-2-0.1-4.3 2.2-3.8 4.9 1.3 3.3 6.3-0.5 4.8-4l-1-0.9z'/%3E%3C/svg%3E");
-  
-  transform-origin: 75% 75%; /* 우측 하단 회전의 중심축 설정 */
-  animation: cheese-fondue-shake-idle 12.5s cubic-bezier(0.25, 0.8, 0.25, 1) infinite;
+  -webkit-mask: var(--cb-cheese-fondue-edge-mask);
+  mask: var(--cb-cheese-fondue-edge-mask);
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 32% 28%;
+  mix-blend-mode: screen;
 }
 
-/* 전체적인 치즈의 은은한 밝기 일렁임 */
-@keyframes cheese-fondue-pulse {
-  0%, 100% { filter: brightness(1) drop-shadow(0 0 2px rgba(245, 158, 11, 0.3)); }
-  50% { filter: brightness(1.08) drop-shadow(0 0 6px rgba(245, 158, 11, 0.6)); }
+.cb-cheese-fondue::before {
+  background-position: center, 87% 84%;
+  background-size: 100% 100%, 12% 28%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3ClinearGradient id%3D%27cheese-micro-filament%27 x1%3D%270%27 y1%3D%270%27 x2%3D%270%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fff8c7%27%2F%3E%3Cstop offset%3D%27.45%27 stop-color%3D%27%23f0be36%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%239f6019%27%2F%3E%3C%2FlinearGradient%3E%3CradialGradient id%3D%27cheese-micro-fat%27 cx%3D%27.35%27 cy%3D%27.3%27 r%3D%27.8%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23ffffff%27%2F%3E%3Cstop offset%3D%27.35%27 stop-color%3D%27%23ffe892%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23d28c21%27 stop-opacity%3D%270%27%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%3Cpath d%3D%27M84 118C82 124 87 128 84 134C82 138 81 141 82 145%27 fill%3D%27none%27 stroke%3D%27url(%23cheese-micro-filament)%27 stroke-width%3D%271.25%27 stroke-linecap%3D%27round%27%3E%3Canimate id%3D%27cheese-micro-filament-necking-main%27 attributeName%3D%27d%27 values%3D%27M84 118C82 124 87 128 84 134C82 138 81 141 82 145%3BM84 118C80 125 88 130 83 136C80 140 82 143 82 145%3BM84 118C82 124 87 128 84 134C82 138 81 141 82 145%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%278.4s%27 begin%3D%27-3.7s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M82 145C79 146 78 149 81 151C84 150 85 147 82 145Z%27 fill%3D%27url(%23cheese-micro-fat)%27%3E%3CanimateTransform id%3D%27cheese-micro-caquelon-convection-droplet%27 attributeName%3D%27transform%27 type%3D%27scale%27 values%3D%271 1%3B.74 1.25%3B1 1%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%276.7s%27 begin%3D%27-2.9s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M73 145C77 141 82 140 88 142C91 143 93 146 94 149%27 fill%3D%27none%27 stroke%3D%27%23ffe997%27 stroke-width%3D%27.7%27 stroke-dasharray%3D%272 3%27%3E%3Canimate id%3D%27cheese-micro-caquelon-convection-current%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-8%3B-16%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2710.9s%27 begin%3D%27-6.2s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M76 147C79 144 82 143 85 145M86 146C88 144 91 145 92 147%27 fill%3D%27none%27 stroke%3D%27%23fff8cd%27 stroke-width%3D%27.55%27%3E%3Canimate id%3D%27cheese-micro-meniscus-specular%27 attributeName%3D%27stroke-width%27 values%3D%27.35%3B.8%3B.52%3B.35%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2712.3s%27 begin%3D%27-8.1s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M12 29C13 34 12 38 13 42M16 27C17 32 16 35 17 38%27 fill%3D%27none%27 stroke%3D%27%23ffd958%27 stroke-width%3D%27.6%27 stroke-linecap%3D%27round%27%3E%3Canimate id%3D%27cheese-micro-rind-filament-alpha%27 attributeName%3D%27opacity%27 values%3D%27.24%3B1%3B.52%3B.24%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%279.7s%27 begin%3D%27-5.4s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M6 49C8 47 9 44 8 41M93 67C91 65 90 62 91 59M7 108C9 106 10 103 9 100%27 fill%3D%27none%27 stroke%3D%27%23f0cf91%27 stroke-width%3D%27.45%27%3E%3Canimate id%3D%27cheese-micro-enamel-engraving-rake%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-6%3B-12%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2714.6s%27 begin%3D%27-9.6s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cg transform%3D%27translate(87 123)%27%3E%3Cpath d%3D%27M0 0L3-8L4-7L1 1Z%27 fill%3D%27%23b47a31%27 stroke%3D%27%23f5d99b%27 stroke-width%3D%27.35%27%2F%3E%3CanimateTransform id%3D%27cheese-micro-fork-recoil-tine%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 0 0%3B5 0 0%3B-3 0 0%3B0 0 0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2711.8s%27 begin%3D%27-7.3s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"), radial-gradient(ellipse at center, rgba(255,224,112,.3), transparent 70%);
+  animation: cheese-filament-necking-thermal-caustic 10.9s cubic-bezier(.65,0,.35,1) infinite;
+  will-change: background-position, background-size, filter;
 }
 
-
-/* [최고급 마이크로 모션] 3~5초 범위 내(약 2.8s~4s)의 불규칙한 대기 간격을 시뮬레이션하기 위해 12.5초 대주기를 설계함.
-   각 대기 사이마다 0.7~0.8초 가량 툭툭 회전하듯이 흔들렸다 멈추는 비주기적 물리 모션 재현. */
-@keyframes cheese-fondue-shake-idle {
-  /* --- 대기 1: 3.5초 (0s ~ 3.5s) --- */
-  0%, 28% {
-    transform: rotate(15deg) scale(1);
-  }
-  /* --- 흔들림 1: 0.7초간 (3.5s ~ 4.2s) --- */
-  29.28% {
-    transform: rotate(23deg) scale(1.05); /* 시계 방향 회전 튕김 */
-  }
-  30.56% {
-    transform: rotate(7deg) scale(1.05);  /* 반시계 방향 반동 */
-  }
-  32.0% {
-    transform: rotate(18deg) scale(1.02); /* 감속 미세 요동 */
-  }
-  33.6% {
-    transform: rotate(15deg) scale(1);    /* 원위치 정지 */
-  }
-  /* --- 대기 2: 4.0초 (4.2s ~ 8.2s) --- */
-  33.6%, 65.6% {
-    transform: rotate(15deg) scale(1);
-  }
-  /* --- 흔들림 2: 0.7초간 (8.2s ~ 8.9s) --- */
-  66.8% {
-    transform: rotate(7deg) scale(1.05);  /* 반시계 방향 회전 튕김 */
-  }
-  68.4% {
-    transform: rotate(24deg) scale(1.05); /* 시계 방향 반동 */
-  }
-  69.8% {
-    transform: rotate(12deg) scale(1.02); /* 감속 미세 요동 */
-  }
-  71.2% {
-    transform: rotate(15deg) scale(1);    /* 원위치 정지 */
-  }
-  /* --- 대기 3: 2.8초 (8.9s ~ 11.7s) --- */
-  71.2%, 93.6% {
-    transform: rotate(15deg) scale(1);
-  }
-  /* --- 흔들림 3: 0.7초간 (11.7s ~ 12.4s) --- */
-  94.8% {
-    transform: rotate(22deg) scale(1.04); /* 시계 방향 회전 튕김 */
-  }
-  96.2% {
-    transform: rotate(8deg) scale(1.04);  /* 반시계 방향 반동 */
-  }
-  97.6% {
-    transform: rotate(17deg) scale(1.01); /* 감속 미세 요동 */
-  }
-  99.2% {
-    transform: rotate(15deg) scale(1);    /* 원위치 정지 */
-  }
-  /* --- 대기 4: 0.1초 (12.4s ~ 12.5s) ---
-     (대기 4의 0.1초와 다음 루프의 대기 1인 3.5초가 합산되어 총 3.6초 대기 시간 확보) */
-  99.2%, 100% {
-    transform: rotate(15deg) scale(1);
-  }
+.cb-cheese-fondue::after {
+  background-position: center, 88% 89%;
+  background-size: 100% 100%, 24% 18%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3C%2Fdefs%3E%3Cg transform%3D%27translate(14 42)%27%3E%3Cpath d%3D%27M-3-2L2-3L4 1L1 4L-4 2Z%27 fill%3D%27%23d89b2c%27 stroke%3D%27%23ffe58a%27 stroke-width%3D%27.45%27%2F%3E%3Cpath d%3D%27M-1-1L1-1L1 1L-1 1Z%27 fill%3D%27%237f4c17%27%2F%3E%3CanimateMotion id%3D%27cheese-particle-bread-perimeter-a%27 values%3D%270 0%3B0 34%3B2 69%3B-1 99%3B0 0%27 keyTimes%3D%270%3B0.25%3B0.5%3B0.75%3B1%27 dur%3D%2717.2s%27 begin%3D%27-5.8s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3CanimateTransform id%3D%27cheese-particle-bread-tumble-a%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 0 0%3B180 0 0%3B360 0 0%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%278.6s%27 begin%3D%27-3.1s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cg transform%3D%27translate(92 46)%27%3E%3Cpath d%3D%27M-2-2L2-2L3 1L0 3L-3 1Z%27 fill%3D%27%23e3aa36%27 stroke%3D%27%23fff0a0%27 stroke-width%3D%27.4%27%2F%3E%3Cpath d%3D%27M-.8-.5L1-.7L.7 1L-1 .8Z%27 fill%3D%27%2387531c%27%2F%3E%3CanimateMotion id%3D%27cheese-particle-bread-perimeter-b%27 values%3D%270 0%3B1 32%3B-1 65%3B0 94%3B0 0%27 keyTimes%3D%270%3B0.25%3B0.5%3B0.75%3B1%27 dur%3D%2721.4s%27 begin%3D%27-12.2s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3Canimate id%3D%27cheese-particle-bread-alpha-b%27 attributeName%3D%27opacity%27 values%3D%27.12%3B.82%3B.54%3B.12%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%279.9s%27 begin%3D%27-6.1s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fg%3E%3Cg transform%3D%27translate(82 144)%27%3E%3Cpath d%3D%27M0 0C-1-2-.4-3.4.5-4C1.6-2.6 1.4-1 .4 0Z%27 fill%3D%27%23ffe56f%27 stroke%3D%27%23a7641b%27 stroke-width%3D%27.3%27%2F%3E%3CanimateMotion id%3D%27cheese-particle-caquelon-convection-blister%27 values%3D%270 0%3B-4 -6%3B2 -11%3B5 -5%3B0 0%27 keyTimes%3D%270%3B0.25%3B0.5%3B0.75%3B1%27 dur%3D%277.7s%27 begin%3D%27-4.4s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3CanimateTransform id%3D%27cheese-particle-filament-necking-droplet-spin%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 0 0%3B180 0 0%3B360 0 0%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%2712.8s%27 begin%3D%27-8.7s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cpath d%3D%27M7 150C20 147 33 152 46 149M56 149C68 146 76 149 88 145%27 fill%3D%27none%27 stroke%3D%27%23f2cf78%27 stroke-width%3D%27.45%27 stroke-dasharray%3D%271 5%27%3E%3Canimate id%3D%27cheese-particle-fork-recoil-trivet-glint%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-12%3B-24%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2714.3s%27 begin%3D%27-9.4s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3C%2Fsvg%3E"), radial-gradient(circle at center, rgba(255,246,190,.24), transparent 72%);
+  animation: cheese-caquelon-convection-fork-recoil-impulse 13.3s cubic-bezier(.34,1.22,.64,1) infinite;
+  will-change: background-position, background-size, filter, opacity;
 }
 
-/* 모션 최소화 사용자는 애니메이션 정지 (정적 프레임 및 글로우만 유지) */
+/* The caustic stretches vertically with the filament, pinches, then recoils wider. */
+@keyframes cheese-filament-necking-thermal-caustic {
+  0% { background-position: center, 87% 84%; background-size: 100% 100%, 12% 28%; filter: brightness(.94) contrast(1.04) saturate(1.04); }
+  17% { background-position: center, 85% 78%; background-size: 100% 100%, 10% 34%; filter: brightness(1.06) contrast(1.08) saturate(1.12); }
+  36% { background-position: center, 82% 69%; background-size: 100% 100%, 7% 43%; filter: brightness(1.2) contrast(1.14) saturate(1.2); }
+  52% { background-position: center, 80% 61%; background-size: 100% 100%, 4% 51%; filter: brightness(1.36) contrast(1.2) saturate(1.28); }
+  67% { background-position: center, 86% 75%; background-size: 100% 100%, 19% 23%; filter: brightness(1.16) contrast(1.1) saturate(1.16); }
+  82% { background-position: center, 90% 87%; background-size: 100% 100%, 15% 20%; filter: brightness(1.02) contrast(1.06) saturate(1.08); }
+  93% { background-position: center, 87% 84%; background-size: 100% 100%, 11% 27%; filter: brightness(.96) contrast(1.04) saturate(1.05); }
+  100% { background-position: center, 87% 84%; background-size: 100% 100%, 12% 28%; filter: brightness(.94) contrast(1.04) saturate(1.04); }
+}
+
+/* Pot convection swells the light; the fork impulse overshoots and damps back into it. */
+@keyframes cheese-caquelon-convection-fork-recoil-impulse {
+  0% { background-position: center, 88% 89%; background-size: 100% 100%, 24% 18%; filter: brightness(.94) saturate(1.02); opacity: .78; }
+  8% { background-position: center, 89% 87%; background-size: 100% 100%, 34% 25%; filter: brightness(1.28) saturate(1.18); opacity: 1; }
+  29% { background-position: center, 86% 73%; background-size: 100% 100%, 26% 36%; filter: brightness(1.16) saturate(1.14); opacity: .92; }
+  47% { background-position: center, 91% 82%; background-size: 100% 100%, 18% 24%; filter: brightness(1.04) saturate(1.08); opacity: .86; }
+  63% { background-position: center, 84% 88%; background-size: 100% 100%, 30% 20%; filter: brightness(1.12) saturate(1.12); opacity: .9; }
+  79% { background-position: center, 90% 90%; background-size: 100% 100%, 21% 17%; filter: brightness(.98) saturate(1.04); opacity: .8; }
+  100% { background-position: center, 88% 89%; background-size: 100% 100%, 24% 18%; filter: brightness(.94) saturate(1.02); opacity: .78; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cb-cheese-fondue { animation: none; }
-  .cb-cheese-fondue::before, .cb-cheese-fondue::after { animation: none; }
+  .cb-cheese-fondue, .cb-cheese-fondue::before, .cb-cheese-fondue::after { animation: none !important; }
+}
+
+@media print {
+  .cb-cheese-fondue, .cb-cheese-fondue::before, .cb-cheese-fondue::after { animation: none !important; }
 }

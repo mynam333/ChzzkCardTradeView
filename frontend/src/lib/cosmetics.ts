@@ -343,17 +343,23 @@ const ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY = new Map<string, number>([
   ['cb-autumn', 2],
   ['cb-sakura', 2],
   ['cb-snow', 2],
+  ['cb-beach', 2],
+  ['cb-cheese-fondue', 1],
   ['cb-ginkgo-lacquer-wind', 2],
   ['cb-goryeo-celadon', 2],
+  ['cb-hanok-yeonhwa', 2],
+  ['cb-heart-pop', 1],
   ['cb-cyberpunk', 2],
   ['cb-retro-8bit-arcade', 2],
+  ['cb-galaxy', 0],
   ['cb-prism', 1],
   ['cb-volcano', 0],
   ['cb-abyssal-reliquary', 2],
   ['cb-medieval', 2],
   ['cb-oriental', 0],
   ['cb-royal', 0],
-  ['cb-stained-glass-nocturne', 0]
+  ['cb-stained-glass-nocturne', 0],
+  ['cb-steampunk', 0]
 ]);
 
 export const selectActiveCosmeticSvgMotionKeys = (

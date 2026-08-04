@@ -13,33 +13,45 @@ const defaultThemes = [
   'autumn.css',
   'sakura.css',
   'snow.css',
+  'beach.css',
+  'cheese-fondue.css',
   'cyberpunk.css',
+  'galaxy.css',
   'prism.css',
   'volcano.css',
   'medieval.css',
   'oriental.css',
   'royal.css',
   'stained-glass-nocturne.css',
+  'steampunk.css',
   'ginkgo-lacquer-wind.css',
   'abyssal-reliquary.css',
   'goryeo-celadon.css',
+  'hanok-yeonhwa-border-wind.optimized.css',
+  'heart-pop.css',
   'retro-8bit-arcade.css'
 ];
 
 const expectedMotionIdentities = new Map([
   ['autumn.css', ['herbarium-press', 'vein-ignition', 'leaf-curl-settle']],
-  ['sakura.css', ['nacre-polarization', 'sequential-bloom', 'silk-tassel-wave']],
+  ['sakura.css', ['nacre-polarization', 'sequential-bloom', 'petal-airloop']],
   ['snow.css', ['dendrite-growth', 'bragg-diffraction', 'frost-sublimation']],
+  ['beach.css', ['swell-gather', 'breaker-curl', 'foam-backwash']],
+  ['cheese-fondue.css', ['caquelon-convection', 'filament-necking', 'fork-recoil']],
   ['cyberpunk.css', ['packet-handoff', 'gate-latch', 'closed-rail-courier']],
+  ['galaxy.css', ['orrery-precession', 'constellation-parallax', 'comet-gravity-return']],
   ['prism.css', ['iris-calibration', 'spectral-split', 'photon-reflection']],
   ['volcano.css', ['crack-propagation', 'pressure-vent', 'ballistic-ember']],
   ['medieval.css', ['forge-temper', 'chain-tension', 'ballistic-spark']],
   ['oriental.css', ['hinge-articulation', 'patina-infiltration', 'ring-pendulum']],
   ['royal.css', ['prong-articulation', 'gem-internal-reflection', 'embroidery-stitch']],
   ['stained-glass-nocturne.css', ['moon-incidence', 'lead-shadow', 'caustic-projection']],
+  ['steampunk.css', ['pressure-charge', 'gear-ratio-mesh', 'steam-condensation-return']],
   ['ginkgo-lacquer-wind.css', ['goldfoil-inversion', 'calligraphy-wind', 'layered-aerodynamics']],
   ['abyssal-reliquary.css', ['pearl-interference', 'viscous-current', 'species-swim']],
   ['goryeo-celadon.css', ['glaze-caustic', 'crane-procession', 'crackle-branchlight']],
+  ['hanok-yeonhwa-border-wind.optimized.css', ['eave-windload', 'dancheong-reflection', 'norigae-damped-return']],
+  ['heart-pop.css', ['candy-pressure-release', 'heartbeat-edge-relay', 'bubble-return-channel']],
   ['retro-8bit-arcade.css', ['crt-retrace-lock', 'sprite-step-quest', 'phosphor-palette-cycle']]
 ]);
 
@@ -54,6 +66,11 @@ const svgDetailRequirements = [
   { role: 'particle/projection', minShapes: 4, minPathCharacters: 100, minGradients: 0, minMotionKinds: 3 }
 ];
 const smilIdOwners = new Map();
+const cssMotionTopologyOwners = new Map();
+const smilMotionTopologyOwners = new Map();
+const svgPathDataOwners = new Map();
+const svgStructuredPathTopologyOwners = new Map();
+const svgPointConstellations = new Map();
 
 const requested = process.argv.slice(2);
 const filenames = requested.length ? requested : defaultThemes;
@@ -116,6 +133,30 @@ const validateCssLoops = (root, filename) => {
     const end = rules.find((rule) => keyframeSelectorIncludes(rule, ['100%', 'to']));
     if (!start || !end) {
       throw new Error(`${filename} @keyframes ${atRule.params}: explicit 0%/100% endpoints required`);
+    }
+
+    if (expectedMotionIdentities.has(filename)) {
+      const topology = rules.map((rule) => {
+        const selectors = rule.selector
+          .split(',')
+          .map((selector) => selector.trim().toLowerCase())
+          .sort()
+          .join(',');
+        const properties = (rule.nodes ?? [])
+          .filter((node) => node.type === 'decl')
+          .map((declaration) => declaration.prop.toLowerCase())
+          .sort()
+          .join(',');
+        return `${selectors}:${properties}`;
+      }).join('|');
+      const owner = cssMotionTopologyOwners.get(topology);
+      if (owner && owner.filename !== filename) {
+        throw new Error(
+          `${filename} @keyframes ${atRule.params}: motion topology duplicates `
+          + `${owner.filename} @keyframes ${owner.keyframe}; copy-renamed carrier loops are forbidden`
+        );
+      }
+      cssMotionTopologyOwners.set(topology, { filename, keyframe: atRule.params });
     }
 
     const startDeclarations = keyframeDeclarations(start);
@@ -416,6 +457,148 @@ const validateTileLoopBindings = (root, filename, tileKeyframes) => {
 const attr = (source, name) => {
   const match = source.match(new RegExp(`\\b${name}=['"]([^'"]+)['"]`, 'i'));
   return match?.[1] ?? '';
+};
+
+const smilMotionTopology = (svg) => {
+  const selfClosingAnimations = [...svg.matchAll(selfClosingSmilPattern)].map((match) => ({
+    tag: match[1],
+    attributes: match[2] || ''
+  }));
+  const svgWithoutSelfClosingSmil = svg.replace(selfClosingSmilPattern, '');
+  const pairedAnimations = [...svgWithoutSelfClosingSmil.matchAll(pairedSmilPattern)].map((match) => ({
+    tag: match[1],
+    attributes: match[2] || ''
+  }));
+
+  return [...selfClosingAnimations, ...pairedAnimations]
+    .map(({ tag, attributes }) => {
+      const attributeName = attr(attributes, 'attributeName').toLowerCase() || 'motion';
+      const transformType = attr(attributes, 'type').toLowerCase() || '-';
+      return `${tag.toLowerCase()}:${attributeName}:${transformType}`;
+    })
+    .join('|');
+};
+
+const validateUniqueSmilMotionTopology = (decodedSvgs, filename) => {
+  if (!expectedMotionIdentities.has(filename)) return;
+  const topology = decodedSvgs.map(smilMotionTopology).join('||');
+  const owner = smilMotionTopologyOwners.get(topology);
+  if (owner && owner !== filename) {
+    throw new Error(
+      `${filename}: aggregate SVG/SMIL motion topology duplicates ${owner}; `
+      + 'copy-renamed animation skeletons are forbidden'
+    );
+  }
+  smilMotionTopologyOwners.set(topology, filename);
+};
+
+const validateUniqueSvgPathGeometry = (decodedSvgs, filename) => {
+  if (!expectedMotionIdentities.has(filename)) return;
+  const themePaths = new Set();
+  const themeStructuredPathTopologies = new Set();
+  for (const svg of decodedSvgs) {
+    for (const match of svg.matchAll(/<path\b[^>]*\bd=['"]([^'"]+)['"]/gi)) {
+      const normalizedPath = match[1].replace(/\s+/g, ' ').trim();
+      if (normalizedPath.length >= 60) themePaths.add(normalizedPath);
+      const commandTopologyParts = [...normalizedPath.matchAll(/([MmZzLlHhVvCcSsQqTtAa])([^MmZzLlHhVvCcSsQqTtAa]*)/g)]
+        .map((commandMatch) => {
+          const numberCount = (commandMatch[2].match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi) ?? []).length;
+          return `${commandMatch[1].toLowerCase()}:${numberCount}`;
+        });
+      if (normalizedPath.length >= 100 && commandTopologyParts.length >= 20) {
+        themeStructuredPathTopologies.add(commandTopologyParts.join('|'));
+      }
+    }
+  }
+
+  for (const pathData of themePaths) {
+    const owner = svgPathDataOwners.get(pathData);
+    if (owner && owner !== filename) {
+      throw new Error(
+        `${filename}: static SVG path geometry duplicates ${owner} `
+        + `(${pathData.slice(0, 72)}...); cross-theme template paths are forbidden`
+      );
+    }
+    svgPathDataOwners.set(pathData, filename);
+  }
+
+  for (const topology of themeStructuredPathTopologies) {
+    const owner = svgStructuredPathTopologyOwners.get(topology);
+    if (owner && owner !== filename) {
+      throw new Error(
+        `${filename}: structured static SVG path command topology duplicates ${owner}; `
+        + 'reformatted or coordinate-shifted template paths are forbidden'
+      );
+    }
+    svgStructuredPathTopologyOwners.set(topology, filename);
+  }
+};
+
+const validateUniqueSvgPointConstellation = (decodedSvgs, filename) => {
+  if (!expectedMotionIdentities.has(filename)) return;
+  const points = new Set();
+  for (const svg of decodedSvgs) {
+    for (const match of svg.matchAll(/<(circle|ellipse)\b([^>]*)\/?\s*>/gi)) {
+      const tag = match[1].toLowerCase();
+      const attributes = match[2] || '';
+      const cx = attr(attributes, 'cx').trim();
+      const cy = attr(attributes, 'cy').trim();
+      if (!cx || !cy) continue;
+      const radius = tag === 'circle'
+        ? attr(attributes, 'r').trim()
+        : `${attr(attributes, 'rx').trim()}:${attr(attributes, 'ry').trim()}`;
+      if (!radius || radius === ':') continue;
+      points.add(`${tag}:${cx}:${cy}:${radius}`);
+    }
+  }
+
+  for (const [owner, ownerPoints] of svgPointConstellations) {
+    const shared = [...points].filter((point) => ownerPoints.has(point));
+    if (shared.length >= 6) {
+      throw new Error(
+        `${filename}: ${shared.length} SVG point ornaments duplicate ${owner}; `
+        + 'shared rivet/bead constellations of six or more points are forbidden'
+      );
+    }
+  }
+  svgPointConstellations.set(filename, points);
+};
+
+const validateStaticCenterSafeArea = async (renderedLayers, filename) => {
+  const width = 500;
+  const height = 800;
+  const { data, info } = await sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite(renderedLayers.map((input) => ({ input })))
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let centerPixels = 0;
+  let strongPixels = 0;
+  const left = Math.floor(info.width * 0.22);
+  const right = Math.ceil(info.width * 0.78);
+  const top = Math.floor(info.height * 0.2);
+  const bottom = Math.ceil(info.height * 0.8);
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      centerPixels += 1;
+      if (data[(y * info.width + x) * 4 + 3] > 40) strongPixels += 1;
+    }
+  }
+
+  const strongCoverage = strongPixels / centerPixels;
+  if (strongCoverage > 0.02) {
+    throw new Error(
+      `${filename}: static SVG layers cover ${(strongCoverage * 100).toFixed(3)}% of the center safe area; `
+      + 'expected at most 2% strong-alpha coverage'
+    );
+  }
 };
 
 const isEquivalentRotationLoop = (type, first, last) => {
@@ -963,42 +1146,52 @@ const runTileBindingRegressionFixtures = () => {
   }
 };
 
-runTileBindingRegressionFixtures();
+try {
+  runTileBindingRegressionFixtures();
 
-let svgTotal = 0;
-let smilTotal = 0;
-let cssLoopTotal = 0;
-for (const filename of filenames) {
-  const filePath = path.resolve(repositoryRoot, 'card-borders', filename);
-  const css = fs.readFileSync(filePath, 'utf8');
-  const root = postcss.parse(css, { from: filePath });
-  validateCssContract(root, filename);
-  const cssLoopValidation = validateCssLoops(root, filename);
-  cssLoopTotal += cssLoopValidation.count;
-  validateTileLoopBindings(root, filename, cssLoopValidation.tileKeyframes);
-  if (!/@media\s*\(prefers-reduced-motion:\s*reduce\)/i.test(css)) {
-    throw new Error(`${filename}: missing reduced-motion CSS`);
+  let svgTotal = 0;
+  let smilTotal = 0;
+  let cssLoopTotal = 0;
+  for (const filename of filenames) {
+    const filePath = path.resolve(repositoryRoot, 'card-borders', filename);
+    const css = fs.readFileSync(filePath, 'utf8');
+    const root = postcss.parse(css, { from: filePath });
+    validateCssContract(root, filename);
+    const cssLoopValidation = validateCssLoops(root, filename);
+    cssLoopTotal += cssLoopValidation.count;
+    validateTileLoopBindings(root, filename, cssLoopValidation.tileKeyframes);
+    if (!/@media\s*\(prefers-reduced-motion:\s*reduce\)/i.test(css)) {
+      throw new Error(`${filename}: missing reduced-motion CSS`);
+    }
+    validateNoTransparentDummyLayers(root, filename);
+    const payloads = [...css.matchAll(dataSvgPattern)].map((match) => match[2]);
+    if (expectedMotionIdentities.has(filename) && payloads.length !== 3) {
+      throw new Error(`${filename}: expected exactly three SVG layers, found ${payloads.length}`);
+    }
+    if (payloads.length < 2) throw new Error(`${filename}: expected at least two SVG layers`);
+    const decodedSvgs = payloads.map((payload) => decodeURIComponent(payload));
+    validateMotionIdentity(css, decodedSvgs, filename);
+    validateUniqueSmilMotionTopology(decodedSvgs, filename);
+    validateUniqueSvgPathGeometry(decodedSvgs, filename);
+    validateUniqueSvgPointConstellation(decodedSvgs, filename);
+    let fileSmil = 0;
+    const renderedLayers = [];
+    for (const [svgIndex, svg] of decodedSvgs.entries()) {
+      validateSvgSafety(svg, filename, svgIndex);
+      fileSmil += validateSmil(svg, filename, svgIndex);
+      renderedLayers.push(await sharp(Buffer.from(svg)).resize(500, 800).png().toBuffer());
+      svgTotal += 1;
+    }
+    await validateStaticCenterSafeArea(renderedLayers, filename);
+    if (expectedMotionIdentities.has(filename) && (fileSmil < 20 || fileSmil > 24)) {
+      throw new Error(`${filename}: SMIL count ${fileSmil}, expected 20..24`);
+    }
+    smilTotal += fileSmil;
+    console.log(`${filename}: ${payloads.length} SVG, ${fileSmil} SMIL`);
   }
-  validateNoTransparentDummyLayers(root, filename);
-  const payloads = [...css.matchAll(dataSvgPattern)].map((match) => match[2]);
-  if (expectedMotionIdentities.has(filename) && payloads.length !== 3) {
-    throw new Error(`${filename}: expected exactly three SVG layers, found ${payloads.length}`);
-  }
-  if (payloads.length < 2) throw new Error(`${filename}: expected at least two SVG layers`);
-  const decodedSvgs = payloads.map((payload) => decodeURIComponent(payload));
-  validateMotionIdentity(css, decodedSvgs, filename);
-  let fileSmil = 0;
-  for (const [svgIndex, svg] of decodedSvgs.entries()) {
-    validateSvgSafety(svg, filename, svgIndex);
-    fileSmil += validateSmil(svg, filename, svgIndex);
-    await sharp(Buffer.from(svg)).resize(500, 800).png().toBuffer();
-    svgTotal += 1;
-  }
-  if (expectedMotionIdentities.has(filename) && (fileSmil < 20 || fileSmil > 24)) {
-    throw new Error(`${filename}: SMIL count ${fileSmil}, expected 20..24`);
-  }
-  smilTotal += fileSmil;
-  console.log(`${filename}: ${payloads.length} SVG, ${fileSmil} SMIL`);
+
+  console.log(JSON.stringify({ themes: filenames.length, svgs: svgTotal, smil: smilTotal, cssLoops: cssLoopTotal }));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
 }
-
-console.log(JSON.stringify({ themes: filenames.length, svgs: svgTotal, smil: smilTotal, cssLoops: cssLoopTotal }));

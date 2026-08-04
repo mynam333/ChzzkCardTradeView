@@ -160,7 +160,19 @@ SVG를 `background-image: url("data:image/svg+xml,...")` 로 인라인하면 외
 - 큰 군락 안을 단색 면으로 끝내지 않고 외곽면·중간 재질면·각인/잎맥/균열·국소 하이라이트의 **최소 4단 재료 위계**로 분할합니다.
 - 본체 레일은 장식을 연결하는 구조여야 하며, 네 변이 같은 굵기와 같은 패턴으로 반복되는 단순 사각 프레임을 최종 실루엣으로 삼지 않습니다.
 - 장식이 중앙 안전 영역을 침범하지 않도록 바깥 12~16% 띠와 코너 20% 영역 안에서 밀도를 확보하고, 실제 갤러리 크기·모바일·6배 확대에서 모두 확인합니다.
+- validator는 세 정적 SVG를 500×800 투명 캔버스에 합성해 중앙 `x 22~78% / y 20~80%`의 alpha를 검사합니다. alpha 40 초과 픽셀이 중앙의 2%를 넘으면 실패하므로, 가는 국소 연결선은 허용하되 굵은 패널·회로·장식 군락은 외곽 밴드로 후퇴시킵니다.
 - SMIL 개수를 늘리기 전에 정적 base state만으로 소재와 테마가 읽히는지 먼저 검사합니다. Reduced Motion에서도 같은 소장 가치를 유지해야 합니다.
+
+#### 클린 아트디렉션 게이트
+
+정교함은 장식의 개수나 색의 수와 같지 않습니다. 아래 항목을 통과하지 못하면 기존 SVG의 일부만 덧대지 말고, 큰 실루엣과 레일부터 다시 설계합니다.
+
+- 갤러리 크기에서 **대표 소재 1개와 보조 소재 1개**가 먼저 읽혀야 합니다. 네 모서리에 같은 대형 장식을 복제하거나 모든 변에 서로 다른 주제를 넣지 않습니다.
+- 기본 팔레트는 명도 단계가 분명한 **주색 3계열 + 작은 강조색 1계열**을 권장합니다. 보석·유리·홀로그램이라도 무지개색은 실제 굴절점이나 유리 조각 내부에만 제한합니다.
+- 리본 꼬리, 천막 같은 측면 곡선, 물결형 돌출, 촉수·살점처럼 보이는 scallop은 테마의 구조적 이유가 없으면 사용하지 않습니다. 꽃·왕관·기계처럼 단단한 주제는 곧은 레일, 장석, 가지, 기둥 등 납득 가능한 지지 구조로 연결합니다.
+- 장식의 주 군락은 한 곳, 반대편 보조 군락은 한 곳으로 두고 나머지 변에는 숨 쉴 공간을 남깁니다. 동일 모티프의 네 모서리 반복은 작은 나사·리벳·접합부에만 허용합니다.
+- 프레임 전체가 동시에 확대·회전·점멸하거나 `hue-rotate`로 색상이 통째로 순환하는 연출은 금지합니다. 움직임은 재질 내부 반사, 관절, 균열, 유체, 입자처럼 실제 원인이 있는 국소 요소에만 부여합니다.
+- 정지 상태, 한 주기의 서로 다른 두 시점, 감소 모션 상태를 나란히 캡처해 비교합니다. 테마 이름을 가린 상태에서도 실루엣·재질·움직임 중 두 가지 이상으로 구분되지 않으면 재설계 대상입니다.
 
 > 모서리가 둥근 곡선 장식은 `preserveAspectRatio='none'` 로 약간 늘어납니다.
 > 너무 동그란 모티프보다 **사선·결정·기하학** 모티프가 늘어짐을 잘 견딥니다.
@@ -305,8 +317,8 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 - 기존 `transform`이 있는 `<g>`/`<use>`에 `<animateTransform>`을 추가할 때는 `additive="sum"`으로 정적 배치가 사라지지 않게 합니다.
 - 시그니처 모션은 실제 카드 2× 배율에서도 한 주기 안에 식별되어야 합니다. 대표 하이라이트는 밝기·불투명도 차이를 충분히 확보하고, 회전·굴절·파동은 해당 재질이 인지될 만큼의 진폭을 주되 전체 프레임을 동시에 번쩍이게 만들지는 않습니다. 최소 두 종류의 재질 모션을 서로 다른 주기로 엇갈리게 배치해 정지 화면처럼 보이는 구간을 줄입니다.
 - SMIL을 제거해도 아름다운 **정적 base state**가 반드시 남아야 합니다. 런타임은 `prefers-reduced-motion: reduce`일 때 data SVG의 SMIL 요소를 제거해 다시 주입하고, 테마의 미디어 쿼리는 바깥 CSS 애니메이션을 함께 중지합니다.
-- 카드 크기 자체에는 상한을 두지 않습니다. 대신 런타임은 화면에 보이는 서로 다른 SMIL 테마 중 **최대 3종·복잡도 가중 합산 가시 면적 90,000 CSS px²**만 동시에 재생합니다. SVG 레이어 한 장당 약 7개 SMIL 타임라인을 가중치 1로 보므로, 정확히 3 SVG를 쓰는 완성형 테마의 기본 가중치는 대략 3입니다. 카드가 작을 때는 최대 3종, 카드가 크거나 타임라인이 조밀할 때는 1~2종이 자연스럽게 활성화됩니다. 예산 밖 테마와 화면에 보이는 인스턴스가 하나도 없는 테마는 SMIL을 제거한 정적 SVG로 다시 주입합니다. 신규·갱신 동적 SVG는 먼저 정적으로 주입하고 다음 렌더 프레임의 실제 가시 면적 승인 후에만 재생하므로, 예산 계산 전 한 프레임 과다 재생도 허용하지 않습니다. 같은 테마가 화면 안팎에 동시에 존재하면 공유 SVG는 유지하되 화면 밖 개별 프레임의 바깥 CSS를 정지하고 브라우저의 오프스크린 페인트 컬링을 활용합니다. 카드가 화면 중앙에 가까워지거나 hover/focus되면 **예산과 반복 인스턴스 보호 범위 안에서** 우선권을 넘깁니다. 동일 테마가 여러 장 보이고 합산 면적이 예산을 넘으면 한 장만 hover해도 공유 SMIL 전체를 켜지 않습니다. **화면에 한 장만 보이는 큰 카드**는 면적이 예산을 넘어도 최소 1종을 재생하므로 상세 화면과 임의의 확대 배율에는 크기 제한이 생기지 않습니다. 반대로 동일 테마가 여러 장 보이면 그 면적을 합산하고 단일 카드 예외를 적용하지 않아, 반복 인스턴스가 예산을 우회하지 못하게 합니다. 런타임은 각 프레임의 교차 상태와 실제 크기를 함께 관찰해 레이아웃·intrinsic size 변화 뒤에도 면적을 다시 계산합니다. 예시 14종은 한 프레임의 실제 렌더 면적이 **120,000 CSS px² 이상 500,000 CSS px² 미만**이면 `data-cosmetic-motion-smil-only="true"` 중간 LOD로 전환합니다. 따라서 가이드의 일반 2×~4× 검증 범위에서는 CSS+SMIL 전체 모션을 유지하고, 그보다 큰 상세 확대에서만 이 단계가 개입합니다. 원본 CSS는 20~24개 SMIL과 정교한 SVG를 그대로 보존합니다. 다만 적응형 단계에서는 테마별 시그니처가 가장 분명한 SVG 한 장의 6~8개 SMIL만 동적으로 유지하고, 나머지 두 SVG에서는 SMIL만 제거해 모든 정적 도형·재질·확대 세공을 그대로 표시합니다. 동시에 HTML 레이어의 root/`::before`/`::after` CSS 애니메이션을 `animation: none`으로 비활성화하여, 대형 표면에서 SVG 재페인트 표면을 3장에서 1장으로 줄이고 CSS 합성 레이어와 겹치는 비용도 피합니다. 실제 렌더 면적이 **500,000 CSS px² 이상**이면 `data-cosmetic-motion-css-only="true"` 초대형 LOD로 한 번 더 전환합니다. 이 단계는 세 SVG의 SMIL을 모두 제거해 정교한 정적 벡터를 캐시하고, 테마가 원래 가진 `::before`·`::after` CSS carrier 루프는 그대로 재생합니다. 8× 논리 카드(512 × 819.2 ≈ 419,430px²)는 중간 LOD에 남고, 768 × 1228.8 ≈ 943,718px² 카드는 초대형 LOD에 들어갑니다. `will-change`는 상시 레이어 메모리를 늘리므로 이 단계에서도 추가하지 않습니다. 모든 CSS 루프가 폐쇄 종점을 가지므로 카드가 다시 작아져 애니메이션이 처음부터 재개되어도 루프 이음매는 유지됩니다. 카드가 작아지면 해당 경계에 맞춰 시그니처 SMIL과 전체 20~24개 SMIL이 순서대로 자동 복구되며, 보호된 기존 6종에는 두 LOD가 모두 적용되지 않습니다.
-- 대형 LOD 시그니처 레이어는 **particle/projection**(Autumn, Sakura, Snow, Ginkgo, Goryeo, Cyberpunk, Retro 8-bit, Abyssal, Medieval), **micro-detail**(Prism), **base**(Volcano, Oriental, Royal, Stained Glass)로 고정합니다. 레이어 순서는 반드시 base → micro-detail → particle/projection을 유지해야 런타임 선택과 일치합니다.
+- 카드 크기 자체에는 상한을 두지 않습니다. 대신 런타임은 화면에 보이는 서로 다른 SMIL 테마 중 **최대 3종·복잡도 가중 합산 가시 면적 90,000 CSS px²**만 동시에 재생합니다. SVG 레이어 한 장당 약 7개 SMIL 타임라인을 가중치 1로 보므로, 정확히 3 SVG를 쓰는 완성형 테마의 기본 가중치는 대략 3입니다. 카드가 작을 때는 최대 3종, 카드가 크거나 타임라인이 조밀할 때는 1~2종이 자연스럽게 활성화됩니다. 예산 밖 테마와 화면에 보이는 인스턴스가 하나도 없는 테마는 SMIL을 제거한 정적 SVG로 다시 주입합니다. 신규·갱신 동적 SVG는 먼저 정적으로 주입하고 다음 렌더 프레임의 실제 가시 면적 승인 후에만 재생하므로, 예산 계산 전 한 프레임 과다 재생도 허용하지 않습니다. 같은 테마가 화면 안팎에 동시에 존재하면 공유 SVG는 유지하되 화면 밖 개별 프레임의 바깥 CSS를 정지하고 브라우저의 오프스크린 페인트 컬링을 활용합니다. 카드가 화면 중앙에 가까워지거나 hover/focus되면 **예산과 반복 인스턴스 보호 범위 안에서** 우선권을 넘깁니다. 동일 테마가 여러 장 보이고 합산 면적이 예산을 넘으면 한 장만 hover해도 공유 SMIL 전체를 켜지 않습니다. **화면에 한 장만 보이는 큰 카드**는 면적이 예산을 넘어도 최소 1종을 재생하므로 상세 화면과 임의의 확대 배율에는 크기 제한이 생기지 않습니다. 반대로 동일 테마가 여러 장 보이면 그 면적을 합산하고 단일 카드 예외를 적용하지 않아, 반복 인스턴스가 예산을 우회하지 못하게 합니다. 런타임은 각 프레임의 교차 상태와 실제 크기를 함께 관찰해 레이아웃·intrinsic size 변화 뒤에도 면적을 다시 계산합니다. 예시 **20종 전체**는 한 프레임의 실제 렌더 면적이 **120,000 CSS px² 이상 500,000 CSS px² 미만**이면 `data-cosmetic-motion-smil-only="true"` 중간 LOD로 전환합니다. 따라서 가이드의 일반 2×~4× 검증 범위에서는 CSS+SMIL 전체 모션을 유지하고, 그보다 큰 상세 확대에서만 이 단계가 개입합니다. 원본 CSS는 20~24개 SMIL과 정교한 SVG를 그대로 보존합니다. 다만 적응형 단계에서는 테마별 시그니처가 가장 분명한 SVG 한 장의 6~8개 SMIL만 동적으로 유지하고, 나머지 두 SVG에서는 SMIL만 제거해 모든 정적 도형·재질·확대 세공을 그대로 표시합니다. 동시에 HTML 레이어의 root/`::before`/`::after` CSS 애니메이션을 `animation: none`으로 비활성화하여, 대형 표면에서 SVG 재페인트 표면을 3장에서 1장으로 줄이고 CSS 합성 레이어와 겹치는 비용도 피합니다. 실제 렌더 면적이 **500,000 CSS px² 이상**이면 `data-cosmetic-motion-css-only="true"` 초대형 LOD로 한 번 더 전환합니다. 이 단계는 세 SVG의 SMIL을 모두 제거해 정교한 정적 벡터를 캐시하고, 테마가 원래 가진 `::before`·`::after` CSS carrier 루프는 그대로 재생합니다. 8× 논리 카드(512 × 819.2 ≈ 419,430px²)는 중간 LOD에 남고, 768 × 1228.8 ≈ 943,718px² 카드는 초대형 LOD에 들어갑니다. `will-change`는 상시 레이어 메모리를 늘리므로 이 단계에서도 추가하지 않습니다. 모든 CSS 루프가 폐쇄 종점을 가지므로 카드가 다시 작아져 애니메이션이 처음부터 재개되어도 루프 이음매는 유지됩니다. 카드가 작아지면 해당 경계에 맞춰 시그니처 SMIL과 전체 20~24개 SMIL이 순서대로 자동 복구됩니다.
+- 대형 LOD 시그니처 레이어는 **particle/projection**(Autumn, Sakura, Snow, Beach, Ginkgo, Goryeo, Hanok, Cyberpunk, Retro 8-bit, Abyssal, Medieval), **micro-detail**(Cheese Fondue, Heart Pop, Prism), **base**(Galaxy, Volcano, Oriental, Royal, Stained Glass, Steampunk)로 고정합니다. 레이어 순서는 반드시 base → micro-detail → particle/projection을 유지해야 런타임 선택과 일치합니다.
 - 같은 테마 key의 여러 활성 인스턴스는 한 style을 공유하므로 크기가 서로 다르면 **가장 높은 LOD를 모든 활성 가시 인스턴스에 함께 적용**합니다. 화면 밖 인스턴스는 이 승격에 참여하지 않으며 계속 정지 상태를 유지합니다.
 - 전체 프레임의 불투명도를 빠르게 깜빡이거나 중앙을 가로지르는 대형 발광은 금지합니다. 움직임은 테두리·코너·장식물에 집중합니다.
 
@@ -321,6 +333,10 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 
 - 세 토큰은 다른 테마와 중복되지 않아야 하며, 주석에만 머물지 않고 실제 SMIL `id` 또는 `@keyframes` 이름에 각각 연결되어야 합니다.
 - 지문은 `원인 → 전달 → 반응`의 인과관계를 가져야 합니다. 단순한 `pulse`, `glow`, `rotate`, `drift`는 지문으로 인정하지 않습니다.
+- CSS `@keyframes`도 이름과 숫자만 바꾼 복제본이어서는 안 됩니다. validator는 타임스텝과 움직이는 속성의 조합이 다른 테마와 같으면 **모션 토폴로지 복제**로 실패시킵니다. 소재의 물리가 다르면 단계 수, 작동 속성, 반환 방식도 실제로 달라야 합니다.
+- 세 SVG의 SMIL 요소를 합친 `태그 + 대상 속성 + transform 종류` 골격도 테마마다 고유해야 합니다. validator는 3개 레이어의 집계 토폴로지가 다른 테마와 완전히 같으면 이름·색·시간값이 달라도 **복제 애니메이션 골격**으로 실패시킵니다.
+- 장식용 SVG path를 다른 테마에 그대로 복사해 색만 바꾸지 않습니다. validator는 60자 이상의 정적 `d` 경로가 다른 완성형 테마에 정확히 재사용되면 **정적 템플릿 골격**으로 실패시킵니다. 100자 이상이면서 명령이 20개 이상인 구조화 경로는 좌표나 포맷만 바꿔도 명령·인자 개수 토폴로지가 같으면 실패합니다. 공용 레일이 필요해도 접합 방식·분절·곡률을 각 소재에 맞게 다시 설계합니다.
+- 동일 좌표·반지름의 원형 리벳이나 비드를 여러 테마에 같은 배치로 복사하지 않습니다. validator는 두 테마가 6개 이상의 `circle`/`ellipse` 점 장식을 정확히 공유하면 **공용 점 장식 군집**으로 실패시킵니다. 금속은 나사·와셔, 꽃은 꽃술, 도자는 유약 기포처럼 모양과 간격 모두 소재에 맞춰야 합니다.
 - 완성형 라이브러리 테마는 **base SVG + micro-detail SVG + particle/projection SVG의 정확한 3층**을 사용합니다.
 - 각 SVG에는 6~8개의 의미 있는 SMIL을 두고, 테마 전체는 20~24개 타임라인으로 구성합니다. 동일한 opacity 맥박을 여러 개 복제해 수만 채우지 말고, 광학 좌표·경로 morph·재질 편광·관절·폐쇄 경로 이동처럼 서로 다른 속성을 사용합니다.
 - `pnpm run validate:card-borders`는 base/micro-detail/particle-projection 순서와 세공 밀도를 함께 검사합니다. base는 24개 이상의 도형·1,000자 이상의 path·3개 이상의 gradient, micro-detail은 7개/200자/1개 이상, particle-projection은 4개/100자 이상을 최소선으로 삼습니다. 이는 시각 품질의 충분조건이 아니라, 단순 도형 몇 개로 정교한 SVG를 가장하는 회귀를 막는 하한입니다.
@@ -332,11 +348,16 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 | 테마 | 고유 모션 지문 | 물리적 서사 |
 |---|---|---|
 | Autumn | `herbarium-press / vein-ignition / leaf-curl-settle` | 표본 압착 장치가 풀리고 엽맥이 점등된 뒤 마른 잎이 접혀 안착 |
-| Sakura | `nacre-polarization / sequential-bloom / silk-tassel-wave` | 자개 편광, 꽃잎별 개화, 비단 술을 따라 전달되는 탄성파 |
+| Sakura | `nacre-polarization / sequential-bloom / petal-airloop` | 자개 편광, 꽃잎별 개화, 외곽 채널을 도는 꽃잎 기류 |
 | Snow | `dendrite-growth / bragg-diffraction / frost-sublimation` | 육방정 가지 성장, 결정 회절, 서리 승화 |
+| Beach | `swell-gather / breaker-curl / foam-backwash` | 너울 축적, 쇄파의 말림, 포말의 가장자리 역류 |
+| Cheese fondue | `caquelon-convection / filament-necking / fork-recoil` | 냄비 대류, 치즈 실의 점탄성 수축, 포크의 복원 반동 |
 | Ginkgo lacquer | `goldfoil-inversion / calligraphy-wind / layered-aerodynamics` | 금박 앞뒷면 반전, 서예획 같은 바람, 전·후경 잎의 다른 공력 |
 | Goryeo celadon | `glaze-caustic / crane-procession / crackle-branchlight` | 유약 아래 caustic, 상감 학의 순행, 빙렬을 따라 번지는 빛 |
+| Hanok | `eave-windload / dancheong-reflection / norigae-damped-return` | 처마에 걸린 풍압, 단청 광택 전달, 노리개의 감쇠 복귀 |
+| Heart Pop | `candy-pressure-release / heartbeat-edge-relay / bubble-return-channel` | 에나멜 압력 해방, 가장자리 박동 전달, 코너 채널의 기포 복귀 |
 | Cyberpunk | `packet-handoff / gate-latch / closed-rail-courier` | 회로 발신·라우팅·게이트 검증·수신 확인 |
+| Galaxy | `orrery-precession / constellation-parallax / comet-gravity-return` | 천체의 세차운동, 별자리 시차, 중력 궤도를 따른 혜성 복귀 |
 | Prism | `iris-calibration / spectral-split / photon-reflection` | 조리개 보정, 실제 입사광 분광, stray photon 반사 |
 | Volcano | `crack-propagation / pressure-vent / ballistic-ember` | 압력 축적, 균열 전파와 vent 해방, 탄도 불씨 냉각 |
 | Abyssal | `pearl-interference / viscous-current / species-swim` | 진주 간섭색, 점성 해류의 위상 지연, 종별 유영 |
@@ -344,6 +365,7 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 | Oriental | `hinge-articulation / patina-infiltration / ring-pendulum` | 장석 관절, 녹청 침윤, 들쇠의 감쇠 진자 |
 | Royal | `prong-articulation / gem-internal-reflection / embroidery-stitch` | 왕관 발톱 관절, 고정 보석 내부반사, 금사 자수 진행 |
 | Stained glass | `moon-incidence / lead-shadow / caustic-projection` | 고정된 유리에 달빛이 입사하고 납선 그림자와 투영광만 이동 |
+| Steampunk | `pressure-charge / gear-ratio-mesh / steam-condensation-return` | 압력 축적, 기어비에 따른 맞물림, 증기의 응결·복귀 |
 | Retro 8-bit | `crt-retrace-lock / sprite-step-quest / phosphor-palette-cycle` | CRT 재주사 동기가 잠기고 자체 픽셀 스프라이트가 외곽 레일을 퀘스트한 뒤 인광 기억색이 순환 |
 
 > **부드러운 루프 3원칙**
@@ -367,6 +389,11 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 - [ ] SVG 내부 SMIL도 정적 base state가 완성되어 있고 감소 모션 런타임에서 제거되는가
 - [ ] 완성형 라이브러리 테마가 정확한 3 SVG, SVG당 6~8개·총 20~24개의 의미 있는 SMIL을 사용하는가
 - [ ] 파일의 `Motion identity` 세 토큰이 다른 테마와 중복되지 않고 실제 SMIL id/키프레임에 연결되는가
+- [ ] 다른 테마의 CSS keyframe 타임스텝·속성 골격을 이름과 수치만 바꾸어 복제하지 않았는가
+- [ ] 세 SVG의 집계 SMIL 태그·대상 속성·transform 종류 골격이 다른 테마와 고유한가
+- [ ] 다른 테마의 긴 SVG path를 그대로 복사하지 않고 레일·접합·장식을 소재에 맞게 다시 설계했는가
+- [ ] 6개 이상의 리벳·비드 좌표 군집을 다른 테마와 그대로 공유하지 않는가
+- [ ] 세 정적 SVG 합성 시 중앙 안전영역의 강한 alpha 커버리지가 2% 이하인가
 - [ ] SVG당 SMIL 8개 이하, 주기 2.8초 이상, 첫값·끝값 동일 규칙을 지켰는가
 - [ ] 2× 카드에서 시그니처 모션이 명확히 보이면서도 프레임 전체가 한꺼번에 점멸하지 않는가
 - [ ] 모든 CSS `@keyframes`의 0%·100%가 동일하거나 정확한 160px 타일/360° 등가 종점인가
@@ -382,7 +409,7 @@ CSS 애니메이션은 전체 레이어의 이동·원근·타일 순환을 담�
 - [ ] 대형 파티클이 `scale(0.4)` 이하의 규격을 만족하여 카드 중요 정보를 가리지 않는가
 - [ ] 3D 반환점 감속 곡선 및 64px 논리 폭 대비 카드 크기 2×~4× 환경에서의 동작을 여러 번 검증했는가
 
-프로젝트 예시 14종은 다음 명령으로 PostCSS 파싱, data SVG 안전성, 정적 렌더, SMIL 개수·주기·무단절 종점과 CSS keyframe의 폐쇄 종점을 한 번에 검사할 수 있습니다.
+프로젝트 예시 20종은 다음 명령으로 PostCSS 파싱, data SVG 안전성, 정적 렌더, SMIL 개수·주기·무단절 종점과 CSS keyframe의 폐쇄 종점을 한 번에 검사할 수 있습니다.
 
 ```bash
 node scripts/validate-card-border-smil.mjs

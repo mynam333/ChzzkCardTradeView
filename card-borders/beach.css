@@ -1,7 +1,7 @@
 /* ============================================================
-   여름 해변 (Summer Beach) — 생동 태양(코너) + 야자수·갈매기 프레임 + 3겹 파도
-   적용 클래스: cb-beach
-   ▶ 태양은 우상단 코너, 파도는 하단 → 중앙~상단은 자연히 비어 있습니다.
+   여름 해변 — Sunlit Breakwater Diorama
+   Motion identity: swell-gather / breaker-curl / foam-backwash
+   Exact three-layer SVG artwork: base / micro-detail / particle-projection.
    ============================================================ */
 .cb-beach {
   position: absolute;
@@ -10,72 +10,71 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
+  isolation: isolate;
+  --cb-beach-edge-mask: radial-gradient(ellipse 73% 69% at 50% 44%, transparent 0 51%, rgba(0,0,0,.22) 64%, #000 82%);
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
-  /* 
-    배경 인라인 SVG 내부에 스타일시트를 직접 주입하여 
-    갈매기 천천히 날개짓/유영(g1, g2), 야자수 개별 잎사귀 미세 흩날림(l1~l4), 불가사리 입체 3D 회전(sf) 구현 
-  */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322c1d6'/%3E%3Cstop offset='.55' stop-color='%2362d0d6'/%3E%3Cstop offset='1' stop-color='%23ffd98a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cstyle%3E.g1%7Btransform-origin:22px 28px;animation:f1 5s ease-in-out infinite alternate%7D.g2%7Btransform-origin:35px 36px;animation:f2 6s ease-in-out infinite alternate%7D.l1%7Btransform-origin:4px -24px;animation:s1 4.5s ease-in-out infinite alternate%7D.l2%7Btransform-origin:4px -24px;animation:s2 5.2s ease-in-out infinite alternate%7D.l3%7Btransform-origin:4px -24px;animation:s3 4.8s ease-in-out infinite alternate%7D.l4%7Btransform-origin:4px -24px;animation:s4 5.9s ease-in-out infinite alternate%7D.sf%7Btransform-origin:0px 0px;animation:sp 6.8s ease-in-out infinite alternate%7D@keyframes f1%7B0%25%7Btransform:translateY(0) rotate(-2deg)%7D100%25%7Btransform:translateY(-2.5px) rotate(3deg)%7D%7D@keyframes f2%7B0%25%7Btransform:translateY(0) rotate(3deg)%7D100%25%7Btransform:translateY(-2px) rotate(-3deg)%7D%7D@keyframes s1%7B0%25%7Btransform:rotate(-4deg)%7D100%25%7Btransform:rotate(4deg)%7D%7D@keyframes s2%7B0%25%7Btransform:rotate(-3deg)%7D100%25%7Btransform:rotate(5deg)%7D%7D@keyframes s3%7B0%25%7Btransform:rotate(-5deg)%7D100%25%7Btransform:rotate(3deg)%7D%7D@keyframes s4%7B0%25%7Btransform:rotate(-3deg)%7D100%25%7Btransform:rotate(3deg)%7D%7D@keyframes sp%7B0%25%7Btransform:rotate(0deg) rotateY(0deg)%7D100%25%7Btransform:rotate(20deg) rotateY(180deg)%7D%7D%3C/style%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23bg)' stroke-width='2.6'/%3E%3Crect x='6.5' y='6.5' width='87' height='147' rx='1' ry='1' fill='none' stroke='%23ffe9b0' stroke-width='.9' opacity='.65'/%3E%3Cg stroke='%23ffffff' stroke-width='1' fill='none' opacity='.7' stroke-linecap='round'%3E%3Cpath class='g1' d='M16,30 Q19,26 22,30 Q25,26 28,30'/%3E%3Cpath class='g2' d='M30,38 Q32.5,35 35,38 Q37.5,35 40,38'/%3E%3C/g%3E%3Cg transform='translate(11,150)'%3E%3Cpath d='M0,0 C-1,-9 1,-18 4,-24' fill='none' stroke='%238a5a2a' stroke-width='1.6' stroke-linecap='round'/%3E%3Cg fill='none' stroke='%232f9e54' stroke-width='1.3' stroke-linecap='round'%3E%3Cpath class='l1' d='M4,-24 C0,-30 -6,-31 -10,-29'/%3E%3Cpath class='l2' d='M4,-24 C2,-31 8,-34 13,-32'/%3E%3Cpath class='l3' d='M4,-24 C9,-28 15,-27 18,-23'/%3E%3Cpath class='l4' d='M4,-24 C-2,-27 -6,-23 -7,-19'/%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(88,140)' fill='%23ff9a6b' stroke='%23e8633a' stroke-width='.5'%3E%3Cpath class='sf' d='M0,-5 L1.5,-1.5 L5,-1.5 L2.2,1 L3.2,5 L0,2.5 L-3.2,5 L-2.2,1 L-5,-1.5 L-1.5,-1.5 Z'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: 0 0 12px rgba(34,193,214,.45), inset 0 0 12px rgba(255,217,138,.26);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3ClinearGradient id%3D%27beach-base-metal%27 x1%3D%270%27 y1%3D%270%27 x2%3D%271%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fff0bd%27%2F%3E%3Cstop offset%3D%27.24%27 stop-color%3D%27%23b98743%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%23f8df9b%27%2F%3E%3Cstop offset%3D%27.76%27 stop-color%3D%27%23805f36%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23d9bd78%27%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient id%3D%27beach-base-glass%27 x1%3D%270%27 y1%3D%270%27 x2%3D%271%27 y2%3D%270%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%231f6e72%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%238ad8cf%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23245f67%27%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient id%3D%27beach-base-sand%27 x1%3D%270%27 y1%3D%270%27 x2%3D%270%27 y2%3D%271%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23f2d49b%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%239b6f48%27%2F%3E%3C%2FlinearGradient%3E%3CradialGradient id%3D%27beach-base-sun%27 cx%3D%27.38%27 cy%3D%27.34%27 r%3D%27.65%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fffbe8%27%2F%3E%3Cstop offset%3D%27.35%27 stop-color%3D%27%23ffd779%27%2F%3E%3Cstop offset%3D%27.76%27 stop-color%3D%27%23c88a31%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%236f4b28%27%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%3Crect x%3D%271.4%27 y%3D%271.4%27 width%3D%2797.2%27 height%3D%27157.2%27 rx%3D%274%27 ry%3D%274%27 fill%3D%27none%27 stroke%3D%27%23152f31%27 stroke-width%3D%273.2%27%2F%3E%3Crect x%3D%272.7%27 y%3D%272.7%27 width%3D%2794.6%27 height%3D%27154.6%27 rx%3D%272.7%27 ry%3D%272.7%27 fill%3D%27none%27 stroke%3D%27url(%23beach-base-metal)%27 stroke-width%3D%271.7%27%2F%3E%3Crect x%3D%274.3%27 y%3D%274.3%27 width%3D%2791.4%27 height%3D%27151.4%27 rx%3D%271.2%27 ry%3D%271.2%27 fill%3D%27none%27 stroke%3D%27url(%23beach-base-glass)%27 stroke-width%3D%272.1%27%2F%3E%3Cpath d%3D%27M6 34Q4 30 6 25L6 11Q6 6 11 6H26C31 6 32 10 36 10H63C68 10 70 6 75 6H89Q94 6 94 11L94 27Q94 31 90 35C88 48 90 69 89 86C88 103 90 119 94 132L94 149Q94 154 89 154H74C68 154 66 150 61 150H38C33 150 31 154 26 154H11Q6 154 6 149V132Q10 126 9 119C8 96 10 68 9 42Q9 37 6 34Z%27 fill%3D%27none%27 stroke%3D%27%23e9d7a6%27 stroke-width%3D%27.55%27%2F%3E%3Cpath d%3D%27M9 38C12 31 11 20 17 14Q22 10 29 12L35 14C44 11 56 11 65 14L72 12Q79 10 84 16C90 24 87 34 90 41L90 120C87 128 91 136 88 145Q84 150 76 148L69 146C55 149 43 149 30 146L24 149Q15 150 10 143C12 134 8 128 11 120L11 43Q11 40 9 38Z%27 fill%3D%27none%27 stroke%3D%27%232d7376%27 stroke-width%3D%27.8%27%2F%3E%3Cpath d%3D%27M5 44C8 39 10 33 11 25C14 21 16 18 18 15C15 30 13 46 13 62C13 76 12 91 9 107C7 91 6 73 7 57Z%27 fill%3D%27%23705338%27 stroke%3D%27%23d1a35f%27 stroke-width%3D%27.55%27%2F%3E%3Cpath d%3D%27M10 31C14 23 20 19 27 17C22 24 17 29 10 31Z%27 fill%3D%27%236f8b4e%27 stroke%3D%27%23c8c276%27 stroke-width%3D%27.45%27%2F%3E%3Cpath id%3D%27beach-base-palm-frond%27 d%3D%27M10 38C17 29 24 27 31 28C23 35 17 39 10 38Z%27 fill%3D%27%23829a58%27 stroke%3D%27%23d6cc82%27 stroke-width%3D%27.45%27%2F%3E%3Cpath d%3D%27M9 45C15 38 20 37 26 39C20 45 15 48 9 45Z%27 fill%3D%27%23587543%27 stroke%3D%27%23b7b66d%27 stroke-width%3D%27.45%27%2F%3E%3Cpath d%3D%27M8 49C4 41 3 34 5 28C9 35 11 42 8 49Z%27 fill%3D%27%2370894b%27 stroke%3D%27%23d0c47b%27 stroke-width%3D%27.45%27%2F%3E%3Cg transform%3D%27translate(0 0)%27%3E%3Cpath d%3D%27M90 2.8L101.00 14.00L97.75 15.45Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L99.53 23.00L96.26 21.51Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L95.50 29.59L93.10 25.56Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L90.00 32.00L89.10 26.52Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L84.50 29.59L85.35 24.12Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L80.47 23.00L82.84 19.00Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L79.00 14.00L82.25 12.55Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L80.47 5.00L83.74 6.49Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L84.50 -1.59L86.90 2.44Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L90.00 -4.00L90.90 1.48Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L95.50 -1.59L94.65 3.88Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Cpath d%3D%27M90 2.8L99.53 5.00L97.16 9.00Z%27 fill%3D%27%23e6bd64%27 stroke%3D%27%236f4b28%27 stroke-width%3D%27.25%27%2F%3E%3Ccircle cx%3D%2790%27 cy%3D%2714%27 r%3D%278.7%27 fill%3D%27%235d472b%27 stroke%3D%27%23f2d383%27 stroke-width%3D%271%27%2F%3E%3Ccircle cx%3D%2790%27 cy%3D%2714%27 r%3D%277.1%27 fill%3D%27url(%23beach-base-sun)%27 stroke%3D%27%23fff0b2%27 stroke-width%3D%27.45%27%2F%3E%3CanimateTransform id%3D%27beach-base-sun-ray-orbit%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 90 14%3B360 90 14%27 keyTimes%3D%270%3B1%27 dur%3D%2718.4s%27 begin%3D%27-7.1s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cpath d%3D%27M3 148C13 144 21 151 31 147C42 142 51 151 62 146C74 141 83 149 97 143L97 158L3 158Z%27 fill%3D%27url(%23beach-base-sand)%27 stroke%3D%27%23f4deb0%27 stroke-width%3D%27.45%27%2F%3E%3Cpath d%3D%27M3 144C14 138 22 148 34 141C45 135 55 145 67 138C78 132 87 141 97 135L97 150C86 155 75 146 64 151C52 156 42 147 31 153C20 158 12 149 3 154Z%27 fill%3D%27%232f8d91%27 stroke%3D%27%23d6fbf6%27 stroke-width%3D%27.7%27%3E%3Canimate id%3D%27beach-swell-gather-tide-body%27 attributeName%3D%27d%27 values%3D%27M3 144C14 138 22 148 34 141C45 135 55 145 67 138C78 132 87 141 97 135L97 150C86 155 75 146 64 151C52 156 42 147 31 153C20 158 12 149 3 154Z%3BM3 145C14 140 23 146 34 140C46 134 55 144 67 139C79 134 88 142 97 136L97 150C86 153 76 147 64 152C53 155 42 148 31 152C19 156 11 150 3 154Z%3BM3 144C14 138 22 148 34 141C45 135 55 145 67 138C78 132 87 141 97 135L97 150C86 155 75 146 64 151C52 156 42 147 31 153C20 158 12 149 3 154Z%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%2711.8s%27 begin%3D%27-4.2s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath id%3D%27beach-base-foam-trace%27 d%3D%27M3 140C13 137 20 143 30 139C40 134 48 141 59 137C70 132 79 138 88 134C92 132 95 131 97 132%27 fill%3D%27none%27 stroke%3D%27%23f6fffa%27 stroke-width%3D%271.15%27 stroke-linecap%3D%27round%27%3E%3Canimate id%3D%27beach-breaker-curl-crest-line%27 attributeName%3D%27d%27 values%3D%27M3 140C13 137 20 143 30 139C40 134 48 141 59 137C70 132 79 138 88 134C92 132 95 131 97 132%3BM3 141C13 136 21 144 30 139C40 133 49 142 59 136C70 131 78 139 88 133C92 130 95 130 97 131%3BM3 140C13 137 20 143 30 139C40 134 48 141 59 137C70 132 79 138 88 134C92 132 95 131 97 132%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%278.9s%27 begin%3D%27-5.7s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath id%3D%27beach-base-coral%27 d%3D%27M74 153C79 147 84 143 90 143C94 144 96 147 97 151%27 fill%3D%27none%27 stroke%3D%27%23e67662%27 stroke-width%3D%271.1%27%2F%3E%3Cpath d%3D%27M88 145C87 139 88 134 91 130M91 143C94 139 96 136 98 136M85 148C82 144 79 142 76 142M90 139C86 136 84 133 84 130%27 fill%3D%27none%27 stroke%3D%27%23d9695a%27 stroke-width%3D%27.8%27 stroke-linecap%3D%27round%27%2F%3E%3Ccircle cx%3D%276%27 cy%3D%276%27 r%3D%271.05%27 fill%3D%27%23eedca7%27%2F%3E%3Ccircle cx%3D%2794%27 cy%3D%276%27 r%3D%271.05%27 fill%3D%27%23eedca7%27%2F%3E%3Ccircle cx%3D%276%27 cy%3D%27154%27 r%3D%271.05%27 fill%3D%27%23eedca7%27%2F%3E%3Ccircle cx%3D%2794%27 cy%3D%27154%27 r%3D%271.05%27 fill%3D%27%23eedca7%27%2F%3E%3Canimate id%3D%27beach-base-glass-polarization%27 attributeName%3D%27x1%27 values%3D%270%3B.66%3B.18%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2714.7s%27 begin%3D%27-9.3s%27 repeatCount%3D%27indefinite%27  href%3D%27%23beach-base-glass%27%2F%3E%3Canimate id%3D%27beach-base-sun-caustic%27 attributeName%3D%27fx%27 values%3D%27.25%3B.61%3B.4%3B.25%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%279.8s%27 begin%3D%27-3.6s%27 repeatCount%3D%27indefinite%27  href%3D%27%23beach-base-sun%27%2F%3E%3Canimate id%3D%27beach-foam-backwash-littoral-trace%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-13%3B-26%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2712.6s%27 begin%3D%27-8.4s%27 repeatCount%3D%27indefinite%27  href%3D%27%23beach-base-foam-trace%27%2F%3E%3Canimate id%3D%27beach-base-coral-sun-response%27 attributeName%3D%27opacity%27 values%3D%27.62%3B1%3B.74%3B.62%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2710.7s%27 begin%3D%27-6.1s%27 repeatCount%3D%27indefinite%27  href%3D%27%23beach-base-coral%27%2F%3E%3CanimateTransform id%3D%27beach-base-palm-windload%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 9 45%3B1.8 9 45%3B-1.2 9 45%3B0 9 45%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2713.9s%27 begin%3D%27-7.7s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27  href%3D%27%23beach-base-palm-frond%27%2F%3E%3C%2Fsvg%3E");
+  box-shadow: 0 0 10px rgba(80,172,170,.28), inset 0 0 13px rgba(13,46,48,.52);
 }
-/* 태양 — 회전 광선 + 입체 구체 + 맥동 코로나 (우상단 코너에 바짝) */
-.cb-beach::before {
-  content: "";
-  position: absolute;
-  top: 1px; right: 1px;
-  width: 19px; height: 19px;
-  pointer-events: none;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 40% 37%, #fffef4 0 14%, #ffefae 26%, #ffc24d 47%, rgba(255,150,40,0) 70%),
-    repeating-conic-gradient(rgba(255,222,120,.6) 0deg 2.5deg, transparent 2.5deg 12deg);
-  -webkit-mask: radial-gradient(circle, #000 0 44%, transparent 63%);
-          mask: radial-gradient(circle, #000 0 44%, transparent 63%);
-  box-shadow: 0 0 7px 1px rgba(255,179,59,.42);
-  animation: beach-sun-spin 16s linear infinite, beach-sun-pulse 3.6s ease-in-out infinite;
-}
-@keyframes beach-sun-spin { to { transform: rotate(360deg); } }
-@keyframes beach-sun-pulse {
-  0%,100% { opacity: .9;  box-shadow: 0 0 6px 1px rgba(255,179,59,.38); }
-  50%     { opacity: 1;   box-shadow: 0 0 11px 3px rgba(255,179,59,.58); }
-}
-/* 하단 파도 (3겹 다차원 패럴랙스 유동) */
+
+.cb-beach::before,
 .cb-beach::after {
   content: "";
   position: absolute;
-  left: 0; right: 0; bottom: 0; height: 30px;
+  inset: 0;
   pointer-events: none;
-  background-repeat: repeat-x;
-  background-position: bottom;
-  background-size: 80px 22px;
-  
-  /* 
-    3겹의 파도를 각각 개별 레이어로 쪼개어 다중 배경으로 주입 
-    각 파도의 높이와 깊이를 반영하여 투명도(opacity)를 조절함
-  */
-  background-image: 
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 22'%3E%3Cpath d='M0,18 Q10,14 20,18 T40,18 T60,18 T80,18 V22 H0 Z' fill='%23bdeef5' fill-opacity='0.55'/%3E%3C/svg%3E"), /* 전경 (밝은 모래펄 파도) */
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 22'%3E%3Cpath d='M0,15 Q10,9 20,15 T40,15 T60,15 T80,15 V22 H0 Z' fill='%2340cfe0' fill-opacity='0.48'/%3E%3C/svg%3E"),  /* 중경 */
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 22'%3E%3Cpath d='M0,12 Q10,5 20,12 T40,12 T60,12 T80,12 V22 H0 Z' fill='%231fb0c6' fill-opacity='0.55'/%3E%3C/svg%3E");  /* 후경 (깊은 바다 파도) */
-    
-  background-position-x: 0px, 0px, 0px;
-  
-  /* 단일 애니메이션 루프 내에서 세 레이어의 이동 주기 및 방향을 다르게 비틀어 최상의 입체 패럴랙스를 시뮬레이션 */
-  animation: beach-wave-parallax 12s linear infinite;
+  -webkit-mask: var(--cb-beach-edge-mask);
+  mask: var(--cb-beach-edge-mask);
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 32% 28%;
+  mix-blend-mode: screen;
 }
 
-@keyframes beach-wave-parallax {
-  0% {
-    background-position-x: 0px, 0px, 0px;
-  }
-  100% {
-    /* 전경(빠르게 정방향) / 중경(중간속도 역방향) / 후경(느리게 정방향)으로 파도 엇박자 설계 */
-    background-position-x: 400px, -240px, 160px;
-  }
+.cb-beach::before {
+  background-position: center, 3% 92%;
+  background-size: 100% 100%, 54% 10%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3ClinearGradient id%3D%27beach-micro-foam%27 x1%3D%270%27 y1%3D%270%27 x2%3D%271%27 y2%3D%270%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23d9fff8%27%2F%3E%3Cstop offset%3D%27.5%27 stop-color%3D%27%23ffffff%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%236ec7c8%27%2F%3E%3C%2FlinearGradient%3E%3CradialGradient id%3D%27beach-micro-glint%27 cx%3D%27.3%27 cy%3D%27.4%27 r%3D%27.8%27%3E%3Cstop offset%3D%270%27 stop-color%3D%27%23fffbe3%27%2F%3E%3Cstop offset%3D%271%27 stop-color%3D%27%23fffbe3%27 stop-opacity%3D%270%27%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%3Cpath d%3D%27M4 146C12 142 17 147 25 143C34 139 40 146 48 142C58 137 65 145 74 140C83 136 89 140 96 137%27 fill%3D%27none%27 stroke%3D%27url(%23beach-micro-foam)%27 stroke-width%3D%271.15%27 stroke-linecap%3D%27round%27%3E%3Canimate id%3D%27beach-micro-breaker-curl-lace-a%27 attributeName%3D%27d%27 values%3D%27M4 146C12 142 17 147 25 143C34 139 40 146 48 142C58 137 65 145 74 140C83 136 89 140 96 137%3BM4 145C12 143 18 148 25 142C34 138 41 147 48 141C58 136 65 144 74 139C83 135 90 141 96 136%3BM4 146C12 142 17 147 25 143C34 139 40 146 48 142C58 137 65 145 74 140C83 136 89 140 96 137%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%277.6s%27 begin%3D%27-2.8s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M4 151C14 147 21 153 31 148C42 144 51 151 62 147C74 143 85 149 96 145%27 fill%3D%27none%27 stroke%3D%27%239fe7df%27 stroke-width%3D%27.7%27 stroke-dasharray%3D%272 3%27%3E%3Canimate id%3D%27beach-micro-foam-backwash-dash%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B10%3B20%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2710.2s%27 begin%3D%27-6.5s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M7 136Q11 132 15 136T23 136T31 136M68 132Q73 127 78 132T88 132%27 fill%3D%27none%27 stroke%3D%27%23eefdf8%27 stroke-width%3D%27.55%27%3E%3Canimate id%3D%27beach-micro-swell-gather-capillary%27 attributeName%3D%27stroke-width%27 values%3D%27.42%3B.82%3B.56%3B.42%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2711.9s%27 begin%3D%27-8.2s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M82 9L87 14M86 6L90 12M77 14L84 16M92 23L95 28%27 fill%3D%27none%27 stroke%3D%27%23fff2b8%27 stroke-width%3D%27.5%27 stroke-linecap%3D%27round%27%3E%3Canimate id%3D%27beach-micro-solar-ray-rake%27 attributeName%3D%27opacity%27 values%3D%27.18%3B.92%3B.5%3B.18%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%278.7s%27 begin%3D%27-4.9s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M7 56C10 48 11 40 10 32M8 62C12 52 13 44 13 35%27 fill%3D%27none%27 stroke%3D%27%23e8daa5%27 stroke-width%3D%27.45%27%3E%3Canimate id%3D%27beach-micro-palm-vein-current%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-8%3B-16%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2713.4s%27 begin%3D%27-9.6s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M18 151L20 149L22 151L20 153ZM61 146L63 144L65 146L63 148Z%27 fill%3D%27url(%23beach-micro-glint)%27%3E%3Canimate id%3D%27beach-micro-wet-sand-scintillation%27 attributeName%3D%27opacity%27 values%3D%27.2%3B1%3B.46%3B.2%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%279.3s%27 begin%3D%27-5.3s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3Cpath d%3D%27M92 139C94 136 96 135 98 136M88 144C84 141 82 138 82 135%27 fill%3D%27none%27 stroke%3D%27%23ff9983%27 stroke-width%3D%27.7%27%3E%3CanimateTransform id%3D%27beach-micro-coral-flex%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%27-1 92 140%3B2.2 92 140%3B-1 92 140%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%2712.8s%27 begin%3D%27-7.1s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fpath%3E%3C%2Fsvg%3E"), radial-gradient(ellipse at center, rgba(222,255,247,.32), transparent 69%);
+  animation: beach-breaker-curl-caustic 12.6s cubic-bezier(.37,0,.63,1) infinite;
+  will-change: background-position, background-size, filter;
+}
+
+.cb-beach::after {
+  background-position: center, 92% 94%;
+  background-size: 100% 100%, 78% 12%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27 viewBox%3D%270 0 100 160%27 preserveAspectRatio%3D%27none%27%3E%3Cdefs%3E%3C%2Fdefs%3E%3Cg transform%3D%27translate(18 27)%27%3E%3Cpath d%3D%27M-5 1Q-2-2 0 1Q2-2 5 1Q2-.7 0 2Q-2-.7-5 1Z%27 fill%3D%27none%27 stroke%3D%27%23f7fff9%27 stroke-width%3D%27.65%27%2F%3E%3CanimateMotion id%3D%27beach-particle-gull-coastal-orbit%27 values%3D%270 0%3B16 -3%3B34 1%3B50 -2%3B66 1%3B82 -3%3B0 0%27 keyTimes%3D%270%3B0.1667%3B0.3333%3B0.5%3B0.6667%3B0.8333%3B1%27 dur%3D%2718.7s%27 begin%3D%27-5.1s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3CanimateTransform id%3D%27beach-particle-gull-wingbeat%27 attributeName%3D%27transform%27 type%3D%27scale%27 values%3D%271 1%3B1 .72%3B1 1%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%275.9s%27 begin%3D%27-2.9s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cg transform%3D%27translate(72 36)%27%3E%3Cpath d%3D%27M-4 1Q-2-1.5 0 1Q2-1.5 4 1Q2-.4 0 1.7Q-2-.4-4 1Z%27 fill%3D%27none%27 stroke%3D%27%23fff9df%27 stroke-width%3D%27.52%27%2F%3E%3CanimateMotion id%3D%27beach-particle-gull-distant-loop%27 values%3D%270 0%3B-18 2%3B-34 -2%3B-50 1%3B-64 -1%3B0 0%27 keyTimes%3D%270%3B0.2%3B0.4%3B0.6%3B0.8%3B1%27 dur%3D%2723.4s%27 begin%3D%27-11.2s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cg transform%3D%27translate(18 145)%27%3E%3Cpath d%3D%27M0 0C-1.8-2.6-1.1-5 .4-6.3C2-4.4 2.4-2 .8 0Z%27 fill%3D%27%23dffff8%27 stroke%3D%27%2369c9c7%27 stroke-width%3D%27.35%27%2F%3E%3CanimateMotion id%3D%27beach-particle-foam-backwash-droplet-a%27 values%3D%270 0%3B8 -4%3B17 -1%3B25 -5%3B0 0%27 keyTimes%3D%270%3B0.25%3B0.5%3B0.75%3B1%27 dur%3D%278.6s%27 begin%3D%27-3.8s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3CanimateTransform id%3D%27beach-particle-spray-tumble-a%27 attributeName%3D%27transform%27 type%3D%27rotate%27 values%3D%270 0 0%3B180 0 0%3B360 0 0%27 keyTimes%3D%270%3B0.5%3B1%27 dur%3D%278.6s%27 begin%3D%27-3.8s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3C%2Fg%3E%3Cg transform%3D%27translate(79 141)%27%3E%3Cpath d%3D%27M0 0C-1.2-2-.8-3.7.3-4.8C1.5-3.1 1.8-1.5.6 0Z%27 fill%3D%27%23fff9e2%27 stroke%3D%27%2392dad4%27 stroke-width%3D%27.3%27%2F%3E%3CanimateMotion id%3D%27beach-particle-breaker-curl-droplet-b%27 values%3D%270 0%3B-7 -5%3B-15 -2%3B-22 -6%3B0 0%27 keyTimes%3D%270%3B0.25%3B0.5%3B0.75%3B1%27 dur%3D%2711.3s%27 begin%3D%27-7.4s%27 repeatCount%3D%27indefinite%27 additive%3D%27sum%27 %2F%3E%3Canimate id%3D%27beach-particle-spray-alpha-b%27 attributeName%3D%27opacity%27 values%3D%27.08%3B.9%3B.44%3B.08%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2711.3s%27 begin%3D%27-7.4s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fg%3E%3Cpath d%3D%27M12 150C20 145 28 148 36 143M65 145C73 140 82 142 91 136%27 fill%3D%27none%27 stroke%3D%27%23d9fff7%27 stroke-width%3D%27.45%27 stroke-dasharray%3D%271.2 4%27%3E%3Canimate id%3D%27beach-particle-swell-gather-spindrift%27 attributeName%3D%27stroke-dashoffset%27 values%3D%270%3B-9%3B-18%3B0%27 keyTimes%3D%270%3B0.3333%3B0.6667%3B1%27 dur%3D%2713.8s%27 begin%3D%27-8.9s%27 repeatCount%3D%27indefinite%27 %2F%3E%3C%2Fpath%3E%3C%2Fsvg%3E"), radial-gradient(circle at center, rgba(255,232,168,.26), transparent 72%);
+  animation: beach-foam-backwash-carrier 15.4s cubic-bezier(.45,.05,.55,.95) infinite;
+  will-change: background-position, background-size, opacity;
+}
+
+/* A long swell gathers, steepens, curls and collapses instead of translating as one tile. */
+@keyframes beach-breaker-curl-caustic {
+  0% { background-position: center, 3% 92%; background-size: 100% 100%, 54% 10%; filter: brightness(.92) saturate(1.02); }
+  14% { background-position: center, 12% 91%; background-size: 100% 100%, 70% 12%; filter: brightness(1.02) saturate(1.08); }
+  32% { background-position: center, 24% 89%; background-size: 100% 100%, 90% 16%; filter: brightness(1.14) saturate(1.16); }
+  46% { background-position: center, 36% 86%; background-size: 100% 100%, 112% 23%; filter: brightness(1.28) saturate(1.22); }
+  59% { background-position: center, 48% 91%; background-size: 100% 100%, 78% 18%; filter: brightness(1.12) saturate(1.14); }
+  76% { background-position: center, 64% 94%; background-size: 100% 100%, 98% 11%; filter: brightness(1.04) saturate(1.08); }
+  91% { background-position: center, 8% 93%; background-size: 100% 100%, 58% 9%; filter: brightness(.94) saturate(1.03); }
+  100% { background-position: center, 3% 92%; background-size: 100% 100%, 54% 10%; filter: brightness(.92) saturate(1.02); }
+}
+
+/* Foam drains against the breaker direction, thinning before an invisible shoreline reset. */
+@keyframes beach-foam-backwash-carrier {
+  0% { background-position: center, 92% 94%; background-size: 100% 100%, 78% 12%; opacity: .42; }
+  21% { background-position: center, 73% 95%; background-size: 100% 100%, 94% 14%; opacity: .92; }
+  43% { background-position: center, 48% 96%; background-size: 100% 100%, 112% 18%; opacity: 1; }
+  64% { background-position: center, 24% 97%; background-size: 100% 100%, 92% 13%; opacity: .68; }
+  83% { background-position: center, 5% 98%; background-size: 100% 100%, 72% 9%; opacity: .24; }
+  94% { background-position: center, 92% 94%; background-size: 100% 100%, 78% 12%; opacity: .22; }
+  100% { background-position: center, 92% 94%; background-size: 100% 100%, 78% 12%; opacity: .42; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cb-beach::before, .cb-beach::after { animation: none; }
+  .cb-beach, .cb-beach::before, .cb-beach::after { animation: none !important; }
+}
+
+@media print {
+  .cb-beach, .cb-beach::before, .cb-beach::after { animation: none !important; }
 }

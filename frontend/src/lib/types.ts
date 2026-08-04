@@ -94,7 +94,7 @@ export interface ShopItem {
   sale_end_at?: string | null;
   limited_total_quantity?: number;
   sold_quantity?: number;
-  active?: boolean;
+  active: boolean;
 }
 
 /** 관리자 유저 목록 항목 */

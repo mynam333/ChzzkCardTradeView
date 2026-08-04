@@ -701,7 +701,9 @@ export const ShopTab: React.FC = () => {
 
     window.addEventListener('chikapo:shop-updated', handleShopUpdated);
     document.addEventListener('visibilitychange', handleVisible);
-    const fallbackMs = typeof EventSource === 'undefined' ? 30_000 : 300_000;
+    // API가 여러 프로세스로 실행되면 프로세스 로컬 SSE 이벤트를 놓칠 수 있으므로
+    // EventSource 지원 여부와 무관하게 visible 상태에서 30초마다 카탈로그를 보정합니다.
+    const fallbackMs = 30_000;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') scheduleShopRefresh(200, 0);
     }, fallbackMs);

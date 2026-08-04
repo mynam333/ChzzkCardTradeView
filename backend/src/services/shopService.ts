@@ -67,16 +67,33 @@ const ARENA_LOADOUT_COLUMN_BY_TYPE: Record<ArenaLoadoutCosmeticType, string> = {
   ko_text: 'ko_text_item_id'
 };
 
-const mapSqliteItem = (r: any): ShopItem => ({
-  id: r.id, type: r.type, name: r.name, description: r.description,
-  price: r.price, style_json: r.style_json, font_url: r.font_url,
-  font_family: r.font_family, active: r.active === 1,
-  purchase_limit: r.purchase_limit ?? 0,
+const normalizeDbBoolean = (value: unknown): boolean => (
+  value === true
+  || value === 1
+  || value === 1n
+  || (typeof value === 'string' && ['1', 'true', 't'].includes(value.trim().toLowerCase()))
+);
+
+const normalizeDbNumber = (value: unknown, fallback = 0): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const shopItemNotFoundError = (id: number) => Object.assign(
+  new Error(`상점 아이템을 찾을 수 없습니다: ${id}`),
+  { code: 'SHOP_ITEM_NOT_FOUND' }
+);
+
+const mapShopItem = (r: any): ShopItem => ({
+  id: normalizeDbNumber(r.id), type: r.type, name: r.name, description: r.description,
+  price: normalizeDbNumber(r.price), style_json: r.style_json, font_url: r.font_url,
+  font_family: r.font_family, active: normalizeDbBoolean(r.active),
+  purchase_limit: normalizeDbNumber(r.purchase_limit),
   listed_at: r.listed_at ?? null,
   sale_start_at: r.sale_start_at ?? null,
   sale_end_at: r.sale_end_at ?? null,
-  limited_total_quantity: r.limited_total_quantity ?? 0,
-  sold_quantity: r.sold_quantity ?? 0,
+  limited_total_quantity: normalizeDbNumber(r.limited_total_quantity),
+  sold_quantity: normalizeDbNumber(r.sold_quantity),
   created_at: r.created_at ?? null
 });
 
@@ -98,14 +115,6 @@ const SHOP_ITEM_SELECT_COLUMNS = [
   'sold_quantity',
   'created_at'
 ].join(', ');
-const ACTIVE_ITEMS_CACHE_TTL_MS = 15_000;
-let activeItemsCache: { expiresAt: number; data: ShopItem[] } | null = null;
-let activeItemsInFlight: Promise<ShopItem[]> | null = null;
-
-export const invalidateActiveShopItemsCache = () => {
-  activeItemsCache = null;
-};
-
 const toDbDateTime = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const date = new Date(value);
@@ -115,8 +124,9 @@ const toDbDateTime = (value: string | null | undefined): string | null => {
 
 const nowDbDateTime = () => toDbDateTime(new Date().toISOString());
 
-const parseShopDateMs = (value: string | null | undefined): number => {
+const parseShopDateMs = (value: string | Date | null | undefined): number => {
   if (!value) return NaN;
+  if (value instanceof Date) return value.getTime();
   const text = String(value).trim();
   if (!text) return NaN;
   if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) return new Date(text).getTime();
@@ -139,13 +149,14 @@ const resultNeedsCatalogRefresh = (reason: string) => reason === 'OK';
 // ---- 아이템 카탈로그 ----
 const fetchActiveItemsFromDb = async (): Promise<ShopItem[]> => {
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient()
+    const { data, error } = await getSupabaseClient()
       .from('shop_items')
       .select(SHOP_ITEM_SELECT_COLUMNS)
       .eq('active', true)
       .order('listed_at', { ascending: false, nullsFirst: false })
       .order('id', { ascending: false });
-    return (data || []) as unknown as ShopItem[];
+    if (error) throw error;
+    return (data || []).map(mapShopItem);
   }
   if (getDbMode() === 'MYSQL') {
     const rows = await getMysqlDb().all(`
@@ -154,60 +165,48 @@ const fetchActiveItemsFromDb = async (): Promise<ShopItem[]> => {
        WHERE active = 1
        ORDER BY listed_at DESC, id DESC
     `);
-    return rows.map(mapSqliteItem);
+    return rows.map(mapShopItem);
   }
   return getSqliteDb().prepare(`
     SELECT ${SHOP_ITEM_SELECT_COLUMNS}
       FROM shop_items
      WHERE active = 1
      ORDER BY listed_at DESC, id DESC
-  `).all().map(mapSqliteItem);
+  `).all().map(mapShopItem);
 };
 
 export const getActiveItems = async (): Promise<ShopItem[]> => {
-  const now = Date.now();
-  if (activeItemsCache && activeItemsCache.expiresAt > now) {
-    return activeItemsCache.data;
-  }
-  if (activeItemsInFlight) {
-    return activeItemsInFlight;
-  }
-
-  activeItemsInFlight = fetchActiveItemsFromDb()
-    .then((data) => {
-      activeItemsCache = { data, expiresAt: Date.now() + ACTIVE_ITEMS_CACHE_TTL_MS };
-      return data;
-    })
-    .finally(() => {
-      activeItemsInFlight = null;
-    });
-
-  return activeItemsInFlight;
+  // 운영 API는 여러 프로세스로 실행됩니다. 프로세스 로컬 TTL 캐시는 한 인스턴스에서
+  // 판매 상태를 바꾼 직후 다른 인스턴스가 과거 목록을 반환하게 만들 수 있으므로,
+  // 작고 인덱스된 상점 카탈로그는 DB를 원본으로 즉시 조회합니다.
+  return fetchActiveItemsFromDb();
 };
 
 export const getAllItems = async (): Promise<ShopItem[]> => {
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('shop_items').select('*').order('id', { ascending: false });
-    return (data || []) as ShopItem[];
+    const { data, error } = await getSupabaseClient().from('shop_items').select('*').order('id', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapShopItem);
   }
   if (getDbMode() === 'MYSQL') {
     const rows = await getMysqlDb().all('SELECT * FROM shop_items ORDER BY id DESC');
-    return rows.map(mapSqliteItem);
+    return rows.map(mapShopItem);
   }
-  return getSqliteDb().prepare('SELECT * FROM shop_items ORDER BY id DESC').all().map(mapSqliteItem);
+  return getSqliteDb().prepare('SELECT * FROM shop_items ORDER BY id DESC').all().map(mapShopItem);
 };
 
 export const getItem = async (id: number): Promise<ShopItem | null> => {
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient().from('shop_items').select('*').eq('id', id).maybeSingle();
-    return (data as ShopItem) || null;
+    const { data, error } = await getSupabaseClient().from('shop_items').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data ? mapShopItem(data) : null;
   }
   if (getDbMode() === 'MYSQL') {
     const r = await getMysqlDb().get('SELECT * FROM shop_items WHERE id = ?', id);
-    return r ? mapSqliteItem(r) : null;
+    return r ? mapShopItem(r) : null;
   }
   const r = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id);
-  return r ? mapSqliteItem(r) : null;
+  return r ? mapShopItem(r) : null;
 };
 
 export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { active?: boolean }): Promise<void> => {
@@ -218,11 +217,12 @@ export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { activ
   const saleEndAt = toDbDateTime(item.sale_end_at);
   const listedAt = active ? nowDbDateTime() : null;
   if (getDbMode() === 'SUPABASE') {
-    await getSupabaseClient().from('shop_items').insert([{
+    const { error } = await getSupabaseClient().from('shop_items').insert([{
       type: item.type, name: item.name, description: item.description ?? null, price: item.price,
       style_json: item.style_json ?? null, font_url: item.font_url ?? null, font_family: item.font_family ?? null, active, purchase_limit: limit,
       listed_at: listedAt, sale_start_at: saleStartAt, sale_end_at: saleEndAt, limited_total_quantity: totalQuantity, sold_quantity: 0
     }]);
+    if (error) throw error;
   } else if (getDbMode() === 'MYSQL') {
     await getMysqlDb().run(
       'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, listed_at, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -233,13 +233,14 @@ export const createItem = async (item: Omit<ShopItem, 'id' | 'active'> & { activ
       'INSERT INTO shop_items (type, name, description, price, style_json, font_url, font_family, active, purchase_limit, listed_at, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     ).run(item.type, item.name, item.description ?? null, item.price, item.style_json ?? null, item.font_url ?? null, item.font_family ?? null, active ? 1 : 0, limit, listedAt, saleStartAt, saleEndAt, totalQuantity, 0);
   }
-  invalidateActiveShopItemsCache();
 };
 
 export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<void> => {
   if (getDbMode() === 'SUPABASE') {
     const payload: any = {};
     const cur = await getSupabaseClient().from('shop_items').select('active, listed_at').eq('id', id).maybeSingle();
+    if (cur.error) throw cur.error;
+    if (!cur.data) throw shopItemNotFoundError(id);
     for (const k of ['type', 'name', 'description', 'price', 'style_json', 'font_url', 'font_family', 'active', 'purchase_limit', 'sale_start_at', 'sale_end_at', 'limited_total_quantity', 'sold_quantity'] as const) {
       if (item[k] !== undefined) payload[k] = item[k];
     }
@@ -250,10 +251,12 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
     if (payload.sale_start_at !== undefined) payload.sale_start_at = toDbDateTime(payload.sale_start_at);
     if (payload.sale_end_at !== undefined) payload.sale_end_at = toDbDateTime(payload.sale_end_at);
     if (payload.limited_total_quantity !== undefined) payload.limited_total_quantity = Math.max(0, Math.floor(Number(payload.limited_total_quantity) || 0));
-    await getSupabaseClient().from('shop_items').update(payload).eq('id', id);
+    const updated = await getSupabaseClient().from('shop_items').update(payload).eq('id', id).select('id').maybeSingle();
+    if (updated.error) throw updated.error;
+    if (!updated.data) throw shopItemNotFoundError(id);
   } else if (getDbMode() === 'MYSQL') {
     const cur = await getMysqlDb().get('SELECT * FROM shop_items WHERE id = ?', id) as any;
-    if (!cur) return;
+    if (!cur) throw shopItemNotFoundError(id);
     const merged = {
       type: item.type ?? cur.type, name: item.name ?? cur.name, description: item.description ?? cur.description,
       price: item.price ?? cur.price, style_json: item.style_json ?? cur.style_json,
@@ -274,7 +277,7 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
     );
   } else {
     const cur = getSqliteDb().prepare('SELECT * FROM shop_items WHERE id = ?').get(id) as any;
-    if (!cur) return;
+    if (!cur) throw shopItemNotFoundError(id);
     const merged = {
       type: item.type ?? cur.type, name: item.name ?? cur.name, description: item.description ?? cur.description,
       price: item.price ?? cur.price, style_json: item.style_json ?? cur.style_json,
@@ -293,7 +296,6 @@ export const updateItem = async (id: number, item: Partial<ShopItem>): Promise<v
       'UPDATE shop_items SET type=?, name=?, description=?, price=?, style_json=?, font_url=?, font_family=?, active=?, purchase_limit=?, listed_at=?, sale_start_at=?, sale_end_at=?, limited_total_quantity=?, sold_quantity=? WHERE id=?'
     ).run(merged.type, merged.name, merged.description, merged.price, merged.style_json, merged.font_url, merged.font_family, merged.active, merged.purchase_limit, merged.listed_at, merged.sale_start_at, merged.sale_end_at, merged.limited_total_quantity, merged.sold_quantity, id);
   }
-  invalidateActiveShopItemsCache();
 };
 
 // ---- 보유 코스메틱 ----
@@ -309,7 +311,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
       console.error('[Supabase] getUserCosmetics - 조인 쿼리 실패:', error.message);
       return [];
     }
-    return (data || []).map((r: any) => ({ ...(r.item), quantity: r.quantity }));
+    return (data || []).map((r: any) => ({ ...mapShopItem(r.item), quantity: normalizeDbNumber(r.quantity) }));
   }
 
   if (getDbMode() === 'MYSQL') {
@@ -323,7 +325,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
       JOIN shop_items si ON uc.item_id = si.id
       WHERE uc.user_id = ? AND uc.quantity > 0
     `, userId) as any[];
-    return rows.map((r) => ({ ...mapSqliteItem(r), quantity: r.quantity }));
+    return rows.map((r) => ({ ...mapShopItem(r), quantity: normalizeDbNumber(r.quantity) }));
   }
 
   // SQLite 모드: uc.id와 si.id 컬럼명 충돌로 인해 si.id가 uc.id로 덮어씌워지는 현상을 해결하기 위해 컬럼을 명시적으로 SELECT
@@ -337,7 +339,7 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
     JOIN shop_items si ON uc.item_id = si.id
     WHERE uc.user_id = ? AND uc.quantity > 0
   `).all(userId) as any[];
-  return rows.map((r) => ({ ...mapSqliteItem(r), quantity: r.quantity }));
+  return rows.map((r) => ({ ...mapShopItem(r), quantity: normalizeDbNumber(r.quantity) }));
 };
 
 /** 상점 목록 표시용 보유 수량 맵. 코스메틱 상세 조인을 피해서 payload와 DB 비용을 낮춥니다. */
@@ -615,7 +617,6 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
     }
     const reason = String(data);
     const result = { ok: reason === 'OK', reason, catalogChanged: resultNeedsCatalogRefresh(reason) };
-    if (result.catalogChanged) invalidateActiveShopItemsCache();
     return result;
   }
 
@@ -677,7 +678,6 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
       }
       return { ok: true, reason: 'OK' };
       });
-      if (result.ok && shouldInvalidateCatalog) invalidateActiveShopItemsCache();
       return { ...result, catalogChanged: result.ok && shouldInvalidateCatalog };
     } catch (err: any) {
       if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };
@@ -746,7 +746,6 @@ export const buyItem = async (userId: string, itemId: number): Promise<{ ok: boo
 
     return { ok: true, reason: 'OK' };
     })();
-    if (result.ok && shouldInvalidateCatalog) invalidateActiveShopItemsCache();
     return { ...result, catalogChanged: result.ok && shouldInvalidateCatalog };
   } catch (err: any) {
     if (err?.message === 'SHOP_STOCK_RACE') return { ok: false, reason: 'SOLD_OUT' };

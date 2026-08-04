@@ -975,6 +975,15 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await db.run("ALTER TABLE streamers ALTER COLUMN lifecycle_id SET DEFAULT md5(random()::text || clock_timestamp()::text)");
   await db.run('ALTER TABLE streamers ALTER COLUMN lifecycle_id SET NOT NULL');
   await db.run(`
+    ALTER TABLE shop_items
+      ADD COLUMN IF NOT EXISTS listed_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS sale_start_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS sale_end_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS limited_total_quantity INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS sold_quantity INTEGER NOT NULL DEFAULT 0
+  `);
+  await db.run('UPDATE shop_items SET listed_at = COALESCE(created_at, NOW()) WHERE active = TRUE AND listed_at IS NULL');
+  await db.run(`
     ALTER TABLE minigame_sessions
       ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS progress_data TEXT NOT NULL DEFAULT '{}',
@@ -1293,6 +1302,8 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_name_trgm ON streamers USING GIN (name gin_trgm_ops)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_active_value ON streamers (is_active, base_value DESC)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_streamers_base_value ON streamers (base_value DESC, channel_id)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shop_items_active_listed ON shop_items (active, listed_at DESC, id DESC)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shop_items_limited_sale ON shop_items (active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible ON user_cards (user_id, is_hidden)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_visible_channel_star ON user_cards (user_id, is_hidden, channel_id, star)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_cards_user_locked ON user_cards (user_id, is_locked)');

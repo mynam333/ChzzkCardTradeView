@@ -1,10 +1,5 @@
-/* ============================================================
-   갤럭시 아스트랄 오러리 (Galaxy Astral Orrery)
-   - 다중 금속/성운 프레임, 상단 고리 행성, 하단 별자리, 코너 룬 장식
-   - 후경 성운은 가장자리 위주로 유영하며 색상 순환
-   - 전경 별밭은 3D 패럴랙스처럼 미세 회전/표류하고, 비주기적 유성 글린트가 지나감
-   적용 클래스: cb-galaxy
-   ============================================================ */
+/* Motion identity: orrery-precession / constellation-parallax / comet-gravity-return */
+/* 황동 천구의와 항성 지도 — three-layer authored SVG frame; center-safe and tile-free. */
 .cb-galaxy {
   position: absolute;
   inset: 0;
@@ -12,164 +7,104 @@
   border-radius: 3.43px;
   pointer-events: none;
   overflow: hidden;
-
-  --galaxy-edge-mask: radial-gradient(84% 75% at 50% 38%, transparent 42%, #000 76%);
-  --galaxy-core-mask: radial-gradient(76% 68% at 50% 43%, transparent 37%, rgba(0,0,0,.72) 60%, #000 86%);
-  --galaxy-planet-overlay: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 58'%3E%3Cdefs%3E%3CradialGradient id='pg' cx='.34' cy='.28' r='.82'%3E%3Cstop offset='0' stop-color='%23fff4ff'/%3E%3Cstop offset='.24' stop-color='%23f0a4ff'/%3E%3Cstop offset='.52' stop-color='%238b5cf6'/%3E%3Cstop offset='.78' stop-color='%234f46e5'/%3E%3Cstop offset='1' stop-color='%23121a5c'/%3E%3C/radialGradient%3E%3ClinearGradient id='rb' x1='9' y1='31' x2='79' y2='27' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%2367e8f9' stop-opacity='.18'/%3E%3Cstop offset='.32' stop-color='%23c4b5fd' stop-opacity='.78'/%3E%3Cstop offset='.68' stop-color='%23f0abfc' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%2367e8f9' stop-opacity='.9'/%3E%3C/linearGradient%3E%3ClinearGradient id='rf' x1='18' y1='38' x2='76' y2='24' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23bae6fd'/%3E%3Cstop offset='.45' stop-color='%23ffffff'/%3E%3Cstop offset='.68' stop-color='%23f0abfc'/%3E%3Cstop offset='1' stop-color='%2367e8f9'/%3E%3C/linearGradient%3E%3Cfilter id='gl' x='-40%25' y='-40%25' width='180%25' height='180%25'%3E%3CfeDropShadow dx='0' dy='0' stdDeviation='2.4' flood-color='%2393c5fd' flood-opacity='.65'/%3E%3CfeDropShadow dx='0' dy='1.3' stdDeviation='3' flood-color='%23d946ef' flood-opacity='.45'/%3E%3C/filter%3E%3Cfilter id='sh' x='-30%25' y='-30%25' width='160%25' height='160%25'%3E%3CfeGaussianBlur stdDeviation='.7'/%3E%3C/filter%3E%3C/defs%3E%3Cg filter='url(%23gl)'%3E%3Cg transform='translate(44 29) rotate(-18)'%3E%3Cellipse rx='35.5' ry='8.4' fill='none' stroke='url(%23rb)' stroke-width='5.2' opacity='.64'/%3E%3Cellipse rx='31.5' ry='5.2' fill='none' stroke='%23101b54' stroke-width='2.2' opacity='.38'/%3E%3C/g%3E%3Ccircle cx='44' cy='29' r='15.3' fill='url(%23pg)'/%3E%3Cpath d='M32.6 23.1 C39.5 17.2 52.4 18.2 59.3 25.9 C50.7 28.1 40.1 28.4 32.6 23.1Z' fill='%23ffffff' opacity='.24'/%3E%3Cpath d='M30.2 31.4 C37.7 36.8 50.8 36.9 61.4 30.2' fill='none' stroke='%23131752' stroke-width='4.1' stroke-linecap='round' opacity='.34' filter='url(%23sh)'/%3E%3Cpath d='M22.1 37.2 C31.2 45.4 54.4 43.8 73.4 24.8' fill='none' stroke='url(%23rf)' stroke-width='5.8' stroke-linecap='round'%3E%3Canimate attributeName='opacity' values='.72;1;.78' dur='2.8s' repeatCount='indefinite'/%3E%3C/path%3E%3Cpath d='M27.7 37.2 C37 42.5 52.6 40.8 68.2 26.6' fill='none' stroke='%23ffffff' stroke-width='1.2' stroke-linecap='round' opacity='.78'/%3E%3Ccircle cx='37.9' cy='22.1' r='2' fill='%23ffffff' opacity='.72'/%3E%3Ccircle cx='64.5' cy='18.5' r='1.65' fill='%23ffffff'%3E%3Canimate attributeName='opacity' values='.25;1;.25' dur='1.9s' repeatCount='indefinite'/%3E%3Canimate attributeName='r' values='1.1;1.9;1.1' dur='1.9s' repeatCount='indefinite'/%3E%3C/circle%3E%3C/g%3E%3C/svg%3E");
-
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
-
-  /* 정교한 프레임: 삼중 유리/금속선 + 행성 + 별자리 + 코너 오러리 룬 */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='rim' x1='2' y1='2' x2='98' y2='158' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23f0e7ff'/%3E%3Cstop offset='.18' stop-color='%2397b8ff'/%3E%3Cstop offset='.48' stop-color='%236d5df6'/%3E%3Cstop offset='.72' stop-color='%23ff7ac8'/%3E%3Cstop offset='1' stop-color='%23b9f5ff'/%3E%3C/linearGradient%3E%3ClinearGradient id='inner' x1='100' y1='0' x2='0' y2='160' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%238be9ff'/%3E%3Cstop offset='.5' stop-color='%238a63ff'/%3E%3Cstop offset='1' stop-color='%23ff8bd8'/%3E%3C/linearGradient%3E%3CradialGradient id='planet' cx='38%25' cy='34%25' r='70%25'%3E%3Cstop offset='0' stop-color='%23fff7ff'/%3E%3Cstop offset='.3' stop-color='%23f4a7ff'/%3E%3Cstop offset='.62' stop-color='%236d5df6'/%3E%3Cstop offset='1' stop-color='%231e1b70'/%3E%3C/radialGradient%3E%3CradialGradient id='gem' cx='45%25' cy='38%25' r='64%25'%3E%3Cstop offset='0' stop-color='%23ffffff'/%3E%3Cstop offset='.35' stop-color='%23b9f5ff'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/radialGradient%3E%3Cfilter id='soft'%3E%3CfeGaussianBlur stdDeviation='.55'/%3E%3C/filter%3E%3Cfilter id='spark'%3E%3CfeGaussianBlur stdDeviation='.22'/%3E%3C/filter%3E%3C/defs%3E%3Crect x='1.2' y='1.2' width='97.6' height='157.6' rx='4.2' ry='4.2' fill='none' stroke='%230b102f' stroke-width='2.6' opacity='.78'/%3E%3Crect x='3' y='3' width='94' height='154' rx='2.4' ry='2.4' fill='none' stroke='url(%23rim)' stroke-width='2.45'/%3E%3Crect x='6.2' y='6.2' width='87.6' height='147.6' rx='.9' ry='.9' fill='none' stroke='url(%23inner)' stroke-width='.9' opacity='.78'/%3E%3Crect x='9.4' y='9.4' width='81.2' height='141.2' rx='.55' ry='.55' fill='none' stroke='%23e9d5ff' stroke-width='.28' opacity='.58' stroke-dasharray='2.4 3.2'/%3E%3Cpath d='M4.7,25.2 C12.4,19.5 17.2,12.2 20.5,4.2 M95.3,25.2 C87.6,19.5 82.8,12.2 79.5,4.2 M4.7,134.8 C12.4,140.5 17.2,147.8 20.5,155.8 M95.3,134.8 C87.6,140.5 82.8,147.8 79.5,155.8' fill='none' stroke='%23c4b5fd' stroke-width='.85' opacity='.78'/%3E%3Cpath d='M8.2,28.7 L15.5,24.4 L17.9,16.4 L22.2,23.8 L30.2,26.1 L22.8,30.4 L20.5,38.4 L16.1,31.1 Z M91.8,28.7 L84.5,24.4 L82.1,16.4 L77.8,23.8 L69.8,26.1 L77.2,30.4 L79.5,38.4 L83.9,31.1 Z M8.2,131.3 L15.5,135.6 L17.9,143.6 L22.2,136.2 L30.2,133.9 L22.8,129.6 L20.5,121.6 L16.1,128.9 Z M91.8,131.3 L84.5,135.6 L82.1,143.6 L77.8,136.2 L69.8,133.9 L77.2,129.6 L79.5,121.6 L83.9,128.9 Z' fill='none' stroke='%2360a5fa' stroke-width='.42' opacity='.76'/%3E%3Cg fill='none' stroke='%23bcd7ff' stroke-width='.48' opacity='.68'%3E%3Cpath d='M12.5,116.5 L19.8,126.9 L16.5,139.4 L27.8,132.6 L35.8,143.4'/%3E%3Cpath d='M66.5,113.8 L75.2,121.5 L84.3,118.4 L89,128.2'/%3E%3C/g%3E%3Cg fill='%23ffffff' filter='url(%23spark)'%3E%3Ccircle cx='12.5' cy='116.5' r='.95'/%3E%3Ccircle cx='19.8' cy='126.9' r='.75'/%3E%3Ccircle cx='16.5' cy='139.4' r='.8'/%3E%3Ccircle cx='27.8' cy='132.6' r='.9'/%3E%3Ccircle cx='35.8' cy='143.4' r='.62'/%3E%3Ccircle cx='66.5' cy='113.8' r='.72'/%3E%3Ccircle cx='75.2' cy='121.5' r='.85'/%3E%3Ccircle cx='84.3' cy='118.4' r='.68'/%3E%3Ccircle cx='89' cy='128.2' r='.76'/%3E%3Ccircle cx='13' cy='45' r='.65' opacity='.7'/%3E%3Ccircle cx='88' cy='62' r='.6' opacity='.8'/%3E%3Ccircle cx='53' cy='18' r='.55' opacity='.75'/%3E%3C/g%3E%3Cg opacity='.85'%3E%3Ccircle cx='50' cy='5.8' r='1.75' fill='url(%23gem)'/%3E%3Ccircle cx='50' cy='154.2' r='1.75' fill='url(%23gem)'/%3E%3Ccircle cx='5.8' cy='80' r='1.25' fill='url(%23gem)'/%3E%3Ccircle cx='94.2' cy='80' r='1.25' fill='url(%23gem)'/%3E%3C/g%3E%3Cpath d='M50,10.5 C54,20 54,31 50,39.5 C46,31 46,20 50,10.5 Z M50,149.5 C54,140 54,129 50,120.5 C46,129 46,140 50,149.5 Z' fill='none' stroke='%23f0abfc' stroke-width='.38' opacity='.65'/%3E%3C/svg%3E");
-
-  box-shadow:
-    0 0 18px rgba(129, 140, 248, .52),
-    0 0 30px rgba(236, 72, 153, .22),
-    inset 0 0 18px rgba(15, 23, 42, .55),
-    inset 0 0 9px rgba(125, 211, 252, .36);
-  animation: galaxy-aurora-breath 5.8s ease-in-out infinite;
+  isolation: isolate;
+  --galaxy-edge-mask: radial-gradient(ellipse 73% 69% at 50% 43%, transparent 0 50%, rgba(0,0,0,.2) 64%, #000 81%);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 160' preserveAspectRatio='none' shape-rendering='geometricPrecision'%3E%3Cdefs%3E%3ClinearGradient id='galaxy-base-night' x1='0' y1='0' x2='1' y2='1'%3E%3Canimate id='galaxy-base-night-meridian' attributeName='x1' values='0;.3;0' keyTimes='0;.5;1' calcMode='spline' keySplines='.42 0 .58 1;.42 0 .58 1' dur='19.2s' begin='-7.4s' repeatCount='indefinite'/%3E%3Cstop stop-color='%2302050d'/%3E%3Cstop offset='.2' stop-color='%23111b35'/%3E%3Cstop offset='.42' stop-color='%23081126'/%3E%3Cstop offset='.62' stop-color='%2324345a'/%3E%3Cstop offset='.82' stop-color='%23080d1d'/%3E%3Cstop offset='1' stop-color='%23010307'/%3E%3C/linearGradient%3E%3ClinearGradient id='galaxy-base-brass' x1='0' y1='0' x2='1' y2='1'%3E%3Canimate id='galaxy-base-brass-ecliptic' attributeName='y2' values='1;.44;1' keyTimes='0;.5;1' calcMode='spline' keySplines='.4 .02 .6 .98;.4 .02 .6 .98' dur='15.8s' begin='-10.1s' repeatCount='indefinite'/%3E%3Cstop stop-color='%232e1c09'/%3E%3Cstop offset='.22' stop-color='%239d7332'/%3E%3Cstop offset='.42' stop-color='%23f0d185'/%3E%3Cstop offset='.58' stop-color='%236a4720'/%3E%3Cstop offset='.78' stop-color='%23c89d4d'/%3E%3Cstop offset='1' stop-color='%23241407'/%3E%3C/linearGradient%3E%3CradialGradient id='galaxy-base-sun' cx='.32' cy='.28' r='.76'%3E%3Cstop stop-color='%23fff6c9'/%3E%3Cstop offset='.22' stop-color='%23e3b75a'/%3E%3Cstop offset='.52' stop-color='%238c541d'/%3E%3Cstop offset='.78' stop-color='%2338200b'/%3E%3Cstop offset='1' stop-color='%23080706'/%3E%3C/radialGradient%3E%3ClinearGradient id='galaxy-base-aurora' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop stop-color='%238ce8ee'/%3E%3Cstop offset='.38' stop-color='%238096df'/%3E%3Cstop offset='.72' stop-color='%23d39bc8'/%3E%3Cstop offset='1' stop-color='%23e6c778'/%3E%3C/linearGradient%3E%3CclipPath id='galaxy-base-clip'%3E%3Crect width='100' height='160' rx='5.36' ry='5.36'/%3E%3C/clipPath%3E%3C/defs%3E%3Cg clip-path='url(%23galaxy-base-clip)' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='.7' y='.7' width='98.6' height='158.6' rx='4.66' ry='4.66' fill='none' stroke='%23010205' stroke-width='3.1'/%3E%3Cpath d='M50 3.1C71.8 3.1 89.2 18.4 95 43.2C97.6 54.3 98.2 68.1 97 80C98.2 92.6 97.1 106.2 93.8 118.1C87 141.2 70.4 156.4 50 156.4' fill='none' stroke='url(%23galaxy-base-brass)' stroke-width='3.1'/%3E%3Cpath d='M50 156.4C29.2 156.4 12 140.1 5.9 115.7C3.4 105.4 2.7 91.8 4 79.6C2.8 67.5 3.7 53.7 6.8 42.1C13 18.7 29.1 3.1 50 3.1' fill='none' stroke='url(%23galaxy-base-night)' stroke-width='3.25'/%3E%3Cpath d='M13.2 18.3C29.5 7.2 47.5 4.4 65.3 8.2C78.8 11.1 88.8 19.8 94.6 31.7' fill='none' stroke='%23efd38b' stroke-width='.62'/%3E%3Cpath d='M5.1 128.6C13.7 145.1 29.4 154.2 47.3 155.1C66.8 156.1 82.1 147.1 93.9 129.4' fill='none' stroke='%2380602e' stroke-width='.74'/%3E%3Cpath d='M4.7 62.5C9.6 43.7 25.2 25.8 45 15.2C65.4 4.2 84.5 8.2 95.3 26.9' fill='none' stroke='url(%23galaxy-base-aurora)' stroke-width='.46' opacity='.74'/%3E%3Cpath d='M4.1 98.3C12.6 119.7 28.1 139.1 49.2 149.8C68.3 159.5 86.6 148.8 95.8 128.1' fill='none' stroke='%23a58a54' stroke-width='.38' opacity='.78'/%3E%3Cpath d='M7.2 41.8C18 25.7 32.7 16.7 49.8 14.4C68.5 11.8 84.8 20.8 93.2 39.5' fill='none' stroke='%236d82aa' stroke-width='.34' stroke-dasharray='1.1 2.7'/%3E%3Cpath d='M6.4 119.7C18.1 137.2 34.4 146.8 51.4 147.8C69 148.8 83.7 139.9 93.7 121.2' fill='none' stroke='%23d0ad61' stroke-width='.32' stroke-dasharray='.8 3.1'/%3E%3Cpath d='M6.2 45.5C3.5 66.2 4 91.6 7.4 112.8' fill='none' stroke='url(%23galaxy-base-brass)' stroke-width='1.05'/%3E%3Cpath d='M93.7 47.8C97.1 68.2 96.8 91.4 92.8 114.1' fill='none' stroke='url(%23galaxy-base-brass)' stroke-width='1.18'/%3E%3Cg transform='translate(50 11.8)'%3E%3Cpath d='M-20.5-5.5C-15.5-10.6-7.6-13.1 0-13.1S15.4-10.6 20.5-5.5L17.8 4.5C12 8.6 6.1 10.8 0 10.8S-12.2 8.6-17.8 4.5Z' fill='%23050913' stroke='url(%23galaxy-base-brass)' stroke-width='.9'/%3E%3Cellipse rx='16.9' ry='7.2' fill='url(%23galaxy-base-night)' stroke='%23e0c47b' stroke-width='.46'/%3E%3Cellipse rx='14.4' ry='4.6' fill='none' stroke='%237e95bd' stroke-width='.34' transform='rotate(-12)'/%3E%3Cg%3E%3Cpath d='M0-7.8C3.1-5.5 5.2-2.6 5.6.7C4.1 4.5 2.1 6.6 0 7.9C-2.3 6.3-4.3 4.1-5.5.7C-5-2.7-3.1-5.6 0-7.8Z' fill='none' stroke='url(%23galaxy-base-aurora)' stroke-width='.55'/%3E%3Cpath d='M-8.9 0C-5.6-2.3-2.6-3.4.2-3.2C3.5-2.9 6.4-1.8 9 0C6.4 1.9 3.5 3.1.2 3.3C-2.8 3.4-5.8 2.3-8.9 0Z' fill='none' stroke='%23d8b76a' stroke-width='.42'/%3E%3CanimateTransform id='galaxy-orrery-precession' attributeName='transform' type='rotate' values='0 0 0;360 0 0' keyTimes='0;1' calcMode='linear' dur='28.4s' begin='-17.2s' repeatCount='indefinite' additive='sum'/%3E%3C/g%3E%3Cg%3E%3Ccircle cx='11.3' cy='0' r='1.24' fill='%2391dce5' stroke='%23eaffff' stroke-width='.22'/%3E%3Ccircle cx='-8.1' cy='3.8' r='.94' fill='%23d39cc8' stroke='%23fff0fa' stroke-width='.2'/%3E%3Ccircle cx='-3.2' cy='-5.9' r='.73' fill='%23e2c56f'/%3E%3CanimateTransform id='galaxy-base-orbit-phase' attributeName='transform' type='rotate' values='0 0 0;360 0 0' keyTimes='0;1' calcMode='linear' dur='17.3s' begin='-6.9s' repeatCount='indefinite' additive='sum'/%3E%3C/g%3E%3Ccircle r='2.7' fill='url(%23galaxy-base-sun)' stroke='%23fff0b6' stroke-width='.34'/%3E%3C/g%3E%3Cg transform='translate(91.2 101.5)'%3E%3Cpath d='M0-12.3C4.4-10.6 7.1-6.4 7.4-1.5C7.7 4 4.8 9.2 0 12.5C-4.6 9.3-7.2 4-7.1-1.2C-7-6.2-4.5-10.5 0-12.3Z' fill='%2307101d' stroke='url(%23galaxy-base-brass)' stroke-width='.8'/%3E%3Cpath d='M0-9.3C2.5-6.2 3.7-3 3.4.4C3 4.3 1.8 7 0 9.4C-1.9 6.8-3 4-3.4.4C-3.6-3.2-2.5-6.3 0-9.3Z' fill='url(%23galaxy-base-aurora)' fill-opacity='.35' stroke='%23e8d69d' stroke-width='.32'/%3E%3Cg%3E%3Cpath d='M0-7.7L1.2-.6L0 7.8L-1.2-.6Z' fill='%23f0d27d' stroke='%23fff3bc' stroke-width='.2'/%3E%3CanimateTransform id='galaxy-base-compass-libration' attributeName='transform' type='rotate' values='-18 0 0;22 0 0;-18 0 0' keyTimes='0;.5;1' calcMode='spline' keySplines='.34 .02 .66 .98;.34 .02 .66 .98' dur='13.9s' begin='-9.8s' repeatCount='indefinite' additive='sum'/%3E%3C/g%3E%3C/g%3E%3Cg fill='none' stroke='%23ead388' stroke-width='.48'%3E%3Canimate id='galaxy-base-star-aperture' attributeName='opacity' values='.3;1;.3' keyTimes='0;.5;1' calcMode='spline' keySplines='.3 .04 .7 .96;.3 .04 .7 .96' dur='7.6s' begin='-2.3s' repeatCount='indefinite'/%3E%3Cpath d='M8.3 26.2C9.8 27 10.6 28.2 10.7 29.8C10.4 31.3 9.5 32.4 8.2 33.1C6.8 32.4 6 31.2 5.8 29.8C6.1 28.2 6.9 27 8.3 26.2Z'/%3E%3Cpath d='M92.4 133C93.8 133.9 94.5 135.2 94.3 136.8C94 138.1 93.1 139.1 91.8 139.7C90.6 138.8 90 137.6 90 136.1C90.5 134.6 91.3 133.6 92.4 133Z'/%3E%3Cpath d='M7.1 85.6C8.3 86.3 9 87.4 9.1 88.7C8.8 90 8.1 90.8 6.9 91.5C5.8 90.7 5.2 89.7 5.2 88.4C5.6 87.2 6.2 86.3 7.1 85.6Z'/%3E%3C/g%3E%3Cpath d='M4.7 62.5C9.6 43.7 25.2 25.8 45 15.2C65.4 4.2 84.5 8.2 95.3 26.9M4.1 98.3C12.6 119.7 28.1 139.1 49.2 149.8C68.3 159.5 86.6 148.8 95.8 128.1' fill='none' stroke='url(%23galaxy-base-aurora)' stroke-width='.34' stroke-dasharray='1.2 5.3' opacity='.64'%3E%3Canimate id='galaxy-base-ecliptic-dash' attributeName='stroke-dashoffset' values='0;12;0' keyTimes='0;.5;1' calcMode='linear' dur='20.6s' begin='-13.7s' repeatCount='indefinite'/%3E%3C/path%3E%3Cpath d='M8.4 52.7C13.2 48.6 17.5 47.1 22.2 48.1C26.1 49 29.8 52.5 33.8 58M92.1 67.5C87.2 63.9 82.8 62.8 78.4 64.4C74.9 65.8 71.7 69.4 68.4 74.6' fill='none' stroke='%238092b4' stroke-width='.3'/%3E%3Cpath d='M7.8 107.2C12 111.1 16.6 112.8 21.4 111.8C25.5 111 29.6 107.6 33.7 102.1M92.4 118.3C87.8 122.1 83.5 123.4 79 121.9C75.1 120.7 71.5 117 68.1 111.5' fill='none' stroke='%23b59960' stroke-width='.28'/%3E%3Cg fill='%23d7c27e' stroke='%23201606' stroke-width='.2'%3E%3Ccircle cx='6.3' cy='18.7' r='.81'/%3E%3Ccircle cx='94.1' cy='42.6' r='.67'/%3E%3Ccircle cx='5.8' cy='73.4' r='.54'/%3E%3Ccircle cx='94.6' cy='121.3' r='.91'/%3E%3Ccircle cx='14.2' cy='148.7' r='.62'/%3E%3Ccircle cx='75.8' cy='152.4' r='.76'/%3E%3Cellipse cx='93.1' cy='76.8' rx='.58' ry='.82'/%3E%3C/g%3E%3Cpath d='M16.5 7.1C22.1 9.7 27.4 12.8 32.2 16.5M69.6 15.3C75.2 11.4 81 8.7 87.1 7.1M13.4 151.5C20.1 148.8 26.3 145.5 31.9 141.3M68.8 142.4C74.6 146.3 80.7 149.3 87.2 151.5' fill='none' stroke='%23d0b66e' stroke-width='.27'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  box-shadow: 0 1px 3px rgba(1,3,9,.8), inset 0 0 13px rgba(2,7,18,.55), inset 0 0 4px rgba(209,177,100,.2);
 }
 
-/* 후경 성운: 가장자리 위주로 번지는 색상층 + 블랙홀 렌즈감 */
-.cb-galaxy::before {
-  content: "";
-  position: absolute;
-  inset: -18%;
-  pointer-events: none;
-  -webkit-mask: var(--galaxy-core-mask);
-  mask: var(--galaxy-core-mask);
-  mix-blend-mode: normal;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
-  background-position: 84% 19%, center, 14% 18%, 94% 76%, 82% 13%, 18% 88%, center;
-  background-size: 31% auto, 100% 100%, auto, auto, auto, auto, 100% 100%;
-  background-image:
-    var(--galaxy-planet-overlay),
-    radial-gradient(34px 24px at 84% 19%, rgba(19, 30, 54, .98) 0 54%, rgba(24, 38, 66, .9) 64%, transparent 78%),
-    radial-gradient(72px 108px at 14% 18%, rgba(168, 85, 247, .58), transparent 70%),
-    radial-gradient(94px 112px at 94% 76%, rgba(34, 211, 238, .48), transparent 72%),
-    radial-gradient(74px 86px at 82% 13%, rgba(244, 114, 182, .42), transparent 72%),
-    radial-gradient(82px 128px at 18% 88%, rgba(79, 70, 229, .42), transparent 74%),
-    conic-gradient(from 220deg at 50% 48%, transparent 0deg, rgba(125, 211, 252, .16) 46deg, transparent 92deg, rgba(217, 70, 239, .15) 152deg, transparent 226deg, rgba(99, 102, 241, .18) 292deg, transparent 360deg);
-  filter: saturate(1.42) brightness(1.12);
-  transform-origin: 51% 47%;
-  animation: galaxy-nebula-orbit 19s cubic-bezier(.45,.05,.55,.95) infinite, galaxy-nebula-hue 14s linear infinite;
-}
-
-/* 전경 별밭 + 유성: 작은 별은 가장자리 밀도 높게, 유성은 비스듬히 짧게 통과 */
+.cb-galaxy::before,
 .cb-galaxy::after {
   content: "";
   position: absolute;
-  inset: -15px;
+  inset: 0;
   pointer-events: none;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
   -webkit-mask: var(--galaxy-edge-mask);
   mask: var(--galaxy-edge-mask);
+  transform: translateZ(0);
+  backface-visibility: hidden;
   mix-blend-mode: screen;
-  background-repeat:
-    repeat, repeat, repeat, repeat, repeat, repeat,
-    repeat, repeat, repeat, repeat, repeat, repeat,
-    no-repeat, no-repeat;
-  background-size:
-    100% 160px, 100% 190px, 100% 160px, 100% 190px, 100% 160px, 100% 190px,
-    100% 160px, 100% 190px, 100% 160px, 100% 190px, 100% 160px, 100% 190px,
-    190% 190%, 100% 100%;
-  background-position:
-    0 0, 0 14px, 0 2px, 0 29px, 0 5px, 0 21px,
-    0 0, 0 9px, 0 0, 0 18px, 0 7px, 0 31px,
-    -130% -80%, center;
-  background-image:
-    radial-gradient(1.6px 1.6px at 12px 13px, rgba(255,255,255,.95), transparent 62%),
-    radial-gradient(1.1px 1.1px at 36px 31px, rgba(191,219,254,.86), transparent 62%),
-    radial-gradient(1.9px 1.9px at 83px 44px, rgba(255,255,255,.9), transparent 63%),
-    radial-gradient(1.2px 1.2px at 18px 82px, rgba(233,213,255,.9), transparent 62%),
-    radial-gradient(2.1px 2.1px at 68px 105px, rgba(255,255,255,.85), transparent 62%),
-    radial-gradient(1px 1px at 91px 137px, rgba(186,230,253,.86), transparent 62%),
-    radial-gradient(1.4px 1.4px at 42px 151px, rgba(255,255,255,.78), transparent 62%),
-    radial-gradient(1px 1px at 75px 169px, rgba(245,208,254,.82), transparent 62%),
-    radial-gradient(1.1px 1.1px at 28px 22px, rgba(255,255,255,.72), transparent 62%),
-    radial-gradient(1.4px 1.4px at 58px 67px, rgba(191,219,254,.78), transparent 62%),
-    radial-gradient(1px 1px at 8px 111px, rgba(255,255,255,.68), transparent 62%),
-    radial-gradient(1.7px 1.7px at 94px 150px, rgba(233,213,255,.74), transparent 62%),
-    linear-gradient(118deg, transparent 0 42%, rgba(186,230,253,0) 46%, rgba(255,255,255,.95) 49%, rgba(244,114,182,.65) 50.5%, rgba(59,130,246,.18) 53%, transparent 58%),
-    radial-gradient(45px 62px at 50% 6%, rgba(255,255,255,.12), transparent 70%);
-  opacity: .86;
-  transform-origin: 50% 50%;
-  animation: galaxy-stellar-parallax 17s linear infinite, galaxy-star-twinkle 3.4s ease-in-out infinite;
 }
 
-@keyframes galaxy-aurora-breath {
+.cb-galaxy::before {
+  z-index: 1;
+  opacity: .84;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 160%22 preserveAspectRatio=%22none%22 shape-rendering=%22geometricPrecision%22%3E%3Cdefs%3E%3ClinearGradient id=%22galaxy-micro-starlight%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Canimate id=%22galaxy-micro-spectrum-drift%22 attributeName=%22x2%22 values=%221;.48;1%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.42 0 .58 1;.42 0 .58 1%22 dur=%2214.3s%22 begin=%22-6.4s%22 repeatCount=%22indefinite%22/%3E%3Cstop stop-color=%22%23f5e9ba%22/%3E%3Cstop offset=%22.3%22 stop-color=%22%238ce3eb%22/%3E%3Cstop offset=%22.62%22 stop-color=%22%238d9cdb%22/%3E%3Cstop offset=%221%22 stop-color=%22%23d7a8ca%22/%3E%3C/linearGradient%3E%3Cmask id=%22galaxy-micro-edge%22%3E%3Crect width=%22100%22 height=%22160%22 fill=%22white%22/%3E%3Crect x=%2214%22 y=%2222%22 width=%2272%22 height=%22116%22 rx=%225%22 fill=%22black%22/%3E%3C/mask%3E%3C/defs%3E%3Cg mask=%22url(%23galaxy-micro-edge)%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M8 30L14 24L21 27L27 20L34 23L40 14L48 17M92 42L86 36L80 40L75 32L68 35L63 27L57 30M8 111L14 104L21 108L27 100L34 104L40 95M92 122L86 116L80 120L74 112L67 116L61 108%22 stroke=%22url(%23galaxy-micro-starlight)%22 stroke-width=%22.46%22 stroke-dasharray=%221.2 2.4%22%3E%3Canimate id=%22galaxy-constellation-parallax%22 attributeName=%22stroke-dashoffset%22 values=%220;7.2;0%22 keyTimes=%220;.5;1%22 calcMode=%22linear%22 dur=%2212.6s%22 begin=%22-3.8s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cpath d=%22M8 51C18 44 24 37 32 26M92 58C83 51 77 43 70 34M8 128C18 120 26 112 34 102M92 139C83 132 77 124 69 115%22 stroke=%22%23746ea0%22 stroke-width=%22.32%22 opacity=%22.64%22%3E%3Canimate id=%22galaxy-micro-depth-fade%22 attributeName=%22opacity%22 values=%22.28;.86;.28%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.36 .02 .64 .98;.36 .02 .64 .98%22 dur=%229.4s%22 begin=%22-7.1s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cg fill=%22%23f3e9bd%22 stroke=%22%2317203a%22 stroke-width=%22.22%22%3E%3Ccircle cx=%228%22 cy=%2230%22 r=%221.1%22/%3E%3Ccircle cx=%2214%22 cy=%2224%22 r=%22.85%22/%3E%3Ccircle cx=%2221%22 cy=%2227%22 r=%22.72%22/%3E%3Ccircle cx=%2227%22 cy=%2220%22 r=%22.95%22/%3E%3Ccircle cx=%2234%22 cy=%2223%22 r=%22.66%22/%3E%3Ccircle cx=%2240%22 cy=%2214%22 r=%22.88%22/%3E%3Ccircle cx=%2248%22 cy=%2217%22 r=%22.62%22/%3E%3Canimate id=%22galaxy-micro-node-sequence%22 attributeName=%22fill%22 values=%22%23f3e9bd;%238ce3eb;%23f3e9bd%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.42 0 .58 1;.42 0 .58 1%22 dur=%2216.2s%22 begin=%22-10.9s%22 repeatCount=%22indefinite%22/%3E%3C/g%3E%3Cg transform=%22translate(91 122)%22%3E%3Cpath d=%22M0-4L1.2-1.2L4 0L1.2 1.2L0 4L-1.2 1.2L-4 0L-1.2-1.2Z%22 fill=%22url(%23galaxy-micro-starlight)%22 stroke=%22%23fff%22 stroke-width=%22.24%22/%3E%3CanimateTransform id=%22galaxy-micro-sidereal-turn%22 attributeName=%22transform%22 type=%22rotate%22 values=%220 0 0;360 0 0%22 keyTimes=%220;1%22 calcMode=%22linear%22 dur=%2218.9s%22 begin=%22-12.4s%22 repeatCount=%22indefinite%22 additive=%22sum%22/%3E%3C/g%3E%3Cpath d=%22M7 72C10 68 12 62 12 56M93 76C90 71 88 65 88 59M7 95C10 99 12 105 12 111M93 92C90 97 88 103 88 109%22 stroke=%22%23d1b66d%22 stroke-width=%22.4%22%3E%3Canimate id=%22galaxy-micro-arc-width%22 attributeName=%22stroke-width%22 values=%22.25;.68;.25%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.38 .02 .62 .98;.38 .02 .62 .98%22 dur=%2211.1s%22 begin=%22-5.6s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cpath d=%22M18 8C32 13 42 13 50 8C58 13 68 13 82 8M18 152C32 147 42 147 50 152C58 147 68 147 82 152%22 stroke=%22url(%23galaxy-micro-starlight)%22 stroke-width=%22.36%22 stroke-dasharray=%222 4%22%3E%3Canimate id=%22galaxy-micro-meridian-march%22 attributeName=%22stroke-dasharray%22 values=%222 4;5 1;2 4%22 keyTimes=%220;.5;1%22 calcMode=%22linear%22 dur=%2215.5s%22 begin=%22-8.8s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cpath d=%22M12 34.7C12.6 37.1 13.3 38.2 15.4 39C13.3 39.7 12.5 40.8 12 43.2C11.5 40.8 10.7 39.7 8.6 39C10.7 38.2 11.4 37.1 12 34.7ZM88 43.9C88.7 46.3 89.5 47.4 91.7 48.2C89.5 49 88.7 50.2 88 52.6C87.4 50.2 86.6 49 84.4 48.2C86.6 47.4 87.4 46.3 88 43.9ZM12 113.8C12.7 116.2 13.5 117.3 15.7 118.1C13.5 119 12.7 120.1 12 122.5C11.4 120.1 10.5 119 8.3 118.1C10.5 117.3 11.4 116.2 12 113.8ZM88 123.7C88.6 126.1 89.5 127.2 91.7 128C89.5 128.8 88.6 130 88 132.4C87.4 130 86.5 128.8 84.3 128C86.5 127.2 87.4 126.1 88 123.7Z%22 fill=%22url(%23galaxy-micro-starlight)%22 fill-opacity=%22.38%22%3E%3Canimate id=%22galaxy-micro-star-incidence%22 attributeName=%22fill-opacity%22 values=%22.2;.92;.2%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.32 .03 .68 .97;.32 .03 .68 .97%22 dur=%227.8s%22 begin=%22-2.2s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3C/g%3E%3C/svg%3E");
+  animation: galaxy-constellation-parallax-carrier 31.6s cubic-bezier(.45,.05,.55,.95) infinite;
+}
+
+.cb-galaxy::after {
+  z-index: 2;
+  opacity: .58;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 160%22 preserveAspectRatio=%22none%22 shape-rendering=%22geometricPrecision%22%3E%3Cdefs%3E%3ClinearGradient id=%22galaxy-particle-comet%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%220%22%3E%3Cstop stop-color=%22%23fff7cf%22/%3E%3Cstop offset=%22.28%22 stop-color=%22%2389e7ec%22/%3E%3Cstop offset=%22.7%22 stop-color=%22%238196db%22/%3E%3Cstop offset=%221%22 stop-color=%22%235a3f71%22/%3E%3C/linearGradient%3E%3Cmask id=%22galaxy-particle-edge%22%3E%3Crect width=%22100%22 height=%22160%22 fill=%22white%22/%3E%3Crect x=%2215%22 y=%2223%22 width=%2270%22 height=%22114%22 rx=%225%22 fill=%22black%22/%3E%3C/mask%3E%3Cg id=%22galaxy-particle-comet-head%22%3E%3Ccircle r=%221.7%22 fill=%22%23fff7d3%22 stroke=%22%238ce7ed%22 stroke-width=%22.32%22/%3E%3Cpath d=%22M-1.2 0L-6.5-1.6L-3.8 0L-6.5 1.6Z%22 fill=%22url(%23galaxy-particle-comet)%22/%3E%3C/g%3E%3C/defs%3E%3Cg mask=%22url(%23galaxy-particle-edge)%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cg%3E%3Cuse href=%22%23galaxy-particle-comet-head%22/%3E%3CanimateMotion id=%22galaxy-comet-gravity-return%22 path=%22M18 19 C46 4 79 9 91 35 C98 58 92 94 88 122 C79 150 46 156 20 145 C3 132 6 98 9 70 C6 48 6 29 18 19 Z%22 keyTimes=%220;.18;.38;.58;.78;1%22 calcMode=%22spline%22 keySplines=%22.42 0 .58 1;.42 0 .58 1;.42 0 .58 1;.42 0 .58 1;.42 0 .58 1%22 dur=%2216.8s%22 begin=%22-6.2s%22 repeatCount=%22indefinite%22 additive=%22sum%22/%3E%3C/g%3E%3Cg%3E%3Cuse href=%22%23galaxy-particle-comet-head%22 transform=%22scale(.62) rotate(180)%22/%3E%3CanimateMotion id=%22galaxy-particle-counter-comet%22 values=%2282 142;55 153;24 147;8 119;10 83;8 47;24 14;56 8;86 24;92 69;92 112;82 142%22 keyTimes=%220;.09;.18;.27;.36;.45;.54;.63;.72;.81;.9;1%22 calcMode=%22linear%22 dur=%2222.4s%22 begin=%22-15.7s%22 repeatCount=%22indefinite%22 additive=%22sum%22/%3E%3C/g%3E%3Cg transform=%22translate(10 67)%22%3E%3Cpath d=%22M0-4L1.3-1.3L4 0L1.3 1.3L0 4L-1.3 1.3L-4 0L-1.3-1.3Z%22 fill=%22%23d6b970%22/%3E%3CanimateTransform id=%22galaxy-particle-pole-turn%22 attributeName=%22transform%22 type=%22rotate%22 values=%220 0 0;360 0 0%22 keyTimes=%220;1%22 calcMode=%22linear%22 dur=%2211.3s%22 begin=%22-3.4s%22 repeatCount=%22indefinite%22 additive=%22sum%22/%3E%3C/g%3E%3Cpath d=%22M10 19.7L11.1 22.7L14.2 24L11.1 25.2L10 28.3L8.9 25.2L5.8 24L8.9 22.7ZM90 26.9L91.2 29.7L94.2 31L91.2 32.4L90 35.2L88.8 32.4L85.8 31L88.8 29.7ZM10 121.7L11.1 124.7L14.2 126L11.1 127.3L10 130.3L8.9 127.3L5.8 126L8.9 124.7ZM90 132.8L91.2 135.7L94.2 137L91.2 138.3L90 141.2L88.8 138.3L85.8 137L88.8 135.7ZM49 2.7L50.1 5.7L53.2 7L50.1 8.3L49 11.3L47.9 8.3L44.8 7L47.9 5.7Z%22 fill=%22%23f2e9bd%22%3E%3Canimate id=%22galaxy-particle-sidereal-fade%22 attributeName=%22fill-opacity%22 values=%22.34;1;.72;.34%22 keyTimes=%220;.24;.61;1%22 calcMode=%22spline%22 keySplines=%22.2 .7 .35 1;.4 0 .6 1;.5 0 .8 .3%22 dur=%227.4s%22 begin=%22-5.2s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cpath d=%22M10 84.8A4.2 4.2 0 1 0 10 93.2A3.1 3.1 0 1 1 10 84.8ZM90 72.8A4.2 4.2 0 1 0 90 81.2A3 3 0 1 1 90 72.8ZM31 3.9A4.1 4.1 0 1 0 31 12.1A3 3 0 1 1 31 3.9ZM69 146.8A4.2 4.2 0 1 0 69 155.2A3 3 0 1 1 69 146.8Z%22 fill=%22%238ce4eb%22%3E%3Canimate id=%22galaxy-particle-temperature-shift%22 attributeName=%22fill%22 values=%22%238ce4eb;%23d6a6cb;%238ce4eb%22 keyTimes=%220;.5;1%22 calcMode=%22spline%22 keySplines=%22.42 0 .58 1;.42 0 .58 1%22 dur=%2212.9s%22 begin=%22-8.7s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cpath d=%22M8 54C12 34 28 16 49 10C70 13 87 29 92 51M8 108C13 130 29 147 50 152C71 148 87 132 92 109%22 fill=%22none%22 stroke=%22url(%23galaxy-particle-comet)%22 stroke-width=%22.34%22 stroke-dasharray=%221 6%22%3E%3Canimate id=%22galaxy-particle-orbit-dash%22 attributeName=%22stroke-dashoffset%22 values=%220;14;0%22 keyTimes=%220;.5;1%22 calcMode=%22linear%22 dur=%2218.7s%22 begin=%22-12.8s%22 repeatCount=%22indefinite%22/%3E%3C/path%3E%3Cg%3E%3Cpath d=%22M0-2.4L2.4 0L0 2.4L-2.4 0Z%22 fill=%22%23fff5c9%22 stroke=%22%238ce5eb%22 stroke-width=%22.25%22/%3E%3CanimateMotion id=%22galaxy-particle-lagrange-return%22 path=%22M10 42 C20 14 48 5 75 14 C94 25 98 58 90 85 C96 111 82 143 56 151 C30 158 6 137 9 108 C3 83 5 61 10 42 Z%22 keyTimes=%220;.2;.4;.6;.8;1%22 calcMode=%22linear%22 dur=%2225.1s%22 begin=%22-18.9s%22 repeatCount=%22indefinite%22 additive=%22sum%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  animation: galaxy-comet-gravity-return-wake 16.8s cubic-bezier(.22,.61,.36,1) infinite;
+}
+
+@keyframes galaxy-constellation-parallax-carrier {
   0%, 100% {
-    filter: brightness(1) saturate(1.05) drop-shadow(0 0 2px rgba(125, 211, 252, .28));
+    opacity: .84;
+    -webkit-mask-position: 50% 50%;
+    mask-position: 50% 50%;
   }
-  45% {
-    filter: brightness(1.12) saturate(1.28) drop-shadow(0 0 8px rgba(217, 70, 239, .48));
+  19% {
+    opacity: .92;
+    -webkit-mask-position: 49.7% 49.85%;
+    mask-position: 49.7% 49.85%;
   }
-  72% {
-    filter: brightness(1.06) saturate(1.16) drop-shadow(0 0 5px rgba(96, 165, 250, .42));
+  47% {
+    opacity: .76;
+    -webkit-mask-position: 50.25% 50%;
+    mask-position: 50.25% 50%;
+  }
+  74% {
+    opacity: .95;
+    -webkit-mask-position: 49.9% 50.2%;
+    mask-position: 49.9% 50.2%;
   }
 }
 
-@keyframes galaxy-nebula-orbit {
-  0% {
-    transform: perspective(520px) rotateX(2deg) rotateY(-4deg) rotateZ(0deg) translate3d(-2%, -1%, 0);
+@keyframes galaxy-comet-gravity-return-wake {
+  0%, 100% {
+    opacity: .58;
+    clip-path: inset(0 0 0 0 round 3.43px);
   }
-  34% {
-    transform: perspective(520px) rotateX(-3deg) rotateY(8deg) rotateZ(2.2deg) translate3d(2.4%, -2.8%, 8px);
+  11% {
+    opacity: .98;
+    clip-path: inset(.08% 0 0 .12% round 3.43px);
+  }
+  29% {
+    opacity: .83;
+    clip-path: inset(0 .1% .06% 0 round 3.43px);
   }
   67% {
-    transform: perspective(520px) rotateX(4deg) rotateY(3deg) rotateZ(-1.4deg) translate3d(1.2%, 2.6%, 4px);
+    opacity: .46;
+    clip-path: inset(.05% 0 0 .08% round 3.43px);
   }
-  100% {
-    transform: perspective(520px) rotateX(2deg) rotateY(-4deg) rotateZ(0deg) translate3d(-2%, -1%, 0);
+  86% {
+    opacity: .64;
+    clip-path: inset(0 .06% .04% 0 round 3.43px);
   }
-}
-
-@keyframes galaxy-nebula-hue {
-  to { filter: hue-rotate(360deg) saturate(1.42) brightness(1.12); }
-}
-
-@keyframes galaxy-stellar-parallax {
-  0% {
-    background-position:
-      0 0, 0 14px, 0 2px, 0 29px, 0 5px, 0 21px,
-      0 0, 0 9px, 0 0, 0 18px, 0 7px, 0 31px,
-      -130% -80%, center;
-    transform: perspective(480px) rotateX(1.8deg) rotateY(-2.4deg) translateX(-3px);
-  }
-  50% {
-    background-position:
-      0 80px, 0 109px, 0 82px, 0 124px, 0 85px, 0 116px,
-      0 80px, 0 104px, 0 80px, 0 113px, 0 87px, 0 126px,
-      -130% -80%, center;
-    transform: perspective(480px) rotateX(-2.2deg) rotateY(4.2deg) translateX(3px);
-  }
-  66% {
-    background-position:
-      0 106px, 0 139px, 0 108px, 0 154px, 0 111px, 0 146px,
-      0 106px, 0 134px, 0 106px, 0 143px, 0 113px, 0 156px,
-      130% 170%, center;
-    transform: perspective(480px) rotateX(-1deg) rotateY(5.2deg) translateX(4px);
-  }
-  100% {
-    background-position:
-      0 160px, 0 204px, 0 162px, 0 219px, 0 165px, 0 211px,
-      0 160px, 0 199px, 0 160px, 0 208px, 0 167px, 0 221px,
-      -130% -80%, center;
-    transform: perspective(480px) rotateX(1.8deg) rotateY(-2.4deg) translateX(-3px);
-  }
-}
-
-@keyframes galaxy-star-twinkle {
-  0%, 100% { opacity: .58; }
-  38% { opacity: .98; }
-  61% { opacity: .74; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cb-galaxy,
   .cb-galaxy::before,
+  .cb-galaxy::after { animation: none !important; }
+  .cb-galaxy::before { opacity: .78; }
+  .cb-galaxy::after { opacity: .7; }
+}
+
+@media print {
+  .cb-galaxy,
+  .cb-galaxy::before,
   .cb-galaxy::after {
-    animation: none;
+    animation: none !important;
+    box-shadow: none !important;
+    filter: none !important;
   }
+  .cb-galaxy::before,
+  .cb-galaxy::after { opacity: .66; }
 }

@@ -2310,6 +2310,40 @@
   margin-right: auto;
 }
 
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-item.is-inactive) {
+  background: color-mix(in srgb, var(--arena-surface-soft) 74%, var(--arena-surface));
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-heading) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-status) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 8px;
+  border: 1px solid var(--arena-line);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-status.is-active) {
+  border-color: color-mix(in srgb, var(--arena-green) 34%, var(--arena-line));
+  background: var(--arena-green-soft);
+  color: var(--arena-green);
+}
+
+.arenaV2Scope :global(.arena-v2-admin-cosmetic-status.is-inactive) {
+  background: var(--arena-surface-soft);
+  color: var(--arena-muted);
+}
+
 .arenaV2Scope :global(.arena-v2-admin-flag span),
 .arenaV2Scope :global(.arena-v2-admin-cosmetic-item small) {
   color: var(--arena-muted);

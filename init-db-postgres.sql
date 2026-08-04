@@ -286,6 +286,11 @@ CREATE TABLE IF NOT EXISTS shop_items (
     font_family TEXT,                            -- 폰트 패밀리명 (선택)
     active BOOLEAN DEFAULT TRUE,
     purchase_limit INTEGER DEFAULT 0,            -- 1인 최대 구매 갯수 (0 = 무제한)
+    listed_at TIMESTAMPTZ,                       -- 상점에 활성 등록된 시각
+    sale_start_at TIMESTAMPTZ,                   -- 한정판매 시작 시각
+    sale_end_at TIMESTAMPTZ,                     -- 한정판매 종료 시각
+    limited_total_quantity INTEGER NOT NULL DEFAULT 0,
+    sold_quantity INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -611,8 +616,16 @@ ALTER TABLE coupons ADD COLUMN IF NOT EXISTS reward_quantity INTEGER DEFAULT 0;
 ALTER TABLE coupons ADD COLUMN IF NOT EXISTS rewards JSONB NOT NULL DEFAULT '[]'::JSONB;
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS purchase_limit INTEGER DEFAULT 0;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS listed_at TIMESTAMPTZ;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS sale_start_at TIMESTAMPTZ;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS sale_end_at TIMESTAMPTZ;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS limited_total_quantity INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS sold_quantity INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE shop_items ALTER COLUMN style_json TYPE TEXT;
 ALTER TABLE shop_items ALTER COLUMN price TYPE BIGINT USING price::BIGINT;
+UPDATE shop_items SET listed_at = COALESCE(created_at, NOW()) WHERE active = TRUE AND listed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_shop_items_active_listed ON shop_items(active, listed_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_shop_items_limited_sale ON shop_items(active, sale_start_at, sale_end_at, limited_total_quantity, sold_quantity);
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS star INTEGER DEFAULT 0;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS border_item_id INTEGER;
 ALTER TABLE user_cards ADD COLUMN IF NOT EXISTS name_effect_item_id INTEGER;

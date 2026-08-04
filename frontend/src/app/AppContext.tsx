@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { usePathname, useRouter } from 'next/navigation';
 import { API_BASE_URL, apiFetch, isAuthed, setAuthFlag, clearAuthFlag } from '@/lib/api';
 import { normalizeImageBlindKey } from '@/lib/imageBlind';
+import { getRealtimeTopicsForPathname } from '@/lib/realtimeTopics';
 import {
   identifyAnalyticsUser,
   initAnalytics,
@@ -582,15 +583,7 @@ const AppProviderInner: React.FC<{ children: React.ReactNode }> = ({ children })
     return 'main';
   })();
   const isArenaRoute = pathname.startsWith('/arena');
-  const realtimeTopics = React.useMemo(() => {
-    const topics = new Set(['maintenance', 'ranking']);
-    if (pathname.startsWith('/shop')) {
-      topics.add('shop');
-      topics.add('market');
-    }
-    if (pathname.startsWith('/arena')) topics.add('arena');
-    return Array.from(topics).join(',');
-  }, [pathname]);
+  const realtimeTopics = React.useMemo(() => getRealtimeTopicsForPathname(pathname), [pathname]);
 
   const setActiveTab = React.useCallback((tab: TabId) => {
     const route = tab === 'main' ? '/' : `/${tab}`;

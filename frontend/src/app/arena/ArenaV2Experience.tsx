@@ -67,6 +67,13 @@ import {
   arenaCardClassMeta as classTone,
   formatArenaCardKeyword as formatArenaKeyword
 } from './ArenaCard';
+import {
+  getSuccessfulRequestApplyVersion,
+  getArenaCosmeticStatusLabel,
+  getArenaCosmeticToggleLabel,
+  isArenaCosmeticActive,
+  normalizeArenaCosmeticActive
+} from './arenaCosmeticState';
 import { ArenaEmotePieMenu } from './ArenaEmotePieMenu';
 import { ArenaQuickMatchFlow } from './ArenaQuickMatchFlow';
 import { ArenaSurrenderDialog } from './matches/ArenaSurrenderDialog';
@@ -152,7 +159,7 @@ type ArenaCosmeticItem = {
   sale_end_at?: string | null;
   limited_total_quantity?: number;
   sold_quantity?: number;
-  active?: boolean;
+  active: boolean;
 };
 
 type ArenaCosmeticLoadout = {
@@ -174,6 +181,23 @@ type ArenaAdminCosmeticForm = {
   limited_total_quantity: number;
   sold_quantity: number;
 };
+
+const normalizeArenaCosmeticItem = (value: unknown): ArenaCosmeticItem | null => {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Record<string, unknown>;
+  if (!Number.isFinite(Number(item.id)) || !isArenaCosmeticType(item.type)) return null;
+  return {
+    ...item,
+    id: Number(item.id),
+    active: normalizeArenaCosmeticActive(item.active)
+  } as ArenaCosmeticItem;
+};
+
+const normalizeArenaCosmeticItems = (value: unknown): ArenaCosmeticItem[] => (
+  Array.isArray(value)
+    ? value.map(normalizeArenaCosmeticItem).filter((item): item is ArenaCosmeticItem => item !== null)
+    : []
+);
 
 const legalCardClasses = ['charge', 'guardian', 'sniper', 'support', 'trick', 'specter', 'tech'];
 const arenaCardPageSize = 100;
@@ -614,6 +638,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const [selectedArenaEmoteSlot, setSelectedArenaEmoteSlot] = React.useState(0);
   const [arenaCosmeticCategory, setArenaCosmeticCategory] = React.useState<'all' | ArenaCosmeticType>('all');
   const [savingArenaCosmetic, setSavingArenaCosmetic] = React.useState(false);
+  const [refreshingArenaCosmetics, setRefreshingArenaCosmetics] = React.useState(false);
   const [adminCosmeticUploading, setAdminCosmeticUploading] = React.useState(false);
   const [adminCosmeticForm, setAdminCosmeticForm] = React.useState<ArenaAdminCosmeticForm>({ ...emptyArenaAdminCosmeticForm });
   const [streamerCardForm, setStreamerCardForm] = React.useState(hydrateStreamerCardForm(null));
@@ -647,6 +672,12 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   const activeMatchCanSurrender = activeMatch?.mode === 'bot' || activeMatch?.mode === 'quick';
   const cardLoadSentinelRef = React.useRef<HTMLDivElement | null>(null);
   const activeMatchRequestIdRef = React.useRef(0);
+  const arenaCosmeticsRequestIdRef = React.useRef(0);
+  const arenaCosmeticsCatalogLastAppliedRequestIdRef = React.useRef(0);
+  const arenaCosmeticsAuxiliaryLastAppliedRequestIdRef = React.useRef(0);
+  const arenaAdminCosmeticsRequestIdRef = React.useRef(0);
+  const arenaAdminCosmeticsLastAppliedRequestIdRef = React.useRef(0);
+  const arenaCosmeticsManualRefreshRef = React.useRef<Promise<void> | null>(null);
   const deferredInventorySearch = React.useDeferredValue(inventorySearch);
   const selectedCardIdSet = React.useMemo(() => new Set(selectedCardIds), [selectedCardIds]);
   const availableInventoryClasses = React.useMemo(() => {
@@ -732,8 +763,19 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
     return normalized;
   }, [buildArenaCardPath]);
 
-  const loadArenaCosmetics = React.useCallback(async () => {
+  const loadArenaCosmetics = React.useCallback(async (options: { catalogOnly?: boolean } = {}) => {
+    const requestId = ++arenaCosmeticsRequestIdRef.current;
     if (!user) {
+      const applyVersion = getSuccessfulRequestApplyVersion(
+        requestId,
+        arenaCosmeticsCatalogLastAppliedRequestIdRef.current
+      );
+      if (applyVersion === null) return;
+      arenaCosmeticsCatalogLastAppliedRequestIdRef.current = applyVersion;
+      arenaCosmeticsAuxiliaryLastAppliedRequestIdRef.current = Math.max(
+        requestId,
+        arenaCosmeticsAuxiliaryLastAppliedRequestIdRef.current
+      );
       setArenaCosmetics([]);
       setArenaCosmeticCounts({});
       setArenaCosmeticPurchases({});
@@ -741,35 +783,100 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       setArenaEmoteSlotDraft(Array.from({ length: 8 }, () => null));
       return;
     }
-    const [itemsRes, countsRes, purchasesRes, loadoutRes] = await Promise.all([
-      apiFetch('/arena/cosmetics/shop-items'),
-      apiFetch('/arena/cosmetics/inventory-counts'),
-      apiFetch('/arena/cosmetics/purchases'),
-      apiFetch('/arena/cosmetics/loadout')
-    ]);
-    const itemsJson = itemsRes.ok ? await itemsRes.json().catch(() => ({})) : {};
-    setArenaCosmetics(Array.isArray(itemsJson?.items) ? itemsJson.items : []);
-    setArenaCosmeticCounts(countsRes.ok ? await countsRes.json().catch(() => ({})) : {});
-    setArenaCosmeticPurchases(purchasesRes.ok ? await purchasesRes.json().catch(() => ({})) : {});
-    const loadoutJson = loadoutRes.ok ? await loadoutRes.json().catch(() => ({})) : {};
-    const nextLoadout: ArenaCosmeticLoadout = {
-      emoteSlots: Array.from({ length: 8 }, (_, index) => loadoutJson?.emoteSlots?.[index] || null),
-      equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [type, loadoutJson?.equipped?.[type] || null])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
-    };
-    setArenaCosmeticLoadout(nextLoadout);
-    setArenaEmoteSlotDraft(nextLoadout.emoteSlots);
+    const itemsPromise = fetchArenaJson('/arena/cosmetics/shop-items');
+    const auxiliaryResultsPromise = options.catalogOnly
+      ? null
+      : Promise.allSettled([
+          fetchArenaJson('/arena/cosmetics/inventory-counts'),
+          fetchArenaJson('/arena/cosmetics/purchases'),
+          fetchArenaJson('/arena/cosmetics/loadout')
+        ]);
+
+    // 실패는 요청 순서와 무관하게 호출자에게 전달합니다. 최신 요청이 단지 시작됐다는
+    // 이유만으로 먼저 성공한 응답을 버리지 않고, 최신 성공이 적용된 경우에만 폐기합니다.
+    const itemsJson: unknown = await itemsPromise;
+    const itemApplyVersion = getSuccessfulRequestApplyVersion(
+      requestId,
+      arenaCosmeticsCatalogLastAppliedRequestIdRef.current
+    );
+    if (itemApplyVersion !== null) {
+      arenaCosmeticsCatalogLastAppliedRequestIdRef.current = itemApplyVersion;
+      const itemPayload = itemsJson && typeof itemsJson === 'object'
+        ? (itemsJson as Record<string, unknown>).items
+        : undefined;
+      setArenaCosmetics(normalizeArenaCosmeticItems(itemPayload));
+    }
+
+    if (!auxiliaryResultsPromise) return;
+    const [countsResult, purchasesResult, loadoutResult] = await auxiliaryResultsPromise;
+    const auxiliaryApplyVersion = getSuccessfulRequestApplyVersion(
+      requestId,
+      arenaCosmeticsAuxiliaryLastAppliedRequestIdRef.current
+    );
+    if (auxiliaryApplyVersion === null) return;
+    arenaCosmeticsAuxiliaryLastAppliedRequestIdRef.current = auxiliaryApplyVersion;
+    if (countsResult.status === 'fulfilled' && countsResult.value && typeof countsResult.value === 'object') {
+      setArenaCosmeticCounts(countsResult.value);
+    }
+    if (purchasesResult.status === 'fulfilled' && purchasesResult.value && typeof purchasesResult.value === 'object') {
+      setArenaCosmeticPurchases(purchasesResult.value);
+    }
+    if (loadoutResult.status === 'fulfilled') {
+      const loadoutJson = loadoutResult.value;
+      const nextLoadout: ArenaCosmeticLoadout = {
+        emoteSlots: Array.from({ length: 8 }, (_, index) => normalizeArenaCosmeticItem(loadoutJson?.emoteSlots?.[index])),
+        equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [type, normalizeArenaCosmeticItem(loadoutJson?.equipped?.[type])])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
+      };
+      setArenaCosmeticLoadout(nextLoadout);
+      setArenaEmoteSlotDraft(nextLoadout.emoteSlots);
+    }
   }, [user]);
 
+  const loadArenaCosmeticCatalog = React.useCallback(
+    () => loadArenaCosmetics({ catalogOnly: true }),
+    [loadArenaCosmetics]
+  );
+
   const loadArenaAdminCosmetics = React.useCallback(async () => {
+    const requestId = ++arenaAdminCosmeticsRequestIdRef.current;
     if (user?.role !== 'ADMIN') {
+      const applyVersion = getSuccessfulRequestApplyVersion(
+        requestId,
+        arenaAdminCosmeticsLastAppliedRequestIdRef.current
+      );
+      if (applyVersion === null) return;
+      arenaAdminCosmeticsLastAppliedRequestIdRef.current = applyVersion;
       setArenaAdminCosmeticItems([]);
       return;
     }
-    const res = await apiFetch('/admin/arena/cosmetics');
-    const json = res.ok ? await res.json().catch(() => []) : [];
+    const json = await fetchArenaJson('/admin/arena/cosmetics');
+    const applyVersion = getSuccessfulRequestApplyVersion(
+      requestId,
+      arenaAdminCosmeticsLastAppliedRequestIdRef.current
+    );
+    if (applyVersion === null) return;
+    arenaAdminCosmeticsLastAppliedRequestIdRef.current = applyVersion;
     const items = Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : [];
-    setArenaAdminCosmeticItems(items.filter((item: { type?: unknown }) => isArenaCosmeticType(item?.type)));
+    setArenaAdminCosmeticItems(normalizeArenaCosmeticItems(items));
   }, [user?.role]);
+
+  const refreshArenaCosmeticsManually = React.useCallback(async () => {
+    if (arenaCosmeticsManualRefreshRef.current) return;
+    setRefreshingArenaCosmetics(true);
+    const refreshPromise = loadArenaCosmetics();
+    arenaCosmeticsManualRefreshRef.current = refreshPromise;
+    try {
+      await refreshPromise;
+      toast('상점 정보를 새로고침했습니다.', 'success');
+    } catch (error: unknown) {
+      toast(error instanceof Error ? error.message : '상점 정보를 새로고침하지 못했습니다.', 'error');
+    } finally {
+      if (arenaCosmeticsManualRefreshRef.current === refreshPromise) {
+        arenaCosmeticsManualRefreshRef.current = null;
+        setRefreshingArenaCosmetics(false);
+      }
+    }
+  }, [loadArenaCosmetics, toast]);
 
   const loadArenaV2 = React.useCallback(async () => {
     setLoading(true);
@@ -897,6 +1004,50 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   React.useEffect(() => {
     void loadArenaV2();
   }, [loadArenaV2]);
+
+  React.useEffect(() => {
+    if (!user?.id) return;
+    let refreshTimer: number | null = null;
+
+    const refreshCatalogs = () => {
+      refreshTimer = null;
+      if (document.visibilityState !== 'visible') return;
+      const requests: Array<Promise<void>> = [loadArenaCosmeticCatalog()];
+      if (user.role === 'ADMIN') requests.push(loadArenaAdminCosmetics());
+      void Promise.all(requests).catch(() => undefined);
+    };
+    const scheduleRefresh = (delayMs = 200) => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(refreshCatalogs, delayMs);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleRefresh(0);
+        return;
+      }
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+    };
+    const handleFocus = () => scheduleRefresh(0);
+    const handleShopUpdated = () => scheduleRefresh(200);
+    const fallbackTimer = window.setInterval(() => scheduleRefresh(0), 30_000);
+
+    window.addEventListener('chikapo:shop-updated', handleShopUpdated);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.removeEventListener('chikapo:shop-updated', handleShopUpdated);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(fallbackTimer);
+    };
+  }, [loadArenaAdminCosmetics, loadArenaCosmeticCatalog, user?.id, user?.role]);
 
   React.useEffect(() => {
     if (activeTab !== 'inventory' || !season?.id || !cardPage.hasMore || loadingMoreCards) return;
@@ -1431,7 +1582,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       description: item.description || '',
       price: Number(item.price || 0),
       style_json: item.style_json || (item.type === 'emote' ? '{"schema_version":1,"emoji":"✨","rarity":"common"}' : '{"schema_version":1,"rarity":"common","primary_color":"#f2556b","secondary_color":"#17adc0","accent_color":"#ffd166"}'),
-      active: item.active !== false,
+      active: Boolean(item.active),
       purchase_limit: Number(item.purchase_limit || 0),
       sale_start_at: toArenaDateTimeInput(item.sale_start_at),
       sale_end_at: toArenaDateTimeInput(item.sale_end_at),
@@ -1441,19 +1592,29 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
   };
 
   const toggleAdminArenaCosmetic = async (item: ArenaCosmeticItem) => {
+    const nextActive = !Boolean(item.active);
     try {
       setAdminActionLoading(`cosmetic-toggle-${item.id}`);
       const res = await apiFetch(`/admin/arena/cosmetics/${item.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ active: item.active === false })
+        body: JSON.stringify({ active: nextActive })
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '치장 판매 상태를 변경하지 못했습니다.');
-      toast(item.active === false ? '치장 판매를 켰습니다.' : '치장 판매를 껐습니다.', 'success');
-      await Promise.all([
-        loadArenaAdminCosmetics().catch(() => undefined),
-        loadArenaCosmetics().catch(() => undefined)
+      setArenaAdminCosmeticItems((current) => current.map((candidate) => (
+        candidate.id === item.id ? { ...candidate, active: nextActive } : candidate
+      )));
+      if (!nextActive) {
+        setArenaCosmetics((current) => current.filter((candidate) => candidate.id !== item.id));
+      }
+      toast(nextActive ? '치장 판매를 시작했습니다.' : '치장 판매를 중지했습니다.', 'success');
+      const refreshResults = await Promise.allSettled([
+        loadArenaAdminCosmetics(),
+        loadArenaCosmetics()
       ]);
+      if (refreshResults.some((result) => result.status === 'rejected')) {
+        toast('판매 상태는 변경됐지만 최신 상점 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.', 'error');
+      }
     } catch (error: any) {
       toast(error?.message || '치장 판매 상태 변경 중 문제가 발생했습니다.', 'error');
     } finally {
@@ -1492,10 +1653,15 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || '장착 정보를 저장하지 못했습니다.');
-      const savedSlots = Array.from({ length: 8 }, (_, index) => json?.emoteSlots?.[index] || null) as Array<ArenaCosmeticItem | null>;
+      const savedSlots = Array.from({ length: 8 }, (_, index) => normalizeArenaCosmeticItem(json?.emoteSlots?.[index]));
       setArenaCosmeticLoadout((current) => ({
         emoteSlots: savedSlots,
-        equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [type, json?.equipped?.[type] || current.equipped[type]])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
+        equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [
+          type,
+          json?.equipped?.[type] === undefined
+            ? current.equipped[type]
+            : normalizeArenaCosmeticItem(json.equipped[type])
+        ])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
       }));
       setArenaEmoteSlotDraft(savedSlots);
       toast('이모트 휠을 저장했습니다.', 'success');
@@ -1542,7 +1708,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
       if (!res.ok) throw new Error(json?.message || '치장 정보를 저장하지 못했습니다.');
       setArenaCosmeticLoadout((current) => ({
         ...current,
-        equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [type, json?.equipped?.[type] || null])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
+        equipped: Object.fromEntries(arenaLoadoutCosmeticTypes.map((type) => [type, normalizeArenaCosmeticItem(json?.equipped?.[type])])) as Record<ArenaLoadoutCosmeticType, ArenaCosmeticItem | null>
       }));
       toast(nextItemId ? `${item.name} 치장을 장착했습니다.` : `${item.name} 치장을 해제했습니다.`, 'success');
     } catch (error: any) {
@@ -2186,8 +2352,15 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <span className="arena-v2-point-balance"><Sparkles className="h-4 w-4" /> {Number(user?.point || 0).toLocaleString()} P</span>
             </ArenaTooltip>
             <ArenaTooltip data={{ ...arenaCoreTooltips.refresh, title: '상점 새로고침', description: '판매 중인 치장, 보유 수량, 장착 상태와 이모트 휠 정보를 서버에서 다시 불러옵니다.' }} side="bottom">
-              <button type="button" onClick={loadArenaCosmetics} className="arena-v2-secondary-button">
-                <RefreshCw className={`h-4 w-4 ${savingArenaCosmetic ? 'animate-spin' : ''}`} /> 상점 새로고침
+              <button
+                type="button"
+                onClick={() => void refreshArenaCosmeticsManually()}
+                className="arena-v2-secondary-button"
+                disabled={refreshingArenaCosmetics || savingArenaCosmetic}
+                aria-busy={refreshingArenaCosmetics}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshingArenaCosmetics ? 'animate-spin' : ''}`} />
+                {refreshingArenaCosmetics ? '새로고침 중' : '상점 새로고침'}
               </button>
             </ArenaTooltip>
           </div>
@@ -2670,7 +2843,7 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
               <>
                 <div className="arena-v2-admin-kpis">
                   <div className="arena-v2-stat"><span>등록 치장</span><strong>{arenaAdminCosmeticItems.length.toLocaleString()}개</strong></div>
-                  <div className="arena-v2-stat"><span>판매 중</span><strong>{arenaAdminCosmeticItems.filter((item) => item.active !== false).length.toLocaleString()}개</strong></div>
+                  <div className="arena-v2-stat"><span>판매 중</span><strong>{arenaAdminCosmeticItems.filter(isArenaCosmeticActive).length.toLocaleString()}개</strong></div>
                   <div className="arena-v2-stat"><span>내 장착 상태</span><strong>{equippedEmotes + equippedCosmetics}/15</strong></div>
                 </div>
                 <div className="arena-v2-admin-grid">
@@ -2773,19 +2946,30 @@ export const ArenaV2Experience: React.FC<{ activeTab: ArenaSiteTab }> = ({ activ
                   <div className="arena-v2-admin-cosmetic-list">
                     {arenaAdminCosmeticItems.length === 0 ? (
                       <span>등록된 아레나 치장이 없습니다.</span>
-                    ) : arenaAdminCosmeticItems.map((item) => (
-                        <article key={item.id} className="arena-v2-admin-cosmetic-item">
+                    ) : arenaAdminCosmeticItems.map((item) => {
+                      const isActive = isArenaCosmeticActive(item);
+                      const isToggling = adminActionLoading === `cosmetic-toggle-${item.id}`;
+                      return (
+                        <article key={item.id} className={`arena-v2-admin-cosmetic-item ${isActive ? 'is-active' : 'is-inactive'}`}>
                           <ArenaCosmeticPreview item={item} compact />
                           <div>
-                            <strong>{item.name}</strong>
+                            <div className="arena-v2-admin-cosmetic-heading">
+                              <strong>{item.name}</strong>
+                              <span className={`arena-v2-admin-cosmetic-status ${isActive ? 'is-active' : 'is-inactive'}`}>
+                                {getArenaCosmeticStatusLabel(item)}
+                              </span>
+                            </div>
                             <small>{arenaCosmeticTypeLabels[item.type]} · {Number(item.price || 0).toLocaleString()} P · 판매 {Number(item.sold_quantity || 0).toLocaleString()}{item.limited_total_quantity ? `/${Number(item.limited_total_quantity).toLocaleString()}` : ''}</small>
                           </div>
                           <div className="arena-v2-queue-actions">
-                            <button type="button" onClick={() => editAdminArenaCosmetic(item)}>수정</button>
-                            <button type="button" onClick={() => toggleAdminArenaCosmetic(item)} disabled={adminActionLoading === `cosmetic-toggle-${item.id}`}>{item.active === false ? '활성' : '비활성'}</button>
+                            <button type="button" onClick={() => editAdminArenaCosmetic(item)} disabled={Boolean(adminActionLoading)}>수정</button>
+                            <button type="button" onClick={() => toggleAdminArenaCosmetic(item)} disabled={Boolean(adminActionLoading)}>
+                              {isToggling ? '변경 중' : getArenaCosmeticToggleLabel(item)}
+                            </button>
                           </div>
                         </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </>
