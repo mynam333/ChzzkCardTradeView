@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, ArrowRightLeft, ChevronRight, Eraser, MessageCircleHeart, RefreshCw, Users, WalletCards } from 'lucide-react';
 import { useApp } from './AppContext';
 import { apiFetch } from '@/lib/api';
@@ -97,43 +97,64 @@ export const AdminUsersTab: React.FC = () => {
   const [userTotal, setUserTotal] = useState(0);
   const [userTotalPages, setUserTotalPages] = useState(1);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [debouncedUserSearch, setDebouncedUserSearch] = useState('');
+  const [usersLoadedAt, setUsersLoadedAt] = useState(0);
+  const usersRequestIdRef = useRef(0);
   const [resettingStatusUserId, setResettingStatusUserId] = useState<string | null>(null);
   const [audit, setAudit] = useState<PointAuditResponse | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditTrail, setAuditTrail] = useState<{ id: string; username: string | null }[]>([]);
 
-  const fetchUsers = async (page = userPage, keyword = userSearch) => {
+  const fetchUsers = useCallback(async (page: number, keyword: string) => {
+    const requestId = ++usersRequestIdRef.current;
     setUsersLoading(true);
+    setUsersError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(USERS_PER_PAGE) });
       if (keyword.trim()) params.set('q', keyword.trim());
       const res = await apiFetch(`/admin/users?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users || []);
-        setUserTotal(data.total || 0);
-        setUserTotalPages(data.total_pages || 1);
+      const data = await res.json().catch(() => ({}));
+      if (requestId !== usersRequestIdRef.current) return;
+      if (!res.ok) {
+        const message = typeof data?.message === 'string' && data.message.trim()
+          ? data.message
+          : '유저 목록을 불러오지 못했습니다.';
+        setUsersError(message);
+        return;
       }
-    } catch { /* noop */ } finally {
-      setUsersLoading(false);
+      if (!Array.isArray(data?.users)) {
+        setUsersError('유저 목록 응답 형식이 올바르지 않습니다.');
+        return;
+      }
+
+      setUsers(data.users);
+      setUserTotal(Number(data.total) || 0);
+      setUserTotalPages(Math.max(1, Number(data.total_pages) || 1));
+      setUsersLoadedAt(Date.now());
+    } catch {
+      if (requestId === usersRequestIdRef.current) {
+        setUsersError('서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      if (requestId === usersRequestIdRef.current) setUsersLoading(false);
     }
-  };
+  }, []);
 
   // 검색어 디바운스(닉네임/ID) → 1페이지부터 재조회
   useEffect(() => {
     const t = setTimeout(() => {
       setUserPage(1);
-      fetchUsers(1, userSearch);
+      setDebouncedUserSearch(userSearch);
     }, 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userSearch]);
 
-  // 페이지 변경 시 재조회
+  // 페이지 또는 디바운스된 검색어 변경 시 한 번만 재조회
   useEffect(() => {
-    fetchUsers(userPage, userSearch);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPage]);
+    const t = window.setTimeout(() => void fetchUsers(userPage, debouncedUserSearch), 0);
+    return () => window.clearTimeout(t);
+  }, [debouncedUserSearch, fetchUsers, userPage]);
 
   // 닉네임/ID 클립보드 복사 (HTTPS 미지원 환경 폴백 포함)
   const copyText = async (text: string, label: string) => {
@@ -360,7 +381,15 @@ export const AdminUsersTab: React.FC = () => {
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users className="h-4 w-4" /> 유저 목록 ({userTotal.toLocaleString()} · 탈퇴 제외)</h3>
-          <button onClick={() => fetchUsers(userPage, userSearch)} className="text-xs text-muted-foreground hover:text-foreground"><RefreshCw className="h-3.5 w-3.5" /></button>
+          <button
+            type="button"
+            onClick={() => void fetchUsers(userPage, debouncedUserSearch)}
+            aria-label="유저 목록 새로고침"
+            title="유저 목록 새로고침"
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${usersLoading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
 
         {/* 검색 */}
@@ -376,6 +405,17 @@ export const AdminUsersTab: React.FC = () => {
         <div className="space-y-2">
           {usersLoading ? (
             <p className="py-8 text-center text-xs text-muted-foreground">불러오는 중…</p>
+          ) : usersError ? (
+            <div role="alert" className="flex flex-col items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-7 text-center">
+              <p className="text-xs font-bold text-rose-500">{usersError}</p>
+              <button
+                type="button"
+                onClick={() => void fetchUsers(userPage, debouncedUserSearch)}
+                className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-xs font-black text-rose-500 transition hover:bg-rose-500/15"
+              >
+                다시 시도
+              </button>
+            </div>
           ) : users.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">{userSearch.trim() ? '검색 결과가 없습니다.' : '유저가 없습니다.'}</p>
           ) : users.map((u) => (
@@ -406,7 +446,7 @@ export const AdminUsersTab: React.FC = () => {
                       {userIdentityLabel(u)}
                     </span>
                   )}
-                  {u.banned_until && new Date(u.banned_until).getTime() > Date.now() && (
+                  {u.banned_until && new Date(u.banned_until).getTime() > usersLoadedAt && (
                     <span className="shrink-0 rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-bold text-red-500">정지</span>
                   )}
                 </button>

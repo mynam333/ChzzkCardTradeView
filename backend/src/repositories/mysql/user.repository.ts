@@ -421,7 +421,7 @@ export class MysqlUserRepository implements IUserRepository {
                du.deleted_at,
                CASE WHEN du.user_id IS NULL THEN 'current' ELSE 'rejoined' END AS identity_source,
                0 AS is_deleted,
-               COALESCE(u.created_at, '') AS sort_at
+               u.created_at AS sort_at
           FROM users u
           LEFT JOIN deleted_user_accounts du ON du.user_id = u.id
           ${activeWhere}
@@ -446,13 +446,13 @@ export class MysqlUserRepository implements IUserRepository {
                du.deleted_at,
                'deleted_snapshot' AS identity_source,
                1 AS is_deleted,
-               COALESCE(du.deleted_at, '') AS sort_at
+               du.deleted_at AS sort_at
           FROM deleted_user_accounts du
           LEFT JOIN users u ON u.id = du.user_id
          WHERE u.id IS NULL
           ${deletedWhere}
       ) combined
-      ORDER BY sort_at DESC, id ASC
+      ORDER BY CASE WHEN sort_at IS NULL THEN 1 ELSE 0 END ASC, sort_at DESC, id ASC
       LIMIT ? OFFSET ?
     `, params);
     return { users: rows.map((row) => this.mapUser(row)), total };

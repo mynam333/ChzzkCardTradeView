@@ -788,6 +788,7 @@ export const listUsers = async (req: Request, res: Response) => {
       total_pages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (err: any) {
+    console.error('[AdminController] listUsers 에러:', err?.message || err);
     return res.status(500).json({ error: 'InternalServerError', message: '유저 목록 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
   }
 };
