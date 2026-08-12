@@ -3273,12 +3273,6 @@ export const ArcadeTab: React.FC = () => {
   }, [activeGame, gameData?.rounds, toast]);
 
   useEffect(() => {
-    if (activeGame !== 'quiz' || isPracticeMode || !pendingPaidRound || !roundFeedback || isGameOver) return;
-    const timer = window.setTimeout(() => advanceToPaidRound(pendingPaidRound), 450);
-    return () => window.clearTimeout(timer);
-  }, [activeGame, advanceToPaidRound, isGameOver, isPracticeMode, pendingPaidRound, roundFeedback]);
-
-  useEffect(() => {
     if (!submitRetry || gameResult || !sessionId) return;
     const retryDelayMs = Math.min(5000, 1200 + submitRetry.attempt * 600);
     const retryTimer = window.setTimeout(() => {
