@@ -51,4 +51,25 @@ describe('SupabaseStreamerRepository.bulkApplyScheduleResults', () => {
     expect(eq).toHaveBeenNthCalledWith(1, 'channel_id', 'channel-1');
     expect(eq).toHaveBeenNthCalledWith(2, 'channel_id', 'channel-2');
   });
+
+  it('RPC 폴백에서도 최신 채널명과 제거된 프로필 이미지를 반영한다', async () => {
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const rpc = vi.fn().mockResolvedValue({ error: { message: 'rpc unavailable' } });
+    mocks.getSupabaseClient.mockReturnValue({ from, rpc });
+
+    const repository = new SupabaseStreamerRepository();
+    await repository.bulkApplyScheduleResults([{
+      ...createScheduleResult('channel-profile'),
+      polled: true,
+      name: '  새 채널명  ',
+      logo_url: null
+    }]);
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      name: '새 채널명',
+      logo_url: null
+    }));
+  });
 });

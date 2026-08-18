@@ -1170,6 +1170,7 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
             polled BOOLEAN,
             is_active BOOLEAN,
             follower_count INTEGER,
+            name TEXT,
             logo_url TEXT,
             last_broadcast_at TEXT
           )
@@ -1184,7 +1185,12 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
              chat_count           = GREATEST(s.chat_count - COALESCE(u.consumed_chats, 0), 0),
              is_active            = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.is_active, FALSE) ELSE s.is_active END,
              follower_count       = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.follower_count, s.follower_count) ELSE s.follower_count END,
-             logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.logo_url, s.logo_url) ELSE s.logo_url END,
+             name                 = CASE
+                                      WHEN COALESCE(u.polled, FALSE)
+                                      THEN COALESCE(NULLIF(BTRIM(u.name), ''), s.name)
+                                      ELSE s.name
+                                    END,
+             logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN u.logo_url ELSE s.logo_url END,
              last_broadcast_at    = CASE
                                       WHEN COALESCE(u.polled, FALSE)
                                       THEN COALESCE(NULLIF(u.last_broadcast_at, '')::TIMESTAMPTZ, s.last_broadcast_at)

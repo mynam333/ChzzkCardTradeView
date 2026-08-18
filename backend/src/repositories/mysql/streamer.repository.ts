@@ -90,6 +90,9 @@ export class MysqlStreamerRepository implements IStreamerRepository {
       // serializer를 사용하므로 0/1이 아니라 실제 boolean을 전달해야 합니다.
       addCase('is_active', (row) => row.is_active);
       addCase('follower_count', (row) => row.follower_count);
+      const nameExpr = this.caseExpr(rows, (row) => row.name?.trim() || null, 'name');
+      assignments.push(`name = COALESCE(NULLIF(TRIM(${nameExpr.sql}), ''), name)`);
+      params.push(...nameExpr.params);
       addCase('logo_url', (row) => row.logo_url ?? null);
       addCase('last_broadcast_at', (row) => row.last_broadcast_at ? this.normalizeUtcString(row.last_broadcast_at) : null);
     }

@@ -110,8 +110,8 @@ describe('streamerScheduler live-status probe', () => {
     mocks.findAll.mockResolvedValue([streamer]);
     mocks.fetchLiveStatus.mockResolvedValue(liveStatus);
     mocks.fetchChannelProfile.mockResolvedValue({
-      name: streamer.name,
-      logoUrl: streamer.logo_url,
+      name: '새 스트리머 이름',
+      logoUrl: 'https://example.com/new.webp',
       followerCount: 1100,
       ...liveStatus
     });
@@ -126,6 +126,8 @@ describe('streamerScheduler live-status probe', () => {
         is_active: true,
         polled: true,
         follower_count: 1100,
+        name: '새 스트리머 이름',
+        logo_url: 'https://example.com/new.webp',
         add_broadcast_count: 1
       })
     ]);

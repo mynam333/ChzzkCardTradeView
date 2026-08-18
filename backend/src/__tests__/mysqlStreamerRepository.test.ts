@@ -31,7 +31,8 @@ describe('MysqlStreamerRepository PostgreSQL compatibility', () => {
       polled: true,
       is_active: isActive,
       follower_count: 1000,
-      logo_url: null,
+      name: '새 채널명',
+      logo_url: 'https://example.com/new-logo.webp',
       last_broadcast_at: '2026-07-23T00:00:00.000Z'
     };
 
@@ -59,5 +60,11 @@ describe('MysqlStreamerRepository PostgreSQL compatibility', () => {
     const [postgresSql, postgresParams] = unsafe.mock.calls[0] as [string, unknown[]];
     expect(postgresSql).toMatch(/is_active = CASE channel_id WHEN \$\d+ THEN \$\d+ ELSE is_active END/);
     expect(postgresParams[paramsBeforeAssignment + 1]).toBe(isActive);
+
+    const nameAssignment = sql.indexOf('name = COALESCE');
+    expect(nameAssignment).toBeGreaterThan(-1);
+    const paramsBeforeName = (sql.slice(0, nameAssignment).match(/\?/g) || []).length;
+    expect(params[paramsBeforeName]).toBe('channel-live');
+    expect(params[paramsBeforeName + 1]).toBe('새 채널명');
   });
 });

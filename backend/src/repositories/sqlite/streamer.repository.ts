@@ -345,6 +345,7 @@ export class SqliteStreamerRepository implements IStreamerRepository {
          broadcast_count = broadcast_count + ?,
          chat_count = MAX(chat_count - ?, 0),
          is_active = ?, follower_count = ?,
+         name = COALESCE(NULLIF(TRIM(?), ''), name),
          logo_url = ?,
          last_broadcast_at = ?,
          updated_at = datetime('now')
@@ -365,7 +366,8 @@ export class SqliteStreamerRepository implements IStreamerRepository {
           updPolled.run(
             r.prev_value, r.base_value, r.activity_score, r.broadcast_multiplier,
             r.add_minutes, r.add_broadcast_count, r.consumed_chats,
-            r.is_active ? 1 : 0, r.follower_count, r.logo_url ?? null, r.last_broadcast_at ?? null, r.channel_id
+            r.is_active ? 1 : 0, r.follower_count, r.name ?? null,
+            r.logo_url ?? null, r.last_broadcast_at ?? null, r.channel_id
           );
         } else {
           updCompute.run(

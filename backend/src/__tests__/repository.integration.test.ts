@@ -142,6 +142,49 @@ describe('findByIds 배치 조회', () => {
   });
 });
 
+describe('streamer profile schedule sync', () => {
+  it('폴링 결과의 최신 채널명과 프로필 이미지를 함께 반영한다', async () => {
+    seedStreamer(db, 'profile-sync', '기존 채널명');
+
+    const baseUpdate = {
+      channel_id: 'profile-sync',
+      prev_value: 1000,
+      base_value: 1010,
+      activity_score: 10,
+      broadcast_multiplier: 1,
+      add_minutes: 0,
+      add_broadcast_count: 0,
+      consumed_chats: 0,
+      polled: true,
+      is_active: true,
+      follower_count: 1200,
+      last_broadcast_at: '2026-08-18T00:00:00.000Z'
+    };
+
+    await streamerRepository.bulkApplyScheduleResults([{
+      ...baseUpdate,
+      name: '새 채널명',
+      logo_url: 'https://example.com/new-logo.webp'
+    }]);
+
+    expect(db.prepare('SELECT name, logo_url FROM streamers WHERE channel_id = ?').get('profile-sync')).toEqual({
+      name: '새 채널명',
+      logo_url: 'https://example.com/new-logo.webp'
+    });
+
+    await streamerRepository.bulkApplyScheduleResults([{
+      ...baseUpdate,
+      name: '   ',
+      logo_url: null
+    }]);
+
+    expect(db.prepare('SELECT name, logo_url FROM streamers WHERE channel_id = ?').get('profile-sync')).toEqual({
+      name: '새 채널명',
+      logo_url: null
+    });
+  });
+});
+
 describe('streamer live-status API', () => {
   it('동시 요청을 합쳐 경량 상태 맵을 반환하고 외부 캐시를 금지한다', async () => {
     seedStreamer(db, 'api-live', '라이브');

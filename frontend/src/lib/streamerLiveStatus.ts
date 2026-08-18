@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch } from './api';
 
 export type StreamerLiveStatusSource = {
   channel_id?: string | null;
@@ -226,6 +226,20 @@ export const resolveStreamerLiveStatus = (
   }
   return streamer?.is_active === true || streamer?.isLive === true;
 };
+
+export const hasNewlyLiveOwnedStreamer = (
+  streamers: readonly StreamerLiveStatusSource[],
+  statuses: LiveStatusSnapshot,
+  previousStatuses: LiveStatusSnapshot
+) => streamers.some((streamer) => {
+  const channelId = typeof streamer.channel_id === 'string' ? streamer.channel_id.trim() : '';
+  return channelId !== '' && statuses[channelId] === true && previousStatuses[channelId] !== true;
+});
+
+export const hasOwnedLiveStreamer = (
+  streamers: readonly StreamerLiveStatusSource[],
+  statuses: LiveStatusSnapshot
+) => streamers.some((streamer) => resolveStreamerLiveStatus(streamer, statuses));
 
 export const useStreamerLiveStatuses = (enabled = true) => {
   const statuses = useSyncExternalStore(

@@ -95,6 +95,8 @@ export interface StreamerScheduleResult {
   is_active: boolean;
   /** polled === true 일 때만 반영되는 팔로워 수 */
   follower_count: number;
+  /** 치지직 API에서 불러온 최신 채널명. polled === true이고 비어 있지 않을 때만 반영합니다. */
+  name?: string | null;
   /** 치지직 API에서 불러온 프로필 이미지 URL (polled === true 일 때 다르면 업데이트) */
   logo_url?: string | null;
   /** 마지막 방송 감지 일시. polled === true 일 때만 반영합니다. */

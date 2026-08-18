@@ -32,7 +32,11 @@ import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
-import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
+import {
+  hasNewlyLiveOwnedStreamer,
+  hasOwnedLiveStreamer,
+  useStreamerLiveStatuses
+} from '@/lib/streamerLiveStatus';
 
 interface Streamer {
   channel_id: string;
@@ -115,14 +119,16 @@ const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FAL
 
 export const GachaTab: React.FC = () => {
   const { user, refreshUserData, toast, blindImage, unblindImage, isImageBlinded } = useApp();
-  const { isStreamerLive } = useStreamerLiveStatuses(Boolean(user));
+  const { statuses: liveStatuses, isStreamerLive } = useStreamerLiveStatuses(Boolean(user));
   const router = useRouter();
   const searchParams = useSearchParams();
+  const userId = user?.id;
   const broadcastModeStorageKey = `chikapo_inventory_broadcast_mode:${user?.id || 'guest'}`;
   const broadcastModeLoadedKeyRef = React.useRef<string | null>(null);
   const skipNextBroadcastModeSaveRef = React.useRef(false);
   const [streamers, setStreamers] = useState<Streamer[]>([]);
   const [inventory, setInventory] = useState<UserCard[]>([]);
+  const previousLiveStatusesRef = React.useRef<Readonly<Record<string, boolean>> | null>(null);
   const [broadcastMode, setBroadcastMode] = useState(false);
   // 코스메틱 장착
   const [myCosmetics, setMyCosmetics] = useState<any[]>([]);
@@ -259,6 +265,35 @@ export const GachaTab: React.FC = () => {
   const streamerProfileImage = (streamer?: Streamer | null, star: number = 0) =>
     streamer?.logo_url || cardImage(streamer, star);
 
+  const applyFreshInventory = React.useCallback((cards: UserCard[]) => {
+    setInventory(cards);
+
+    const freshProfiles = new Map<string, Streamer>();
+    for (const card of cards) {
+      if (card.streamer) freshProfiles.set(card.channel_id, card.streamer);
+    }
+    if (freshProfiles.size > 0) {
+      setStreamers((current) => current.map((streamer) => {
+        const fresh = freshProfiles.get(streamer.channel_id);
+        return fresh ? { ...streamer, ...fresh } : streamer;
+      }));
+    }
+  }, []);
+
+  const refreshStreamerCardProfiles = React.useCallback(async () => {
+    try {
+      const response = await apiFetch('/users/me/cards', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!response.ok) return;
+      const cards = await response.json();
+      if (Array.isArray(cards)) applyFreshInventory(cards);
+    } catch (error) {
+      console.error('스트리머 카드 프로필 갱신 실패:', error);
+    }
+  }, [applyFreshInventory]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(broadcastModeStorageKey);
@@ -360,6 +395,32 @@ export const GachaTab: React.FC = () => {
       fetchMarketPending();
     }
   }, [user]);
+
+  // 라이브 전환을 감지하면 같은 주기에 DB에 저장된 최신 채널명/프로필 이미지를 카드에도 반영합니다.
+  useEffect(() => {
+    if (!userId) {
+      previousLiveStatusesRef.current = null;
+      return;
+    }
+    if (Object.keys(liveStatuses).length === 0) return;
+
+    const previous = previousLiveStatusesRef.current;
+    previousLiveStatusesRef.current = liveStatuses;
+    if (!previous) return;
+
+    const hasNewOwnedLive = hasNewlyLiveOwnedStreamer(inventory, liveStatuses, previous);
+    if (hasNewOwnedLive) void refreshStreamerCardProfiles();
+  }, [inventory, liveStatuses, refreshStreamerCardProfiles, userId]);
+
+  // 방송 중 프로필이 다시 바뀌는 경우도 열린 보관함에 지연 없이 수렴하도록 주기적으로 보정합니다.
+  const hasLiveOwnedCard = hasOwnedLiveStreamer(inventory, liveStatuses);
+  useEffect(() => {
+    if (!userId || !hasLiveOwnedCard) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshStreamerCardProfiles();
+    }, 2 * 60_000);
+    return () => window.clearInterval(timer);
+  }, [hasLiveOwnedCard, refreshStreamerCardProfiles, userId]);
 
   // 진행 중 거래의 예약 카드/포인트 집계
   useEffect(() => {
@@ -545,7 +606,7 @@ export const GachaTab: React.FC = () => {
       ]);
       if (res.ok) {
         const data = await res.json();
-        setInventory(data);
+        if (Array.isArray(data)) applyFreshInventory(data);
       }
     } catch (e) {
       console.error('인벤토리 조회 실패:', e);

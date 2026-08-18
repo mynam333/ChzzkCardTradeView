@@ -1304,9 +1304,10 @@ $$ LANGUAGE sql;
 -- 스케줄러 1주기 계산 결과를 단일 호출로 일괄 반영 (네트워크 왕복 최소화)
 -- p_updates: StreamerScheduleResult[] 형태의 JSONB 배열
 --   { channel_id, prev_value, base_value, activity_score, broadcast_multiplier,
---     add_minutes, add_broadcast_count, consumed_chats, polled, is_active, follower_count }
+--     add_minutes, add_broadcast_count, consumed_chats, polled, is_active, follower_count,
+--     name, logo_url, last_broadcast_at }
 -- chat_count는 GREATEST(chat_count - consumed_chats, 0)로 상대 차감하여 집계 도중 유입분 보존.
--- is_active/follower_count는 polled=true(이번 주기 HTTP 폴링)인 경우에만 갱신.
+-- 라이브 상태와 치지직 채널 프로필은 polled=true(이번 주기 HTTP 폴링)인 경우에만 갱신.
 CREATE OR REPLACE FUNCTION bulk_apply_streamer_schedule(p_updates JSONB)
 RETURNS VOID AS $$
   WITH updates AS (
@@ -1323,6 +1324,7 @@ RETURNS VOID AS $$
         polled BOOLEAN,
         is_active BOOLEAN,
         follower_count INTEGER,
+        name TEXT,
         logo_url TEXT,
         last_broadcast_at TEXT
       )
@@ -1337,7 +1339,12 @@ RETURNS VOID AS $$
          chat_count           = GREATEST(s.chat_count - COALESCE(u.consumed_chats, 0), 0),
          is_active            = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.is_active, FALSE) ELSE s.is_active END,
          follower_count       = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.follower_count, s.follower_count) ELSE s.follower_count END,
-         logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN COALESCE(u.logo_url, s.logo_url) ELSE s.logo_url END,
+         name                 = CASE
+                                  WHEN COALESCE(u.polled, FALSE)
+                                  THEN COALESCE(NULLIF(BTRIM(u.name), ''), s.name)
+                                  ELSE s.name
+                                END,
+         logo_url             = CASE WHEN COALESCE(u.polled, FALSE) THEN u.logo_url ELSE s.logo_url END,
          last_broadcast_at    = CASE
                                   WHEN COALESCE(u.polled, FALSE)
                                   THEN COALESCE(NULLIF(u.last_broadcast_at, '')::TIMESTAMPTZ, s.last_broadcast_at)

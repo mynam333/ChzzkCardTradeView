@@ -288,6 +288,7 @@ const buildScheduleResult = (
       polled,
       is_active: openLive,
       follower_count: followerCount,
+      name: polled ? (profile?.name?.trim() || null) : null,
       logo_url: polled ? (profile?.logoUrl || null) : null,
       last_broadcast_at: polled ? (profile?.lastLiveAt || streamer.last_broadcast_at || null) : null
     },

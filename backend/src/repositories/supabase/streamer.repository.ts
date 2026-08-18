@@ -396,9 +396,8 @@ export class SupabaseStreamerRepository implements IStreamerRepository {
           patch.is_active = r.is_active;
           patch.follower_count = r.follower_count;
           patch.last_broadcast_at = r.last_broadcast_at ?? null;
-          if (r.logo_url) {
-            patch.logo_url = r.logo_url;
-          }
+          if (r.name?.trim()) patch.name = r.name.trim();
+          patch.logo_url = r.logo_url ?? null;
         }
         const { error: updateError } = await client.from('streamers').update(patch).eq('channel_id', r.channel_id);
         if (updateError) throw updateError;
