@@ -122,10 +122,10 @@ export class MysqlMarketRepository implements IMarketRepository {
       : '';
     const cardJoin = includeHistoricalRefs ? 'LEFT JOIN user_cards uc ON uc.id = ml.user_card_id' : 'JOIN user_cards uc ON uc.id = ml.user_card_id';
     const channelExpr = includeHistoricalRefs
-      ? 'COALESCE(uc.channel_id COLLATE utf8mb4_unicode_ci, mat.channel_id COLLATE utf8mb4_unicode_ci)'
+      ? 'COALESCE(mat.channel_id COLLATE utf8mb4_unicode_ci, uc.channel_id COLLATE utf8mb4_unicode_ci)'
       : 'uc.channel_id';
-    const serialExpr = includeHistoricalRefs ? 'COALESCE(uc.serial_number, mat.serial_number)' : 'uc.serial_number';
-    const starExpr = includeHistoricalRefs ? 'COALESCE(uc.star, mat.star, 0)' : 'uc.star';
+    const serialExpr = includeHistoricalRefs ? 'COALESCE(mat.serial_number, uc.serial_number)' : 'uc.serial_number';
+    const starExpr = includeHistoricalRefs ? 'COALESCE(mat.star, uc.star, 0)' : 'uc.star';
     const streamerJoin = includeHistoricalRefs
       ? `LEFT JOIN streamers s ON s.channel_id COLLATE utf8mb4_unicode_ci = (${channelExpr}) COLLATE utf8mb4_unicode_ci`
       : 'JOIN streamers s ON s.channel_id = uc.channel_id';
@@ -772,12 +772,31 @@ export class MysqlMarketRepository implements IMarketRepository {
 
   async getRecentPrice(channelId: string): Promise<number | null> {
     const row = await this.getDb().get(`
-      SELECT ml.price FROM market_listings ml
-      JOIN user_cards uc ON uc.id = ml.user_card_id
-      WHERE uc.channel_id = ? AND ml.status = 'SOLD'
-      ORDER BY ml.updated_at DESC
+      SELECT recent.price
+        FROM (
+          SELECT mat.price,
+                 COALESCE(mat.listing_updated_at, mat.recorded_at) AS sold_at,
+                 COALESCE(mat.listing_id, mat.id) AS listing_id
+            FROM market_transaction_audit_logs mat
+           WHERE mat.event_type = 'sold'
+             AND mat.status = 'SOLD'
+             AND mat.channel_id = ?
+          UNION ALL
+          SELECT ml.price, ml.updated_at AS sold_at, ml.id AS listing_id
+            FROM market_listings ml
+            JOIN user_cards uc ON uc.id = ml.user_card_id
+           WHERE ml.status = 'SOLD'
+             AND uc.channel_id = ?
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM market_transaction_audit_logs mat
+                WHERE mat.listing_id = ml.id
+                  AND mat.event_type = 'sold'
+             )
+        ) recent
+      ORDER BY recent.sold_at DESC, recent.listing_id DESC
       LIMIT 1
-    `, channelId);
+    `, channelId, channelId);
     return row ? Number(row.price) : null;
   }
 

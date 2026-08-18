@@ -2562,6 +2562,37 @@ BEGIN
          updated_at = NOW()
    WHERE id = p_listing_id;
 
+  -- 거래 이력은 이후 카드 강화/삭제와 무관하게 체결 시점 상태를 유지해야 합니다.
+  INSERT INTO market_transaction_audit_logs
+    (audit_key, listing_id, event_type, related_user_id, seller_id, buyer_id, current_bidder_id,
+     user_card_id, channel_id, serial_number, star, price, status, listing_type, current_bid,
+     bid_reserved, fee, settled_amount, listing_created_at, listing_updated_at)
+  SELECT
+    'sold:' || ml.id,
+    ml.id,
+    'sold',
+    NULL,
+    ml.seller_id,
+    ml.buyer_id,
+    ml.current_bidder_id,
+    ml.user_card_id,
+    uc.channel_id,
+    uc.serial_number,
+    COALESCE(uc.star, 0),
+    ml.price,
+    ml.status,
+    ml.listing_type,
+    ml.current_bid,
+    ml.bid_reserved,
+    ml.fee,
+    ml.settled_amount,
+    ml.created_at,
+    ml.updated_at
+  FROM market_listings ml
+  JOIN user_cards uc ON uc.id = ml.user_card_id
+  WHERE ml.id = p_listing_id
+  ON CONFLICT DO NOTHING;
+
   -- 카드 소유권 이전 및 코스메틱 처리 분기
   IF listing.with_cosmetics THEN
     -- 코스메틱 정보를 유지한 채 소유권만 이전

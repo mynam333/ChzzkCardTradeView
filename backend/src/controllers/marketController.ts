@@ -6,7 +6,7 @@ import { getUserReservations } from './tradeController';
 import { createRealtimeNotification } from '../services/notificationDelivery';
 import { FIXED_MARKET_FEE_RATE, calculateMarketFee, getAuctionFeeRate } from '../utils/marketFee';
 import { publishRealtimeEvent } from '../services/realtimeStream';
-import { scheduleUserRankingRefresh } from './playController';
+import { clearStreamerDetailCache, scheduleUserRankingRefresh } from './playController';
 import type { MarketListing } from '../repositories/interfaces';
 import { recordAchievementEvent } from '../services/achievementService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
@@ -590,6 +590,8 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
       return res.status(400).json({ error: 'PurchaseFailed', message: errMsg });
     }
 
+    clearStreamerDetailCache(listing.card?.channel_id);
+
     // 알림 발송 처리
     const streamerName = listing.card?.streamer?.name || '스트리머';
     const star = listing.card?.star ?? 0;
@@ -785,6 +787,9 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
     const endedListings = settledAuctionListings.filter((listing) => listing.status === 'AUCTION_ENDED');
     const staleCutoffIso = new Date(Date.now() - MARKET_STALE_LISTING_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const cancelledListings = await marketRepository.cancelStaleListings(staleCutoffIso, MARKET_STALE_CANCEL_BATCH);
+    for (const listing of soldListings) {
+      clearStreamerDetailCache(listing.card?.channel_id);
+    }
     if (settledAuctionListings.length > 0 || cancelledListings.length > 0) {
       console.log(`[MarketScheduler] 정리 완료: 만료 경매 ${settledAuctionListings.length}건(낙찰 ${soldListings.length}건), 오래된 고정가 매물 자동 취소 ${cancelledListings.length}건`);
     }

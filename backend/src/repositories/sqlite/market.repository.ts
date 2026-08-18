@@ -756,9 +756,9 @@ export class SqliteMarketRepository implements IMarketRepository {
     const rows = this.getDb().prepare(`
       SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
              uc.user_id AS card_user_id,
-             COALESCE(uc.channel_id, mat.channel_id) AS channel_id,
-             COALESCE(uc.serial_number, mat.serial_number) AS serial_number,
-             COALESCE(uc.star, mat.star, 0) AS star,
+             COALESCE(mat.channel_id, uc.channel_id) AS channel_id,
+             COALESCE(mat.serial_number, uc.serial_number) AS serial_number,
+             COALESCE(mat.star, uc.star, 0) AS star,
              uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
              s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
              s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
@@ -774,7 +774,7 @@ export class SqliteMarketRepository implements IMarketRepository {
         LEFT JOIN users cb ON cb.id = ml.current_bidder_id
         LEFT JOIN market_transaction_audit_logs mat ON mat.listing_id = ml.id AND mat.event_type = 'sold'
         LEFT JOIN user_cards uc ON uc.id = ml.user_card_id
-        LEFT JOIN streamers s ON s.channel_id = COALESCE(uc.channel_id, mat.channel_id)
+        LEFT JOIN streamers s ON s.channel_id = COALESCE(mat.channel_id, uc.channel_id)
         LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
         LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
        WHERE (ml.seller_id = ? OR ml.buyer_id = ?) AND ml.status IN ('SOLD', 'CANCELLED')
@@ -822,9 +822,9 @@ export class SqliteMarketRepository implements IMarketRepository {
     const rows = this.getDb().prepare(`
       SELECT ml.*, u.username AS seller_username, bu.username AS buyer_username, cb.username AS current_bidder_username,
              uc.user_id AS card_user_id,
-             COALESCE(uc.channel_id, mat.channel_id) AS channel_id,
-             COALESCE(uc.serial_number, mat.serial_number) AS serial_number,
-             COALESCE(uc.star, mat.star, 0) AS star,
+             COALESCE(mat.channel_id, uc.channel_id) AS channel_id,
+             COALESCE(mat.serial_number, uc.serial_number) AS serial_number,
+             COALESCE(mat.star, uc.star, 0) AS star,
              uc.border_item_id, uc.name_effect_item_id, uc.acquired_at,
              s.name AS streamer_name, s.logo_url AS streamer_logo, s.custom_image_url AS streamer_custom_image,
              s.custom_image_url_1 as sci1, s.custom_image_url_2 as sci2, s.custom_image_url_3 as sci3,
@@ -840,7 +840,7 @@ export class SqliteMarketRepository implements IMarketRepository {
         LEFT JOIN users cb ON cb.id = ml.current_bidder_id
         LEFT JOIN market_transaction_audit_logs mat ON mat.listing_id = ml.id AND mat.event_type = 'sold'
         LEFT JOIN user_cards uc ON uc.id = ml.user_card_id
-        LEFT JOIN streamers s ON s.channel_id = COALESCE(uc.channel_id, mat.channel_id)
+        LEFT JOIN streamers s ON s.channel_id = COALESCE(mat.channel_id, uc.channel_id)
         LEFT JOIN shop_items bi ON uc.border_item_id = bi.id
         LEFT JOIN shop_items ni ON uc.name_effect_item_id = ni.id
        WHERE ml.status = 'SOLD'
@@ -887,14 +887,32 @@ export class SqliteMarketRepository implements IMarketRepository {
 
   async getRecentPrice(channelId: string): Promise<number | null> {
     const row = this.getDb().prepare(`
-      SELECT ml.price
-        FROM market_listings ml
-        JOIN user_cards uc ON uc.id = ml.user_card_id
-       WHERE uc.channel_id = ? AND ml.status = 'SOLD'
-       ORDER BY ml.updated_at DESC
+      SELECT recent.price
+        FROM (
+          SELECT mat.price,
+                 COALESCE(mat.listing_updated_at, mat.recorded_at) AS sold_at,
+                 COALESCE(mat.listing_id, mat.id) AS listing_id
+            FROM market_transaction_audit_logs mat
+           WHERE mat.event_type = 'sold'
+             AND mat.status = 'SOLD'
+             AND mat.channel_id = ?
+          UNION ALL
+          SELECT ml.price, ml.updated_at AS sold_at, ml.id AS listing_id
+            FROM market_listings ml
+            JOIN user_cards uc ON uc.id = ml.user_card_id
+           WHERE ml.status = 'SOLD'
+             AND uc.channel_id = ?
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM market_transaction_audit_logs mat
+                WHERE mat.listing_id = ml.id
+                  AND mat.event_type = 'sold'
+             )
+        ) recent
+       ORDER BY recent.sold_at DESC, recent.listing_id DESC
        LIMIT 1
-    `).get(channelId) as { price: number } | undefined;
-    return row ? row.price : null;
+    `).get(channelId, channelId) as { price: number } | undefined;
+    return row ? Number(row.price) : null;
   }
 
   async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; auction_ends_at?: string | null }> {

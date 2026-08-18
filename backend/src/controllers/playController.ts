@@ -702,6 +702,7 @@ const streamerRankingSnapshotInFlight = new Map<'value' | 'change', Promise<any[
 let streamerRankingTitlesCache: { data: Record<string, any[]>; expiresAt: number } | null = null;
 const streamerDetailCache = new Map<string, { data: any; expiresAt: number; staleExpiresAt: number }>();
 const streamerDetailInFlight = new Map<string, Promise<any>>();
+let streamerDetailCacheRevision = 0;
 const STREAMER_DETAIL_CACHE_TTL = Math.max(15_000, Number(process.env.STREAMER_DETAIL_CACHE_TTL_MS || 30_000));
 const STREAMER_DETAIL_STALE_TTL = Math.max(
   STREAMER_DETAIL_CACHE_TTL,
@@ -722,6 +723,27 @@ let userRankingMutationRefreshTimer: NodeJS.Timeout | null = null;
 let userRankingMutationRefreshFirstQueuedAt = 0;
 let userRankingMutationRefreshLastStartedAt = 0;
 const userRankingMutationRefreshReasons = new Set<string>();
+
+/**
+ * 최근 체결가를 포함하는 스트리머 상세 캐시를 거래 직후 무효화합니다.
+ * revision은 이미 실행 중인 오래된 조회가 완료된 뒤 캐시를 다시 덮어쓰는 경쟁도 막습니다.
+ */
+export const clearStreamerDetailCache = (channelId?: string) => {
+  streamerDetailCacheRevision++;
+  if (!channelId) {
+    streamerDetailCache.clear();
+    streamerDetailInFlight.clear();
+    return;
+  }
+
+  const prefix = `${channelId}|`;
+  for (const key of streamerDetailCache.keys()) {
+    if (key.startsWith(prefix)) streamerDetailCache.delete(key);
+  }
+  for (const key of streamerDetailInFlight.keys()) {
+    if (key.startsWith(prefix)) streamerDetailInFlight.delete(key);
+  }
+};
 
 const mysqlDateValueSql = (column: string) => `
   CASE
@@ -803,8 +825,7 @@ export const clearStreamerRankingCaches = () => {
   streamerRankingSnapshots.clear();
   streamerRankingSnapshotInFlight.clear();
   streamerRankingTitlesCache = null;
-  streamerDetailCache.clear();
-  streamerDetailInFlight.clear();
+  clearStreamerDetailCache();
   clearDrawPoolCache();
 };
 
@@ -2272,7 +2293,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
     const now = Date.now();
     const cached = streamerDetailCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
-      res.set('Cache-Control', 'public, max-age=30');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(cached.data);
     }
     const inFlight = streamerDetailInFlight.get(cacheKey);
@@ -2281,11 +2302,12 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
       if (!data) {
         return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
       }
-      res.set('Cache-Control', 'public, max-age=30');
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json(data);
     }
 
     if (cached && cached.staleExpiresAt > now) {
+      const requestRevision = streamerDetailCacheRevision;
       const refresh = (async () => {
         const streamer = await streamerRepository.findById(channel_id);
         if (!streamer) return null;
@@ -2323,7 +2345,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
           range_end_at: rangeEndAt.toISOString()
         };
       })().then((data) => {
-        if (data) {
+        if (data && requestRevision === streamerDetailCacheRevision) {
           streamerDetailCache.set(cacheKey, {
             data,
             expiresAt: Date.now() + STREAMER_DETAIL_CACHE_TTL,
@@ -2335,14 +2357,17 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
         console.warn('[PlayController] 스트리머 상세 백그라운드 갱신 실패:', err?.message || err);
         return cached.data;
       }).finally(() => {
-        streamerDetailInFlight.delete(cacheKey);
+        if (streamerDetailInFlight.get(cacheKey) === refresh) {
+          streamerDetailInFlight.delete(cacheKey);
+        }
       });
       streamerDetailInFlight.set(cacheKey, refresh);
-      res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=300');
+      res.set('Cache-Control', 'private, no-store');
       res.set('X-Streamer-Detail-Cache', 'stale');
       return res.status(200).json(cached.data);
     }
 
+    const requestRevision = streamerDetailCacheRevision;
     const request = (async () => {
       const streamer = await streamerRepository.findById(channel_id);
       if (!streamer) {
@@ -2387,7 +2412,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
         range_end_at: rangeEndAt.toISOString()
       };
     })().then((data) => {
-      if (data) {
+      if (data && requestRevision === streamerDetailCacheRevision) {
         streamerDetailCache.set(cacheKey, {
           data,
           expiresAt: Date.now() + STREAMER_DETAIL_CACHE_TTL,
@@ -2401,7 +2426,9 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
       }
       return data;
     }).finally(() => {
-      streamerDetailInFlight.delete(cacheKey);
+      if (streamerDetailInFlight.get(cacheKey) === request) {
+        streamerDetailInFlight.delete(cacheKey);
+      }
     });
     streamerDetailInFlight.set(cacheKey, request);
     const data = await request.catch((err) => {
@@ -2415,7 +2442,7 @@ export const getStreamerDetail = async (req: Request, res: Response) => {
     if (!data) {
       return res.status(404).json({ error: 'NotFound', message: '스트리머 정보를 찾을 수 없습니다.' });
     }
-    res.set('Cache-Control', 'public, max-age=30');
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(data);
   } catch (err: any) {
     console.error('[PlayController] getStreamerDetail 에러:', err);

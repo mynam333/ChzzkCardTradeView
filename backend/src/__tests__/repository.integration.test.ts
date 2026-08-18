@@ -16,12 +16,14 @@ import {
   userRepository
 } from '../repositories';
 import {
+  clearStreamerDetailCache,
   clearStreamerLiveStatusCache,
+  getStreamerDetail,
   getStreamerLiveStatuses,
   getUserProfile,
   getUserRankings
 } from '../controllers/playController';
-import { cancelListing, createListing, listMarketHistory } from '../controllers/marketController';
+import { cancelListing, createListing, listMarketHistory, purchaseListing } from '../controllers/marketController';
 import { buyItem, createItem, getActiveItems, getAllItems, getUserPurchases, updateItem } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
@@ -74,6 +76,7 @@ beforeEach(() => {
   loadSchema(db);
   __setSqliteDbForTest(db);
   initRepositories();
+  clearStreamerDetailCache();
   clearStreamerLiveStatusCache();
 });
 
@@ -1549,6 +1552,62 @@ describe('MarketRepository 재등록 제약', () => {
         source_id: String(first.id)
       }
     ]);
+  });
+
+  it('최근 체결가는 거래 직후 갱신되고 거래 이력의 별은 체결 시점에 고정된다', async () => {
+    seedUser(db, 'snapshot-seller');
+    seedUser(db, 'snapshot-buyer', 10_000);
+    seedUser(db, 'snapshot-final-buyer', 10_000);
+    seedStreamer(db, 'snapshot-channel', '스냅샷 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('snapshot-seller', 'snapshot-channel', 17, 2)
+    `).run().lastInsertRowid);
+
+    const detailBeforeSale = createJsonResponse();
+    await getStreamerDetail({ params: { channel_id: 'snapshot-channel' }, query: { range: '7d' } } as any, detailBeforeSale);
+    expect(detailBeforeSale.body.streamer.recent_market_price).toBeNull();
+
+    const firstListing = await marketRepository.create({
+      seller_id: 'snapshot-seller',
+      user_card_id: cardId,
+      price: 1200
+    });
+    const firstPurchaseResponse = createJsonResponse();
+    await purchaseListing({
+      user: { id: 'snapshot-buyer', username: '첫 구매자' },
+      params: { id: String(firstListing.id) }
+    } as any, firstPurchaseResponse);
+    expect(firstPurchaseResponse.body).toMatchObject({ ok: true });
+
+    const detailAfterFirstSale = createJsonResponse();
+    await getStreamerDetail({ params: { channel_id: 'snapshot-channel' }, query: { range: '7d' } } as any, detailAfterFirstSale);
+    expect(detailAfterFirstSale.body.streamer.recent_market_price).toBe(1200);
+
+    const secondListing = await marketRepository.create({
+      seller_id: 'snapshot-buyer',
+      user_card_id: cardId,
+      price: 2600
+    });
+    const secondPurchaseResponse = createJsonResponse();
+    await purchaseListing({
+      user: { id: 'snapshot-final-buyer', username: '최종 구매자' },
+      params: { id: String(secondListing.id) }
+    } as any, secondPurchaseResponse);
+    expect(secondPurchaseResponse.body).toMatchObject({ ok: true });
+
+    const detailAfterSecondSale = createJsonResponse();
+    await getStreamerDetail({ params: { channel_id: 'snapshot-channel' }, query: { range: '7d' } } as any, detailAfterSecondSale);
+    expect(detailAfterSecondSale.body.streamer.recent_market_price).toBe(2600);
+    expect(detailAfterSecondSale.headers['Cache-Control']).toBe('private, no-store');
+
+    db.prepare('UPDATE user_cards SET star = 5 WHERE id = ?').run(cardId);
+
+    const participantHistory = await marketRepository.listHistory('snapshot-buyer');
+    const publicHistory = await marketRepository.listAllHistory(10);
+    expect(participantHistory.map((listing) => listing.card?.star)).toEqual([2, 2]);
+    expect(publicHistory.map((listing) => listing.card?.star)).toEqual([2, 2]);
+    expect(await marketRepository.getRecentPrice('snapshot-channel')).toBe(2600);
   });
 
   it('판매 체결과 탈퇴 시점의 오픈마켓 감사 로그에는 탈퇴 유저 ID가 유지된다', async () => {

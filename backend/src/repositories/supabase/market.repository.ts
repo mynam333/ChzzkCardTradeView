@@ -563,6 +563,23 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if (!listingsData || listingsData.length === 0) return [];
 
     const cardIds = listingsData.map(l => l.user_card_id);
+    const soldListingIds = listingsData
+      .filter((listing) => listing.status === 'SOLD')
+      .map((listing) => Number(listing.id))
+      .filter(Number.isFinite);
+    const auditByListingId = new Map<number, any>();
+    if (soldListingIds.length > 0) {
+      const { data: auditRows } = await this.getClient()
+        .from('market_transaction_audit_logs')
+        .select('id, listing_id, channel_id, serial_number, star, price, recorded_at')
+        .eq('event_type', 'sold')
+        .in('listing_id', soldListingIds)
+        .order('id', { ascending: false });
+      for (const audit of auditRows || []) {
+        const listingId = Number(audit.listing_id);
+        if (!auditByListingId.has(listingId)) auditByListingId.set(listingId, audit);
+      }
+    }
     let cardsMap: Record<number, any> = {};
     if (cardIds.length > 0) {
       const { data: cardsData } = await this.getClient()
@@ -597,7 +614,51 @@ export class SupabaseMarketRepository implements IMarketRepository {
       }
     }
 
-    return listingsData.map(l => this.mapRow(l, cardsMap[l.user_card_id]));
+    return listingsData.map((listing) => {
+      const audit = auditByListingId.get(Number(listing.id));
+      const currentCard = cardsMap[listing.user_card_id];
+      const snapshotCard = currentCard && audit
+        ? {
+            ...currentCard,
+            channel_id: audit.channel_id ?? currentCard.channel_id,
+            serial_number: audit.serial_number ?? currentCard.serial_number,
+            star: audit.star ?? currentCard.star
+          }
+        : currentCard;
+      const snapshotListing = audit?.price == null ? listing : { ...listing, price: audit.price };
+      return this.mapRow(snapshotListing, snapshotCard);
+    });
+  }
+
+  private async recordSoldSnapshot(listing: any, card: any): Promise<void> {
+    if (!listing?.id || !card) return;
+    const { error } = await this.getClient()
+      .from('market_transaction_audit_logs')
+      .upsert({
+        audit_key: `sold:${listing.id}`,
+        listing_id: listing.id,
+        event_type: 'sold',
+        related_user_id: null,
+        seller_id: listing.seller_id,
+        buyer_id: listing.buyer_id,
+        current_bidder_id: listing.current_bidder_id ?? null,
+        user_card_id: listing.user_card_id,
+        channel_id: card.channel_id,
+        serial_number: card.serial_number,
+        star: card.star ?? 0,
+        price: listing.price,
+        status: 'SOLD',
+        listing_type: listing.listing_type || 'fixed',
+        current_bid: listing.current_bid ?? null,
+        bid_reserved: listing.bid_reserved ?? 0,
+        fee: listing.fee ?? 0,
+        settled_amount: listing.settled_amount ?? 0,
+        listing_created_at: listing.created_at ?? null,
+        listing_updated_at: listing.updated_at ?? new Date().toISOString()
+      }, { onConflict: 'audit_key', ignoreDuplicates: true });
+    if (error) {
+      console.warn('[SupabaseMarketRepository] 판매 거래 스냅샷 저장 실패:', listing.id, error.message);
+    }
   }
 
   async listHistory(userId: string): Promise<MarketListing[]> {
@@ -625,17 +686,35 @@ export class SupabaseMarketRepository implements IMarketRepository {
   }
 
   async getRecentPrice(channelId: string): Promise<number | null> {
-    const { data, error } = await this.getClient()
-      .from('market_listings')
-      .select('price, user_cards!inner(channel_id)')
-      .eq('status', 'SOLD')
-      .eq('user_cards.channel_id', channelId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const [auditResult, listingResult] = await Promise.all([
+      this.getClient()
+        .from('market_transaction_audit_logs')
+        .select('price, listing_updated_at, recorded_at')
+        .eq('event_type', 'sold')
+        .eq('status', 'SOLD')
+        .eq('channel_id', channelId)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      this.getClient()
+        .from('market_listings')
+        .select('price, updated_at, user_cards!inner(channel_id)')
+        .eq('status', 'SOLD')
+        .eq('user_cards.channel_id', channelId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ]);
 
-    if (error || !data) return null;
-    return (data as any).price;
+    const audit = auditResult.error ? null : auditResult.data as any;
+    const listing = listingResult.error ? null : listingResult.data as any;
+    if (!audit && !listing) return null;
+    if (!audit) return Number(listing.price);
+    if (!listing) return Number(audit.price);
+
+    const auditTime = new Date(audit.listing_updated_at || audit.recorded_at || 0).getTime();
+    const listingTime = new Date(listing.updated_at || 0).getTime();
+    return Number(auditTime >= listingTime ? audit.price : listing.price);
   }
 
   async placeBid(listingId: number, bidderId: string, amount: number): Promise<{ ok: boolean; reason: string; auction_ends_at?: string | null }> {
@@ -714,7 +793,19 @@ export class SupabaseMarketRepository implements IMarketRepository {
           await client.rpc('increment_user_point', { p_id: bidderId, p_delta: winnerRefund });
         }
         await client.rpc('increment_user_point', { p_id: row.seller_id, p_delta: settledAmount });
-        await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
+        const cardData = await this.getCardDetail(row.user_card_id);
+        const soldListing = {
+          ...row,
+          status: 'SOLD',
+          buyer_id: bidderId,
+          current_bidder_id: bidderId,
+          current_bid: amount,
+          price: amount,
+          fee,
+          bid_reserved: 0,
+          settled_amount: settledAmount,
+          updated_at: nowIso
+        };
         const { error: listingError } = await client
           .from('market_listings')
           .update({
@@ -733,8 +824,9 @@ export class SupabaseMarketRepository implements IMarketRepository {
           .eq('status', 'PENDING');
         if (listingError) throw listingError;
 
-        const cardData = await this.getCardDetail(row.user_card_id);
-        settled.push(this.mapRow({ ...row, status: 'SOLD', buyer_id: bidderId, current_bidder_id: bidderId, current_bid: amount, price: amount, fee, bid_reserved: 0, settled_amount: settledAmount }, cardData));
+        await this.recordSoldSnapshot(soldListing, cardData);
+        await client.from('user_cards').update({ user_id: bidderId }).eq('id', row.user_card_id);
+        settled.push(this.mapRow(soldListing, cardData));
       } catch (err: any) {
         console.warn('[SupabaseMarketRepository] 만료 경매 정리 실패, 경매 종료 처리 시도:', row.id, err?.message || err);
         try {
