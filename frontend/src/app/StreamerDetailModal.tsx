@@ -8,6 +8,7 @@ import { formatLocal } from '@/lib/time';
 import { useApp } from './AppContext';
 import { BarChart3, X } from 'lucide-react';
 import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
+import { formatMarketPrice } from '@/lib/marketLimits';
 
 interface HistoryPoint { value: number; recorded_at: string; }
 interface HistoryRange { start: string; end: string; }
@@ -20,7 +21,7 @@ interface StreamerDetail {
   is_active?: boolean | null;
   base_value?: number | null;
   prev_value?: number | null;
-  recent_market_price?: number | null;
+  recent_market_price?: number | string | null;
   activity_score?: number | null;
   broadcast_minutes?: number | null;
 }
@@ -127,7 +128,7 @@ export const StreamerDetailModal: React.FC<{ channelId: string; onClose: () => v
                   return <p className={`text-[11px] font-bold ${cls}`}>{arrow} {rate.toFixed(1)}% (24h)</p>;
                 })()}
                 {streamer.recent_market_price !== undefined && streamer.recent_market_price !== null ? (
-                  <p className="mt-1 text-[10px] font-bold text-emerald-500">최근 체결 {streamer.recent_market_price.toLocaleString()} P</p>
+                  <p className="mt-1 text-[10px] font-bold text-emerald-500">최근 체결 {formatMarketPrice(streamer.recent_market_price)} P</p>
                 ) : (
                   <p className="mt-1 text-[10px] text-muted-foreground">마켓 거래 이력 없음</p>
                 )}

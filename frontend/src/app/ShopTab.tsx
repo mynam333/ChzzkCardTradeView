@@ -14,7 +14,7 @@ import { CardPreview } from './CardPreview';
 import { BlindableCardImage } from './BlindableCardImage';
 import { Sparkles, Coins, ShoppingBag, Store, Search, ChevronLeft, ChevronRight, ArrowRightLeft, Clock, Trash2, X, Layers, Ticket, Bell, Gavel, Hourglass, BadgePercent } from 'lucide-react';
 import { formatLocalDateTime, parseAppDate } from '@/lib/time';
-import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
+import { formatMarketPrice, MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 import { useStreamerLiveStatuses } from '@/lib/streamerLiveStatus';
 
 interface ShopItem {
@@ -1027,11 +1027,11 @@ export const ShopTab: React.FC = () => {
     const minBid = Number(listing.starting_bid || listing.price || 0);
     const currentMyBid = Math.max(0, Number(listing.my_bid || 0));
     if (!Number.isFinite(amount) || amount < minBid) {
-      toast(`최소 입찰가는 ${minBid.toLocaleString()} P 입니다.`, 'warning');
+      toast(`최소 입찰가는 ${formatMarketPrice(minBid)} P 입니다.`, 'warning');
       return;
     }
     if (amount > MAX_MARKET_PRICE) {
-      toast(`입찰 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`, 'warning');
+      toast(`입찰 금액은 최대 ${formatMarketPrice(MAX_MARKET_PRICE)} P까지 입력할 수 있습니다.`, 'warning');
       return;
     }
     if (Number(user.point || 0) + currentMyBid < amount) {
@@ -1871,7 +1871,7 @@ export const ShopTab: React.FC = () => {
                         title="클릭하면 삭제됩니다"
                       >
                         {watch.streamer?.name || watch.channel_id} · {watch.star == null ? '모든 등급' : watch.star === 0 ? '일반' : `${watch.star}성`}
-                        {watch.max_price ? ` · ${Number(watch.max_price).toLocaleString()}P 이하` : ''}
+                        {watch.max_price ? ` · ${formatMarketPrice(watch.max_price)}P 이하` : ''}
                       </button>
                     ))}
                   </div>
@@ -1973,7 +1973,7 @@ export const ShopTab: React.FC = () => {
                             <span className="text-muted-foreground truncate" title={listing.seller_username}>판매: {listing.seller_username}</span>
                             <span className={`cute-number-font flex shrink-0 items-center font-black ${isAuction ? 'text-violet-500' : 'text-primary'}`}>
                               {isAuction ? <Gavel className="h-3 w-3 mr-0.5" /> : <Coins className="h-3 w-3 mr-0.5" />}
-                              {(isAuction ? startBid : listing.price).toLocaleString()}
+                              {formatMarketPrice(isAuction ? startBid : listing.price)}
                             </span>
                           </div>
                           {isAuction && (
@@ -1997,12 +1997,12 @@ export const ShopTab: React.FC = () => {
                               {/* 시작가 */}
                               <div className="flex items-center justify-between text-[10px] font-bold text-violet-700 dark:text-violet-200">
                                 <span>시작가</span>
-                                <span className="cute-number-font">{startBid.toLocaleString()} P</span>
+                                <span className="cute-number-font">{formatMarketPrice(startBid)} P</span>
                               </div>
                               {myBid > 0 && (
                                 <div className="flex items-center justify-between rounded-lg bg-white/70 px-2 py-1 text-[10px] font-black text-violet-900 dark:bg-black/20 dark:text-violet-100">
                                   <span>내 입찰가</span>
-                                  <span className="cute-number-font">{myBid.toLocaleString()} P</span>
+                                  <span className="cute-number-font">{formatMarketPrice(myBid)} P</span>
                                 </div>
                               )}
                               {isUrgent && (
@@ -2030,7 +2030,7 @@ export const ShopTab: React.FC = () => {
                                     maxLength={9}
                                     value={bidInputs[listing.id] || ''}
                                     onChange={(event) => setBidInputs(prev => ({ ...prev, [listing.id]: sanitizeMarketPriceInput(event.target.value) }))}
-                                    placeholder={`${minBid.toLocaleString()}P`}
+                                    placeholder={`${formatMarketPrice(minBid)}P`}
                                     className="min-w-0 flex-1 rounded-xl border border-border bg-card px-2 py-1.5 text-[10px] font-bold focus:border-primary focus:outline-none"
                                   />
                                   <button
@@ -2057,7 +2057,7 @@ export const ShopTab: React.FC = () => {
                                   className="cute-wiggle-hover flex w-full items-center justify-center gap-1 rounded-2xl bg-primary py-1.5 text-[10px] font-bold text-primary-foreground shadow-sm transition hover:bg-primary/95 active:scale-95 disabled:opacity-50"
                                 >
                                   <ShoppingBag className="h-3 w-3" />
-                                  {purchasingListingId === listing.id ? '처리 중...' : isAuction ? `${buyNowPrice.toLocaleString()}P 즉시낙찰` : '구매하기'}
+                                  {purchasingListingId === listing.id ? '처리 중...' : isAuction ? `${formatMarketPrice(buyNowPrice)}P 즉시낙찰` : '구매하기'}
                                 </button>
                               )}
                               {streamer?.channel_id && (
@@ -2196,18 +2196,18 @@ export const ShopTab: React.FC = () => {
                             </td>
                             <td className="py-3">
                               <div className={`font-black ${isAuction ? 'text-violet-500' : 'text-yellow-500'}`}>
-                                {isAuction ? `${startBid.toLocaleString()} P 시작` : `${l.price.toLocaleString()} P`}
+                                {isAuction ? `${formatMarketPrice(startBid)} P 시작` : `${formatMarketPrice(l.price)} P`}
                               </div>
                               {isAuction && (
                                 <div className="mt-1 space-y-0.5 text-[9px] font-bold">
                                   <div className="text-muted-foreground">
-                                    {l.buy_now_price ? `즉시 ${Number(l.buy_now_price).toLocaleString()} P` : '입찰 전용'}
+                                    {l.buy_now_price ? `즉시 ${formatMarketPrice(l.buy_now_price)} P` : '입찰 전용'}
                                   </div>
                                   <div className={highestBid > 0 ? 'text-violet-500' : 'text-muted-foreground'}>
-                                    최고 제시 {highestBid > 0 ? `${highestBid.toLocaleString()} P` : '입찰 없음'}
+                                    최고 제시 {highestBid > 0 ? `${formatMarketPrice(highestBid)} P` : '입찰 없음'}
                                   </div>
                                   {l.status === 'SOLD' && winningPrice > 0 && (
-                                    <div className="text-emerald-500">실제 낙찰 {winningPrice.toLocaleString()} P</div>
+                                    <div className="text-emerald-500">실제 낙찰 {formatMarketPrice(winningPrice)} P</div>
                                   )}
                                 </div>
                               )}
@@ -2215,7 +2215,7 @@ export const ShopTab: React.FC = () => {
                             <td className="py-3 text-muted-foreground font-semibold">
                               {l.status === 'SOLD' ? (
                                 <div className="flex flex-col">
-                                  <span>{l.settled_amount.toLocaleString()} P</span>
+                                  <span>{formatMarketPrice(l.settled_amount)} P</span>
                                   <span className="text-[9px] font-bold text-rose-500">수수료 {feeRate}%</span>
                                 </div>
                               ) : '-'}
@@ -2358,12 +2358,12 @@ export const ShopTab: React.FC = () => {
                             if (isSeller) {
                               typeLabel = '판매 완료';
                               typeColor = 'bg-emerald-500/10 text-emerald-500';
-                              actionPoint = `+${l.settled_amount.toLocaleString()} P`;
+                              actionPoint = `+${formatMarketPrice(l.settled_amount)} P`;
                               actionPointColor = 'text-emerald-500 font-extrabold';
                             } else if (isBuyer) {
                               typeLabel = '구매 완료';
                               typeColor = 'bg-sky-500/10 text-sky-500';
-                              actionPoint = `-${l.price.toLocaleString()} P`;
+                              actionPoint = `-${formatMarketPrice(l.price)} P`;
                               actionPointColor = 'text-sky-500 font-extrabold';
                             }
                           } else if (l.status === 'CANCELLED') {
@@ -2402,14 +2402,14 @@ export const ShopTab: React.FC = () => {
                                 </div>
                               </td>
                               <td className="py-3">
-                                <div className="font-bold text-yellow-500">{l.price.toLocaleString()} P</div>
+                                <div className="font-bold text-yellow-500">{formatMarketPrice(l.price)} P</div>
                                 {historyScope === 'mine' && isAuction && (
                                   <div className="mt-1 space-y-0.5 text-[9px] font-bold">
                                     <div className="text-violet-500">
-                                      최고 제시 {highestBid > 0 ? `${highestBid.toLocaleString()} P` : '입찰 없음'}
+                                      최고 제시 {highestBid > 0 ? `${formatMarketPrice(highestBid)} P` : '입찰 없음'}
                                     </div>
                                     {winningPrice > 0 && (
-                                      <div className="text-emerald-500">실제 낙찰 {winningPrice.toLocaleString()} P</div>
+                                      <div className="text-emerald-500">실제 낙찰 {formatMarketPrice(winningPrice)} P</div>
                                     )}
                                   </div>
                                 )}
@@ -2544,13 +2544,13 @@ export const ShopTab: React.FC = () => {
                 <span className="font-bold text-muted-foreground">구매 가격</span>
                 <span className="cute-number-font inline-flex items-center gap-1 font-black text-primary">
                   <Coins className="h-3.5 w-3.5" />
-                  {marketBuyConfirm.price.toLocaleString()} P
+                  {formatMarketPrice(marketBuyConfirm.price)} P
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
                 <span className="font-bold text-muted-foreground">구매 후 예상 보유 포인트</span>
                 <span className="cute-number-font font-black text-foreground">
-                  {Math.max(0, (user?.point || 0) - marketBuyConfirm.price).toLocaleString()} P
+                  {formatMarketPrice(Math.max(0, (user?.point || 0) - marketBuyConfirm.price))} P
                 </span>
               </div>
             </div>
@@ -2596,13 +2596,13 @@ export const ShopTab: React.FC = () => {
                 <span className="font-bold text-muted-foreground">즉시 낙찰가</span>
                 <span className="cute-number-font inline-flex items-center gap-1 font-black text-violet-600 dark:text-violet-200">
                   <Coins className="h-3.5 w-3.5" />
-                  {auctionBuyConfirm.price.toLocaleString()} P
+                  {formatMarketPrice(auctionBuyConfirm.price)} P
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
                 <span className="font-bold text-muted-foreground">낙찰 후 예상 보유 포인트</span>
                 <span className="cute-number-font font-black text-foreground">
-                  {Math.max(0, (user?.point || 0) - auctionBuyConfirm.price).toLocaleString()} P
+                  {formatMarketPrice(Math.max(0, (user?.point || 0) - auctionBuyConfirm.price))} P
                 </span>
               </div>
             </div>

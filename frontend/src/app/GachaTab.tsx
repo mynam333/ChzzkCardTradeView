@@ -31,7 +31,7 @@ import { ReportCardModal } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
-import { MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
+import { formatMarketPrice, MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
 import {
   hasNewlyLiveOwnedStreamer,
   hasOwnedLiveStreamer,
@@ -657,7 +657,7 @@ export const GachaTab: React.FC = () => {
       return;
     }
     if (buyNowPrice > MAX_MARKET_PRICE || startingBid > MAX_MARKET_PRICE) {
-      showAlert('등록 실패', `판매 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`, 'warning');
+      showAlert('등록 실패', `판매 금액은 최대 ${formatMarketPrice(MAX_MARKET_PRICE)} P까지 입력할 수 있습니다.`, 'warning');
       return;
     }
 
@@ -3368,7 +3368,7 @@ export const GachaTab: React.FC = () => {
                     No.{String(streamer.serial_number ?? 0).padStart(4, '0')} · {star}성 카드
                   </p>
                   <p className="text-[10px] text-emerald-500 font-bold mt-0.5">
-                    시세 가치: {cardVal.toLocaleString()} P
+                    시세 가치: {formatMarketPrice(cardVal)} P
                   </p>
                 </div>
               </div>
@@ -3473,16 +3473,16 @@ export const GachaTab: React.FC = () => {
                   {marketListingType === 'auction' && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">경매 시작가</span>
-                      <span className="font-bold text-foreground">{startingBid.toLocaleString()} P</span>
+                      <span className="font-bold text-foreground">{formatMarketPrice(startingBid)} P</span>
                     </div>
                   )}
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">수수료 ({feeRate}%)</span>
-                    <span className="text-rose-500 font-bold">-{fee.toLocaleString()} P</span>
+                    <span className="text-rose-500 font-bold">-{formatMarketPrice(fee)} P</span>
                   </div>
                   <div className="flex justify-between border-t border-border/40 pt-1.5 font-bold">
                     <span>{marketListingType === 'auction' ? '즉시 구매 시 정산 예상' : '정산 예정 금액'}</span>
-                    <span className="text-emerald-500 font-black">{settlement.toLocaleString()} P</span>
+                    <span className="text-emerald-500 font-black">{formatMarketPrice(settlement)} P</span>
                   </div>
                 </div>
 
