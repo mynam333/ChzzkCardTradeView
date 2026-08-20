@@ -10,6 +10,7 @@ import { clearStreamerDetailCache, scheduleUserRankingRefresh } from './playCont
 import type { MarketListing } from '../repositories/interfaces';
 import { recordAchievementEvent } from '../services/achievementService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
+import { formatMarketPrice } from '../utils/marketPrice';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.min(5000, Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000)));
@@ -390,7 +391,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
   if (submittedPrices.some((value) => !Number.isInteger(value) || value > MAX_MARKET_PRICE)) {
     return res.status(400).json({
       error: 'PriceTooHigh',
-      message: `판매 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`
+      message: `판매 금액은 최대 ${formatMarketPrice(MAX_MARKET_PRICE)} P까지 입력할 수 있습니다.`
     });
   }
   if (listingType === 'auction' && rawBuyNowPrice !== null && rawBuyNowPrice < startBid) {
@@ -600,7 +601,7 @@ export const purchaseListing = async (req: AuthenticatedRequest, res: Response) 
     const settledAmount = result.settled_amount ?? calculateMarketFee(price, feeRate).settledAmount;
 
     const title = '[오픈마켓] 카드 판매 완료';
-    const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${price}P에서 수수료 ${feeRate}%를 제한 ${settledAmount}P가 계정으로 정산되었습니다.`;
+    const body = `등록하신 [${streamerName}] ${star}성 카드가 판매되었습니다. 대금 ${formatMarketPrice(price)}P에서 수수료 ${feeRate}%를 제한 ${formatMarketPrice(settledAmount)}P가 계정으로 정산되었습니다.`;
     notify(listing.seller_id, title, body);
     const updatedListing = await marketRepository.findById(id).catch(() => null);
     publishMarketUpdated('listing_purchased', updatedListing || { ...listing, status: 'SOLD', price });
@@ -646,7 +647,7 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
   if (amount > MAX_MARKET_PRICE) {
     return res.status(400).json({
       error: 'PriceTooHigh',
-      message: `입찰 금액은 최대 ${MAX_MARKET_PRICE.toLocaleString('ko-KR')} P까지 입력할 수 있습니다.`
+      message: `입찰 금액은 최대 ${formatMarketPrice(MAX_MARKET_PRICE)} P까지 입력할 수 있습니다.`
     });
   }
   const result = await marketRepository.placeBid(id, user.id, amount);
@@ -805,12 +806,12 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
       const winningBid = auctionResult?.winning_bid ?? listing.current_bid ?? price;
       const secondBid = auctionResult?.second_bid ?? null;
       const winnerDetail = secondBid && secondBid > 0
-        ? `최고 입찰가 ${winningBid.toLocaleString()}P 중 2번째 높은 입찰가 ${secondBid.toLocaleString()}P 기준으로 ${price.toLocaleString()}P에 낙찰되었습니다.`
-        : `단독 입찰 또는 경쟁 입찰이 없어 시작가 기준 ${price.toLocaleString()}P에 낙찰되었습니다.`;
+        ? `최고 입찰가 ${formatMarketPrice(winningBid)}P 중 2번째 높은 입찰가 ${formatMarketPrice(secondBid)}P 기준으로 ${formatMarketPrice(price)}P에 낙찰되었습니다.`
+        : `단독 입찰 또는 경쟁 입찰이 없어 시작가 기준 ${formatMarketPrice(price)}P에 낙찰되었습니다.`;
       notify(
         listing.seller_id,
         '[오픈마켓] 경매 낙찰 완료',
-        `[${streamerName}] ${star}성 카드 경매가 ${winnerName}님에게 ${price.toLocaleString()}P에 낙찰되었습니다.`,
+        `[${streamerName}] ${star}성 카드 경매가 ${winnerName}님에게 ${formatMarketPrice(price)}P에 낙찰되었습니다.`,
         'shop:market',
         `market-auction-seller:${listing.id}`
       );
@@ -828,7 +829,7 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
         notifySiteOnly(
           bidder.user_id,
           '[오픈마켓] 경매 미낙찰',
-          `[${streamerName}] ${star}성 카드 경매는 낙찰되지 않았습니다. 내 입찰가 ${bidder.amount.toLocaleString()}P, 최고 입찰자는 ${winnerName}님(${winningBid.toLocaleString()}P 입찰)입니다. 예약된 포인트는 환불되었습니다.`,
+          `[${streamerName}] ${star}성 카드 경매는 낙찰되지 않았습니다. 내 입찰가 ${formatMarketPrice(bidder.amount)}P, 최고 입찰자는 ${winnerName}님(${formatMarketPrice(winningBid)}P 입찰)입니다. 예약된 포인트는 환불되었습니다.`,
           'shop:market',
           `market-auction-lost:${listing.id}:${bidder.user_id}`
         );
@@ -843,7 +844,7 @@ export const settleExpiredAuctions = async (options: { force?: boolean } = {}) =
         notifySiteOnly(
           bidder.user_id,
           '[오픈마켓] 경매 유찰',
-          `[${streamerName}] ${star}성 카드 경매가 낙찰 없이 종료되었습니다. 내 입찰가 ${bidder.amount.toLocaleString()}P는 환불되었습니다.`,
+          `[${streamerName}] ${star}성 카드 경매가 낙찰 없이 종료되었습니다. 내 입찰가 ${formatMarketPrice(bidder.amount)}P는 환불되었습니다.`,
           'shop:market',
           `market-auction-ended:${listing.id}:${bidder.user_id}`
         );
@@ -888,7 +889,7 @@ const notifyMatchingWatches = async (listing: any) => {
     notify(
       watch.user_id,
       '[오픈마켓] 관심 카드 등록 알림',
-      `${streamerName} ${star}성 카드가 ${price.toLocaleString()}P 조건으로 오픈마켓에 등록되었습니다.`,
+      `${streamerName} ${star}성 카드가 ${formatMarketPrice(price)}P 조건으로 오픈마켓에 등록되었습니다.`,
       'shop:market'
     );
   }

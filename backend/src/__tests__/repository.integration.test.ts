@@ -1610,6 +1610,32 @@ describe('MarketRepository 재등록 제약', () => {
     expect(await marketRepository.getRecentPrice('snapshot-channel')).toBe(2600);
   });
 
+  it('오픈마켓 판매 알림은 DB 문자열 가격에도 천 단위 구분자를 붙인다', async () => {
+    seedUser(db, 'notification-seller');
+    seedUser(db, 'notification-buyer', 2_000_000);
+    seedStreamer(db, 'notification-channel', '알림 스트리머');
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('notification-seller', 'notification-channel', 31, 3)
+    `).run().lastInsertRowid);
+    const listing = await marketRepository.create({
+      seller_id: 'notification-seller',
+      user_card_id: cardId,
+      price: 1_234_500
+    });
+
+    const purchaseResponse = createJsonResponse();
+    await purchaseListing({
+      user: { id: 'notification-buyer', username: '알림 구매자' },
+      params: { id: String(listing.id) }
+    } as any, purchaseResponse);
+
+    const [notification] = await notificationRepository.findByUser('notification-seller', 10);
+    expect(notification.body).toBe(
+      '등록하신 [알림 스트리머] 3성 카드가 판매되었습니다. 대금 1,234,500P에서 수수료 5%를 제한 1,172,775P가 계정으로 정산되었습니다.'
+    );
+  });
+
   it('판매 체결과 탈퇴 시점의 오픈마켓 감사 로그에는 탈퇴 유저 ID가 유지된다', async () => {
     seedUser(db, 'audit-seller');
     seedUser(db, 'audit-buyer', 10000);
