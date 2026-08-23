@@ -1303,10 +1303,36 @@ const expireDailyLoginStreakIfNeeded = async (userId: string) => {
   await setAchievementStat(userId, 'login.current_streak_days', 0, { last_date: lastDate });
 };
 
+const recomputePointBalanceStat = async (userId: string): Promise<void> => {
+  let point: unknown;
+  if (getDbMode() === 'LOCAL_SQL') {
+    const user = getSqliteDb().prepare('SELECT point FROM users WHERE id = ?').get(userId) as { point?: unknown } | undefined;
+    if (!user) return;
+    point = user.point;
+  } else if (getDbMode() === 'MYSQL') {
+    const user = await getMysqlDb().get('SELECT point FROM users WHERE id = ?', userId) as { point?: unknown } | undefined;
+    if (!user) return;
+    point = user.point;
+  } else {
+    const { data, error } = await getSupabaseClient()
+      .from('users')
+      .select('point')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return;
+    point = (data as { point?: unknown }).point;
+  }
+  await setAchievementStat(userId, 'user.point_balance', Number(point || 0));
+};
+
 export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   if (!userId) return;
   await expireDailyLoginStreakIfNeeded(userId).catch(() => undefined);
+  // 포인트 잔액은 다른 기능 테이블의 상태와 무관한 핵심 조건입니다.
+  // 부가 스냅샷 조회 하나가 실패하더라도 포인트 업적 평가는 최신 잔액을 사용해야 합니다.
+  await recomputePointBalanceStat(userId);
   if (getDbMode() === 'LOCAL_SQL') {
     const db = getSqliteDb();
     const cardStats = db.prepare(`
@@ -1801,7 +1827,9 @@ const isAchievementWinnerStatus = (status: unknown) =>
 
 export const evaluateUserAchievements = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
-  await recomputeSnapshotStats(userId).catch(() => undefined);
+  await recomputeSnapshotStats(userId).catch((err) => {
+    console.warn('[Achievement] snapshot recompute failed:', err instanceof Error ? err.message : String(err));
+  });
   const achievements = await listAchievements();
   const stats = await getUserStats(userId);
   const nowIso = new Date().toISOString();
