@@ -2129,9 +2129,12 @@ export const listUserAchievements = async (
     else if (error) throw error;
     else rows = data || [];
   }
-  const stateByAchievement = new Map(rows.map((row) => [Number(row.achievement_id), row]));
+  const stateByAchievementAndRepeatKey = new Map(
+    rows.map((row) => [`${Number(row.achievement_id)}:${String(row.repeat_key || 'once')}`, row])
+  );
   const items = achievements.map((achievement) => {
-    const state = stateByAchievement.get(achievement.id) || {};
+    const repeatKey = getRepeatKey(achievement);
+    const state = stateByAchievementAndRepeatKey.get(`${achievement.id}:${repeatKey}`) || {};
     const status = (state.status || 'locked') as AchievementStatus;
     const completeOrClaimed = status === 'completed' || status === 'claimed';
     const hiddenMasked = achievement.is_hidden && !completeOrClaimed;
