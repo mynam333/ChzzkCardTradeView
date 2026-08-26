@@ -748,6 +748,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     try {
       return txn();
     } catch (err: any) {
+      console.warn('[SqliteMarketRepository] 마켓 체결 실패:', { listingId, buyerId, reason: err?.message || 'FAILED' });
       return { ok: false, reason: err.message || 'FAILED' };
     }
   }

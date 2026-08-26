@@ -342,30 +342,57 @@ export const getUserCosmetics = async (userId: string): Promise<(ShopItem & { qu
   return rows.map((r) => ({ ...mapShopItem(r), quantity: normalizeDbNumber(r.quantity) }));
 };
 
-/** 상점 목록 표시용 보유 수량 맵. 코스메틱 상세 조인을 피해서 payload와 DB 비용을 낮춥니다. */
+/** 상점 목록 표시용 총 보유 수량 맵(미장착 재고 + 카드에 장착된 수량). */
 export const getUserCosmeticCounts = async (userId: string): Promise<Record<number, number>> => {
   const map: Record<number, number> = {};
+  const addCount = (itemId: unknown, quantity = 1) => {
+    const id = Number(itemId || 0);
+    const count = Number(quantity || 0);
+    if (id > 0 && count > 0) map[id] = (map[id] || 0) + count;
+  };
+  const addEquippedCounts = (cards: Array<{ border_item_id?: unknown; name_effect_item_id?: unknown }>) => {
+    for (const card of cards) {
+      addCount(card.border_item_id);
+      addCount(card.name_effect_item_id);
+    }
+  };
   if (getDbMode() === 'SUPABASE') {
-    const { data } = await getSupabaseClient()
-      .from('user_cosmetics')
-      .select('item_id, quantity')
-      .eq('user_id', userId)
-      .gt('quantity', 0);
-    for (const r of data || []) map[r.item_id] = (map[r.item_id] || 0) + (r.quantity || 0);
+    const client = getSupabaseClient();
+    const [inventoryResult, equippedResult] = await Promise.all([
+      client.from('user_cosmetics').select('item_id, quantity').eq('user_id', userId).gt('quantity', 0),
+      client.from('user_cards').select('border_item_id, name_effect_item_id').eq('user_id', userId)
+    ]);
+    if (inventoryResult.error) {
+      console.error('[ShopService] 코스메틱 미장착 수량 조회 실패:', inventoryResult.error.message);
+      throw inventoryResult.error;
+    }
+    if (equippedResult.error) {
+      console.error('[ShopService] 코스메틱 장착 수량 조회 실패:', equippedResult.error.message);
+      throw equippedResult.error;
+    }
+    for (const row of inventoryResult.data || []) addCount(row.item_id, row.quantity);
+    addEquippedCounts(equippedResult.data || []);
     return map;
   }
   if (getDbMode() === 'MYSQL') {
-    const rows = await getMysqlDb().all(
-      'SELECT item_id, quantity FROM user_cosmetics WHERE user_id = ? AND quantity > 0',
-      userId
-    ) as any[];
-    for (const r of rows) map[r.item_id] = (map[r.item_id] || 0) + (r.quantity || 0);
+    const db = getMysqlDb();
+    const [inventoryRows, equippedRows] = await Promise.all([
+      db.all('SELECT item_id, quantity FROM user_cosmetics WHERE user_id = ? AND quantity > 0', userId) as Promise<any[]>,
+      db.all('SELECT border_item_id, name_effect_item_id FROM user_cards WHERE user_id = ?', userId) as Promise<any[]>
+    ]);
+    for (const row of inventoryRows) addCount(row.item_id, row.quantity);
+    addEquippedCounts(equippedRows);
     return map;
   }
-  const rows = getSqliteDb().prepare(
+  const db = getSqliteDb();
+  const inventoryRows = db.prepare(
     'SELECT item_id, quantity FROM user_cosmetics WHERE user_id = ? AND quantity > 0'
   ).all(userId) as any[];
-  for (const r of rows) map[r.item_id] = (map[r.item_id] || 0) + (r.quantity || 0);
+  const equippedRows = db.prepare(
+    'SELECT border_item_id, name_effect_item_id FROM user_cards WHERE user_id = ?'
+  ).all(userId) as any[];
+  for (const row of inventoryRows) addCount(row.item_id, row.quantity);
+  addEquippedCounts(equippedRows);
   return map;
 };
 
@@ -792,6 +819,8 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
       const card = await tx.get(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
       if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
       if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
+      const pendingListing = await tx.get("SELECT id FROM market_listings WHERE user_card_id = ? AND status = 'PENDING'", cardId) as any;
+      if (pendingListing) return { ok: false, reason: 'CARD_IN_MARKET' };
       if (card.current === itemId) return { ok: true, reason: 'OK' };
       const owned = await tx.get('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ? FOR UPDATE', userId, itemId) as any;
       if ((owned?.q || 0) < 1) return { ok: false, reason: 'NOT_OWNED' };
@@ -840,6 +869,8 @@ export const equipCosmetic = async (userId: string, cardId: number, itemId: numb
       .get(cardId, userId) as any;
     if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
     if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
+    const pendingListing = db.prepare("SELECT id FROM market_listings WHERE user_card_id = ? AND status = 'PENDING'").get(cardId) as any;
+    if (pendingListing) return { ok: false, reason: 'CARD_IN_MARKET' };
     if (card.current === itemId) return { ok: true, reason: 'OK' };
 
     const owned = db.prepare('SELECT COALESCE(quantity, 0) AS q FROM user_cosmetics WHERE user_id = ? AND item_id = ?')
@@ -917,6 +948,8 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
       const card = await tx.get(`SELECT ${col} AS current, COALESCE(is_locked, 0) AS is_locked FROM user_cards WHERE id = ? AND user_id = ? FOR UPDATE`, cardId, userId) as any;
       if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
       if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
+      const pendingListing = await tx.get("SELECT id FROM market_listings WHERE user_card_id = ? AND status = 'PENDING'", cardId) as any;
+      if (pendingListing) return { ok: false, reason: 'CARD_IN_MARKET' };
       if (!card.current) return { ok: true, reason: 'OK' };
       await tx.run(`
         INSERT INTO user_cosmetics (user_id, item_id, quantity) VALUES (?, ?, 1)
@@ -947,6 +980,8 @@ export const unequipCosmetic = async (userId: string, cardId: number, type: 'bor
       .get(cardId, userId) as any;
     if (!card) return { ok: false, reason: 'CARD_NOT_FOUND' };
     if (Number(card.is_locked || 0) !== 0) return { ok: false, reason: 'CARD_LOCKED' };
+    const pendingListing = db.prepare("SELECT id FROM market_listings WHERE user_card_id = ? AND status = 'PENDING'").get(cardId) as any;
+    if (pendingListing) return { ok: false, reason: 'CARD_IN_MARKET' };
     if (!card.current) return { ok: true, reason: 'OK' };
 
     db.prepare(`

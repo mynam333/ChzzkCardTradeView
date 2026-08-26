@@ -220,7 +220,9 @@ export class MysqlTradeRepository implements ITradeRepository {
                         SELECT 1 FROM market_listings ml
                          WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
                       )
-                    ORDER BY uc.id ASC
+                    ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                             uc.favorite_order ASC,
+                             uc.id DESC
                     LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.star, c.count
                 )
@@ -234,7 +236,9 @@ export class MysqlTradeRepository implements ITradeRepository {
                         SELECT 1 FROM market_listings ml
                          WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
                       )
-                    ORDER BY uc.id ASC
+                    ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                             uc.favorite_order ASC,
+                             uc.id DESC
                     LIMIT ? FOR UPDATE`,
                   fromId, c.channel_id, c.count
                 );
@@ -335,6 +339,7 @@ export class MysqlTradeRepository implements ITradeRepository {
       });
       return { ok: true, reason: 'OK' };
     } catch (err: any) {
+      console.warn('[MysqlTradeRepository] 거래 체결 실패:', { tradeId: id, actorId, reason: err?.message || 'FAILED' });
       return { ok: false, reason: err.message || 'FAILED' };
     }
   }

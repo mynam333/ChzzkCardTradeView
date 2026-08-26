@@ -212,7 +212,9 @@ export class SqliteTradeRepository implements ITradeRepository {
                     SELECT 1 FROM market_listings ml
                      WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
                   )
-                ORDER BY uc.id ASC
+                ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                         uc.favorite_order ASC,
+                         uc.id DESC
                 LIMIT ?`
             ).all(fromId, c.channel_id, c.star, c.count) as { id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }[]
           : db.prepare(
@@ -225,7 +227,9 @@ export class SqliteTradeRepository implements ITradeRepository {
                     SELECT 1 FROM market_listings ml
                      WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'
                   )
-                ORDER BY uc.id ASC
+                ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                         uc.favorite_order ASC,
+                         uc.id DESC
                 LIMIT ?`
             ).all(fromId, c.channel_id, c.count) as { id: number; serial_number: number; star: number; border_item_id: number | null; name_effect_item_id: number | null }[];
         if (owned.length < c.count) {
@@ -344,6 +348,7 @@ export class SqliteTradeRepository implements ITradeRepository {
       txn();
       return { ok: true, reason: 'OK' };
     } catch (err: any) {
+      console.warn('[SqliteTradeRepository] 거래 체결 실패:', { tradeId: id, actorId, reason: err?.message || 'FAILED' });
       return { ok: false, reason: err.message || 'FAILED' };
     }
   }

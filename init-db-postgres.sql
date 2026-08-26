@@ -1420,7 +1420,9 @@ BEGIN
               WHERE ml.user_card_id = uc.id
                 AND ml.status = 'PENDING'
            )
-         ORDER BY uc.id ASC
+         ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                  uc.favorite_order ASC,
+                  uc.id DESC
          LIMIT cnt
          FOR UPDATE
       ) picked;
@@ -1503,7 +1505,9 @@ BEGIN
               WHERE ml.user_card_id = uc.id
                 AND ml.status = 'PENDING'
            )
-         ORDER BY uc.id ASC
+         ORDER BY CASE WHEN uc.favorite_order IS NULL THEN 1 ELSE 0 END,
+                  uc.favorite_order ASC,
+                  uc.id DESC
          LIMIT cnt
          FOR UPDATE
       ) picked;
@@ -1864,6 +1868,10 @@ BEGIN
     SELECT name_effect_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
   END IF;
   IF NOT FOUND THEN RETURN 'CARD_NOT_FOUND'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM market_listings
+     WHERE user_card_id = p_card_id AND status = 'PENDING'
+  ) THEN RETURN 'CARD_IN_MARKET'; END IF;
   IF current_item = p_item_id THEN RETURN 'OK'; END IF;
 
   SELECT COALESCE(quantity, 0) INTO available
@@ -1907,6 +1915,10 @@ BEGIN
     SELECT name_effect_item_id INTO current_item FROM user_cards WHERE id = p_card_id AND user_id = p_user_id FOR UPDATE;
   END IF;
   IF NOT FOUND THEN RETURN 'CARD_NOT_FOUND'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM market_listings
+     WHERE user_card_id = p_card_id AND status = 'PENDING'
+  ) THEN RETURN 'CARD_IN_MARKET'; END IF;
   IF current_item IS NULL THEN RETURN 'OK'; END IF;
 
   INSERT INTO user_cosmetics (user_id, item_id, quantity)

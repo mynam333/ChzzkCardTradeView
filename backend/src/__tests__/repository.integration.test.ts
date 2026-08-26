@@ -24,7 +24,17 @@ import {
   getUserRankings
 } from '../controllers/playController';
 import { cancelListing, createListing, listMarketHistory, purchaseListing } from '../controllers/marketController';
-import { buyItem, createItem, getActiveItems, getAllItems, getUserPurchases, updateItem } from '../services/shopService';
+import {
+  buyItem,
+  createItem,
+  equipCosmetic,
+  getActiveItems,
+  getAllItems,
+  getUserCosmeticCounts,
+  getUserPurchases,
+  unequipCosmetic,
+  updateItem
+} from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
 
@@ -1342,6 +1352,50 @@ describe('TradeRepository 코스메틱 포함 옵션', () => {
        ORDER BY item_id ASC
     `).all('trade-receiver')).toEqual([{ item_id: nameEffectId, quantity: 0 }]);
   });
+
+  it('동일한 카드가 여러 장이면 미리보기에 사용된 최신 카드의 코스메틱과 보유 수량을 함께 이전한다', async () => {
+    seedUser(db, 'trade-order-sender', 1000);
+    seedUser(db, 'trade-order-receiver', 1000);
+    seedStreamer(db, 'trade-order-channel', '코스메틱 선택 순서 카드');
+    const borderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '선택 순서 테두리', 100, '{"border":"2px solid gold"}')
+    `).run().lastInsertRowid);
+    const plainCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('trade-order-sender', 'trade-order-channel', 1, 2)
+    `).run().lastInsertRowid);
+    const cosmeticCardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id)
+      VALUES ('trade-order-sender', 'trade-order-channel', 2, 2, ?)
+    `).run(borderId).lastInsertRowid);
+
+    const trade = await tradeRepository.create({
+      sender_id: 'trade-order-sender',
+      receiver_id: 'trade-order-receiver',
+      sender_offer: {
+        cards: [{ channel_id: 'trade-order-channel', star: 2, count: 1 }],
+        point: 0,
+        with_cosmetics: true
+      },
+      receiver_offer: { cards: [], point: 0 }
+    });
+
+    expect(await tradeRepository.confirm(trade.id as number, 'trade-order-receiver'))
+      .toEqual({ ok: true, reason: 'OK' });
+    expect(await tradeRepository.finalize(trade.id as number, 'trade-order-sender'))
+      .toEqual({ ok: true, reason: 'OK' });
+    expect(db.prepare('SELECT user_id, border_item_id FROM user_cards WHERE id = ?').get(cosmeticCardId)).toEqual({
+      user_id: 'trade-order-receiver',
+      border_item_id: borderId
+    });
+    expect(db.prepare('SELECT user_id, border_item_id FROM user_cards WHERE id = ?').get(plainCardId)).toEqual({
+      user_id: 'trade-order-sender',
+      border_item_id: null
+    });
+    expect((await getUserCosmeticCounts('trade-order-receiver'))[borderId]).toBe(1);
+    expect((await getUserCosmeticCounts('trade-order-sender'))[borderId] || 0).toBe(0);
+  });
 });
 
 describe('User profile hidden cards', () => {
@@ -1552,6 +1606,47 @@ describe('MarketRepository 재등록 제약', () => {
         source_id: String(first.id)
       }
     ]);
+  });
+
+  it('코스메틱 포함 매물은 슬롯 변경을 막고 체결 시 구매자의 보유 수량으로 이관한다', async () => {
+    seedUser(db, 'market-package-seller', 0);
+    seedUser(db, 'market-package-buyer', 5000);
+    seedStreamer(db, 'market-package-channel', '코스메틱 포함 매물');
+    const borderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '포함 테두리', 100, '{"border":"2px solid lime"}')
+    `).run().lastInsertRowid);
+    const replacementBorderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '교체 테두리', 100, '{"border":"2px solid blue"}')
+    `).run().lastInsertRowid);
+    db.prepare(`
+      INSERT INTO user_cosmetics (user_id, item_id, quantity)
+      VALUES ('market-package-seller', ?, 1)
+    `).run(replacementBorderId);
+    const cardId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id)
+      VALUES ('market-package-seller', 'market-package-channel', 1, 3, ?)
+    `).run(borderId).lastInsertRowid);
+    const listing = await marketRepository.create({
+      seller_id: 'market-package-seller',
+      user_card_id: cardId,
+      price: 1000,
+      with_cosmetics: true
+    });
+
+    expect(await equipCosmetic('market-package-seller', cardId, replacementBorderId))
+      .toEqual({ ok: false, reason: 'CARD_IN_MARKET' });
+    expect(await unequipCosmetic('market-package-seller', cardId, 'border'))
+      .toEqual({ ok: false, reason: 'CARD_IN_MARKET' });
+    expect(await marketRepository.buyAtomic(listing.id as number, 'market-package-buyer'))
+      .toEqual(expect.objectContaining({ ok: true, reason: 'OK' }));
+    expect(db.prepare('SELECT user_id, border_item_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({
+      user_id: 'market-package-buyer',
+      border_item_id: borderId
+    });
+    expect((await getUserCosmeticCounts('market-package-buyer'))[borderId]).toBe(1);
+    expect((await getUserCosmeticCounts('market-package-seller'))[borderId] || 0).toBe(0);
   });
 
   it('최근 체결가는 거래 직후 갱신되고 거래 이력의 별은 체결 시점에 고정된다', async () => {

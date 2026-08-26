@@ -679,6 +679,7 @@ export class MysqlMarketRepository implements IMarketRepository {
         return { ok: true, reason: 'OK', settled_amount: settledAmount, seller_id: listing.seller_id, price: finalPrice };
       });
     } catch (err: any) {
+      console.warn('[MysqlMarketRepository] 마켓 체결 실패:', { listingId, buyerId, reason: err?.message || 'FAILED' });
       return { ok: false, reason: err.message || 'FAILED' };
     }
   }
