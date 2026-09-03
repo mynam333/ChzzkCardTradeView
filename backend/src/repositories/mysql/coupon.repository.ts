@@ -85,13 +85,12 @@ export class MysqlCouponRepository implements ICouponRepository {
   }
 
   async logCouponRedeem(couponId: number, userId: string): Promise<boolean> {
-    try {
-      await this.getDb().run('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)', couponId, userId);
-      return true;
-    } catch (err: any) {
-      if (err?.code === 'ER_DUP_ENTRY') return false;
-      throw err;
-    }
+    const result = await this.getDb().run(
+      'INSERT IGNORE INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)',
+      couponId,
+      userId
+    );
+    return Number(result.changes || result.affectedRows || 0) > 0;
   }
 
   async redeemAtomic(couponId: number, userId: string): Promise<CouponRedeemResult> {
@@ -114,11 +113,13 @@ export class MysqlCouponRepository implements ICouponRepository {
         }
       }
 
-      try {
-        await tx.run('INSERT INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)', couponId, userId);
-      } catch (err: any) {
-        if (err?.code === 'ER_DUP_ENTRY') return { ok: false, reason: 'DUPLICATE' };
-        throw err;
+      const logResult = await tx.run(
+        'INSERT IGNORE INTO coupon_logs (coupon_id, user_id) VALUES (?, ?)',
+        couponId,
+        userId
+      );
+      if (Number(logResult.changes || logResult.affectedRows || 0) === 0) {
+        return { ok: false, reason: 'DUPLICATE' };
       }
 
       await tx.run('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', couponId);

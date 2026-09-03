@@ -556,6 +556,10 @@ CREATE INDEX IF NOT EXISTS idx_market_listings_created ON market_listings(create
 CREATE INDEX IF NOT EXISTS idx_market_listings_status_type_created ON market_listings(status, listing_type, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_market_listings_participants
     ON market_listings(seller_id, buyer_id, current_bidder_id);
+CREATE INDEX IF NOT EXISTS idx_market_listings_seller_status_type
+    ON market_listings(seller_id, status, listing_type);
+CREATE INDEX IF NOT EXISTS idx_market_listings_buyer_status
+    ON market_listings(buyer_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card
     ON market_listings(user_card_id)
     WHERE status = 'PENDING';

@@ -1375,14 +1375,20 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
         FROM user_achievements
        WHERE user_id = ?
     `).get(userId) as any;
-    const marketStats = db.prepare(`
-      SELECT SUM(CASE WHEN seller_id = ? AND status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
-             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count
+    const sellerMarketStats = db.prepare(`
+      SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
+             SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
+             SUM(CASE WHEN status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
+             SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count
         FROM market_listings
-    `).get(userId, userId, userId, userId, userId) as any;
+       WHERE seller_id = ?
+    `).get(userId) as any;
+    const buyerMarketStats = db.prepare(`
+      SELECT COUNT(*) AS bought_listing_count
+        FROM market_listings
+       WHERE buyer_id = ?
+         AND status = 'SOLD'
+    `).get(userId) as any;
     const activeBidStats = db.prepare(`
       SELECT COUNT(DISTINCT ml.id) AS c
         FROM market_listings ml
@@ -1460,11 +1466,11 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'minigame.failure.count': Number(minigameFailureStats?.c || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
       'profile.status_message.set': user?.status_message ? 1 : 0,
-      'market.active_listing_count': Number(marketStats?.active_listing_count || 0),
-      'market.active_fixed_listing_count': Number(marketStats?.active_fixed_listing_count || 0),
-      'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
-      'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
-      'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
+      'market.active_listing_count': Number(sellerMarketStats?.active_listing_count || 0),
+      'market.active_fixed_listing_count': Number(sellerMarketStats?.active_fixed_listing_count || 0),
+      'market.active_auction_listing_count': Number(sellerMarketStats?.active_auction_listing_count || 0),
+      'market.sold_listing_count': Number(sellerMarketStats?.sold_listing_count || 0),
+      'market.bought_listing_count': Number(buyerMarketStats?.bought_listing_count || 0),
       'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),
@@ -1522,14 +1528,20 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
         FROM user_achievements
        WHERE user_id = ?
     `, userId);
-    const marketStats = await db.get(`
-      SELECT SUM(CASE WHEN seller_id = ? AND status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
-             SUM(CASE WHEN seller_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count,
-             SUM(CASE WHEN buyer_id = ? AND status = 'SOLD' THEN 1 ELSE 0 END) AS bought_listing_count
+    const sellerMarketStats = await db.get(`
+      SELECT SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS active_listing_count,
+             SUM(CASE WHEN status = 'PENDING' AND COALESCE(listing_type, 'fixed') = 'fixed' THEN 1 ELSE 0 END) AS active_fixed_listing_count,
+             SUM(CASE WHEN status = 'PENDING' AND listing_type = 'auction' THEN 1 ELSE 0 END) AS active_auction_listing_count,
+             SUM(CASE WHEN status = 'SOLD' THEN 1 ELSE 0 END) AS sold_listing_count
         FROM market_listings
-    `, userId, userId, userId, userId, userId);
+       WHERE seller_id = ?
+    `, userId);
+    const buyerMarketStats = await db.get(`
+      SELECT COUNT(*) AS bought_listing_count
+        FROM market_listings
+       WHERE buyer_id = ?
+         AND status = 'SOLD'
+    `, userId);
     const activeBidStats = await db.get(`
       SELECT COUNT(DISTINCT ml.id) AS c
         FROM market_listings ml
@@ -1607,11 +1619,11 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'minigame.failure.count': Number(minigameFailureStats?.c || 0),
       'profile.representative.set': user?.representative_card_channel_id ? 1 : 0,
       'profile.status_message.set': user?.status_message ? 1 : 0,
-      'market.active_listing_count': Number(marketStats?.active_listing_count || 0),
-      'market.active_fixed_listing_count': Number(marketStats?.active_fixed_listing_count || 0),
-      'market.active_auction_listing_count': Number(marketStats?.active_auction_listing_count || 0),
-      'market.sold_listing_count': Number(marketStats?.sold_listing_count || 0),
-      'market.bought_listing_count': Number(marketStats?.bought_listing_count || 0),
+      'market.active_listing_count': Number(sellerMarketStats?.active_listing_count || 0),
+      'market.active_fixed_listing_count': Number(sellerMarketStats?.active_fixed_listing_count || 0),
+      'market.active_auction_listing_count': Number(sellerMarketStats?.active_auction_listing_count || 0),
+      'market.sold_listing_count': Number(sellerMarketStats?.sold_listing_count || 0),
+      'market.bought_listing_count': Number(buyerMarketStats?.bought_listing_count || 0),
       'market.active_bid_count': Number(activeBidStats?.c || 0),
       'market.watch_count': Number(watchStats?.c || 0),
       'shop.unique_purchase_count': Number(shopStats?.c || 0),

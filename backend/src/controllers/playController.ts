@@ -19,6 +19,11 @@ import { getDbMode, getMysqlDb, getSqliteDb, getSqlDialect } from '../services/d
 import { acquireSchedulerLock } from '../services/schedulerLock';
 import { recordAchievementEvent } from '../services/achievementService';
 import { publishRealtimeEvent } from '../services/realtimeStream';
+import {
+  isUserRankingSnapshotFresh,
+  readLatestUserRankingSnapshotAt,
+  syncPostgresUserRankingSnapshotTables
+} from '../services/userRankingSnapshot';
 
 const DRAW_LOCKS = new Set<string>();
 const userCardsInFlight = new Map<string, Promise<any[]>>();
@@ -676,6 +681,10 @@ const USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS = Math.max(
   5_000,
   Number(process.env.USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS || 45_000)
 );
+const USER_RANKING_SNAPSHOT_LOCK_TTL_MS = Math.max(
+  60_000,
+  Number(process.env.USER_RANKING_SNAPSHOT_LOCK_TTL_MS || Math.max(300_000, USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS * 8))
+);
 const USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS = Math.max(
   1_000,
   Number(process.env.USER_RANKING_SNAPSHOT_PRESENCE_CACHE_TTL_MS || 10_000)
@@ -690,7 +699,7 @@ const USER_RANKING_MUTATION_REFRESH_MAX_DELAY_MS = Math.max(
 );
 const USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS = Math.max(
   USER_RANKING_MUTATION_REFRESH_DEBOUNCE_MS,
-  Number(process.env.USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS || 5_000)
+  Number(process.env.USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS || USER_RANKING_SNAPSHOT_MIN_REFRESH_INTERVAL)
 );
 const STREAMER_RANKING_CHANGE_HISTORY_ENABLED = process.env.STREAMER_RANKING_CHANGE_HISTORY_ENABLED === 'true';
 const rankingsCache = new Map<string, { data: any[]; expiresAt: number }>();
@@ -798,7 +807,10 @@ export const scheduleUserRankingRefresh = (reason = 'ranking_mutation') => {
     const eventReason = reasons.length ? reasons.join(',') : reason;
     try {
       userRankingMutationRefreshLastStartedAt = Date.now();
-      const refreshed = await refreshUserRankingSnapshot({ force: true });
+      const refreshed = await refreshUserRankingSnapshot({
+        force: true,
+        minimumRefreshIntervalMs: USER_RANKING_MUTATION_REFRESH_MIN_INTERVAL_MS
+      });
       clearUserRankingCaches();
       publishRealtimeEvent('ranking', {
         reason: eventReason,
@@ -864,7 +876,11 @@ const hasUserRankingSnapshot = async (requireCardFilter = true): Promise<boolean
     && (!requireCardFilter || userRankingSnapshotPresenceCache.cardFilterPresent);
 };
 
-export const refreshUserRankingSnapshot = async (options: { force?: boolean; requireCardFilter?: boolean } = {}): Promise<boolean> => {
+export const refreshUserRankingSnapshot = async (options: {
+  force?: boolean;
+  requireCardFilter?: boolean;
+  minimumRefreshIntervalMs?: number;
+} = {}): Promise<boolean> => {
   const mode = getDbMode();
   if (mode === 'SUPABASE') return false;
   const force = options.force === true;
@@ -884,9 +900,21 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean; req
     if (mode === 'MYSQL') {
       const db = getMysqlDb();
       const isPostgres = getSqlDialect() === 'postgres';
-      const releaseLock = await acquireSchedulerLock('snapshot:user-ranking', 60_000);
+      const releaseLock = await acquireSchedulerLock('snapshot:user-ranking', USER_RANKING_SNAPSHOT_LOCK_TTL_MS);
       if (!releaseLock) return waitForUserRankingSnapshot();
       try {
+        const minimumRefreshIntervalMs = Math.max(0, Number(options.minimumRefreshIntervalMs || 0));
+        if (isPostgres && minimumRefreshIntervalMs > 0) {
+          const latestSnapshotAt = await readLatestUserRankingSnapshotAt(db);
+          if (isUserRankingSnapshotFresh(latestSnapshotAt, minimumRefreshIntervalMs)) {
+            userRankingSnapshotLastBuiltAt = latestSnapshotAt as number;
+            userRankingSnapshotExpiresAt = Math.max(
+              userRankingSnapshotExpiresAt,
+              userRankingSnapshotLastBuiltAt + USER_RANKING_SNAPSHOT_TTL
+            );
+            return true;
+          }
+        }
         if (isPostgres) {
           await db.transaction(async (tx) => {
             await tx.run(`SET LOCAL statement_timeout = '${USER_RANKING_SNAPSHOT_STATEMENT_TIMEOUT_MS}ms'`);
@@ -933,20 +961,16 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean; req
                WHERE uc.is_hidden IS NOT TRUE
                GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
             `);
-            await tx.run('DELETE FROM user_asset_ranking_cards');
-            await tx.run('DELETE FROM user_asset_rankings');
-            await tx.run('INSERT INTO user_asset_rankings SELECT * FROM user_asset_rankings_next');
-            await tx.run('INSERT INTO user_asset_ranking_cards SELECT * FROM user_asset_ranking_cards_next');
+            await syncPostgresUserRankingSnapshotTables(tx);
           });
-          return true;
-        }
-        await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
-        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
-        await db.run('DROP TABLE IF EXISTS user_asset_rankings_next');
-        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_next');
-        await db.run('CREATE TABLE user_asset_rankings_next LIKE user_asset_rankings');
-        await db.run('CREATE TABLE user_asset_ranking_cards_next LIKE user_asset_ranking_cards');
-        await db.run(`
+        } else {
+          await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
+          await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
+          await db.run('DROP TABLE IF EXISTS user_asset_rankings_next');
+          await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_next');
+          await db.run('CREATE TABLE user_asset_rankings_next LIKE user_asset_rankings');
+          await db.run('CREATE TABLE user_asset_ranking_cards_next LIKE user_asset_ranking_cards');
+          await db.run(`
           INSERT INTO user_asset_rankings_next
             (user_id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
              card_count, cards_value, total_asset, total_rank, cards_rank, snapshot_at)
@@ -986,8 +1010,8 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean; req
             SELECT id, username, avatar_url, role, point, last_free_draw, banned_until, ban_reason, status_message, last_seen_at, created_at,
                    card_count, ROUND(cards_value_raw), point + ROUND(cards_value_raw), total_rank, cards_rank, UTC_TIMESTAMP()
               FROM RankedUsers
-        `);
-        await db.run(`
+          `);
+          await db.run(`
           INSERT INTO user_asset_ranking_cards_next (user_id, channel_id, star, card_count)
           SELECT uc.user_id, uc.channel_id, COALESCE(uc.star, 0) AS star, COUNT(*) AS card_count
             FROM user_cards uc
@@ -995,16 +1019,17 @@ export const refreshUserRankingSnapshot = async (options: { force?: boolean; req
               ON r.user_id = uc.user_id
            WHERE COALESCE(uc.is_hidden, 0) = 0
            GROUP BY uc.user_id, uc.channel_id, COALESCE(uc.star, 0)
-        `);
-        await db.run(
-          `RENAME TABLE
+          `);
+          await db.run(
+            `RENAME TABLE
              user_asset_rankings TO user_asset_rankings_old,
              user_asset_rankings_next TO user_asset_rankings,
              user_asset_ranking_cards TO user_asset_ranking_cards_old,
              user_asset_ranking_cards_next TO user_asset_ranking_cards`
-        );
-        await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
-        await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
+          );
+          await db.run('DROP TABLE IF EXISTS user_asset_rankings_old');
+          await db.run('DROP TABLE IF EXISTS user_asset_ranking_cards_old');
+        }
       } finally {
         await releaseLock().catch(() => undefined);
       }

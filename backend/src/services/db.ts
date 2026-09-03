@@ -844,6 +844,8 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_auction_end', '(status, auction_ends_at, id)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_bidder_active', '(status, listing_type, current_bidder_id, bid_reserved)');
   await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_status_type_auction_end', '(status, listing_type, auction_ends_at, id)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_seller_status_type', '(seller_id, status, listing_type)');
+  await ensureMysqlIndex(db, 'market_listings', 'idx_market_listings_buyer_status', '(buyer_id, status)');
   await dropMysqlSingleColumnUniqueIndexes(db, 'market_listings', 'user_card_id');
   await ensureMysqlUniqueIndex(db, 'market_listings', 'idx_market_listings_pending_card', '(pending_user_card_id)');
   await normalizeMysqlIsoDateColumn(db, 'market_listings', 'auction_ends_at');
@@ -1332,6 +1334,8 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_price ON market_listings (status, price, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_status_auction_end ON market_listings (status, auction_ends_at, id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_bidder_active ON market_listings (status, listing_type, current_bidder_id, bid_reserved)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_seller_status_type ON market_listings (seller_id, status, listing_type)');
+  await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_buyer_status ON market_listings (buyer_id, status)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_listings_pending_created_latest ON market_listings (created_at DESC, id DESC) WHERE status = \'PENDING\'');
   await ensureIndex('CREATE UNIQUE INDEX IF NOT EXISTS idx_market_listings_pending_card ON market_listings (pending_user_card_id)');
   await ensureIndex('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_market_bids_listing ON market_bids (listing_id, amount DESC)');
@@ -2083,6 +2087,8 @@ export const initDatabaseConnection = async (
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_bidder_active ON market_listings(status, listing_type, current_bidder_id, bid_reserved);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_sold_updated_card ON market_listings(status, updated_at DESC, user_card_id, price);`);
       sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_participants ON market_listings(seller_id, buyer_id, current_bidder_id);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_seller_status_type ON market_listings(seller_id, status, listing_type);`);
+      sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_market_listings_buyer_status ON market_listings(buyer_id, status);`);
       try {
         const db = sqliteDb;
         if (!db) throw new Error('SQLITE_DB_NOT_READY');

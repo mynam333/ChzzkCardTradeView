@@ -229,6 +229,12 @@ export const claimCoupon = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(500).json({ error: 'InternalServerError', message: '올바르지 않은 쿠폰 상태입니다.' });
     }
 
+    // 이미 사용한 쿠폰의 반복 요청은 쿠폰 행 잠금을 잡는 트랜잭션까지 보내지 않습니다.
+    // 동시 요청 경쟁은 redeemAtomic의 INSERT IGNORE가 최종적으로 차단합니다.
+    if (await couponRepository.checkCouponRedeemed(coupon.id, userId)) {
+      return res.status(409).json({ error: 'Conflict', message: '이미 사용하신 쿠폰입니다.' });
+    }
+
     const rewards = couponToRewards(coupon);
     const enriched = await enrichRewards(rewards);
     if (!enriched.rewards) {
