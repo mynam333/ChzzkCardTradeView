@@ -979,6 +979,7 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   let validUniqueIndexes: Set<string> | null = null;
   const getValidUniqueIndexes = async () => {
     if (validUniqueIndexes) return validUniqueIndexes;
+    if (typeof db.all !== 'function') return new Set<string>();
     const rows = await db.all<{ index_name: string }>(`
       SELECT index_class.relname AS index_name
         FROM pg_class index_class
