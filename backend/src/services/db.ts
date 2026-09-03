@@ -808,6 +808,13 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
            settled_amount = COALESCE(settled_amount, 0),
            with_cosmetics = COALESCE(with_cosmetics, 0),
            pending_user_card_id = CASE WHEN status = 'PENDING' THEN COALESCE(pending_user_card_id, user_card_id) ELSE NULL END
+     WHERE listing_type IS NULL
+        OR bid_reserved IS NULL
+        OR fee_rate IS NULL
+        OR settled_amount IS NULL
+        OR with_cosmetics IS NULL
+        OR (status = 'PENDING' AND pending_user_card_id IS NULL)
+        OR (status <> 'PENDING' AND pending_user_card_id IS NOT NULL)
   `);
   await db.run(`
     CREATE TABLE IF NOT EXISTS market_bids (
@@ -1130,6 +1137,13 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
            settled_amount = COALESCE(settled_amount, 0),
            with_cosmetics = COALESCE(with_cosmetics, FALSE),
            pending_user_card_id = CASE WHEN status = 'PENDING' THEN COALESCE(pending_user_card_id, user_card_id) ELSE NULL END
+     WHERE listing_type IS NULL
+        OR bid_reserved IS NULL
+        OR fee_rate IS NULL
+        OR settled_amount IS NULL
+        OR with_cosmetics IS NULL
+        OR (status = 'PENDING' AND pending_user_card_id IS NULL)
+        OR (status <> 'PENDING' AND pending_user_card_id IS NOT NULL)
   `);
   await db.run('ALTER TABLE market_listings DROP CONSTRAINT IF EXISTS market_listings_user_card_id_key');
   await db.run(`
