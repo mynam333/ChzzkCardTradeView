@@ -939,6 +939,58 @@ const ensureMysqlCompatibilityMigrations = async (db: MysqlDb) => {
 };
 
 export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
+  const dedupeIndexByTable: Record<string, string> = {
+    user_achievements: 'uniq_user_achievement_repeat',
+    user_achievement_stats: 'uniq_user_achievement_stats_key',
+    achievement_grant_logs: 'uniq_achievement_grant',
+    achievement_events: 'uniq_achievement_event_key',
+    achievement_evaluation_queue: 'uniq_achievement_queue_dedupe',
+    achievements: 'uniq_achievements_code',
+    streamers: 'uniq_streamers_channel',
+    system_configs: 'uniq_system_configs_key',
+    user_card_serials: 'uniq_user_card_serials_channel',
+    push_subscriptions: 'uniq_push_subscriptions_endpoint',
+    streamer_registration_blocks: 'uniq_streamer_registration_blocks_channel',
+    chat_attachments: 'uniq_chat_attachments_owner_hash',
+    user_cosmetics: 'uniq_user_cosmetics_item',
+    shop_purchases: 'uniq_shop_purchases_item',
+    user_minigame_tickets: 'uniq_user_minigame_tickets_user',
+    user_titles: 'uniq_user_titles_user_title',
+    subscription_title_states: 'uniq_subscription_title_states_rule',
+    user_image_blinds: 'uniq_user_image_blinds_key',
+    link_previews: 'uniq_link_previews_hash',
+    puzzle_excluded_images: 'uniq_puzzle_excluded_images_key',
+    arena_worker_heartbeats: 'uniq_arena_worker_heartbeats_worker',
+    arena_user_cosmetic_loadouts: 'uniq_arena_user_cosmetic_loadouts_user',
+    arena_cup_replays: 'uniq_arena_cup_replays_cup',
+    arena_match_replays: 'uniq_arena_match_replays_match',
+    arena_player_ratings: 'uniq_arena_player_ratings_user',
+    notifications: 'uniq_notifications_group_key',
+    market_watches: 'uniq_market_watches_user_channel_star',
+    market_transaction_audit_logs: 'uniq_market_audit_key',
+    asset_event_logs: 'uniq_asset_event_logs_key',
+    tutorial_rewards: 'uniq_tutorial_rewards_key',
+    coupon_logs: 'uniq_coupon_logs_user',
+    coupons: 'uniq_coupons_code',
+    friendships: 'uniq_friendships_pair',
+    user_blocks: 'uniq_user_blocks_pair',
+    deleted_user_accounts: 'uniq_deleted_user_accounts_user'
+  };
+  let validUniqueIndexes: Set<string> | null = null;
+  const getValidUniqueIndexes = async () => {
+    if (validUniqueIndexes) return validUniqueIndexes;
+    const rows = await db.all<{ index_name: string }>(`
+      SELECT index_class.relname AS index_name
+        FROM pg_class index_class
+        JOIN pg_index index_meta ON index_meta.indexrelid = index_class.oid
+        JOIN pg_namespace index_namespace ON index_namespace.oid = index_class.relnamespace
+       WHERE index_namespace.nspname = current_schema()
+         AND index_meta.indisunique
+         AND index_meta.indisvalid
+    `);
+    validUniqueIndexes = new Set(rows.map((row) => String(row.index_name)));
+    return validUniqueIndexes;
+  };
   const ensureIndex = async (sql: string) => {
     try {
       await db.run(sql);
@@ -949,6 +1001,8 @@ export const ensurePostgresCompatibilityMigrations = async (db: PostgresDb) => {
   };
   const dedupeRows = async (table: string, partitionBy: string, orderBy: string, where = 'TRUE') => {
     try {
+      const uniqueIndex = dedupeIndexByTable[table];
+      if (uniqueIndex && (await getValidUniqueIndexes()).has(uniqueIndex)) return;
       await db.run(`
         DELETE FROM ${table}
          WHERE ctid IN (
