@@ -235,6 +235,17 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
     }
   }
 
+  async saveActionProgress(sessionId: string, userId: string, revision: number, progressData: string, expiresAt?: string): Promise<boolean> {
+    const { data, error } = await this.getClient().from('minigame_sessions')
+      .update({ progress_data: progressData, progress_revision: revision + 1, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+      .eq('id', sessionId).eq('user_id', userId).eq('status', 'STARTED')
+      .eq('progress_revision', revision).gt('expires_at', new Date().toISOString())
+      .in('game_type', ['fan_meeting', 'streamer_catch', 'sequence_relay'])
+      .select('id').maybeSingle();
+    if (error) throw new Error('미니게임 진행 상태를 저장하지 못했습니다.');
+    return Boolean(data);
+  }
+
   async armRoundDeadline(
     sessionId: string,
     userId: string,
@@ -558,6 +569,7 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
       .select('*')
       .eq('status', 'STARTED')
       .lt('created_at', limitDate)
+      .or(`game_type.not.in.(fan_meeting,streamer_catch,sequence_relay),expires_at.lte.${new Date().toISOString()}`)
       .order('created_at', { ascending: true })
       .limit(safeLimit);
 

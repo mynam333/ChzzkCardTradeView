@@ -266,6 +266,14 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     });
   }
 
+  async saveActionProgress(sessionId: string, userId: string, revision: number, progressData: string, expiresAt?: string): Promise<boolean> {
+    const result = await this.getDb().run(
+      "UPDATE minigame_sessions SET progress_data = ?, progress_revision = progress_revision + 1, expires_at = COALESCE(?, expires_at) WHERE id = ? AND user_id = ? AND status = 'STARTED' AND progress_revision = ? AND expires_at > ? AND game_type IN ('fan_meeting', 'streamer_catch', 'sequence_relay')",
+      progressData, expiresAt ?? null, sessionId, userId, revision, new Date().toISOString()
+    );
+    return Number(result.affectedRows ?? result.changes ?? 0) === 1;
+  }
+
   async armRoundDeadline(
     sessionId: string,
     userId: string,
@@ -586,10 +594,11 @@ export class MysqlMinigameRepository implements IMinigameRepository {
         FROM minigame_sessions
         WHERE status = 'STARTED'
           AND created_at < ?
+          AND (game_type NOT IN ('fan_meeting', 'streamer_catch', 'sequence_relay') OR expires_at <= ?)
         ORDER BY created_at ASC
         LIMIT ?
         FOR UPDATE
-      `, cutoff, safeLimit);
+      `, cutoff, new Date().toISOString(), safeLimit);
       for (const session of expired) {
         await tx.run("UPDATE minigame_sessions SET status = 'EXPIRED', completed_at = ? WHERE id = ? AND status = 'STARTED'", formatKstDbTime(), session.id);
       }

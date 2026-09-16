@@ -117,9 +117,9 @@ test('paid crop keeps answer feedback visible until the next-question button is 
   assert.ok(paidAdvanceStart >= 0 && paidAdvanceEnd > paidAdvanceStart);
   assert.ok(continueStart >= 0 && continueEnd > continueStart);
   assert.ok(cropViewStart >= 0 && cropViewEnd > cropViewStart);
-  assert.match(
+  assert.doesNotMatch(
     paidAdvanceFlow,
-    /if \(activeGame !== 'quiz' \|\| isPracticeMode[\s\S]*window\.setTimeout\(\(\) => advanceToPaidRound/
+    /window\.setTimeout\([\s\S]*advanceToPaidRound/
   );
   assert.match(continueFlow, /advanceToPaidRound\(pendingPaidRound\)/);
   assert.match(cropView, /onClick=\{handleRoundContinue\}/);

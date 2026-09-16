@@ -214,6 +214,7 @@ import {
   startMinigame,
   startMinigameRound,
   checkMinigameRoundAnswer,
+  playMinigameAction,
   submitMinigameResult
 } from '../controllers/minigameController';
 import {
@@ -305,6 +306,8 @@ const minigameLimiter = rateLimit({
   key: 'minigame',
   keyByUser: true
 });
+// Real-time games can legitimately generate several inputs per second.
+const minigameActionLimiter = rateLimit({ windowMs: 10_000, max: 100, key: 'minigame-action', keyByUser: true });
 const streamerReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('STREAMER_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('STREAMER_READ_RATE_LIMIT_MAX', 240), key: 'streamer-read' });
 const arenaReadLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_READ_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_READ_RATE_LIMIT_MAX', 240), key: 'arena-read' });
 const arenaDeckWriteLimiter = rateLimit({ windowMs: routeRateLimitWindowMs('ARENA_DECK_WRITE_RATE_LIMIT_WINDOW_MS'), max: routeRateLimitMax('ARENA_DECK_WRITE_RATE_LIMIT_MAX', 12), key: 'arena-deck-write', keyByUser: true });
@@ -578,6 +581,7 @@ router.post('/minigames/start', authMiddleware, banCheckMiddleware, accountInter
 router.post('/minigames/round-start', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, startMinigameRound);
 router.post('/minigames/round-answer', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, checkMinigameRoundAnswer);
 router.post('/minigames/submit', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameLimiter, submitMinigameResult);
+router.post('/minigames/action', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, minigameActionLimiter, playMinigameAction);
 
 // ==========================================
 // 치카포 아레나 API (읽기 우선, 저부하 캐시 기반)

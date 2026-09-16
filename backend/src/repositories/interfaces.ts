@@ -641,7 +641,7 @@ export interface IMarketRepository {
 }
 
 // 10. 미니게임 티켓 및 세션 데이터 인터페이스
-export type MinigameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
+export type MinigameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective' | 'fan_meeting' | 'streamer_catch' | 'sequence_relay';
 
 export interface UserMinigameTicket {
   user_id: string;
@@ -706,6 +706,8 @@ export type MinigameCompletionResult =
     };
 
 export interface IMinigameRepository {
+  /** Compare-and-swap server-owned action state; never writes to a settled session. */
+  saveActionProgress(sessionId: string, userId: string, revision: number, progressData: string, expiresAt?: string): Promise<boolean>;
   getTicketStatus(userId: string): Promise<UserMinigameTicket>;
   refreshTicketStatus(userId: string, chargeIntervalMinutes: number): Promise<RefreshedMinigameTicket>;
   updateTickets(userId: string, currentTickets: number, lastChargedAt: string): Promise<void>;

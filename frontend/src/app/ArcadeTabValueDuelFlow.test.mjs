@@ -27,9 +27,9 @@ test('paid value duel keeps feedback on the answered round until continue is cli
     /setPendingPaidRound\(hasNextRound[\s\S]*roundIndex: expectedNextIndex, localDeadlineAt: null/
   );
   assert.doesNotMatch(answerFlow, /setRoundIndex\(/);
-  assert.match(
+  assert.doesNotMatch(
     paidAdvanceFlow,
-    /if \(activeGame !== 'quiz' \|\| isPracticeMode[\s\S]*window\.setTimeout\(\(\) => advanceToPaidRound/
+    /window\.setTimeout\([\s\S]*advanceToPaidRound/
   );
 });
 

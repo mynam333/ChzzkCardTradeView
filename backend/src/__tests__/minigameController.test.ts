@@ -1417,7 +1417,7 @@ describe('daily minigame selection', () => {
   });
 
   it('rejects a paid start when it is not today\'s KST game', async () => {
-    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // puzzle day
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // match day
     const request = {
       user: { id: 'user-1' },
       body: { game_type: 'quiz', practice_mode: false }
@@ -1432,12 +1432,12 @@ describe('daily minigame selection', () => {
   });
 
   it('starts today\'s paid game with an authoritative server challenge', async () => {
-    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // puzzle day
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // match day
     findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
     startSession.mockResolvedValue({ ok: true });
     const request = {
       user: { id: 'user-1' },
-      body: { game_type: 'puzzle', practice_mode: false }
+      body: { game_type: 'match', practice_mode: false }
     } as AuthenticatedRequest;
     const response = createResponse();
 
@@ -1446,7 +1446,7 @@ describe('daily minigame selection', () => {
     expect(response.status).toHaveBeenCalledWith(200);
     const body = vi.mocked(response.json).mock.calls[0][0] as any;
     expect(body.practice_mode).toBe(false);
-    expect(body.game_data.puzzle_pieces).toHaveLength(12);
+    expect(body.game_data.cards).toHaveLength(12);
     expect(refreshTicketStatus).toHaveBeenCalledWith('user-1', 240);
     expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
       validation_version: 1,
@@ -1484,53 +1484,22 @@ describe('daily minigame selection', () => {
     expect(progress.round_deadline_at).toBe(body.game_data.round_deadline_at);
   });
 
-  it('marks only the initial paid value-duel round as started', async () => {
-    vi.setSystemTime(new Date('2026-06-02T03:00:00.000Z')); // value duel day
-    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
-    startSession.mockResolvedValue({ ok: true });
+  it.each(['puzzle', 'crop_detective', 'value_duel'])('keeps %s practice-only even on its former daily date', async (gameType) => {
+    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z'));
     const response = createResponse();
-
     await startMinigame({
       user: { id: 'user-1' },
-      body: { game_type: 'value_duel', practice_mode: false }
+      body: { game_type: gameType, practice_mode: false }
     } as AuthenticatedRequest, response);
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    const body = vi.mocked(response.json).mock.calls[0][0] as any;
-    expect(body.game_data.rounds).toHaveLength(1);
-    expect(body.game_data.round_deadline_at).toEqual(expect.any(String));
-    const issuedProgress = JSON.parse(startSession.mock.calls[0][0].progress_data || '{}');
-    expect(issuedProgress).toEqual({
-      round_outcomes: [],
-      round_deadline_at: body.game_data.round_deadline_at,
-      round_started_round: 0
-    });
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(refreshTicketStatus).not.toHaveBeenCalled();
+    expect(startSession).not.toHaveBeenCalled();
   });
 
-  it('issues a paid crop round unarmed so image preparation cannot consume its timer', async () => {
-    vi.setSystemTime(new Date('2026-06-12T03:00:00.000Z')); // crop detective day
-    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
-    startSession.mockResolvedValue({ ok: true });
-    const response = createResponse();
-
-    await startMinigame({
-      user: { id: 'user-1' },
-      body: { game_type: 'crop_detective', practice_mode: false }
-    } as AuthenticatedRequest, response);
-
-    expect(response.status).toHaveBeenCalledWith(200);
-    const body = vi.mocked(response.json).mock.calls[0][0] as any;
-    expect(body.game_data).toEqual(expect.objectContaining({
-      total_rounds: 5,
-      round_deadline_at: null
-    }));
-    expect(body.game_data.rounds).toHaveLength(1);
-    const issuedProgress = JSON.parse(startSession.mock.calls[0][0].progress_data || '{}');
-    expect(issuedProgress).toEqual({
-      round_outcomes: [],
-      round_deadline_at: null,
-      round_image_armed_round: null
-    });
+  it('selects only the five current games throughout a year', () => {
+    const selected = new Set(Array.from({ length: 366 }, (_, day) =>
+      getDailyMinigame(Date.UTC(2026, 0, 1 + day)).game_type));
+    expect(selected).toEqual(new Set(['quiz', 'match', 'fan_meeting', 'streamer_catch', 'sequence_relay']));
   });
 
   it.each([
@@ -1538,13 +1507,13 @@ describe('daily minigame selection', () => {
     { label: 'string true', practiceMode: 'true' },
     { label: 'numeric true', practiceMode: 1 }
   ])('does not treat $label practice_mode as the zero-reward mode', async ({ practiceMode }) => {
-    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // puzzle day
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // match day
     findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
     startSession.mockResolvedValue({ ok: true });
     const request = {
       user: { id: 'user-1' },
       body: {
-        game_type: 'puzzle',
+        game_type: 'match',
         ...(practiceMode === undefined ? {} : { practice_mode: practiceMode })
       }
     } as AuthenticatedRequest;
@@ -1558,7 +1527,7 @@ describe('daily minigame selection', () => {
     }), 240);
   });
 
-  it.each(affectedRewardMinigameTypes)('starts %s in practice mode without reading or spending tickets', async (gameType) => {
+  it.each([...affectedRewardMinigameTypes, 'fan_meeting', 'streamer_catch', 'sequence_relay'])('starts %s in practice mode without reading or spending tickets', async (gameType) => {
     vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z'));
     findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
     startSession.mockResolvedValue({ ok: true });

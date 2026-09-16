@@ -24,6 +24,7 @@ import {
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { proxiedImage } from '@/lib/cosmetics';
+import { ActionMinigame, ACTION_GAME_COPY, ACTION_GAME_TYPES, isActionGameType, type ActionGameType } from './ActionMinigame';
 import {
   CROP_DETECTIVE_IMAGE_REQUEST_PROFILES,
   areCropDetectiveAssetsSettled,
@@ -41,7 +42,7 @@ import {
   waitForAbortableDelay
 } from './cropDetectiveRecovery';
 
-type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective';
+type GameType = 'quiz' | 'puzzle' | 'match' | 'value_duel' | 'crop_detective' | ActionGameType;
 type QuizChoice = {
   channel_id: string;
   name: string;
@@ -228,7 +229,8 @@ type PendingPaidRound = {
   localDeadlineAt: number | null;
 };
 
-const GAME_TYPES: GameType[] = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'];
+const GAME_TYPES: GameType[] = ['quiz', 'match', ...ACTION_GAME_TYPES];
+const LEGACY_GAME_TYPES: GameType[] = ['puzzle', 'crop_detective', 'value_duel'];
 
 const DAILY_GAME_DETAILS: Record<GameType, {
   title: string;
@@ -240,10 +242,25 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   badge: string;
   glow: string;
 }> = {
+  fan_meeting: {
+    ...ACTION_GAME_COPY.fan_meeting, Icon: UserRound,
+    accent: 'text-teal-700 dark:text-teal-300', iconBackground: 'bg-teal-100 dark:bg-teal-500/10',
+    badge: 'border-teal-200 bg-teal-50 text-teal-800 dark:bg-teal-500/10 dark:text-teal-300', glow: 'from-teal-500/15 via-transparent to-transparent'
+  },
+  streamer_catch: {
+    ...ACTION_GAME_COPY.streamer_catch, Icon: Eye,
+    accent: 'text-amber-700 dark:text-amber-300', iconBackground: 'bg-amber-100 dark:bg-amber-500/10',
+    badge: 'border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300', glow: 'from-amber-500/15 via-transparent to-transparent'
+  },
+  sequence_relay: {
+    ...ACTION_GAME_COPY.sequence_relay, Icon: Sparkles,
+    accent: 'text-violet-700 dark:text-violet-300', iconBackground: 'bg-violet-100 dark:bg-violet-500/10',
+    badge: 'border-violet-200 bg-violet-50 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300', glow: 'from-violet-500/15 via-transparent to-transparent'
+  },
   quiz: {
-    title: '송출 오류난 스트리머 맞추기',
-    description: '무작위 스트리머 카드가 전송 오류가 났습니다. 15초 내로 복원되는 카드를 보고 누구인지 맞춰보세요!',
-    bonus: '3초 안에 정답 시 보너스 200 P',
+    title: '스트리머 퀴즈',
+    description: '흐린 카드를 보고 이름을 고르세요. 문제당 10초, 5문제 중 3개 이상 맞히면 성공입니다.',
+    bonus: '5문제 모두 정답 시 보너스 200 P',
     Icon: HelpCircle,
     accent: 'text-emerald-600 dark:text-emerald-400',
     iconBackground: 'bg-emerald-100 dark:bg-emerald-500/10',
@@ -251,7 +268,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
     glow: 'from-emerald-500/15 via-transparent to-transparent'
   },
   puzzle: {
-    title: '3x4 회전 퍼즐',
+    title: '회전 퍼즐',
     description: '120초 안에 섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하세요.',
     bonus: '30초 안에 완성 시 보너스 200 P',
     Icon: Sparkles,
@@ -261,7 +278,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
     glow: 'from-teal-500/18 via-transparent to-transparent'
   },
   match: {
-    title: '스트리머 짝맞추기',
+    title: '그림 짝맞추기',
     description: '처음 2초간 공개되는 카드를 기억한 뒤, 30초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
     bonus: '10초 안에 완성 시 보너스 200 P',
     Icon: Trophy,
@@ -281,7 +298,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
     glow: 'from-amber-500/18 via-transparent to-transparent'
   },
   crop_detective: {
-    title: '카드 확대 탐정',
+    title: '확대 탐정',
     description: '확대된 카드 조각을 보고 4개의 후보 카드 중 같은 이미지에서 나온 카드를 찾으세요. 3문제 이상 맞히면 성공입니다.',
     bonus: '5문제 모두 정답 시 보너스 200 P',
     Icon: Eye,
@@ -2521,6 +2538,7 @@ export const ArcadeTab: React.FC = () => {
   const [nextGameAt, setNextGameAt] = useState('');
   const [secondsUntilGameChange, setSecondsUntilGameChange] = useState(0);
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
+  const [actionGameKey, setActionGameKey] = useState(0);
   const [isPracticeMode, setIsPracticeMode] = useState(false);
   const [isPracticeExpanded, setIsPracticeExpanded] = useState(false);
 
@@ -3613,6 +3631,17 @@ export const ArcadeTab: React.FC = () => {
     practiceMode = false,
     override?: { channelId?: string; star?: number | null; blur?: string | null; imageUrl?: string | null }
   ) => {
+    if (isActionGameType(type)) {
+      if (!practiceMode && type !== todayGame) { void fetchStatus(); return; }
+      activeSessionRestoreAllowedRef.current = false;
+      setGameResult(null);
+      setGameData(null);
+      setCountdownLeft(null);
+      setIsPracticeMode(practiceMode);
+      setActiveGame(type);
+      setActionGameKey(key => key + 1);
+      return;
+    }
     if (!practiceMode && (!todayGame || type !== todayGame)) {
       toast('오늘의 미니게임이 변경되었습니다. 최신 게임을 다시 불러옵니다.', 'warning');
       fetchStatus();
@@ -3861,7 +3890,7 @@ export const ArcadeTab: React.FC = () => {
   useEffect(() => {
     if (autoStartRef.current || !user) return;
     const practiceType = searchParams.get('practice');
-    if (practiceType !== 'quiz' && practiceType !== 'puzzle' && practiceType !== 'match' && practiceType !== 'value_duel' && practiceType !== 'crop_detective') return;
+    if (![...GAME_TYPES, ...LEGACY_GAME_TYPES].includes(practiceType as GameType)) return;
     autoStartRef.current = true;
 
     const channelId = searchParams.get('channel') || undefined;
@@ -4624,7 +4653,7 @@ export const ArcadeTab: React.FC = () => {
             </span>
           </button>
 
-          {isPracticeExpanded && (
+          {isPracticeExpanded && (<>
             <div id="practice-game-list" className="grid gap-3 p-4 animate-in fade-in slide-in-from-top-2 duration-200 sm:grid-cols-3 sm:p-5 xl:grid-cols-5">
               {GAME_TYPES.map((gameType) => {
                 const details = DAILY_GAME_DETAILS[gameType];
@@ -4655,6 +4684,15 @@ export const ArcadeTab: React.FC = () => {
                 );
               })}
             </div>
+            <details className="mx-4 mb-4 rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-muted-foreground sm:mx-5">
+              <summary className="cursor-pointer text-xs font-semibold">이전 게임 · 연습 전용</summary>
+              <p className="mt-2 text-[11px]">오늘의 게임에는 나오지 않으며, 동전 소모와 포인트 지급 없이 즐길 수 있어요.</p>
+              <div className="mt-2 flex flex-wrap gap-2">{LEGACY_GAME_TYPES.map(type => <button key={type} type="button" disabled={gameBusy}
+                onClick={() => handleStartGame(type, true)} className="min-h-11 rounded-lg border border-border px-3 text-xs transition hover:bg-secondary disabled:opacity-40">
+                {DAILY_GAME_DETAILS[type].title} <span className="text-[10px]">연습</span>
+              </button>)}</div>
+            </details>
+          </>
           )}
         </section>
       )}
@@ -4662,7 +4700,11 @@ export const ArcadeTab: React.FC = () => {
       {/* ======================================================== */}
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
-      {activeGame && gameData && (
+      {isActionGameType(activeGame) && <ActionMinigame key={actionGameKey} type={activeGame} practice={isPracticeMode} canRestart={isPracticeMode || tickets > 0}
+        onExit={() => { handleExitGame(); void fetchStatus(); }}
+        onSettled={() => { void fetchStatus(); if (!isPracticeMode) void refreshUserData(); }}
+        onRestart={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)} />}
+      {activeGame && !isActionGameType(activeGame) && gameData && (
         <div
           className="cute-surface relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden overscroll-x-contain rounded-[2rem] p-4 animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]"
           style={{ overscrollBehaviorX: 'contain' }}
@@ -4711,11 +4753,7 @@ export const ArcadeTab: React.FC = () => {
 
             <span className="text-xs font-black text-primary capitalize flex items-center gap-1.5">
               <Gamepad2 className="h-4 w-4" />
-              {activeGame === 'quiz' && '❓ 송출 오류난 스트리머 맞추기'}
-              {activeGame === 'puzzle' && '🧩 3x4 회전 퍼즐'}
-              {activeGame === 'match' && '🎴 짝맞추기 카드게임'}
-              {activeGame === 'value_duel' && '📈 시세 듀얼'}
-              {activeGame === 'crop_detective' && '🔎 카드 확대 탐정'}
+              {DAILY_GAME_DETAILS[activeGame].title}
             </span>
           </div>
 

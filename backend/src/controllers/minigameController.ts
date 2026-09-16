@@ -8,11 +8,16 @@ import { listUserImageBlinds } from '../services/userImageBlindService';
 import { normalizeImageBlindKey } from '../utils/imageBlindKey';
 import { recordAchievementEvent } from '../services/achievementService';
 import { createMinigameImageReference } from '../services/minigameImageToken';
+import { ACTION_GAME_NAMES, ACTION_GAME_PLAY_MS, ACTION_GAMES, ActionGameError, ActionInput, ActionTarget,
+  actionReward, advanceActionGame, createActionTarget, initialActionState, isActionGame,
+  publicActionGame, readActionState } from '../services/actionMinigames';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const DAILY_MINIGAMES = ['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'] as const;
+const DAILY_MINIGAMES = ['quiz', 'match', ...ACTION_GAMES] as const;
+const LEGACY_MINIGAMES = ['puzzle', 'value_duel', 'crop_detective'] as const;
+const ALL_MINIGAMES: readonly string[] = [...DAILY_MINIGAMES, ...LEGACY_MINIGAMES];
 const MINIGAME_VALIDATION_VERSION = 1;
 const getSessionValidationVersion = (session: MinigameSession, target: any): number =>
   Math.floor(Number(session.validation_version ?? target?.validation_version ?? 0) || 0);
@@ -56,7 +61,7 @@ let minigamePoolInFlight: Promise<any[]> | null = null;
 let minigameSessionExpireInFlight: Promise<void> | null = null;
 let minigameSessionExpireLastRunAt = 0;
 
-type DailyMinigameType = typeof DAILY_MINIGAMES[number];
+type DailyMinigameType = MinigameType;
 
 type RoundAnswer = {
   round: number;
@@ -122,6 +127,7 @@ const scheduleMinigameSessionExpiry = (force = false): Promise<void> | null => {
 };
 
 const getGamePlayLimitMs = (gameType: DailyMinigameType): number => {
+  if (isActionGame(gameType)) return ACTION_GAME_PLAY_MS[gameType];
   if (gameType === 'puzzle') return PUZZLE_TIME_LIMIT_MS;
   if (gameType === 'quiz' || gameType === 'value_duel' || gameType === 'crop_detective') return ROUND_GAME_SESSION_LIMIT_MS;
   return MATCH_TIME_LIMIT_MS;
@@ -995,7 +1001,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
   const { game_type, practice_mode } = req.body;
   const practiceMode = practice_mode === true;
-  if (!['quiz', 'puzzle', 'match', 'value_duel', 'crop_detective'].includes(game_type)) {
+  if (!ALL_MINIGAMES.includes(game_type)) {
     return res.status(400).json({ error: 'BadRequest', message: '유효하지 않은 게임 타입입니다.' });
   }
   // 연습 모드 한정 테스트용 강제 지정: 특정 스트리머(channel)와 특정 별(0~5성) 이미지를 사용합니다.
@@ -1045,6 +1051,13 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
             });
           }
           interruptedSessionClosed = true;
+        } else if (isActionGame(game_type)) {
+          if (activeSession.expires_at && new Date(activeSession.expires_at).getTime() > Date.now()) {
+            const action = readActionState(activeSession.progress_data);
+            return res.status(200).json({ session_id: activeSession.id, game_type, practice_mode: false,
+              resumed_session: true, game_data: publicActionGame(game_type, activeTarget, action, activeSession.progress_revision ?? 0) });
+          }
+          await minigameRepository.completeSession(activeSession.id, 0);
         } else if (game_type === 'crop_detective') {
           const resumePayload = buildCropDetectiveResumePayload(activeSession);
           if (resumePayload) return res.status(200).json(resumePayload);
@@ -1102,7 +1115,10 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     let gameData: any = {};
     let targetData: any = {};
 
-    if (game_type === 'quiz') {
+    if (isActionGame(game_type)) {
+      targetData = createActionTarget(game_type, getUniquePlayableImageCards(streamers, userImageBlindKeys));
+      gameData = publicActionGame(game_type, targetData as ActionTarget, initialActionState(), 0);
+    } else if (game_type === 'quiz') {
       const quizCandidates = getPlayableImageCards(streamers, userImageBlindKeys)
         .filter((item) => forceStar === null || item.card.star === forceStar);
       const forcedQuizCandidates = forcedStreamer
@@ -1330,6 +1346,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       target_data: JSON.stringify(targetData),
       validation_version: MINIGAME_VALIDATION_VERSION,
       progress_data: JSON.stringify({
+        ...(isActionGame(game_type) ? { action: initialActionState() } : {}),
         round_outcomes: [],
         ...(!practiceMode && isRoundGameType(game_type)
           ? {
@@ -1340,7 +1357,9 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           : {})
       }),
       progress_revision: 0,
-      expires_at: new Date(Date.now() + getGameSubmitAllowanceMs(game_type as DailyMinigameType)).toISOString(),
+      // Allow reading the rules and retrying images before ready; the ready
+      // action replaces this preparation lease with the actual play deadline.
+      expires_at: new Date(Date.now() + (isActionGame(game_type) ? 600_000 : getGameSubmitAllowanceMs(game_type as DailyMinigameType))).toISOString(),
       created_at: sessionStartedAt
     };
 
@@ -1364,15 +1383,65 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       message: interruptedSessionClosed
         ? '이전에 진행 중이던 미니게임은 실패 처리되었고 새 게임을 시작했습니다.'
         : undefined,
-      timing: getSessionTiming({
+      timing: isActionGame(game_type) ? undefined : getSessionTiming({
         ...newSession,
         created_at: sessionStartedAt
       })
     });
 
   } catch (err: any) {
+    if (err instanceof ActionGameError) return res.status(400).json({ message: err.message });
     console.error('[MinigameController] start error:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '미니게임을 시작하지 못했습니다.' });
+  }
+};
+
+// Each action is serialized by the persisted revision, including retries across workers.
+export const playMinigameAction = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ message: '로그인이 필요합니다.' });
+  const { session_id, revision, request_id, action } = req.body || {};
+  if (typeof session_id !== 'string' || !Number.isInteger(revision) || revision < 0 ||
+    typeof request_id !== 'string' || !/^[a-zA-Z0-9-]{16,64}$/.test(request_id) ||
+    !action || !['ready', 'sort', 'catch', 'sequence', 'finish'].includes(action.kind)) {
+    return res.status(400).json({ message: '게임 입력 정보가 올바르지 않습니다.' });
+  }
+  const input: ActionInput = { kind: action.kind, value: action.value, frame: action.frame };
+  const fingerprint = JSON.stringify(input);
+  try {
+    const session = await minigameRepository.findSessionById(session_id);
+    if (!session) return res.status(404).json({ message: '게임 세션을 찾을 수 없습니다.' });
+    if (session.user_id !== userId) return res.status(403).json({ message: '잘못된 세션 소유권입니다.' });
+    if (!isActionGame(session.game_type)) return res.status(400).json({ message: '입력을 지원하지 않는 게임입니다.' });
+    const target = parseDbJson<ActionTarget>(session.target_data, {} as ActionTarget);
+    if (getSessionValidationVersion(session, target) !== MINIGAME_VALIDATION_VERSION) {
+      return res.status(400).json({ message: '게임 검증 정보를 확인할 수 없습니다.' });
+    }
+    const state = readActionState(session.progress_data);
+    const currentRevision = session.progress_revision ?? 0;
+    const view = () => publicActionGame(session.game_type as typeof ACTION_GAMES[number], target, state, currentRevision);
+    if (state.last_request === request_id) {
+      if (state.last_action !== fingerprint) return res.status(409).json({ message: '이미 다른 입력으로 사용된 요청입니다.' });
+      return res.status(200).json({ game_data: view() });
+    }
+    if (session.status !== 'STARTED' || !session.expires_at || Date.now() >= new Date(session.expires_at).getTime()) {
+      return res.status(409).json({ message: '이미 종료되었거나 만료된 게임입니다.' });
+    }
+    if (revision !== currentRevision) return res.status(409).json({ game_data: view(), message: '게임 진행 상태를 동기화했습니다.' });
+    const next = advanceActionGame(session.game_type, target, state, input, Date.now());
+    next.last_request = request_id;
+    next.last_action = fingerprint;
+    // Image loading never consumes play time; arm the full play and settlement
+    // windows once, in the same compare-and-swap as the first ready action.
+    const expiresAt = state.starts_at === null && next.ends_at !== null
+      ? new Date(next.ends_at + 60_000).toISOString() : undefined;
+    const saved = await minigameRepository.saveActionProgress(session_id, userId, revision, JSON.stringify({ action: next }), expiresAt);
+    if (!saved) return res.status(409).json({ message: '입력을 저장 중입니다. 같은 요청을 다시 시도해 주세요.' });
+    return res.status(200).json({ game_data: publicActionGame(session.game_type, target, next, revision + 1) });
+  } catch (err) {
+    if (err instanceof ActionGameError) return res.status(400).json({ message: err.message });
+    console.error('[MinigameController] action error:', err);
+    return res.status(500).json({ message: '게임 입력을 저장하지 못했습니다. 다시 시도해 주세요.' });
   }
 };
 
@@ -1455,7 +1524,22 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const BONUS_REWARD = 200;
 
     // 게임 타입별 채점 및 치팅 검증
-    if (session.game_type === 'puzzle') {
+    if (isActionGame(session.game_type)) {
+      let state = readActionState(session.progress_data);
+      if (!state.done) {
+        state = advanceActionGame(session.game_type, target as ActionTarget, state, { kind: 'finish' }, Date.now());
+        const saved = await minigameRepository.saveActionProgress(session.id, userId, session.progress_revision ?? 0,
+          JSON.stringify({ action: state }));
+        if (!saved) return res.status(409).json({ message: '진행 기록을 동기화하고 있습니다. 결과 확인을 다시 시도해 주세요.' });
+      }
+      earnedPoints = actionReward(session.game_type, state);
+      isCorrect = earnedPoints > 0;
+      const detail = session.game_type === 'sequence_relay' ? `${state.cleared}/5단계 완료`
+        : `${state.correct}${session.game_type === 'fan_meeting' ? '장 분류' : '/10회 캐치'} · 실수 ${state.mistakes}회`;
+      message = `${ACTION_GAME_NAMES[session.game_type]} ${detail}. ${earnedPoints === 1200
+        ? '보너스 200 P를 포함해 1,200 P를 획득했습니다!'
+        : earnedPoints === 1000 ? '성공 보상 1,000 P를 획득했습니다!' : '이번에는 성공 조건에 도달하지 못했습니다.'}`;
+    } else if (session.game_type === 'puzzle') {
       const { success } = payload || {};
       const hasIssuedPuzzle = Array.isArray(target?.initial_puzzle_pieces);
       const puzzleProof = hasIssuedPuzzle
@@ -1708,6 +1792,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     });
 
   } catch (err: any) {
+    if (err instanceof ActionGameError) return res.status(409).json({ message: err.message });
     console.error('[MinigameController] submit error:', err);
     return res.status(500).json({ error: 'InternalServerError', message: '게임 결과 제출 중 오류가 발생했습니다.' });
   }
