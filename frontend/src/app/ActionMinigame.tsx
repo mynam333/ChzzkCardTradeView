@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Heart, RefreshCw, Trophy, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { proxiedImage } from '@/lib/cosmetics';
+import { estimateActionClock } from './actionMinigameTiming';
 
 export const ACTION_GAME_TYPES = ['fan_meeting', 'streamer_catch', 'sequence_relay'] as const;
 export type ActionGameType = typeof ACTION_GAME_TYPES[number];
@@ -16,7 +17,8 @@ export const ACTION_GAME_COPY: Record<ActionGameType, { title: string; descripti
 
 type Card = { name: string; image_url: string; channel_id: string };
 type View = {
-  revision: number; server_now: number; cards: Card[]; current_card: number | null; sequence: number[];
+  revision: number; server_now: number; server_received_at?: number; input_grace_ms?: number;
+  cards: Card[]; current_card: number | null; sequence: number[];
   frames: Array<{ start: number; duration: number; cells: Array<{ cell: number; card: number }> }>;
   state: { starts_at: number | null; ends_at: number | null; done: boolean; correct: number; mistakes: number;
     combo: number; index: number; blocked_until: number; clicked: string[]; stage: number; cleared: number;
@@ -53,19 +55,28 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
   const [notice, setNotice] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [booted, setBooted] = useState(false);
+  const [catchPending, setCatchPending] = useState<string[]>([]);
   const current = useRef<View | null>(null);
   const session = useRef('');
   const clockOffset = useRef(0);
+  const clockRoundTrip = useRef(Infinity);
   const inFlight = useRef(false);
   const mounted = useRef(true);
   const pending = useRef<Pending | null>(null);
+  const catchRequests = useRef(new Map<string, { body: Pending; sending: boolean }>());
   const settled = useRef(false);
-  const startRequest = useRef<Promise<{ session_id: string; game_data: View }> | null>(null);
+  const startRequest = useRef<Promise<{ session_id: string; game_data: View; sentAt: number }> | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const copy = ACTION_GAME_COPY[type];
 
   const accept = useCallback((data: View, before: number) => {
-    clockOffset.current = data.server_now - (before + Date.now()) / 2;
+    // Overlapping catch responses can arrive in the opposite order.
+    if (current.current && data.revision < current.current.revision) return;
+    const sample = estimateActionClock(data, before, Date.now());
+    if (sample.roundTrip <= clockRoundTrip.current) {
+      clockOffset.current = sample.offset;
+      clockRoundTrip.current = sample.roundTrip;
+    }
     current.current = data;
     if (mounted.current) { setView(data); setNow(Date.now() + clockOffset.current); }
   }, []);
@@ -95,6 +106,46 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
     }
   }, [accept]);
 
+  const sendCatch = useCallback(async (input: Input, retry = false) => {
+    if (!current.current || !session.current || inFlight.current || !mounted.current) return;
+    const key = `${input.frame}:${input.value}`;
+    const existing = catchRequests.current.get(key);
+    if (existing?.sending || (!retry && (existing || current.current.state.clicked.includes(key)))) return;
+    const item = existing || { body: {
+      session_id: session.current, revision: current.current.revision, request_id: crypto.randomUUID(), action: input
+    }, sending: false };
+    item.sending = true;
+    catchRequests.current.set(key, item);
+    setCatchPending([...catchRequests.current.keys()]);
+    // Each cell owns its pending request. Other cells stay interactive while a
+    // response is delayed; retries reuse the same request and frame/cell key.
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const before = Date.now();
+        try {
+          const response = await apiFetch('/minigames/action', { method: 'POST', body: JSON.stringify(item.body), signal: AbortSignal.timeout(8000) });
+          const data = await readResponse(response);
+          if (!mounted.current) return;
+          if (data.game_data) accept(data.game_data, before);
+          if (response.status >= 500 || response.status === 409) {
+            throw new Error(data.message || '입력 저장을 다시 시도해 주세요.');
+          }
+          if (!response.ok) setNotice(data.message || '입력을 확인해 주세요.');
+          catchRequests.current.delete(key);
+          return;
+        } catch (err) {
+          if (!mounted.current) return;
+          if (attempt === 1) throw err;
+        }
+      }
+    } catch (err) {
+      if (mounted.current) setError(readableError(err, '연결을 확인하고 다시 시도해 주세요.'));
+    } finally {
+      item.sending = false;
+      if (mounted.current) setCatchPending([...catchRequests.current.keys()]);
+    }
+  }, [accept]);
+
   const prepare = useCallback(async () => {
     if (!current.current) return;
     setError(''); setBusy(true);
@@ -112,17 +163,17 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
     let cancelled = false;
     if (!startRequest.current) {
       startRequest.current = (async () => {
+        const sentAt = Date.now();
         const response = await apiFetch('/minigames/start', { method: 'POST', body: JSON.stringify({ game_type: type, practice_mode: practice }), signal: AbortSignal.timeout(12000) });
         const data = await readResponse(response);
         if (!response.ok) throw new Error(data.message || '게임을 시작하지 못했습니다.');
-        return data;
+        return { ...data, sentAt };
       })();
     }
-    const before = Date.now();
     void startRequest.current.then(async data => {
       if (cancelled) return;
       session.current = data.session_id;
-      accept(data.game_data, before);
+      accept(data.game_data, data.sentAt);
       await prepare();
     }).catch(err => { if (!cancelled) setError(readableError(err, '게임 준비에 실패했습니다. 다시 시도해 주세요.')); });
     return () => { cancelled = true; mounted.current = false; };
@@ -135,7 +186,7 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
   }, [booted, result]);
 
   const finish = useCallback(async () => {
-    if (inFlight.current || settled.current || !session.current) return;
+    if (inFlight.current || catchRequests.current.size || settled.current || !session.current) return;
     inFlight.current = true; setBusy(true); setError('');
     try {
       const response = await apiFetch('/minigames/submit', { method: 'POST', body: JSON.stringify({ session_id: session.current, payload: {} }), signal: AbortSignal.timeout(10000) });
@@ -149,9 +200,9 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
   }, [onSettled]);
 
   const state = view?.state;
-  const ended = Boolean(state?.done || (state?.ends_at && now >= state.ends_at + 250));
-  useEffect(() => { if (booted && ended && !error && !busy && !pending.current) void finish(); }, [booted, ended, error, busy, finish]);
-  const playing = Boolean(booted && state?.starts_at && now >= state.starts_at && !ended && !result);
+  const ended = Boolean(state?.done || (state?.ends_at && now >= state.ends_at + (view?.input_grace_ms || 0) + 250));
+  useEffect(() => { if (booted && ended && !error && !busy && !pending.current && !catchPending.length) void finish(); }, [booted, ended, error, busy, catchPending.length, finish]);
+  const playing = Boolean(booted && state?.starts_at && now >= state.starts_at && state.ends_at && now < state.ends_at && !state.done && !result);
   const enabled = playing && !busy && !error;
   const preview = Boolean(type === 'sequence_relay' && state && now < state.input_at);
   const locked = now < (state?.blocked_until || 0);
@@ -204,14 +255,16 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
 
     {error && <div role="alert" className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
       <p>{error}</p><button className="mt-3 min-h-11 rounded-xl bg-primary px-4 font-bold text-primary-foreground" disabled={busy} onClick={() => {
-        if (pending.current) void send(pending.current.action, true);
+        if (catchRequests.current.size) {
+          setError('');
+          for (const item of catchRequests.current.values()) void sendCatch(item.body.action, true);
+        } else if (pending.current) void send(pending.current.action, true);
         else if (!session.current) onRestart();
         else if (!booted) void prepare();
         else if (current.current?.state.starts_at === null) void send({ kind: 'ready' });
         else void finish();
       }}>다시 시도</button>
     </div>}
-    {notice && <p role="status" className="mb-3 text-center text-xs text-muted-foreground">{notice}</p>}
     {result ? <div className="space-y-5 py-7 text-center" role="status">
       <Trophy className={`mx-auto h-12 w-12 ${result.correct ? 'text-primary' : 'text-muted-foreground'}`} />
       <h3 className="text-2xl font-black">{result.correct ? '성공했어요!' : '다음에 다시 도전해요'}</h3>
@@ -259,10 +312,20 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
         <div className="mx-auto grid max-w-[clamp(12rem,calc(100svh-25rem),24rem)] grid-cols-3 gap-2 sm:gap-3">{Array.from({ length: 9 }, (_, cell) => {
           const shown = currentFrame >= 0 ? view.frames[currentFrame].cells.find(item => item.cell === cell) : undefined;
           const clicked = state?.clicked.includes(`${currentFrame}:${cell}`);
-          return <button key={cell} disabled={!enabled || !shown || clicked} aria-label={`${cell + 1}번 모니터${shown ? ` · ${view.cards[shown.card].name}` : ' · 대기'}`}
-            onClick={() => void send({ kind: 'catch', frame: currentFrame, value: cell })}
-            className={`relative aspect-square overflow-hidden rounded-xl border-2 p-1.5 transition-colors ${shown ? 'border-primary/40 bg-card' : 'border-border bg-secondary/60'}`}>
-            {shown && <div key={currentFrame} className="action-card-enter h-full w-full">{picture(view.cards[shown.card])}</div>}{clicked && <div className="absolute inset-0 flex items-center justify-center bg-card/65">{shown?.card === 0 ? <Check className="h-9 w-9 text-primary" /> : <X className="h-9 w-9 text-rose-500" />}</div>}
+          const waiting = catchPending.includes(`${currentFrame}:${cell}`);
+          return <button key={cell} type="button" disabled={!enabled || !shown || clicked || waiting} aria-busy={waiting} aria-label={`${cell + 1}번 모니터${shown ? ` · ${view.cards[shown.card].name}` : ' · 대기'}`}
+            onPointerDown={event => {
+              if (!event.isPrimary || event.button !== 0) return;
+              // Capture the visible frame on press, before a finger/mouse release
+              // can land on a different picture after the board advances.
+              event.preventDefault();
+              event.currentTarget.focus({ preventScroll: true });
+              void sendCatch({ kind: 'catch', frame: currentFrame, value: cell });
+            }}
+            onClick={event => { if (event.detail === 0) void sendCatch({ kind: 'catch', frame: currentFrame, value: cell }); }}
+            className={`relative aspect-square touch-manipulation overflow-hidden rounded-xl border-2 p-1.5 transition-colors ${waiting ? 'border-primary bg-primary/10' : shown ? 'border-primary/40 bg-card' : 'border-border bg-secondary/60'}`}>
+            {shown && <div key={currentFrame} className="action-card-enter pointer-events-none h-full w-full">{picture(view.cards[shown.card])}</div>}
+            {(clicked || waiting) && <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-card/65">{waiting ? <RefreshCw className="h-7 w-7 animate-spin text-primary" /> : shown?.card === 0 ? <Check className="h-9 w-9 text-primary" /> : <X className="h-9 w-9 text-rose-500" />}</div>}
           </button>;
         })}</div>
       </>}
@@ -279,6 +342,7 @@ export function ActionMinigame({ type, practice, canRestart, onExit, onSettled, 
       </>}
       {ended && !result && <p className="mt-5 text-center text-sm" role="status">결과를 확인하고 있어요…</p>}
     </div>}
+    {!result && booted && <p role="status" className="mt-3 min-h-5 text-center text-xs text-muted-foreground">{notice || (catchPending.length ? '입력을 확인하고 있어요' : '')}</p>}
     <style jsx>{`
       @keyframes action-card-enter { from { opacity: .65; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
       .action-card-enter { animation: action-card-enter 120ms ease-out; }

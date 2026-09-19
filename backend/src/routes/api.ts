@@ -215,6 +215,7 @@ import {
   startMinigameRound,
   checkMinigameRoundAnswer,
   playMinigameAction,
+  markMinigameRequestTime,
   submitMinigameResult
 } from '../controllers/minigameController';
 import {
@@ -285,6 +286,7 @@ export const shouldDeferAdminShopItemBodyParsing = (method: string, pathname: st
   method.toUpperCase() === 'POST' && /^\/api\/admin\/shop\/items(?:\/\d+)?\/?$/.test(pathname);
 
 router.post('/analytics/events', collectSiteInsightEvent);
+router.use('/minigames', markMinigameRequestTime);
 router.use(maintenanceCheckMiddleware);
 
 // 라우트별 레이트 리미터 (IP 기준 고정 윈도우)

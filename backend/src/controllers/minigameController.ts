@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Response, RequestHandler } from 'express';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import crypto from 'crypto';
 import { minigameRepository, streamerRepository, systemConfigRepository, userRepository } from '../repositories';
@@ -19,6 +19,12 @@ const DAILY_MINIGAMES = ['quiz', 'match', ...ACTION_GAMES] as const;
 const LEGACY_MINIGAMES = ['puzzle', 'value_duel', 'crop_detective'] as const;
 const ALL_MINIGAMES: readonly string[] = [...DAILY_MINIGAMES, ...LEGACY_MINIGAMES];
 const MINIGAME_VALIDATION_VERSION = 1;
+// Capture before authentication/database work. A body/header cannot supply this timestamp.
+export const markMinigameRequestTime: RequestHandler = (_req, res, next) => {
+  res.locals.minigameReceivedAt = Date.now();
+  next();
+};
+const minigameReceivedAt = (res: Response): number => res.locals?.minigameReceivedAt ?? Date.now();
 const getSessionValidationVersion = (session: MinigameSession, target: any): number =>
   Math.floor(Number(session.validation_version ?? target?.validation_version ?? 0) || 0);
 // Sessions issued before the authoritative protocol did not contain enough
@@ -996,6 +1002,7 @@ export const abandonMinigameSession = async (req: AuthenticatedRequest, res: Res
 
 // 2. POST /api/minigames/start
 export const startMinigame = async (req: AuthenticatedRequest, res: Response) => {
+  const receivedAt = minigameReceivedAt(res);
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
 
@@ -1055,7 +1062,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           if (activeSession.expires_at && new Date(activeSession.expires_at).getTime() > Date.now()) {
             const action = readActionState(activeSession.progress_data);
             return res.status(200).json({ session_id: activeSession.id, game_type, practice_mode: false,
-              resumed_session: true, game_data: publicActionGame(game_type, activeTarget, action, activeSession.progress_revision ?? 0) });
+              resumed_session: true, game_data: publicActionGame(game_type, activeTarget, action, activeSession.progress_revision ?? 0, Date.now(), receivedAt) });
           }
           await minigameRepository.completeSession(activeSession.id, 0);
         } else if (game_type === 'crop_detective') {
@@ -1374,6 +1381,9 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
     scheduleMinigameSessionExpiry();
 
+    if (isActionGame(game_type)) {
+      gameData = publicActionGame(game_type, targetData as ActionTarget, initialActionState(), 0, Date.now(), receivedAt);
+    }
     return res.status(200).json({
       session_id: sessionId,
       game_type,
@@ -1396,8 +1406,10 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
   }
 };
 
-// Each action is serialized by the persisted revision, including retries across workers.
+// Ordered games require the exact revision. Independent catch cells merge through
+// compare-and-swap so one slow response does not block the next visible target.
 export const playMinigameAction = async (req: AuthenticatedRequest, res: Response) => {
+  const receivedAt = minigameReceivedAt(res);
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ message: '로그인이 필요합니다.' });
   const { session_id, revision, request_id, action } = req.body || {};
@@ -1409,35 +1421,56 @@ export const playMinigameAction = async (req: AuthenticatedRequest, res: Respons
   const input: ActionInput = { kind: action.kind, value: action.value, frame: action.frame };
   const fingerprint = JSON.stringify(input);
   try {
-    const session = await minigameRepository.findSessionById(session_id);
-    if (!session) return res.status(404).json({ message: '게임 세션을 찾을 수 없습니다.' });
-    if (session.user_id !== userId) return res.status(403).json({ message: '잘못된 세션 소유권입니다.' });
-    if (!isActionGame(session.game_type)) return res.status(400).json({ message: '입력을 지원하지 않는 게임입니다.' });
-    const target = parseDbJson<ActionTarget>(session.target_data, {} as ActionTarget);
-    if (getSessionValidationVersion(session, target) !== MINIGAME_VALIDATION_VERSION) {
-      return res.status(400).json({ message: '게임 검증 정보를 확인할 수 없습니다.' });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const session = await minigameRepository.findSessionById(session_id);
+      if (!session) return res.status(404).json({ message: '게임 세션을 찾을 수 없습니다.' });
+      if (session.user_id !== userId) return res.status(403).json({ message: '잘못된 세션 소유권입니다.' });
+      if (!isActionGame(session.game_type)) return res.status(400).json({ message: '입력을 지원하지 않는 게임입니다.' });
+      const target = parseDbJson<ActionTarget>(session.target_data, {} as ActionTarget);
+      if (getSessionValidationVersion(session, target) !== MINIGAME_VALIDATION_VERSION) {
+        return res.status(400).json({ message: '게임 검증 정보를 확인할 수 없습니다.' });
+      }
+      const state = readActionState(session.progress_data);
+      const currentRevision = session.progress_revision ?? 0;
+      const view = () => publicActionGame(session.game_type as typeof ACTION_GAMES[number], target, state, currentRevision, Date.now(), receivedAt);
+      const catchInput = session.game_type === 'streamer_catch' && input.kind === 'catch';
+      if (state.last_request === request_id) {
+        if (state.last_action !== fingerprint) return res.status(409).json({ message: '이미 다른 입력으로 사용된 요청입니다.' });
+        return res.status(200).json({ game_data: view() });
+      }
+      // A response can be lost while later cells are already saved. The persisted
+      // frame/cell key is the idempotency key for a catch throughout the session.
+      if (catchInput && Number.isInteger(input.frame) && Number.isInteger(input.value) &&
+        revision <= currentRevision && state.clicked.includes(`${input.frame}:${input.value}`)) {
+        return res.status(200).json({ game_data: view() });
+      }
+      if (session.status !== 'STARTED' || !session.expires_at || Date.now() >= new Date(session.expires_at).getTime()) {
+        return res.status(409).json({ message: '이미 종료되었거나 만료된 게임입니다.' });
+      }
+      if (revision > currentRevision || (!catchInput && revision !== currentRevision)) {
+        return res.status(409).json({ game_data: view(), message: '게임 진행 상태를 동기화했습니다.' });
+      }
+      let next;
+      try {
+        next = advanceActionGame(session.game_type, target, state, input, catchInput ? receivedAt : Date.now());
+      } catch (err) {
+        if (err instanceof ActionGameError) return res.status(400).json({ message: err.message, game_data: view() });
+        throw err;
+      }
+      next.last_request = request_id;
+      next.last_action = fingerprint;
+      // Image loading never consumes play time; arm the full play and settlement
+      // windows once, in the same compare-and-swap as the first ready action.
+      const expiresAt = state.starts_at === null && next.ends_at !== null
+        ? new Date(next.ends_at + 60_000).toISOString() : undefined;
+      const saved = await minigameRepository.saveActionProgress(session_id, userId, currentRevision, JSON.stringify({ action: next }), expiresAt);
+      if (!saved) {
+        if (catchInput) continue;
+        return res.status(409).json({ message: '입력을 저장 중입니다. 같은 요청을 다시 시도해 주세요.' });
+      }
+      return res.status(200).json({ game_data: publicActionGame(session.game_type, target, next, currentRevision + 1, Date.now(), receivedAt) });
     }
-    const state = readActionState(session.progress_data);
-    const currentRevision = session.progress_revision ?? 0;
-    const view = () => publicActionGame(session.game_type as typeof ACTION_GAMES[number], target, state, currentRevision);
-    if (state.last_request === request_id) {
-      if (state.last_action !== fingerprint) return res.status(409).json({ message: '이미 다른 입력으로 사용된 요청입니다.' });
-      return res.status(200).json({ game_data: view() });
-    }
-    if (session.status !== 'STARTED' || !session.expires_at || Date.now() >= new Date(session.expires_at).getTime()) {
-      return res.status(409).json({ message: '이미 종료되었거나 만료된 게임입니다.' });
-    }
-    if (revision !== currentRevision) return res.status(409).json({ game_data: view(), message: '게임 진행 상태를 동기화했습니다.' });
-    const next = advanceActionGame(session.game_type, target, state, input, Date.now());
-    next.last_request = request_id;
-    next.last_action = fingerprint;
-    // Image loading never consumes play time; arm the full play and settlement
-    // windows once, in the same compare-and-swap as the first ready action.
-    const expiresAt = state.starts_at === null && next.ends_at !== null
-      ? new Date(next.ends_at + 60_000).toISOString() : undefined;
-    const saved = await minigameRepository.saveActionProgress(session_id, userId, revision, JSON.stringify({ action: next }), expiresAt);
-    if (!saved) return res.status(409).json({ message: '입력을 저장 중입니다. 같은 요청을 다시 시도해 주세요.' });
-    return res.status(200).json({ game_data: publicActionGame(session.game_type, target, next, revision + 1) });
+    return res.status(409).json({ message: '입력을 저장 중입니다. 같은 요청을 다시 시도해 주세요.' });
   } catch (err) {
     if (err instanceof ActionGameError) return res.status(400).json({ message: err.message });
     console.error('[MinigameController] action error:', err);

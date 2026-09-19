@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTION_GAMES, ActionGameType, ActionState, actionReward, advanceActionGame,
+  ACTION_GAMES, CATCH_INPUT_GRACE_MS, ActionGameType, ActionState, actionReward, advanceActionGame,
   createActionTarget, initialActionState, publicActionGame
 } from '../services/actionMinigames';
 
@@ -80,8 +80,8 @@ describe('server-owned action rules', () => {
     const click = { kind: 'catch' as const, frame: frameIndex, value: cell };
     const at = state.starts_at! + frame.start;
     expect(() => advanceActionGame('streamer_catch', target, state, click, at - 1)).toThrow();
-    expect(() => advanceActionGame('streamer_catch', target, state, click, at + frame.duration + 150)).toThrow();
-    const clicked = advanceActionGame('streamer_catch', target, state, click, at + frame.duration + 149);
+    expect(() => advanceActionGame('streamer_catch', target, state, click, at + frame.duration + CATCH_INPUT_GRACE_MS)).toThrow();
+    const clicked = advanceActionGame('streamer_catch', target, state, click, at + frame.duration + CATCH_INPUT_GRACE_MS - 1);
     expect(clicked.correct).toBe(1);
     expect(() => advanceActionGame('streamer_catch', target, clicked, click, at + 100)).toThrow();
     const empty = Array.from({ length: 9 }, (_, i) => i).find(i => !frame.cells.some(c => c.cell === i))!;

@@ -11,6 +11,7 @@ export const ACTION_GAME_NAMES: Record<ActionGameType, string> = {
 export const ACTION_GAME_PLAY_MS: Record<ActionGameType, number> = {
   fan_meeting: 20_000, streamer_catch: 25_000, sequence_relay: 150_000
 };
+export const CATCH_INPUT_GRACE_MS = 500;
 export type ActionCard = { channel_id: string; name: string; image_url: string };
 export type CatchFrame = { start: number; duration: number; cells: Array<{ cell: number; card: number }> };
 export type ActionTarget = {
@@ -117,8 +118,8 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
     state.done = true;
     return state;
   }
-  // Catch clicks have a small fixed transport allowance, never a client clock.
-  if (now >= state.ends_at + (type === 'streamer_catch' ? 150 : 0)) {
+  // Bound transport tolerance using the server's request receipt time, never a client clock.
+  if (now >= state.ends_at + (type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : 0)) {
     state.done = true;
     return state;
   }
@@ -133,7 +134,7 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
   } else if (type === 'streamer_catch' && input.kind === 'catch') {
     if (!Number.isInteger(input.frame)) throw new ActionGameError('화면 정보가 올바르지 않습니다.');
     const frame = target.frames[input.frame!];
-    if (!frame || now < state.starts_at + frame.start || now >= state.starts_at + frame.start + frame.duration + 150) {
+    if (!frame || now < state.starts_at + frame.start || now >= state.starts_at + frame.start + frame.duration + CATCH_INPUT_GRACE_MS) {
       throw new ActionGameError('이미 지나간 화면입니다. 다음 게스트를 기다려 주세요.');
     }
     const shown = frame.cells.find(item => item.cell === input.value);
@@ -180,9 +181,10 @@ export function actionReward(type: ActionGameType, state: ActionState): 0 | 1000
   return state.cleared === 5 && state.mistakes === 0 ? 1200 : state.cleared >= 4 ? 1000 : 0;
 }
 
-export function publicActionGame(type: ActionGameType, target: ActionTarget, state: ActionState, revision: number, now = Date.now()) {
+export function publicActionGame(type: ActionGameType, target: ActionTarget, state: ActionState, revision: number, now = Date.now(), receivedAt = now) {
   const { last_request, last_action, ...publicState } = state;
-  return { game_type: type, revision, server_now: now, cards: target.cards, state: publicState,
+  return { game_type: type, revision, server_now: now, server_received_at: receivedAt,
+    input_grace_ms: type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : 0, cards: target.cards, state: publicState,
     current_card: type === 'fan_meeting' ? target.deck[state.index] ?? null : null,
     frames: type === 'streamer_catch' ? target.frames : [],
     sequence: type === 'sequence_relay' && state.starts_at !== null ? target.sequences[state.stage] : [] };

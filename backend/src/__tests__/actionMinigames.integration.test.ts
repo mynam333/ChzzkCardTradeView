@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { __setSqliteDbForTest } from '../services/db';
 import { initRepositories, minigameRepository } from '../repositories';
-import { getDailyMinigame, playMinigameAction, startMinigame, submitMinigameResult } from '../controllers/minigameController';
+import { getDailyMinigame, markMinigameRequestTime, playMinigameAction, startMinigame, submitMinigameResult } from '../controllers/minigameController';
 import { ACTION_GAMES, ActionGameType, ActionInput, ActionTarget, initialActionState, readActionState } from '../services/actionMinigames';
 import { AuthenticatedRequest } from '../middlewares/admin';
 import { Response } from 'express';
@@ -13,7 +13,7 @@ vi.mock('../services/achievementService', () => ({ recordAchievementEvent: vi.fn
 let db: Database.Database;
 const request = (body: unknown, userId = 'player') => ({ user: { id: userId }, body }) as AuthenticatedRequest;
 const response = () => {
-  const res = { statusCode: 0, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(value: unknown) { this.body = value; return this; } };
+  const res = { locals: {} as Record<string, unknown>, statusCode: 0, body: undefined as any, status(code: number) { this.statusCode = code; return this; }, json(value: unknown) { this.body = value; return this; } };
   return res;
 };
 const asResponse = (res: ReturnType<typeof response>) => res as unknown as Response;
@@ -129,6 +129,88 @@ describe('new minigame API and SQLite settlement', () => {
     }
     vi.setSystemTime(state.ends_at + 300);
     expect((await submit(session_id)).body).toMatchObject({ correct: true, earned_points: 1200 });
+  });
+
+  it('judges a catch when the request arrives, even if the session lookup is slow', async () => {
+    const { session_id } = await start('streamer_catch');
+    const armed = await action(session_id, { kind: 'ready' });
+    const { frames, state, revision } = armed.body.game_data;
+    const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
+    const cell = frames[frame].cells.find((item: any) => item.card === 0).cell;
+    const receivedAt = state.starts_at + frames[frame].start + frames[frame].duration - 50;
+    vi.setSystemTime(receivedAt);
+    const find = minigameRepository.findSessionById.bind(minigameRepository);
+    vi.spyOn(minigameRepository, 'findSessionById').mockImplementationOnce(async id => {
+      vi.setSystemTime(receivedAt + 900);
+      return find(id);
+    });
+    const res = response();
+    await playMinigameAction(request({ session_id, revision, request_id: crypto.randomUUID(), action: { kind: 'catch', frame, value: cell } }), asResponse(res));
+    expect(res.statusCode).toBe(200);
+    expect(res.body.game_data.state.correct).toBe(1);
+    expect(res.body.game_data.server_received_at).toBe(receivedAt);
+    expect(res.body.game_data.server_now).toBe(Date.now());
+  });
+
+  it('accepts overlapping catch requests and keeps retried cells idempotent after later inputs', async () => {
+    const { session_id } = await start('streamer_catch');
+    const armed = await action(session_id, { kind: 'ready' });
+    const { frames, state, revision } = armed.body.game_data;
+    const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
+    const target = frames[frame].cells.find((item: any) => item.card === 0).cell;
+    const other = frames[frame].cells.find((item: any) => item.card !== 0).cell;
+    vi.setSystemTime(state.starts_at + frames[frame].start + 200);
+    const id = crypto.randomUUID();
+    const results = await Promise.all([
+      action(session_id, { kind: 'catch', frame, value: target }, id, revision),
+      action(session_id, { kind: 'catch', frame, value: other }, crypto.randomUUID(), revision)
+    ]);
+    expect(results.map(result => result.statusCode)).toEqual([200, 200]);
+    expect(readActionState((await minigameRepository.findSessionById(session_id))!.progress_data)).toMatchObject({ correct: 1, mistakes: 1 });
+    vi.setSystemTime(state.starts_at + frames[frame].start + frames[frame].duration + 2000);
+    const retry = await action(session_id, { kind: 'catch', frame, value: target }, id, revision);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.body.game_data.state).toMatchObject({ correct: 1, mistakes: 1 });
+    expect(retry.body.game_data.revision).toBe(revision + 2);
+  });
+
+  it('uses the receipt before middleware delay and never trusts a timestamp from the client', async () => {
+    const { session_id } = await start('streamer_catch');
+    const armed = await action(session_id, { kind: 'ready' });
+    const { frames, state, revision } = armed.body.game_data;
+    const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
+    const value = frames[frame].cells.find((item: any) => item.card === 0).cell;
+    const at = state.starts_at + frames[frame].start;
+    vi.setSystemTime(at + 100);
+    const req = request({ session_id, revision, request_id: crypto.randomUUID(), received_at: 0, action: { kind: 'catch', frame, value, clicked_at: 0 } });
+    const res = response();
+    markMinigameRequestTime(req, asResponse(res), vi.fn());
+    vi.setSystemTime(at + 2000);
+    await playMinigameAction(req, asResponse(res));
+    expect(res.statusCode).toBe(200);
+    expect(res.body.game_data).toMatchObject({ server_received_at: at + 100, state: { correct: 1 } });
+    const unclicked = frames[frame].cells.find((item: any) => item.card !== 0).cell;
+    const expired = response();
+    await playMinigameAction(request({ session_id, revision: revision + 1, request_id: crypto.randomUUID(), received_at: at + 100, action: { kind: 'catch', frame, value: unclicked, clicked_at: at + 100 } }), asResponse(expired));
+    expect(expired.statusCode).toBe(400);
+    expect(expired.body.game_data.state).toMatchObject({ correct: 1, mistakes: 0 });
+  });
+
+  it('counts simultaneous duplicate catches only once and rejects a future revision', async () => {
+    const { session_id } = await start('streamer_catch');
+    const armed = await action(session_id, { kind: 'ready' });
+    const { frames, state, revision } = armed.body.game_data;
+    const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
+    const value = frames[frame].cells.find((item: any) => item.card === 0).cell;
+    vi.setSystemTime(state.starts_at + frames[frame].start + 100);
+    const input = { kind: 'catch' as const, frame, value };
+    expect((await action(session_id, input, crypto.randomUUID(), revision + 10)).statusCode).toBe(409);
+    const results = await Promise.all([action(session_id, input), action(session_id, input)]);
+    for (const res of results) {
+      expect(res.statusCode).toBe(200);
+      expect(res.body.game_data.state.correct).toBe(1);
+      expect(res.body.game_data.revision).toBe(revision + 1);
+    }
   });
 
   it.each(ACTION_GAMES)('%s cannot award points from a forged success or practice payload', async type => {
