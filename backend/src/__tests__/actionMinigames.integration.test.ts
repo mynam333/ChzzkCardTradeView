@@ -66,6 +66,30 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('new minigame API and SQLite settlement', () => {
+  it('enforces the fan penalty for batches and retries without extending it or changing rewards', async () => {
+    const { session_id } = await start('fan_meeting');
+    const armed = await action(session_id, { kind: 'ready', quick_start: true });
+    const at = armed.body.game_data.state.starts_at;
+    const target = JSON.parse((await minigameRepository.findSessionById(session_id))!.target_data) as ActionTarget;
+    const requestId = crypto.randomUUID();
+    const input: ActionInput = { kind: 'sort', offset: 0, values: [1 - target.deck[0], target.deck[1]] };
+    const wrong = await action(session_id, input, requestId);
+    expect(wrong.statusCode).toBe(200);
+    expect(wrong.body.game_data.state).toMatchObject({ correct: 0, mistakes: 1, input_count: 1, blocked_until: at + 500, ends_at: at + 20_000 });
+    vi.setSystemTime(at + 200);
+    const retry = await action(session_id, input, requestId, 1);
+    expect(retry.body.game_data.state).toMatchObject({ mistakes: 1, input_count: 1, blocked_until: at + 500 });
+    vi.setSystemTime(at + 499);
+    const early = await action(session_id, { kind: 'sort', offset: 1, values: [target.deck[1]] });
+    expect(early.statusCode).toBe(400);
+    expect(early.body.game_data.state.input_count).toBe(1);
+    vi.setSystemTime(at + 500);
+    const resumed = await action(session_id, { kind: 'sort', offset: 1, values: target.deck.slice(1, 26) });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.body.game_data.state).toMatchObject({ correct: 25, mistakes: 1, input_count: 26, combo: 25 });
+    vi.setSystemTime(at + 21_000);
+    expect((await submit(session_id)).body).toMatchObject({ correct: true, earned_points: 1200 });
+  });
   it('merges a final sort flush with a slow earlier batch and deduplicates it after settlement', async () => {
     const { session_id } = await start('fan_meeting');
     const armed = await action(session_id, { kind: 'ready', quick_start: true });

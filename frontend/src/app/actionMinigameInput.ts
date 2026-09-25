@@ -10,6 +10,14 @@ export type ActionView = {
 };
 export type OrderedInputs = { offset: number; values: number[] };
 
+export function canPressOrderedAction(type: string, view: ActionView, now: number): boolean {
+  const state = view.state;
+  if (view.awaiting_transition || state.done || state.starts_at === null || state.ends_at === null ||
+    now < state.starts_at || now >= state.ends_at) return false;
+  if (type === 'fan_meeting') return view.current_card !== null && now >= state.blocked_until;
+  return type === 'sequence_relay' && now >= state.input_at;
+}
+
 export function reconcileActionInputs(queue: OrderedInputs, view: ActionView): OrderedInputs {
   const count = view.state.input_count || 0;
   return { offset: count, values: view.state.done ? [] : queue.values.slice(Math.max(0, count - queue.offset)) };

@@ -13,6 +13,7 @@ export const ACTION_GAME_PLAY_MS: Record<ActionGameType, number> = {
 };
 export const CATCH_INPUT_GRACE_MS = 500;
 export const SORT_INPUT_GRACE_MS = 500;
+export const FAN_SORT_PENALTY_MS = 500;
 export const CATCH_TARGET_COUNT = 12;
 export type ActionCard = { channel_id: string; name: string; image_url: string };
 export type CatchFrame = { start: number; duration: number; cells: Array<{ cell: number; card: number }> };
@@ -133,7 +134,9 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
     let next = previous;
     for (const value of input.values.slice(Math.max(0, saved.length - input.offset!))) {
       next = advanceActionGame(type, target, next, { kind: input.kind, value }, now);
-      if (next.done) break;
+      // Save the accepted prefix, including the mistake. Subsequent queued
+      // presses must wait for the penalty instead of bypassing it in one batch.
+      if (next.done || (type === 'fan_meeting' && next.blocked_until > now)) break;
     }
     return { ...next };
   }
@@ -163,10 +166,10 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
   if (!Number.isInteger(input.value)) throw new ActionGameError('입력값이 올바르지 않습니다.');
   if (type === 'fan_meeting' && input.kind === 'sort') {
     if (input.value !== 0 && input.value !== 1) throw new ActionGameError('왼쪽 또는 오른쪽을 선택해 주세요.');
+    if (now < state.blocked_until) throw new ActionGameError('오답 후 0.5초 동안은 카드를 넘길 수 없습니다.');
     if (state.index >= target.deck.length) throw new ActionGameError('카드를 모두 분류했습니다.');
     if (target.deck[state.index] === input.value) { state.correct++; state.combo++; }
-    else { state.mistakes++; state.combo = 0; }
-    state.blocked_until = 0;
+    else { state.mistakes++; state.combo = 0; state.blocked_until = now + FAN_SORT_PENALTY_MS; }
     state.index++;
     state.inputs = [...(state.inputs || []), input.value];
   } else if (type === 'streamer_catch' && input.kind === 'catch') {

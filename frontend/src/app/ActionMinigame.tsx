@@ -5,14 +5,14 @@ import { ArrowLeft, ArrowRight, Check, Heart, RefreshCw, Trophy, X } from 'lucid
 import { apiFetch } from '@/lib/api';
 import { proxiedImage } from '@/lib/cosmetics';
 import { estimateActionClock } from './actionMinigameTiming';
-import { activeCatchCells, projectActionInputs, reconcileActionInputs, type ActionCard as Card, type ActionView as View, type OrderedInputs } from './actionMinigameInput';
+import { activeCatchCells, canPressOrderedAction, projectActionInputs, reconcileActionInputs, type ActionCard as Card, type ActionView as View, type OrderedInputs } from './actionMinigameInput';
 import { minigamePress } from './minigamePress';
 
 export const ACTION_GAME_TYPES = ['fan_meeting', 'streamer_catch', 'sequence_relay'] as const;
 export type ActionGameType = typeof ACTION_GAME_TYPES[number];
 export const isActionGameType = (value: unknown): value is ActionGameType => ACTION_GAME_TYPES.includes(value as ActionGameType);
 export const ACTION_GAME_COPY: Record<ActionGameType, { title: string; description: string; bonus: string }> = {
-  fan_meeting: { title: '팬 줄서기', description: '같은 사진 쪽으로 카드를 넘기세요. 뒤에 기다리는 카드도 미리 보며, 20초 동안 15장 이상 분류하면 성공!', bonus: '25장 이상 또는 무실수 20장 이상 · +200 P' },
+  fan_meeting: { title: '팬 줄서기', description: '같은 사진 쪽으로 카드를 넘기세요. 20초 동안 15장 이상 분류하면 성공! 틀리면 0.5초간 멈추고 콤보가 초기화됩니다.', bonus: '25장 이상 또는 무실수 20장 이상 · +200 P' },
   streamer_catch: { title: '게스트 캐치', description: '각 모니터에 불쑥 나타나는 목표 사진을 누르세요. 30초 동안 12번 등장하며, 7번 이상 잡고 실수 2회 이하면 성공!', bonus: '10번 이상 캐치 · 실수 0회 · +200 P' },
   sequence_relay: { title: '순서 기억', description: '사진이 나온 순서대로 누르세요. 4개부터 8개까지 5단계! 4단계 완료 시 성공, 두 번 틀리면 종료됩니다.', bonus: '실수 없이 5단계 완료 · +200 P' }
 };
@@ -60,6 +60,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const deadlineRequest = useRef<Pending | null>(null);
   const deadlineSending = useRef(false);
   const deadlineFlushed = useRef(false);
+  const localPenaltyUntil = useRef<number | null>(null);
   const autoStarted = useRef(false);
   const session = useRef('');
   const clockOffset = useRef(0);
@@ -76,6 +77,8 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
 
   const project = useCallback((data: View) => {
     const next = projectActionInputs(type, data, orderedInputs.current.values);
+    // A delayed acknowledgement must not start the same visible penalty again.
+    if (type === 'fan_meeting' && localPenaltyUntil.current !== null) next.state.blocked_until = localPenaltyUntil.current;
     if (type === 'sequence_relay' && previewClock.current) {
       next.state.preview_at = previewClock.current.start;
       next.state.input_at = previewClock.current.start + data.sequence.length * 700;
@@ -114,6 +117,13 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     try {
       let conflicts = 0;
       while (mounted.current && (orderedRequest.current || orderedInputs.current.values.length)) {
+        if (type === 'fan_meeting' && !orderedRequest.current) {
+          const cooldown = current.current.state.blocked_until - (Date.now() + clockOffset.current);
+          if (cooldown > 0) {
+            await new Promise(resolve => window.setTimeout(resolve, Math.min(cooldown + 20, 520)));
+            continue;
+          }
+        }
         const body: Pending = orderedRequest.current || {
           session_id: session.current, revision: current.current.revision, request_id: crypto.randomUUID(),
           action: { kind: type === 'fan_meeting' ? 'sort' : 'sequence', offset: orderedInputs.current.offset, values: orderedInputs.current.values.slice(0, 64) }
@@ -136,8 +146,13 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
           orderedRequest.current = null;
           continue;
         }
+        if (response?.status === 400 && type === 'fan_meeting' && data.game_data?.state.blocked_until > Date.now() + clockOffset.current) {
+          orderedRequest.current = null;
+          continue;
+        }
         if (!response?.ok) {
           orderedInputs.current = { offset: current.current.state.input_count || 0, values: [] };
+          localPenaltyUntil.current = null;
           projected.current = current.current; setView(current.current); setOrderedPending(0);
           setNotice(data?.message || '입력을 확인해 주세요.');
         }
@@ -158,6 +173,8 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     deadlineRequest.current = body;
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
+        const cooldown = (current.current?.state.blocked_until || 0) - (Date.now() + clockOffset.current);
+        if (cooldown > 0) await new Promise(resolve => window.setTimeout(resolve, Math.min(cooldown + 20, 520)));
         const before = Date.now();
         try {
           const response = await apiFetch('/minigames/action', { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
@@ -178,10 +195,9 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const pressOrdered = useCallback((value: number) => {
     const shown = projected.current;
     const at = Date.now() + clockOffset.current;
-    if (!shown || inFlight.current || shown.awaiting_transition || shown.state.done ||
-      shown.state.starts_at === null || shown.state.ends_at === null || at < shown.state.starts_at || at >= shown.state.ends_at ||
-      (type === 'sequence_relay' && at < shown.state.input_at) || (type === 'fan_meeting' && shown.current_card === null)) return;
+    if (!shown || inFlight.current || !canPressOrderedAction(type, shown, at)) return;
     const correct = (type === 'fan_meeting' ? shown.current_card : shown.sequence[shown.state.position]) === value;
+    if (type === 'fan_meeting' && !correct) localPenaltyUntil.current = at + 500;
     orderedInputs.current.values.push(value);
     projected.current = project(current.current!);
     setView(projected.current); setOrderedPending(orderedInputs.current.values.length);
@@ -324,6 +340,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const playing = Boolean(booted && state?.starts_at && now >= state.starts_at && state.ends_at && now < state.ends_at && !state.done && !result);
   const enabled = playing && !busy && !error;
   const preview = Boolean(type === 'sequence_relay' && state && now < state.input_at);
+  const locked = type === 'fan_meeting' && now < (state?.blocked_until || 0);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -425,7 +442,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
             style={{ top: -(i + 1) * 18, bottom: (i + 1) * 18, transform: `scale(${1 - (i + 1) * 0.045})`, zIndex: 3 - i }}>
             <div className="h-full w-full">{picture(view.cards[card], 'object-top')}</div>
           </div>)}
-        <div className={`relative z-10 h-full w-full touch-pan-y overflow-hidden rounded-2xl border-2 bg-card p-2 ${recentPress && !recentPress.correct ? 'border-rose-400' : 'border-primary/40'}`}
+        <div className={`relative z-10 h-full w-full touch-pan-y overflow-hidden rounded-2xl border-2 bg-card p-2 ${locked ? 'border-rose-400 bg-rose-500/10' : 'border-primary/40'}`}
           onPointerDown={event => { pointer.current = { x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }}
           onPointerCancel={() => { pointer.current = null; }}
           onPointerMove={event => { const start = pointer.current; if (!start || !enabled) return;
@@ -434,8 +451,11 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
           onPointerUp={() => { pointer.current = null; }}>
           <div className="h-full w-full">{view.current_card !== null && view.cards[view.current_card] && picture(view.cards[view.current_card])}</div>
         </div></div>
-        <p role="status" className="mb-3 h-5 text-center text-xs text-muted-foreground">{recentPress ? recentPress.correct ? '정답! 다음 카드도 이어서 넘기세요' : '다른 줄이에요. 바로 다음 카드!' : '뒤에 기다리는 카드도 미리 확인하세요'}</p>
-        <div className="grid grid-cols-2 gap-3">{[0, 1].map(i => <button key={i} disabled={!enabled || view.current_card === null} {...minigamePress(() => pressOrdered(i))} className="flex min-h-14 touch-manipulation items-center justify-center gap-2 rounded-2xl bg-primary text-sm font-black text-primary-foreground active:brightness-110 disabled:opacity-45">{i === 0 && <ArrowLeft className="h-5 w-5" />}{i === 0 ? '왼쪽으로' : '오른쪽으로'}{i === 1 && <ArrowRight className="h-5 w-5" />}</button>)}</div>
+        <p role="status" className={`mb-3 h-5 text-center text-xs ${locked ? 'font-bold text-rose-500' : 'text-muted-foreground'}`}>{locked ? `다른 줄이에요 · ${Math.max(0, ((state?.blocked_until || 0) - now) / 1000).toFixed(1)}초 후 다시 넘기세요` : recentPress?.correct ? '정답! 다음 카드도 이어서 넘기세요' : '뒤에 기다리는 카드도 미리 확인하세요'}</p>
+        <div className="grid grid-cols-2 gap-3">{[0, 1].map(i => <button key={i} disabled={!enabled || locked || view.current_card === null}
+          onPointerDown={event => minigamePress(() => pressOrdered(i)).onPointerDown(event)}
+          onClick={event => minigamePress(() => pressOrdered(i)).onClick(event)}
+          className="flex min-h-14 touch-manipulation items-center justify-center gap-2 rounded-2xl bg-primary text-sm font-black text-primary-foreground active:brightness-110 disabled:opacity-45">{i === 0 && <ArrowLeft className="h-5 w-5" />}{i === 0 ? '왼쪽으로' : '오른쪽으로'}{i === 1 && <ArrowRight className="h-5 w-5" />}</button>)}</div>
         <p className="mt-3 text-center text-xs text-muted-foreground">스와이프 · 좌우 방향키 지원</p>
       </>}
 
@@ -447,7 +467,8 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
           const clicked = state?.clicked.includes(`${currentFrame}:${cell}`);
           const waiting = catchPending.includes(`${currentFrame}:${cell}`);
           return <button key={cell} type="button" disabled={!enabled || !shown || clicked || waiting} aria-busy={waiting} aria-label={`${cell + 1}번 모니터${shown ? ` · ${view.cards[shown.card].name}` : ' · 대기'}`}
-            {...minigamePress(() => { void sendCatch({ kind: 'catch', frame: currentFrame, value: cell }); })}
+            onPointerDown={event => minigamePress(() => { void sendCatch({ kind: 'catch', frame: currentFrame, value: cell }); }).onPointerDown(event)}
+            onClick={event => minigamePress(() => { void sendCatch({ kind: 'catch', frame: currentFrame, value: cell }); }).onClick(event)}
             className={`relative aspect-square touch-manipulation overflow-hidden rounded-xl border-2 p-1.5 transition-colors ${waiting ? 'border-primary bg-primary/10' : shown ? 'border-primary/40 bg-card' : 'border-border bg-secondary/60'}`}>
             {shown && <div key={currentFrame} className="action-card-enter pointer-events-none h-full w-full">{picture(view.cards[shown.card])}</div>}
             {(clicked || waiting) && <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-card/65">{shown?.card === 0 ? <Check className="h-9 w-9 text-primary" /> : <X className="h-9 w-9 text-rose-500" />}</div>}
@@ -462,7 +483,9 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
           {preview && previewCard ? picture(previewCard) : recentPress ? picture(view.cards[recentPress.card]) : <span className="whitespace-pre-line text-center text-sm font-bold text-muted-foreground">{preview || state?.starts_at === null ? '기억할 준비!' : '순서대로\n눌러 주세요'}</span>}
         </div>
         <div className="mb-3 flex justify-center gap-1.5" aria-label={`${state?.position || 0}개 입력 완료`}>{view.sequence.map((_, i) => <span key={i} className={`h-2 w-5 rounded-full ${i < (state?.position || 0) ? 'bg-primary' : 'bg-secondary'}`} />)}</div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{view.cards.map((card, i) => <button key={card.channel_id} disabled={!enabled || preview || view.awaiting_transition} aria-label={`${i + 1}번 ${card.name}`} {...minigamePress(() => pressOrdered(i))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{view.cards.map((card, i) => <button key={card.channel_id} disabled={!enabled || preview || view.awaiting_transition} aria-label={`${i + 1}번 ${card.name}`}
+          onPointerDown={event => minigamePress(() => pressOrdered(i)).onPointerDown(event)}
+          onClick={event => minigamePress(() => pressOrdered(i)).onClick(event)}
           className={`touch-manipulation rounded-2xl border-2 p-2 disabled:opacity-60 ${recentPress?.card === i ? recentPress.correct ? 'border-primary bg-primary/15' : 'border-rose-400 bg-rose-500/10' : 'border-primary/25 bg-card hover:bg-primary/10'}`}><div className="h-20 sm:h-24">{picture(card)}</div><p className="mt-1 truncate text-xs font-bold">{i + 1}. {card.name}</p></button>)}</div>
         <p className="mt-3 text-center text-xs text-muted-foreground">숫자키 1~4 지원 · 틀리면 같은 순서를 다시 보여드려요</p>
       </>}

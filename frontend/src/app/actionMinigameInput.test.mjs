@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { activeCatchCells, projectActionInputs, reconcileActionInputs } from './actionMinigameInput.ts';
+import { activeCatchCells, canPressOrderedAction, projectActionInputs, reconcileActionInputs } from './actionMinigameInput.ts';
 import { minigamePress } from './minigamePress.ts';
 
 const view = () => ({ revision: 1, server_now: 1000, cards: [], current_card: 0,
@@ -9,7 +9,7 @@ const view = () => ({ revision: 1, server_now: 1000, cards: [], current_card: 0,
     combo: 0, index: 0, blocked_until: 0, clicked: [], stage: 0, cleared: 0,
     position: 0, preview_at: 1000, input_at: 3800, input_count: 0 } });
 
-test('fan sorting advances immediately even after a wrong press, without mutating confirmed state', () => {
+test('projects queued fan inputs without mutating confirmed state', () => {
   const saved = view();
   const next = projectActionInputs('fan_meeting', saved, [1, 1, 0]);
   assert.equal(next.state.correct, 2);
@@ -19,6 +19,26 @@ test('fan sorting advances immediately even after a wrong press, without mutatin
   assert.deepEqual(next.upcoming_cards, [0, 1]);
   assert.equal(saved.state.index, 0);
   assert.equal(saved.upcoming_cards.length, 5);
+});
+
+test('every ordered input path enforces the penalty boundary and game clock', () => {
+  const saved = view();
+  saved.state.blocked_until = 4500;
+  assert.equal(canPressOrderedAction('fan_meeting', saved, 4499), false);
+  assert.equal(canPressOrderedAction('fan_meeting', saved, 4500), true);
+  assert.equal(canPressOrderedAction('fan_meeting', saved, 21000), false);
+  saved.state.starts_at = null;
+  assert.equal(canPressOrderedAction('fan_meeting', saved, 4500), false);
+});
+
+test('rapid correct relay input stays enabled while previews and stage transitions remain protected', () => {
+  const saved = view();
+  assert.equal(canPressOrderedAction('sequence_relay', saved, 3799), false);
+  assert.equal(canPressOrderedAction('sequence_relay', saved, 3800), true);
+  saved.state.position = 2;
+  assert.equal(canPressOrderedAction('sequence_relay', saved, 3800), true);
+  saved.awaiting_transition = true;
+  assert.equal(canPressOrderedAction('sequence_relay', saved, 3800), false);
 });
 
 test('partial acknowledgement preserves presses made during a delayed request', () => {

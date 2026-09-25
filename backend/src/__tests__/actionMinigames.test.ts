@@ -100,16 +100,29 @@ describe('server-owned action rules', () => {
     expect(() => advanceActionGame('sequence_relay', target, state, { ...input, values: [...input.values, 0] }, state.input_at)).toThrow();
     expect(state.stage).toBe(0);
   });
-  it('accepts the next sort immediately after a mistake and stops at 20 seconds', () => {
+  it('blocks sorting for exactly 500ms after a mistake and keeps correct inputs immediate', () => {
     const { target, state } = ready('fan_meeting');
     expect(() => advanceActionGame('fan_meeting', target, state, { kind: 'sort', value: 0 }, 3999)).toThrow();
     const wrong = advanceActionGame('fan_meeting', target, state, { kind: 'sort', value: 1 - target.deck[0] }, 4000);
-    expect(wrong).toMatchObject({ correct: 0, mistakes: 1, blocked_until: 0, index: 1 });
-    const correct = advanceActionGame('fan_meeting', target, wrong, { kind: 'sort', value: target.deck[1] }, 4000);
+    expect(wrong).toMatchObject({ correct: 0, mistakes: 1, blocked_until: 4500, index: 1 });
+    expect(() => advanceActionGame('fan_meeting', target, wrong, { kind: 'sort', value: target.deck[1] }, 4499)).toThrow('0.5초');
+    const correct = advanceActionGame('fan_meeting', target, wrong, { kind: 'sort', value: target.deck[1] }, 4500);
     expect(correct).toMatchObject({ correct: 1, mistakes: 1, combo: 1, index: 2 });
+    expect(advanceActionGame('fan_meeting', target, correct, { kind: 'sort', value: target.deck[2] }, 4500)).toMatchObject({ correct: 2, index: 3 });
     expect(state.index).toBe(0);
     expect(advanceActionGame('fan_meeting', target, correct, { kind: 'sort', value: target.deck[2] }, state.ends_at! + SORT_INPUT_GRACE_MS)).toMatchObject({ correct: 1, done: true });
     expect(() => advanceActionGame('fan_meeting', target, state, { kind: 'finish' }, 4500)).toThrow();
+  });
+
+  it('saves only the batch prefix through a mistake and cannot bypass its penalty', () => {
+    const { target, state } = ready('fan_meeting');
+    const values = [target.deck[0], 1 - target.deck[1], target.deck[2], target.deck[3]];
+    const wrong = advanceActionGame('fan_meeting', target, state, { kind: 'sort', offset: 0, values }, 4000);
+    expect(wrong).toMatchObject({ correct: 1, mistakes: 1, index: 2, blocked_until: 4500, inputs: values.slice(0, 2) });
+    expect(() => advanceActionGame('fan_meeting', target, wrong, { kind: 'sort', offset: 0, values }, 4499)).toThrow('0.5초');
+    const next = advanceActionGame('fan_meeting', target, wrong, { kind: 'sort', offset: 0, values }, 4500);
+    expect(next).toMatchObject({ correct: 3, mistakes: 1, index: 4, combo: 2, inputs: values });
+    expect(advanceActionGame('fan_meeting', target, next, { kind: 'sort', offset: 0, values }, 4500)).toEqual(next);
   });
 
   it('rejects catch clicks before appearance, after the receipt window, on empty cells or twice', () => {
