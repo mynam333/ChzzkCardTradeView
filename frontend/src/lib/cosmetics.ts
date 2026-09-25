@@ -1,5 +1,6 @@
 import React from 'react';
 import { API_BASE_URL } from './api';
+import { readCosmeticFrameLayers, type CosmeticFrameLayerConfig } from './cosmeticFrameLayers';
 
 /**
  * 외부/교차 출처 이미지를 백엔드 프록시(동일 출처 + CORS 허용)로 우회시킵니다.
@@ -165,14 +166,25 @@ export const borderStyle = (border?: { style_json?: string | null } | null): Rea
  * 실제 비주얼 CSS는 함께 저장된 {"css":...}가 ensureBorderCss로 주입됩니다.
  * (예시 라이브러리: 프로젝트 루트 card-borders/*.css)
  */
-export const borderClass = (border?: { style_json?: string | null } | null): string => {
-  if (!border?.style_json) return '';
+export const cosmeticFrameConfig = (styleJson?: string | null): CosmeticFrameLayerConfig & { className: string } => {
+  if (!styleJson) return { className: '' };
   try {
-    const obj = JSON.parse(border.style_json);
-    return typeof obj?.class === 'string' ? obj.class.trim() : '';
+    const obj = JSON.parse(styleJson);
+    const className = typeof obj?.class === 'string' ? obj.class.trim() : '';
+    return {
+      className,
+      ...(typeof obj?.css === 'string' ? readCosmeticFrameLayers(className, obj.css) : {})
+    };
   } catch {
-    return '';
+    return { className: '' };
   }
+};
+export const borderClass = (border?: { style_json?: string | null } | null): string => {
+  // Callers asking only for a class must not scan large embedded artwork for layers.
+  try {
+    const obj = JSON.parse(border?.style_json || 'null');
+    return typeof obj?.class === 'string' ? obj.class.trim() : '';
+  } catch { return ''; }
 };
 
 /**
@@ -266,7 +278,7 @@ export const stripSvgSmilAnimationsExceptDataSvgIndexInCss = (
 };
 
 const CSS_URL_TOKEN = /url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\)/gi;
-const CSS_PX_LENGTH = /(-?\d*\.?\d+)px\b/g;
+const CSS_PX_LENGTH = /(?<![\w.#-])(-?\d*\.?\d+)px\b(?![\w-])/g;
 
 const withCssUrlsProtected = (css: string, transform: (protectedCss: string) => string): string => {
   const urls: string[] = [];
@@ -299,6 +311,7 @@ type InjectedCosmeticCssSource = {
   isFrame: boolean;
   fallbackCss: string;
   hasSvgSmil: boolean;
+  hasDomLayers: boolean;
   svgSmilMotionWeight: number;
   motionSelector: string;
 };
@@ -340,6 +353,7 @@ export const SVG_CSS_ONLY_MIN_RENDER_AREA = 500_000;
  * 각 테마의 대형 카드에서 가장 식별력 높은 시그니처 움직임 한 장만 남깁니다.
  */
 const ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY = new Map<string, number>([
+  ['cb-chuseok-harvest-moon', 2],
   ['cb-autumn', 2],
   ['cb-sakura', 2],
   ['cb-snow', 2],
@@ -434,11 +448,18 @@ const compileCosmeticCss = (source: InjectedCosmeticCssSource): string => {
   if (source.isFrame) {
     cssText = migrateFramePxToContainerUnits(cssText);
   }
-  if (source.isFrame && (prefersReducedMotion || exceedsMotionBudget) && source.motionSelector) {
-    cssText += `\n${source.motionSelector},${source.motionSelector}::before,${source.motionSelector}::after{animation-play-state:paused!important;}`;
+  if (source.isFrame && source.motionSelector) {
+    const targets = [source.motionSelector, `${source.motionSelector} [data-cosmetic-layer]`];
+    const selectors = targets.flatMap((target) => [target, `${target}::before`, `${target}::after`]).join(',');
+    if (prefersReducedMotion) {
+      cssText += `\n${selectors}{animation:none!important;transition:none!important;}`;
+    } else if (exceedsMotionBudget && !source.hasDomLayers) {
+      cssText += `\n${selectors}{animation-play-state:paused!important;}`;
+    }
   }
   if (
     source.isFrame
+    && !source.hasDomLayers
     && source.motionSelector
     && ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
   ) {
@@ -607,7 +628,7 @@ const refreshCosmeticSvgMotionBudget = (): void => {
   const pageIsHidden = document.visibilityState === 'hidden';
   let order = 0;
   for (const source of injectedCosmeticCssSources.values()) {
-    if (!source.isFrame || !source.hasSvgSmil) continue;
+    if (!source.isFrame) continue;
     let visibleArea = 0;
     let distance = Number.POSITIVE_INFINITY;
     let engaged = false;
@@ -630,12 +651,12 @@ const refreshCosmeticSvgMotionBudget = (): void => {
       if (!visibleRect) continue;
       visibleElements.add(element);
       if (
-        ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
+        source.hasSvgSmil && !source.hasDomLayers && ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
         && visibleRect.renderArea >= SVG_CSS_ONLY_MIN_RENDER_AREA
       ) {
         cssOnlyElements.add(element);
       } else if (
-        ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
+        source.hasSvgSmil && !source.hasDomLayers && ADAPTIVE_DYNAMIC_SMIL_LAYER_BY_FRAME_KEY.has(source.key)
         && visibleRect.renderArea >= SVG_SMIL_ONLY_MIN_RENDER_AREA
       ) {
         smilOnlyElements.add(element);
@@ -658,7 +679,7 @@ const refreshCosmeticSvgMotionBudget = (): void => {
         && engagementTarget.contains(document.activeElement)
       );
     }
-    if (visibleArea > 0) {
+    if (visibleArea > 0 && source.hasSvgSmil) {
       candidates.push({
         key: source.key,
         engaged,
@@ -679,6 +700,7 @@ const refreshCosmeticSvgMotionBudget = (): void => {
   syncObservedCosmeticMotionElements(elementsByKey);
 
   for (const [key, elements] of elementsByKey) {
+    const source = injectedCosmeticCssSources.get(key);
     // data SVG CSS는 key별로 한 style을 공유하므로, 같은 테마의 가시 인스턴스가
     // 서로 다른 크기라면 가장 높은 LOD를 그 key 전체에 일관되게 적용합니다.
     const usesCssOnlyTier = activeKeys.has(key) && elements.cssOnly.size > 0;
@@ -688,7 +710,10 @@ const refreshCosmeticSvgMotionBudget = (): void => {
       && elements.smilOnly.size > 0
     );
     for (const element of elements.all) {
-      const shouldPause = !activeKeys.has(key) || !elements.visible.has(element);
+      // Layer carriers (including mixed SVG/WebP themes) and plain CSS frames
+      // do not lose their CSS motion merely because SVG repaint is budgeted.
+      const budgetPausesCss = source?.hasSvgSmil && !source.hasDomLayers && !activeKeys.has(key);
+      const shouldPause = pageIsHidden || budgetPausesCss || !elements.visible.has(element);
       if (shouldPause) {
         element.setAttribute(COSMETIC_MOTION_PAUSED_ATTRIBUTE, 'true');
       } else {
@@ -936,12 +961,20 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     const fallbackFontName = fontNameMatch ? fontNameMatch[1] : 'GMarketSans';
     fallbackCss = `${obj.fallback_ks_css}\n.${key} .ne-fallback-char { font-family: "${fallbackFontName}" !important; }`;
   }
+  const previousSource = injectedCosmeticCssSources.get(key);
+  if (previousSource?.css === css && previousSource.fallbackCss === fallbackCss) {
+    // A gallery can mount many copies of the same large artwork. Keep the style
+    // and its current timeline intact; only refresh visibility for the new card.
+    scheduleCosmeticSvgMotionBudgetRefresh();
+    return;
+  }
   const source: InjectedCosmeticCssSource = {
     key,
     css,
-    isFrame: key.startsWith('cb-'),
+    isFrame: key.split(/\s+/).some((name) => name.startsWith('cb-')),
     fallbackCss,
     hasSvgSmil: SVG_SMIL_RAW_OR_ENCODED_START.test(css),
+    hasDomLayers: !!readCosmeticFrameLayers(key, css).layers?.length,
     // 7개 타임라인을 비용 1의 기준 단위로 두며, 현재 운영 테마의
     // 20~24개 SMIL은 약 2.86~3.43배의 가시 면적 예산을 사용합니다.
     svgSmilMotionWeight: Math.max(
@@ -950,7 +983,6 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     ),
     motionSelector: cosmeticClassSelector(key)
   };
-  const previousSource = injectedCosmeticCssSources.get(key);
   const needsSvgMotionBudgetReapproval = source.isFrame && source.hasSvgSmil && (
     !previousSource
     || !previousSource.hasSvgSmil
@@ -978,7 +1010,7 @@ export const ensureCosmeticCss = (cosmetic?: { style_json?: string | null } | nu
     injectedBorderCss.set(key, el);
   }
   syncInjectedCosmeticCss(source);
-  if (source.isFrame && source.hasSvgSmil) ensureCosmeticSvgMotionBudgetObserver();
+  if (source.isFrame) ensureCosmeticSvgMotionBudgetObserver();
   scheduleCosmeticSvgMotionBudgetRefresh();
 };
 /** 하위 호환 별칭 */

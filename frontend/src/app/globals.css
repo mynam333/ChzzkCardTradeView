@@ -1906,11 +1906,42 @@ html.easter-egg-mode .card-star {
   transform-style: flat;
 }
 
-/* 화면 밖이거나 동시 SVG 모션 예산에서 빠진 개별 프레임은 바깥 CSS 타임라인도 정지합니다. */
+/* Opt-in decorative layers. Zero specificity keeps theme sizing/positioning free. */
+:where(.cosmetic-frame[data-cosmetic-layout] [data-cosmetic-layer]) {
+  display: block;
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: center;
+}
+
+.cosmetic-frame [data-cosmetic-layer],
+.cosmetic-frame [data-cosmetic-layer]::before,
+.cosmetic-frame [data-cosmetic-layer]::after {
+  pointer-events: none !important;
+}
+
+/* 화면 밖/숨김 탭에서는 자식 및 그 가상 요소까지 현재 재생 위치를 유지합니다. */
 .cosmetic-frame[data-cosmetic-motion-paused="true"],
 .cosmetic-frame[data-cosmetic-motion-paused="true"]::before,
-.cosmetic-frame[data-cosmetic-motion-paused="true"]::after {
+.cosmetic-frame[data-cosmetic-motion-paused="true"]::after,
+.cosmetic-frame[data-cosmetic-motion-paused="true"] [data-cosmetic-layer],
+.cosmetic-frame[data-cosmetic-motion-paused="true"] [data-cosmetic-layer]::before,
+.cosmetic-frame[data-cosmetic-motion-paused="true"] [data-cosmetic-layer]::after {
   animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce), print {
+  .cosmetic-frame,
+  .cosmetic-frame::before,
+  .cosmetic-frame::after,
+  .cosmetic-frame [data-cosmetic-layer],
+  .cosmetic-frame [data-cosmetic-layer]::before,
+  .cosmetic-frame [data-cosmetic-layer]::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .card-star,

@@ -178,6 +178,103 @@ describe('cosmetic SVG motion handling', () => {
     expect(migrated).not.toMatch(/viewBox='0 0 100 calc/);
   });
 
+  it('preserves WebP bytes during CSS normalization and logical-pixel migration', () => {
+    const uri = 'data:image/webp;base64,UklGRjgwcHgrLz09';
+    const css = `.cb-test{--image:url("${uri}");border-radius:3.43px;background-image:var(--image)}`;
+    const migrated = migrateFramePxToContainerUnits(normalizeSvgInCss(css));
+    expect(migrated).toContain(uri);
+    expect(migrated).toContain('border-radius:calc(var(--cosmetic-frame-unit) * 3.43)');
+    expect(stripSvgSmilAnimationsInCss(migrated)).toBe(migrated);
+  });
+
+  it.each([
+    ['cb-chuseok-harvest-moon', '--cosmetic-frame-layout:chuseok-webp-v1;', false],
+    ['cb-new-layer-theme', '--cosmetic-frame-layout:layers-v1;--cosmetic-frame-layers:frame,front/cloud;', false],
+    ['cb-css-only', 'animation:custom-motion 12s infinite;', false],
+    ['cb-autumn', '--cosmetic-frame-layout:layers-v1;--cosmetic-frame-layers:frame,front/cloud;', true]
+  ] as const)('keeps large %s CSS motion alive, pausing only hidden/offscreen instances', (key, declarations, mixed) => {
+    let hidden = false;
+    let offscreen = false;
+    let scheduled: (() => void) | undefined;
+    let visibilityChanged: (() => void) | undefined;
+    const attributes = new Map<string, string>();
+    const frame = {
+      parentElement: null,
+      checkVisibility: () => true,
+      getBoundingClientRect: () => ({ left: 0, top: offscreen ? 2000 : 0, right: 768, bottom: offscreen ? 3228.8 : 1228.8, width: 768, height: 1228.8 }),
+      matches: () => false,
+      contains: () => false,
+      setAttribute: (key: string, value: string) => attributes.set(key, value),
+      removeAttribute: (key: string) => attributes.delete(key)
+    };
+    const style = { textContent: '', setAttribute: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('window', {
+      innerWidth: 1280, innerHeight: 900,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: () => void) => { scheduled = callback; return 1; }),
+      cancelAnimationFrame: vi.fn(),
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1', overflowX: 'visible', overflowY: 'visible' })
+    });
+    vi.stubGlobal('document', {
+      get visibilityState() { return hidden ? 'hidden' : 'visible'; },
+      activeElement: null,
+      getElementsByClassName: () => mixed ? [frame, { ...frame }] : [frame],
+      addEventListener: (event: string, callback: () => void) => { if (event === 'visibilitychange') visibilityChanged = callback; },
+      removeEventListener: vi.fn(),
+      createElement: () => style,
+      head: { appendChild: vi.fn() }
+    });
+    const css = `.${key}{${declarations}}${mixed ? svgMotionCss(key, 24) : ''}`;
+    const cosmetic = { style_json: JSON.stringify({ class: key, css }) };
+    ensureCosmeticCss(cosmetic);
+    scheduled?.();
+    expect(attributes.size).toBe(0); // No SVG LOD or size-based static fallback.
+    hidden = true;
+    visibilityChanged?.();
+    expect(attributes.get('data-cosmetic-motion-paused')).toBe('true');
+    hidden = false;
+    offscreen = true;
+    visibilityChanged?.();
+    scheduled?.();
+    expect(attributes.get('data-cosmetic-motion-paused')).toBe('true');
+    offscreen = false;
+    ensureCosmeticCss(cosmetic);
+    scheduled?.();
+    expect(attributes.size).toBe(0);
+    expect(style.textContent).toContain(declarations);
+    if (mixed) {
+      // Repeated large SVG artwork is static, but independent CSS carriers still run.
+      expect(style.textContent).not.toMatch(/%3Canimate\b/);
+      expect(style.textContent).not.toContain('animation-play-state:paused!important;');
+    }
+  });
+
+  it('does not rewrite layer names that happen to end in a pixel-like suffix', () => {
+    const css = '.cb-test{--cosmetic-frame-layers:front/leaf-12px;} .cb-test [data-cosmetic-layer="leaf-12px"]{inset:-1.5px;transform:translateX(2px)}';
+    const migrated = migrateFramePxToContainerUnits(css);
+    expect(migrated).toContain('front/leaf-12px;');
+    expect(migrated).toContain('[data-cosmetic-layer="leaf-12px"]');
+    expect(migrated).toContain('inset:calc(var(--cosmetic-frame-unit) * -1.5)');
+  });
+
+  it('enforces reduced motion on arbitrary nested layers and their pseudo-elements', () => {
+    let reduce = true;
+    let preferenceChanged: (() => void) | undefined;
+    const style = { textContent: '', setAttribute: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('window', {
+      matchMedia: () => ({ get matches() { return reduce; }, addEventListener: (_event: string, cb: () => void) => { preferenceChanged = cb; }, removeEventListener: vi.fn() })
+    });
+    vi.stubGlobal('document', { createElement: () => style, head: { appendChild: vi.fn() } });
+    const css = '.cb-custom{--cosmetic-frame-layout:layers-v1;--cosmetic-frame-layers:front/spark;} .cb-custom [data-cosmetic-layer="spark"]::before{animation:spark 5s infinite;}';
+    ensureCosmeticCss({ style_json: JSON.stringify({ class: 'cb-custom', css }) });
+    expect(style.textContent).toContain('.cb-custom [data-cosmetic-layer]::before');
+    expect(style.textContent).toContain('.cb-custom [data-cosmetic-layer]::after{animation:none!important;transition:none!important;}');
+    reduce = false;
+    preferenceChanged?.();
+    expect(style.textContent).toContain('animation:spark 5s infinite');
+    expect(style.textContent).not.toContain('animation:none!important');
+  });
+
   it('recompiles injected SVGs when the reduced-motion preference changes', () => {
     let prefersReducedMotion = false;
     let notifyPreferenceChange: (() => void) | undefined;
@@ -613,7 +710,7 @@ describe('cosmetic SVG motion handling', () => {
     notifyMediaChange?.();
     expect(stylesByKey.get('cb-autumn')?.textContent).not.toMatch(/%3Canimate\b/);
     expect(stylesByKey.get('cb-autumn')?.textContent).toContain(
-      'animation-play-state:paused!important;'
+      'animation:none!important;'
     );
     prefersReducedMotion = false;
     notifyMediaChange?.();
@@ -730,6 +827,7 @@ describe('cosmetic SVG motion handling', () => {
       remove: ReturnType<typeof vi.fn>;
     }>();
     const newlyStandardizedFrameKeys = [
+      'cb-chuseok-harvest-moon',
       'cb-beach',
       'cb-cheese-fondue',
       'cb-galaxy',

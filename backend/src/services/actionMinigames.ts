@@ -9,9 +9,11 @@ export const ACTION_GAME_NAMES: Record<ActionGameType, string> = {
   fan_meeting: '팬 줄서기', streamer_catch: '게스트 캐치', sequence_relay: '순서 기억'
 };
 export const ACTION_GAME_PLAY_MS: Record<ActionGameType, number> = {
-  fan_meeting: 20_000, streamer_catch: 25_000, sequence_relay: 150_000
+  fan_meeting: 20_000, streamer_catch: 30_000, sequence_relay: 150_000
 };
 export const CATCH_INPUT_GRACE_MS = 500;
+export const SORT_INPUT_GRACE_MS = 500;
+export const CATCH_TARGET_COUNT = 12;
 export type ActionCard = { channel_id: string; name: string; image_url: string };
 export type CatchFrame = { start: number; duration: number; cells: Array<{ cell: number; card: number }> };
 export type ActionTarget = {
@@ -38,8 +40,10 @@ export type ActionState = {
   input_at: number;
   last_request?: string;
   last_action?: string;
+  inputs?: number[];
 };
-export type ActionInput = { kind: 'ready' | 'sort' | 'catch' | 'sequence' | 'finish'; value?: number; frame?: number };
+export type ActionInput = { kind: 'ready' | 'sort' | 'catch' | 'sequence' | 'finish'; value?: number; frame?: number;
+  values?: number[]; offset?: number; quick_start?: boolean };
 export class ActionGameError extends Error {}
 const shuffle = <T>(items: T[]): T[] => {
   const result = [...items];
@@ -67,21 +71,36 @@ export function createActionTarget(type: ActionGameType, candidates: ActionCard[
     ? Array.from({ length: 5 }, (_, stage) => Array.from({ length: stage + 4 }, () => crypto.randomInt(4))) : [];
   const frames: CatchFrame[] = [];
   if (type === 'streamer_catch') {
-    const targets = new Set(shuffle(Array.from({ length: 25 }, (_, i) => i)).slice(0, 10));
-    const durations: number[] = [];
-    // 25 appearances, each 0.8–1.2s, summing to exactly 25 seconds.
-    for (let i = 0; i < 12; i++) {
-      const duration = crypto.randomInt(800, 1201);
-      durations.push(duration, 2000 - duration);
+    // Reserve every target first, so random placement cannot reduce the quota or
+    // truncate the final appearance. Targets never compete with each other.
+    const durations = Array.from({ length: CATCH_TARGET_COUNT }, () => crypto.randomInt(1100, 1901));
+    const weights = Array.from({ length: CATCH_TARGET_COUNT + 1 }, () => crypto.randomInt(1, 101));
+    const freeTime = ACTION_GAME_PLAY_MS.streamer_catch - durations.reduce((a, b) => a + b, 0) - weights.length * 200;
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    const gaps = weights.map(weight => 200 + Math.floor(freeTime * weight / totalWeight));
+    let start = gaps[0];
+    let previousCell = -1;
+    for (let i = 0; i < CATCH_TARGET_COUNT; i++) {
+      const cell = shuffle(Array.from({ length: 9 }, (_, index) => index).filter(index => index !== previousCell))[0];
+      frames.push({ start, duration: durations[i], cells: [{ cell, card: 0 }] });
+      previousCell = cell;
+      start += durations[i] + gaps[i + 1];
     }
-    durations.push(1000);
-    let start = 0;
-    for (let i = 0; i < 25; i++) {
-      const slots = shuffle(Array.from({ length: 9 }, (_, cell) => cell));
-      const selected = targets.has(i) ? [0, ...shuffle([1, 2, 3]).slice(0, 2)] : [1, 2, 3];
-      frames.push({ start, duration: durations[i], cells: shuffle(selected).map((card, index) => ({ cell: slots[index], card })) });
-      start += durations[i];
+    const targets = [...frames];
+    // Every other cell has its own random idle and visible times. Leave a gap
+    // around reserved targets so a photo cannot replace another on the same press.
+    for (let cell = 0; cell < 9; cell++) {
+      let at = crypto.randomInt(300, 2401);
+      while (at < ACTION_GAME_PLAY_MS.streamer_catch) {
+        const duration = crypto.randomInt(750, 1851);
+        if (at + duration <= ACTION_GAME_PLAY_MS.streamer_catch && !targets.some(target =>
+          target.cells[0].cell === cell && at < target.start + target.duration + 250 && at + duration + 250 > target.start)) {
+          frames.push({ start: at, duration, cells: [{ cell, card: crypto.randomInt(1, 4) }] });
+        }
+        at += duration + crypto.randomInt(900, 4001);
+      }
     }
+    frames.sort((a, b) => a.start - b.start);
   }
   return { cards, deck, frames, sequences };
 }
@@ -100,11 +119,29 @@ export function readActionState(progress: unknown): ActionState {
 }
 
 export function advanceActionGame(type: ActionGameType, target: ActionTarget, previous: ActionState, input: ActionInput, now: number): ActionState {
+  if (input.values !== undefined) {
+    if (!((type === 'fan_meeting' && input.kind === 'sort') || (type === 'sequence_relay' && input.kind === 'sequence')) ||
+      !Array.isArray(input.values) || !input.values.length || input.values.length > 64 ||
+      !input.values.every(Number.isInteger) || !Number.isInteger(input.offset) || input.offset! < 0) {
+      throw new ActionGameError('연속 입력 정보가 올바르지 않습니다.');
+    }
+    const saved = previous.inputs || [];
+    if (input.offset! > saved.length || input.values.some((value, i) =>
+      input.offset! + i < saved.length && saved[input.offset! + i] !== value)) {
+      throw new ActionGameError('입력 순서를 확인할 수 없습니다.');
+    }
+    let next = previous;
+    for (const value of input.values.slice(Math.max(0, saved.length - input.offset!))) {
+      next = advanceActionGame(type, target, next, { kind: input.kind, value }, now);
+      if (next.done) break;
+    }
+    return { ...next };
+  }
   const state: ActionState = { ...previous, clicked: [...previous.clicked] };
   if (state.done) return state;
   if (input.kind === 'ready') {
     if (state.starts_at !== null) return state;
-    state.starts_at = now + 3000;
+    state.starts_at = now + (input.quick_start === true ? 0 : 3000);
     state.ends_at = state.starts_at + ACTION_GAME_PLAY_MS[type];
     state.preview_at = state.starts_at;
     state.input_at = state.preview_at + 4 * 700;
@@ -119,18 +156,19 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
     return state;
   }
   // Bound transport tolerance using the server's request receipt time, never a client clock.
-  if (now >= state.ends_at + (type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : 0)) {
+  if (now >= state.ends_at + (type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : type === 'fan_meeting' ? SORT_INPUT_GRACE_MS : 0)) {
     state.done = true;
     return state;
   }
   if (!Number.isInteger(input.value)) throw new ActionGameError('입력값이 올바르지 않습니다.');
   if (type === 'fan_meeting' && input.kind === 'sort') {
     if (input.value !== 0 && input.value !== 1) throw new ActionGameError('왼쪽 또는 오른쪽을 선택해 주세요.');
-    if (now < state.blocked_until) throw new ActionGameError('잠시 후 다음 카드를 넘겨 주세요.');
     if (state.index >= target.deck.length) throw new ActionGameError('카드를 모두 분류했습니다.');
     if (target.deck[state.index] === input.value) { state.correct++; state.combo++; }
-    else { state.mistakes++; state.combo = 0; state.blocked_until = now + 500; }
+    else { state.mistakes++; state.combo = 0; }
+    state.blocked_until = 0;
     state.index++;
+    state.inputs = [...(state.inputs || []), input.value];
   } else if (type === 'streamer_catch' && input.kind === 'catch') {
     if (!Number.isInteger(input.frame)) throw new ActionGameError('화면 정보가 올바르지 않습니다.');
     const frame = target.frames[input.frame!];
@@ -147,12 +185,13 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
   } else if (type === 'sequence_relay' && input.kind === 'sequence') {
     if (input.value! < 0 || input.value! >= target.cards.length) throw new ActionGameError('보기 카드를 선택해 주세요.');
     if (now < state.input_at) throw new ActionGameError('순서를 모두 본 뒤 입력해 주세요.');
+    state.inputs = [...(state.inputs || []), input.value!];
     if (target.sequences[state.stage][state.position] !== input.value) {
       state.mistakes++;
       state.position = 0;
       if (state.mistakes >= 2) state.done = true;
       else {
-        state.preview_at = now + 800;
+        state.preview_at = now;
         state.input_at = state.preview_at + target.sequences[state.stage].length * 700;
       }
     } else {
@@ -163,7 +202,7 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
         else {
           state.stage++;
           state.position = 0;
-          state.preview_at = now + 800;
+          state.preview_at = now;
           state.input_at = state.preview_at + target.sequences[state.stage].length * 700;
         }
       }
@@ -176,15 +215,18 @@ export function actionReward(type: ActionGameType, state: ActionState): 0 | 1000
   if (!state.done) throw new ActionGameError('게임 종료 후 결과를 확인해 주세요.');
   if (type === 'fan_meeting') return state.correct >= 25 || (state.correct >= 20 && state.mistakes === 0)
     ? 1200 : state.correct >= 15 ? 1000 : 0;
-  if (type === 'streamer_catch') return state.correct === 10 && state.mistakes === 0
+  if (type === 'streamer_catch') return state.correct >= 10 && state.mistakes === 0
     ? 1200 : state.correct >= 7 && state.mistakes <= 2 ? 1000 : 0;
   return state.cleared === 5 && state.mistakes === 0 ? 1200 : state.cleared >= 4 ? 1000 : 0;
 }
 
 export function publicActionGame(type: ActionGameType, target: ActionTarget, state: ActionState, revision: number, now = Date.now(), receivedAt = now) {
-  const { last_request, last_action, ...publicState } = state;
+  const { last_request, last_action, inputs, ...publicState } = state;
   return { game_type: type, revision, server_now: now, server_received_at: receivedAt,
-    input_grace_ms: type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : 0, cards: target.cards, state: publicState,
+    input_grace_ms: type === 'streamer_catch' ? CATCH_INPUT_GRACE_MS : type === 'fan_meeting' ? SORT_INPUT_GRACE_MS : 0, cards: target.cards,
+    state: { ...publicState, input_count: inputs?.length || 0 },
+    upcoming_cards: type === 'fan_meeting' ? target.deck.slice(state.index, state.index + 64) : [],
+    target_count: type === 'streamer_catch' ? target.frames.filter(frame => frame.cells.some(cell => cell.card === 0)).length : 0,
     current_card: type === 'fan_meeting' ? target.deck[state.index] ?? null : null,
     frames: type === 'streamer_catch' ? target.frames : [],
     sequence: type === 'sequence_relay' && state.starts_at !== null ? target.sequences[state.stage] : [] };

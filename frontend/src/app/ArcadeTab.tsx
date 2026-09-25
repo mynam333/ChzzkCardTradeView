@@ -25,6 +25,7 @@ import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { proxiedImage } from '@/lib/cosmetics';
 import { ActionMinigame, ACTION_GAME_COPY, ACTION_GAME_TYPES, isActionGameType, type ActionGameType } from './ActionMinigame';
+import { minigamePress } from './minigamePress';
 import {
   CROP_DETECTIVE_IMAGE_REQUEST_PROFILES,
   areCropDetectiveAssetsSettled,
@@ -1686,10 +1687,10 @@ const CardImageTile: React.FC<{
   return (
     <button
       type="button"
-      onClick={() => {
+      {...minigamePress(() => {
         if (disabled) return;
         onClick?.();
-      }}
+      })}
       onContextMenu={(event) => {
         if (!imageBlindEnabled) {
           event.preventDefault();
@@ -2295,6 +2296,7 @@ const CropDetectiveChoices: React.FC<{
   round: CropDetectiveRound;
   roundFeedback: RoundFeedback | null;
   roundChecking: boolean;
+  pendingChoiceId: string | null;
   gameBusy: boolean;
   isGameOver: boolean;
   countdownLeft: number | null;
@@ -2306,6 +2308,7 @@ const CropDetectiveChoices: React.FC<{
   round,
   roundFeedback,
   roundChecking,
+  pendingChoiceId,
   gameBusy,
   isGameOver,
   countdownLeft,
@@ -2358,7 +2361,7 @@ const CropDetectiveChoices: React.FC<{
     !roundChecking &&
     !roundFeedback &&
     (countdownLeft === null || countdownLeft <= 0);
-  const selectedId = roundFeedback?.selected_channel_id || null;
+  const selectedId = roundFeedback?.selected_channel_id || (roundChecking ? pendingChoiceId : null);
   const correctIds = roundFeedback?.correct_channel_ids || [];
 
   const handleAssetSettled = useCallback((
@@ -2539,6 +2542,8 @@ export const ArcadeTab: React.FC = () => {
   const [secondsUntilGameChange, setSecondsUntilGameChange] = useState(0);
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
   const [actionGameKey, setActionGameKey] = useState(0);
+  const [actionAutoStart, setActionAutoStart] = useState(false);
+  const quickRestartRef = useRef(false);
   const [isPracticeMode, setIsPracticeMode] = useState(false);
   const [isPracticeExpanded, setIsPracticeExpanded] = useState(false);
 
@@ -2594,10 +2599,17 @@ export const ArcadeTab: React.FC = () => {
   }, []);
 
   // 3. 카드 뒤집기 전용 상태
-  const [matchCards, setMatchCards] = useState<MatchCard[]>([]);
+  const [matchCards, setMatchCardsState] = useState<MatchCard[]>([]);
+  const matchCardsRef = useRef<MatchCard[]>([]);
+  const setMatchCards = useCallback((update: React.SetStateAction<MatchCard[]>) => {
+    const next = typeof update === 'function' ? update(matchCardsRef.current) : update;
+    matchCardsRef.current = next;
+    setMatchCardsState(next);
+  }, []);
   const [matchedPairs, setMatchedPairs] = useState<MatchedPair[]>([]);
   const [matchUsesServerDeck, setMatchUsesServerDeck] = useState(false);
-  const [flippedIndices, setFlippedIndices] = useState<number[]>([]);
+  const flippedIndicesRef = useRef<number[]>([]);
+  const setFlippedIndices = useCallback((indices: number[]) => { flippedIndicesRef.current = indices; }, []);
   const [revealActive, setRevealActive] = useState(false); // 시작 시 2초 공개 중인지 여부
   const [gameTimeLeft, setGameTimeLeft] = useState(MATCH_TIME_LIMIT_SECONDS);
   const [isGameOver, setIsGameOver] = useState(false);
@@ -2620,6 +2632,7 @@ export const ArcadeTab: React.FC = () => {
   const [roundCorrectCount, setRoundCorrectCount] = useState(0);
   const [roundTimeLeft, setRoundTimeLeft] = useState(ROUND_GAME_ROUND_SECONDS);
   const [roundChecking, setRoundChecking] = useState(false);
+  const [roundPressedChoice, setRoundPressedChoice] = useState<string | null>(null);
   const [roundStartBusy, setRoundStartBusy] = useState(false);
   const [roundTimeoutRetryAttempt, setRoundTimeoutRetryAttempt] = useState(0);
   const roundDeadlineRef = useRef<number | null>(null);
@@ -3122,6 +3135,7 @@ export const ArcadeTab: React.FC = () => {
     if (roundSubmissionKey === submissionKey) return;
     setRoundSubmissionKey(submissionKey);
     setRoundChecking(true);
+    setRoundPressedChoice(timedOut ? null : selected);
 
     const handleTimedOutSubmissionFailure = () => {
       setRoundSubmissionKey(null);
@@ -3412,13 +3426,15 @@ export const ArcadeTab: React.FC = () => {
             // 카운트다운 종료 후 바로 퍼즐 조작을 허용합니다.
           } else if (activeGame === 'match') {
             setRevealActive(true);
-            setTimeout(() => {
+            const timeoutId = window.setTimeout(() => {
+              matchActionTimeoutsRef.current.delete(timeoutId);
               setMatchCards(prevDeck =>
                 prevDeck.map(c => ({ ...c, isFlipped: false }))
               );
               matchDeadlineRef.current = Date.now() + MATCH_TIME_LIMIT_SECONDS * 1000;
               setRevealActive(false);
             }, 2000);
+            matchActionTimeoutsRef.current.add(timeoutId);
           } else if (activeGame === 'crop_detective') {
             if (isPracticeMode) {
               // Practice has no authoritative server deadline, so its clock can
@@ -3440,10 +3456,10 @@ export const ArcadeTab: React.FC = () => {
         }
         return prev - 1;
       });
-    }, 1000);
+    }, quickRestartRef.current ? 0 : 1000);
 
     return () => clearInterval(timer);
-  }, [countdownLeft, activeGame, isPracticeMode]);
+  }, [countdownLeft, activeGame, isPracticeMode, setMatchCards]);
 
   // 짝맞추기 30초 인게임 타이머 구동
   useEffect(() => {
@@ -3629,7 +3645,7 @@ export const ArcadeTab: React.FC = () => {
   const handleStartGame = async (
     type: GameType,
     practiceMode = false,
-    override?: { channelId?: string; star?: number | null; blur?: string | null; imageUrl?: string | null }
+    override?: { channelId?: string; star?: number | null; blur?: string | null; imageUrl?: string | null; quickStart?: boolean }
   ) => {
     if (isActionGameType(type)) {
       if (!practiceMode && type !== todayGame) { void fetchStatus(); return; }
@@ -3639,6 +3655,7 @@ export const ArcadeTab: React.FC = () => {
       setCountdownLeft(null);
       setIsPracticeMode(practiceMode);
       setActiveGame(type);
+      setActionAutoStart(override?.quickStart === true);
       setActionGameKey(key => key + 1);
       return;
     }
@@ -3656,6 +3673,7 @@ export const ArcadeTab: React.FC = () => {
     }
 
     activeSessionRestoreAllowedRef.current = false;
+    quickRestartRef.current = override?.quickStart === true;
     setGameBusy(true);
     roundStartRequestRef.current += 1;
     roundStartInFlightRef.current = false;
@@ -3704,6 +3722,7 @@ export const ArcadeTab: React.FC = () => {
         body: JSON.stringify({
           game_type: type,
           practice_mode: practiceMode,
+          skip_countdown: override?.quickStart === true,
           // 연습 모드 한정: 특정 스트리머/별 이미지를 강제 지정(테스트용)
           ...(practiceMode && override?.channelId ? { force_channel_id: override.channelId } : {}),
           ...(practiceMode && override?.star != null ? { force_star: override.star } : {}),
@@ -3873,7 +3892,7 @@ export const ArcadeTab: React.FC = () => {
         setMatchCards(serverMatchDeck ?? legacyPracticeMatchDeck ?? []);
       }
 
-      setCountdownLeft(data.resumed_session ? 0 : 3);
+      setCountdownLeft(data.resumed_session ? 0 : override?.quickStart ? 1 : 3);
 
       if (!responsePracticeMode) fetchStatus(); // 일반 게임만 남은 티켓 수량 갱신
 
@@ -4086,16 +4105,25 @@ export const ArcadeTab: React.FC = () => {
   // 3. 카드 뒤집기 제어 (모바일 3x4 / PC 4x3)
   // ==========================================
   const handleFlipCard = (index: number) => {
-    if (gameBusy || gameResult || revealActive || flippedIndices.length >= 2 || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
-    const clickedCard = matchCards[index];
-    if (clickedCard.isFlipped || clickedCard.isMatched) return;
-
-    const nextDeck = matchCards.map((card, idx) =>
+    if (gameBusy || gameResult || revealActive || isGameOver || (countdownLeft !== null && countdownLeft > 0)) return;
+    let deck = matchCardsRef.current;
+    let flipped = flippedIndicesRef.current;
+    if (!deck[index] || deck[index].isMatched) return;
+    // A new press closes a previous mismatch immediately. Its feedback timer
+    // never locks the board or flips a newly selected card behind the player.
+    if (flipped.length === 2) {
+      matchActionTimeoutsRef.current.forEach(timeout => window.clearTimeout(timeout));
+      matchActionTimeoutsRef.current.clear();
+      deck = deck.map((card, i) => flipped.includes(i) ? { ...card, isFlipped: false } : card);
+      flipped = [];
+    }
+    if (deck[index].isFlipped) return;
+    const nextDeck = deck.map((card, idx) =>
       idx === index ? { ...card, isFlipped: true } : card
     );
     setMatchCards(nextDeck);
 
-    const newFlipped = [...flippedIndices, index];
+    const newFlipped = [...flipped, index];
     setFlippedIndices(newFlipped);
 
     if (newFlipped.length === 2) {
@@ -4108,9 +4136,7 @@ export const ArcadeTab: React.FC = () => {
           first_card_id: firstCard.card_id,
           second_card_id: secondCard.card_id
         };
-        // 짝 맞춤 성공 -> 0.5초 후 isMatched와 isFlipped를 확실히 true로 세팅
-        const timeoutId = window.setTimeout(() => {
-          matchActionTimeoutsRef.current.delete(timeoutId);
+        // A correct pair is committed on the second press, with no input lock.
           setMatchedPairs(prevPairs => {
             const alreadyRecorded = prevPairs.some(pair =>
               pair.first_card_id === matchedPair.first_card_id ||
@@ -4129,8 +4155,6 @@ export const ArcadeTab: React.FC = () => {
             return matchedDeck;
           });
           setFlippedIndices([]);
-        }, 500);
-        matchActionTimeoutsRef.current.add(timeoutId);
       } else {
         // 매치 실패 -> 0.8초 뒤에 두 카드의 뒤집힘 원복
         const timeoutId = window.setTimeout(() => {
@@ -4457,7 +4481,7 @@ export const ArcadeTab: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)}
+                    onClick={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode, { quickStart: true })}
                     disabled={!isPracticeMode && tickets <= 0}
                     className="cute-wiggle-hover flex items-center justify-center gap-1 rounded-2xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
                   >
@@ -4700,10 +4724,10 @@ export const ArcadeTab: React.FC = () => {
       {/* ======================================================== */}
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
-      {isActionGameType(activeGame) && <ActionMinigame key={actionGameKey} type={activeGame} practice={isPracticeMode} canRestart={isPracticeMode || tickets > 0}
+      {isActionGameType(activeGame) && <ActionMinigame key={actionGameKey} type={activeGame} practice={isPracticeMode} autoStart={actionAutoStart} canRestart={isPracticeMode || tickets > 0}
         onExit={() => { handleExitGame(); void fetchStatus(); }}
         onSettled={() => { void fetchStatus(); if (!isPracticeMode) void refreshUserData(); }}
-        onRestart={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode)} />}
+        onRestart={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode, { quickStart: true })} />}
       {activeGame && !isActionGameType(activeGame) && gameData && (
         <div
           className="cute-surface relative mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-5xl flex-col overflow-hidden overscroll-x-contain rounded-[2rem] p-4 animate-in zoom-in-95 duration-200 sm:p-6 md:min-h-[calc(100dvh-4rem)]"
@@ -4714,7 +4738,7 @@ export const ArcadeTab: React.FC = () => {
         >
 
           {/* 아케이드 3초 카운트다운 오버레이 */}
-          {countdownLeft !== null && countdownLeft > 0 && (
+          {countdownLeft !== null && countdownLeft > 0 && !quickRestartRef.current && (
             <div className="absolute inset-0 z-40 flex select-none flex-col items-center justify-center bg-sky-950/88 backdrop-blur-xs pointer-events-auto">
               <div className="text-center space-y-3 animate-in zoom-in-90 duration-200">
                 <span className="text-[10px] font-black tracking-widest text-primary bg-primary/10 border border-primary/20 px-3.5 py-1 rounded-full animate-pulse">
@@ -4787,7 +4811,7 @@ export const ArcadeTab: React.FC = () => {
             if (!isQuizRound(currentRound)) return null;
             const protectedRoundImage = isProtectedMinigameImage(currentRound.image_url);
             const currentRoundImageUrl = resolveMinigameImage(currentRound.image_url);
-            const selectedId = roundFeedback?.selected_channel_id || null;
+            const selectedId = roundFeedback?.selected_channel_id || (roundChecking ? roundPressedChoice : null);
             const correctIds = roundFeedback?.correct_channel_ids || [];
             const imageBlindEnabled = Boolean(roundFeedback);
 
@@ -4889,7 +4913,7 @@ export const ArcadeTab: React.FC = () => {
                     return (
                       <button
                         key={choice.channel_id}
-                        onClick={() => handleRoundChoice(choice.channel_id)}
+                        {...minigamePress(() => handleRoundChoice(choice.channel_id))}
                         disabled={Boolean(roundFeedback) || roundChecking || gameBusy || isGameOver || roundTimeLeft <= 0 || (countdownLeft !== null && countdownLeft > 0)}
                         className={`cute-card-pop rounded-2xl border p-3.5 text-center text-xs font-extrabold transition sm:p-5 sm:text-base ${
                           correct
@@ -5050,7 +5074,7 @@ export const ArcadeTab: React.FC = () => {
           {activeGame === 'value_duel' && gameData.rounds && (() => {
             const currentRound = gameData.rounds[roundIndex];
             if (!isValueDuelRound(currentRound)) return null;
-            const selectedId = roundFeedback?.selected_channel_id || null;
+            const selectedId = roundFeedback?.selected_channel_id || (roundChecking ? roundPressedChoice : null);
             const correctIds = roundFeedback?.correct_channel_ids || [];
             const leftState = {
               selected: selectedId === currentRound.left.channel_id,
@@ -5167,6 +5191,7 @@ export const ArcadeTab: React.FC = () => {
                   round={currentRound}
                   roundFeedback={roundFeedback}
                   roundChecking={roundChecking}
+                  pendingChoiceId={roundPressedChoice}
                   gameBusy={gameBusy}
                   isGameOver={isGameOver}
                   countdownLeft={countdownLeft}
@@ -5234,15 +5259,17 @@ export const ArcadeTab: React.FC = () => {
                   // 선공개 중이거나 뒤집혔거나 이미 맞춘 경우 앞면 노출
                   const showFront = revealActive || card.isFlipped || card.isMatched;
                   return (
-                    <div
+                    <button type="button"
                       key={card.card_id}
-                      onClick={() => handleFlipCard(idx)}
-                      className={`perspective group relative h-full min-h-0 w-full min-w-0 cursor-pointer transition-all duration-300 ${
+                      aria-label={`${idx + 1}번 카드${card.isMatched ? ' · 짝 완성' : showFront ? ` · ${card.name}` : ''}`}
+                      {...minigamePress(() => handleFlipCard(idx))}
+                      disabled={gameBusy || Boolean(gameResult) || revealActive || isGameOver || (countdownLeft !== null && countdownLeft > 0) || card.isMatched}
+                      className={`perspective group relative h-full min-h-0 w-full min-w-0 touch-manipulation cursor-pointer transition-transform duration-100 ${
                         card.isMatched ? 'scale-95' : ''
                       }`}
                     >
                       <div
-                        className={`relative w-full h-full card-inner-transition transform-style preserve-3d ${showFront ? 'rotate-y-180' : ''
+                        className={`relative w-full h-full transition-transform duration-100 motion-reduce:transition-none transform-style preserve-3d ${showFront ? 'rotate-y-180' : ''
                           } ${card.isMatched ? '' : 'group-hover:scale-102'
                           }`}
                       >
@@ -5302,7 +5329,7 @@ export const ArcadeTab: React.FC = () => {
                           )}
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

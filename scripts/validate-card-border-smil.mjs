@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
@@ -10,6 +11,7 @@ const requireFromFrontend = createRequire(path.resolve(repositoryRoot, 'frontend
 const postcss = requireFromFrontend('postcss');
 const sharp = requireFromFrontend('sharp');
 const defaultThemes = [
+  'chuseok-harvest-moon.css',
   'autumn.css',
   'sakura.css',
   'snow.css',
@@ -33,6 +35,7 @@ const defaultThemes = [
 ];
 
 const expectedMotionIdentities = new Map([
+  ['chuseok-harvest-moon.css', ['three-cloud-parallax', 'harvest-moon-libration', 'panicle-wind-bow']],
   ['autumn.css', ['herbarium-press', 'vein-ignition', 'leaf-curl-settle']],
   ['sakura.css', ['nacre-polarization', 'sequential-bloom', 'petal-airloop']],
   ['snow.css', ['dendrite-growth', 'bragg-diffraction', 'frost-sublimation']],
@@ -65,6 +68,17 @@ const svgDetailRequirements = [
   { role: 'micro-detail', minShapes: 7, minPathCharacters: 200, minGradients: 1, minMotionKinds: 2 },
   { role: 'particle/projection', minShapes: 4, minPathCharacters: 100, minGradients: 0, minMotionKinds: 3 }
 ];
+// Chuseok's supplied frame is explicitly required to be completely static.
+// The moon is behind it; clouds and rice share the top layer (2 / 0 / 14 SMIL).
+const isChuseokStaticFrame = (filename, svgIndex) =>
+  filename === 'chuseok-harvest-moon.css' && svgIndex === 1;
+const getSvgDetailRequirements = (filename, svgIndex) => {
+  const detail = svgDetailRequirements[svgIndex];
+  if (filename !== 'chuseok-harvest-moon.css') return detail;
+  if (svgIndex === 0) return { ...detail, minGradients: 1, minMotionKinds: 2 };
+  if (svgIndex === 1) return { ...detail, minGradients: 0 };
+  return detail;
+};
 const smilIdOwners = new Map();
 const cssMotionTopologyOwners = new Map();
 const smilMotionTopologyOwners = new Map();
@@ -622,8 +636,15 @@ const validateSmil = (svg, filename, svgIndex) => {
     attributes: match[2] || ''
   }));
   const animations = [...selfClosingAnimations, ...pairedAnimations];
-  if (animations.length < 6 || animations.length > 8) {
-    throw new Error(`${filename} SVG ${svgIndex + 1}: SMIL count ${animations.length}, expected 6..8`);
+  if (isChuseokStaticFrame(filename, svgIndex)) {
+    if (animations.length !== 0) throw new Error(`${filename}: supplied frame must contain zero SMIL`);
+    return 0;
+  }
+  const prescribedCount = filename === 'chuseok-harvest-moon.css' ? [2, 0, 14][svgIndex] : null;
+  const minimumAnimations = prescribedCount ?? 6;
+  const maximumAnimations = prescribedCount ?? 8;
+  if (animations.length < minimumAnimations || animations.length > maximumAnimations) {
+    throw new Error(`${filename} SVG ${svgIndex + 1}: SMIL count ${animations.length}, expected ${minimumAnimations}..${maximumAnimations}`);
   }
 
   const motionKinds = new Set();
@@ -794,15 +815,16 @@ const validateSmil = (svg, filename, svgIndex) => {
     }
   }
 
-  const minimumMotionKinds = svgDetailRequirements[svgIndex]?.minMotionKinds ?? 2;
+  const minimumMotionKinds = getSvgDetailRequirements(filename, svgIndex)?.minMotionKinds ?? 2;
   if (motionKinds.size < minimumMotionKinds) {
     throw new Error(
       `${filename} SVG ${svgIndex + 1}: only ${motionKinds.size} motion kind(s), expected at least ${minimumMotionKinds}`
     );
   }
-  if (durations.size < 3 || beginOffsets.size < 3) {
+  const minimumPhases = Math.min(3, animations.length);
+  if (durations.size < minimumPhases || beginOffsets.size < minimumPhases) {
     throw new Error(
-      `${filename} SVG ${svgIndex + 1}: expected at least three distinct durations and negative phases, found `
+      `${filename} SVG ${svgIndex + 1}: expected at least ${minimumPhases} distinct durations and negative phases, found `
       + `${durations.size}/${beginOffsets.size}`
     );
   }
@@ -838,7 +860,7 @@ const validateSvgSafety = (svg, filename, svgIndex) => {
     }
   }
 
-  const detail = svgDetailRequirements[svgIndex];
+  const detail = getSvgDetailRequirements(filename, svgIndex);
   if (!detail) return;
   const shapeCount = (svg.match(/<(?:path|rect|circle|ellipse|polygon|polyline|line|use)\b/gi) ?? []).length;
   const pathCharacters = [...svg.matchAll(/\bd=['"]([^'"]+)['"]/gi)]
@@ -930,6 +952,112 @@ const validateCssContract = (root, filename) => {
       throw new Error(`${filename}: generic breathe keyframes are not allowed`);
     }
   });
+};
+
+const validateChuseokLayerContract = (root, svgs, filename) => {
+  if (filename !== 'chuseok-harvest-moon.css') return;
+  if (!/id=['"]chuseok-moon-source['"]/.test(svgs[0]) || /id=['"]chuseok-(?:frame|cloud|rice)/.test(svgs[0])) {
+    throw new Error(`${filename}: the root SVG must contain only the rear moon`);
+  }
+  if (!/id=['"]chuseok-frame-fixed['"]/.test(svgs[1]) || /id=['"]chuseok-(?:cloud|moon|rice)/.test(svgs[1])) {
+    throw new Error(`${filename}: the middle SVG must contain only the fixed frame`);
+  }
+  if (/id=['"]chuseok-(?:frame|moon)/.test(svgs[2])) {
+    throw new Error(`${filename}: the uppermost SVG must not contain the frame or moon`);
+  }
+  for (const id of ['chuseok-cloud-1-drift', 'chuseok-cloud-2-drift', 'chuseok-cloud-3-drift', 'chuseok-rice-fixed', 'chuseok-rice-canopy']) {
+    if (!svgs[2].includes(`id='${id}'`)) throw new Error(`${filename}: missing foreground group ${id}`);
+  }
+  for (const [pseudo, index] of [['', '5'], ['::before', '1'], ['::after', '2']]) {
+    const declarations = new Map();
+    root.walkRules((rule) => {
+      if (isInsideKeyframes(rule) || !splitSelectors(rule.selector).includes(`.cb-chuseok-harvest-moon${pseudo}`)) return;
+      rule.walkDecls((declaration) => declarations.set(declaration.prop, stripImportant(declaration.value)));
+    });
+    const required = [['z-index', index], ['animation', 'none'], ['transform', 'none'], ['filter', 'none']];
+    if (pseudo) required.push(['opacity', '1']);
+    for (const [property, value] of required) {
+      if (declarations.get(property) !== value) throw new Error(`${filename}: ${pseudo} requires ${property}: ${value} to keep the frame/rice foot fixed`);
+    }
+  }
+  root.walkAtRules('keyframes', () => {
+    throw new Error(`${filename}: animate the SVG artwork internally, never the CSS background or whole frame`);
+  });
+};
+
+// Pin the supplied artwork independently of the local Downloads directory.
+// Updating the artwork intentionally requires reviewing these hashes as well.
+const suppliedChuseokWebpSha256 = {
+  moon: '2fbe389b966a1b7a76a6bceb93e1121be6b234bb1cc3686dbcbbabdd7e1785c0',
+  frame: 'c4ae689cec2c4a9ac60defbc7bd3aec721ee84716d0a05a09e37668788a02428',
+  cloud1: 'aade7e8b57118ff00a95068af66335d6362c1d9491ec75153a9ab6fd9e7812d0',
+  cloud2: 'c50ead6b6894a29709ccc860f8b8e070b446f7d2d8bd92fea587906221810607',
+  cloud3: 'e02a06d63be4cbd3abb81e900289cdf519247cf7850a379774e11ba478e18ace',
+  rice: 'c127686cae8e77e5919300f7166dd52f5a0920affefa303fa7e1db157ec81354'
+};
+
+const validateChuseokWebp = async (root, css, filename) => {
+  const selector = '.cb-chuseok-harvest-moon';
+  const declarationsFor = (target) => {
+    const declarations = new Map();
+    root.walkRules((rule) => {
+      if (isInsideKeyframes(rule) || !splitSelectors(rule.selector).includes(target)) return;
+      rule.walkDecls((declaration) => declarations.set(declaration.prop, stripImportant(declaration.value)));
+    });
+    return declarations;
+  };
+  const base = declarationsFor(selector);
+  if (base.get('--cosmetic-frame-layout') !== 'chuseok-webp-v1') throw new Error(`${filename}: missing WebP component opt-in`);
+  if (/data:image\/svg|<svg|<animate/i.test(css)) throw new Error(`${filename}: WebP theme must not contain SVG wrappers or SMIL`);
+  if ([...css.matchAll(/url\(/gi)].length !== 6) throw new Error(`${filename}: expected exactly six embedded images`);
+  const layers = [];
+  for (const key of ['moon', 'frame', 'cloud1', 'cloud2', 'cloud3', 'rice']) {
+    const value = base.get(`--chuseok-${key}`) ?? '';
+    const match = value.match(/^url\("data:image\/webp;base64,([A-Za-z0-9+/=]+)"\)$/);
+    if (!match) throw new Error(`${filename}: ${key} requires an embedded WebP`);
+    const bytes = Buffer.from(match[1], 'base64');
+    if (bytes.toString('base64') !== match[1] || createHash('sha256').update(bytes).digest('hex') !== suppliedChuseokWebpSha256[key]) {
+      throw new Error(`${filename}: ${key} must preserve the supplied WebP bytes unchanged`);
+    }
+    const metadata = await sharp(bytes).metadata();
+    if (metadata.format !== 'webp' || metadata.width !== 992 || metadata.height !== 1586 || !metadata.hasAlpha || (metadata.pages ?? 1) !== 1) {
+      throw new Error(`${filename}: ${key} must be one transparent 992x1586 WebP`);
+    }
+    layers.push(await sharp(bytes).resize(500, 800).png().toBuffer());
+  }
+  for (const [role, z] of [['moon', '0'], ['frame', '1'], ['front', '2']]) {
+    if (declarationsFor(`${selector} [data-cosmetic-layer="${role}"]`).get('z-index') !== z) {
+      throw new Error(`${filename}: incorrect ${role} layer order`);
+    }
+  }
+  for (const target of [selector, ...['frame', 'front', 'rice-base'].map((role) => `${selector} [data-cosmetic-layer="${role}"]`)]) {
+    const declarations = declarationsFor(target);
+    for (const prop of ['animation', 'transform', 'filter']) {
+      if (declarations.get(prop) !== 'none') throw new Error(`${filename}: ${target} must keep ${prop} static`);
+    }
+  }
+  const fixed = declarationsFor(`${selector} [data-cosmetic-layer="rice-base"]`);
+  const canopy = declarationsFor(`${selector} [data-cosmetic-layer="rice-canopy"]`);
+  if (fixed.get('clip-path') !== 'inset(var(--chuseok-rice-hinge) 0 0 0)' || canopy.get('clip-path') !== 'inset(0 0 var(--chuseok-rice-foot) 0)') {
+    throw new Error(`${filename}: rice must have complementary fixed-foot and moving-canopy clips`);
+  }
+  const hinge = parseFloat(base.get('--chuseok-rice-hinge'));
+  const foot = parseFloat(base.get('--chuseok-rice-foot'));
+  if (Math.abs(hinge - 1410 / 1586 * 100) > 0.00001 || Math.abs(hinge + foot - 100) > 0.00001) {
+    throw new Error(`${filename}: rice hinge changed or clip regions do not meet`);
+  }
+  for (const role of ['rice-sway', 'rice-tension']) {
+    if (declarationsFor(`${selector} [data-cosmetic-layer="${role}"]`).get('transform-origin') !== '0 var(--chuseok-rice-hinge)') {
+      throw new Error(`${filename}: ${role} must be rooted at the fixed join`);
+    }
+  }
+  const expectedFallback = ['rice', 'cloud3', 'cloud2', 'cloud1', 'frame', 'moon'].map((key) => `var(--chuseok-${key})`).join(',');
+  if (base.get('background-image')?.replace(/\s/g, '') !== expectedFallback) throw new Error(`${filename}: static fallback layer order changed`);
+  root.walkAtRules('keyframes', (rule) => rule.walkDecls((declaration) => {
+    if (!['transform', 'opacity', 'filter'].includes(declaration.prop)) throw new Error(`${filename}: animate image wrappers, not background-position or layout`);
+  }));
+  validateMotionIdentity(css, [], filename);
+  await validateStaticCenterSafeArea(layers, filename);
 };
 
 const splitTopLevelCssLayers = (value) => {
@@ -1152,6 +1280,7 @@ try {
   let svgTotal = 0;
   let smilTotal = 0;
   let cssLoopTotal = 0;
+  let webpTotal = 0;
   for (const filename of filenames) {
     const filePath = path.resolve(repositoryRoot, 'card-borders', filename);
     const css = fs.readFileSync(filePath, 'utf8');
@@ -1164,12 +1293,19 @@ try {
       throw new Error(`${filename}: missing reduced-motion CSS`);
     }
     validateNoTransparentDummyLayers(root, filename);
+    if (filename === 'chuseok-harvest-moon.css' && css.includes('data:image/webp;base64,')) {
+      await validateChuseokWebp(root, css, filename);
+      webpTotal += 6;
+      console.log(`${filename}: 6 WebP, 0 SVG/SMIL, ${cssLoopValidation.count} CSS loops`);
+      continue;
+    }
     const payloads = [...css.matchAll(dataSvgPattern)].map((match) => match[2]);
     if (expectedMotionIdentities.has(filename) && payloads.length !== 3) {
       throw new Error(`${filename}: expected exactly three SVG layers, found ${payloads.length}`);
     }
     if (payloads.length < 2) throw new Error(`${filename}: expected at least two SVG layers`);
     const decodedSvgs = payloads.map((payload) => decodeURIComponent(payload));
+    validateChuseokLayerContract(root, decodedSvgs, filename);
     validateMotionIdentity(css, decodedSvgs, filename);
     validateUniqueSmilMotionTopology(decodedSvgs, filename);
     validateUniqueSvgPathGeometry(decodedSvgs, filename);
@@ -1183,14 +1319,15 @@ try {
       svgTotal += 1;
     }
     await validateStaticCenterSafeArea(renderedLayers, filename);
-    if (expectedMotionIdentities.has(filename) && (fileSmil < 20 || fileSmil > 24)) {
-      throw new Error(`${filename}: SMIL count ${fileSmil}, expected 20..24`);
+    const [minSmil, maxSmil] = filename === 'chuseok-harvest-moon.css' ? [16, 16] : [20, 24];
+    if (expectedMotionIdentities.has(filename) && (fileSmil < minSmil || fileSmil > maxSmil)) {
+      throw new Error(`${filename}: SMIL count ${fileSmil}, expected ${minSmil}..${maxSmil}`);
     }
     smilTotal += fileSmil;
     console.log(`${filename}: ${payloads.length} SVG, ${fileSmil} SMIL`);
   }
 
-  console.log(JSON.stringify({ themes: filenames.length, svgs: svgTotal, smil: smilTotal, cssLoops: cssLoopTotal }));
+  console.log(JSON.stringify({ themes: filenames.length, svgs: svgTotal, webps: webpTotal, smil: smilTotal, cssLoops: cssLoopTotal }));
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

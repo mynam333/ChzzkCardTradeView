@@ -151,11 +151,12 @@ const completedWithinBonusTime = (
 const getGameSubmitAllowanceMs = (gameType: DailyMinigameType): number =>
   getGamePreplayMs(gameType) + getGamePlayLimitMs(gameType) + SUBMISSION_GRACE_MS;
 
-const getSessionTiming = (session: Pick<MinigameSession, 'game_type' | 'created_at'>) => {
+const getSessionTiming = (session: Pick<MinigameSession, 'game_type' | 'created_at'> & Partial<Pick<MinigameSession, 'target_data'>>) => {
   const nowMs = Date.now();
   const createdMs = parseDbKstTimeMs(session.created_at);
   const elapsedMs = Number.isFinite(createdMs) ? Math.max(0, nowMs - createdMs) : 0;
-  const preplayMs = getGamePreplayMs(session.game_type);
+  const skippedCountdown = parseDbJson<{ skip_countdown?: boolean }>(session.target_data, {}).skip_countdown === true ? COUNTDOWN_MS : 0;
+  const preplayMs = getGamePreplayMs(session.game_type) - skippedCountdown;
   const playLimitMs = getGamePlayLimitMs(session.game_type);
   const playElapsedMs = Math.max(0, elapsedMs - preplayMs);
   const timeRemainingMs = Math.max(0, playLimitMs - playElapsedMs);
@@ -168,7 +169,7 @@ const getSessionTiming = (session: Pick<MinigameSession, 'game_type' | 'created_
     preplay_ms: preplayMs,
     time_limit_ms: playLimitMs,
     time_remaining_ms: timeRemainingMs,
-    submit_allowance_ms: getGameSubmitAllowanceMs(session.game_type)
+    submit_allowance_ms: getGameSubmitAllowanceMs(session.game_type) - skippedCountdown
   };
 };
 
@@ -1316,13 +1317,14 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     }
 
     targetData.practice_mode = practiceMode;
+    targetData.skip_countdown = req.body.skip_countdown === true;
     targetData.validation_version = MINIGAME_VALIDATION_VERSION;
 
     // A paid crop round is armed only by the protected image renderer, after a
     // real clue is ready and immediately before
     // bytes are sent. This prevents image preparation time from consuming play.
     const initialRoundDeadlineAt = !practiceMode && isRoundGameType(game_type)
-      ? game_type === 'crop_detective' ? null : createRoundDeadline(game_type, true)
+      ? game_type === 'crop_detective' ? null : createRoundDeadline(game_type, !targetData.skip_countdown)
       : null;
     if (!practiceMode && isRoundGameType(game_type)) {
       const rounds = Array.isArray(targetData.rounds) ? targetData.rounds : [];
@@ -1418,7 +1420,9 @@ export const playMinigameAction = async (req: AuthenticatedRequest, res: Respons
     !action || !['ready', 'sort', 'catch', 'sequence', 'finish'].includes(action.kind)) {
     return res.status(400).json({ message: '게임 입력 정보가 올바르지 않습니다.' });
   }
-  const input: ActionInput = { kind: action.kind, value: action.value, frame: action.frame };
+  const input: ActionInput = { kind: action.kind, value: action.value, frame: action.frame,
+    ...(action.values !== undefined ? { values: action.values, offset: action.offset } : {}),
+    ...(action.quick_start !== undefined ? { quick_start: action.quick_start } : {}) };
   const fingerprint = JSON.stringify(input);
   try {
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -1434,6 +1438,9 @@ export const playMinigameAction = async (req: AuthenticatedRequest, res: Respons
       const currentRevision = session.progress_revision ?? 0;
       const view = () => publicActionGame(session.game_type as typeof ACTION_GAMES[number], target, state, currentRevision, Date.now(), receivedAt);
       const catchInput = session.game_type === 'streamer_catch' && input.kind === 'catch';
+      const batchInput = (session.game_type === 'fan_meeting' && input.kind === 'sort' || session.game_type === 'sequence_relay' && input.kind === 'sequence') &&
+        Array.isArray(input.values) && input.values.length > 0 && input.values.length <= 64 &&
+        Number.isInteger(input.offset) && input.offset! >= 0;
       if (state.last_request === request_id) {
         if (state.last_action !== fingerprint) return res.status(409).json({ message: '이미 다른 입력으로 사용된 요청입니다.' });
         return res.status(200).json({ game_data: view() });
@@ -1444,15 +1451,21 @@ export const playMinigameAction = async (req: AuthenticatedRequest, res: Respons
         revision <= currentRevision && state.clicked.includes(`${input.frame}:${input.value}`)) {
         return res.status(200).json({ game_data: view() });
       }
+      // A final flush can overtake an earlier batch. Matching saved prefixes are
+      // idempotent even when that earlier response arrives after settlement.
+      if (batchInput && revision <= currentRevision && input.offset! + input.values!.length <= (state.inputs?.length || 0) &&
+        input.values!.every((value, i) => state.inputs![input.offset! + i] === value)) {
+        return res.status(200).json({ game_data: view() });
+      }
       if (session.status !== 'STARTED' || !session.expires_at || Date.now() >= new Date(session.expires_at).getTime()) {
         return res.status(409).json({ message: '이미 종료되었거나 만료된 게임입니다.' });
       }
-      if (revision > currentRevision || (!catchInput && revision !== currentRevision)) {
+      if (revision > currentRevision || (!catchInput && !batchInput && revision !== currentRevision)) {
         return res.status(409).json({ game_data: view(), message: '게임 진행 상태를 동기화했습니다.' });
       }
       let next;
       try {
-        next = advanceActionGame(session.game_type, target, state, input, catchInput ? receivedAt : Date.now());
+        next = advanceActionGame(session.game_type, target, state, input, input.kind === 'ready' ? Date.now() : receivedAt);
       } catch (err) {
         if (err instanceof ActionGameError) return res.status(400).json({ message: err.message, game_data: view() });
         throw err;
@@ -1465,7 +1478,7 @@ export const playMinigameAction = async (req: AuthenticatedRequest, res: Respons
         ? new Date(next.ends_at + 60_000).toISOString() : undefined;
       const saved = await minigameRepository.saveActionProgress(session_id, userId, currentRevision, JSON.stringify({ action: next }), expiresAt);
       if (!saved) {
-        if (catchInput) continue;
+        if (catchInput || batchInput) continue;
         return res.status(409).json({ message: '입력을 저장 중입니다. 같은 요청을 다시 시도해 주세요.' });
       }
       return res.status(200).json({ game_data: publicActionGame(session.game_type, target, next, currentRevision + 1, Date.now(), receivedAt) });
@@ -1539,7 +1552,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
     // 서버 사이드 시간 경과 체크 (치팅 패킷 변조 차단)
     const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
-    const serverElapsedMs = Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0;
+    const serverElapsedMs = (Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0) + (target.skip_countdown === true ? COUNTDOWN_MS : 0);
     const clientRemainingMs = Math.max(0, Math.floor(Number(payload?.client_remaining_ms || 0)));
     const exceededTimeLimit = (allowedMs: number, clientReportedGraceMs = CLIENT_REPORTED_GRACE_MS) => {
       if (serverElapsedMs <= allowedMs + SUBMISSION_GRACE_MS) return false;
@@ -1658,8 +1671,8 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
         });
       }
 
-      // 카드 뒤집기 최소 물리 시간 검증 (카운트다운 3초 + 2초 노출 + 최소 1.5초 조작 = 6500ms 미만 차단)
-      if (serverElapsedMs < 6500) {
+      // Valid pairs may be entered rapidly; only the mandatory reveal must finish.
+      if (serverElapsedMs < COUNTDOWN_MS + MATCH_REVEAL_MS) {
         return res.status(400).json({ error: 'BadRequest', message: '비정상적인 접근이 감지되었습니다. (치팅 의심)' });
       }
 
@@ -1880,7 +1893,7 @@ export const checkMinigameRoundAnswer = async (req: AuthenticatedRequest, res: R
     }
 
     const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
-    const serverElapsedMs = Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0;
+    const serverElapsedMs = (Number.isFinite(sessionCreatedMs) ? Math.max(0, Date.now() - sessionCreatedMs) : 0) + (target.skip_countdown === true ? COUNTDOWN_MS : 0);
     const roundAnswerAllowanceMs = getGameSubmitAllowanceMs(session.game_type) + (practiceMode ? CLIENT_REPORTED_GRACE_MS : 0);
     if (serverElapsedMs > roundAnswerAllowanceMs) {
       return res.status(400).json({ error: 'BadRequest', message: '미니게임 시간 제한이 초과되었습니다.' });

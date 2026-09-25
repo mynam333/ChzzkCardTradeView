@@ -55,6 +55,7 @@ import { AdminUsersTab } from './AdminUsersTab';
 import { parseStyle, nameEffectStyle, cardImage, borderClass, streamerProfileImage } from '@/lib/cosmetics';
 import { fuzzyScore } from '@/lib/search';
 import { CosmeticFrame } from './CosmeticFrame';
+import { CosmeticFrameStatus } from './CosmeticFrameStatus';
 import { CosmeticName } from './CosmeticName';
 import { AdminTitlesTab } from './AdminTitlesTab';
 import { AdminAchievementsTab } from './AdminAchievementsTab';
@@ -3821,10 +3822,12 @@ export const AdminTab: React.FC = () => {
                       />
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {isBorder
-                          ? <>입력한 CSS가 그대로 주입되어 카드 위 오버레이(<code>.cosmetic-frame .클래스명</code>)에 적용됩니다.</>
+                          ? <>입력한 CSS가 카드 위 오버레이(<code>.cosmetic-frame.클래스명</code>)에 적용됩니다. 독립 이미지·그룹 애니메이션은 루트에 <code>--cosmetic-frame-layout: layers-v1;</code>과 <code>--cosmetic-frame-layers: back, front/cloud;</code>를 선언하세요. 생성된 장식은 <code>[data-cosmetic-layer="cloud"]</code>로 꾸밀 수 있습니다.</>
                           : <>입력한 CSS가 그대로 주입되어 카드 이름 텍스트(<code>.클래스명</code>)에 적용됩니다. (글자 색·그라데이션·그림자·애니메이션 등)</>}
                         <br />※ 클래스명과 <code>@keyframes</code> 이름은 다른 항목과 겹치지 않게 고유하게 지정하세요.
                       </p>
+
+                      {isBorder && <CosmeticFrameStatus styleJson={shopForm.style_json} />}
 
                       {!isBorder && (
                         <div className="pt-2 border-t border-border/40 space-y-2">

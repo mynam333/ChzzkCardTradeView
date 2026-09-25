@@ -39,6 +39,15 @@ async function submit(sessionId: string, payload: unknown = {}) {
   await submitMinigameResult(request({ session_id: sessionId, payload }), asResponse(res));
   return res;
 }
+async function fixedCatchFrames(sessionId: string) {
+  const session = await minigameRepository.findSessionById(sessionId);
+  const target = JSON.parse(session!.target_data);
+  target.frames = [
+    { start: 0, duration: 1000, cells: [{ cell: 0, card: 0 }] },
+    { start: 100, duration: 1100, cells: [{ cell: 1, card: 1 }] }
+  ];
+  db.prepare('UPDATE minigame_sessions SET target_data = ? WHERE id = ?').run(JSON.stringify(target), sessionId);
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -57,6 +66,57 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('new minigame API and SQLite settlement', () => {
+  it('merges a final sort flush with a slow earlier batch and deduplicates it after settlement', async () => {
+    const { session_id } = await start('fan_meeting');
+    const armed = await action(session_id, { kind: 'ready', quick_start: true });
+    const target = JSON.parse((await minigameRepository.findSessionById(session_id))!.target_data) as ActionTarget;
+    vi.setSystemTime(armed.body.game_data.state.ends_at + 100);
+    const short: ActionInput = { kind: 'sort', offset: 0, values: target.deck.slice(0, 12) };
+    const full: ActionInput = { kind: 'sort', offset: 0, values: target.deck.slice(0, 25) };
+    const responses = await Promise.all([action(session_id, full, crypto.randomUUID(), 1), action(session_id, short, crypto.randomUUID(), 1)]);
+    expect(responses.every(res => res.statusCode === 200)).toBe(true);
+    expect(readActionState((await minigameRepository.findSessionById(session_id))!.progress_data)).toMatchObject({ correct: 25, index: 25 });
+    vi.setSystemTime(armed.body.game_data.state.ends_at + 1000);
+    expect((await submit(session_id)).body.earned_points).toBe(1200);
+    const retry = await action(session_id, short, crypto.randomUUID(), 1);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.body.game_data.state.correct).toBe(25);
+    expect((await action(session_id, { ...short, values: [1 - target.deck[0]] }, crypto.randomUUID(), 1)).statusCode).toBe(409);
+  });
+  it('saves rapid batches exactly once across lost responses, overlapping prefixes and settlement', async () => {
+    const { session_id } = await start('fan_meeting');
+    const armed = await action(session_id, { kind: 'ready', quick_start: true });
+    expect(armed.body.game_data.state.starts_at).toBe(Date.now());
+    const target = JSON.parse((await minigameRepository.findSessionById(session_id))!.target_data) as ActionTarget;
+    const requestId = crypto.randomUUID();
+    const input: ActionInput = { kind: 'sort', offset: 0, values: target.deck.slice(0, 12) };
+    const first = await action(session_id, input, requestId, 1);
+    const retry = await action(session_id, input, requestId, 1);
+    expect(first.statusCode).toBe(200);
+    expect(retry.body.game_data).toMatchObject({ revision: 2, state: { correct: 12, input_count: 12 } });
+    expect((await action(session_id, { ...input, values: [1 - target.deck[0]] }, requestId, 1)).statusCode).toBe(409);
+    const next = await action(session_id, { kind: 'sort', offset: 8, values: target.deck.slice(8, 25) });
+    expect(next.body.game_data.state).toMatchObject({ correct: 25, input_count: 25 });
+    expect((await action(session_id, { kind: 'sort', offset: 27, values: [0] })).statusCode).toBe(400);
+    vi.setSystemTime(armed.body.game_data.state.ends_at + 1000);
+    expect((await submit(session_id)).body).toMatchObject({ earned_points: 1200 });
+    expect((await submit(session_id)).body).toMatchObject({ earned_points: 1200 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM point_ledger_entries WHERE source_type = 'minigame' AND source_id = ?").get(session_id)).toEqual({ count: 1 });
+  });
+
+  it('accepts rapid relay inputs through all five stages without a per-card network turn', async () => {
+    const { session_id } = await start('sequence_relay');
+    let view = (await action(session_id, { kind: 'ready', quick_start: true })).body.game_data;
+    for (let stage = 0; stage < 5; stage++) {
+      vi.setSystemTime(view.state.input_at);
+      const next = await action(session_id, { kind: 'sequence', offset: view.state.input_count, values: view.sequence });
+      expect(next.statusCode).toBe(200);
+      view = next.body.game_data;
+      expect(view.state.cleared).toBe(stage + 1);
+    }
+    expect(view.state.input_count).toBe(30);
+    expect((await submit(session_id)).body).toMatchObject({ earned_points: 1200 });
+  });
   it.each(ACTION_GAMES)('starts %s without a timer, resumes without another ticket and arms after images are ready', async type => {
     const issued = await start(type);
     expect(issued.game_data.state.starts_at).toBeNull();
@@ -117,10 +177,11 @@ describe('new minigame API and SQLite settlement', () => {
     expect(await minigameRepository.saveActionProgress(session_id, 'player', saved!.progress_revision!, '{}')).toBe(false);
   });
 
-  it('awards the catch bonus only from ten accepted target clicks', async () => {
+  it('keeps the catch bonus for all twelve accepted target clicks', async () => {
     const { session_id } = await start('streamer_catch');
     const armed = await action(session_id, { kind: 'ready' });
     const { frames, state } = armed.body.game_data;
+    expect(armed.body.game_data.target_count).toBe(12);
     for (const [frame, value] of frames.entries()) {
       const target = value.cells.find((cell: { card: number }) => cell.card === 0);
       if (!target) continue;
@@ -154,16 +215,17 @@ describe('new minigame API and SQLite settlement', () => {
 
   it('accepts overlapping catch requests and keeps retried cells idempotent after later inputs', async () => {
     const { session_id } = await start('streamer_catch');
+    await fixedCatchFrames(session_id);
     const armed = await action(session_id, { kind: 'ready' });
     const { frames, state, revision } = armed.body.game_data;
     const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
     const target = frames[frame].cells.find((item: any) => item.card === 0).cell;
-    const other = frames[frame].cells.find((item: any) => item.card !== 0).cell;
+    const other = frames[1].cells[0].cell;
     vi.setSystemTime(state.starts_at + frames[frame].start + 200);
     const id = crypto.randomUUID();
     const results = await Promise.all([
       action(session_id, { kind: 'catch', frame, value: target }, id, revision),
-      action(session_id, { kind: 'catch', frame, value: other }, crypto.randomUUID(), revision)
+      action(session_id, { kind: 'catch', frame: 1, value: other }, crypto.randomUUID(), revision)
     ]);
     expect(results.map(result => result.statusCode)).toEqual([200, 200]);
     expect(readActionState((await minigameRepository.findSessionById(session_id))!.progress_data)).toMatchObject({ correct: 1, mistakes: 1 });
@@ -176,6 +238,7 @@ describe('new minigame API and SQLite settlement', () => {
 
   it('uses the receipt before middleware delay and never trusts a timestamp from the client', async () => {
     const { session_id } = await start('streamer_catch');
+    await fixedCatchFrames(session_id);
     const armed = await action(session_id, { kind: 'ready' });
     const { frames, state, revision } = armed.body.game_data;
     const frame = frames.findIndex((item: any) => item.cells.some((cell: any) => cell.card === 0));
@@ -189,9 +252,9 @@ describe('new minigame API and SQLite settlement', () => {
     await playMinigameAction(req, asResponse(res));
     expect(res.statusCode).toBe(200);
     expect(res.body.game_data).toMatchObject({ server_received_at: at + 100, state: { correct: 1 } });
-    const unclicked = frames[frame].cells.find((item: any) => item.card !== 0).cell;
+    const unclicked = frames[1].cells[0].cell;
     const expired = response();
-    await playMinigameAction(request({ session_id, revision: revision + 1, request_id: crypto.randomUUID(), received_at: at + 100, action: { kind: 'catch', frame, value: unclicked, clicked_at: at + 100 } }), asResponse(expired));
+    await playMinigameAction(request({ session_id, revision: revision + 1, request_id: crypto.randomUUID(), received_at: at + 100, action: { kind: 'catch', frame: 1, value: unclicked, clicked_at: at + 100 } }), asResponse(expired));
     expect(expired.statusCode).toBe(400);
     expect(expired.body.game_data.state).toMatchObject({ correct: 1, mistakes: 0 });
   });
