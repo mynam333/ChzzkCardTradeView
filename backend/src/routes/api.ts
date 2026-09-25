@@ -331,13 +331,17 @@ const CHAT_IMAGE_MAX_UPLOAD_BYTES = readBytesEnv('CHAT_IMAGE_MAX_UPLOAD_BYTES', 
 
 // Multer 파일 메모리 스토리지 세팅 (이미지 MIME 사전 필터)
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
+// Busboy emits partsLimit when the count reaches the configured value, while
+// Multer treats that event as an error. Keep one sentinel above the real cap;
+// the independent files/fields limits remain authoritative.
+const multerPartsLimit = (files: number, fields: number) => files + fields + 1;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: STREAMER_IMAGE_MAX_UPLOAD_BYTES,
     files: 1,
     fields: 4,
-    parts: 5,
+    parts: multerPartsLimit(1, 4),
     fieldNestingDepth: 0
   },
   fileFilter: (_req, file, cb) => {
@@ -348,7 +352,7 @@ const upload = multer({
 });
 
 // Multer 에러(용량 초과·비이미지 등)를 500이 아닌 400 JSON으로 일관 처리하는 래퍼
-const uploadSingleImage = (req: any, res: any, next: any) => {
+export const uploadSingleImage = (req: any, res: any, next: any) => {
   upload.single('image')(req, res, (err: any) => {
     if (err) {
       const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
@@ -366,7 +370,7 @@ const chatImageUpload = multer({
     fileSize: CHAT_IMAGE_MAX_UPLOAD_BYTES,
     files: 1,
     fields: 0,
-    parts: 1,
+    parts: multerPartsLimit(1, 0),
     fieldNestingDepth: 0
   },
   fileFilter: (_req, file, cb) => {
@@ -375,7 +379,7 @@ const chatImageUpload = multer({
   }
 });
 
-const uploadChatImage = (req: any, res: any, next: any) => {
+export const uploadChatImage = (req: any, res: any, next: any) => {
   chatImageUpload.single('image')(req, res, (err: any) => {
     if (err) {
       const msg = (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE')
