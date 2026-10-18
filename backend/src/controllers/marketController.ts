@@ -11,6 +11,10 @@ import type { MarketListing } from '../repositories/interfaces';
 import { recordAchievementEvent } from '../services/achievementService';
 import { getDbMode, getMysqlDb, getSqliteDb, getSupabaseClient } from '../services/db';
 import { formatMarketPrice } from '../utils/marketPrice';
+import {
+  DEFAULT_MARKET_LISTING_LIMIT,
+  getMarketListingLimit
+} from '../services/marketListingLimit';
 
 type MarketNotificationTarget = 'inventory' | 'shop:market';
 const MARKET_LIST_CACHE_TTL_MS = Math.min(5000, Math.max(1000, Number(process.env.MARKET_LIST_CACHE_TTL_MS || 5000)));
@@ -404,7 +408,10 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
   }
   const feeRate = listingType === 'auction' ? getAuctionFeeRate(auctionHours) : FIXED_MARKET_FEE_RATE;
 
+  let marketListingLimit = DEFAULT_MARKET_LISTING_LIMIT;
   try {
+    marketListingLimit = await getMarketListingLimit();
+
     // 1) 내 소유 카드인지 검사. 보관함 목록 조회는 streamer 조인 결과에 의존하므로
     // 마켓 등록 검증은 user_cards 원본을 직접 확인한다.
     const targetCard = await findMarketOwnedCard(user.id, cardId);
@@ -415,13 +422,16 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(400).json({ error: 'CardLocked', message: '잠금된 카드는 오픈마켓에 등록할 수 없습니다.' });
     }
 
-    // 2) 이미 이 카드가 마켓에 PENDING 상태로 올라가 있는지 중복 확인 및 등록 한도 체크 (최대 5개)
+    // 2) 이미 이 카드가 마켓에 PENDING 상태로 올라가 있는지 중복 확인 및 관리자 설정 한도 체크
     const pendingCardIds = await marketRepository.findPendingCardIdsByUser(user.id);
     if (pendingCardIds.includes(cardId)) {
       return res.status(400).json({ error: 'DuplicateListing', message: '이미 마켓에 판매 등록된 카드입니다.' });
     }
-    if (pendingCardIds.length >= 5) {
-      return res.status(400).json({ error: 'MaxListingsReached', message: '최대 5개의 카드만 동시에 오픈마켓에 등록할 수 있습니다.' });
+    if (pendingCardIds.length >= marketListingLimit) {
+      return res.status(400).json({
+        error: 'MaxListingsReached',
+        message: `최대 ${marketListingLimit}개의 카드만 동시에 오픈마켓에 등록할 수 있습니다.`
+      });
     }
 
     // 3) 에스크로(교환 예약 등) 검증
@@ -449,7 +459,8 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       auction_ends_at: listingType === 'auction'
         ? new Date(Date.now() + auctionHours * 60 * 60 * 1000).toISOString()
         : null,
-      fee_rate: feeRate
+      fee_rate: feeRate,
+      max_active_listings: marketListingLimit
     });
     await notifyMatchingWatches(listing);
     publishMarketUpdated('listing_created', listing);
@@ -469,6 +480,12 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
     console.error('[MarketController] createListing 에러:', err);
     if (err?.message === 'CARD_LOCKED_OR_NOT_FOUND') {
       return res.status(400).json({ error: 'CardLocked', message: '잠금되었거나 소유하지 않은 카드는 오픈마켓에 등록할 수 없습니다.' });
+    }
+    if (err?.message === 'MAX_LISTINGS_REACHED') {
+      return res.status(400).json({
+        error: 'MaxListingsReached',
+        message: `최대 ${marketListingLimit}개의 카드만 동시에 오픈마켓에 등록할 수 있습니다.`
+      });
     }
     return res.status(500).json({ error: 'ServerError', message: '매물 등록 중 오류가 발생했습니다.' });
   }

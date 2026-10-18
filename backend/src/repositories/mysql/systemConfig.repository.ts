@@ -10,11 +10,12 @@ export class MysqlSystemConfigRepository implements ISystemConfigRepository {
     return getMysqlDb();
   }
 
-  async get(key: string, defaultValue: string): Promise<string> {
-    const cached = this.cache.get(key);
+  async get(key: string, defaultValue: string, options?: { fresh?: boolean }): Promise<string> {
+    const useCache = !options?.fresh;
+    const cached = useCache ? this.cache.get(key) : undefined;
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    const pending = this.inFlight.get(key);
+    const pending = useCache ? this.inFlight.get(key) : undefined;
     if (pending) return pending;
 
     const request = (async () => {
@@ -32,10 +33,10 @@ export class MysqlSystemConfigRepository implements ISystemConfigRepository {
         return defaultValue;
       }
     })().finally(() => {
-      this.inFlight.delete(key);
+      if (useCache) this.inFlight.delete(key);
     });
 
-    this.inFlight.set(key, request);
+    if (useCache) this.inFlight.set(key, request);
     return request;
   }
 

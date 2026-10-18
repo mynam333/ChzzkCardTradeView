@@ -36,6 +36,8 @@ import {
   setDrawCost,
   getMinigameTicketChargeInterval,
   setMinigameTicketChargeInterval,
+  getMarketListingLimit,
+  setMarketListingLimit,
   getMaintenanceStatus,
   setMaintenanceStatus,
   resetUserStatusMessage,
@@ -956,13 +958,15 @@ router.get('/admin/push/sent', authMiddleware, adminMiddleware, getSentNotificat
 router.put('/admin/push/:id', authMiddleware, adminMiddleware, updateScheduledNotification);
 router.delete('/admin/push/:id', authMiddleware, adminMiddleware, deleteScheduledNotification);
 
-// 시스템 설정 (무료 뽑기 간격, 뽑기 비용, 미니게임 동전 충전 간격)
+// 시스템 설정 (무료 뽑기 간격, 뽑기 비용, 미니게임 동전 충전 간격, 마켓 등록 한도)
 router.get('/admin/config/free-draw', authMiddleware, adminMiddleware, getFreeDrawInterval);
 router.post('/admin/config/free-draw', authMiddleware, adminMiddleware, setFreeDrawInterval);
 router.get('/admin/config/draw-cost', authMiddleware, adminMiddleware, getDrawCost);
 router.post('/admin/config/draw-cost', authMiddleware, adminMiddleware, setDrawCost);
 router.get('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, getMinigameTicketChargeInterval);
 router.post('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, setMinigameTicketChargeInterval);
+router.get('/admin/config/market-listing-limit', authMiddleware, adminMiddleware, getMarketListingLimit);
+router.post('/admin/config/market-listing-limit', authMiddleware, adminMiddleware, setMarketListingLimit);
 
 // 점검 시스템 API
 router.get('/maintenance/status', getMaintenanceStatus);

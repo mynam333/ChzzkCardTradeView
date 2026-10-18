@@ -25,7 +25,7 @@ export class SqliteSystemConfigRepository implements ISystemConfigRepository {
     return getSqliteDb();
   }
 
-  async get(key: string, defaultValue: string): Promise<string> {
+  async get(key: string, defaultValue: string, _options?: { fresh?: boolean }): Promise<string> {
     try {
       const row = this.getDb().prepare('SELECT value FROM system_configs WHERE key = ?').get(key) as any;
       return row ? row.value : defaultValue;

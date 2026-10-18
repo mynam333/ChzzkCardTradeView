@@ -522,6 +522,7 @@ INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_interval', 
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1');
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_cost', '10000'); -- 뽑기 1회 기본 비용
 INSERT OR IGNORE INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240'); -- 미니게임 동전 충전 간격(분)
+INSERT OR IGNORE INTO system_configs (key, value) VALUES ('market_listing_limit', '5'); -- 사용자별 마켓 동시 등록 한도
 
 -- 16. 오픈마켓 매물 테이블
 CREATE TABLE IF NOT EXISTS market_listings (

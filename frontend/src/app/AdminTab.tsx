@@ -274,6 +274,8 @@ export const AdminTab: React.FC = () => {
   const [isSavingMinigameTicketCharge, setIsSavingMinigameTicketCharge] = useState(false);
   const [drawCost, setDrawCost] = useState('10000');           // 뽑기 1회 비용 (P)
   const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
+  const [marketListingLimit, setMarketListingLimit] = useState('5');
+  const [isSavingMarketListingLimit, setIsSavingMarketListingLimit] = useState(false);
 
   // 쿠폰
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -391,6 +393,7 @@ export const AdminTab: React.FC = () => {
       fetchFreeDrawInterval();
       fetchMinigameTicketChargeInterval();
       fetchDrawCost();
+      fetchMarketListingLimit();
     }
     if (subTab === 'push') {
       fetchScheduledPushes();
@@ -1227,6 +1230,43 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러', 'error');
     } finally {
       setIsSavingCost(false);
+    }
+  };
+
+  const fetchMarketListingLimit = async () => {
+    try {
+      const res = await apiFetch('/admin/config/market-listing-limit');
+      if (res.ok) {
+        const data = await res.json();
+        setMarketListingLimit(String(data.limit ?? '5'));
+      }
+    } catch { /* noop */ }
+  };
+
+  const handleSaveMarketListingLimit = async () => {
+    const limit = Number(marketListingLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      toast('마켓 등록 한도는 1~100 사이의 정수여야 합니다.', 'error');
+      return;
+    }
+
+    setIsSavingMarketListingLimit(true);
+    try {
+      const res = await apiFetch('/admin/config/market-listing-limit', {
+        method: 'POST',
+        body: JSON.stringify({ limit })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMarketListingLimit(String(data.limit ?? limit));
+        toast(data.message || '마켓 동시 등록 한도가 변경되었습니다.', 'success');
+      } else {
+        toast(data.message || '설정 저장 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingMarketListingLimit(false);
     }
   };
 
@@ -3697,6 +3737,41 @@ export const AdminTab: React.FC = () => {
                 className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-white hover:bg-amber-600 disabled:opacity-50 transition-all shadow-md active:scale-95"
               >
                 {isSavingCost ? '저장 중...' : '설정 저장'}
+              </button>
+            </div>
+          </div>
+
+          {/* 사용자별 마켓 동시 등록 한도 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Layers className="h-4 w-4 text-emerald-500" />
+              마켓 동시 등록 한도
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              사용자 한 명이 동시에 판매 중 상태로 올릴 수 있는 카드 수를 설정합니다. 기본값은 <b>5장</b>이며 1~100장까지 지정할 수 있습니다.<br />
+              한도를 낮춰도 기존 매물은 취소되지 않고, 판매 중인 매물 수가 새 한도보다 적어질 때까지 신규 등록만 제한됩니다.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="relative min-w-0">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="1"
+                  max="100"
+                  value={marketListingLimit}
+                  onChange={(e) => setMarketListingLimit(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 pr-10 text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                  placeholder="예: 5"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">장</span>
+              </div>
+              <button
+                onClick={handleSaveMarketListingLimit}
+                disabled={isSavingMarketListingLimit}
+                className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-50 transition-all shadow-md active:scale-95 sm:w-auto"
+              >
+                {isSavingMarketListingLimit ? '저장 중...' : '설정 저장'}
               </button>
             </div>
           </div>

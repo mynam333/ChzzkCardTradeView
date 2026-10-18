@@ -225,6 +225,7 @@ export class MysqlMarketRepository implements IMarketRepository {
     starting_bid?: number | null;
     auction_ends_at?: string | null;
     fee_rate?: number;
+    max_active_listings?: number;
   }): Promise<MarketListing> {
     const listingType = listing.listing_type === 'auction' ? 'auction' : 'fixed';
     const buyNowPrice = listingType === 'auction' ? (listing.buy_now_price ?? null) : listing.price;
@@ -235,6 +236,18 @@ export class MysqlMarketRepository implements IMarketRepository {
     const now = toSqlDateTime(new Date(), getSqlDialect());
     if (price < 100 || (startingBid != null && startingBid < 100)) throw new Error('MIN_PRICE_LIMIT');
     const insertId = await this.getDb().transaction(async (tx) => {
+      if (listing.max_active_listings != null) {
+        const seller = await tx.get('SELECT id FROM users WHERE id = ? FOR UPDATE', listing.seller_id);
+        if (!seller) throw new Error('CARD_LOCKED_OR_NOT_FOUND');
+        const activeCount = await tx.get(
+          "SELECT COUNT(*) AS count FROM market_listings WHERE seller_id = ? AND status = 'PENDING'",
+          listing.seller_id
+        );
+        if (Number(activeCount?.count || 0) >= listing.max_active_listings) {
+          throw new Error('MAX_LISTINGS_REACHED');
+        }
+      }
+
       const candidate = await tx.get(
         'SELECT channel_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0',
         listing.user_card_id,

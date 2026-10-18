@@ -55,7 +55,20 @@ export class SupabaseSystemConfigRepository implements ISystemConfigRepository {
     }
   }
 
-  async get(key: string, defaultValue: string): Promise<string> {
+  async get(key: string, defaultValue: string, options?: { fresh?: boolean }): Promise<string> {
+    if (options?.fresh) {
+      try {
+        const value = await this.load(key);
+        this.cache.set(key, {
+          value,
+          expiresAt: Date.now() + SupabaseSystemConfigRepository.CACHE_TTL_MS
+        });
+        return value === CONFIG_NOT_FOUND ? defaultValue : value;
+      } catch {
+        return defaultValue;
+      }
+    }
+
     const now = Date.now();
     const cached = this.cache.get(key);
     if (cached && cached.expiresAt > now) {

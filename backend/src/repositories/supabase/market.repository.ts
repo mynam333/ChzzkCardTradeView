@@ -165,6 +165,7 @@ export class SupabaseMarketRepository implements IMarketRepository {
     starting_bid?: number | null;
     auction_ends_at?: string | null;
     fee_rate?: number;
+    max_active_listings?: number;
   }): Promise<MarketListing> {
     const listingType = listing.listing_type || 'fixed';
     const startingBid = Math.floor(Number(listing.starting_bid ?? listing.price));
@@ -174,6 +175,18 @@ export class SupabaseMarketRepository implements IMarketRepository {
     if ((listingType === 'auction' ? startingBid : listing.price) < 100) {
       throw new Error('MIN_PRICE_LIMIT');
     }
+    if (listing.max_active_listings != null) {
+      const { count, error: countError } = await this.getClient()
+        .from('market_listings')
+        .select('id', { count: 'exact', head: true })
+        .eq('seller_id', listing.seller_id)
+        .eq('status', 'PENDING');
+      if (countError) throw countError;
+      if (Number(count || 0) >= listing.max_active_listings) {
+        throw new Error('MAX_LISTINGS_REACHED');
+      }
+    }
+
     const { data: card, error: cardError } = await this.getClient()
       .from('user_cards')
       .select('id')

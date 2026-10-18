@@ -30,6 +30,13 @@ import {
 } from '../services/puzzleImageExclusionService';
 import { getSiteInsights, normalizeInsightsGranularity, normalizeInsightsRange } from '../services/siteInsightsService';
 import { createRealtimeNotification } from '../services/notificationDelivery';
+import {
+  getMarketListingLimit as readMarketListingLimit,
+  saveMarketListingLimit,
+  parseMarketListingLimit,
+  MIN_MARKET_LISTING_LIMIT,
+  MAX_MARKET_LISTING_LIMIT
+} from '../services/marketListingLimit';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -986,6 +993,53 @@ export const setMinigameTicketChargeInterval = async (req: Request, res: Respons
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '미니게임 동전 충전 설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 오픈마켓 사용자별 동시 판매 등록 한도 조회
+ */
+export const getMarketListingLimit = async (_req: Request, res: Response) => {
+  try {
+    const limit = await readMarketListingLimit();
+    return res.status(200).json({
+      limit,
+      min: MIN_MARKET_LISTING_LIMIT,
+      max: MAX_MARKET_LISTING_LIMIT
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '마켓 등록 한도 조회 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
+  }
+};
+
+/**
+ * 오픈마켓 사용자별 동시 판매 등록 한도 저장
+ */
+export const setMarketListingLimit = async (req: Request, res: Response) => {
+  const limit = parseMarketListingLimit(req.body?.limit);
+  if (limit === null) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: `마켓 등록 한도는 ${MIN_MARKET_LISTING_LIMIT}~${MAX_MARKET_LISTING_LIMIT} 사이의 정수여야 합니다.`
+    });
+  }
+
+  try {
+    await saveMarketListingLimit(limit);
+    return res.status(200).json({
+      message: `마켓 동시 등록 한도가 사용자당 ${limit}장으로 변경되었습니다.`,
+      limit
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '마켓 등록 한도 저장 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
   }
 };
 

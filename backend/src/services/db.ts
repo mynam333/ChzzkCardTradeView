@@ -2378,6 +2378,7 @@ export const initDatabaseConnection = async (
       // 가챠 추첨 목표 기댓값(원하는 1회 뽑기 평균 카드 가치). 가중 지수를 이 값에 맞춰 적응 조정.
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('draw_target_value', '2500')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240')").run();
+      sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('market_listing_limit', '5')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_active', 'false')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_start_at', '')").run();
       sqliteDb.prepare("INSERT OR IGNORE INTO system_configs (key, value) VALUES ('maintenance_end_at', '')").run();

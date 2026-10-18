@@ -168,6 +168,7 @@ export class SqliteMarketRepository implements IMarketRepository {
     starting_bid?: number | null;
     auction_ends_at?: string | null;
     fee_rate?: number;
+    max_active_listings?: number;
   }): Promise<MarketListing> {
     const listingType = listing.listing_type === 'auction' ? 'auction' : 'fixed';
     const buyNowPrice = listingType === 'auction' ? (listing.buy_now_price ?? null) : listing.price;
@@ -180,6 +181,15 @@ export class SqliteMarketRepository implements IMarketRepository {
     }
     const db = this.getDb();
     const newId = db.transaction(() => {
+      if (listing.max_active_listings != null) {
+        const activeCount = db.prepare(
+          "SELECT COUNT(*) AS count FROM market_listings WHERE seller_id = ? AND status = 'PENDING'"
+        ).get(listing.seller_id) as { count?: number } | undefined;
+        if (Number(activeCount?.count || 0) >= listing.max_active_listings) {
+          throw new Error('MAX_LISTINGS_REACHED');
+        }
+      }
+
       const candidate = db.prepare(
         'SELECT channel_id FROM user_cards WHERE id = ? AND user_id = ? AND COALESCE(is_locked, 0) = 0'
       ).get(listing.user_card_id, listing.seller_id) as { channel_id?: string } | undefined;

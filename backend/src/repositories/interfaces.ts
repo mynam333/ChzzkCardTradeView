@@ -528,7 +528,7 @@ export interface IUserCardRepository {
 
 // 8. 시스템 설정 리포지토리 인터페이스
 export interface ISystemConfigRepository {
-  get(key: string, defaultValue: string): Promise<string>;
+  get(key: string, defaultValue: string, options?: { fresh?: boolean }): Promise<string>;
   set(key: string, value: string): Promise<void>;
 }
 
@@ -598,6 +598,7 @@ export interface IMarketRepository {
     starting_bid?: number | null;
     auction_ends_at?: string | null;
     fee_rate?: number;
+    max_active_listings?: number;
   }): Promise<MarketListing>;
   findById(id: number): Promise<MarketListing | null>;
   hasBids(listingId: number): Promise<boolean>;

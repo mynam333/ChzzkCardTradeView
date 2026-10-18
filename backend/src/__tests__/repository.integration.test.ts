@@ -10,6 +10,7 @@ import {
   notificationRepository,
   reportRepository,
   streamerRepository,
+  systemConfigRepository,
   titleRepository,
   tradeRepository,
   userCardRepository,
@@ -24,6 +25,10 @@ import {
   getUserRankings
 } from '../controllers/playController';
 import { cancelListing, createListing, listMarketHistory, purchaseListing } from '../controllers/marketController';
+import {
+  getMarketListingLimit as getAdminMarketListingLimit,
+  setMarketListingLimit as setAdminMarketListingLimit
+} from '../controllers/adminController';
 import {
   buyItem,
   createItem,
@@ -1426,6 +1431,84 @@ describe('User profile hidden cards', () => {
     expect(res.body.representative_card).toEqual(expect.objectContaining({
       channel_id: 'visible-channel'
     }));
+  });
+});
+
+describe('마켓 동시 등록 한도 설정', () => {
+  it('관리자는 1~100 사이 정수로 한도를 조회·변경할 수 있고 손상된 값은 기본값으로 복구해 읽는다', async () => {
+    const initialRes = createJsonResponse();
+    await getAdminMarketListingLimit({} as any, initialRes);
+    expect(initialRes.statusCode).toBe(200);
+    expect(initialRes.body).toEqual({ limit: 5, min: 1, max: 100 });
+
+    for (const invalidLimit of [0, 101, -1, 1.5, '', '5abc', '1e2', true, null]) {
+      const invalidRes = createJsonResponse();
+      await setAdminMarketListingLimit({ body: { limit: invalidLimit } } as any, invalidRes);
+      expect(invalidRes.statusCode).toBe(400);
+      expect(invalidRes.body).toMatchObject({ error: 'BadRequest' });
+    }
+
+    const saveRes = createJsonResponse();
+    await setAdminMarketListingLimit({ body: { limit: 12 } } as any, saveRes);
+    expect(saveRes.statusCode).toBe(200);
+    expect(saveRes.body).toMatchObject({ limit: 12 });
+    await expect(systemConfigRepository.get('market_listing_limit', '5')).resolves.toBe('12');
+
+    db.prepare("UPDATE system_configs SET value = 'broken' WHERE key = 'market_listing_limit'").run();
+    const fallbackRes = createJsonResponse();
+    await getAdminMarketListingLimit({} as any, fallbackRes);
+    expect(fallbackRes.statusCode).toBe(200);
+    expect(fallbackRes.body.limit).toBe(5);
+  });
+
+  it('설정값을 실제 등록과 저장소 트랜잭션에 적용하고 오류 메시지에도 현재 한도를 표시한다', async () => {
+    seedUser(db, 'limited-seller');
+    seedStreamer(db, 'limited-channel', '한도 테스트 스트리머');
+    const cardIds = [1, 2, 3, 4].map((serialNumber) => Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('limited-seller', 'limited-channel', ?, 0)
+    `).run(serialNumber).lastInsertRowid));
+
+    await systemConfigRepository.set('market_listing_limit', '2');
+    await marketRepository.create({ seller_id: 'limited-seller', user_card_id: cardIds[0], price: 1000 });
+    await marketRepository.create({ seller_id: 'limited-seller', user_card_id: cardIds[1], price: 1100 });
+
+    await expect(marketRepository.create({
+      seller_id: 'limited-seller',
+      user_card_id: cardIds[2],
+      price: 1200,
+      max_active_listings: 2
+    })).rejects.toThrow('MAX_LISTINGS_REACHED');
+
+    const blockedRes = createJsonResponse();
+    await createListing({
+      user: { id: 'limited-seller' },
+      body: { user_card_id: cardIds[2], listing_type: 'fixed', price: 1200 }
+    } as any, blockedRes);
+    expect(blockedRes.statusCode).toBe(400);
+    expect(blockedRes.body).toEqual({
+      error: 'MaxListingsReached',
+      message: '최대 2개의 카드만 동시에 오픈마켓에 등록할 수 있습니다.'
+    });
+
+    await systemConfigRepository.set('market_listing_limit', '3');
+    const allowedRes = createJsonResponse();
+    await createListing({
+      user: { id: 'limited-seller' },
+      body: { user_card_id: cardIds[2], listing_type: 'fixed', price: 1200 }
+    } as any, allowedRes);
+    expect(allowedRes.body).toMatchObject({ ok: true });
+
+    await systemConfigRepository.set('market_listing_limit', '2');
+    const loweredRes = createJsonResponse();
+    await createListing({
+      user: { id: 'limited-seller' },
+      body: { user_card_id: cardIds[3], listing_type: 'fixed', price: 1300 }
+    } as any, loweredRes);
+    expect(loweredRes.statusCode).toBe(400);
+    expect(loweredRes.body).toMatchObject({ error: 'MaxListingsReached' });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM market_listings WHERE seller_id = ? AND status = 'PENDING'").get('limited-seller'))
+      .toEqual({ count: 3 });
   });
 });
 

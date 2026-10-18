@@ -2279,6 +2279,7 @@ INSERT INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1') ON C
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
 INSERT INTO system_configs (key, value) VALUES ('draw_target_value', '2500') ON CONFLICT (key) DO NOTHING; -- 가챠 추첨 목표 기댓값(평균 카드 가치)
 INSERT INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240') ON CONFLICT (key) DO NOTHING; -- 미니게임 동전 충전 간격(분)
+INSERT INTO system_configs (key, value) VALUES ('market_listing_limit', '5') ON CONFLICT (key) DO NOTHING; -- 사용자별 마켓 동시 등록 한도
 INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_end_at', '') ON CONFLICT (key) DO NOTHING;
