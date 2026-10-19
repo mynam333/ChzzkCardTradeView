@@ -37,6 +37,16 @@ import {
   MIN_MARKET_LISTING_LIMIT,
   MAX_MARKET_LISTING_LIMIT
 } from '../services/marketListingLimit';
+import {
+  getMinigameRewardConfig,
+  saveMinigameRewardConfig
+} from '../services/minigameRewardConfig';
+import {
+  MAX_MINIGAME_REWARD_POINTS,
+  MIN_MINIGAME_REWARD_POINTS,
+  parseMinigameRewardConfig,
+  toPublicMinigameRewardConfig
+} from '../services/minigameRewardPolicy';
 
 const reportStarLabel = (report: CardReport) => `${report.star || 0}성`;
 
@@ -993,6 +1003,54 @@ export const setMinigameTicketChargeInterval = async (req: Request, res: Respons
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '미니게임 동전 충전 설정 저장 실패', details: IS_PRODUCTION ? undefined : err.message });
+  }
+};
+
+/**
+ * 미니게임 성공/보너스 포인트 조회
+ */
+export const getMinigameRewards = async (_req: Request, res: Response) => {
+  try {
+    const config = await getMinigameRewardConfig();
+    return res.status(200).json({
+      ...toPublicMinigameRewardConfig(config),
+      min_points: MIN_MINIGAME_REWARD_POINTS,
+      max_points: MAX_MINIGAME_REWARD_POINTS,
+      max_total_points: MAX_MINIGAME_REWARD_POINTS
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '미니게임 보상 설정 조회 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
+  }
+};
+
+/**
+ * 미니게임 성공/보너스 포인트 저장
+ */
+export const setMinigameRewards = async (req: Request, res: Response) => {
+  const config = parseMinigameRewardConfig(req.body);
+  if (!config) {
+    return res.status(400).json({
+      error: 'BadRequest',
+      message: `성공 포인트와 보너스 포인트는 각각 ${MIN_MINIGAME_REWARD_POINTS.toLocaleString()}~${MAX_MINIGAME_REWARD_POINTS.toLocaleString()} 사이의 정수여야 하며, 합계는 ${MAX_MINIGAME_REWARD_POINTS.toLocaleString()} P 이하여야 합니다.`
+    });
+  }
+
+  try {
+    await saveMinigameRewardConfig(config);
+    return res.status(200).json({
+      message: `미니게임 보상이 성공 ${config.successPoints.toLocaleString()} P, 보너스 ${config.bonusPoints.toLocaleString()} P로 변경되었습니다. 새로 시작하는 세션부터 적용됩니다.`,
+      ...toPublicMinigameRewardConfig(config)
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'InternalServerError',
+      message: '미니게임 보상 설정 저장 실패',
+      details: IS_PRODUCTION ? undefined : err.message
+    });
   }
 };
 

@@ -11,10 +11,35 @@ import { minigamePress } from './minigamePress';
 export const ACTION_GAME_TYPES = ['fan_meeting', 'streamer_catch', 'sequence_relay'] as const;
 export type ActionGameType = typeof ACTION_GAME_TYPES[number];
 export const isActionGameType = (value: unknown): value is ActionGameType => ACTION_GAME_TYPES.includes(value as ActionGameType);
-export const ACTION_GAME_COPY: Record<ActionGameType, { title: string; description: string; bonus: string }> = {
-  fan_meeting: { title: '팬 줄서기', description: '같은 사진 쪽으로 카드를 넘기세요. 20초 동안 15장 이상 분류하면 성공! 틀리면 0.5초간 멈추고 콤보가 초기화됩니다.', bonus: '25장 이상 또는 무실수 20장 이상 · +200 P' },
-  streamer_catch: { title: '게스트 캐치', description: '각 모니터에 불쑥 나타나는 목표 사진을 누르세요. 30초 동안 12번 등장하며, 7번 이상 잡고 실수 2회 이하면 성공!', bonus: '10번 이상 캐치 · 실수 0회 · +200 P' },
-  sequence_relay: { title: '순서 기억', description: '사진이 나온 순서대로 누르세요. 4개부터 8개까지 5단계! 4단계 완료 시 성공, 두 번 틀리면 종료됩니다.', bonus: '실수 없이 5단계 완료 · +200 P' }
+export type MinigameRewardConfig = Readonly<{ success_points: number; bonus_points: number }>;
+export const DEFAULT_MINIGAME_REWARD_CONFIG: MinigameRewardConfig = Object.freeze({
+  success_points: 1000,
+  bonus_points: 200
+});
+const MAX_MINIGAME_REWARD_POINTS = 10_000_000;
+
+export const resolveMinigameRewardConfig = (
+  value: unknown,
+  fallback: MinigameRewardConfig = DEFAULT_MINIGAME_REWARD_CONFIG
+): MinigameRewardConfig => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
+  const config = value as Record<string, unknown>;
+  const successPoints = config.success_points;
+  const bonusPoints = config.bonus_points;
+  if (
+    !Number.isSafeInteger(successPoints)
+    || !Number.isSafeInteger(bonusPoints)
+    || Number(successPoints) < 0
+    || Number(bonusPoints) < 0
+    || Number(successPoints) + Number(bonusPoints) > MAX_MINIGAME_REWARD_POINTS
+  ) return fallback;
+  return { success_points: Number(successPoints), bonus_points: Number(bonusPoints) };
+};
+
+export const ACTION_GAME_COPY: Record<ActionGameType, { title: string; description: string; bonusCondition: string }> = {
+  fan_meeting: { title: '팬 줄서기', description: '같은 사진 쪽으로 카드를 넘기세요. 20초 동안 15장 이상 분류하면 성공! 틀리면 0.5초간 멈추고 콤보가 초기화됩니다.', bonusCondition: '25장 이상 또는 무실수 20장 이상' },
+  streamer_catch: { title: '게스트 캐치', description: '각 모니터에 불쑥 나타나는 목표 사진을 누르세요. 30초 동안 12번 등장하며, 7번 이상 잡고 실수 2회 이하면 성공!', bonusCondition: '10번 이상 캐치 · 실수 0회' },
+  sequence_relay: { title: '순서 기억', description: '사진이 나온 순서대로 누르세요. 4개부터 8개까지 5단계! 4단계 완료 시 성공, 두 번 틀리면 종료됩니다.', bonusCondition: '실수 없이 5단계 완료' }
 };
 
 type Input = { kind: 'ready' | 'sort' | 'catch' | 'sequence'; value?: number; frame?: number;
@@ -39,8 +64,8 @@ function preload(cards: Card[]) {
   })));
 }
 
-export function ActionMinigame({ type, practice, canRestart, autoStart = false, onExit, onSettled, onRestart }: {
-  type: ActionGameType; practice: boolean; canRestart: boolean; autoStart?: boolean; onExit: () => void; onSettled: () => void; onRestart: () => void;
+export function ActionMinigame({ type, practice, canRestart, autoStart = false, rewardConfig, onExit, onSettled, onRestart }: {
+  type: ActionGameType; practice: boolean; canRestart: boolean; autoStart?: boolean; rewardConfig?: MinigameRewardConfig; onExit: () => void; onSettled: () => void; onRestart: () => void;
 }) {
   const [view, setView] = useState<View | null>(null);
   const [now, setNow] = useState(0);
@@ -52,6 +77,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const [catchPending, setCatchPending] = useState<string[]>([]);
   const [orderedPending, setOrderedPending] = useState(0);
   const [lastPress, setLastPress] = useState<{ card: number; at: number; correct: boolean } | null>(null);
+  const [sessionRewardConfig, setSessionRewardConfig] = useState(() => resolveMinigameRewardConfig(rewardConfig));
   const current = useRef<View | null>(null);
   const projected = useRef<View | null>(null);
   const orderedInputs = useRef<OrderedInputs>({ offset: 0, values: [] });
@@ -71,7 +97,7 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const pending = useRef<Pending | null>(null);
   const catchRequests = useRef(new Map<string, { body: Pending; sending: boolean }>());
   const settled = useRef(false);
-  const startRequest = useRef<Promise<{ session_id: string; game_data: View; sentAt: number }> | null>(null);
+  const startRequest = useRef<Promise<{ session_id: string; game_data: View; reward_config?: unknown; sentAt: number }> | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const copy = ACTION_GAME_COPY[type];
 
@@ -297,11 +323,12 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
     void startRequest.current.then(async data => {
       if (cancelled) return;
       session.current = data.session_id;
+      setSessionRewardConfig(resolveMinigameRewardConfig(data.reward_config));
       accept(data.game_data, data.sentAt);
       await prepare();
     }).catch(err => { if (!cancelled) setError(readableError(err, '게임 준비에 실패했습니다. 다시 시도해 주세요.')); });
     return () => { cancelled = true; mounted.current = false; };
-  }, [type, practice, accept, prepare]);
+  }, [type, practice, rewardConfig, accept, prepare]);
 
   useEffect(() => {
     if (!autoStart || !booted || busy || error || autoStarted.current || current.current?.state.starts_at !== null) return;
@@ -379,6 +406,14 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
   const recentPress = lastPress && now - lastPress.at < 220 ? lastPress : null;
   const previewIndex = state ? Math.floor((now - state.preview_at) / 700) : -1;
   const previewCard = view && previewIndex >= 0 && previewIndex < view.sequence.length && (now - (state?.preview_at || 0)) % 700 < 620 ? view.cards[view.sequence[previewIndex]] : null;
+  const activeCondition = type === 'fan_meeting'
+    ? '성공 15장 · 보너스 25장 또는 무실수 20장'
+    : type === 'streamer_catch'
+      ? '성공 7회 · 실수 2회 이하 / 보너스 무실수 10회'
+      : '성공 4단계 · 보너스 무실수 5단계';
+  const rewardLabel = practice
+    ? '연습은 포인트를 지급하지 않아요'
+    : `성공 보상 ${sessionRewardConfig.success_points.toLocaleString()} P · 보너스 +${sessionRewardConfig.bonus_points.toLocaleString()} P`;
 
   return <section className="cute-surface mx-auto w-full max-w-3xl rounded-[2rem] p-4 sm:p-6" aria-label={copy.title}>
     <header className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3">
@@ -386,10 +421,12 @@ export function ActionMinigame({ type, practice, canRestart, autoStart = false, 
       <h2 className="text-lg font-black">{copy.title}</h2>
       <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">{practice ? '무료 연습' : '보상 도전'}</span>
     </header>
-    {(!autoStart && !state?.starts_at) || result ? <>
-      <p className="mb-2 text-center text-sm leading-relaxed text-muted-foreground">{copy.description}</p>
-      <p className="mb-5 text-center text-xs font-semibold text-primary">성공 1,000 P · {copy.bonus}{practice && ' (연습은 지급 없음)'}</p>
-    </> : <p className="mb-3 text-center text-xs font-semibold text-primary">{type === 'fan_meeting' ? '성공 15장 · 보너스 25장 또는 무실수 20장' : type === 'streamer_catch' ? '성공 7회 · 실수 2회 이하 / 보너스 무실수 10회' : '성공 4단계 · 보너스 무실수 5단계'}</p>}
+    {((!autoStart && !state?.starts_at) || result) &&
+      <p className="mb-2 text-center text-sm leading-relaxed text-muted-foreground">{copy.description}</p>}
+    <div className="mb-5 space-y-1 text-center text-xs font-semibold">
+      <p className="text-muted-foreground">{state?.starts_at ? activeCondition : `보너스 조건: ${copy.bonusCondition}`}</p>
+      <p className="text-primary">{rewardLabel}</p>
+    </div>
 
     {error && <div role="alert" className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
       <p>{error}</p><button className="mt-3 min-h-11 rounded-xl bg-primary px-4 font-bold text-primary-foreground" disabled={busy} onClick={() => {

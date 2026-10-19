@@ -36,6 +36,8 @@ import {
   setDrawCost,
   getMinigameTicketChargeInterval,
   setMinigameTicketChargeInterval,
+  getMinigameRewards,
+  setMinigameRewards,
   getMarketListingLimit,
   setMarketListingLimit,
   getMaintenanceStatus,
@@ -965,6 +967,8 @@ router.get('/admin/config/draw-cost', authMiddleware, adminMiddleware, getDrawCo
 router.post('/admin/config/draw-cost', authMiddleware, adminMiddleware, setDrawCost);
 router.get('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, getMinigameTicketChargeInterval);
 router.post('/admin/config/minigame-ticket-charge', authMiddleware, adminMiddleware, setMinigameTicketChargeInterval);
+router.get('/admin/config/minigame-rewards', authMiddleware, adminMiddleware, getMinigameRewards);
+router.post('/admin/config/minigame-rewards', authMiddleware, adminMiddleware, setMinigameRewards);
 router.get('/admin/config/market-listing-limit', authMiddleware, adminMiddleware, getMarketListingLimit);
 router.post('/admin/config/market-listing-limit', authMiddleware, adminMiddleware, setMarketListingLimit);
 

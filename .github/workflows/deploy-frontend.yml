@@ -55,6 +55,9 @@ jobs:
         run: |
           node -e "console.log('[site-insights]', { analyticsEnabled: process.env.NEXT_PUBLIC_ANALYTICS_ENABLED || '', allowLocalhost: process.env.NEXT_PUBLIC_ANALYTICS_ALLOW_LOCALHOST || '', heartbeatMs: process.env.NEXT_PUBLIC_ANALYTICS_HEARTBEAT_MS || '' })"
 
+      - name: Test minigame reward contracts
+        run: node --test frontend/src/app/AdminTabMinigameRewards.test.mjs frontend/src/app/ArcadeMinigameRewards.test.mjs
+
       - name: Build frontend
         run: pnpm --filter frontend build
         env:

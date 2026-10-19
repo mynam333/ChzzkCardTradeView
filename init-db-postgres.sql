@@ -1024,8 +1024,14 @@ RETURNS TABLE (
 DECLARE
   session_row minigame_sessions%ROWTYPE;
   balance_after BIGINT;
+  target_json JSONB;
+  reward_json JSONB;
+  success_reward_text TEXT;
+  bonus_reward_text TEXT;
+  success_reward_points INTEGER;
+  bonus_reward_points INTEGER;
 BEGIN
-  IF p_earned_points IS NULL OR p_earned_points NOT IN (0, 1000, 1200) THEN
+  IF p_earned_points IS NULL THEN
     RETURN QUERY SELECT FALSE, 'INVALID_REWARD'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
     RETURN;
   END IF;
@@ -1042,6 +1048,57 @@ BEGIN
   IF session_row.user_id <> p_user_id THEN
     RETURN QUERY SELECT FALSE, 'SESSION_OWNER_MISMATCH'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
     RETURN;
+  END IF;
+
+  IF p_earned_points <> 0 THEN
+    BEGIN
+      target_json := COALESCE(NULLIF(session_row.target_data, '')::JSONB, '{}'::JSONB);
+    EXCEPTION WHEN OTHERS THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+      RETURN;
+    END;
+    IF jsonb_typeof(target_json) <> 'object' THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+      RETURN;
+    END IF;
+
+    reward_json := target_json -> 'reward_config';
+    IF reward_json IS NULL THEN
+      -- 배포 전 발급된 검증 버전 1 세션은 기존 1000/200 정책으로 정산한다.
+      success_reward_points := 1000;
+      bonus_reward_points := 200;
+    ELSE
+      IF jsonb_typeof(reward_json) <> 'object' THEN
+        RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+        RETURN;
+      END IF;
+      success_reward_text := reward_json ->> 'success_points';
+      bonus_reward_text := reward_json ->> 'bonus_points';
+      IF success_reward_text !~ '^[0-9]+$' OR bonus_reward_text !~ '^[0-9]+$' THEN
+        RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+        RETURN;
+      END IF;
+      BEGIN
+        success_reward_points := success_reward_text::INTEGER;
+        bonus_reward_points := bonus_reward_text::INTEGER;
+      EXCEPTION WHEN OTHERS THEN
+        RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+        RETURN;
+      END;
+      IF success_reward_points < 0
+        OR bonus_reward_points < 0
+        OR success_reward_points > 10000000
+        OR bonus_reward_points > 10000000
+        OR success_reward_points + bonus_reward_points > 10000000 THEN
+        RETURN QUERY SELECT FALSE, 'INVALID_REWARD_POLICY'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+        RETURN;
+      END IF;
+    END IF;
+
+    IF p_earned_points NOT IN (success_reward_points, success_reward_points + bonus_reward_points) THEN
+      RETURN QUERY SELECT FALSE, 'INVALID_REWARD'::TEXT, FALSE, NULL::BIGINT, NULL::INTEGER, NULL::TEXT;
+      RETURN;
+    END IF;
   END IF;
 
   IF session_row.status = 'COMPLETED' THEN
@@ -2279,6 +2336,7 @@ INSERT INTO system_configs (key, value) VALUES ('free_draw_max_stack', '1') ON C
 INSERT INTO system_configs (key, value) VALUES ('draw_cost', '10000') ON CONFLICT (key) DO NOTHING; -- 뽑기 1회 기본 비용
 INSERT INTO system_configs (key, value) VALUES ('draw_target_value', '2500') ON CONFLICT (key) DO NOTHING; -- 가챠 추첨 목표 기댓값(평균 카드 가치)
 INSERT INTO system_configs (key, value) VALUES ('minigame_ticket_charge_interval_minutes', '240') ON CONFLICT (key) DO NOTHING; -- 미니게임 동전 충전 간격(분)
+INSERT INTO system_configs (key, value) VALUES ('minigame_reward_config', '{"success_points":1000,"bonus_points":200}') ON CONFLICT (key) DO NOTHING; -- 미니게임 성공/보너스 포인트
 INSERT INTO system_configs (key, value) VALUES ('market_listing_limit', '5') ON CONFLICT (key) DO NOTHING; -- 사용자별 마켓 동시 등록 한도
 INSERT INTO system_configs (key, value) VALUES ('maintenance_active', 'false') ON CONFLICT (key) DO NOTHING;
 INSERT INTO system_configs (key, value) VALUES ('maintenance_start_at', '') ON CONFLICT (key) DO NOTHING;

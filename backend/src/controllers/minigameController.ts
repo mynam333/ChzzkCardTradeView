@@ -9,8 +9,13 @@ import { normalizeImageBlindKey } from '../utils/imageBlindKey';
 import { recordAchievementEvent } from '../services/achievementService';
 import { createMinigameImageReference } from '../services/minigameImageToken';
 import { ACTION_GAME_NAMES, ACTION_GAME_PLAY_MS, ACTION_GAMES, ActionGameError, ActionInput, ActionTarget,
-  actionReward, advanceActionGame, createActionTarget, initialActionState, isActionGame,
+  actionReward, actionRewardTier, advanceActionGame, createActionTarget, initialActionState, isActionGame,
   publicActionGame, readActionState } from '../services/actionMinigames';
+import { getMinigameRewardConfig } from '../services/minigameRewardConfig';
+import {
+  resolveMinigameRewardConfigFromTargetData,
+  toPublicMinigameRewardConfig
+} from '../services/minigameRewardPolicy';
 
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240; // 4시간
 const MAX_TICKETS = 5;
@@ -850,6 +855,8 @@ const buildCropDetectiveResumePayload = (session: MinigameSession) => {
   if (timing.time_remaining_ms <= 0) return null;
   const gameData = buildPublicCropDetectiveGameData(session);
   if (!gameData) return null;
+  const rewardConfig = resolveMinigameRewardConfigFromTargetData(session.target_data);
+  if (!rewardConfig) return null;
   const target = parseDbJson<any>(session.target_data, {});
   const outcomes = getStoredRoundOutcomes(session);
   const score = scoreCropDetectiveAnswers(getRoundAnswersFromOutcomes(outcomes), target);
@@ -857,6 +864,7 @@ const buildCropDetectiveResumePayload = (session: MinigameSession) => {
     session_id: session.id,
     game_type: 'crop_detective' as const,
     practice_mode: target.practice_mode === true,
+    reward_config: toPublicMinigameRewardConfig(rewardConfig),
     game_data: gameData,
     round_progress: {
       outcomes,
@@ -911,7 +919,10 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
   if (!userId) return res.status(401).json({ error: 'Unauthorized', message: '로그인이 필요합니다.' });
 
   try {
-    const chargeIntervalMinutes = await getTicketChargeIntervalMinutes();
+    const [chargeIntervalMinutes, rewardConfig] = await Promise.all([
+      getTicketChargeIntervalMinutes(),
+      getMinigameRewardConfig()
+    ]);
     const refreshed = await minigameRepository.refreshTicketStatus(userId, chargeIntervalMinutes);
     const dailyMinigame = getDailyMinigame();
 
@@ -926,7 +937,8 @@ export const getMinigameStatus = async (req: AuthenticatedRequest, res: Response
       today_game: dailyMinigame.game_type,
       kst_date: dailyMinigame.kst_date,
       next_game_at: dailyMinigame.next_game_at,
-      seconds_until_game_change: dailyMinigame.seconds_until_game_change
+      seconds_until_game_change: dailyMinigame.seconds_until_game_change,
+      reward_config: toPublicMinigameRewardConfig(rewardConfig)
     });
   } catch (err: any) {
     console.error('[MinigameController] status error:', err);
@@ -948,6 +960,20 @@ export const getActiveMinigameSession = async (req: AuthenticatedRequest, res: R
     const activeSession = await minigameRepository.findActiveStartedSession(userId, 'crop_detective');
     if (!activeSession) return res.status(200).json({ active_session: null });
     const activeTarget = parseDbJson<any>(activeSession.target_data, {});
+    if (!resolveMinigameRewardConfigFromTargetData(activeSession.target_data)) {
+      const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+      if (!closeResult.ok) {
+        return res.status(409).json({
+          error: 'ActiveSessionCloseFailed',
+          message: '보상 설정을 확인할 수 없는 미니게임 세션을 안전하게 종료하지 못했습니다.'
+        });
+      }
+      return res.status(200).json({
+        active_session: null,
+        invalid_reward_session_closed: true,
+        message: '보상 설정을 확인할 수 없는 이전 미니게임 세션을 안전하게 종료했습니다. 새 게임을 시작해 주세요.'
+      });
+    }
     if (isLegacyUnverifiablePaidSession(activeSession, activeTarget)) {
       const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
       if (!closeResult.ok) {
@@ -1032,6 +1058,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const dailyMinigame = getDailyMinigame();
+    const rewardConfig = await getMinigameRewardConfig();
     let interruptedSessionClosed = false;
     let chargeIntervalMinutes = DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES;
     if (!practiceMode && game_type !== dailyMinigame.game_type) {
@@ -1050,7 +1077,17 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       const activeSession = await minigameRepository.findActiveStartedSession(userId, game_type as DailyMinigameType);
       if (activeSession) {
         const activeTarget = parseDbJson<any>(activeSession.target_data, {});
-        if (isLegacyUnverifiablePaidSession(activeSession, activeTarget)) {
+        const activeRewardConfig = resolveMinigameRewardConfigFromTargetData(activeSession.target_data);
+        if (!activeRewardConfig) {
+          const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
+          if (!closeResult.ok) {
+            return res.status(409).json({
+              error: 'ActiveSessionCloseFailed',
+              message: '보상 설정을 확인할 수 없는 미니게임 세션을 안전하게 정리하지 못했습니다.'
+            });
+          }
+          interruptedSessionClosed = true;
+        } else if (isLegacyUnverifiablePaidSession(activeSession, activeTarget)) {
           const closeResult = await minigameRepository.completeSession(activeSession.id, 0);
           if (!closeResult.ok) {
             return res.status(409).json({
@@ -1063,6 +1100,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
           if (activeSession.expires_at && new Date(activeSession.expires_at).getTime() > Date.now()) {
             const action = readActionState(activeSession.progress_data);
             return res.status(200).json({ session_id: activeSession.id, game_type, practice_mode: false,
+              reward_config: toPublicMinigameRewardConfig(activeRewardConfig),
               resumed_session: true, game_data: publicActionGame(game_type, activeTarget, action, activeSession.progress_revision ?? 0, Date.now(), receivedAt) });
           }
           await minigameRepository.completeSession(activeSession.id, 0);
@@ -1319,6 +1357,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
     targetData.practice_mode = practiceMode;
     targetData.skip_countdown = req.body.skip_countdown === true;
     targetData.validation_version = MINIGAME_VALIDATION_VERSION;
+    targetData.reward_config = toPublicMinigameRewardConfig(rewardConfig);
 
     // A paid crop round is armed only by the protected image renderer, after a
     // real clue is ready and immediately before
@@ -1390,6 +1429,7 @@ export const startMinigame = async (req: AuthenticatedRequest, res: Response) =>
       session_id: sessionId,
       game_type,
       practice_mode: practiceMode,
+      reward_config: toPublicMinigameRewardConfig(rewardConfig),
       game_data: gameData,
       interrupted_session_closed: interruptedSessionClosed,
       message: interruptedSessionClosed
@@ -1549,6 +1589,22 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     if (session.status !== 'STARTED') {
       return res.status(400).json({ error: 'BadRequest', message: '이미 처리되었거나 만료된 세션입니다.' });
     }
+    const rewardConfig = resolveMinigameRewardConfigFromTargetData(session.target_data);
+    if (!rewardConfig) {
+      const closeResult = await minigameRepository.completeSession(session_id, 0);
+      if (!closeResult.ok) {
+        return res.status(409).json({
+          error: 'MinigameSessionCloseFailed',
+          message: '보상 설정을 확인할 수 없는 미니게임 세션을 안전하게 종료하지 못했습니다.'
+        });
+      }
+      return res.status(409).json({
+        error: 'InvalidMinigameRewardConfig',
+        message: '게임 시작 시의 보상 설정을 확인할 수 없어 세션을 안전하게 종료했습니다. 새 게임을 시작해 주세요.',
+        session_closed: true,
+        earned_points: 0
+      });
+    }
 
     // 서버 사이드 시간 경과 체크 (치팅 패킷 변조 차단)
     const sessionCreatedMs = parseDbKstTimeMs(session.created_at);
@@ -1565,9 +1621,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     let isCorrect = false;
     let earnedPoints = 0;
     let message = '아쉽게도 정답이 아닙니다!';
-
-    const BASE_REWARD = 1000;
-    const BONUS_REWARD = 200;
+    const formatPoints = (points: number) => points.toLocaleString('ko-KR');
 
     // 게임 타입별 채점 및 치팅 검증
     if (isActionGame(session.game_type)) {
@@ -1578,13 +1632,17 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
           JSON.stringify({ action: state }));
         if (!saved) return res.status(409).json({ message: '진행 기록을 동기화하고 있습니다. 결과 확인을 다시 시도해 주세요.' });
       }
-      earnedPoints = actionReward(session.game_type, state);
-      isCorrect = earnedPoints > 0;
+      const rewardTier = actionRewardTier(session.game_type, state);
+      earnedPoints = actionReward(session.game_type, state, rewardConfig);
+      isCorrect = rewardTier !== 'none';
       const detail = session.game_type === 'sequence_relay' ? `${state.cleared}/5단계 완료`
         : `${state.correct}${session.game_type === 'fan_meeting' ? '장 분류' : '/10회 캐치'} · 실수 ${state.mistakes}회`;
-      message = `${ACTION_GAME_NAMES[session.game_type]} ${detail}. ${earnedPoints === 1200
-        ? '보너스 200 P를 포함해 1,200 P를 획득했습니다!'
-        : earnedPoints === 1000 ? '성공 보상 1,000 P를 획득했습니다!' : '이번에는 성공 조건에 도달하지 못했습니다.'}`;
+      const rewardMessage = rewardTier === 'none'
+        ? '이번에는 성공 조건에 도달하지 못했습니다.'
+        : rewardTier === 'bonus' && rewardConfig.bonusPoints > 0
+          ? `보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함해 ${formatPoints(earnedPoints)} P를 획득했습니다!`
+          : `성공 보상 ${formatPoints(earnedPoints)} P를 획득했습니다!`;
+      message = `${ACTION_GAME_NAMES[session.game_type]} ${detail}. ${rewardMessage}`;
     } else if (session.game_type === 'puzzle') {
       const { success } = payload || {};
       const hasIssuedPuzzle = Array.isArray(target?.initial_puzzle_pieces);
@@ -1629,14 +1687,16 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
       if (solvedPuzzle) {
         isCorrect = true;
-        earnedPoints = BASE_REWARD;
+        earnedPoints = rewardConfig.successPoints;
 
-        // 30초 내 퍼즐 완성 시 보너스 200 P.
+        // 30초 내 퍼즐 완성 시 현재 세션에 고정된 보너스를 지급합니다.
         if (completedWithinBonusTime(serverElapsedMs, 'puzzle', 30_000)) {
-          earnedPoints += BONUS_REWARD;
-          message = `30초 내로 퍼즐을 완성하셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          earnedPoints += rewardConfig.bonusPoints;
+          message = rewardConfig.bonusPoints > 0
+            ? `30초 내로 퍼즐을 완성하셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
+            : `30초 내로 퍼즐을 완성하셨습니다! 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         } else {
-          message = `퍼즐을 무사히 완성하셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
+          message = `퍼즐을 무사히 완성하셨습니다! 기본 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         }
       } else {
         message = '120초 시간 제한이 초과되어 실패 처리되었습니다.';
@@ -1685,14 +1745,16 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
       if (solvedMatch) {
         isCorrect = true;
-        earnedPoints = BASE_REWARD;
+        earnedPoints = rewardConfig.successPoints;
 
-        // 10초 내 완료 시 보너스 200 P.
+        // 10초 내 완료 시 현재 세션에 고정된 보너스를 지급합니다.
         if (completedWithinBonusTime(serverElapsedMs, 'match', 10_000)) {
-          earnedPoints += BONUS_REWARD;
-          message = `10초 내에 짝을 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          earnedPoints += rewardConfig.bonusPoints;
+          message = rewardConfig.bonusPoints > 0
+            ? `10초 내에 짝을 맞추셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
+            : `10초 내에 짝을 맞추셨습니다! 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         } else {
-          message = `모든 카드의 짝을 찾으셨습니다! 기본 성공 포인트 ${earnedPoints} P 획득!`;
+          message = `모든 카드의 짝을 찾으셨습니다! 기본 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         }
       }
     } else if (isRoundGameType(session.game_type)) {
@@ -1748,13 +1810,15 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
 
       if (score.correctCount >= minCorrect) {
         isCorrect = true;
-        earnedPoints = BASE_REWARD;
+        earnedPoints = rewardConfig.successPoints;
 
         if (score.perfect) {
-          earnedPoints += BONUS_REWARD;
-          message = `${gameLabel} 5문제를 모두 맞추셨습니다! 보너스 ${BONUS_REWARD} P를 포함하여 총 ${earnedPoints} P 획득!`;
+          earnedPoints += rewardConfig.bonusPoints;
+          message = rewardConfig.bonusPoints > 0
+            ? `${gameLabel} 5문제를 모두 맞추셨습니다! 보너스 ${formatPoints(rewardConfig.bonusPoints)} P를 포함하여 총 ${formatPoints(earnedPoints)} P 획득!`
+            : `${gameLabel} 5문제를 모두 맞추셨습니다! 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         } else {
-          message = `${gameLabel} ${score.correctCount}/${score.totalRounds}문제 성공! 기본 성공 포인트 ${earnedPoints} P 획득!`;
+          message = `${gameLabel} ${score.correctCount}/${score.totalRounds}문제 성공! 기본 성공 포인트 ${formatPoints(earnedPoints)} P 획득!`;
         }
       } else {
         message = `${gameLabel} ${score.correctCount}/${score.totalRounds}문제 정답입니다. 3문제 이상 맞혀야 성공입니다.`;
@@ -1796,7 +1860,7 @@ export const submitMinigameResult = async (req: AuthenticatedRequest, res: Respo
     const authoritativeEarnedPoints = Number(
       authoritativeResult.earned_points ?? completeResult.earnedPoints ?? earnedPoints
     );
-    if (![0, BASE_REWARD, BASE_REWARD + BONUS_REWARD].includes(authoritativeEarnedPoints)) {
+    if (![0, rewardConfig.successPoints, rewardConfig.successPoints + rewardConfig.bonusPoints].includes(authoritativeEarnedPoints)) {
       return res.status(500).json({
         error: 'InternalServerError',
         message: '저장된 미니게임 보상 결과가 올바르지 않습니다.'

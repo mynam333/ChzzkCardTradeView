@@ -10,10 +10,10 @@ import {
   MinigameCompletionResult
 } from "../interfaces";
 import { recordSqlitePointLedger } from "../../services/pointLedger";
+import { isAllowedMinigameReward } from "../../services/minigameRewardPolicy";
 
 const MAX_AUTO_TICKETS = 5;
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240;
-const ALLOWED_MINIGAME_REWARDS = new Set([0, 1000, 1200]);
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -515,15 +515,15 @@ export class SqliteMinigameRepository implements IMinigameRepository {
     earnedPoints: number,
     resultData?: string
   ): Promise<MinigameCompletionResult> {
-    if (!Number.isInteger(earnedPoints) || !ALLOWED_MINIGAME_REWARDS.has(earnedPoints)) {
-      return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
-    }
     const db = this.getDb();
     const txn = db.transaction((): MinigameCompletionResult => {
       // 1. 세션이 존재하고 'STARTED' 상태인지 확인
       const session = db.prepare('SELECT * FROM minigame_sessions WHERE id = ?').get(sessionId) as any;
       if (!session) {
         return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
+      }
+      if (!isAllowedMinigameReward(earnedPoints, session.target_data)) {
+        return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
       }
       if (session.status === 'COMPLETED') {
         const user = db.prepare('SELECT point FROM users WHERE id = ?').get(session.user_id) as any;

@@ -272,6 +272,10 @@ export const AdminTab: React.FC = () => {
   const [isSavingInterval, setIsSavingInterval] = useState(false);
   const [minigameTicketChargeMinutes, setMinigameTicketChargeMinutes] = useState('240');
   const [isSavingMinigameTicketCharge, setIsSavingMinigameTicketCharge] = useState(false);
+  const [minigameSuccessPoints, setMinigameSuccessPoints] = useState('1000');
+  const [minigameBonusPoints, setMinigameBonusPoints] = useState('200');
+  const [isSavingMinigameRewards, setIsSavingMinigameRewards] = useState(false);
+  const [minigameRewardsLoadState, setMinigameRewardsLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [drawCost, setDrawCost] = useState('10000');           // 뽑기 1회 비용 (P)
   const [isSavingCost, setIsSavingCost] = useState(false);    // 뽑기 비용 저장 중 여부
   const [marketListingLimit, setMarketListingLimit] = useState('5');
@@ -392,6 +396,7 @@ export const AdminTab: React.FC = () => {
       fetchShopItems();
       fetchFreeDrawInterval();
       fetchMinigameTicketChargeInterval();
+      fetchMinigameRewards();
       fetchDrawCost();
       fetchMarketListingLimit();
     }
@@ -1194,6 +1199,86 @@ export const AdminTab: React.FC = () => {
       toast('서버 통신 에러', 'error');
     } finally {
       setIsSavingMinigameTicketCharge(false);
+    }
+  };
+
+  const parseMinigameRewardInput = (value: string): number | null => {
+    const normalized = value.trim();
+    if (!/^\d+$/.test(normalized)) return null;
+    const parsed = Number(normalized);
+    return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 10_000_000 ? parsed : null;
+  };
+
+  const readMinigameRewardResponse = (payload: unknown): { successPoints: number; bonusPoints: number } | null => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const root = payload as Record<string, unknown>;
+    const nested = root.reward_config ?? root.rewardConfig ?? root.config;
+    const source = nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? nested as Record<string, unknown>
+      : root;
+    const successPoints = parseMinigameRewardInput(String(source.success_points ?? source.successPoints ?? ''));
+    const bonusPoints = parseMinigameRewardInput(String(source.bonus_points ?? source.bonusPoints ?? ''));
+    if (successPoints === null || bonusPoints === null || successPoints + bonusPoints > 10_000_000) return null;
+    return { successPoints, bonusPoints };
+  };
+
+  const fetchMinigameRewards = async () => {
+    setMinigameRewardsLoadState('loading');
+    try {
+      const res = await apiFetch('/admin/config/minigame-rewards');
+      if (!res.ok) throw new Error('미니게임 보상 설정 조회 실패');
+      const config = readMinigameRewardResponse(await res.json());
+      if (!config) throw new Error('미니게임 보상 설정 응답 오류');
+      setMinigameSuccessPoints(String(config.successPoints));
+      setMinigameBonusPoints(String(config.bonusPoints));
+      setMinigameRewardsLoadState('ready');
+    } catch {
+      setMinigameRewardsLoadState('error');
+    }
+  };
+
+  const parsedMinigameSuccessPoints = parseMinigameRewardInput(minigameSuccessPoints);
+  const parsedMinigameBonusPoints = parseMinigameRewardInput(minigameBonusPoints);
+  const isMinigameRewardInputValid = parsedMinigameSuccessPoints !== null
+    && parsedMinigameBonusPoints !== null
+    && parsedMinigameSuccessPoints + parsedMinigameBonusPoints <= 10_000_000;
+  const minigameRewardTotal = isMinigameRewardInputValid
+    ? parsedMinigameSuccessPoints + parsedMinigameBonusPoints
+    : null;
+
+  const handleSaveMinigameRewards = async () => {
+    if (minigameRewardsLoadState !== 'ready') {
+      toast('현재 설정을 먼저 정상적으로 불러와야 저장할 수 있습니다.', 'error');
+      return;
+    }
+    if (!isMinigameRewardInputValid) {
+      toast('성공·보너스 포인트는 각각 0~10,000,000 사이의 정수이며, 합계가 10,000,000 이하여야 합니다.', 'error');
+      return;
+    }
+    const successPoints = parsedMinigameSuccessPoints;
+    const bonusPoints = parsedMinigameBonusPoints;
+
+    setIsSavingMinigameRewards(true);
+    try {
+      const res = await apiFetch('/admin/config/minigame-rewards', {
+        method: 'POST',
+        body: JSON.stringify({ success_points: successPoints, bonus_points: bonusPoints })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const saved = readMinigameRewardResponse(data);
+        if (saved) {
+          setMinigameSuccessPoints(String(saved.successPoints));
+          setMinigameBonusPoints(String(saved.bonusPoints));
+        }
+        toast(data.message || '미니게임 포인트 보상이 변경되었습니다.', 'success');
+      } else {
+        toast(data.message || '설정 저장 실패', 'error');
+      }
+    } catch {
+      toast('서버 통신 에러', 'error');
+    } finally {
+      setIsSavingMinigameRewards(false);
     }
   };
 
@@ -3707,6 +3792,77 @@ export const AdminTab: React.FC = () => {
                 {isSavingMinigameTicketCharge ? '저장 중...' : '설정 저장'}
               </button>
             </div>
+          </div>
+
+          {/* 미니게임 포인트 보상 설정 */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <Gamepad2 className="h-4 w-4 text-violet-500" />
+              미니게임 포인트 보상 설정
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              성공 포인트는 성공 조건을 달성했을 때 지급되며, 보너스 포인트는 보너스 조건을 달성하면 추가로 지급됩니다.<br />
+              저장한 값은 <b>새 세션부터 적용</b>되고, 진행 중인 게임은 <b>시작 시 설정을 유지</b>합니다.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center">
+              <label className="relative min-w-0">
+                <span className="sr-only">성공 포인트</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="0"
+                  max="10000000"
+                  value={minigameSuccessPoints}
+                  onChange={(e) => setMinigameSuccessPoints(e.target.value)}
+                  disabled={minigameRewardsLoadState !== 'ready' || isSavingMinigameRewards}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 pr-10 text-xs focus:ring-1 focus:ring-violet-500 focus:outline-none"
+                  placeholder="성공 포인트 (예: 1000)"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">P</span>
+              </label>
+              <label className="relative min-w-0">
+                <span className="sr-only">보너스 포인트</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="0"
+                  max="10000000"
+                  value={minigameBonusPoints}
+                  onChange={(e) => setMinigameBonusPoints(e.target.value)}
+                  disabled={minigameRewardsLoadState !== 'ready' || isSavingMinigameRewards}
+                  className="w-full rounded-lg border border-border bg-secondary/40 px-3 py-2 pr-10 text-xs focus:ring-1 focus:ring-violet-500 focus:outline-none"
+                  placeholder="보너스 포인트 (예: 200)"
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-muted-foreground font-bold">P</span>
+              </label>
+              <button
+                onClick={handleSaveMinigameRewards}
+                disabled={minigameRewardsLoadState !== 'ready' || isSavingMinigameRewards || !isMinigameRewardInputValid}
+                className="w-full rounded-lg bg-violet-500 px-4 py-2 text-xs font-bold text-white hover:bg-violet-600 disabled:opacity-50 transition-all shadow-md active:scale-95 sm:w-auto"
+              >
+                {isSavingMinigameRewards ? '저장 중...' : '설정 저장'}
+              </button>
+            </div>
+            {minigameRewardsLoadState === 'error' ? (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-600 dark:text-rose-300">
+                <span>현재 보상 설정을 불러오지 못해 저장이 잠겨 있습니다.</span>
+                <button type="button" onClick={fetchMinigameRewards} className="rounded-md border border-current px-2 py-1 hover:bg-rose-500/10">
+                  다시 불러오기
+                </button>
+              </div>
+            ) : minigameRewardsLoadState === 'loading' ? (
+              <p className="text-xs font-semibold text-muted-foreground">현재 보상 설정을 불러오는 중입니다...</p>
+            ) : minigameRewardTotal === null ? (
+              <p role="alert" className="text-xs font-semibold text-rose-500">
+                각 값은 0~10,000,000 사이의 정수여야 하며, 두 값의 합계는 10,000,000을 넘을 수 없습니다.
+              </p>
+            ) : (
+              <p className="rounded-lg bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300">
+                현재 지급 미리보기 · 일반 성공 {(parsedMinigameSuccessPoints ?? 0).toLocaleString()} P · 보너스 성공 {minigameRewardTotal.toLocaleString()} P
+              </p>
+            )}
           </div>
 
           {/* 뽑기 비용 설정 */}

@@ -214,13 +214,25 @@ export function advanceActionGame(type: ActionGameType, target: ActionTarget, pr
   return state;
 }
 
-export function actionReward(type: ActionGameType, state: ActionState): 0 | 1000 | 1200 {
+export type ActionRewardTier = 'none' | 'success' | 'bonus';
+
+export function actionRewardTier(type: ActionGameType, state: ActionState): ActionRewardTier {
   if (!state.done) throw new ActionGameError('게임 종료 후 결과를 확인해 주세요.');
   if (type === 'fan_meeting') return state.correct >= 25 || (state.correct >= 20 && state.mistakes === 0)
-    ? 1200 : state.correct >= 15 ? 1000 : 0;
+    ? 'bonus' : state.correct >= 15 ? 'success' : 'none';
   if (type === 'streamer_catch') return state.correct >= 10 && state.mistakes === 0
-    ? 1200 : state.correct >= 7 && state.mistakes <= 2 ? 1000 : 0;
-  return state.cleared === 5 && state.mistakes === 0 ? 1200 : state.cleared >= 4 ? 1000 : 0;
+    ? 'bonus' : state.correct >= 7 && state.mistakes <= 2 ? 'success' : 'none';
+  return state.cleared === 5 && state.mistakes === 0 ? 'bonus' : state.cleared >= 4 ? 'success' : 'none';
+}
+
+export function actionReward(
+  type: ActionGameType,
+  state: ActionState,
+  rewards: { successPoints: number; bonusPoints: number } = { successPoints: 1000, bonusPoints: 200 }
+): number {
+  const tier = actionRewardTier(type, state);
+  if (tier === 'none') return 0;
+  return rewards.successPoints + (tier === 'bonus' ? rewards.bonusPoints : 0);
 }
 
 export function publicActionGame(type: ActionGameType, target: ActionTarget, state: ActionState, revision: number, now = Date.now(), receivedAt = now) {

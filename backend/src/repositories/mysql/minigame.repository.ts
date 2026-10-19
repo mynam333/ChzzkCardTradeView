@@ -10,10 +10,10 @@ import {
   MinigameCompletionResult
 } from '../interfaces';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
+import { isAllowedMinigameReward } from '../../services/minigameRewardPolicy';
 
 const MAX_AUTO_TICKETS = 5;
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240;
-const ALLOWED_MINIGAME_REWARDS = new Set([0, 1000, 1200]);
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -504,12 +504,12 @@ export class MysqlMinigameRepository implements IMinigameRepository {
     earnedPoints: number,
     resultData?: string
   ): Promise<MinigameCompletionResult> {
-    if (!Number.isInteger(earnedPoints) || !ALLOWED_MINIGAME_REWARDS.has(earnedPoints)) {
-      return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
-    }
     return this.getDb().transaction(async (tx) => {
       const session = await tx.get('SELECT * FROM minigame_sessions WHERE id = ? FOR UPDATE', sessionId);
       if (!session) return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
+      if (!isAllowedMinigameReward(earnedPoints, session.target_data)) {
+        return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
+      }
       if (session.status === 'COMPLETED') {
         const user = await tx.get('SELECT point FROM users WHERE id = ?', session.user_id);
         if (!user) throw new Error('미니게임 세션 소유자를 찾을 수 없습니다.');

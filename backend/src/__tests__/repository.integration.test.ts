@@ -27,7 +27,9 @@ import {
 import { cancelListing, createListing, listMarketHistory, purchaseListing } from '../controllers/marketController';
 import {
   getMarketListingLimit as getAdminMarketListingLimit,
-  setMarketListingLimit as setAdminMarketListingLimit
+  setMarketListingLimit as setAdminMarketListingLimit,
+  getMinigameRewards as getAdminMinigameRewards,
+  setMinigameRewards as setAdminMinigameRewards
 } from '../controllers/adminController';
 import {
   buyItem,
@@ -951,6 +953,40 @@ describe('MinigameRepository authoritative paid sessions', () => {
     `).get('reward-lock-user', 'reward-lock-session')).toEqual({ count: 1 });
   });
 
+  it('settles only the success values captured in the session reward snapshot', async () => {
+    seedUser(db, 'dynamic-reward-user');
+    expect((await minigameRepository.startSession({
+      id: 'dynamic-reward-session',
+      user_id: 'dynamic-reward-user',
+      game_type: 'quiz',
+      status: 'STARTED',
+      target_data: JSON.stringify({
+        practice_mode: false,
+        reward_config: { success_points: 1500, bonus_points: 350 }
+      }),
+      validation_version: 1,
+      progress_data: '{}',
+      progress_revision: 0,
+      expires_at: new Date(Date.now() + 120_000).toISOString()
+    }, 240)).ok).toBe(true);
+
+    expect((await minigameRepository.completeSession('dynamic-reward-session', 1000)).ok).toBe(false);
+    expect((await minigameRepository.completeSession('dynamic-reward-session', 1200)).ok).toBe(false);
+    const result = await minigameRepository.completeSession(
+      'dynamic-reward-session',
+      1850,
+      JSON.stringify({ correct: true, earned_points: 1850 })
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      settledNow: true,
+      newPoints: 1850,
+      earnedPoints: 1850
+    }));
+    expect((await userRepository.findById('dynamic-reward-user'))?.point).toBe(1850);
+  });
+
   it('never credits a versioned practice session', async () => {
     seedUser(db, 'practice-reward-guard-user');
     expect((await minigameRepository.startSession({
@@ -1431,6 +1467,48 @@ describe('User profile hidden cards', () => {
     expect(res.body.representative_card).toEqual(expect.objectContaining({
       channel_id: 'visible-channel'
     }));
+  });
+});
+
+describe('미니게임 보상 설정', () => {
+  it('기본값을 조회하고 두 보상값을 하나의 검증된 JSON 설정으로 저장한다', async () => {
+    const initialRes = createJsonResponse();
+    await getAdminMinigameRewards({} as any, initialRes);
+    expect(initialRes.statusCode).toBe(200);
+    expect(initialRes.body).toMatchObject({
+      success_points: 1000,
+      bonus_points: 200,
+      min_points: 0,
+      max_points: 10_000_000,
+      max_total_points: 10_000_000
+    });
+
+    const saveRes = createJsonResponse();
+    await setAdminMinigameRewards({
+      body: { success_points: 1500, bonus_points: 350 }
+    } as any, saveRes);
+    expect(saveRes.statusCode).toBe(200);
+    expect(saveRes.body).toMatchObject({ success_points: 1500, bonus_points: 350 });
+    expect(db.prepare("SELECT value FROM system_configs WHERE key = 'minigame_reward_config'").get())
+      .toEqual({ value: '{"success_points":1500,"bonus_points":350}' });
+  });
+
+  it.each([
+    { success_points: -1, bonus_points: 0 },
+    { success_points: 1.5, bonus_points: 0 },
+    { success_points: '1e3', bonus_points: 200 },
+    { success_points: 10_000_000, bonus_points: 1 },
+    { success_points: 1000 },
+    null
+  ])('거부된 요청은 기존 보상 쌍을 부분 변경하지 않는다: %j', async (body) => {
+    await systemConfigRepository.set('minigame_reward_config', '{"success_points":1400,"bonus_points":300}');
+    const response = createJsonResponse();
+
+    await setAdminMinigameRewards({ body } as any, response);
+
+    expect(response.statusCode).toBe(400);
+    await expect(systemConfigRepository.get('minigame_reward_config', '')).resolves
+      .toBe('{"success_points":1400,"bonus_points":300}');
   });
 });
 

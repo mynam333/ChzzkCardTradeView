@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTION_GAMES, CATCH_INPUT_GRACE_MS, SORT_INPUT_GRACE_MS, ActionGameType, ActionState, actionReward, advanceActionGame,
+  ACTION_GAMES, CATCH_INPUT_GRACE_MS, SORT_INPUT_GRACE_MS, ActionGameType, ActionState, actionReward, actionRewardTier, advanceActionGame,
   createActionTarget, initialActionState, publicActionGame
 } from '../services/actionMinigames';
 
@@ -196,5 +196,22 @@ describe('fixed reward thresholds', () => {
     ['sequence_relay', { cleared: 5 }, 1200]
   ] as [ActionGameType, Partial<ActionState>, number][])('%s %j yields exactly %i points', (type, progress, reward) => {
     expect(actionReward(type, { ...initialActionState(), ...progress, done: true })).toBe(reward);
+  });
+
+  it('maps semantic success tiers to the session reward snapshot', () => {
+    const rewards = { successPoints: 1500, bonusPoints: 350 };
+    const success = { ...initialActionState(), done: true, correct: 15 };
+    const bonus = { ...initialActionState(), done: true, correct: 25, mistakes: 3 };
+
+    expect(actionRewardTier('fan_meeting', success)).toBe('success');
+    expect(actionReward('fan_meeting', success, rewards)).toBe(1500);
+    expect(actionRewardTier('fan_meeting', bonus)).toBe('bonus');
+    expect(actionReward('fan_meeting', bonus, rewards)).toBe(1850);
+  });
+
+  it('preserves a successful tier when the configured payout is zero', () => {
+    const success = { ...initialActionState(), done: true, cleared: 4 };
+    expect(actionRewardTier('sequence_relay', success)).toBe('success');
+    expect(actionReward('sequence_relay', success, { successPoints: 0, bonusPoints: 0 })).toBe(0);
   });
 });

@@ -9,10 +9,10 @@ import {
   MinigameRoundDeadlineArmResult,
   MinigameCompletionResult
 } from "../interfaces";
+import { isAllowedMinigameReward } from "../../services/minigameRewardPolicy";
 
 const MAX_AUTO_TICKETS = 5;
 const DEFAULT_TICKET_CHARGE_INTERVAL_MINUTES = 240;
-const ALLOWED_MINIGAME_REWARDS = new Set([0, 1000, 1200]);
 
 const parseDbJson = <T = any>(value: unknown, fallback: T): T => {
   if (value == null || value === '') return fallback;
@@ -486,20 +486,20 @@ export class SupabaseMinigameRepository implements IMinigameRepository {
     earnedPoints: number,
     resultData?: string
   ): Promise<MinigameCompletionResult> {
-    if (!Number.isInteger(earnedPoints) || !ALLOWED_MINIGAME_REWARDS.has(earnedPoints)) {
-      return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
-    }
     const client = this.getClient();
     try {
       // p_user_id는 RPC 내부의 소유권 일치 검증용입니다. 실제 변경은 아래 RPC 하나에서만 수행합니다.
       const { data: owner, error: ownerError } = await client
         .from('minigame_sessions')
-        .select('user_id')
+        .select('user_id,target_data')
         .eq('id', sessionId)
         .maybeSingle();
 
       if (ownerError || !owner?.user_id) {
         return { ok: false, reason: '존재하지 않는 미니게임 세션입니다.' };
+      }
+      if (!isAllowedMinigameReward(earnedPoints, owner.target_data)) {
+        return { ok: false, reason: '허용되지 않은 미니게임 보상입니다.' };
       }
 
       const { data, error } = await client.rpc('complete_minigame_session_authoritative_atomic', {

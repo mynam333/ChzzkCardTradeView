@@ -1071,6 +1071,74 @@ describe('authoritative paid minigame activation contract', () => {
     expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ correct: true, earned_points: 1200 }));
   });
 
+  it('settles against the reward pair captured when the session started', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'paid-quiz-dynamic-reward',
+      user_id: 'user-1',
+      game_type: 'quiz',
+      status: 'STARTED',
+      validation_version: 1,
+      target_data: JSON.stringify({
+        practice_mode: false,
+        reward_config: { success_points: 1500, bonus_points: 350 },
+        rounds: quizRounds
+      }),
+      progress_data: JSON.stringify({
+        round_outcomes: quizRounds.map((round) => ({
+          round: round.round,
+          selected_channel_id: round.answer_channel_id
+        }))
+      }),
+      progress_revision: 5,
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+    const response = createResponse();
+
+    await submitMinigameResult({
+      user: { id: 'user-1' },
+      body: { session_id: 'paid-quiz-dynamic-reward', payload: {} }
+    } as AuthenticatedRequest, response);
+
+    expect(completeSession).toHaveBeenCalledWith('paid-quiz-dynamic-reward', 1850, expect.any(String));
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      correct: true,
+      earned_points: 1850,
+      message: expect.stringContaining('350 P')
+    }));
+  });
+
+  it('fails closed when a paid session contains a malformed reward snapshot', async () => {
+    findSessionById.mockResolvedValue({
+      id: 'paid-quiz-invalid-reward',
+      user_id: 'user-1',
+      game_type: 'quiz',
+      status: 'STARTED',
+      validation_version: 1,
+      target_data: JSON.stringify({
+        practice_mode: false,
+        reward_config: { success_points: 1500, bonus_points: -1 },
+        rounds: quizRounds
+      }),
+      progress_data: JSON.stringify({ round_outcomes: [] }),
+      progress_revision: 0,
+      created_at: new Date(Date.now() - 20_000).toISOString()
+    });
+    const response = createResponse();
+
+    await submitMinigameResult({
+      user: { id: 'user-1' },
+      body: { session_id: 'paid-quiz-invalid-reward', payload: {} }
+    } as AuthenticatedRequest, response);
+
+    expect(completeSession).toHaveBeenCalledWith('paid-quiz-invalid-reward', 0);
+    expect(response.status).toHaveBeenCalledWith(409);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'InvalidMinigameRewardConfig',
+      session_closed: true,
+      earned_points: 0
+    }));
+  });
+
   it('uses the winning stored settlement when concurrent final submissions race', async () => {
     findSessionById.mockResolvedValue({
       id: 'paid-quiz-settlement-race',
@@ -1416,6 +1484,24 @@ describe('daily minigame selection', () => {
     }));
   });
 
+  it('publishes the current reward configuration in minigame status', async () => {
+    systemConfigGet.mockImplementation(async (key) => key === 'minigame_reward_config'
+      ? '{"success_points":1500,"bonus_points":350}'
+      : '240');
+    const response = createResponse();
+
+    await getMinigameStatus({ user: { id: 'user-1' } } as AuthenticatedRequest, response);
+
+    expect(systemConfigGet).toHaveBeenCalledWith(
+      'minigame_reward_config',
+      '{"success_points":1000,"bonus_points":200}',
+      { fresh: true }
+    );
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      reward_config: { success_points: 1500, bonus_points: 350 }
+    }));
+  });
+
   it('rejects a paid start when it is not today\'s KST game', async () => {
     vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // match day
     const request = {
@@ -1452,6 +1538,27 @@ describe('daily minigame selection', () => {
       validation_version: 1,
       progress_data: JSON.stringify({ round_outcomes: [] })
     }), 240);
+  });
+
+  it('snapshots the current reward configuration in every new session', async () => {
+    vi.setSystemTime(new Date('2026-06-06T03:00:00.000Z')); // match day
+    systemConfigGet.mockImplementation(async (key) => key === 'minigame_reward_config'
+      ? '{"success_points":1500,"bonus_points":350}'
+      : '240');
+    findAllStreamers.mockResolvedValue(createPlayableStreamers() as never);
+    startSession.mockResolvedValue({ ok: true });
+    const response = createResponse();
+
+    await startMinigame({
+      user: { id: 'user-1' },
+      body: { game_type: 'match', practice_mode: false }
+    } as AuthenticatedRequest, response);
+
+    const responseBody = vi.mocked(response.json).mock.calls[0][0] as any;
+    const session = startSession.mock.calls[0][0];
+    const target = JSON.parse(session.target_data);
+    expect(responseBody.reward_config).toEqual({ success_points: 1500, bonus_points: 350 });
+    expect(target.reward_config).toEqual({ success_points: 1500, bonus_points: 350 });
   });
 
   it('reveals only the current paid quiz round and stores its server deadline', async () => {

@@ -24,7 +24,16 @@ import {
 import { ReportCardModal, type ReportTargetCard } from './ReportCardModal';
 import { BlindableCardImage } from './BlindableCardImage';
 import { proxiedImage } from '@/lib/cosmetics';
-import { ActionMinigame, ACTION_GAME_COPY, ACTION_GAME_TYPES, isActionGameType, type ActionGameType } from './ActionMinigame';
+import {
+  ActionMinigame,
+  ACTION_GAME_COPY,
+  ACTION_GAME_TYPES,
+  DEFAULT_MINIGAME_REWARD_CONFIG,
+  isActionGameType,
+  resolveMinigameRewardConfig,
+  type ActionGameType,
+  type MinigameRewardConfig
+} from './ActionMinigame';
 import { minigamePress } from './minigamePress';
 import {
   CROP_DETECTIVE_IMAGE_REQUEST_PROFILES,
@@ -169,6 +178,7 @@ type TicketStatusResponse = {
   kst_date: string;
   next_game_at: string;
   seconds_until_game_change: number;
+  reward_config?: unknown;
 };
 
 type StartGameResponse = {
@@ -179,6 +189,7 @@ type StartGameResponse = {
   practice_mode?: boolean;
   resumed_session?: boolean;
   interrupted_session_closed?: boolean;
+  reward_config?: unknown;
   round_progress?: {
     outcomes: Array<{ round: number; selected_channel_id: string | null }>;
     next_round: number;
@@ -236,7 +247,7 @@ const LEGACY_GAME_TYPES: GameType[] = ['puzzle', 'crop_detective', 'value_duel']
 const DAILY_GAME_DETAILS: Record<GameType, {
   title: string;
   description: string;
-  bonus: string;
+  bonusCondition: string;
   Icon: React.ComponentType<{ className?: string }>;
   accent: string;
   iconBackground: string;
@@ -261,7 +272,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   quiz: {
     title: '스트리머 퀴즈',
     description: '흐린 카드를 보고 이름을 고르세요. 문제당 10초, 5문제 중 3개 이상 맞히면 성공입니다.',
-    bonus: '5문제 모두 정답 시 보너스 200 P',
+    bonusCondition: '5문제 모두 정답',
     Icon: HelpCircle,
     accent: 'text-emerald-600 dark:text-emerald-400',
     iconBackground: 'bg-emerald-100 dark:bg-emerald-500/10',
@@ -271,7 +282,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   puzzle: {
     title: '회전 퍼즐',
     description: '120초 안에 섞인 조각을 드래그로 교체하고, 탭해서 90도씩 회전시켜 올바른 카드 이미지를 복구하세요.',
-    bonus: '30초 안에 완성 시 보너스 200 P',
+    bonusCondition: '30초 안에 완성',
     Icon: Sparkles,
     accent: 'text-teal-700 dark:text-teal-300',
     iconBackground: 'bg-teal-100 dark:bg-teal-500/10',
@@ -281,7 +292,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   match: {
     title: '그림 짝맞추기',
     description: '처음 2초간 공개되는 카드를 기억한 뒤, 30초 안에 뒤집힌 스트리머 카드의 짝을 모두 맞춰보세요!',
-    bonus: '10초 안에 완성 시 보너스 200 P',
+    bonusCondition: '10초 안에 완성',
     Icon: Trophy,
     accent: 'text-sky-700 dark:text-sky-300',
     iconBackground: 'bg-sky-100 dark:bg-sky-500/10',
@@ -291,7 +302,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   value_duel: {
     title: '시세 듀얼',
     description: '5문제 동안 두 스트리머 카드 중 현재 시세가 더 높은 쪽을 10초 안에 고르세요. 3문제 이상 맞히면 성공입니다.',
-    bonus: '5문제 모두 정답 시 보너스 200 P',
+    bonusCondition: '5문제 모두 정답',
     Icon: Trophy,
     accent: 'text-amber-700 dark:text-amber-300',
     iconBackground: 'bg-amber-100 dark:bg-amber-500/10',
@@ -301,7 +312,7 @@ const DAILY_GAME_DETAILS: Record<GameType, {
   crop_detective: {
     title: '확대 탐정',
     description: '확대된 카드 조각을 보고 4개의 후보 카드 중 같은 이미지에서 나온 카드를 찾으세요. 3문제 이상 맞히면 성공입니다.',
-    bonus: '5문제 모두 정답 시 보너스 200 P',
+    bonusCondition: '5문제 모두 정답',
     Icon: Eye,
     accent: 'text-fuchsia-700 dark:text-fuchsia-300',
     iconBackground: 'bg-fuchsia-100 dark:bg-fuchsia-500/10',
@@ -2540,6 +2551,8 @@ export const ArcadeTab: React.FC = () => {
   const [todayKstDate, setTodayKstDate] = useState('');
   const [nextGameAt, setNextGameAt] = useState('');
   const [secondsUntilGameChange, setSecondsUntilGameChange] = useState(0);
+  const [rewardConfig, setRewardConfig] = useState<MinigameRewardConfig>(DEFAULT_MINIGAME_REWARD_CONFIG);
+  const [sessionRewardConfig, setSessionRewardConfig] = useState<MinigameRewardConfig>(DEFAULT_MINIGAME_REWARD_CONFIG);
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
   const [actionGameKey, setActionGameKey] = useState(0);
   const [actionAutoStart, setActionAutoStart] = useState(false);
@@ -2759,6 +2772,7 @@ export const ArcadeTab: React.FC = () => {
         setTodayKstDate(data.kst_date);
         setNextGameAt(data.next_game_at);
         setSecondsUntilGameChange(data.seconds_until_game_change);
+        setRewardConfig(resolveMinigameRewardConfig(data.reward_config));
         return data;
       }
       return null;
@@ -2831,6 +2845,7 @@ export const ArcadeTab: React.FC = () => {
     setRoundSubmissionKey(null);
     setSubmitRetry(null);
     setSessionId(data.session_id);
+    setSessionRewardConfig(resolveMinigameRewardConfig(data.reward_config));
     setGameData({
       ...data.game_data,
       rounds: contract.rounds,
@@ -3800,6 +3815,7 @@ export const ArcadeTab: React.FC = () => {
       if (!responseGameData) return;
 
       setSessionId(data.session_id);
+      setSessionRewardConfig(resolveMinigameRewardConfig(data.reward_config));
       setGameData(paidRoundContract
         ? {
             ...responseGameData,
@@ -4614,10 +4630,10 @@ export const ArcadeTab: React.FC = () => {
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span className={`rounded-lg border px-2.5 py-1 text-[10px] font-black ${dailyGameDetails.badge}`}>
-                    기본 성공 보상 1,000 P
+                    기본 성공 보상 {rewardConfig.success_points.toLocaleString()} P
                   </span>
                   <span className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-black text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-400">
-                    {dailyGameDetails.bonus}
+                    {dailyGameDetails.bonusCondition} · 보너스 +{rewardConfig.bonus_points.toLocaleString()} P
                   </span>
                 </div>
               </div>
@@ -4724,7 +4740,7 @@ export const ArcadeTab: React.FC = () => {
       {/* ======================================================== */}
       {/* 인게임 뷰 영역 */}
       {/* ======================================================== */}
-      {isActionGameType(activeGame) && <ActionMinigame key={actionGameKey} type={activeGame} practice={isPracticeMode} autoStart={actionAutoStart} canRestart={isPracticeMode || tickets > 0}
+      {isActionGameType(activeGame) && <ActionMinigame key={actionGameKey} type={activeGame} practice={isPracticeMode} autoStart={actionAutoStart} canRestart={isPracticeMode || tickets > 0} rewardConfig={rewardConfig}
         onExit={() => { handleExitGame(); void fetchStatus(); }}
         onSettled={() => { void fetchStatus(); if (!isPracticeMode) void refreshUserData(); }}
         onRestart={() => handleStartGame(isPracticeMode ? activeGame : todayGame, isPracticeMode, { quickStart: true })} />}
@@ -4736,6 +4752,16 @@ export const ArcadeTab: React.FC = () => {
           onTouchMove={(event) => event.stopPropagation()}
           onTouchEnd={(event) => event.stopPropagation()}
         >
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-2 text-[10px] font-black sm:text-xs">
+            <span className="rounded-full border border-border/70 bg-secondary/55 px-3 py-1.5 text-muted-foreground">
+              보너스 조건: {DAILY_GAME_DETAILS[activeGame].bonusCondition}
+            </span>
+            <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5 text-primary">
+              {isPracticeMode
+                ? '연습은 포인트를 지급하지 않아요'
+                : `성공 보상 ${sessionRewardConfig.success_points.toLocaleString()} P · 보너스 +${sessionRewardConfig.bonus_points.toLocaleString()} P`}
+            </span>
+          </div>
 
           {/* 아케이드 3초 카운트다운 오버레이 */}
           {countdownLeft !== null && countdownLeft > 0 && !quickRestartRef.current && (

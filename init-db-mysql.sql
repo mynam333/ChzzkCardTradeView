@@ -598,6 +598,7 @@ INSERT IGNORE INTO system_configs (`key`, value) VALUES ('free_draw_max_stack', 
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('draw_cost', '10000');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('draw_target_value', '2500');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('minigame_ticket_charge_interval_minutes', '240');
+INSERT IGNORE INTO system_configs (`key`, value) VALUES ('minigame_reward_config', '{"success_points":1000,"bonus_points":200}');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('market_listing_limit', '5');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('maintenance_active', 'false');
 INSERT IGNORE INTO system_configs (`key`, value) VALUES ('maintenance_start_at', '');
