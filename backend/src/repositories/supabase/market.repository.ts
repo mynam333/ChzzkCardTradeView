@@ -284,6 +284,25 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return result;
   }
 
+  async getListingBidPresence(listingIds: number[]): Promise<Record<number, boolean>> {
+    const ids = Array.from(new Set(listingIds.filter(Number.isFinite)));
+    if (ids.length === 0) return {};
+    const listingIdsWithBids = new Set<number>();
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await this.getClient()
+        .from('market_bids')
+        .select('listing_id')
+        .in('listing_id', ids)
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      for (const row of data || []) listingIdsWithBids.add(Number(row.listing_id));
+      if ((data?.length || 0) < pageSize) break;
+    }
+    return Object.fromEntries(ids.map((id) => [id, listingIdsWithBids.has(id)]));
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const { data, error } = await this.getClient()
       .from('market_listings')

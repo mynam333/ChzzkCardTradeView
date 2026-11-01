@@ -58,6 +58,9 @@ jobs:
       - name: Test minigame reward contracts
         run: node --test frontend/src/app/AdminTabMinigameRewards.test.mjs frontend/src/app/ArcadeMinigameRewards.test.mjs
 
+      - name: Test auction privacy contracts
+        run: node --test frontend/src/app/ShopTabAuctionPrivacy.test.mjs
+
       - name: Build frontend
         run: pnpm --filter frontend build
         env:

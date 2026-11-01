@@ -374,6 +374,18 @@ export class MysqlMarketRepository implements IMarketRepository {
     return Object.fromEntries(rows.map((row: any) => [Number(row.listing_id), Number(row.highest_bid || 0)]));
   }
 
+  async getListingBidPresence(listingIds: number[]): Promise<Record<number, boolean>> {
+    const ids = Array.from(new Set(listingIds.filter(Number.isFinite)));
+    if (ids.length === 0) return {};
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await this.getDb().all<{ listing_id: number }>(
+      `SELECT DISTINCT listing_id FROM market_bids WHERE listing_id IN (${placeholders})`,
+      ...ids
+    );
+    const listingIdsWithBids = new Set(rows.map((row) => Number(row.listing_id)));
+    return Object.fromEntries(ids.map((id) => [id, listingIdsWithBids.has(id)]));
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const rows = await this.getDb().all<{ user_card_id: number }>("SELECT user_card_id FROM market_listings WHERE seller_id = ? AND status = 'PENDING'", userId);
     return rows.map((r) => r.user_card_id);

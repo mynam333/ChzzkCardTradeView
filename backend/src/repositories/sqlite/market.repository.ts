@@ -353,6 +353,19 @@ export class SqliteMarketRepository implements IMarketRepository {
     return Object.fromEntries(rows.map((row) => [Number(row.listing_id), Number(row.highest_bid || 0)]));
   }
 
+  async getListingBidPresence(listingIds: number[]): Promise<Record<number, boolean>> {
+    const ids = Array.from(new Set(listingIds.filter(Number.isFinite)));
+    if (ids.length === 0) return {};
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.getDb().prepare(`
+      SELECT DISTINCT listing_id
+        FROM market_bids
+       WHERE listing_id IN (${placeholders})
+    `).all(...ids) as Array<{ listing_id: number }>;
+    const listingIdsWithBids = new Set(rows.map((row) => Number(row.listing_id)));
+    return Object.fromEntries(ids.map((id) => [id, listingIdsWithBids.has(id)]));
+  }
+
   async findPendingCardIdsByUser(userId: string): Promise<number[]> {
     const rows = this.getDb().prepare(`
       SELECT user_card_id FROM market_listings

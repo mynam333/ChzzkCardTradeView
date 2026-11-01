@@ -87,7 +87,7 @@ const GACHA_PARTICLES = Array.from({ length: 28 }, (_, i) => {
 // 동일 내용의 매물은 기존 객체 참조를 유지해 불필요한 카드 리렌더(및 입장 애니메이션 재생)를 막습니다.
 const MARKET_LISTING_VOLATILE_KEYS = [
   'price', 'status', 'current_bid', 'current_bidder_id', 'current_bidder_username',
-  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at', 'my_bid', 'highest_bid', 'winning_price'
+  'buy_now_price', 'auction_ends_at', 'fee_rate', 'updated_at', 'my_bid', 'has_bids', 'winning_price'
 ];
 const marketListingsEqual = (a: any, b: any): boolean =>
   MARKET_LISTING_VOLATILE_KEYS.every((key) => a?.[key] === b?.[key]);
@@ -2005,6 +2005,9 @@ export const ShopTab: React.FC = () => {
                                   <span className="cute-number-font">{formatMarketPrice(myBid)} P</span>
                                 </div>
                               )}
+                              <div className="rounded-lg border border-violet-200/70 bg-white/60 px-2 py-1 text-center text-[9px] font-bold text-violet-700 dark:border-violet-300/15 dark:bg-black/15 dark:text-violet-200">
+                                진행 중 입찰가 비공개 (판매자 포함)
+                              </div>
                               {isUrgent && (
                                 <div className="text-[9px] font-black text-red-500">
                                   마감 임박
@@ -2176,9 +2179,8 @@ export const ShopTab: React.FC = () => {
                         const star = l.card?.star ?? 0;
                         const isAuction = l.listing_type === 'auction';
                         const startBid = Number(l.starting_bid || l.price || 0);
-                        const highestBid = Math.max(0, Number(l.highest_bid || 0));
                         const winningPrice = Math.max(0, Number(l.winning_price || 0));
-                        const auctionHasBids = isAuction && highestBid > 0;
+                        const auctionHasBids = isAuction && l.has_bids === true;
                         const feeRate = Number(l.fee_rate ?? 5);
                         return (
                           <tr key={l.id} className="border-b border-border/40 hover:bg-secondary/10">
@@ -2203,9 +2205,9 @@ export const ShopTab: React.FC = () => {
                                   <div className="text-muted-foreground">
                                     {l.buy_now_price ? `즉시 ${formatMarketPrice(l.buy_now_price)} P` : '입찰 전용'}
                                   </div>
-                                  <div className={highestBid > 0 ? 'text-violet-500' : 'text-muted-foreground'}>
-                                    최고 제시 {highestBid > 0 ? `${formatMarketPrice(highestBid)} P` : '입찰 없음'}
-                                  </div>
+                                  {l.status === 'PENDING' && (
+                                    <div className="text-violet-500">진행 중 입찰가 비공개 (판매자 포함)</div>
+                                  )}
                                   {l.status === 'SOLD' && winningPrice > 0 && (
                                     <div className="text-emerald-500">실제 낙찰 {formatMarketPrice(winningPrice)} P</div>
                                   )}
@@ -2342,7 +2344,6 @@ export const ShopTab: React.FC = () => {
                           const streamer = l.card?.streamer;
                           const star = l.card?.star ?? 0;
                           const isAuction = l.listing_type === 'auction';
-                          const highestBid = Math.max(0, Number(l.highest_bid || 0));
                           const winningPrice = Math.max(0, Number(l.winning_price || 0));
 
                           let typeLabel = '';
@@ -2405,9 +2406,6 @@ export const ShopTab: React.FC = () => {
                                 <div className="font-bold text-yellow-500">{formatMarketPrice(l.price)} P</div>
                                 {historyScope === 'mine' && isAuction && (
                                   <div className="mt-1 space-y-0.5 text-[9px] font-bold">
-                                    <div className="text-violet-500">
-                                      최고 제시 {highestBid > 0 ? `${formatMarketPrice(highestBid)} P` : '입찰 없음'}
-                                    </div>
                                     {winningPrice > 0 && (
                                       <div className="text-emerald-500">실제 낙찰 {formatMarketPrice(winningPrice)} P</div>
                                     )}

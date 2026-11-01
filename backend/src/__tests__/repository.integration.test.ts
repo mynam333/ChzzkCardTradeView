@@ -24,7 +24,15 @@ import {
   getUserProfile,
   getUserRankings
 } from '../controllers/playController';
-import { cancelListing, createListing, listMarketHistory, purchaseListing } from '../controllers/marketController';
+import {
+  cancelListing,
+  createListing,
+  listActiveListings,
+  listMarketHistory,
+  listMyListings,
+  placeBid as placeMarketBid,
+  purchaseListing
+} from '../controllers/marketController';
 import {
   getMarketListingLimit as getAdminMarketListingLimit,
   setMarketListingLimit as setAdminMarketListingLimit,
@@ -44,6 +52,7 @@ import {
 } from '../services/shopService';
 import { accountInteractionRestrictionMiddleware } from '../middlewares/accountInteractionRestriction';
 import { grantCardDeletionCompensations } from '../services/cardDeletionCompensation';
+import { subscribeRealtimeStream } from '../services/realtimeStream';
 
 /**
  * 실제 in-memory SQLite( better-sqlite3 )에 init-db.sql 스키마를 적재하여
@@ -2190,6 +2199,203 @@ describe('MarketRepository 재등록 제약', () => {
     expect(db.prepare('SELECT status FROM market_listings WHERE id = ?').get(listing.id)).toEqual({ status: 'PENDING' });
     expect(db.prepare('SELECT point FROM users WHERE id = ?').get('protected-auction-bidder')).toEqual({ point: 3200 });
     expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardId)).toEqual({ user_id: 'protected-auction-seller' });
+  });
+
+  it('진행 중 비공개 입찰은 존재 여부와 내 입찰만 노출하고 시작가 정렬과 Vickrey 정산을 유지한다', async () => {
+    seedUser(db, 'sealed-auction-seller');
+    seedUser(db, 'sealed-auction-bidder-a', 30_000);
+    seedUser(db, 'sealed-auction-bidder-b', 30_000);
+    seedStreamer(db, 'sealed-auction-channel-a', '비공개 경매 A');
+    seedStreamer(db, 'sealed-auction-channel-b', '비공개 경매 B');
+    const cardA = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('sealed-auction-seller', 'sealed-auction-channel-a', 1, 0)
+    `).run().lastInsertRowid);
+    const cardB = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('sealed-auction-seller', 'sealed-auction-channel-b', 1, 0)
+    `).run().lastInsertRowid);
+    const auctionA = await marketRepository.create({
+      seller_id: 'sealed-auction-seller',
+      user_card_id: cardA,
+      price: 1000,
+      listing_type: 'auction',
+      starting_bid: 1000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+    const auctionB = await marketRepository.create({
+      seller_id: 'sealed-auction-seller',
+      user_card_id: cardB,
+      price: 2000,
+      listing_type: 'auction',
+      starting_bid: 2000,
+      auction_ends_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      fee_rate: 5
+    });
+
+    await expect(marketRepository.getListingBidPresence([])).resolves.toEqual({});
+    await expect(marketRepository.placeBid(auctionA.id as number, 'sealed-auction-seller', 20_000)).resolves.toMatchObject({
+      ok: false,
+      reason: 'CANNOT_BID_OWN_ITEM'
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM market_bids WHERE bidder_id = ?').get('sealed-auction-seller'))
+      .toEqual({ count: 0 });
+
+    await expect(marketRepository.placeBid(auctionA.id as number, 'sealed-auction-bidder-a', 9000)).resolves.toMatchObject({ ok: true });
+    await expect(marketRepository.placeBid(auctionB.id as number, 'sealed-auction-bidder-a', 2500)).resolves.toMatchObject({ ok: true });
+
+    const realtimeWrites: string[] = [];
+    let closeRealtimeStream: () => void = () => undefined;
+    const realtimeResponse = {
+      destroyed: false,
+      writeHead: vi.fn(),
+      flushHeaders: vi.fn(),
+      write(chunk: string) {
+        realtimeWrites.push(chunk);
+        return true;
+      },
+      on(event: string, handler: () => void) {
+        if (event === 'close') closeRealtimeStream = handler;
+        return this;
+      },
+      destroy() {
+        this.destroyed = true;
+      }
+    } as any;
+    subscribeRealtimeStream(realtimeResponse, 'market');
+
+    const bidResponse = createJsonResponse();
+    await placeMarketBid({
+      user: { id: 'sealed-auction-bidder-b' },
+      params: { id: String(auctionA.id) },
+      body: { amount: 8000 }
+    } as any, bidResponse);
+    expect(bidResponse.statusCode).toBe(200);
+    expect(bidResponse.body).toMatchObject({
+      ok: true,
+      listing: {
+        id: auctionA.id,
+        current_bid: 1000,
+        my_bid: 8000
+      }
+    });
+    for (const hiddenField of ['highest_bid', 'winning_price', 'auction_result', 'bid_reserved', 'has_bids']) {
+      expect(bidResponse.body.listing).not.toHaveProperty(hiddenField);
+    }
+    expect(bidResponse.body.listing).toMatchObject({
+      current_bidder_id: null,
+      current_bidder_username: null
+    });
+    expect(bidResponse.body).toMatchObject({ ok: true, reason: 'OK' });
+
+    const realtimeBidEvent = realtimeWrites
+      .filter((chunk) => chunk.startsWith('data: '))
+      .map((chunk) => JSON.parse(chunk.slice('data: '.length)))
+      .find((payload) => payload.reason === 'auction_bid');
+    expect(realtimeBidEvent).toMatchObject({
+      listingId: auctionA.id,
+      listing: {
+        id: auctionA.id,
+        current_bid: 1000,
+        current_bidder_id: null,
+        current_bidder_username: null
+      }
+    });
+    expect(realtimeBidEvent.listing).not.toHaveProperty('my_bid');
+    expect(realtimeBidEvent.listing).not.toHaveProperty('highest_bid');
+    expect(realtimeBidEvent.listing).not.toHaveProperty('winning_price');
+    expect(realtimeBidEvent.listing).not.toHaveProperty('auction_result');
+    expect(realtimeBidEvent.listing).not.toHaveProperty('bid_reserved');
+    closeRealtimeStream();
+
+    await expect(marketRepository.getListingBidPresence([
+      auctionA.id as number,
+      auctionB.id as number,
+      999_999,
+      auctionA.id as number
+    ])).resolves.toEqual({
+      [auctionA.id as number]: true,
+      [auctionB.id as number]: true,
+      999_999: false
+    });
+
+    const publicListResponse = createJsonResponse();
+    await listActiveListings({
+      query: { page: '1', limit: '12', sort: 'bid_desc', type: 'auction' }
+    } as any, publicListResponse);
+    expect(publicListResponse.body.listings.map((item: any) => item.id)).toEqual([auctionB.id, auctionA.id]);
+    for (const item of publicListResponse.body.listings) {
+      expect(item.current_bid).toBe(item.starting_bid);
+      expect(item).not.toHaveProperty('my_bid');
+      expect(item).not.toHaveProperty('has_bids');
+      for (const hiddenField of ['highest_bid', 'winning_price', 'auction_result', 'current_bidder_id', 'current_bidder_username', 'bid_reserved']) {
+        expect(item).not.toHaveProperty(hiddenField);
+      }
+    }
+
+    const bidderListResponse = createJsonResponse();
+    await listActiveListings({
+      user: { id: 'sealed-auction-bidder-a' },
+      query: { page: '1', limit: '12', sort: 'latest', type: 'bidding' }
+    } as any, bidderListResponse);
+    expect(bidderListResponse.body.listings).toHaveLength(2);
+    expect(Object.fromEntries(bidderListResponse.body.listings.map((item: any) => [item.id, item.my_bid]))).toEqual({
+      [auctionA.id as number]: 9000,
+      [auctionB.id as number]: 2500
+    });
+    for (const item of bidderListResponse.body.listings) {
+      expect(item.current_bid).toBe(item.starting_bid);
+      expect(item).not.toHaveProperty('has_bids');
+      expect(item).not.toHaveProperty('current_bidder_id');
+      expect(item).not.toHaveProperty('bid_reserved');
+    }
+
+    const sellerListResponse = createJsonResponse();
+    await listMyListings({ user: { id: 'sealed-auction-seller' } } as any, sellerListResponse);
+    expect(sellerListResponse.body).toHaveLength(2);
+    for (const item of sellerListResponse.body) {
+      expect(item).toMatchObject({ has_bids: true });
+      expect(item.current_bid).toBe(item.starting_bid);
+      expect(item).not.toHaveProperty('highest_bid');
+      expect(item).not.toHaveProperty('winning_price');
+      expect(item).not.toHaveProperty('auction_result');
+      expect(item).not.toHaveProperty('current_bidder_id');
+      expect(item).not.toHaveProperty('current_bidder_username');
+      expect(item).not.toHaveProperty('bid_reserved');
+    }
+
+    const pendingHistoryResponse = createJsonResponse();
+    await listMarketHistory({ user: { id: 'sealed-auction-seller' }, query: { scope: 'mine' } } as any, pendingHistoryResponse);
+    expect(pendingHistoryResponse.body).toEqual([]);
+
+    db.prepare("UPDATE market_listings SET auction_ends_at = datetime('now', '-1 minute') WHERE id = ?").run(auctionA.id);
+    const settled = await marketRepository.finishExpiredAuctions(new Date().toISOString());
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      id: auctionA.id,
+      status: 'SOLD',
+      buyer_id: 'sealed-auction-bidder-a',
+      price: 8000,
+      fee: 400,
+      settled_amount: 7600,
+      auction_result: {
+        winning_bid: 9000,
+        winning_price: 8000,
+        second_bid: 8000
+      }
+    });
+    expect(db.prepare('SELECT point FROM users WHERE id = ?').get('sealed-auction-seller')).toEqual({ point: 7600 });
+    expect(db.prepare('SELECT user_id FROM user_cards WHERE id = ?').get(cardA)).toEqual({ user_id: 'sealed-auction-bidder-a' });
+
+    const completedHistoryResponse = createJsonResponse();
+    await listMarketHistory({ user: { id: 'sealed-auction-seller' }, query: { scope: 'mine' } } as any, completedHistoryResponse);
+    expect(completedHistoryResponse.body[0]).toMatchObject({
+      id: auctionA.id,
+      highest_bid: 9000,
+      winning_price: 8000
+    });
+    expect(completedHistoryResponse.body[0]).not.toHaveProperty('auction_result');
   });
 
   it('경매 가격 상세는 내 거래 이력에만 포함되고 전체 거래 이력 응답에서는 제거된다', async () => {

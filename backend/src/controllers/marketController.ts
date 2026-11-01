@@ -67,19 +67,24 @@ const bidderUsernameForViewer = (listing: MarketListing, viewerId?: string): str
 };
 
 const marketListingForViewer = (listing: MarketListing, viewerId?: string): MarketListing => {
+  const viewerListing: MarketListing = { ...listing };
+  delete viewerListing.has_bids;
+  if (!viewerId) delete viewerListing.my_bid;
+
   if (listing.status === 'PENDING' && listing.listing_type === 'auction') {
-    return {
-      ...listing,
-      current_bid: listing.starting_bid ?? listing.price,
-      current_bidder_id: null,
-      current_bidder_username: undefined,
-      bid_reserved: 0
-    };
+    // 진행 중 경매는 비공개 입찰입니다. 기존 클라이언트 호환을 위해
+    // current_bid에는 실제 최고가가 아닌 공개 시작가만 제공합니다.
+    viewerListing.current_bid = listing.starting_bid ?? listing.price;
+    delete viewerListing.highest_bid;
+    delete viewerListing.winning_price;
+    delete viewerListing.auction_result;
+    delete viewerListing.current_bidder_id;
+    delete viewerListing.current_bidder_username;
+    delete viewerListing.bid_reserved;
+    return viewerListing;
   }
-  return {
-    ...listing,
-    current_bidder_username: bidderUsernameForViewer(listing, viewerId) ?? undefined
-  };
+  viewerListing.current_bidder_username = bidderUsernameForViewer(listing, viewerId) ?? undefined;
+  return viewerListing;
 };
 
 const marketListingsForViewer = (listings: MarketListing[], viewerId?: string): MarketListing[] =>
@@ -99,14 +104,35 @@ const publicHistoryListingForViewer = (listing: MarketListing, viewerId?: string
 };
 
 const privateAuctionListingsForViewer = async (listings: MarketListing[], viewerId: string): Promise<MarketListing[]> => {
-  const listingIds = listings
-    .filter((listing) => listing.listing_type === 'auction' && Number.isFinite(Number(listing.id)))
+  const pendingListingIds = listings
+    .filter((listing) => (
+      listing.listing_type === 'auction'
+      && listing.status === 'PENDING'
+      && Number.isFinite(Number(listing.id))
+    ))
     .map((listing) => Number(listing.id));
-  const highestBids = await marketRepository.getHighestBids(listingIds);
+  const completedListingIds = listings
+    .filter((listing) => (
+      listing.listing_type === 'auction'
+      && listing.status !== 'PENDING'
+      && Number.isFinite(Number(listing.id))
+    ))
+    .map((listing) => Number(listing.id));
+  const [bidPresence, highestBids] = await Promise.all([
+    marketRepository.getListingBidPresence(pendingListingIds),
+    marketRepository.getHighestBids(completedListingIds)
+  ]);
   return listings.map((listing) => {
     const privateListing: MarketListing = { ...marketListingForViewer(listing, viewerId) };
     delete privateListing.auction_result;
     if (listing.listing_type !== 'auction' || listing.id == null) return privateListing;
+    if (listing.status === 'PENDING') {
+      // 이 경로는 판매자의 내 등록 목록입니다. 판매자는 자신의 경매에
+      // 입찰할 수 없으므로 adapter가 잘못 붙인 my_bid도 노출하지 않습니다.
+      delete privateListing.my_bid;
+      privateListing.has_bids = bidPresence[Number(listing.id)] === true;
+      return privateListing;
+    }
     privateListing.highest_bid = highestBids[Number(listing.id)] || null;
     privateListing.winning_price = listing.status === 'SOLD' ? Number(listing.price || 0) : null;
     return privateListing;
@@ -357,6 +383,7 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
       console.warn('[MarketController] 내 판매 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
     });
     const listings = await marketRepository.listByUser(user.id);
+    setMarketListCacheHeaders(res);
     return res.json(await privateAuctionListingsForViewer(listings, user.id));
   } catch (err: any) {
     console.error('[MarketController] listMyListings 에러:', err);
@@ -475,7 +502,7 @@ export const createListing = async (req: AuthenticatedRequest, res: Response) =>
       stats: { 'market.listed.count': 1 }
     }).catch(() => undefined);
 
-    return res.json({ ok: true, listing });
+    return res.json({ ok: true, listing: marketListingForViewer(listing, user.id) });
   } catch (err: any) {
     console.error('[MarketController] createListing 에러:', err);
     if (err?.message === 'CARD_LOCKED_OR_NOT_FOUND') {
@@ -702,7 +729,12 @@ export const placeBid = async (req: AuthenticatedRequest, res: Response) => {
     metadata: { amount },
     stats: { 'market.bid.count': 1 }
   }).catch(() => undefined);
-  return res.status(200).json({ ...result, listing: listingPatch });
+  return res.status(200).json({
+    ok: true,
+    reason: 'OK',
+    auction_ends_at: result.auction_ends_at ?? null,
+    listing: listingPatch
+  });
 };
 
 export const listMarketWatches = async (req: AuthenticatedRequest, res: Response) => {
@@ -783,6 +815,7 @@ export const listMarketHistory = async (req: AuthenticatedRequest, res: Response
     const history = scope === 'all'
       ? await marketRepository.listAllHistory(historyLimit)
       : await marketRepository.listHistory(user.id);
+    setMarketListCacheHeaders(res);
     if (scope === 'all') {
       return res.json(history.map((listing) => publicHistoryListingForViewer(listing, user.id)));
     }

@@ -546,9 +546,11 @@ export interface MarketListing {
   current_bid?: number | null;
   current_bidder_id?: string | null;
   my_bid?: number | null;
-  /** 판매자/거래 당사자에게만 제공되는 최고 제시 입찰가. 공개 목록/전체 거래 이력에는 포함하지 않습니다. */
+  /** 판매자용 진행 중 매물 관리 화면에서만 제공하는 입찰 존재 여부. 금액이나 입찰자 정보는 포함하지 않습니다. */
+  has_bids?: boolean;
+  /** 종료된 개인 거래 이력에서만 제공되는 최고 제시 입찰가. 진행 중/공개 응답에는 포함하지 않습니다. */
   highest_bid?: number | null;
-  /** 판매자/거래 당사자에게만 제공되는 실제 경매 낙찰가. 공개 목록/전체 거래 이력에는 포함하지 않습니다. */
+  /** 종료된 개인 거래 이력에서만 제공되는 실제 경매 낙찰가. 진행 중/공개 응답에는 포함하지 않습니다. */
   winning_price?: number | null;
   auction_ends_at?: string | null;
   bid_reserved?: number;
@@ -604,8 +606,10 @@ export interface IMarketRepository {
   hasBids(listingId: number): Promise<boolean>;
   /** 판매자가 판매 중인 매물을 취소합니다. 입찰이 생긴 경매는 같은 트랜잭션 안에서 거부해야 합니다. */
   cancelBySeller(listingId: number, sellerId: string): Promise<{ ok: boolean; reason: 'OK' | 'NOT_FOUND' | 'FORBIDDEN' | 'NOT_PENDING' | 'AUCTION_HAS_BIDS' }>;
-  /** 비공개 화면에서 사용할 매물별 최고 입찰가를 조회합니다. */
+  /** 종료된 개인 거래 이력에서만 사용할 매물별 최고 입찰가를 조회합니다. */
   getHighestBids(listingIds: number[]): Promise<Record<number, number>>;
+  /** 판매자용 진행 중 매물 관리에서 사용할 매물별 입찰 존재 여부를 일괄 조회합니다. */
+  getListingBidPresence(listingIds: number[]): Promise<Record<number, boolean>>;
   /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */
   findPendingCardIdsByUser(userId: string): Promise<number[]>;
   /** 마켓 목록 조회 (유사도 검색 필터 및 페이지네이션, 정렬 지원) */
