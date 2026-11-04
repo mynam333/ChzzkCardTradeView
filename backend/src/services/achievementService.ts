@@ -3,6 +3,7 @@ import { recordMysqlAssetEvent, recordSqliteAssetEvent } from './assetEventLog';
 import { recordMysqlPointLedger, recordSqlitePointLedger } from './pointLedger';
 import { createRealtimeNotification } from './notificationDelivery';
 import { toSqlDateTime } from '../repositories/mysql/dateUtils';
+import { createAchievementEvaluationQueue } from './achievementEvaluationQueue';
 
 export type AchievementCategory =
   | 'start'
@@ -385,6 +386,7 @@ const enrichAchievementsWithRewardLabels = async (achievements: Achievement[]): 
 
 let sqliteReady: object | null = null;
 let mysqlReady = false;
+let mysqlInitialization: Promise<void> | null = null;
 let achievementCache: { data: Achievement[]; expiresAt: number } | null = null;
 const ACHIEVEMENT_CACHE_TTL_MS = 60_000;
 
@@ -651,6 +653,15 @@ const defaultAchievements = (): Achievement[] => DEFAULT_ACHIEVEMENTS.map((achie
 }));
 
 export const ensureAchievementTables = async (): Promise<void> => {
+  if (getDbMode() !== 'MYSQL') return initializeAchievementTables();
+  if (mysqlReady) return;
+  if (!mysqlInitialization) {
+    mysqlInitialization = initializeAchievementTables().finally(() => { mysqlInitialization = null; });
+  }
+  return mysqlInitialization;
+};
+
+const initializeAchievementTables = async (): Promise<void> => {
   const mode = getDbMode();
   if (mode === 'LOCAL_SQL') {
     const db = getSqliteDb();
@@ -902,8 +913,8 @@ export const ensureAchievementTables = async (): Promise<void> => {
       await db.run('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_event_key ON achievement_events (event_key)');
       await db.run('CREATE UNIQUE INDEX IF NOT EXISTS uniq_achievement_queue_dedupe ON achievement_evaluation_queue (dedupe_key)');
     }
-    mysqlReady = true;
     await seedDefaultAchievements();
+    mysqlReady = true;
     return;
   }
 };
@@ -1636,13 +1647,17 @@ export const recomputeSnapshotStats = async (userId: string): Promise<void> => {
       'coupon.redeemed_unique_count': Number(couponStats?.c || 0),
       'community.friend_count': Number(friendStats?.c || 0)
     };
-    for (const [key, value] of Object.entries(stats)) {
-      await db.run(`
-        INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
-        VALUES (?, ?, ?, JSON_OBJECT(), UTC_TIMESTAMP())
-        ON DUPLICATE KEY UPDATE stat_value = VALUES(stat_value), updated_at = VALUES(updated_at)
-      `, userId, key, value);
-    }
+    const entries = Object.entries(stats);
+    const updateClause = getSqlDialect() === 'postgres'
+      ? `ON CONFLICT (user_id, stat_key) DO UPDATE SET
+           stat_value = EXCLUDED.stat_value, updated_at = EXCLUDED.updated_at
+         WHERE user_achievement_stats.stat_value IS DISTINCT FROM EXCLUDED.stat_value`
+      : 'ON DUPLICATE KEY UPDATE stat_value = VALUES(stat_value), updated_at = VALUES(updated_at)';
+    await db.run(`
+      INSERT INTO user_achievement_stats (user_id, stat_key, stat_value, metadata_json, updated_at)
+      VALUES ${entries.map(() => '(?, ?, ?, JSON_OBJECT(), UTC_TIMESTAMP())').join(',')}
+      ${updateClause}
+    `, ...entries.flatMap(([key, value]) => [userId, key, value]));
   }
 };
 
@@ -1843,7 +1858,7 @@ const limitedWinnerLimit = (achievement: Achievement) =>
 const isAchievementWinnerStatus = (status: unknown) =>
   status === 'completed' || status === 'claimed';
 
-export const evaluateUserAchievements = async (userId: string): Promise<void> => {
+const evaluateUserAchievementsOnce = async (userId: string): Promise<void> => {
   await ensureAchievementTables();
   await recomputeSnapshotStats(userId).catch((err) => {
     console.warn('[Achievement] snapshot recompute failed:', err instanceof Error ? err.message : String(err));
@@ -2065,6 +2080,9 @@ export const evaluateUserAchievements = async (userId: string): Promise<void> =>
   }
 };
 
+// Card batches and concurrent page requests share evaluation work, rather than filling the DB pool.
+export const evaluateUserAchievements = createAchievementEvaluationQueue(evaluateUserAchievementsOnce);
+
 export const recordAchievementEvent = async (input: AchievementEventInput): Promise<void> => {
   if (!input.userId || !input.eventKey || !input.eventType) return;
   await ensureAchievementTables();
@@ -2123,8 +2141,12 @@ export const recordAchievementEvent = async (input: AchievementEventInput): Prom
     if (!inserted) return;
     if (input.stats) await incrementAchievementStats(input.userId, input.stats);
     if (input.eventType === 'login.daily') await recordDailyLoginStreak(input.userId, input.occurredAt || new Date());
-    if (input.refreshSnapshots) await recomputeSnapshotStats(input.userId).catch(() => undefined);
-    if (input.evaluate !== false) await evaluateUserAchievements(input.userId).catch((err) => console.warn('[Achievement] evaluate failed:', err?.message || err));
+    if (input.evaluate !== false) {
+      // Evaluation already recomputes snapshots; doing both doubles the aggregate reads and writes.
+      await evaluateUserAchievements(input.userId).catch((err) => console.warn('[Achievement] evaluate failed:', err?.message || err));
+    } else if (input.refreshSnapshots) {
+      await recomputeSnapshotStats(input.userId).catch(() => undefined);
+    }
   } catch (err: any) {
     console.warn('[Achievement] event record failed:', err?.message || err);
   }

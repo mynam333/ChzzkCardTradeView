@@ -1,13 +1,15 @@
-import type { IMarketRepository, IUserCardRepository } from '../repositories/interfaces';
+import type {
+  IMarketRepository,
+  IUserCardRepository,
+  UserCardBulkSetting,
+  UserCardBulkSettingUpdate
+} from '../repositories/interfaces';
 
 export const MAX_BULK_CARD_SETTINGS_UPDATES = 200;
 
-export type BulkCardSetting = 'favorite' | 'hidden' | 'locked';
+export type BulkCardSetting = UserCardBulkSetting;
 
-export interface BulkCardSettingUpdate {
-  card_id: number;
-  value: boolean;
-}
+export interface BulkCardSettingUpdate extends UserCardBulkSettingUpdate {}
 
 export interface BulkCardSettingsResult {
   succeededIds: number[];
@@ -15,7 +17,7 @@ export interface BulkCardSettingsResult {
 }
 
 interface BulkCardSettingsDependencies {
-  userCardRepository: Pick<IUserCardRepository, 'updateVisibility' | 'setFavorite' | 'setLocked'>;
+  userCardRepository: Pick<IUserCardRepository, 'updateVisibility' | 'setFavorite' | 'setLocked' | 'updateSettingsBulk'>;
   marketRepository: Pick<IMarketRepository, 'findPendingCardIdsByUser'>;
 }
 
@@ -52,11 +54,29 @@ export const applyBulkCardSettings = async (
     ? new Set(await dependencies.marketRepository.findPendingCardIdsByUser(userId))
     : new Set<number>();
   const concurrency = setting === 'favorite' ? 1 : NON_FAVORITE_WRITE_CONCURRENCY;
-  const succeededIds: number[] = [];
-  const failedIds: number[] = [];
+  const eligibleUpdates = updates.filter((update) => !(setting === 'locked' && update.value && pendingMarketCardIds.has(update.card_id)));
 
-  for (let offset = 0; offset < updates.length; offset += concurrency) {
-    const batch = updates.slice(offset, offset + concurrency);
+  if (dependencies.userCardRepository.updateSettingsBulk) {
+    try {
+      const updatedIds = new Set(await dependencies.userCardRepository.updateSettingsBulk(userId, setting, eligibleUpdates));
+      const succeededIds: number[] = [];
+      const failedIds: number[] = [];
+      for (const update of updates) {
+        (updatedIds.has(update.card_id) ? succeededIds : failedIds).push(update.card_id);
+      }
+      return { succeededIds, failedIds };
+    } catch {
+      return { succeededIds: [], failedIds: updates.map((update) => update.card_id) };
+    }
+  }
+
+  const succeededIds: number[] = [];
+  const failedIds = updates
+    .filter((update) => setting === 'locked' && update.value && pendingMarketCardIds.has(update.card_id))
+    .map((update) => update.card_id);
+
+  for (let offset = 0; offset < eligibleUpdates.length; offset += concurrency) {
+    const batch = eligibleUpdates.slice(offset, offset + concurrency);
     const results = await Promise.all(batch.map(async (update) => {
       try {
         const ok = await applyUpdate(userId, setting, update, dependencies, pendingMarketCardIds);

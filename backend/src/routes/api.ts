@@ -67,6 +67,7 @@ import {
 import { claimTutorialGachaTicket, getTutorialProgress, markTutorialCompleted } from '../controllers/tutorialController';
 import { getPublicLandingStats } from '../controllers/publicStatsController';
 import { updateMyCardSettingsBulk } from '../controllers/bulkCardSettingsController';
+import { getMyOwnedStreamerProfiles } from '../controllers/ownedStreamerProfilesController';
 import {
   getMyAssetEvents,
   getAdminAssetEvents,
@@ -476,6 +477,7 @@ router.get('/users/ranking', streamerReadLimiter, getUserRankings);
 router.get('/public/stats', getPublicLandingStats);
 router.get('/users/search', authMiddleware, banCheckMiddleware, searchLimiter, searchUsers);
 router.get('/users/me/cards/groups', authMiddleware, banCheckMiddleware, getUserCardGroups);
+router.get('/users/me/cards/profiles', authMiddleware, banCheckMiddleware, getMyOwnedStreamerProfiles);
 router.get('/users/me/cards', authMiddleware, banCheckMiddleware, getUserCards);
 router.get('/users/:user_id/collection', authMiddleware, banCheckMiddleware, getUserCollection);
 router.get('/users/:user_id/profile', authMiddleware, banCheckMiddleware, getUserProfile);

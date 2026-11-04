@@ -47,6 +47,52 @@ const createResponse = () => {
 };
 
 describe('applyBulkCardSettings', () => {
+  it('200장 요청은 repository bulk fast path를 한 번만 호출한다', async () => {
+    const updates = Array.from({ length: 200 }, (_, index) => ({ card_id: index + 1, value: index % 2 === 0 }));
+    const updateSettingsBulk = vi.fn(async (_userId: string, _setting: string, entries: typeof updates) =>
+      entries.filter((entry) => entry.card_id !== 199).map((entry) => entry.card_id));
+    const updateVisibility = vi.fn();
+
+    const result = await applyBulkCardSettings('user-1', 'hidden', updates, {
+      userCardRepository: {
+        updateSettingsBulk,
+        updateVisibility,
+        setFavorite: vi.fn(),
+        setLocked: vi.fn()
+      },
+      marketRepository: { findPendingCardIdsByUser: vi.fn() }
+    } as any);
+
+    expect(updateSettingsBulk).toHaveBeenCalledOnce();
+    expect(updateSettingsBulk).toHaveBeenCalledWith('user-1', 'hidden', updates);
+    expect(updateVisibility).not.toHaveBeenCalled();
+    expect(result.succeededIds).toHaveLength(199);
+    expect(result.failedIds).toEqual([199]);
+  });
+
+  it('bulk fast path 앞에서도 마켓 대기 잠금 카드를 제외하고 실패 ID 순서를 보존한다', async () => {
+    const updateSettingsBulk = vi.fn(async (_userId: string, _setting: string, entries: Array<{ card_id: number }>) =>
+      entries.map((entry) => entry.card_id));
+    const updates = [
+      { card_id: 1, value: true },
+      { card_id: 2, value: true },
+      { card_id: 3, value: false }
+    ];
+
+    const result = await applyBulkCardSettings('user-1', 'locked', updates, {
+      userCardRepository: {
+        updateSettingsBulk,
+        updateVisibility: vi.fn(),
+        setFavorite: vi.fn(),
+        setLocked: vi.fn()
+      },
+      marketRepository: { findPendingCardIdsByUser: vi.fn(async () => [2]) }
+    } as any);
+
+    expect(updateSettingsBulk).toHaveBeenCalledWith('user-1', 'locked', [updates[0], updates[2]]);
+    expect(result).toEqual({ succeededIds: [1, 3], failedIds: [2] });
+  });
+
   it('잠금 시 마켓 대기 카드를 건너뛰고 해제와 소유권 검증은 기존 repository 결과를 따른다', async () => {
     const setLocked = vi.fn(async (_userId: string, cardId: number) => cardId !== 4);
     const findPendingCardIdsByUser = vi.fn(async () => [2, 3]);

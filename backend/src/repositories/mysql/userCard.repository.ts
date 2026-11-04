@@ -1,7 +1,7 @@
 import { getMysqlDb, getSqlDialect } from '../../services/db';
 import { recordMysqlPointLedger } from '../../services/pointLedger';
 import { recordMysqlAssetEvent, recordMysqlAssetEvents } from '../../services/assetEventLog';
-import { IUserCardRepository } from '../interfaces';
+import { IUserCardRepository, UserCardBulkSetting, UserCardBulkSettingUpdate } from '../interfaces';
 import { formatUploadUrl } from '../../services/imageService';
 import { parseMysqlDateTimeMs, toSqlDateTime } from './dateUtils';
 
@@ -465,6 +465,106 @@ export class MysqlUserCardRepository implements IUserCardRepository {
   async setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean> {
     const result = await this.getDb().run('UPDATE user_cards SET is_locked = ? WHERE id = ? AND user_id = ?', locked ? 1 : 0, cardId, userId);
     return result.changes > 0;
+  }
+
+  async updateSettingsBulk(
+    userId: string,
+    setting: UserCardBulkSetting,
+    updates: readonly UserCardBulkSettingUpdate[]
+  ): Promise<number[]> {
+    if (updates.length === 0) return [];
+
+    return this.getDb().transaction(async (tx) => {
+      const ids = updates.map((update) => update.card_id);
+      const placeholders = ids.map(() => '?').join(',');
+      const pendingSelect = setting === 'locked'
+        ? ", CASE WHEN EXISTS (SELECT 1 FROM market_listings ml WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING') THEN 1 ELSE 0 END AS pending_market"
+        : '';
+      const ownedRows = await tx.all<{ id: number; favorite_order: number | null; pending_market?: number | boolean }>(`
+        SELECT uc.id, uc.favorite_order${pendingSelect}
+          FROM user_cards uc
+         WHERE uc.user_id = ? AND uc.id IN (${placeholders})
+         FOR UPDATE
+      `, userId, ...ids);
+      const ownedById = new Map(ownedRows.map((row) => [Number(row.id), row]));
+      const allowed = updates.filter((update) => {
+        const row = ownedById.get(update.card_id);
+        if (!row) return false;
+        return !(setting === 'locked' && update.value && !!row.pending_market);
+      });
+      if (allowed.length === 0) return [];
+
+      if (setting === 'hidden' || setting === 'locked') {
+        const column = setting === 'hidden' ? 'is_hidden' : 'is_locked';
+        for (const value of [false, true]) {
+          const valueIds = allowed.filter((update) => update.value === value).map((update) => update.card_id);
+          if (valueIds.length === 0) continue;
+          const valuePlaceholders = valueIds.map(() => '?').join(',');
+          await tx.run(
+            `UPDATE user_cards SET ${column} = ? WHERE user_id = ? AND id IN (${valuePlaceholders})`,
+            value ? 1 : 0,
+            userId,
+            ...valueIds
+          );
+        }
+        return allowed.map((update) => update.card_id);
+      }
+
+      const favoriteRows = await tx.all<{ id: number; favorite_order: number }>(`
+        SELECT id, favorite_order
+          FROM user_cards
+         WHERE user_id = ? AND favorite_order IS NOT NULL
+         ORDER BY favorite_order DESC, id DESC
+         FOR UPDATE
+      `, userId);
+      const removedFavoriteIds = new Set<number>();
+      let favoriteCursor = 0;
+      let nextAssignedOrder: number | null = null;
+      const assignedOrders = new Map<number, number>();
+
+      for (const update of allowed) {
+        if (!update.value) {
+          removedFavoriteIds.add(update.card_id);
+          continue;
+        }
+        while (favoriteCursor < favoriteRows.length && removedFavoriteIds.has(Number(favoriteRows[favoriteCursor].id))) {
+          favoriteCursor += 1;
+        }
+        const currentMax: number = nextAssignedOrder !== null
+          ? nextAssignedOrder
+          : Number(favoriteRows[favoriteCursor]?.favorite_order || 0);
+        const assignedOrder = currentMax + 1;
+        nextAssignedOrder = assignedOrder;
+        assignedOrders.set(update.card_id, assignedOrder);
+      }
+
+      const disabledIds = allowed.filter((update) => !update.value).map((update) => update.card_id);
+      if (disabledIds.length > 0) {
+        await tx.run(
+          `UPDATE user_cards SET favorite_order = NULL, favorite_at = NULL WHERE user_id = ? AND id IN (${disabledIds.map(() => '?').join(',')})`,
+          userId,
+          ...disabledIds
+        );
+      }
+
+      if (assignedOrders.size > 0) {
+        const entries = Array.from(assignedOrders.entries());
+        const caseSql = entries.map(() => 'WHEN ? THEN ?').join(' ');
+        const trueIds = entries.map(([cardId]) => cardId);
+        const params = entries.flatMap(([cardId, order]) => [cardId, order]);
+        await tx.run(
+          `UPDATE user_cards
+              SET favorite_order = CASE id ${caseSql} ELSE favorite_order END,
+                  favorite_at = UTC_TIMESTAMP()
+            WHERE user_id = ? AND id IN (${trueIds.map(() => '?').join(',')})`,
+          ...params,
+          userId,
+          ...trueIds
+        );
+      }
+
+      return allowed.map((update) => update.card_id);
+    });
   }
 
   async deleteCards(userId: string, channelId: string, count: number): Promise<number> {

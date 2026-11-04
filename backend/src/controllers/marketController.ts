@@ -44,7 +44,9 @@ const setMarketListCacheHeaders = (res: Response) => {
 };
 
 const hasExpiredAuctionListing = (data: any) => {
-  const listings = Array.isArray(data?.listings) ? data.listings : [];
+  const listings = Array.isArray(data)
+    ? data
+    : (Array.isArray(data?.listings) ? data.listings : []);
   const now = Date.now();
   return listings.some((listing: any) => {
     if (listing?.status !== 'PENDING' || listing?.listing_type !== 'auction' || !listing?.auction_ends_at) return false;
@@ -379,10 +381,17 @@ export const listMyListings = async (req: AuthenticatedRequest, res: Response) =
   }
 
   try {
-    await settleExpiredAuctions({ force: true }).catch((err: any) => {
-      console.warn('[MarketController] 내 판매 목록 조회 전 만료 경매 정리 실패:', err?.message || err);
-    });
-    const listings = await marketRepository.listByUser(user.id);
+    let listings = await marketRepository.listByUser(user.id);
+    // 1분 스케줄러가 전역 만료 경매를 정리한다. 판매자가 종료 직후 조회한 경우만
+    // 즉시 정산을 보완하여, 일반 GET마다 전역 정산 쿼리가 실행되는 것을 막는다.
+    if (hasExpiredAuctionListing(listings)) {
+      try {
+        await settleExpiredAuctions({ force: true });
+        listings = await marketRepository.listByUser(user.id);
+      } catch (err: any) {
+        console.warn('[MarketController] 내 판매 목록 만료 경매 즉시 정리 실패:', err?.message || err);
+      }
+    }
     setMarketListCacheHeaders(res);
     return res.json(await privateAuctionListingsForViewer(listings, user.id));
   } catch (err: any) {

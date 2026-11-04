@@ -209,6 +209,13 @@ export interface UserCardInventoryGroup {
   streamer: Streamer;
 }
 
+export type UserCardBulkSetting = 'favorite' | 'hidden' | 'locked';
+
+export interface UserCardBulkSettingUpdate {
+  card_id: number;
+  value: boolean;
+}
+
 // 1. 유저 리포지토리 인터페이스
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
@@ -528,6 +535,15 @@ export interface IUserCardRepository {
   updateVisibilityByGroup(userId: string, channelId: string, star: number, hidden: boolean): Promise<number>;
   setFavorite(userId: string, cardId: number, favorite: boolean): Promise<boolean>;
   setLocked(userId: string, cardId: number, locked: boolean): Promise<boolean>;
+  /**
+   * 보유권과 마켓 잠금 가드를 한 트랜잭션에서 다시 확인하고 여러 카드 설정을 bounded SQL로 갱신합니다.
+   * 구현하지 않은 원격 어댑터는 서비스의 단건 fallback을 사용합니다.
+   */
+  updateSettingsBulk?(
+    userId: string,
+    setting: UserCardBulkSetting,
+    updates: readonly UserCardBulkSettingUpdate[]
+  ): Promise<number[]>;
 }
 
 // 8. 시스템 설정 리포지토리 인터페이스

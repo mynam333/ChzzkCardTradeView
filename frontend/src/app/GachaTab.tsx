@@ -196,6 +196,7 @@ export const GachaTab: React.FC = () => {
   // 상대 검색/선택 및 상대 보유 카드
   const [receiverSearch, setReceiverSearch] = useState('');
   const [receiverResults, setReceiverResults] = useState<any[]>([]);
+  const receiverSearchRequestRef = React.useRef(0);
   const [selectedReceiver, setSelectedReceiver] = useState<{ id: string; username: string; avatar_url?: string } | null>(null);
   const [partnerCollection, setPartnerCollection] = useState<any[]>([]);
   const [offerSearch, setOfferSearch] = useState('');
@@ -433,19 +434,33 @@ export const GachaTab: React.FC = () => {
     }
   }, []);
 
+  const applyFreshStreamerProfiles = React.useCallback((profiles: Streamer[]) => {
+    const profilesByChannel = new Map(profiles.map((profile) => [profile.channel_id, profile]));
+    if (profilesByChannel.size === 0) return;
+
+    setInventory((current) => current.map((card) => {
+      const fresh = profilesByChannel.get(card.channel_id);
+      return fresh ? { ...card, streamer: { ...(card.streamer || {} as Streamer), ...fresh } } : card;
+    }));
+    setStreamers((current) => current.map((streamer) => {
+      const fresh = profilesByChannel.get(streamer.channel_id);
+      return fresh ? { ...streamer, ...fresh } : streamer;
+    }));
+  }, []);
+
   const refreshStreamerCardProfiles = React.useCallback(async () => {
     try {
-      const response = await apiFetch('/users/me/cards', {
+      const response = await apiFetch('/users/me/cards/profiles', {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache' }
       });
       if (!response.ok) return;
-      const cards = await response.json();
-      if (Array.isArray(cards)) applyFreshInventory(cards);
+      const profiles = await response.json();
+      if (Array.isArray(profiles)) applyFreshStreamerProfiles(profiles);
     } catch (error) {
       console.error('스트리머 카드 프로필 갱신 실패:', error);
     }
-  }, [applyFreshInventory]);
+  }, [applyFreshStreamerProfiles]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -543,10 +558,41 @@ export const GachaTab: React.FC = () => {
       fetchStreamers();
       fetchInventory();
       fetchActiveTrades();
-      fetchTradeHistory();
       fetchMyCosmetics();
     }
   }, [userId]);
+
+  useEffect(() => {
+    const requestId = ++receiverSearchRequestRef.current;
+    if (!tradeModalOpen || selectedReceiver) return;
+
+    const keyword = receiverSearch.trim();
+    if (keyword.length < 1) {
+      setReceiverResults([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await apiFetch(`/users/search?keyword=${encodeURIComponent(keyword)}`, {
+          signal: controller.signal
+        });
+        const data = res.ok ? await res.json() : [];
+        if (controller.signal.aborted || requestId !== receiverSearchRequestRef.current) return;
+        setReceiverResults(data);
+      } catch (error) {
+        if ((error as { name?: string })?.name !== 'AbortError' && requestId === receiverSearchRequestRef.current) {
+          setReceiverResults([]);
+        }
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [receiverSearch, selectedReceiver, tradeModalOpen]);
 
   // 라이브 전환을 감지하면 같은 주기에 DB에 저장된 최신 채널명/프로필 이미지를 카드에도 반영합니다.
   useEffect(() => {
@@ -867,16 +913,6 @@ export const GachaTab: React.FC = () => {
     setTradeModalOpen(true);
   };
 
-  // 상대 검색 (디바운스 없이 버튼/엔터/입력 변경 시 호출)
-  const searchReceivers = async (kw: string) => {
-    setReceiverSearch(kw);
-    if (kw.trim().length < 1) { setReceiverResults([]); return; }
-    try {
-      const res = await apiFetch(`/users/search?keyword=${encodeURIComponent(kw.trim())}`);
-      if (res.ok) setReceiverResults(await res.json());
-    } catch { /* 무시 */ }
-  };
-
   // 상대 선택 → 상대 보유 카드 컬렉션 로드
   const selectReceiver = async (u: { id: string; username: string; avatar_url?: string }) => {
     setSelectedReceiver(u);
@@ -938,6 +974,12 @@ export const GachaTab: React.FC = () => {
     } catch (e) {
       console.error('교환 이력 조회 실패:', e);
     }
+  };
+
+  const openTradeHistory = () => {
+    setHistoryPage(1);
+    setHistoryModalOpen(true);
+    void fetchTradeHistory();
   };
 
   // 스트리머 상세 + 시세 그래프 열기 (실제 로딩/차트는 공용 StreamerDetailModal이 담당)
@@ -1364,7 +1406,6 @@ export const GachaTab: React.FC = () => {
       showAlert(res.ok ? '설정 완료' : '설정 실패', data.message || '', res.ok ? 'success' : 'error');
       if (res.ok) {
         await fetchInventory();
-        await fetchMarketPending();
       }
     } catch {
       showAlert('통신 오류', '카드 잠금 설정 중 오류가 발생했습니다.', 'error');
@@ -1470,7 +1511,7 @@ export const GachaTab: React.FC = () => {
                     <input
                       type="text"
                       value={receiverSearch}
-                      onChange={(e) => searchReceivers(e.target.value)}
+                      onChange={(e) => setReceiverSearch(e.target.value)}
                       placeholder="상대 닉네임 검색"
                       className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm focus:border-primary focus:outline-none"
                     />
@@ -1982,7 +2023,7 @@ export const GachaTab: React.FC = () => {
                 <ArrowRightLeft className="h-3.5 w-3.5" /> 1:1 교환
               </button>
               <button
-                onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
+                onClick={openTradeHistory}
                 className="rounded-lg bg-secondary border border-border/80 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-secondary/80 flex items-center gap-1"
               >
                 <Clock className="h-3.5 w-3.5" /> 이력
@@ -2052,7 +2093,7 @@ export const GachaTab: React.FC = () => {
             </button>
 
             <button
-              onClick={() => { setHistoryPage(1); setHistoryModalOpen(true); }}
+              onClick={openTradeHistory}
               className="hidden sm:flex rounded-lg bg-secondary border border-border/80 px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/80 items-center gap-1 shadow-sm"
             >
               <Clock className="h-3.5 w-3.5" /> 교환 이력
