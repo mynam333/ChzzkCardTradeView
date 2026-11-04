@@ -66,6 +66,7 @@ import {
 } from '../controllers/pushController';
 import { claimTutorialGachaTicket, getTutorialProgress, markTutorialCompleted } from '../controllers/tutorialController';
 import { getPublicLandingStats } from '../controllers/publicStatsController';
+import { updateMyCardSettingsBulk } from '../controllers/bulkCardSettingsController';
 import {
   getMyAssetEvents,
   getAdminAssetEvents,
@@ -492,6 +493,7 @@ router.delete('/users/me/image-blinds/:image_key', authMiddleware, banCheckMiddl
 router.post('/cards/draw', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCard);
 router.post('/cards/draw-many', authMiddleware, banCheckMiddleware, accountInteractionRestrictionMiddleware, drawLimiter, drawCards);
 router.patch('/cards/visibility', authMiddleware, banCheckMiddleware, updateMyCardGroupVisibility);
+router.patch('/cards/bulk-settings', authMiddleware, banCheckMiddleware, updateMyCardSettingsBulk);
 router.patch('/cards/:card_id/visibility', authMiddleware, banCheckMiddleware, updateMyCardVisibility);
 router.patch('/cards/:card_id/favorite', authMiddleware, banCheckMiddleware, updateMyCardFavorite);
 router.patch('/cards/:card_id/lock', authMiddleware, banCheckMiddleware, updateMyCardLock);

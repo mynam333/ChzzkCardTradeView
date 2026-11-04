@@ -21,8 +21,10 @@ import {
   clearStreamerLiveStatusCache,
   getStreamerDetail,
   getStreamerLiveStatuses,
+  getUserCollection,
   getUserProfile,
-  getUserRankings
+  getUserRankings,
+  sellCards
 } from '../controllers/playController';
 import {
   cancelListing,
@@ -1179,6 +1181,34 @@ describe('UserCardRepository 별 등급 분리', () => {
     expect((await userRepository.findById('seller'))?.point).toBe(2600);
   });
 
+  it('일괄 판매는 더 오래된 카드라도 코스메틱 장착 카드를 선택하지 않는다', async () => {
+    seedUser(db, 'cosmetic-sale-owner');
+    seedStreamer(db, 'cosmetic-sale-channel', '코스메틱 판매 보호');
+    const borderId = Number(db.prepare(`
+      INSERT INTO shop_items (type, name, price, style_json)
+      VALUES ('border', '판매 보호 테두리', 100, '{}')
+    `).run().lastInsertRowid);
+    const equippedId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, border_item_id)
+      VALUES ('cosmetic-sale-owner', 'cosmetic-sale-channel', 1, 2, ?)
+    `).run(borderId).lastInsertRowid);
+    const plainId = Number(db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star)
+      VALUES ('cosmetic-sale-owner', 'cosmetic-sale-channel', 2, 2)
+    `).run().lastInsertRowid);
+
+    const res = createJsonResponse();
+    await sellCards({
+      user: { id: 'cosmetic-sale-owner' },
+      body: { items: [{ channelId: 'cosmetic-sale-channel', star: 2, count: 1 }] }
+    } as any, res);
+
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+    expect(db.prepare('SELECT id, border_item_id FROM user_cards WHERE id = ?').get(equippedId))
+      .toEqual({ id: equippedId, border_item_id: borderId });
+    expect(db.prepare('SELECT id FROM user_cards WHERE id = ?').get(plainId)).toBeUndefined();
+  });
+
   it('카드 삭제 보상은 뽑기비보다 비싼 카드는 포인트로, 그 외 카드는 티켓으로 지급한다', async () => {
     seedUser(db, 'delete-low-holder', 100);
     seedUser(db, 'delete-high-holder', 200);
@@ -1476,6 +1506,73 @@ describe('User profile hidden cards', () => {
     expect(res.body.representative_card).toEqual(expect.objectContaining({
       channel_id: 'visible-channel'
     }));
+  });
+});
+
+describe('교환용 유저 컬렉션 가용 수량', () => {
+  it('공개 수량은 유지하고 잠금·마켓·활성 교환 예약을 배치로 차감한다', async () => {
+    seedUser(db, 'collection-owner');
+    seedUser(db, 'collection-viewer');
+    seedStreamer(db, 'collection-channel', '컬렉션 스트리머');
+    const insert = db.prepare(`
+      INSERT INTO user_cards (user_id, channel_id, serial_number, star, is_hidden, is_locked)
+      VALUES ('collection-owner', 'collection-channel', ?, 2, ?, ?)
+    `);
+    const visibleIds: number[] = [];
+    for (let serial = 1; serial <= 5; serial++) {
+      visibleIds.push(Number(insert.run(serial, 0, serial === 1 ? 1 : 0).lastInsertRowid));
+    }
+    insert.run(6, 1, 1); // 타인에게는 count/잠금 모두 비공개
+
+    await marketRepository.create({
+      seller_id: 'collection-owner',
+      user_card_id: visibleIds[1],
+      price: 1000,
+      with_cosmetics: false
+    });
+    // 매물 등록 후 잠금된 카드는 locked ∪ market에서 한 번만 차감되어야 한다.
+    db.prepare('UPDATE user_cards SET is_locked = 1 WHERE id = ?').run(visibleIds[1]);
+    await tradeRepository.create({
+      sender_id: 'collection-owner',
+      receiver_id: 'collection-viewer',
+      sender_offer: {
+        cards: [{ channel_id: 'collection-channel', star: 2, count: 1 }],
+        point: 0
+      },
+      receiver_offer: { cards: [], point: 0 }
+    });
+
+    const res = createJsonResponse();
+    await getUserCollection({
+      params: { user_id: 'collection-owner' },
+      user: { id: 'collection-viewer' }
+    } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['Cache-Control']).toBe('private, no-store');
+    expect(res.body).toEqual([
+      expect.objectContaining({
+        channel_id: 'collection-channel',
+        star: 2,
+        count: 5,
+        available_count: 2
+      })
+    ]);
+
+    const sellRes = createJsonResponse();
+    await sellCards({
+      user: { id: 'collection-owner' },
+      body: {
+        items: [
+          { channelId: 'collection-channel', star: 2, count: 1 },
+          { channelId: 'collection-channel', star: 2, count: 1 }
+        ]
+      }
+    } as any, sellRes);
+    expect(sellRes.statusCode, JSON.stringify(sellRes.body)).toBe(200);
+    expect(sellRes.body.points_gained).toBe(5200);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM user_cards WHERE user_id = 'collection-owner'").get())
+      .toEqual({ count: 4 });
   });
 });
 

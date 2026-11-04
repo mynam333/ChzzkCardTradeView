@@ -1719,6 +1719,9 @@ BEGIN
        WHERE user_id = p_user_id
          AND channel_id = cid
          AND COALESCE(star, 0) = card_star
+         AND COALESCE(is_locked, FALSE) = FALSE
+         AND border_item_id IS NULL
+         AND name_effect_item_id IS NULL
          AND NOT EXISTS (
            SELECT 1
              FROM market_listings ml

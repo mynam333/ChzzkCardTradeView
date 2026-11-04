@@ -314,6 +314,23 @@ export class SupabaseMarketRepository implements IMarketRepository {
     return data.map(r => r.user_card_id);
   }
 
+  async getPendingCardReservationsByUser(userId: string) {
+    const cardIds = await this.findPendingCardIdsByUser(userId);
+    if (cardIds.length === 0) return [];
+    const { data, error } = await this.getClient()
+      .from('user_cards')
+      .select('id, channel_id, star, is_locked, border_item_id, name_effect_item_id')
+      .in('id', cardIds);
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      user_card_id: Number(row.id),
+      channel_id: String(row.channel_id),
+      star: Number(row.star || 0),
+      is_locked: !!row.is_locked,
+      is_plain: row.border_item_id == null && row.name_effect_item_id == null
+    }));
+  }
+
   async listActive(options: {
     page: number;
     limit: number;

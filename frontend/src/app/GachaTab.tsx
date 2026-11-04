@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from './AppContext';
 import {
@@ -32,6 +33,16 @@ import { BlindableCardImage } from './BlindableCardImage';
 import { CometCard } from '@/components/ui/comet-card';
 import { formatLocalDate } from '@/lib/time';
 import { formatMarketPrice, MAX_MARKET_PRICE, sanitizeMarketPriceInput } from '@/lib/marketLimits';
+import { buildInventoryModel, filterAndSortInventoryGroups, getSelectableKeys, type InventorySort } from '@/lib/inventoryModel';
+import {
+  clampTradeSelection,
+  clearTradeResults,
+  getTradeResultCapacity,
+  paginateTradeResults,
+  selectAllTradeResults,
+  selectionIncludesEquippedCosmetics,
+  summarizeTradeSelection
+} from '@/lib/tradeSelection';
 import {
   hasNewlyLiveOwnedStreamer,
   hasOwnedLiveStreamer,
@@ -66,6 +77,15 @@ interface UserCard {
   streamer?: Streamer;
 }
 
+interface TradeCardGroup {
+  key: string;
+  channel_id: string;
+  star: number;
+  count: number;
+  ownedCount: number;
+  streamer?: Streamer;
+}
+
 interface FuseMaterial {
   star: number;
   count: number;
@@ -96,6 +116,32 @@ const calculateFuseResultStar = (baseStar: number, materials: FuseMaterial[]) =>
 
 const CONTEXT_MENU_MARGIN = 8;
 const CONTEXT_MENU_FALLBACK_SIZE = { width: 208, height: 320 };
+const INVENTORY_PAGE_SIZE = 60;
+
+const TradePagination = ({ page, pages, onChange }: {
+  page: number;
+  pages: number;
+  onChange: (page: number) => void;
+}) => pages > 1 ? (
+  <nav aria-label="교환 카드 페이지" className="flex items-center justify-center gap-2 pt-1 text-[10px] font-bold">
+    <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-md bg-secondary px-2 py-1 disabled:opacity-40">이전</button>
+    <span className="min-w-12 text-center text-muted-foreground">{page} / {pages}</span>
+    <button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="rounded-md bg-secondary px-2 py-1 disabled:opacity-40">다음</button>
+  </nav>
+) : null;
+
+const InventoryPagination = ({ page, pages, total, onChange }: {
+  page: number; pages: number; total: number; onChange: (page: number) => void;
+}) => pages > 1 ? (
+  <nav aria-label="보관함 페이지" className="flex flex-wrap items-center justify-center gap-2 py-2 text-xs">
+    <span className="text-muted-foreground">{total.toLocaleString()}묶음 · 페이지당 {INVENTORY_PAGE_SIZE}묶음</span>
+    <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="rounded-lg bg-secondary px-3 py-2 font-bold disabled:opacity-40">이전</button>
+    <select aria-label="보관함 페이지 선택" value={page} onChange={event => onChange(Number(event.target.value))} className="rounded-lg border border-border bg-card px-2 py-2">
+      {Array.from({ length: pages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1} / {pages}</option>)}
+    </select>
+    <button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="rounded-lg bg-secondary px-3 py-2 font-bold disabled:opacity-40">다음</button>
+  </nav>
+) : null;
 
 const clampContextMenuPosition = (x: number, y: number, width = CONTEXT_MENU_FALLBACK_SIZE.width, height = CONTEXT_MENU_FALLBACK_SIZE.height) => {
   if (typeof window === 'undefined') return { x, y };
@@ -154,6 +200,8 @@ export const GachaTab: React.FC = () => {
   const [partnerCollection, setPartnerCollection] = useState<any[]>([]);
   const [offerSearch, setOfferSearch] = useState('');
   const [requestSearch, setRequestSearch] = useState('');
+  const [offerTradePage, setOfferTradePage] = useState(1);
+  const [requestTradePage, setRequestTradePage] = useState(1);
 
   // 받은/보낸 교환 목록 (인박스)
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
@@ -192,6 +240,105 @@ export const GachaTab: React.FC = () => {
   
   // 1:1 교환 예약량 상태 ( available 계산용 )
   const [reservations, setReservations] = useState<{ cards: Record<string, number>; cardsByStar: Record<string, number>; points: number }>({ cards: {}, cardsByStar: {}, points: 0 });
+  const inventoryModel = React.useMemo(() => buildInventoryModel(inventory, {
+    pendingCardIds: marketPendingCardIds,
+    reservedByGroup: reservations.cardsByStar
+  }), [inventory, marketPendingCardIds, reservations.cardsByStar]);
+  const pendingCardIdSet = React.useMemo(() => new Set(marketPendingCardIds), [marketPendingCardIds]);
+  const myTradeCollection = React.useMemo<TradeCardGroup[]>(() => {
+    const groups = new Map<string, Omit<TradeCardGroup, 'count' | 'ownedCount'> & { ownedCount: number }>();
+    for (const card of inventory) {
+      if (!card.streamer) continue;
+      const star = card.star ?? 0;
+      const key = cardKey(card.channel_id, star);
+      const existing = groups.get(key);
+      if (existing) existing.ownedCount += 1;
+      else groups.set(key, { key, channel_id: card.channel_id, star, streamer: card.streamer, ownedCount: 1 });
+    }
+    return Array.from(groups.values())
+      .map((group) => ({ ...group, count: inventoryModel.getAvailableCount(group.channel_id, group.star) }))
+      .filter((group) => group.count > 0)
+      .sort((a, b) => {
+        const byName = (a.streamer?.name || '').localeCompare(b.streamer?.name || '', 'ko');
+        return byName || a.star - b.star;
+      });
+  }, [inventory, inventoryModel]);
+  const partnerTradeCollection = React.useMemo<TradeCardGroup[]>(() => partnerCollection.map((card: any) => {
+    const ownedCount = Math.max(0, Math.floor(Number(card.count) || 0));
+    const availableCount = Math.max(0, Math.min(
+      ownedCount,
+      Math.floor(Number(card.available_count ?? card.count) || 0)
+    ));
+    const star = Math.max(0, Math.floor(Number(card.star) || 0));
+    return {
+      key: cardKey(String(card.channel_id || ''), star),
+      channel_id: String(card.channel_id || ''),
+      star,
+      count: availableCount,
+      ownedCount,
+      streamer: card.streamer
+    };
+  }), [partnerCollection]);
+  const filteredOfferTradeCollection = React.useMemo(
+    () => myTradeCollection.filter((card) => fuzzySearch(card.streamer?.name || '', offerSearch)),
+    [myTradeCollection, offerSearch]
+  );
+  const filteredRequestTradeCollection = React.useMemo(
+    () => partnerTradeCollection.filter((card) => fuzzySearch(card.streamer?.name || '', requestSearch)),
+    [partnerTradeCollection, requestSearch]
+  );
+  const offerTradeOptions = React.useMemo(
+    () => myTradeCollection.map((card) => ({ key: card.key, maxCount: card.count })),
+    [myTradeCollection]
+  );
+  const requestTradeOptions = React.useMemo(
+    () => partnerTradeCollection.map((card) => ({ key: card.key, maxCount: card.count })),
+    [partnerTradeCollection]
+  );
+  const offerSearchOptions = React.useMemo(
+    () => filteredOfferTradeCollection.map((card) => ({ key: card.key, maxCount: card.count })),
+    [filteredOfferTradeCollection]
+  );
+  const requestSearchOptions = React.useMemo(
+    () => filteredRequestTradeCollection.map((card) => ({ key: card.key, maxCount: card.count })),
+    [filteredRequestTradeCollection]
+  );
+  const offerTradePagination = React.useMemo(
+    () => paginateTradeResults(filteredOfferTradeCollection, offerTradePage),
+    [filteredOfferTradeCollection, offerTradePage]
+  );
+  const requestTradePagination = React.useMemo(
+    () => paginateTradeResults(filteredRequestTradeCollection, requestTradePage),
+    [filteredRequestTradeCollection, requestTradePage]
+  );
+  const offerSelectionSummary = React.useMemo(
+    () => summarizeTradeSelection(offerCards, offerTradeOptions),
+    [offerCards, offerTradeOptions]
+  );
+  const requestSelectionSummary = React.useMemo(
+    () => summarizeTradeSelection(requestCards, requestTradeOptions),
+    [requestCards, requestTradeOptions]
+  );
+  const offerSearchSelectionSummary = React.useMemo(
+    () => summarizeTradeSelection(offerCards, offerSearchOptions),
+    [offerCards, offerSearchOptions]
+  );
+  const requestSearchSelectionSummary = React.useMemo(
+    () => summarizeTradeSelection(requestCards, requestSearchOptions),
+    [requestCards, requestSearchOptions]
+  );
+  const offerSearchCapacity = React.useMemo(
+    () => getTradeResultCapacity(offerSearchOptions),
+    [offerSearchOptions]
+  );
+  const requestSearchCapacity = React.useMemo(
+    () => getTradeResultCapacity(requestSearchOptions),
+    [requestSearchOptions]
+  );
+  const offerHasEquippedCosmetics = React.useMemo(
+    () => selectionIncludesEquippedCosmetics(offerCards, inventory, pendingCardIdSet),
+    [inventory, offerCards, pendingCardIdSet]
+  );
 
 
   // 알림 피드백: 전역 토스트로 통일 (title은 메시지 앞에 간단히 덧붙임)
@@ -204,8 +351,11 @@ export const GachaTab: React.FC = () => {
   };
 
   // 카드 정렬 및 필터링 상태 추가
-  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'acquired-desc' | 'acquired-asc' | 'value-desc' | 'value-asc' | 'star-desc' | 'star-asc'>('acquired-desc');
+  const [sortBy, setSortBy] = useState<InventorySort>('acquired-desc');
   const [liveFilter, setLiveFilter] = useState<'all' | 'live' | 'offline'>('all');
+  const [inventoryPage, setInventoryPage] = useState(1);
+  const [bulkSellPage, setBulkSellPage] = useState(1);
+  const inventoryGridRef = React.useRef<HTMLDivElement | null>(null);
 
   // 우클릭 컨텍스트 메뉴 상태
   const [contextMenu, setContextMenu] = useState<{
@@ -228,6 +378,9 @@ export const GachaTab: React.FC = () => {
   // 카드 선택 모드 및 선택된 채널+별 키 목록
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCardKeys, setSelectedCardKeys] = useState<string[]>([]);
+  const selectedCardKeySet = React.useMemo(() => new Set(selectedCardKeys), [selectedCardKeys]);
+  const [bulkSettingsProgress, setBulkSettingsProgress] = useState<{ completed: number; total: number } | null>(null);
+  const bulkSettingsBusyRef = React.useRef(false);
 
   // 단일 판매 모달 및 확인 모달 상태
   const [sellModalOpen, setSellModalOpen] = useState(false);
@@ -392,9 +545,8 @@ export const GachaTab: React.FC = () => {
       fetchActiveTrades();
       fetchTradeHistory();
       fetchMyCosmetics();
-      fetchMarketPending();
     }
-  }, [user]);
+  }, [userId]);
 
   // 라이브 전환을 감지하면 같은 주기에 DB에 저장된 최신 채널명/프로필 이미지를 카드에도 반영합니다.
   useEffect(() => {
@@ -468,13 +620,7 @@ export const GachaTab: React.FC = () => {
   };
 
   const getAvailableCount = (channelId: string, star: number) => {
-    const owned = inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
-    const locked = owned.filter(c => c.is_locked).length;
-    const total = owned.length;
-    const key = `${channelId}#${star}`;
-    const reserved = reservations.cardsByStar[key] || 0;
-    const pendingMarket = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
-    return Math.max(0, total - locked - reserved - pendingMarket);
+    return inventoryModel.getAvailableCount(channelId, star);
   };
 
   const hasEquippedCosmetic = (card?: UserCard | null) =>
@@ -483,21 +629,10 @@ export const GachaTab: React.FC = () => {
   const getInventoryGroupKey = (card: UserCard) =>
     hasEquippedCosmetic(card) ? singleCardKey(card.id) : cardKey(card.channel_id, card.star ?? 0);
 
-  const getCardGroup = (card: UserCard) =>
-    hasEquippedCosmetic(card)
-      ? inventory.filter(c => c.id === card.id)
-      : inventory.filter(c =>
-          !hasEquippedCosmetic(c)
-          && c.channel_id === card.channel_id
-          && (c.star ?? 0) === (card.star ?? 0)
-        );
+  const getCardGroup = (card: UserCard) => inventoryModel.getGroup(getInventoryGroupKey(card))?.cards || [];
 
   const getAvailableGroupCards = (card: UserCard) => {
-    const reserved = hasEquippedCosmetic(card)
-      ? 0
-      : reservations.cardsByStar[cardKey(card.channel_id, card.star ?? 0)] || 0;
-    const candidates = getCardGroup(card).filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
-    return candidates.slice(reserved);
+    return inventoryModel.getAvailableGroupCards(getInventoryGroupKey(card));
   };
   const getFuseMaterialMax = (channelId: string, baseStar: number, materialStar: number) => {
     const targetReserve = materialStar === baseStar ? 1 : 0;
@@ -569,6 +704,33 @@ export const GachaTab: React.FC = () => {
       } else showAlert('해제 실패', data.message || '실패했습니다.', 'error');
     } catch { showAlert('통신 오류', '서버와의 통신 중 오류가 발생했습니다.', 'error'); }
   };
+
+  const groupedInventory = React.useMemo(() => filterAndSortInventoryGroups(inventoryModel.groups, {
+    query: searchQuery, liveFilter, isStreamerLive, sortBy
+  }), [inventoryModel, searchQuery, liveFilter, isStreamerLive, sortBy]);
+  const inventoryPages = Math.max(1, Math.ceil(groupedInventory.length / INVENTORY_PAGE_SIZE));
+  const activeInventoryPage = Math.min(inventoryPage, inventoryPages);
+  const visibleInventory = groupedInventory.slice((activeInventoryPage - 1) * INVENTORY_PAGE_SIZE, activeInventoryPage * INVENTORY_PAGE_SIZE);
+  const filteredSelectionKeys = React.useMemo(() => getSelectableKeys(groupedInventory), [groupedInventory]);
+  const allFilteredSelected = filteredSelectionKeys.length > 0 && filteredSelectionKeys.every(key => selectedCardKeySet.has(key));
+  const bulkSellEntries = React.useMemo(() => Object.entries(bulkSellQuantities), [bulkSellQuantities]);
+  const bulkSellPages = Math.max(1, Math.ceil(bulkSellEntries.length / INVENTORY_PAGE_SIZE));
+  const activeBulkSellPage = Math.min(bulkSellPage, bulkSellPages);
+
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [searchQuery, liveFilter, sortBy]);
+
+  useEffect(() => {
+    if (bulkSellModalOpen) setBulkSellPage(1);
+  }, [bulkSellModalOpen]);
+
+  useEffect(() => {
+    setSelectedCardKeys(previous => {
+      const next = previous.filter(key => inventoryModel.getGroup(key));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [inventoryModel]);
 
   if (!user) {
     return (
@@ -722,27 +884,13 @@ export const GachaTab: React.FC = () => {
     setReceiverSearch(u.username);
     setRequestCards({});
     setPartnerCollection([]);
+    setRequestSearch('');
+    setRequestTradePage(1);
     try {
       const res = await apiFetch(`/users/${u.id}/collection`);
       if (res.ok) setPartnerCollection(await res.json());
     } catch { /* 무시 */ }
   };
-
-  // 내 보유 카드 channel_id + 별(star)별 묶음 (같은 스트리머라도 성별로 분리)
-  const myCollection = (() => {
-    const map: { [key: string]: { key: string; channel_id: string; star: number; count: number; streamer: any } } = {};
-    for (const c of inventory) {
-      if (!c.streamer) continue;
-      const star = c.star || 0;
-      const key = `${c.channel_id}#${star}`;
-      if (!map[key]) map[key] = { key, channel_id: c.channel_id, star, count: 0, streamer: c.streamer };
-      map[key].count = getAvailableCount(c.channel_id, star);
-    }
-    return Object.values(map).filter((item) => item.count > 0).sort((a, b) => {
-      const an = a.streamer?.name || '', bn = b.streamer?.name || '';
-      return an === bn ? a.star - b.star : an.localeCompare(bn);
-    });
-  })();
 
   const adjustOfferCard = (key: string, delta: number, max: number) => {
     setOfferCards(prev => {
@@ -752,6 +900,22 @@ export const GachaTab: React.FC = () => {
       else next[key] = v;
       return next;
     });
+  };
+
+  const selectAllOfferSearchResults = () => {
+    setOfferCards((previous) => selectAllTradeResults(previous, offerSearchOptions));
+  };
+
+  const clearOfferSearchResults = () => {
+    setOfferCards((previous) => clearTradeResults(previous, filteredOfferTradeCollection));
+  };
+
+  const selectAllRequestSearchResults = () => {
+    setRequestCards((previous) => selectAllTradeResults(previous, requestSearchOptions));
+  };
+
+  const clearRequestSearchResults = () => {
+    setRequestCards((previous) => clearTradeResults(previous, filteredRequestTradeCollection));
   };
 
   // 진행 중(보낸/받은) 교환 목록 조회
@@ -883,18 +1047,6 @@ export const GachaTab: React.FC = () => {
 
   const getOfferPoint = (offer: any) => Number(offer?.point || 0);
 
-  const selectionHasEquippedCosmetics = (selection: Record<string, number>) => Object.entries(selection).some(([key, count]) => {
-    if (count <= 0) return false;
-    const [channelId, starStr] = key.split('#');
-    const star = Number(starStr) || 0;
-    return inventory
-      .filter((card) => card.channel_id === channelId && (card.star || 0) === star && !card.is_locked && !marketPendingCardIds.includes(card.id))
-      .slice(0, count)
-      .some((card) => !!card.border || !!card.name_effect);
-  });
-
-  const offerHasEquippedCosmetics = selectionHasEquippedCosmetics(offerCards);
-
   const resetTradeForm = () => {
     setOfferCards({});
     setTradeOfferWithCosmetics(false);
@@ -907,6 +1059,8 @@ export const GachaTab: React.FC = () => {
     setPartnerCollection([]);
     setOfferSearch('');
     setRequestSearch('');
+    setOfferTradePage(1);
+    setRequestTradePage(1);
   };
 
   const executeTrade = async () => {
@@ -920,8 +1074,10 @@ export const GachaTab: React.FC = () => {
       const [channel_id, starStr] = key.split('#');
       return { channel_id, star: Number(starStr) || 0, count };
     };
-    const offerList = Object.entries(offerCards).filter(([, c]) => c > 0).map(parseKey);
-    const reqList = Object.entries(requestCards).filter(([, c]) => c > 0).map(parseKey);
+    const normalizedOfferCards = clampTradeSelection(offerCards, offerTradeOptions);
+    const normalizedRequestCards = clampTradeSelection(requestCards, requestTradeOptions);
+    const offerList = Object.entries(normalizedOfferCards).map(parseKey);
+    const reqList = Object.entries(normalizedRequestCards).map(parseKey);
 
     if (offerList.length === 0 && offerPoint <= 0 && reqList.length === 0 && requestPoint <= 0) {
       showAlert('내용 부족', '제시하거나 요청할 카드/포인트를 최소 한 가지 이상 지정해 주세요.', 'warning');
@@ -1159,7 +1315,7 @@ export const GachaTab: React.FC = () => {
 
   // 카드 수량 계산 헬퍼
   const getCardCountInInventory = (channelId: string, star: number) => {
-    return getAvailableCount(channelId, star);
+    return inventoryModel.getGroup(cardKey(channelId, star))?.availableCount || 0;
   };
 
 
@@ -1215,44 +1371,12 @@ export const GachaTab: React.FC = () => {
     }
   };
 
-  const getCardByKey = (key: string) => {
-    if (isSingleCardKey(key)) {
-      const cardId = Number(key.slice('card:'.length));
-      return inventory.find(c => c.id === cardId) || null;
-    }
-    const { channelId, star } = parseCardKey(key);
-    return inventory.find(c => !hasEquippedCosmetic(c) && c.channel_id === channelId && (c.star || 0) === star)
-      || inventory.find(c => c.channel_id === channelId && (c.star || 0) === star)
-      || null;
-  };
+  const getCardByKey = (key: string) => inventoryModel.getCardByKey(key);
 
 
-  const getCardsBySelectionKeys = (keys: string[]) => {
-    const selected = new Map<number, UserCard>();
-    keys.forEach((key) => {
-      if (isSingleCardKey(key)) {
-        const card = getCardByKey(key);
-        if (card) selected.set(card.id, card);
-        return;
-      }
-      const { channelId, star } = parseCardKey(key);
-      inventory
-        .filter(c => !hasEquippedCosmetic(c) && c.channel_id === channelId && (c.star || 0) === star)
-        .forEach(card => selected.set(card.id, card));
-    });
-    return Array.from(selected.values());
-  };
+  const getCardsBySelectionKeys = (keys: string[]) => inventoryModel.getCardsForKeys(keys);
 
-  const buildBulkSellQuantitiesFromKeys = (keys: string[]) => {
-    const quantities: { [key: string]: number } = {};
-    keys.forEach(key => {
-      if (isSingleCardKey(key)) return;
-      const { channelId, star } = parseCardKey(key);
-      const count = getCardCountInInventory(channelId, star);
-      if (count > 0) quantities[key] = count;
-    });
-    return quantities;
-  };
+  const buildBulkSellQuantitiesFromKeys = (keys: string[]) => inventoryModel.getBulkSellQuantities(keys);
 
   const openBulkSelectionMenu = (event: React.MouseEvent | { clientX: number; clientY: number }, keys = selectedCardKeys) => {
     if (!selectionMode) return;
@@ -1268,104 +1392,51 @@ export const GachaTab: React.FC = () => {
 
   const runSelectedCardUpdates = async (
     cards: UserCard[],
-    makeRequest: (card: UserCard) => Promise<Response>,
+    setting: 'favorite' | 'hidden' | 'locked',
     failureMessage: string,
-    options: { refreshMarket?: boolean } = {}
   ) => {
+    if (bulkSettingsBusyRef.current) return;
     if (cards.length === 0) {
       toast('선택된 카드가 없습니다.');
       return;
     }
 
+    bulkSettingsBusyRef.current = true;
+    setBulkSettingsProgress({ completed: 0, total: cards.length });
     let success = 0;
     let failed = 0;
-    for (let index = 0; index < cards.length; index += 8) {
-      const batch = cards.slice(index, index + 8);
-      const results = await Promise.all(batch.map(async (card) => {
+    try {
+      for (let index = 0; index < cards.length; index += 200) {
+        const batch = cards.slice(index, index + 200);
         try {
-          const res = await makeRequest(card);
-          return res.ok;
+          const res = await apiFetch('/cards/bulk-settings', {
+            method: 'PATCH',
+            body: JSON.stringify({ setting, updates: batch.map(card => ({
+              card_id: card.id,
+              value: setting === 'favorite' ? card.favorite_order == null : setting === 'hidden' ? !card.is_hidden : !card.is_locked
+            })) })
+          });
+          const data = await res.json();
+          const succeeded = res.ok && Array.isArray(data.succeededIds) ? new Set(data.succeededIds) : new Set();
+          const succeededCount = batch.filter(card => succeeded.has(card.id)).length;
+          success += succeededCount;
+          failed += batch.length - succeededCount;
         } catch {
-          return false;
+          failed += batch.length;
         }
-      }));
-      success += results.filter(Boolean).length;
-      failed += results.filter(ok => !ok).length;
-    }
-
-    if (success > 0) {
-      showAlert('설정 완료', `${success}장의 카드에 적용했습니다.${failed > 0 ? ` ${failed}장은 처리하지 못했습니다.` : ''}`, failed > 0 ? 'warning' : 'success');
-      await fetchInventory();
-      if (options.refreshMarket) await fetchMarketPending();
-    } else {
-      showAlert('설정 실패', failureMessage, 'error');
-    }
-  };
-  // 검색 및 라이브 여부 필터링 후, 지정한 기준대로 정렬 처리
-  const getProcessedInventory = () => {
-    // 1. 검색어 및 라이브 상태 필터링
-    let result = inventory.filter(card => {
-      const streamer = card.streamer;
-      if (!streamer) return false;
-
-      // 이름 검색 필터 (초성 매칭 및 띄어쓰기 무시 유사도 매칭 적용)
-      const matchesSearch = fuzzySearch(streamer.name, searchQuery);
-
-      // 공통 실시간 상태를 우선하고, 아직 불러오지 못한 경우 카드 스냅샷으로 폴백
-      const isActive = isStreamerLive(streamer);
-      const matchesLive =
-        liveFilter === 'all' ? true :
-          liveFilter === 'live' ? isActive === true :
-            isActive !== true;
-
-      return matchesSearch && matchesLive;
-    });
-
-    // 2. 정렬 정렬
-    return [...result].sort((a, b) => {
-      const favA = a.favorite_order ?? Number.POSITIVE_INFINITY;
-      const favB = b.favorite_order ?? Number.POSITIVE_INFINITY;
-      if (favA !== favB) return favA - favB;
-
-      const nameA = a.streamer?.name || '';
-      const nameB = b.streamer?.name || '';
-      const valA = a.streamer?.base_value || 0;
-      const valB = b.streamer?.base_value || 0;
-      const starA = a.star || 0;
-      const starB = b.star || 0;
-      const timeA = new Date(a.acquired_at || 0).getTime();
-      const timeB = new Date(b.acquired_at || 0).getTime();
-      const idA = a.id || 0;
-      const idB = b.id || 0;
-      const byNameAsc = nameA.localeCompare(nameB, 'ko') || timeB - timeA || idB - idA;
-
-      switch (sortBy) {
-        case 'name-asc':
-          return nameA.localeCompare(nameB);
-        case 'name-desc':
-          return nameB.localeCompare(nameA);
-        case 'acquired-desc':
-          // 획득순 내림차순 (최신순 - ID 또는 시간 기준)
-          return timeB - timeA || idB - idA;
-        case 'acquired-asc':
-          // 획득순 오름차순 (과거순)
-          return timeA - timeB || idA - idB;
-        case 'value-desc':
-          return valB - valA;
-        case 'value-asc':
-          return valA - valB;
-        case 'star-desc':
-          return starB - starA || byNameAsc;
-        case 'star-asc':
-          return starA - starB || byNameAsc;
-        default:
-          return timeB - timeA;
+        setBulkSettingsProgress({ completed: Math.min(index + batch.length, cards.length), total: cards.length });
       }
-    });
+      if (success > 0) {
+        showAlert('설정 완료', `${success}장의 카드에 적용했습니다.${failed > 0 ? ` ${failed}장은 처리하지 못했습니다.` : ''}`, failed > 0 ? 'warning' : 'success');
+        await fetchInventory();
+      } else {
+        showAlert('설정 실패', failureMessage, 'error');
+      }
+    } finally {
+      bulkSettingsBusyRef.current = false;
+      setBulkSettingsProgress(null);
+    }
   };
-
-  const filteredInventory = getProcessedInventory();
-
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
 
@@ -1377,7 +1448,7 @@ export const GachaTab: React.FC = () => {
               <h3 className="text-base font-bold flex items-center gap-2">
                 <ArrowRightLeft className="h-4.5 w-4.5 text-primary" /> 1:1 스트리머 카드 교환 제안
               </h3>
-              <button onClick={() => setTradeModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <button type="button" aria-label="교환 제안 닫기" onClick={() => setTradeModalOpen(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -1392,7 +1463,7 @@ export const GachaTab: React.FC = () => {
                       <img src={selectedReceiver.avatar_url} alt={selectedReceiver.username} className="h-8 w-8 rounded-full object-cover border border-border/60" />
                       <span className="text-sm font-bold truncate">{selectedReceiver.username}</span>
                     </div>
-                    <button onClick={() => { setSelectedReceiver(null); setReceiverSearch(''); setPartnerCollection([]); setRequestCards({}); }} className="text-xs text-muted-foreground hover:text-foreground">변경</button>
+                    <button onClick={() => { setSelectedReceiver(null); setReceiverSearch(''); setPartnerCollection([]); setRequestCards({}); setRequestSearch(''); setRequestTradePage(1); }} className="text-xs text-muted-foreground hover:text-foreground">변경</button>
                   </div>
                 ) : (
                   <>
@@ -1419,35 +1490,49 @@ export const GachaTab: React.FC = () => {
 
               {/* 내가 제시: 보유 카드(검색) + 포인트 */}
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2.5">
-                <p className="text-xs font-black text-emerald-500">내가 제시</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-black text-emerald-500">내가 제시</p>
+                  <p className="text-[10px] font-bold text-muted-foreground">
+                    전체 선택 {offerSelectionSummary.groupCount.toLocaleString()}종 · {offerSelectionSummary.cardCount.toLocaleString()}장
+                  </p>
+                </div>
                 <input
                   type="text"
                   value={offerSearch}
-                  onChange={(e) => setOfferSearch(e.target.value)}
+                  onChange={(e) => { setOfferSearch(e.target.value); setOfferTradePage(1); }}
                   placeholder="내 보유 카드 검색"
                   className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
                 />
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  {myCollection.length === 0 ? (
-                    <p className="text-[10px] text-muted-foreground py-1">보유한 카드가 없습니다.</p>
-                  ) : myCollection
-                    .filter((c) => fuzzySearch(c.streamer?.name || '', offerSearch))
-                    .map((c) => (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/45 px-2 py-1.5">
+                  <p className="text-[9.5px] font-semibold text-muted-foreground">
+                    검색 {filteredOfferTradeCollection.length.toLocaleString()}종 · 이 결과 {offerSearchSelectionSummary.cardCount.toLocaleString()} / {offerSearchCapacity.toLocaleString()}장
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={selectAllOfferSearchResults} disabled={offerSearchCapacity === 0} className="rounded-md bg-emerald-500 px-2 py-1 text-[9.5px] font-black text-white disabled:opacity-40">전체선택</button>
+                    <button type="button" onClick={clearOfferSearchResults} disabled={offerSearchSelectionSummary.cardCount === 0} className="rounded-md bg-secondary px-2 py-1 text-[9.5px] font-black text-muted-foreground disabled:opacity-40">전체해제</button>
+                  </div>
+                </div>
+                <p className="text-[9px] font-semibold text-muted-foreground">전체선택은 현재 검색 결과 전 페이지에 적용됩니다. 가용 수량은 잠금·마켓 판매·진행 중 교환 예약 카드를 제외합니다.</p>
+                <div data-testid="trade-offer-list" className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {filteredOfferTradeCollection.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground py-1">검색 조건에 맞는 가용 카드가 없습니다.</p>
+                  ) : offerTradePagination.items.map((c) => (
                       <div key={c.key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
                         <div className="flex items-center gap-2 min-w-0">
-                          <img src={streamerProfileImage(c.streamer, c.star)} alt={c.streamer.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
-                          <span className="text-[11px] font-bold truncate">{c.streamer.name}</span>
+                          <img src={streamerProfileImage(c.streamer, c.star)} alt={c.streamer?.name || '카드'} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                          <span className="text-[11px] font-bold truncate">{c.streamer?.name || '스트리머'}</span>
                           {c.star > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
-                          <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
+                          <span className="shrink-0 text-[9px] text-muted-foreground">가용 {c.count.toLocaleString()}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <button onClick={() => adjustOfferCard(c.key, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
-                          <span className="w-5 text-center text-xs font-bold">{offerCards[c.key] || 0}</span>
-                          <button onClick={() => adjustOfferCard(c.key, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                          <button type="button" aria-label={`${c.streamer?.name || '카드'} 제시 수량 줄이기`} onClick={() => adjustOfferCard(c.key, -1, c.count)} disabled={(offerCards[c.key] || 0) <= 0} className="h-6 w-6 rounded bg-secondary text-xs font-bold disabled:opacity-40">-</button>
+                          <span className="min-w-7 text-center text-xs font-bold">{(offerCards[c.key] || 0).toLocaleString()}</span>
+                          <button type="button" aria-label={`${c.streamer?.name || '카드'} 제시 수량 늘리기`} onClick={() => adjustOfferCard(c.key, 1, c.count)} disabled={(offerCards[c.key] || 0) >= c.count} className="h-6 w-6 rounded bg-primary text-primary-foreground text-xs font-bold disabled:opacity-40">+</button>
                         </div>
                       </div>
                     ))}
                 </div>
+                <TradePagination page={offerTradePagination.page} pages={offerTradePagination.totalPages} onChange={setOfferTradePage} />
                 <div>
                   <label className="text-[11px] font-bold text-muted-foreground block mb-1">제시할 포인트 (보유 {user.point.toLocaleString()})</label>
                   <input type="number" min={0} value={offerPoint}
@@ -1477,7 +1562,12 @@ export const GachaTab: React.FC = () => {
 
               {/* 내가 요청: 상대 보유 카드(검색) + 포인트 */}
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 space-y-2.5">
-                <p className="text-xs font-black text-sky-500">상대에게 요청</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-black text-sky-500">상대에게 요청</p>
+                  <p className="text-[10px] font-bold text-muted-foreground">
+                    전체 선택 {requestSelectionSummary.groupCount.toLocaleString()}종 · {requestSelectionSummary.cardCount.toLocaleString()}장
+                  </p>
+                </div>
                 {!selectedReceiver ? (
                   <p className="text-[10px] text-muted-foreground py-1">먼저 교환 상대를 선택하면 상대의 보유 카드를 요청할 수 있어요.</p>
                 ) : (
@@ -1485,34 +1575,40 @@ export const GachaTab: React.FC = () => {
                     <input
                       type="text"
                       value={requestSearch}
-                      onChange={(e) => setRequestSearch(e.target.value)}
+                      onChange={(e) => { setRequestSearch(e.target.value); setRequestTradePage(1); }}
                       placeholder="상대 보유 카드 검색"
                       className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-1.5 text-xs focus:border-primary focus:outline-none"
                     />
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                      {partnerCollection.length === 0 ? (
-                        <p className="text-[10px] text-muted-foreground py-1">상대가 보유한 카드가 없습니다.</p>
-                      ) : partnerCollection
-                        .filter((c) => fuzzySearch(c.streamer?.name || '', requestSearch))
-                        .map((c) => {
-                          const key = `${c.channel_id}#${c.star || 0}`;
-                          return (
-                          <div key={key} className="flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/45 px-2 py-1.5">
+                      <p className="text-[9.5px] font-semibold text-muted-foreground">
+                        검색 {filteredRequestTradeCollection.length.toLocaleString()}종 · 이 결과 {requestSearchSelectionSummary.cardCount.toLocaleString()} / {requestSearchCapacity.toLocaleString()}장
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <button type="button" onClick={selectAllRequestSearchResults} disabled={requestSearchCapacity === 0} className="rounded-md bg-sky-500 px-2 py-1 text-[9.5px] font-black text-white disabled:opacity-40">전체선택</button>
+                        <button type="button" onClick={clearRequestSearchResults} disabled={requestSearchSelectionSummary.cardCount === 0} className="rounded-md bg-secondary px-2 py-1 text-[9.5px] font-black text-muted-foreground disabled:opacity-40">전체해제</button>
+                      </div>
+                    </div>
+                    <p className="text-[9px] font-semibold text-muted-foreground">전체선택은 현재 검색 결과 전 페이지에 적용됩니다. 상대의 잠금·마켓 판매·진행 중 교환 예약 수량은 요청 가능 수량에서 제외됩니다.</p>
+                    <div data-testid="trade-request-list" className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {filteredRequestTradeCollection.length === 0 ? (
+                        <p className="text-[10px] text-muted-foreground py-1">검색 조건에 맞는 카드가 없습니다.</p>
+                      ) : requestTradePagination.items.map((c) => (
+                          <div key={c.key} className={`flex items-center justify-between rounded-lg bg-secondary/30 px-2 py-1.5 ${c.count <= 0 ? 'opacity-55' : ''}`}>
                             <div className="flex items-center gap-2 min-w-0">
-                              <img src={streamerProfileImage(c.streamer, c.star || 0)} alt={c.streamer?.name} className="h-7 w-7 rounded-full object-cover border border-border/60" />
-                              <span className="text-[11px] font-bold truncate">{c.streamer?.name}</span>
-                              {(c.star || 0) > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
-                              <span className="shrink-0 text-[9px] text-muted-foreground">보유 {c.count}</span>
+                              <img src={streamerProfileImage(c.streamer, c.star)} alt={c.streamer?.name || '카드'} className="h-7 w-7 rounded-full object-cover border border-border/60" />
+                              <span className="text-[11px] font-bold truncate">{c.streamer?.name || '스트리머'}</span>
+                              {c.star > 0 && <span className="shrink-0 rounded bg-amber-400/20 px-1 text-[9px] font-black text-amber-500">{c.star}★</span>}
+                              <span className="shrink-0 text-[9px] text-muted-foreground">{c.count < c.ownedCount ? `가용 ${c.count} / 보유 ${c.ownedCount}` : `가용 ${c.count}`}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <button onClick={() => adjustRequestCard(key, -1, c.count)} className="h-5 w-5 rounded bg-secondary text-xs font-bold">-</button>
-                              <span className="w-5 text-center text-xs font-bold">{requestCards[key] || 0}</span>
-                              <button onClick={() => adjustRequestCard(key, 1, c.count)} className="h-5 w-5 rounded bg-primary text-primary-foreground text-xs font-bold">+</button>
+                              <button type="button" aria-label={`${c.streamer?.name || '카드'} 요청 수량 줄이기`} onClick={() => adjustRequestCard(c.key, -1, c.count)} disabled={(requestCards[c.key] || 0) <= 0} className="h-6 w-6 rounded bg-secondary text-xs font-bold disabled:opacity-40">-</button>
+                              <span className="min-w-7 text-center text-xs font-bold">{(requestCards[c.key] || 0).toLocaleString()}</span>
+                              <button type="button" aria-label={`${c.streamer?.name || '카드'} 요청 수량 늘리기`} onClick={() => adjustRequestCard(c.key, 1, c.count)} disabled={c.count <= 0 || (requestCards[c.key] || 0) >= c.count} className="h-6 w-6 rounded bg-primary text-primary-foreground text-xs font-bold disabled:opacity-40">+</button>
                             </div>
                           </div>
-                          );
-                        })}
+                        ))}
                     </div>
+                    <TradePagination page={requestTradePagination.page} pages={requestTradePagination.totalPages} onChange={setRequestTradePage} />
                   </>
                 )}
                 <div>
@@ -1897,6 +1993,7 @@ export const GachaTab: React.FC = () => {
           <div data-tour="inventory-filters" className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto mt-2 sm:mt-0">
             {/* 라이브 상태 필터링 */}
             <select
+              aria-label="방송 상태 필터"
               value={liveFilter}
               onChange={(e: any) => setLiveFilter(e.target.value)}
               className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none"
@@ -1908,12 +2005,14 @@ export const GachaTab: React.FC = () => {
 
             {/* 정렬 방식 필터링 */}
             <select
+              aria-label="카드 정렬"
               value={sortBy}
               onChange={(e: any) => setSortBy(e.target.value)}
               className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:border-primary focus:outline-none"
             >
               <option value="acquired-desc">최신 획득순</option>
               <option value="acquired-asc">과거 획득순</option>
+              <option value="count-desc">카드 수 많은 순</option>
               <option value="name-asc">이름 가나다순</option>
               <option value="name-desc">이름 역순</option>
               <option value="star-desc">등급 높은순</option>
@@ -1934,6 +2033,17 @@ export const GachaTab: React.FC = () => {
             </div>
 
             <button
+              type="button"
+              aria-pressed={selectionMode}
+              onClick={() => {
+                setSelectionMode(!selectionMode);
+                if (selectionMode) setSelectedCardKeys([]);
+              }}
+              className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-bold text-primary"
+            >
+              다중선택
+            </button>
+            <button
               data-tour="inventory-trade-actions"
               onClick={handleOpenTrade}
               className="hidden sm:flex rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 items-center gap-1 shadow-sm"
@@ -1950,60 +2060,33 @@ export const GachaTab: React.FC = () => {
           </div>
         </div>
 
+        {bulkSettingsProgress && <p role="status" className="rounded-xl bg-primary/10 p-3 text-xs font-bold text-primary">카드 설정 적용 중 {bulkSettingsProgress.completed.toLocaleString()} / {bulkSettingsProgress.total.toLocaleString()}장</p>}
         {/* 보관함 카드 그리드 (로딩 중 상태 추가하여 빈 안내 문구 오노출 해결) */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
             <p className="text-xs text-muted-foreground">보유 카드 목록을 불러오는 중입니다...</p>
           </div>
-        ) : filteredInventory.length === 0 ? (
+        ) : groupedInventory.length === 0 ? (
           <div className="rounded-2xl border border-border/80 border-dashed py-12 text-center text-xs text-muted-foreground">
             {searchQuery ? '검색된 카드가 없습니다.' : '보유 중인 스트리머 카드가 없습니다. 상단에서 소환을 완료해 주세요!'}
           </div>
         ) : (() => {
-          // 중복 카드 그룹화 (채널 ID 기준으로 그룹화)
-          // 최신 획득순/정렬 상태에 따라 최초 대표 카드 1장을 정하고, 개수 카운트
-          // 채널 + 별 등급 단위로 그룹화 (서로 다른 별은 별도 스택으로 표시·합성)
-          interface GroupedCard {
-            card: UserCard;
-            count: number;
-            star: number;
-          }
-          const groupKey = getInventoryGroupKey;
-          const groupedMap: { [key: string]: GroupedCard } = {};
-
-          filteredInventory.forEach(card => {
-            const key = groupKey(card);
-            if (!groupedMap[key]) {
-              groupedMap[key] = { card, count: 1, star: card.star || 0 };
-            } else {
-              groupedMap[key].count += 1;
-            }
-          });
-
-          // 원래 정렬 순서를 보존하여 렌더링하기 위해, 정렬 결과 중 처음 나타난 순서대로 배열 변환
-          const groupedList: GroupedCard[] = [];
-          const seen = new Set<string>();
-          filteredInventory.forEach(card => {
-            const key = groupKey(card);
-            if (!seen.has(key)) {
-              seen.add(key);
-              groupedList.push(groupedMap[key]);
-            }
-          });
-
           return (
             <div className="relative">
               {/* 선택 모드 안내 바 */}
               {selectionMode && (
-                <div data-tour="inventory-bulk-actions" className="mb-4 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 p-3.5 animate-in slide-in-from-top-3 duration-200">
-                  <div className="flex items-center gap-2">
+                <div data-tour="inventory-bulk-actions" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl bg-primary/10 border border-primary/20 p-3.5 animate-in slide-in-from-top-3 duration-200">
+                  <div>
                     <span className="h-2 w-2 rounded-full bg-primary animate-ping"></span>
                     <span className="text-[0.75rem] font-bold text-foreground">
-                      카드를 다중 선택 중입니다 ({selectedCardKeys.length}개 선택됨)
+                      카드를 다중 선택 중입니다 ({selectedCardKeys.length}묶음 선택됨)
                     </span>
+                    <p className="mt-1 text-[11px] text-muted-foreground">전체선택은 현재 검색·필터 결과 {filteredSelectionKeys.length.toLocaleString()}묶음에 적용됩니다.</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" disabled={allFilteredSelected} onClick={() => setSelectedCardKeys(previous => Array.from(new Set([...previous, ...filteredSelectionKeys])))} className="rounded-lg border border-primary/30 px-3 py-1.5 text-[0.7rem] font-bold text-primary disabled:opacity-40">전체선택</button>
+                    <button type="button" disabled={selectedCardKeys.length === 0} onClick={() => setSelectedCardKeys([])} className="rounded-lg border border-border px-3 py-1.5 text-[0.7rem] font-bold disabled:opacity-40">전체해제</button>
                     <button
                       onClick={() => {
                         if (selectedCardKeys.length === 0) {
@@ -2011,12 +2094,7 @@ export const GachaTab: React.FC = () => {
                           return;
                         }
                         // 선택된 카드 정보 기반으로 일괄 판매 초기화
-                        const quantities: { [key: string]: number } = {};
-                        selectedCardKeys.forEach(key => {
-                          if (isSingleCardKey(key)) return;
-                          const { channelId, star } = parseCardKey(key);
-                          quantities[key] = getCardCountInInventory(channelId, star);
-                        });
+                        const quantities = buildBulkSellQuantitiesFromKeys(selectedCardKeys);
                         if (Object.keys(quantities).length === 0) {
                           toast('일괄 판매할 수 있는 카드가 선택되지 않았습니다.');
                           return;
@@ -2041,20 +2119,15 @@ export const GachaTab: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {groupedList.map(({ card, count, star }) => {
+              <InventoryPagination page={activeInventoryPage} pages={inventoryPages} total={groupedInventory.length} onChange={page => { setInventoryPage(page); setContextMenu(previous => ({ ...previous, open: false })); }} />
+              <div ref={inventoryGridRef} data-testid="inventory-grid" className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {visibleInventory.map(({ card, count, star, key, cards: owned, availableCards: actionCards, pendingMarketCount, lockedCount, hiddenCount }) => {
                   const streamer = card.streamer;
                   if (!streamer) return null;
 
-                  const key = getInventoryGroupKey(card);
-                  const isSelected = selectedCardKeys.includes(key);
+                  const isSelected = selectedCardKeySet.has(key);
                   const cardValue = Math.round((streamer.base_value || 0) * starMult(star));
-                  const owned = getCardGroup(card);
-                  const actionCards = getAvailableGroupCards(card);
                   const avail = actionCards.length;
-                  const pendingMarketCount = owned.filter(c => marketPendingCardIds.includes(c.id)).length;
-                  const lockedCount = owned.filter(c => c.is_locked).length;
-                  const hiddenCount = owned.filter(c => c.is_hidden).length;
                   const actionCard = actionCards[0] || null;
 
                   // 우클릭 이벤트 핸들러
@@ -2067,7 +2140,7 @@ export const GachaTab: React.FC = () => {
                       return;
                     }
                     const owned = getCardGroup(card);
-                    const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+                    const pendingCard = owned.find(c => pendingCardIdSet.has(c.id));
                     const availableCard = getAvailableGroupCards(card)[0] || null;
 
                     const menuPosition = clampContextMenuPosition(e.clientX, e.clientY);
@@ -2125,8 +2198,8 @@ export const GachaTab: React.FC = () => {
                         return;
                       }
                       if (selectionMode) {
-                        const nextKeys = selectedCardKeys.includes(key) ? selectedCardKeys : [...selectedCardKeys, key];
-                        if (!selectedCardKeys.includes(key)) setSelectedCardKeys(nextKeys);
+                        const nextKeys = selectedCardKeySet.has(key) ? selectedCardKeys : [...selectedCardKeys, key];
+                        if (!selectedCardKeySet.has(key)) setSelectedCardKeys(nextKeys);
                         longPressFired.current = true;
                         longPressTimer.current = null;
                         openBulkSelectionMenu({ clientX: x, clientY: y }, nextKeys);
@@ -2137,7 +2210,7 @@ export const GachaTab: React.FC = () => {
                       longPressTimer.current = null;
                       const menuPosition = clampContextMenuPosition(x, y);
                       const owned = getCardGroup(card);
-                      const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+                      const pendingCard = owned.find(c => pendingCardIdSet.has(c.id));
                       const availableCard = getAvailableGroupCards(card)[0] || null;
                       setContextMenu({
                         x: menuPosition.x,
@@ -2170,6 +2243,8 @@ export const GachaTab: React.FC = () => {
                   return (
                     <div
                       key={card.id}
+                      data-inventory-card={key}
+                      data-selected={isSelected}
                       onContextMenu={handleContextMenu}
                       onClick={handleCardClick}
                       onMouseDown={startPress}
@@ -2317,6 +2392,7 @@ export const GachaTab: React.FC = () => {
                   );
                 })}
               </div>
+              <InventoryPagination page={activeInventoryPage} pages={inventoryPages} total={groupedInventory.length} onChange={page => { setInventoryPage(page); inventoryGridRef.current?.scrollIntoView({ block: 'start' }); }} />
             </div>
           );
         })()}
@@ -2621,10 +2697,10 @@ export const GachaTab: React.FC = () => {
 
         const closeBulkMenu = () => setBulkContextMenu(prev => ({ ...prev, open: false }));
 
-        return (
+        return createPortal(
           <div
             ref={bulkContextMenuRef}
-            className="fixed z-50 max-h-[calc(100dvh-1rem)] w-60 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-2xl border border-border bg-card/95 py-1.5 shadow-2xl backdrop-blur-md animate-in fade-in duration-100"
+            className="fixed z-[60] max-h-[calc(100dvh-1rem)] w-60 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-2xl border border-border bg-card/95 py-1.5 shadow-2xl backdrop-blur-md animate-in fade-in duration-100"
             style={{ left: `${bulkContextMenu.x}px`, top: `${bulkContextMenu.y}px` }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2651,10 +2727,7 @@ export const GachaTab: React.FC = () => {
                 closeBulkMenu();
                 await runSelectedCardUpdates(
                   selectedCards,
-                  (card) => apiFetch(`/cards/${card.id}/favorite`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ favorite: card.favorite_order == null })
-                  }),
+                  'favorite',
                   '즐겨찾기 설정 중 오류가 발생했습니다.'
                 );
               }}
@@ -2667,10 +2740,7 @@ export const GachaTab: React.FC = () => {
                 closeBulkMenu();
                 await runSelectedCardUpdates(
                   selectedCards,
-                  (card) => apiFetch(`/cards/${card.id}/visibility`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ hidden: !card.is_hidden })
-                  }),
+                  'hidden',
                   '외부 공개 설정 중 오류가 발생했습니다.'
                 );
               }}
@@ -2701,12 +2771,8 @@ export const GachaTab: React.FC = () => {
                 closeBulkMenu();
                 await runSelectedCardUpdates(
                   selectedCards,
-                  (card) => apiFetch(`/cards/${card.id}/lock`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ locked: !card.is_locked })
-                  }),
-                  '카드 잠금 설정 중 오류가 발생했습니다.',
-                  { refreshMarket: true }
+                  'locked',
+                  '카드 잠금 설정 중 오류가 발생했습니다.'
                 );
               }}
               className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs font-bold text-foreground hover:bg-secondary/80"
@@ -2724,7 +2790,7 @@ export const GachaTab: React.FC = () => {
             >
               ✕ 선택 해제
             </button>
-          </div>
+          </div>, document.body
         );
       })()}
       {/* 우클릭 컨텍스트 메뉴 오버레이 */}
@@ -2733,12 +2799,12 @@ export const GachaTab: React.FC = () => {
         const star = contextMenu.star;
         const menuCard = contextMenu.card;
         const owned = menuCard ? getCardGroup(menuCard) : inventory.filter(c => c.channel_id === channelId && (c.star ?? 0) === star);
-        const pendingCard = owned.find(c => marketPendingCardIds.includes(c.id));
+        const pendingCard = owned.find(c => pendingCardIdSet.has(c.id));
         const lockedCard = owned.find(c => c.is_locked);
         const allHidden = owned.length > 0 && owned.every(c => c.is_hidden);
         
         // 가용한 카드 찾기
-        const availableCards = menuCard ? getAvailableGroupCards(menuCard) : owned.filter(c => !c.is_locked && !marketPendingCardIds.includes(c.id));
+        const availableCards = menuCard ? getAvailableGroupCards(menuCard) : owned.filter(c => !c.is_locked && !pendingCardIdSet.has(c.id));
         const availableCard = availableCards[0] || null;
 
         // 대표로 사용할 카드 객체
@@ -2750,10 +2816,10 @@ export const GachaTab: React.FC = () => {
         const displayImageBlinded = isImageBlinded(displayImageUrl);
         const canSellSelectedCard = Boolean(availableCard && !hasEquippedCosmetic(availableCard));
 
-        return (
+        return createPortal(
           <div
             ref={contextMenuRef}
-            className="fixed z-50 max-h-[calc(100dvh-1rem)] w-52 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100"
+            className="fixed z-[60] max-h-[calc(100dvh-1rem)] w-52 max-w-[calc(100dvw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-card/95 py-1.5 shadow-xl backdrop-blur-md animate-in fade-in duration-100"
             style={{
               left: `${contextMenu.x}px`,
               top: `${contextMenu.y}px`,
@@ -2923,7 +2989,7 @@ export const GachaTab: React.FC = () => {
             >
               🚩 이미지 신고
             </button>
-          </div>
+          </div>, document.body
         );
       })()}
 
@@ -3188,8 +3254,10 @@ export const GachaTab: React.FC = () => {
               💰 선택 카드 일괄 판매 설정
             </h3>
 
-            <div className="mt-4 space-y-3.5 max-h-60 overflow-y-auto pr-1">
-              {Object.entries(bulkSellQuantities).map(([key, count]) => {
+            <p className="mt-3 text-xs text-muted-foreground">총 {bulkSellEntries.length.toLocaleString()}묶음 · {bulkSellEntries.reduce((sum, [, count]) => sum + count, 0).toLocaleString()}장</p>
+            <InventoryPagination page={activeBulkSellPage} pages={bulkSellPages} total={bulkSellEntries.length} onChange={setBulkSellPage} />
+            <div data-testid="bulk-sell-list" className="mt-4 space-y-3.5 max-h-60 overflow-y-auto pr-1">
+              {bulkSellEntries.slice((activeBulkSellPage - 1) * INVENTORY_PAGE_SIZE, activeBulkSellPage * INVENTORY_PAGE_SIZE).map(([key, count]) => {
                 const card = getCardByKey(key);
                 if (!card?.streamer) return null;
                 const { channelId, star } = parseCardKey(key);

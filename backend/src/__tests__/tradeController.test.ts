@@ -23,7 +23,7 @@ vi.mock('../repositories', () => ({
     create: vi.fn()
   },
   marketRepository: {
-    listByUser: vi.fn()
+    getPendingCardReservationsByUser: vi.fn()
   }
 }));
 
@@ -164,7 +164,7 @@ describe('trade account age restriction', () => {
     vi.mocked(tradeRepository.confirm).mockResolvedValue({ ok: true, reason: 'OK' });
     vi.mocked(notificationRepository.create).mockResolvedValue({} as never);
     vi.mocked(userCardRepository.findByUserId).mockResolvedValue([]);
-    vi.mocked(marketRepository.listByUser).mockResolvedValue([]);
+    vi.mocked(marketRepository.getPendingCardReservationsByUser).mockResolvedValue([]);
 
     const response = createResponse();
     await confirmTrade({
@@ -196,7 +196,7 @@ describe('trade account age restriction', () => {
     vi.mocked(tradeRepository.confirm).mockResolvedValue({ ok: true, reason: 'OK' });
     vi.mocked(notificationRepository.create).mockResolvedValue({} as never);
     vi.mocked(userCardRepository.findByUserId).mockResolvedValue([]);
-    vi.mocked(marketRepository.listByUser).mockResolvedValue([]);
+    vi.mocked(marketRepository.getPendingCardReservationsByUser).mockResolvedValue([]);
 
     const response = createResponse();
     await confirmTrade({
@@ -226,7 +226,7 @@ describe('trade account age restriction', () => {
       receiver_offer: { cards: [], point: 0 }
     }]);
     vi.mocked(userCardRepository.findByUserId).mockResolvedValue([]);
-    vi.mocked(marketRepository.listByUser).mockResolvedValue([]);
+    vi.mocked(marketRepository.getPendingCardReservationsByUser).mockResolvedValue([]);
 
     const response = createResponse();
     await confirmTrade({
@@ -264,18 +264,14 @@ describe('trade account age restriction', () => {
       }
       return [] as never;
     });
-    vi.mocked(marketRepository.listByUser).mockImplementation(async (userId: string) => {
+    vi.mocked(marketRepository.getPendingCardReservationsByUser).mockImplementation(async (userId: string) => {
       if (userId === 'receiver') {
         return [{
-          id: 99,
-          seller_id: 'receiver',
           user_card_id: 10,
-          price: 1000,
-          status: 'PENDING',
-          buyer_id: null,
-          fee: 0,
-          settled_amount: 0,
-          card: { channel_id: 'channel-a', star: 0 }
+          channel_id: 'channel-a',
+          star: 0,
+          is_locked: false,
+          is_plain: true
         }] as never;
       }
       return [] as never;

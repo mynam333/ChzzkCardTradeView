@@ -197,8 +197,12 @@ export interface UserCardInventoryGroup {
   channel_id: string;
   star: number;
   count: number;
+  /** 장착 코스메틱이 없어 일괄 판매 후보가 될 수 있는 카드 수. */
+  plain_count: number;
   hidden_count: number;
   locked_count: number;
+  /** 일괄 판매 후보 중 잠금된 카드 수. */
+  plain_locked_count: number;
   favorite_count: number;
   first_card_id: number | null;
   favorite_order: number | null;
@@ -612,6 +616,14 @@ export interface IMarketRepository {
   getListingBidPresence(listingIds: number[]): Promise<Record<number, boolean>>;
   /** 판매 중인 카드의 이중 지출 방지용 에스크로 판별 (PENDING인 카드 ID 목록) */
   findPendingCardIdsByUser(userId: string): Promise<number[]>;
+  /** 판매자의 PENDING 카드 예약량을 금액/구매자 정보 없이 일괄 조회합니다. */
+  getPendingCardReservationsByUser(userId: string): Promise<Array<{
+    user_card_id: number;
+    channel_id: string;
+    star: number;
+    is_locked: boolean;
+    is_plain: boolean;
+  }>>;
   /** 마켓 목록 조회 (유사도 검색 필터 및 페이지네이션, 정렬 지원) */
   listActive(options: {
     page: number;

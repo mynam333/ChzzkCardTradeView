@@ -130,7 +130,7 @@ const findUserCardGroupsCoalesced = (userId: string): Promise<any[]> => {
   return request;
 };
 
-const clearUserCardsInFlight = (userId: string) => {
+export const clearUserCardsInFlight = (userId: string) => {
   userCardsInFlight.delete(userId);
   userCardGroupsInFlight.delete(userId);
 };
@@ -440,24 +440,53 @@ export const getUserCollection = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'BadRequest', message: '유저 ID가 필요합니다.' });
   }
   try {
-    const cards = await userCardRepository.findByUserId(user_id);
+    const [cards, reservations] = await Promise.all([
+      userCardRepository.findByUserId(user_id),
+      getUserReservations(user_id)
+    ]);
     const requesterId = (req as any).user?.id;
     const visibleCards = requesterId === user_id ? cards : cards.filter((card: any) => !card.is_hidden);
+    const pendingMarketIds = new Set(reservations.marketCardIds);
     // 같은 스트리머라도 별(0~5성)별로 분리해 묶음
     const map: { [key: string]: any } = {};
     for (const c of visibleCards) {
       const star = c.star || 0;
       const key = `${c.channel_id}#${star}`;
       if (!map[key]) {
-        map[key] = { channel_id: c.channel_id, star, count: 0, streamer: c.streamer };
+        map[key] = {
+          channel_id: c.channel_id,
+          star,
+          count: 0,
+          locked_count: 0,
+          pending_market_count: 0,
+          locked_pending_market_count: 0,
+          streamer: c.streamer
+        };
       }
       map[key].count += 1;
+      if (c.is_locked) map[key].locked_count += 1;
+      if (c.id != null && pendingMarketIds.has(Number(c.id))) {
+        map[key].pending_market_count += 1;
+        if (c.is_locked) map[key].locked_pending_market_count += 1;
+      }
+    }
+    for (const [key, group] of Object.entries(map) as [string, any][]) {
+      const tradeReserved = Math.max(0, Number(reservations.tradeCardsByStar[key] || 0));
+      const unavailable = group.locked_count
+        + group.pending_market_count
+        - group.locked_pending_market_count
+        + tradeReserved;
+      group.available_count = Math.max(0, Math.min(group.count, group.count - unavailable));
+      delete group.locked_count;
+      delete group.pending_market_count;
+      delete group.locked_pending_market_count;
     }
     // 채널명 → 별 오름차순 정렬
     const list = Object.values(map).sort((a: any, b: any) => {
       const an = a.streamer?.name || '', bn = b.streamer?.name || '';
       return an === bn ? a.star - b.star : an.localeCompare(bn);
     });
+    res.set('Cache-Control', 'private, no-store');
     return res.status(200).json(list);
   } catch (err: any) {
     return res.status(500).json({ error: 'InternalServerError', message: '컬렉션 조회 실패', details: IS_PRODUCTION ? undefined : err.message });
@@ -2037,58 +2066,65 @@ export const sellCards = async (req: Request, res: Response) => {
   }
 
   try {
-    // A. 유저 정보 조회
-    const user = await userRepository.findById(userId);
+    // 동일 채널+별 항목을 먼저 합쳐 중복 입력의 반복 쿼리와 트랜잭션 중단을 막는다.
+    const requestedByKey = new Map<string, { channelId: string; star: number; count: number }>();
+    for (const item of items) {
+      const channelId = typeof item?.channelId === 'string' ? item.channelId.trim() : '';
+      const star = Number(item?.star);
+      const count = item?.count;
+      if (!channelId || !Number.isInteger(star) || star < 0 || star > 5 || !Number.isSafeInteger(count) || count <= 0) {
+        return res.status(400).json({ error: 'BadRequest', message: '올바른 channelId, 별 등급(0~5), 수량이 필요합니다.' });
+      }
+      const key = `${channelId}#${star}`;
+      const previous = requestedByKey.get(key);
+      const nextCount = (previous?.count || 0) + count;
+      if (!Number.isSafeInteger(nextCount)) {
+        return res.status(400).json({ error: 'BadRequest', message: '판매 수량이 너무 큽니다.' });
+      }
+      requestedByKey.set(key, { channelId, star, count: nextCount });
+    }
+
+    // 상세 카드/코스메틱 payload 전체 대신 DB 요약 결과로 보유량을 검증한다.
+    const [user, inventoryGroups, reservations] = await Promise.all([
+      userRepository.findById(userId),
+      userCardRepository.findInventoryGroupsByUserId(userId),
+      getUserReservations(userId)
+    ]);
     if (!user) {
       return res.status(404).json({ error: 'NotFound', message: '사용자를 찾을 수 없습니다.' });
     }
-
-    // B. 유저 보유 카드 데이터 조회
-    const userCards = await userCardRepository.findByUserId(userId);
-
-    const pendingMarketIds = new Set(await marketRepository.findPendingCardIdsByUser(userId));
-
-    // channelId+star별 유저 보유 카드 매핑
-    const userCardsByKey: { [key: string]: any[] } = {};
-    userCards.forEach(uc => {
-      const key = `${uc.channel_id}#${uc.star || 0}`;
-      if (!userCardsByKey[key]) {
-        userCardsByKey[key] = [];
-      }
-      userCardsByKey[key].push(uc);
-    });
-
-    // 진행 중인 거래에 묶인(에스크로) 카드는 판매 불가하도록 예약량 차감
-    const reservations = await getUserReservations(userId);
+    const groupsByKey = new Map(inventoryGroups.map((group) => [
+      `${group.channel_id}#${group.star || 0}`,
+      group
+    ]));
 
     const sellActions: { channelId: string, star: number, count: number, baseValue: number }[] = [];
 
     // C. 판매 항목 수량 및 시세 검증
-    for (const item of items) {
-      const { channelId, count } = item;
-      const star = Number(item.star);
-      if (!channelId || !Number.isInteger(star) || star < 0 || star > 5 || !Number.isInteger(count) || count <= 0) {
-        return res.status(400).json({ error: 'BadRequest', message: '올바른 channelId, 별 등급(0~5), 수량이 필요합니다.' });
-      }
-
+    for (const { channelId, star, count } of requestedByKey.values()) {
       const key = `${channelId}#${star}`;
-      const owned = userCardsByKey[key] || [];
-      const locked = owned.filter((card) => card.is_locked).length;
-      // reservations.cardsByStar 는 교환 에스크로 + 오픈마켓 PENDING 매물을 모두 포함합니다.
-      // 여기서 마켓 매물을 또 빼면 이중 차감이 되어 정상 판매가 막히므로 reservedTotal만 차감합니다.
-      const reservedTotal = reservations.cardsByStar[key] || 0;
-      const pendingMarket = owned.filter((card) => pendingMarketIds.has(card.id)).length;
-      const escrowReserved = Math.max(0, reservedTotal - pendingMarket); // 안내 메시지용 교환 에스크로 추정치
-      const sellable = owned.length - locked - reservedTotal;
+      const group = groupsByKey.get(key);
+      const ownedCount = Number(group?.count || 0);
+      const plainCount = Number(group?.plain_count || 0);
+      const locked = Number(group?.plain_locked_count || 0);
+      const marketReserved = Math.max(0, Number(reservations.marketPlainCardsByStar[key] || 0));
+      const lockedMarketOverlap = Math.min(
+        locked,
+        marketReserved,
+        Math.max(0, Number(reservations.marketPlainLockedCardsByStar[key] || 0))
+      );
+      const tradeReserved = Math.max(0, Number(reservations.tradeCardsByStar[key] || 0));
+      const unavailable = locked + marketReserved - lockedMarketOverlap + tradeReserved;
+      const sellable = plainCount - unavailable;
       if (sellable < count) {
         return res.status(400).json({
           error: 'InsufficientCards',
-          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${owned.length}장, 잠금 ${locked}장, 교환 중 ${escrowReserved}장, 마켓 판매 중 ${pendingMarket}장, 판매 요청 ${count}장)`
+          message: `${star}성 카드의 판매 가능 수량이 부족합니다. (보유 ${ownedCount}장, 코스메틱 미장착 ${plainCount}장, 잠금 ${locked}장, 마켓 ${marketReserved}장, 교환 ${tradeReserved}장, 판매 요청 ${count}장)`
         });
       }
 
       // 시세 가치 조회
-      const streamer = owned[0]?.streamer;
+      const streamer = group?.streamer;
       if (!streamer) {
         return res.status(404).json({ error: 'NotFound', message: `스트리머 정보를 찾을 수 없습니다. (채널 ID: ${channelId})` });
       }

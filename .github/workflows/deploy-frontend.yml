@@ -61,6 +61,9 @@ jobs:
       - name: Test auction privacy contracts
         run: node --test frontend/src/app/ShopTabAuctionPrivacy.test.mjs
 
+      - name: Test large inventory and trade selection
+        run: pnpm --filter frontend test:inventory
+
       - name: Build frontend
         run: pnpm --filter frontend build
         env:

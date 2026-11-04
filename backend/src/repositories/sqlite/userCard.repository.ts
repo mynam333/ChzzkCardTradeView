@@ -368,8 +368,10 @@ export class SqliteUserCardRepository implements IUserCardRepository {
         uc.channel_id,
         COALESCE(uc.star, 0) AS star,
         COUNT(*) AS count,
+        SUM(CASE WHEN uc.border_item_id IS NULL AND uc.name_effect_item_id IS NULL THEN 1 ELSE 0 END) AS plain_count,
         SUM(CASE WHEN COALESCE(uc.is_hidden, 0) = 1 THEN 1 ELSE 0 END) AS hidden_count,
         SUM(CASE WHEN COALESCE(uc.is_locked, 0) = 1 THEN 1 ELSE 0 END) AS locked_count,
+        SUM(CASE WHEN uc.border_item_id IS NULL AND uc.name_effect_item_id IS NULL AND COALESCE(uc.is_locked, 0) = 1 THEN 1 ELSE 0 END) AS plain_locked_count,
         SUM(CASE WHEN uc.favorite_order IS NOT NULL THEN 1 ELSE 0 END) AS favorite_count,
         MIN(uc.id) AS first_card_id,
         MIN(uc.favorite_order) AS favorite_order,
@@ -393,8 +395,10 @@ export class SqliteUserCardRepository implements IUserCardRepository {
       channel_id: row.channel_id,
       star: Number(row.star || 0),
       count: Number(row.count || 0),
+      plain_count: Number(row.plain_count || 0),
       hidden_count: Number(row.hidden_count || 0),
       locked_count: Number(row.locked_count || 0),
+      plain_locked_count: Number(row.plain_locked_count || 0),
       favorite_count: Number(row.favorite_count || 0),
       first_card_id: row.first_card_id == null ? null : Number(row.first_card_id),
       favorite_order: row.favorite_order == null ? null : Number(row.favorite_order),
@@ -598,6 +602,7 @@ export class SqliteUserCardRepository implements IUserCardRepository {
             FROM user_cards uc
             WHERE uc.user_id = ? AND uc.channel_id = ? AND COALESCE(uc.star, 0) = ?
               AND COALESCE(uc.is_locked, 0) = 0
+              AND uc.border_item_id IS NULL AND uc.name_effect_item_id IS NULL
               AND NOT EXISTS (
                 SELECT 1 FROM market_listings ml
                  WHERE ml.user_card_id = uc.id AND ml.status = 'PENDING'

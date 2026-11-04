@@ -391,6 +391,24 @@ export class MysqlMarketRepository implements IMarketRepository {
     return rows.map((r) => r.user_card_id);
   }
 
+  async getPendingCardReservationsByUser(userId: string) {
+    const rows = await this.getDb().all<any>(`
+      SELECT ml.user_card_id, uc.channel_id, COALESCE(uc.star, 0) AS star,
+             COALESCE(uc.is_locked, 0) AS is_locked,
+             CASE WHEN uc.border_item_id IS NULL AND uc.name_effect_item_id IS NULL THEN 1 ELSE 0 END AS is_plain
+        FROM market_listings ml
+        JOIN user_cards uc ON uc.id = ml.user_card_id
+       WHERE ml.seller_id = ? AND ml.status = 'PENDING'
+    `, userId);
+    return rows.map((row: any) => ({
+      user_card_id: Number(row.user_card_id),
+      channel_id: String(row.channel_id),
+      star: Number(row.star || 0),
+      is_locked: row.is_locked === 1 || row.is_locked === true,
+      is_plain: row.is_plain === 1 || row.is_plain === true
+    }));
+  }
+
   async listActive(options: {
     page: number;
     limit: number;

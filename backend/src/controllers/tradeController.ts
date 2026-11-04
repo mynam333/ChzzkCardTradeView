@@ -268,17 +268,35 @@ const tradeUnavailableMessage = (targetLabel: string) =>
  * - 수신자 측: CONFIRMED(동의 완료)일 때 요청받은 품목(receiver_offer)이 예약됨
  * 다른 곳(판매/신규 제안)에서 available = 보유 - 예약 으로 검증해 이중 지출을 막습니다.
  */
-export const getUserReservations = async (userId: string): Promise<{ cards: Record<string, number>; cardsByStar: Record<string, number>; points: number }> => {
+export const getUserReservations = async (userId: string): Promise<{
+  cards: Record<string, number>;
+  cardsByStar: Record<string, number>;
+  tradeCardsByStar: Record<string, number>;
+  marketCardsByStar: Record<string, number>;
+  marketLockedCardsByStar: Record<string, number>;
+  marketPlainCardsByStar: Record<string, number>;
+  marketPlainLockedCardsByStar: Record<string, number>;
+  marketCardIds: number[];
+  points: number;
+}> => {
   const active = await Promise.resolve(tradeRepository.findActiveByUser(userId)).catch(() => []);
   const cards: Record<string, number> = {};        // 채널 단위 합산(판매 가드용 하위호환)
   const cardsByStar: Record<string, number> = {};  // 채널+별 복합키(교환 검증용)
+  const tradeCardsByStar: Record<string, number> = {};
+  const marketCardsByStar: Record<string, number> = {};
+  const marketLockedCardsByStar: Record<string, number> = {};
+  const marketPlainCardsByStar: Record<string, number> = {};
+  const marketPlainLockedCardsByStar: Record<string, number> = {};
+  const marketCardIds: number[] = [];
   let points = 0;
 
   const reserve = (offer: TradeOffer | undefined) => {
     if (!offer) return;
     for (const c of offer.cards || []) {
       cards[c.channel_id] = (cards[c.channel_id] || 0) + c.count;
-      cardsByStar[cardKey(c.channel_id, c.star)] = (cardsByStar[cardKey(c.channel_id, c.star)] || 0) + c.count;
+      const key = cardKey(c.channel_id, c.star);
+      cardsByStar[key] = (cardsByStar[key] || 0) + c.count;
+      tradeCardsByStar[key] = (tradeCardsByStar[key] || 0) + c.count;
     }
     points += offer.point || 0;
   };
@@ -290,21 +308,39 @@ export const getUserReservations = async (userId: string): Promise<{ cards: Reco
 
   // 오픈마켓 PENDING 매물 카드들 예약량에 가산
   try {
-    const myListings = await marketRepository.listByUser(userId);
-    const pendingListings = myListings.filter(l => l.status === 'PENDING');
-    for (const l of pendingListings) {
-      if (l.card) {
-        const cid = l.card.channel_id;
-        const star = l.card.star ?? 0;
-        cards[cid] = (cards[cid] || 0) + 1;
-        cardsByStar[cardKey(cid, star)] = (cardsByStar[cardKey(cid, star)] || 0) + 1;
+    const pendingCards = await marketRepository.getPendingCardReservationsByUser(userId);
+    for (const card of pendingCards) {
+      const cid = card.channel_id;
+      const key = cardKey(cid, card.star);
+      cards[cid] = (cards[cid] || 0) + 1;
+      cardsByStar[key] = (cardsByStar[key] || 0) + 1;
+      marketCardsByStar[key] = (marketCardsByStar[key] || 0) + 1;
+      if (card.is_locked) {
+        marketLockedCardsByStar[key] = (marketLockedCardsByStar[key] || 0) + 1;
       }
+      if (card.is_plain) {
+        marketPlainCardsByStar[key] = (marketPlainCardsByStar[key] || 0) + 1;
+        if (card.is_locked) {
+          marketPlainLockedCardsByStar[key] = (marketPlainLockedCardsByStar[key] || 0) + 1;
+        }
+      }
+      marketCardIds.push(card.user_card_id);
     }
   } catch (err) {
     console.error('[Escrow] 오픈마켓 예약 로드 실패:', err);
   }
 
-  return { cards, cardsByStar, points };
+  return {
+    cards,
+    cardsByStar,
+    tradeCardsByStar,
+    marketCardsByStar,
+    marketLockedCardsByStar,
+    marketPlainCardsByStar,
+    marketPlainLockedCardsByStar,
+    marketCardIds,
+    points
+  };
 };
 
 /**

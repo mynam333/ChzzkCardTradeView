@@ -23,6 +23,8 @@ import { STAR_IMAGE_COLUMNS } from "./shared";
 import { formatUploadUrl } from "../../services/imageService";
 
 export class SupabaseUserCardRepository implements IUserCardRepository {
+  private static readonly PAGE_SIZE = 500;
+
   private getClient() {
     return getSupabaseClient();
   }
@@ -92,45 +94,51 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
   }
 
   async findByUserId(userId: string): Promise<any[]> {
-    // Supabase 상에서 user_cards와 streamers를 Inner Join
-    const { data, error } = await this.getClient()
-      .from('user_cards')
-      .select(`
-        id,
-        user_id,
-        channel_id,
-        serial_number,
-        star,
-        border_item_id,
-        name_effect_item_id,
-        is_hidden,
-        is_locked,
-        favorite_order,
-        favorite_at,
-        acquired_at,
-        streamer:streamers (
+    // PostgREST max-rows(기본 1,000)에 대량 보관함이 잘리지 않도록 안정 정렬로 모든 페이지를 읽는다.
+    const cards: any[] = [];
+    for (let from = 0; ; from += SupabaseUserCardRepository.PAGE_SIZE) {
+      const { data, error } = await this.getClient()
+        .from('user_cards')
+        .select(`
+          id,
+          user_id,
           channel_id,
-          name,
-          logo_url,
-          custom_image_url,
-          custom_image_url_1,
-          custom_image_url_2,
-          custom_image_url_3,
-          custom_image_url_4,
-          custom_image_url_5,
-          base_value,
-          follower_count,
-          is_active,
-          is_image_banned,
-          serial_number
-        )
-      `)
-      .eq('user_id', userId)
-      .order('favorite_order', { ascending: true, nullsFirst: false })
-      .order('id', { ascending: false });
+          serial_number,
+          star,
+          border_item_id,
+          name_effect_item_id,
+          is_hidden,
+          is_locked,
+          favorite_order,
+          favorite_at,
+          acquired_at,
+          streamer:streamers (
+            channel_id,
+            name,
+            logo_url,
+            custom_image_url,
+            custom_image_url_1,
+            custom_image_url_2,
+            custom_image_url_3,
+            custom_image_url_4,
+            custom_image_url_5,
+            base_value,
+            follower_count,
+            is_active,
+            is_image_banned,
+            serial_number
+          )
+        `)
+        .eq('user_id', userId)
+        .order('favorite_order', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: false })
+        .range(from, from + SupabaseUserCardRepository.PAGE_SIZE - 1);
 
-    if (error) throw error;
-    const cards = (data || []) as any[];
+      if (error) throw error;
+      const page = (data || []) as any[];
+      cards.push(...page);
+      if (page.length < SupabaseUserCardRepository.PAGE_SIZE) break;
+    }
     // 임베드된 스트리머에 별별 커스텀 이미지 배열 부여 및 업로드 URL 포맷팅 적용
     for (const c of cards) {
       if (c.streamer) {
@@ -161,29 +169,74 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
   }
 
   async findInventoryGroupsByUserId(userId: string): Promise<any[]> {
-    const cards = await this.findByUserId(userId);
+    // 요약 화면에서는 카드별 코스메틱/스트리머 임베드를 반복 전송하지 않는다.
+    const cards: any[] = [];
+    for (let from = 0; ; from += SupabaseUserCardRepository.PAGE_SIZE) {
+      const { data, error } = await this.getClient()
+        .from('user_cards')
+        .select('id, channel_id, star, border_item_id, name_effect_item_id, is_hidden, is_locked, favorite_order')
+        .eq('user_id', userId)
+        .order('id', { ascending: true })
+        .range(from, from + SupabaseUserCardRepository.PAGE_SIZE - 1);
+      if (error) throw error;
+      const page = (data || []) as any[];
+      cards.push(...page);
+      if (page.length < SupabaseUserCardRepository.PAGE_SIZE) break;
+    }
+
+    const streamerMap = new Map<string, any>();
+    const channelIds = [...new Set(cards.map((card) => String(card.channel_id || '')).filter(Boolean))];
+    const streamerBatchSize = 100;
+    for (let offset = 0; offset < channelIds.length; offset += streamerBatchSize) {
+      const { data, error } = await this.getClient()
+        .from('streamers')
+        .select(`
+          channel_id, name, logo_url, custom_image_url,
+          custom_image_url_1, custom_image_url_2, custom_image_url_3,
+          custom_image_url_4, custom_image_url_5,
+          base_value, follower_count, is_active, is_image_banned, serial_number
+        `)
+        .in('channel_id', channelIds.slice(offset, offset + streamerBatchSize));
+      if (error) throw error;
+      for (const row of data || []) {
+        const streamer: any = { ...row };
+        streamer.custom_image_url = formatUploadUrl(streamer.custom_image_url);
+        streamer.custom_images = STAR_IMAGE_COLUMNS.map((col) => formatUploadUrl(streamer[col]) ?? null);
+        streamer.activity_score = 0;
+        streamerMap.set(streamer.channel_id, streamer);
+      }
+    }
+
     const groups = new Map<string, any>();
     for (const card of cards) {
+      const streamer = streamerMap.get(card.channel_id);
+      if (!streamer) continue;
       const star = Number(card.star || 0);
       const key = `${card.channel_id}:${star}`;
       const existing = groups.get(key);
+      const isPlain = card.border_item_id == null && card.name_effect_item_id == null;
       if (!existing) {
         groups.set(key, {
           channel_id: card.channel_id,
           star,
           count: 1,
+          plain_count: isPlain ? 1 : 0,
           hidden_count: card.is_hidden ? 1 : 0,
           locked_count: card.is_locked ? 1 : 0,
+          plain_locked_count: isPlain && card.is_locked ? 1 : 0,
           favorite_count: card.favorite_order == null ? 0 : 1,
           first_card_id: card.id ?? null,
           favorite_order: card.favorite_order ?? null,
-          streamer: card.streamer
+          streamer,
+          newest_card_id: card.id ?? 0
         });
         continue;
       }
       existing.count += 1;
+      if (isPlain) existing.plain_count += 1;
       if (card.is_hidden) existing.hidden_count += 1;
       if (card.is_locked) existing.locked_count += 1;
+      if (isPlain && card.is_locked) existing.plain_locked_count += 1;
       if (card.favorite_order != null) {
         existing.favorite_count += 1;
         existing.favorite_order = existing.favorite_order == null
@@ -193,8 +246,18 @@ export class SupabaseUserCardRepository implements IUserCardRepository {
       if (card.id != null && (existing.first_card_id == null || card.id < existing.first_card_id)) {
         existing.first_card_id = card.id;
       }
+      if (card.id != null) existing.newest_card_id = Math.max(existing.newest_card_id || 0, card.id);
     }
-    return Array.from(groups.values());
+    return Array.from(groups.values())
+      .sort((a, b) => {
+        const favoriteRank = Number(a.favorite_order == null) - Number(b.favorite_order == null);
+        if (favoriteRank !== 0) return favoriteRank;
+        if (a.favorite_order != null && b.favorite_order != null && a.favorite_order !== b.favorite_order) {
+          return a.favorite_order - b.favorite_order;
+        }
+        return b.newest_card_id - a.newest_card_id;
+      })
+      .map(({ newest_card_id: _newestCardId, ...group }) => group);
   }
 
   async fuse(
